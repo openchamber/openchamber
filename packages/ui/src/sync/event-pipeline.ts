@@ -14,14 +14,11 @@
 
 import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { opencodeClient } from "@/lib/opencode/client"
+import { getRuntimeUrlResolver } from "@/lib/runtime-url"
+import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
+import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
+import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
-
-export type QueuedEvent = {
-  directory: string
-  payload: Event
-}
-
-export type FlushHandler = (events: QueuedEvent[]) => void
 
 const FLUSH_FRAME_MS = 33
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
@@ -41,8 +38,6 @@ const RETRY_BACKOFF_BASE_MS = 250
 const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
 const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
 const RETRY_BACKOFF_MAX_EXPONENT = 8
-const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
-
 export type EventPipelineInput = {
   sdk: OpencodeClient
   onEvent: (directory: string, payload: Event) => void
@@ -168,8 +163,21 @@ function resolveEventDirectory(event: unknown, payload: Event): string {
       ? (payload.properties as Record<string, unknown>)
       : null
   const propertyDirectory = typeof properties?.directory === "string" ? properties.directory : null
+  if (propertyDirectory && propertyDirectory.length > 0) {
+    return propertyDirectory
+  }
 
-  return propertyDirectory && propertyDirectory.length > 0 ? propertyDirectory : "global"
+  // session.created / session.updated carry directory inside properties.info
+  const info =
+    typeof properties?.info === "object" && properties.info !== null
+      ? (properties.info as Record<string, unknown>)
+      : null
+  const infoDirectory = typeof info?.directory === "string" ? info.directory : null
+  if (infoDirectory && infoDirectory.length > 0) {
+    return infoDirectory
+  }
+
+  return "global"
 }
 
 function resolveEventPayload(payload: unknown): Event | null {
@@ -189,30 +197,6 @@ function resolveEventPayload(payload: unknown): Event | null {
   return null
 }
 
-function resolveAbsoluteUrl(candidate: string): string {
-  const normalized = typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : "/api"
-  if (ABSOLUTE_URL_PATTERN.test(normalized)) {
-    return normalized
-  }
-
-  if (typeof window === "undefined") {
-    return normalized
-  }
-
-  const baseReference = window.location?.href || window.location?.origin
-  if (!baseReference) {
-    return normalized
-  }
-
-  return new URL(normalized, baseReference).toString()
-}
-
-function toWebSocketUrl(candidate: string): string {
-  const url = new URL(resolveAbsoluteUrl(candidate))
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  return url.toString()
-}
-
 function buildGlobalEventWsUrl(lastEventId?: string): string {
   let baseUrl = "/api"
   try {
@@ -224,11 +208,21 @@ function buildGlobalEventWsUrl(lastEventId?: string): string {
     baseUrl = "/api"
   }
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
-  const httpUrl = new URL("global/event/ws", resolveAbsoluteUrl(normalizedBase))
-  if (lastEventId && lastEventId.length > 0) {
-    httpUrl.searchParams.set("lastEventId", lastEventId)
-  }
-  return toWebSocketUrl(httpUrl.toString())
+  return getRuntimeUrlResolver().websocket(
+    `${normalizedBase}global/event/ws`,
+    lastEventId && lastEventId.length > 0 ? { lastEventId } : undefined,
+  )
+}
+
+// In relay mode the global-event WebSocket rides the E2EE tunnel instead of a
+// native network socket. The resolver still builds the authenticated URL (it
+// carries the oc_url_token the host replays to the loopback origin); we hand
+// its path+query to the tunnel, which returns a socket-like with the exact
+// on* handler surface this pipeline uses. Direct-URL runtimes keep the native
+// WebSocket path, wrapped to the same shape so the caller holds one type.
+function openGlobalEventSocket(lastEventId?: string): RelayTunnelWebSocket {
+  const url = buildGlobalEventWsUrl(lastEventId)
+  return openRuntimeWebSocket(url)
 }
 
 type DirectoryQueue = {
@@ -282,6 +276,10 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     if (payload.type === "session.status") {
       const props = payload.properties as { sessionID: string }
       return `session.status:${props.sessionID}`
+    }
+    if (payload.type === "session.updated") {
+      const props = payload.properties as { info?: { id?: string } }
+      return props.info?.id ? `session.updated:${props.info.id}` : undefined
     }
     if (payload.type === "lsp.updated") {
       return "lsp.updated"
@@ -455,6 +453,26 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     const normalizedPayload = normalizeEventType(payload)
     const routedDirectory = routeDirectory?.(directory, normalizedPayload) || directory
     const d = getOrCreateDir(routedDirectory)
+
+    // A full part snapshot is a coalescing barrier for that part's deltas:
+    // drop its pending delta coalescing keys so a delta arriving after the
+    // snapshot starts a fresh queue entry instead of merging into a delta
+    // queued before the snapshot, which the snapshot would then overwrite and
+    // drop the later delta's text. The already-queued delta event stays.
+    if (normalizedPayload.type === "message.part.updated") {
+      const part = (normalizedPayload.properties as { part?: { id?: unknown; messageID?: unknown } }).part
+      const messageID = typeof part?.messageID === "string" ? part.messageID : undefined
+      const partID = typeof part?.id === "string" ? part.id : undefined
+      if (messageID && partID) {
+        const deltaPrefix = `message.part.delta:${messageID}:${partID}:`
+        for (const coalesceKey of d.coalesced.keys()) {
+          if (coalesceKey.startsWith(deltaPrefix)) {
+            d.coalesced.delete(coalesceKey)
+          }
+        }
+      }
+    }
+
     const k = key(normalizedPayload)
     if (k) {
       const i = d.coalesced.get(k)
@@ -538,11 +556,33 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const runWsAttempt = async (signal: AbortSignal) => {
+    // A WebSocket upgrade can't carry an Authorization header, so it
+    // authenticates purely via the oc_url_token query param. The sync token
+    // getter returns "" while the token is unminted or inside its expiry skew
+    // window, which would open the socket WITHOUT credentials — the server then
+    // rejects it ("HTTP Authentication failed; no valid credentials available")
+    // and the resulting reconnect storm churns the sync store (transient
+    // status-missing → idle flicker). Mint/await a valid token BEFORE
+    // connecting. (SSE avoids this: the SDK fetch sends the bearer header.)
+    try {
+      await refreshRuntimeUrlAuthToken()
+    } catch (error) {
+      const wrapped = error instanceof Error ? error : new Error("Message stream WebSocket auth token unavailable")
+      if (transport === "auto") {
+        wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
+        ;(wrapped as Error & { code?: string }).code = "WS_FALLBACK"
+      }
+      ;(wrapped as Error & { reason?: string }).reason = "ws_auth_token_unavailable"
+      throw wrapped
+    }
+    if (signal.aborted) {
+      throw new DOMException("Aborted", "AbortError")
+    }
     await new Promise<void>((resolve, reject) => {
       let settled = false
       let opened = false
       let readyAt = 0
-      const socket = new WebSocket(buildGlobalEventWsUrl(lastEventId))
+      const socket: RelayTunnelWebSocket = openGlobalEventSocket(lastEventId)
       const setFallbackCode = (error: Error, force = false) => {
         if ((force || !opened) && transport === "auto") {
           wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
@@ -685,6 +725,14 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         ;(error as Error & { reason?: string }).reason = opened
           ? `ws_closed:code=${event?.code ?? "?"}`
           : "ws_closed_before_ready"
+
+        // Closed before the socket ever opened → the server rejected the
+        // upgrade, typically an auth failure on the oc_url_token. Drop the
+        // cached token so the next attempt mints a fresh one instead of
+        // replaying a token the server won't accept (which would loop).
+        if (!opened) {
+          clearRuntimeUrlAuthToken()
+        }
 
         // If the WS stream connects (ready) but then drops quickly, prefer SSE for a while.
         // This avoids tight reconnect loops with repeated console spam.

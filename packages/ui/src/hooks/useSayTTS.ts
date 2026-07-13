@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 interface SayTTSStatusCache {
   available: boolean;
@@ -45,7 +46,7 @@ async function getSayTTSStatus(): Promise<SayTTSStatusCache> {
 
   sayTTSStatusRequest = (async () => {
     try {
-      const response = await fetch('/api/tts/say/status');
+      const response = await runtimeFetch('/api/tts/say/status');
       if (!response.ok) {
         const unavailableStatus: SayTTSStatusCache = {
           available: false,
@@ -99,7 +100,7 @@ export interface UseSayTTSReturn {
   unlockAudio: () => Promise<void>;
 }
 
-export interface SpeakOptions {
+interface SpeakOptions {
   /** Voice to use (defaults to Samantha) */
   voice?: string;
   /** Speech rate in words per minute (defaults to 200) */
@@ -219,7 +220,7 @@ export function useSayTTS(options: UseSayTTSOptions = {}): UseSayTTSReturn {
       abortControllerRef.current = new AbortController();
       
       // Fetch audio from server
-      const response = await fetch('/api/tts/say/speak', {
+      const response = await runtimeFetch('/api/tts/say/speak', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

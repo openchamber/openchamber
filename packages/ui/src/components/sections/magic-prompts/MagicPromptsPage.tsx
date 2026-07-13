@@ -140,6 +140,54 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'session.review.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
     ],
   },
+  'session.plan': {
+    titleKey: 'settings.magicPrompts.page.group.sessionFeaturePlan.title',
+    descriptionKey: 'settings.magicPrompts.page.group.sessionFeaturePlan.description',
+    blocks: [
+      { id: 'session.plan.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'session.plan.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
+  'session.craftGoal': {
+    titleKey: 'settings.magicPrompts.page.group.sessionCraftGoal.title',
+    descriptionKey: 'settings.magicPrompts.page.group.sessionCraftGoal.description',
+    blocks: [
+      { id: 'session.craftGoal.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'session.craftGoal.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
+  'session.catchup': {
+    titleKey: 'settings.magicPrompts.page.group.sessionCatchUp.title',
+    descriptionKey: 'settings.magicPrompts.page.group.sessionCatchUp.description',
+    blocks: [
+      { id: 'session.catchup.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'session.catchup.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
+  'session.debug': {
+    titleKey: 'settings.magicPrompts.page.group.sessionDebug.title',
+    descriptionKey: 'settings.magicPrompts.page.group.sessionDebug.description',
+    blocks: [
+      { id: 'session.debug.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'session.debug.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
+  'session.weigh': {
+    titleKey: 'settings.magicPrompts.page.group.sessionWeigh.title',
+    descriptionKey: 'settings.magicPrompts.page.group.sessionWeigh.description',
+    blocks: [
+      { id: 'session.weigh.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'session.weigh.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
+  'session.explore': {
+    titleKey: 'settings.magicPrompts.page.group.sessionExplore.title',
+    descriptionKey: 'settings.magicPrompts.page.group.sessionExplore.description',
+    blocks: [
+      { id: 'session.explore.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'session.explore.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
   'session.fusion': {
     titleKey: 'settings.magicPrompts.page.group.sessionFusion.title',
     descriptionKey: 'settings.magicPrompts.page.group.sessionFusion.description',
@@ -286,6 +334,7 @@ export const MagicPromptsPage: React.FC = () => {
             </div>
           </div>
           <Button
+            data-settings-item="magic-prompts.reset-overrides"
             variant="outline"
             size="sm"
             onClick={() => {
@@ -308,7 +357,11 @@ export const MagicPromptsPage: React.FC = () => {
           const resetting = resettingIds[block.id] === true;
 
           return (
-            <section key={block.id} className={index > 0 ? 'space-y-3 pt-5 border-t border-border' : 'space-y-3'}>
+            <section
+              key={block.id}
+              data-settings-item={isVisiblePromptId(block.id) ? 'magic-prompts.visible-prompt' : 'magic-prompts.instructions'}
+              className={index > 0 ? 'space-y-3 pt-5 border-t border-border' : 'space-y-3'}
+            >
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="typography-ui-label text-foreground">{tUnsafe(block.titleKey)}</h3>

@@ -10,6 +10,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
 import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
+import { useTraySync } from '@/hooks/useTraySync';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
@@ -17,7 +18,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell, restartDesktopApp } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
   getBootInjectionStatus,
@@ -29,16 +30,20 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
+import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { VoiceProvider } from '@/components/voice';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
@@ -49,9 +54,12 @@ import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { SyncAppEffects } from '@/apps/AppEffects';
+import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
+import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -110,15 +118,11 @@ const normalizeEmbeddedDirectory = (value: string | null | undefined): string =>
 };
 
 const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || !isEmbeddedSessionChat()) {
     return null;
   }
 
   const params = new URLSearchParams(window.location.search);
-  if (params.get('ocPanel') !== 'session-chat') {
-    return null;
-  }
-
   const sessionIdRaw = params.get('sessionId');
   const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
   if (!sessionId) {
@@ -164,7 +168,12 @@ const EmbeddedSessionChatContent: React.FC<{
     if (expectedDirectory && activeDirectory !== expectedDirectory) return;
 
     const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.sessionId}`;
-    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId === embeddedSessionChat.sessionId) {
+    // Skip if this session was already bootstrapped and a session is still
+    // active — allows in-place navigation (e.g. "Open subtask") to change
+    // currentSessionId without this effect forcing it back. Only re-bootstrap
+    // when currentSessionId was cleared (store init, draft, delete/archive,
+    // runtime-switch remount).
+    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId) {
       return;
     }
 
@@ -197,6 +206,13 @@ const EmbeddedSessionChatContent: React.FC<{
 };
 
 function App({ apis }: AppProps) {
+  React.useEffect(() => {
+    markStartupTrace('App:mounted');
+    if (startupTraceEnabled()) {
+      console.info('[startup-trace] enabled. Run console.table(window.__OPENCHAMBER_STARTUP_TRACE__) after startup.');
+    }
+  }, []);
+
   const initializeApp = useConfigStore((s) => s.initializeApp);
   const isInitialized = useConfigStore((s) => s.isInitialized);
   const isConnected = useConfigStore((s) => s.isConnected);
@@ -215,6 +231,7 @@ function App({ apis }: AppProps) {
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
   const [initRetryExhausted, setInitRetryExhausted] = React.useState(false);
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
+  const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
@@ -248,6 +265,37 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     setIsVSCodeRuntime(apis.runtime.isVSCode);
   }, [apis.runtime.isVSCode]);
+
+  React.useEffect(() => {
+    return subscribeRuntimeEndpointChanged((detail) => {
+      resetAppForRuntimeEndpointChange(detail);
+      setRuntimeEndpointEpoch((epoch) => epoch + 1);
+      setInitRetryExhausted(false);
+      setInitRetryEpoch((epoch) => epoch + 1);
+    });
+  }, []);
+
+  const autoReviewResumeSignature = useAutoReviewStore((state) => {
+    const runtimeKey = getRuntimeKey();
+    return Object.values(state.runsByOriginalSessionID)
+      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey)
+      .map((run) => `${run.originalSessionID}:${run.phase}:${run.lastForwardedMessageID ?? ''}:${run.expectedAssistantParentID ?? ''}`)
+      .sort()
+      .join('|');
+  });
+
+  React.useEffect(() => {
+    if (embeddedSessionChat) {
+      return;
+    }
+
+    const runtimeKey = getRuntimeKey();
+    const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
+      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
+    for (const run of runs) {
+      resumeAutoReviewRun(run.originalSessionID);
+    }
+  }, [autoReviewResumeSignature, embeddedSessionChat, runtimeEndpointEpoch]);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
@@ -337,7 +385,7 @@ function App({ apis }: AppProps) {
     let cancelled = false;
 
     const run = async () => {
-      const res = await fetch('/health', { method: 'GET' }).catch(() => null);
+      const res = await runtimeFetch('/health', { method: 'GET' }).catch(() => null);
       if (!res || !res.ok || cancelled) return;
       const data = (await res.json().catch(() => null)) as null | {
         planModeExperimentalEnabled?: unknown;
@@ -441,8 +489,8 @@ function App({ apis }: AppProps) {
       const state = useConfigStore.getState();
       if (state.providers.length > 0 && state.agents.length > 0) return;
       try {
-        if (state.providers.length === 0) await loadProviders();
-        if (useConfigStore.getState().agents.length === 0) await loadAgents();
+        if (state.providers.length === 0) await loadProviders({ source: 'startupRecovery' });
+        if (useConfigStore.getState().agents.length === 0) await loadAgents({ source: 'startupRecovery' });
       } catch { /* retry next interval */ }
     };
 
@@ -564,6 +612,38 @@ function App({ apis }: AppProps) {
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
   }, []);
 
+  // Open a draft Mini Chat window from the native File menu / tray. Uses a
+  // dedicated single-fire event (not the menu-action channel) because draft
+  // mini-chat windows are NOT deduplicated — a double dispatch would open two.
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onOpenMiniChat = () => {
+      const currentDir = useDirectoryStore.getState().currentDirectory;
+      const { activeProjectId, projects } = useProjectsStore.getState();
+      const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
+      void invokeDesktop('desktop_open_draft_mini_chat_window', {
+        directory: currentDir || activeProject?.path || '',
+        projectId: activeProject?.id ?? null,
+      });
+    };
+    window.addEventListener('openchamber:open-mini-chat', onOpenMiniChat);
+    return () => window.removeEventListener('openchamber:open-mini-chat', onOpenMiniChat);
+  }, []);
+
+  // When the window regains focus, mark the currently-selected session as seen.
+  // Turn-completes that arrive while the app is backgrounded are intentionally
+  // left unseen (see isViewedInCurrentSession); coming back to the window is the
+  // signal that the user has now looked at it, so the marker clears.
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onFocus = () => {
+      const sessionId = useSessionUIStore.getState().currentSessionId;
+      if (sessionId) markSessionViewed(sessionId);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -634,6 +714,8 @@ function App({ apis }: AppProps) {
   }, []);
 
   useMenuActions(handleToggleMemoryDebug);
+
+  useTraySync();
 
   useSessionStatusBootstrap({ enabled: embeddedBackgroundWorkEnabled });
 
@@ -729,7 +811,7 @@ function App({ apis }: AppProps) {
 
   const handleDesktopBootDismiss = React.useCallback(async () => {
     if (shouldRestartDesktopBootFlow({
-      isTauriShell: isTauriShell(),
+      isDesktopShell: isDesktopShell(),
       isDesktopLocalOriginActive: isDesktopLocalOriginActive(),
     })) {
       await restartDesktopApp();
@@ -810,7 +892,7 @@ function App({ apis }: AppProps) {
   if (embeddedSessionChat) {
     return (
       <ErrorBoundary>
-        <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+        <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
           <RuntimeAPIProvider apis={apis}>
             <TooltipProvider delayDuration={300} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
@@ -847,16 +929,15 @@ function App({ apis }: AppProps) {
   }
 
   // Always mount the full provider tree to avoid remounts when isInitialized
-  // flips from false → true. FireworksProvider and VoiceProvider are lightweight
-  // shells; their heavy children are only activated when actually needed.
+  // flips from false → true. FireworksProvider is a lightweight shell; its
+  // heavy children are only activated when actually needed.
   const isBootShell = !isInitialized && !isDesktopRuntime;
 
   return (
     <ErrorBoundary>
-      <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+      <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
-            <VoiceProvider>
               <TooltipProvider delayDuration={300} skipDelayDuration={150}>
                 <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
                   <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
@@ -874,7 +955,6 @@ function App({ apis }: AppProps) {
                   )}
                 </div>
               </TooltipProvider>
-            </VoiceProvider>
           </FireworksProvider>
         </RuntimeAPIProvider>
       </SyncProvider>

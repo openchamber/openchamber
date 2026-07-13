@@ -12,12 +12,19 @@ import { MarkdownRenderer } from '../../MarkdownRenderer';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import type { StreamPhase } from '../types';
 import { useChatSearchStore, type SearchContext } from '@/stores/useChatSearchStore';
+import {
+    getNextReasoningExpansionForSearch,
+    getReasoningSearchContext,
+    shouldExpandReasoningForSearch,
+    type ReasoningExpansionState,
+} from './reasoningSearch';
+import { useChatSearchContext } from '../../hooks/useChatSearchContext';
 
-const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
+const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
-type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
+type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
 export type ReasoningVariant = 'thinking' | 'justification';
 
@@ -35,12 +42,14 @@ const cleanReasoningText = (text: string): string => {
 };
 
 const SUMMARY_MAX_CHARS = 80;
-const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 350;
-const EXPANDED_CONTENT_SPRING = { type: 'spring' as const, visualDuration: 0.35, bounce: 0 };
+const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 200;
+const EXPANDED_CONTENT_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
 
 /** Strip common markdown syntax so the header preview reads as plain text. */
 const stripMarkdown = (text: string): string =>
     text
+        // Empty HTML comments are frequently appended by model tool wrappers.
+        .replace(/<!--\s*-->/g, '')
         // Fenced code blocks → keep inner text on one line
         .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, inner: string) => inner.trim())
         // Inline code
@@ -82,160 +91,89 @@ type ReasoningTimelineBlockProps = {
     variant: ReasoningVariant;
     onContentChange?: (reason?: ContentChangeReason) => void;
     blockId: string;
-    messageId?: string;
-    searchContext?: SearchContext;
     time?: { start?: number; end?: number };
     showDuration?: boolean;
     isStreaming?: boolean;
     actions?: React.ReactNode;
     /** Override the initial expanded state. Defaults to `isStreaming`. */
     defaultExpanded?: boolean;
+    messageId?: string;
+    searchContext?: SearchContext;
 };
 
-type ExpansionState = {
-    expanded: boolean;
-    source: 'auto' | 'search' | 'user';
-};
+type ExpansionState = ReasoningExpansionState;
 
-const sameExpansionState = (a: ExpansionState, b: ExpansionState): boolean => {
-    return a.expanded === b.expanded && a.source === b.source;
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const shouldExpandReasoningForSearch = ({
-    searchIsOpen,
-    query,
-    includeThinking,
-    activeMessageId,
-    messageId,
-}: {
-    searchIsOpen: boolean;
-    query: string;
-    includeThinking: boolean;
-    activeMessageId: string | null;
-    messageId: string;
-}): boolean => {
-    return Boolean(searchIsOpen && query && includeThinking && activeMessageId === messageId);
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const getReasoningSearchContext = ({
-    searchIsOpen,
-    query,
-    includeThinking,
-    caseSensitive,
-    wholeWord,
-    isRegex,
-    messageId,
-}: {
-    searchIsOpen: boolean;
-    query: string;
-    includeThinking: boolean;
-    caseSensitive: boolean;
-    wholeWord: boolean;
-    isRegex: boolean;
-    messageId: string;
-}): SearchContext | undefined => {
-    if (!searchIsOpen || !query || !includeThinking) {
-        return undefined;
-    }
-    return {
-        query,
-        caseSensitive,
-        wholeWord,
-        isRegex,
-        messageId,
-    };
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const getNextReasoningExpansionForSearch = ({
-    current,
-    shouldExpandForSearch,
-    canAutoExpand,
-}: {
-    current: ExpansionState;
-    shouldExpandForSearch: boolean;
-    canAutoExpand: boolean;
-}): ExpansionState => {
-    if (current.source === 'user') {
-        return current;
-    }
-
-    if (shouldExpandForSearch) {
-        return { expanded: true, source: 'search' };
-    }
-
-    if (current.source === 'search') {
-        return { expanded: canAutoExpand, source: 'auto' };
-    }
-
-    return current;
-};
+const sameExpansionState = (a: ExpansionState, b: ExpansionState): boolean => (
+    a.expanded === b.expanded && a.source === b.source
+);
 
 export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     text,
     variant,
     onContentChange,
     blockId,
-    messageId,
-    searchContext: searchContextOverride,
     time,
     isStreaming = false,
     actions,
     defaultExpanded,
+    messageId,
+    searchContext: searchContextOverride,
 }) => {
     const { t } = useI18n();
     const hasEnded = typeof time?.end === 'number';
     const canAutoExpand = isStreaming && !hasEnded;
     const searchMessageId = messageId ?? blockId;
-    const searchIsOpen = useChatSearchStore((s) => s.isOpen);
-    const searchQuery = useChatSearchStore((s) => s.query);
-    const searchCaseSensitive = useChatSearchStore((s) => s.flags.caseSensitive);
-    const searchWholeWord = useChatSearchStore((s) => s.flags.wholeWord);
-    const searchIsRegex = useChatSearchStore((s) => s.flags.regex);
-    const includeThinkingInSearch = useChatSearchStore((s) => s.flags.includeThinking ?? false);
-    const activeSearchMessageId = useChatSearchStore((s) => s.matches[s.activeIndex]?.messageId ?? null);
-    const shouldExpandForActiveThinkingSearch = shouldExpandReasoningForSearch({
+    const activeSearchMatch = useChatSearchStore((state) => state.matches[state.activeIndex] ?? null);
+    const searchIsOpen = useChatSearchStore((state) => state.isOpen);
+    const searchQuery = useChatSearchStore((state) => state.query);
+    const searchCaseSensitive = useChatSearchStore((state) => state.flags.caseSensitive);
+    const searchWholeWord = useChatSearchStore((state) => state.flags.wholeWord);
+    const searchIsRegex = useChatSearchStore((state) => state.flags.regex);
+    const includeThinkingInSearch = useChatSearchStore((state) => state.flags.includeThinking ?? false);
+    const searchPartId = searchContextOverride?.partId ?? blockId;
+    const searchPartType = variant === 'thinking' ? 'reasoning' : 'text';
+    const shouldExpandForActiveThinkingSearch = variant === 'thinking' && shouldExpandReasoningForSearch({
         searchIsOpen,
         query: searchQuery,
         includeThinking: includeThinkingInSearch,
-        activeMessageId: activeSearchMessageId,
+        activeMessageId: activeSearchMatch?.messageId ?? null,
+        activePartId: activeSearchMatch?.partId ?? null,
+        activePartType: activeSearchMatch?.partType ?? null,
         messageId: searchMessageId,
+        partId: searchPartId,
     });
     const [expansion, setExpansion] = React.useState<ExpansionState>(() => {
         if (defaultExpanded === true) {
             return { expanded: true, source: 'user' };
-        }
-        if (shouldExpandForActiveThinkingSearch) {
-            return { expanded: true, source: 'search' };
         }
         return { expanded: canAutoExpand, source: 'auto' };
     });
     const isExpanded = expansion.source === 'auto'
         ? canAutoExpand && expansion.expanded
         : expansion.expanded;
-    const [shouldRenderExpandedContent, setShouldRenderExpandedContent] = React.useState(
-        defaultExpanded === true || canAutoExpand || shouldExpandForActiveThinkingSearch,
-    );
+    const [shouldRenderExpandedContent, setShouldRenderExpandedContent] = React.useState(defaultExpanded === true || canAutoExpand);
     const contentId = React.useId();
-    const scrollRef = React.useRef<HTMLElement>(null);
     const contentRef = React.useRef<HTMLDivElement>(null);
     const contentAnimationRef = React.useRef<AnimationPlaybackControls | null>(null);
     const contentMountedRef = React.useRef(false);
+    // Stable handle to onContentChange so the height-animation layout effect can
+    // signal auto-follow without taking onContentChange as a dependency (which
+    // would risk re-running — and thus restarting — the animation on re-render).
+    const onContentChangeRef = React.useRef(onContentChange);
+    onContentChangeRef.current = onContentChange;
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
-    const storeSearchContext = React.useMemo<SearchContext | undefined>(() => {
-        return getReasoningSearchContext({
-            searchIsOpen,
-            query: searchQuery,
-            includeThinking: includeThinkingInSearch,
-            caseSensitive: searchCaseSensitive,
-            wholeWord: searchWholeWord,
-            isRegex: searchIsRegex,
-            messageId: searchMessageId,
-        });
-    }, [includeThinkingInSearch, searchCaseSensitive, searchIsOpen, searchIsRegex, searchMessageId, searchQuery, searchWholeWord]);
+    const storeSearchContext = React.useMemo<SearchContext | undefined>(() => getReasoningSearchContext({
+        searchIsOpen,
+        query: searchQuery,
+        includeThinking: includeThinkingInSearch,
+        caseSensitive: searchCaseSensitive,
+        wholeWord: searchWholeWord,
+        isRegex: searchIsRegex,
+        messageId: searchMessageId,
+        partId: searchPartId,
+        partType: searchPartType,
+    }), [includeThinkingInSearch, searchCaseSensitive, searchIsOpen, searchIsRegex, searchMessageId, searchPartId, searchQuery, searchWholeWord, searchPartType]);
     const searchContext = searchContextOverride ?? storeSearchContext;
     const toggleAriaLabel = isExpanded
         ? t('chat.reasoningTrace.collapseAria')
@@ -267,24 +205,19 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     }, [canAutoExpand]);
 
     React.useEffect(() => {
-        if (shouldExpandForActiveThinkingSearch) {
-            setShouldRenderExpandedContent(true);
-        }
-        setExpansion((prev) => {
-            const next = getNextReasoningExpansionForSearch({
-                current: prev,
-                shouldExpandForSearch: shouldExpandForActiveThinkingSearch,
-                canAutoExpand,
-            });
-            if (sameExpansionState(prev, next)) {
-                return prev;
-            }
-            return next;
+        const next = getNextReasoningExpansionForSearch({
+            current: expansion,
+            shouldExpandForSearch: shouldExpandForActiveThinkingSearch,
+            canAutoExpand,
         });
-        if (shouldExpandForActiveThinkingSearch) {
+        if (!sameExpansionState(expansion, next)) {
+            if (next.expanded) {
+                setShouldRenderExpandedContent(true);
+            }
+            setExpansion(next);
             onContentChange?.('structural');
         }
-    }, [canAutoExpand, onContentChange, shouldExpandForActiveThinkingSearch]);
+    }, [canAutoExpand, expansion, onContentChange, shouldExpandForActiveThinkingSearch]);
 
     React.useEffect(() => {
         if (text.trim().length === 0) {
@@ -292,12 +225,6 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         }
         onContentChange?.('structural');
     }, [onContentChange, text]);
-
-    React.useEffect(() => {
-        if (isStreaming && isExpanded && scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-    }, [text, isStreaming, isExpanded]);
 
     React.useEffect(() => {
         if (isExpanded || isStreaming) {
@@ -335,19 +262,17 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
             contentMountedRef.current = true;
             if (!isExpanded) {
                 element.style.height = '0px';
-                element.style.opacity = '0';
                 element.style.overflow = 'hidden';
                 return;
             }
 
             element.style.height = '0px';
-            element.style.opacity = '0';
             element.style.overflow = 'hidden';
 
             const animation = animate(
                 element,
-                { height: 'auto', opacity: 1 },
-                EXPANDED_CONTENT_SPRING,
+                { height: 'auto' },
+                EXPANDED_CONTENT_TRANSITION,
             );
             contentAnimationRef.current = animation;
 
@@ -372,16 +297,19 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
         if (isExpanded) {
             element.style.height = '0px';
-            element.style.opacity = '0';
         } else {
             element.style.height = `${element.scrollHeight}px`;
-            element.style.opacity = '1';
+            // Only the COLLAPSE animation needs the guard: it shrinks the
+            // timeline and the trailing async scroll events can be misread as a
+            // user scroll-away. Expansion grows the timeline and re-pins cleanly,
+            // and guarding it caused a faint scroll fight while thinking streams.
+            onContentChangeRef.current?.('animation');
         }
 
         const animation = animate(
             element,
-            { height: isExpanded ? 'auto' : '0px', opacity: isExpanded ? 1 : 0 },
-            EXPANDED_CONTENT_SPRING,
+            { height: isExpanded ? 'auto' : '0px' },
+            EXPANDED_CONTENT_TRANSITION,
         );
         contentAnimationRef.current = animation;
 
@@ -416,6 +344,28 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     if (!text || text.trim().length === 0) {
         return null;
     }
+
+    const reasoningBody = (
+        <>
+            <div data-message-text-export-source="true">
+                <MarkdownRenderer
+                    content={text}
+                    messageId={searchMessageId}
+                    isAnimated={false}
+                    isStreaming={isStreaming}
+                    variant="reasoning"
+                    searchContext={searchContext}
+                />
+            </div>
+            {actions ? (
+                <div className="mt-2 mb-1 flex items-center justify-start gap-1.5" data-message-actions="true">
+                    <div className="flex items-center gap-1.5" data-message-action-group="true">
+                        {actions}
+                    </div>
+                </div>
+            ) : null}
+        </>
+    );
 
     return (
         <div data-reasoning-block-id={blockId} data-message-text-export-root="true">
@@ -499,44 +449,45 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     aria-hidden={!isExpanded}
                     style={{
                         height: isExpanded ? 'auto' : '0px',
-                        opacity: isExpanded ? 1 : 0,
                         overflow: isExpanded ? 'visible' : 'hidden',
                         overflowAnchor: 'none',
                     }}
                 >
-                    <div className="relative ml-2 pl-3 pb-1 pt-0.5">
+                    <div
+                        className="relative ml-2 pl-3 pb-1 pt-0.5"
+                        style={{
+                            opacity: isExpanded ? 1 : 0,
+                            transform: isExpanded ? 'translateY(0)' : 'translateY(-4px)',
+                            transition: 'opacity 180ms ease-out, transform 180ms ease-out',
+                        }}
+                    >
                         <span
                             aria-hidden="true"
                             className="pointer-events-none absolute left-0 top-0 bottom-0 w-px"
                             style={{ backgroundColor: 'var(--tools-border)' }}
                         />
-                        <ScrollableOverlay
-                            ref={scrollRef}
-                            as="div"
-                            outerClassName="max-h-80"
-                            className="p-0"
-                            useScrollShadow
-                            scrollShadowSize={36}
-                            userIntentOnly
-                        >
-                            <div data-message-text-export-source="true">
-                                <MarkdownRenderer
-                                    content={text}
-                                    messageId={blockId}
-                                    isAnimated={false}
-                                    isStreaming={isStreaming}
-                                    variant="reasoning"
-                                    searchContext={searchContext}
-                                />
+                        {isStreaming ? (
+                            // While streaming, let the thinking grow inline — no
+                            // capped, independently-scrollable box. The chat's own
+                            // auto-follow then handles following / releasing, so the
+                            // box never captures the wheel or fights the user's
+                            // scroll. The max-height scroll box is applied only once
+                            // the thinking has finished (the branch below).
+                            <div className="p-0">
+                                {reasoningBody}
                             </div>
-                            {actions ? (
-                                <div className="mt-2 mb-1 flex items-center justify-start gap-1.5" data-message-actions="true">
-                                    <div className="flex items-center gap-1.5" data-message-action-group="true">
-                                        {actions}
-                                    </div>
-                                </div>
-                            ) : null}
-                        </ScrollableOverlay>
+                        ) : (
+                            <ScrollableOverlay
+                                as="div"
+                                outerClassName="max-h-80"
+                                className="p-0"
+                                useScrollShadow
+                                scrollShadowSize={36}
+                                userIntentOnly
+                            >
+                                {reasoningBody}
+                            </ScrollableOverlay>
+                        )}
                     </div>
                 </div>
             ) : null}
@@ -549,6 +500,7 @@ type ReasoningPartProps = {
     onContentChange?: (reason?: ContentChangeReason) => void;
     messageId: string;
     streamPhase?: StreamPhase;
+    partIndex: number;
 };
 
 const ReasoningPart = React.memo(({
@@ -556,10 +508,14 @@ const ReasoningPart = React.memo(({
     onContentChange,
     messageId,
     streamPhase,
+    partIndex,
 }: ReasoningPartProps) => {
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const partWithText = part as PartWithText;
-    const rawText = partWithText.text || partWithText.content || '';
+    const rawText = [partWithText.text, partWithText.content, partWithText.value].reduce<string>(
+        (best, candidate) => typeof candidate === 'string' && candidate.length > best.length ? candidate : best,
+        '',
+    );
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
     const time = partWithText.time;
     const canBeStreaming = streamPhase === undefined || streamPhase !== 'completed';
@@ -569,6 +525,7 @@ const ReasoningPart = React.memo(({
         isStreaming,
         identityKey: `${messageId}:${part.id ?? 'reasoning'}`,
     });
+    const searchContext = useChatSearchContext(messageId, part, partIndex);
 
     // Show reasoning even if time.end isn't set yet (during streaming)
     // Only hide if there's no text content
@@ -583,94 +540,11 @@ const ReasoningPart = React.memo(({
             onContentChange={onContentChange}
             blockId={part.id || `${messageId}-reasoning`}
             messageId={messageId}
+            searchContext={searchContext}
             time={time}
             isStreaming={isStreaming}
         />
     );
 });
-
-type MergedReasoningPartProps = {
-    parts: Part[];
-    onContentChange?: (reason?: ContentChangeReason) => void;
-    messageId: string;
-    streamPhase?: StreamPhase;
-};
-
-/**
- * Renders ALL reasoning parts for a message as a single collapsible block,
- * merging their text and spanning their combined time range.
- * This matches the VSCode Copilot pattern of showing one "Thought" block per turn.
- */
-export const MergedReasoningPart = React.memo(({
-    parts,
-    onContentChange,
-    messageId,
-    streamPhase,
-}: MergedReasoningPartProps) => {
-    const chatRenderMode = useUIStore((state) => state.chatRenderMode);
-
-    const mergedText = React.useMemo(() => {
-        return parts
-            .map((part) => {
-                const p = part as PartWithText;
-                return cleanReasoningText(p.text || p.content || '');
-            })
-            .filter((t) => t.length > 0)
-            .join('\n\n');
-    }, [parts]);
-
-    const mergedTime = React.useMemo(() => {
-        let earliestStart: number | undefined;
-        let latestEnd: number | undefined;
-
-        for (const part of parts) {
-            const time = (part as PartWithText).time;
-            if (typeof time?.start === 'number' && Number.isFinite(time.start)) {
-                if (earliestStart === undefined || time.start < earliestStart) {
-                    earliestStart = time.start;
-                }
-            }
-            if (typeof time?.end === 'number' && Number.isFinite(time.end)) {
-                if (latestEnd === undefined || time.end > latestEnd) {
-                    latestEnd = time.end;
-                }
-            }
-        }
-
-        return earliestStart !== undefined ? { start: earliestStart, end: latestEnd } : undefined;
-    }, [parts]);
-
-    const canBeStreaming = streamPhase === undefined || streamPhase !== 'completed';
-    const isStreaming = chatRenderMode === 'live' && canBeStreaming && parts.some(
-        (part) => typeof (part as PartWithText).time?.end !== 'number',
-    );
-
-    const throttledMergedText = useStreamingTextThrottle({
-        text: mergedText,
-        isStreaming,
-        identityKey: `${messageId}:reasoning-merged`,
-    });
-
-    const blockId = parts[0]?.id ?? `${messageId}-reasoning-merged`;
-
-    if (!throttledMergedText.trim()) {
-        return null;
-    }
-
-    return (
-        <ReasoningTimelineBlock
-            text={throttledMergedText}
-            variant="thinking"
-            onContentChange={onContentChange}
-            blockId={blockId}
-            messageId={messageId}
-            time={mergedTime}
-            isStreaming={isStreaming}
-        />
-    );
-});
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const formatReasoningText = (text: string): string => cleanReasoningText(text);
 
 export default ReasoningPart;

@@ -26,10 +26,10 @@ jobs:
       archive_name: ${{ steps.archive.outputs.archive_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Validate docs source
         run: bun run docs:validate
@@ -43,7 +43,7 @@ jobs:
           echo "archive_name=${ARCHIVE_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: docs-source
           path: artifacts/${{ steps.archive.outputs.archive_name }}
@@ -51,7 +51,7 @@ jobs:
 
       - name: Upload archive to release tag
         if: ${{ github.event_name == 'release' || github.event.inputs.release_tag != '' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag }}
           files: artifacts/${{ steps.archive.outputs.archive_name }}

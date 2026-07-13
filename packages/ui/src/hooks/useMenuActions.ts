@@ -1,6 +1,9 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getSyncSessions } from '@/sync/sync-refs';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -53,15 +56,11 @@ const copyCurrentSelectionFallback = async (): Promise<boolean> => {
 const MENU_ACTION_EVENT = 'openchamber:menu-action';
 const CHECK_FOR_UPDATES_EVENT = 'openchamber:check-for-updates';
 
-type TauriEventApi = {
+type DesktopBridgeGlobal = {
   listen?: (
     event: string,
     handler: (evt: { payload?: unknown }) => void
   ) => Promise<() => void>;
-};
-
-type TauriGlobal = {
-  event?: TauriEventApi;
 };
 
 type MenuAction =
@@ -83,6 +82,12 @@ type MenuAction =
   | 'theme-system'
   | 'toggle-sidebar'
   | 'toggle-memory-debug'
+  | 'go-back'
+  | 'go-forward'
+  | 'previous-session'
+  | 'next-session'
+  | 'previous-project'
+  | 'next-project'
   | 'help-dialog'
   | 'download-logs';
 
@@ -134,6 +139,39 @@ export const useMenuActions = (
 
   const handleChangeWorkspace = React.useCallback(() => {
     sessionEvents.requestDirectoryDialog();
+  }, []);
+
+  const navigateSession = React.useCallback((direction: -1 | 1) => {
+    const sessions = getSyncSessions();
+    if (sessions.length === 0) return;
+
+    const currentSessionId = useSessionUIStore.getState().currentSessionId;
+    const currentIndex = sessions.findIndex((session) => session.id === currentSessionId);
+    let nextIndex = direction > 0 ? 0 : sessions.length - 1;
+    if (currentIndex >= 0) {
+      nextIndex = (currentIndex + direction + sessions.length) % sessions.length;
+    }
+    const nextSession = sessions[nextIndex];
+    if (!nextSession) return;
+
+    setActiveMainTab('chat');
+    setSessionSwitcherOpen(false);
+    useSessionUIStore.getState().setCurrentSession(nextSession.id);
+  }, [setActiveMainTab, setSessionSwitcherOpen]);
+
+  const navigateProject = React.useCallback((direction: -1 | 1) => {
+    const { activeProjectId, projects, setActiveProject } = useProjectsStore.getState();
+    if (projects.length === 0) return;
+
+    const currentIndex = projects.findIndex((project) => project.id === activeProjectId);
+    let nextIndex = direction > 0 ? 0 : projects.length - 1;
+    if (currentIndex >= 0) {
+      nextIndex = (currentIndex + direction + projects.length) % projects.length;
+    }
+    const nextProject = projects[nextIndex];
+    if (!nextProject) return;
+
+    setActiveProject(nextProject.id);
   }, []);
 
   const handleAction = React.useCallback(
@@ -222,6 +260,30 @@ export const useMenuActions = (
           onToggleMemoryDebug?.();
           break;
 
+        case 'go-back':
+          useDirectoryStore.getState().goBack();
+          break;
+
+        case 'go-forward':
+          useDirectoryStore.getState().goForward();
+          break;
+
+        case 'previous-session':
+          navigateSession(-1);
+          break;
+
+        case 'next-session':
+          navigateSession(1);
+          break;
+
+        case 'previous-project':
+          navigateProject(-1);
+          break;
+
+        case 'next-project':
+          navigateProject(1);
+          break;
+
         case 'help-dialog':
           toggleHelpDialog();
           break;
@@ -236,6 +298,8 @@ export const useMenuActions = (
     },
     [
       handleChangeWorkspace,
+      navigateProject,
+      navigateSession,
       onToggleMemoryDebug,
       openNewSessionDraft,
       setAboutDialogOpen,
@@ -276,8 +340,8 @@ export const useMenuActions = (
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    const listen = tauri?.event?.listen;
+    const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
+    const listen = desktop?.listen;
     if (typeof listen !== 'function') return;
 
     let unlistenMenu: null | (() => void | Promise<void>) = null;

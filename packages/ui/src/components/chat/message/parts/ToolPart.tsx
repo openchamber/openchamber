@@ -1,7 +1,6 @@
 
 
 import React from 'react';
-import { animate, type AnimationPlaybackControls } from 'motion';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
@@ -10,20 +9,19 @@ import { getToolMetadata } from '@/lib/toolHelpers';
 
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
-import { getSyncChildStores } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionActivity } from '@/hooks/useSessionActivity';
-import { opencodeClient } from '@/lib/opencode/client';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui';
 import { Text } from '@/components/ui/text';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
@@ -34,9 +32,12 @@ import {
     formatEditOutput,
     detectLanguageFromOutput,
     formatInputForDisplay,
+    renderTodoOutput,
     tryParseJsonOutput,
+    coerceToText,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
+import { JsonSummaryView } from './JsonSummaryView';
 import { Icon } from "@/components/icon/Icon";
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
@@ -44,11 +45,13 @@ import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
+import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
-import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
+import { getDiffPatchEntries, getPatchText, type DiffPatchEntry } from './toolDiffUtils';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
-const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
+const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
@@ -58,7 +61,6 @@ interface ToolPartProps {
     part: ToolPartType;
     isExpanded: boolean;
     onToggle: (toolId: string) => void;
-    syntaxTheme: { [key: string]: React.CSSProperties };
     isMobile: boolean;
     alwaysShowActions?: boolean;
     onContentChange?: (reason?: ContentChangeReason) => void;
@@ -164,17 +166,6 @@ const normalizeToolName = (toolName: string | undefined | null): string => {
 };
 
 const MAX_DURATION_MS = 5 * 60 * 1000; // 5 minutes cap
-const TASK_TOOL_POLL_FAST_MS = 1200;
-const TASK_TOOL_POLL_IDLE_MS = 3200;
-const TASK_TOOL_POLL_HIDDEN_MS = 6000;
-const TASK_TOOL_INITIAL_FETCH_LIMIT = 500;
-const TASK_TOOL_ACTIVE_FETCH_LIMIT = 160;
-const TASK_TOOL_IDLE_FETCH_LIMIT = 80;
-const VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT = 30;
-const VSCODE_TASK_TOOL_ACTIVE_FETCH_LIMIT = 30;
-const VSCODE_TASK_TOOL_IDLE_FETCH_LIMIT = 30;
-const TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS = 3;
-const TASK_TOOL_SETTLE_GRACE_MS = 2500;
 const TASK_TOOL_FALLBACK_RETRY_MS = 3000;
 const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'bash',
@@ -199,30 +190,75 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
     return <>{formatDuration(start, end, now)}</>;
 };
 
-const EXPANDED_CONTENT_TRANSITION_MS = 350;
-const EXPANDED_CONTENT_SPRING = { type: 'spring' as const, visualDuration: 0.35, bounce: 0 };
+const deferredToolBodyMounts: Array<{ active: boolean; fn: () => void }> = [];
+let deferredToolBodyFrame: number | undefined;
 
-const useAnimatedExpandedContent = (isExpanded: boolean) => {
+const flushDeferredToolBodyMounts = () => {
+    while (deferredToolBodyMounts.length > 0) {
+        const item = deferredToolBodyMounts.pop();
+        if (!item) {
+            break;
+        }
+        if (item.active) {
+            item.fn();
+            deferredToolBodyFrame = deferredToolBodyMounts.length > 0
+                ? window.requestAnimationFrame(flushDeferredToolBodyMounts)
+                : undefined;
+            return;
+        }
+    }
+
+    deferredToolBodyFrame = undefined;
+};
+
+const scheduleDeferredToolBodyMount = (fn: () => void) => {
+    if (typeof window === 'undefined') {
+        fn();
+        return () => undefined;
+    }
+
+    const item = { active: true, fn };
+    deferredToolBodyMounts.push(item);
+
+    if (deferredToolBodyFrame === undefined) {
+        deferredToolBodyFrame = window.requestAnimationFrame(() => {
+            deferredToolBodyFrame = window.requestAnimationFrame(flushDeferredToolBodyMounts);
+        });
+    }
+
+    return () => {
+        item.active = false;
+    };
+};
+
+const useDeferredExpandedContent = (isExpanded: boolean) => {
+    // If the tool is expanded when the row first mounts (e.g. "show tools open
+    // by default", or scrolling a default-open tool back into a virtualized
+    // view), render the body SYNCHRONOUSLY so the virtualizer measures the real
+    // height immediately. Deferring it would let the row mount short and grow a
+    // frame later, which makes the virtualizer compensate scroll and lurch the
+    // viewport past several messages on slow scroll. Only defer LATER
+    // user-initiated expansions, where instant single-item feedback isn't worth
+    // blocking the click on a heavy body render.
     const [shouldRender, setShouldRender] = React.useState(isExpanded);
+    const mountedRef = React.useRef(false);
 
     React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            setShouldRender(isExpanded);
+        if (!isExpanded) {
+            mountedRef.current = true;
+            setShouldRender(false);
             return;
         }
 
-        if (isExpanded) {
+        if (!mountedRef.current) {
+            mountedRef.current = true;
             setShouldRender(true);
             return;
         }
 
-        const timer = window.setTimeout(() => {
-            setShouldRender(false);
-        }, EXPANDED_CONTENT_TRANSITION_MS);
-
-        return () => {
-            window.clearTimeout(timer);
-        };
+        return scheduleDeferredToolBodyMount(() => {
+            setShouldRender(true);
+        });
     }, [isExpanded]);
 
     return shouldRender;
@@ -668,7 +704,47 @@ const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, curre
         }
     }
 
+    if (part.tool === 'lsp' && input) {
+        const filePath = input?.filePath || input?.file_path || input?.path;
+        if (typeof filePath === 'string') {
+            return getRelativePath(filePath, currentDirectory);
+        }
+    }
+
     return null;
+};
+
+const getLspToolDescription = (input: Record<string, unknown> | undefined, currentDirectory: string): string => {
+    if (!input) {
+        return '';
+    }
+
+    const operation = typeof input.operation === 'string' ? input.operation : 'lsp';
+    if (operation === 'workspaceSymbol') {
+        const query = typeof input.query === 'string' && input.query.trim().length > 0
+            ? ` "${input.query.trim()}"`
+            : '';
+        return `${operation}${query}`;
+    }
+
+    const filePath = typeof input.filePath === 'string'
+        ? input.filePath
+        : typeof input.file_path === 'string'
+            ? input.file_path
+            : typeof input.path === 'string'
+                ? input.path
+                : '';
+    const displayPath = filePath ? getRelativePath(filePath, currentDirectory) : '';
+
+    if (operation === 'documentSymbol') {
+        return displayPath ? `${operation} ${displayPath}` : operation;
+    }
+
+    const line = typeof input.line === 'number' && Number.isFinite(input.line) ? Math.trunc(input.line) : undefined;
+    const character = typeof input.character === 'number' && Number.isFinite(input.character) ? Math.trunc(input.character) : undefined;
+    const position = line !== undefined && character !== undefined ? `:${line}:${character}` : '';
+
+    return displayPath ? `${operation} ${displayPath}${position}` : operation;
 };
 
 const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string => {
@@ -704,6 +780,10 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
         return input.description.substring(0, 80);
     }
 
+    if (part.tool === 'lsp') {
+        return getLspToolDescription(input, currentDirectory);
+    }
+
     const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
     return typeof desc === 'string' ? desc : '';
 };
@@ -731,7 +811,6 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
                 disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
                 className,
             )}
-           
         >
             <div className="w-full min-w-0">
                 {children}
@@ -770,36 +849,118 @@ const ToolScrollableTextOutput: React.FC<{
     part: ToolPartType;
     metadata: Record<string, unknown> | undefined;
     input: Record<string, unknown> | undefined;
-    syntaxTheme: { [key: string]: React.CSSProperties };
-}> = ({ output, part, metadata, input, syntaxTheme }) => {
+}> = ({ output, part, metadata, input }) => {
+    const { t } = useI18n();
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
+    const [jsonViewMode, setJsonViewMode] = React.useState<'summary' | 'formatted' | 'raw'>('summary');
+    const [copiedJson, setCopiedJson] = React.useState(false);
+
+    React.useEffect(() => {
+        setJsonViewMode('summary');
+        setCopiedJson(false);
+    }, [renderedOutput]);
+
+    const handleJsonViewChange = React.useCallback((view: 'summary' | 'formatted' | 'raw', event: React.MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        setJsonViewMode(view);
+    }, []);
+
+    const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        const result = await copyTextToClipboard(renderedOutput);
+        if (!result.ok) {
+            toast.error(t('chat.toolPart.copyOutputFailed'));
+            return;
+        }
+        setCopiedJson(true);
+        if (typeof window !== 'undefined') {
+            window.setTimeout(() => setCopiedJson(false), 1200);
+        }
+    }, [renderedOutput, t]);
 
     if (jsonResult.isJson) {
         return (
-            <div className="tool-output-surface p-2 rounded-xl w-full min-w-0">
-                <JsonTreeViewer
-                    data={jsonResult.data}
-                    initiallyExpandedDepth={1}
-                    maxHeight="400px"
-                />
+            <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
+                <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'summary' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('summary', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showNavigableJson')}
+                        title={t('chat.toolPart.showNavigableJson')}
+                    >
+                        <Icon name="list-unordered" className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'formatted' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('formatted', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showFormattedJson')}
+                        title={t('chat.toolPart.showFormattedJson')}
+                    >
+                        <Icon name="node-tree" className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'raw' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('raw', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showRawJson')}
+                        title={t('chat.toolPart.showRawJson')}
+                    >
+                        <Icon name="code-box" className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
+                        onClick={handleCopyOutput}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+                        title={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+                    >
+                        <Icon name={copiedJson ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
+                    </Button>
+                </div>
+                {jsonViewMode === 'summary' ? (
+                    <JsonSummaryView data={jsonResult.data} />
+                ) : jsonViewMode === 'formatted' ? (
+                    <JsonTreeViewer
+                        data={jsonResult.data}
+                        initiallyExpandedDepth={1}
+                        maxHeight="400px"
+                    />
+                ) : (
+                    <div className="typography-code pr-12 text-muted-foreground/90">
+                        <WorkerHighlightedCode
+                            language="json"
+                            code={renderedOutput}
+                            style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                            codeStyle={CODE_TAG_PROPS.style}
+                            wrap
+                        />
+                    </div>
+                )}
             </div>
         );
     }
 
     return (
         <div className={part.tool === 'bash' ? 'typography-code text-muted-foreground/90' : undefined}>
-            <SyntaxHighlighter
-                style={syntaxTheme}
+            <WorkerHighlightedCode
                 language={outputLanguage}
-                PreTag="div"
-                customStyle={TOOL_COLLAPSED_CUSTOM_STYLE}
-                codeTagProps={CODE_TAG_PROPS}
-                wrapLongLines
-            >
-                {renderedOutput}
-            </SyntaxHighlighter>
+                code={renderedOutput}
+                style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                codeStyle={CODE_TAG_PROPS.style}
+                wrap
+            />
         </div>
     );
 };
@@ -849,7 +1010,16 @@ const readTaskSessionIdFromOutput = (output: string | undefined): string | undef
     const taskMatch = output.match(/task_id\s*:\s*([^\s<"']+)/i);
     const sessionMatch = output.match(/session[_\s-]?id\s*:\s*([^\s<"']+)/i);
     const candidate = taskMatch?.[1] ?? sessionMatch?.[1];
-    return normalizeSessionIdCandidate(candidate);
+    if (candidate) {
+        return normalizeSessionIdCandidate(candidate);
+    }
+
+    // OpenCode tool output may wrap child session id in <task id="ses_xxx">
+    const taskTagSessionId = readTaskTagSessionIdFromOutput(output);
+    if (taskTagSessionId) {
+        return normalizeSessionIdCandidate(taskTagSessionId);
+    }
+    return undefined;
 };
 
 const buildTaskSummaryEntriesFromSession = (messages: SessionMessageWithParts[]): TaskToolSummaryEntry[] => {
@@ -884,41 +1054,6 @@ const buildTaskSummaryEntriesFromSession = (messages: SessionMessageWithParts[])
     }
 
     return entries;
-};
-
-const buildTaskSessionMessagesSignature = (messages: SessionMessageWithParts[]): string => {
-    if (!Array.isArray(messages) || messages.length === 0) {
-        return '0';
-    }
-
-    const lastMessage = messages[messages.length - 1];
-    const lastMessageId = typeof lastMessage?.info?.id === 'string' ? lastMessage.info.id : '';
-    const lastMessageUpdated =
-        typeof lastMessage?.info?.time?.completed === 'number'
-            ? lastMessage.info.time.completed
-            : typeof lastMessage?.info?.time?.created === 'number'
-                ? lastMessage.info.time.created
-                : 0;
-    const lastParts = Array.isArray(lastMessage?.parts) ? lastMessage.parts : [];
-    const lastPart = lastParts[lastParts.length - 1] as Record<string, unknown> | undefined;
-    const tailType = typeof lastPart?.type === 'string' ? lastPart.type : '';
-    const tailId = typeof lastPart?.id === 'string' ? lastPart.id : '';
-    const tailTextLength = (() => {
-        const textCandidate = lastPart?.text;
-        if (typeof textCandidate === 'string') {
-            return textCandidate.length;
-        }
-        const stateCandidate = lastPart?.state;
-        if (stateCandidate && typeof stateCandidate === 'object') {
-            const stateStatus = (stateCandidate as Record<string, unknown>).status;
-            if (typeof stateStatus === 'string') {
-                return stateStatus.length;
-            }
-        }
-        return 0;
-    })();
-
-    return `${messages.length}:${lastMessageId}:${lastMessageUpdated}:${lastParts.length}:${tailType}:${tailId}:${tailTextLength}`;
 };
 
 const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
@@ -977,6 +1112,144 @@ const shouldRenderGitPathLabel = (toolName: string, label: string): boolean => {
 
     return /^[A-Za-z0-9_-]+$/.test(baseName);
 };
+
+const getTaskSummaryEntryRenderSignature = (entry: TaskToolSummaryEntry): string => {
+    const toolName = normalizeToolName(entry.tool);
+    const status = entry.state?.status ?? '';
+    const label = getTaskSummaryLabel(entry);
+    return `${entry.id ?? ''}\u0001${toolName}\u0001${status}\u0001${label}`;
+};
+
+const areTaskSummaryEntriesRenderEqual = (
+    prevEntries: TaskToolSummaryEntry[],
+    nextEntries: TaskToolSummaryEntry[],
+): boolean => {
+    if (prevEntries === nextEntries) return true;
+    if (prevEntries.length !== nextEntries.length) return false;
+    for (let index = 0; index < prevEntries.length; index += 1) {
+        if (getTaskSummaryEntryRenderSignature(prevEntries[index]) !== getTaskSummaryEntryRenderSignature(nextEntries[index])) {
+            return false;
+        }
+    }
+    return true;
+};
+
+const TaskSummaryEntryRow = React.memo(({
+    entry,
+    isMobile,
+    animateTailText,
+    showToolFileIcons,
+}: {
+    entry: TaskToolSummaryEntry;
+    isMobile: boolean;
+    animateTailText: boolean;
+    showToolFileIcons: boolean;
+}) => {
+    const normalizedToolName = normalizeToolName(entry.tool);
+    const toolName = normalizedToolName.length > 0 ? normalizedToolName : 'tool';
+    const label = getTaskSummaryLabel(entry);
+    const hasLabel = label.trim().length > 0;
+    const status = entry.state?.status;
+    const displayName = getToolMetadata(toolName).displayName;
+
+    return (
+        <ToolRevealOnMount animate={animateTailText} wipe>
+            <div className={cn('flex gap-2 min-w-0 w-full', isMobile ? 'items-start' : 'items-center')}>
+                <span className="flex-shrink-0 text-foreground/80">{getToolIcon(toolName)}</span>
+                <span
+                    className="typography-meta text-foreground/80 flex-shrink-0"
+                    style={{ color: 'var(--tools-title)' }}
+                    title={displayName}
+                >
+                    {displayName}
+                </span>
+                {hasLabel ? (
+                    status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
+                        renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons)
+                    ) : (
+                        status === 'error' ? (
+                            <span className={cn(
+                                'typography-meta flex-1 min-w-0 text-[var(--status-error)]',
+                                isMobile ? 'whitespace-normal break-words' : 'truncate',
+                            )}>
+                                {label}
+                            </span>
+                        ) : (
+                            <Text
+                                variant={animateTailText ? 'generate-effect' : 'static'}
+                                className={cn(
+                                    'typography-meta flex-1 min-w-0 text-muted-foreground/70',
+                                    isMobile ? 'whitespace-normal break-words' : 'truncate',
+                                )}
+                                style={{ color: 'var(--tools-description)' }}
+                                title={label}
+                            >
+                                {label}
+                            </Text>
+                        )
+                    )
+                ) : null}
+            </div>
+        </ToolRevealOnMount>
+    );
+}, (prev, next) => {
+    return prev.isMobile === next.isMobile
+        && prev.animateTailText === next.animateTailText
+        && prev.showToolFileIcons === next.showToolFileIcons
+        && getTaskSummaryEntryRenderSignature(prev.entry) === getTaskSummaryEntryRenderSignature(next.entry);
+});
+
+TaskSummaryEntryRow.displayName = 'TaskSummaryEntryRow';
+
+const TaskSummaryEntriesList = React.memo(({
+    entries,
+    isExpanded,
+    isMobile,
+    animateTailText,
+    showToolFileIcons,
+}: {
+    entries: TaskToolSummaryEntry[];
+    isExpanded: boolean;
+    isMobile: boolean;
+    animateTailText: boolean;
+    showToolFileIcons: boolean;
+}) => {
+    const visibleEntries = isExpanded ? entries : entries.slice(-6);
+    const hiddenCount = Math.max(0, entries.length - visibleEntries.length);
+    const visibleStartIndex = entries.length - visibleEntries.length;
+
+    return (
+        <ToolScrollableSection maxHeightClass={isExpanded ? 'max-h-[40vh]' : 'max-h-56'} disableHorizontal>
+            <div className="w-full min-w-0 space-y-1">
+                {hiddenCount > 0 ? (
+                    <div className="typography-micro text-muted-foreground/70">+{hiddenCount} more…</div>
+                ) : null}
+
+                {visibleEntries.map((entry, idx) => {
+                    const absoluteIndex = isExpanded ? idx : visibleStartIndex + idx;
+                    const rowKey = entry.id ?? `${getTaskSummaryEntryRenderSignature(entry)}:${absoluteIndex}`;
+                    return (
+                        <TaskSummaryEntryRow
+                            key={rowKey}
+                            entry={entry}
+                            isMobile={isMobile}
+                            animateTailText={animateTailText}
+                            showToolFileIcons={showToolFileIcons}
+                        />
+                    );
+                })}
+            </div>
+        </ToolScrollableSection>
+    );
+}, (prev, next) => {
+    return prev.isExpanded === next.isExpanded
+        && prev.isMobile === next.isMobile
+        && prev.animateTailText === next.animateTailText
+        && prev.showToolFileIcons === next.showToolFileIcons
+        && areTaskSummaryEntriesRenderEqual(prev.entries, next.entries);
+});
+
+TaskSummaryEntriesList.displayName = 'TaskSummaryEntriesList';
 
 const stripTaskMetadataFromOutput = (output: string): string => {
     // Strip only a trailing <task_metadata>...</task_metadata> block.
@@ -1089,12 +1362,11 @@ const TaskToolSummary: React.FC<{
     isActive?: boolean;
 }> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
     const { t } = useI18n();
-    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const currentDirectory = useEffectiveDirectory();
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const runtime = React.useContext(RuntimeAPIContext);
-    const displayEntries = entries;
 
     const trimmedOutput = typeof output === 'string'
         ? stripTaskMetadataFromOutput(output)
@@ -1105,7 +1377,10 @@ const TaskToolSummary: React.FC<{
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
         if (sessionId && currentDirectory) {
-            if (isMobile || runtime?.runtime.isVSCode) {
+            // In contexts with no ContextPanel (embedded session-chat iframe)
+            // or single-surface layouts (mobile, VS Code), navigate in place.
+            // Otherwise open a new side-panel tab.
+            if (isEmbeddedSessionChat() || isMobile || runtime?.runtime.isVSCode) {
                 setCurrentSession(sessionId, currentDirectory);
                 return;
             }
@@ -1123,7 +1398,7 @@ const TaskToolSummary: React.FC<{
         ? input.subagent_type
         : 'subagent';
 
-    if (displayEntries.length === 0 && !hasOutput && !sessionId) {
+    if (entries.length === 0 && !hasOutput && !sessionId) {
         return (
             <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]">
                 <div className="typography-meta text-muted-foreground/70">
@@ -1133,9 +1408,6 @@ const TaskToolSummary: React.FC<{
         );
     }
 
-    const visibleEntries = isExpanded ? displayEntries : displayEntries.slice(-6);
-    const hiddenCount = Math.max(0, displayEntries.length - visibleEntries.length);
-
     return (
         <div
             className={cn(
@@ -1144,65 +1416,14 @@ const TaskToolSummary: React.FC<{
                 'before:top-[-0.25rem] before:bottom-0'
             )}
         >
-            {displayEntries.length > 0 ? (
-                <ToolScrollableSection maxHeightClass={isExpanded ? 'max-h-[40vh]' : 'max-h-56'} disableHorizontal>
-                    <div className="w-full min-w-0 space-y-1">
-                        {hiddenCount > 0 ? (
-                            <div className="typography-micro text-muted-foreground/70">+{hiddenCount} more…</div>
-                        ) : null}
-
-                        {visibleEntries.map((entry, idx) => {
-                            const normalizedToolName = normalizeToolName(entry.tool);
-                            const toolName = normalizedToolName.length > 0 ? normalizedToolName : 'tool';
-                            const label = getTaskSummaryLabel(entry);
-                            const hasLabel = label.trim().length > 0;
-                            const status = entry.state?.status;
-
-                            const displayName = getToolMetadata(toolName).displayName;
-
-                            return (
-                                <ToolRevealOnMount key={entry.id ?? `${toolName}-${idx}`} animate={animateTailText} wipe>
-                                    <div className={cn("flex gap-2 min-w-0 w-full", isMobile ? 'items-start' : 'items-center')}>
-                                        <span className="flex-shrink-0 text-foreground/80">{getToolIcon(toolName)}</span>
-                                        <span
-                                            className="typography-meta text-foreground/80 flex-shrink-0"
-                                            style={{ color: 'var(--tools-title)' }}
-                                            title={displayName}
-                                        >
-                                            {displayName}
-                                        </span>
-                                        {hasLabel ? (
-                                            status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
-                                                renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons)
-                                            ) : (
-                                                status === 'error' ? (
-                                                    <span className={cn(
-                                                        'typography-meta flex-1 min-w-0 text-[var(--status-error)]',
-                                                        isMobile ? 'whitespace-normal break-words' : 'truncate'
-                                                    )}>
-                                                        {label}
-                                                    </span>
-                                                ) : (
-                                                    <Text
-                                                        variant={animateTailText ? 'generate-effect' : 'static'}
-                                                        className={cn(
-                                                            'typography-meta flex-1 min-w-0 text-muted-foreground/70',
-                                                            isMobile ? 'whitespace-normal break-words' : 'truncate'
-                                                        )}
-                                                        style={{ color: 'var(--tools-description)' }}
-                                                        title={label}
-                                                    >
-                                                        {label}
-                                                    </Text>
-                                                )
-                                            )
-                                        ) : null}
-                                    </div>
-                                </ToolRevealOnMount>
-                            );
-                        })}
-                    </div>
-                </ToolScrollableSection>
+            {entries.length > 0 ? (
+                <TaskSummaryEntriesList
+                    entries={entries}
+                    isExpanded={isExpanded}
+                    isMobile={isMobile}
+                    animateTailText={animateTailText}
+                    showToolFileIcons={showToolFileIcons}
+                />
             ) : null}
 
             {sessionId && (
@@ -1218,7 +1439,7 @@ const TaskToolSummary: React.FC<{
             )}
 
             {hasOutput ? (
-                <div className={cn('space-y-1', (displayEntries.length > 0 || sessionId) && 'pt-1')}
+                <div className={cn('space-y-1', (entries.length > 0 || sessionId) && 'pt-1')}
                 >
                     <button
                         type="button"
@@ -1270,7 +1491,7 @@ const TOOL_DIFF_METRICS = {
     lineHeight: 24,
     diffHeaderHeight: 44,
     hunkSeparatorHeight: 24,
-    fileGap: 0,
+    spacing: 0,
 };
 
 const TOOL_COLLAPSED_CUSTOM_STYLE: React.CSSProperties = {
@@ -1453,19 +1674,20 @@ DiffPreview.displayName = 'DiffPreview';
 interface ToolExpandedContentProps {
     part: ToolPartType;
     state: ToolStateUnion;
-    syntaxTheme: { [key: string]: React.CSSProperties };
     currentDirectory: string;
+    isExpanded: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
 }
 
 const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     part,
     state,
-    syntaxTheme,
     currentDirectory,
+    isExpanded,
     onShowPopup,
 }) => {
     const { t } = useI18n();
+    const runtime = React.useContext(RuntimeAPIContext);
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const stateWithData = state as ToolStateWithMetadata;
@@ -1511,6 +1733,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     }, [input, part.tool]);
     const hasInputText = !hideToolInputPreview && inputTextContent.trim().length > 0;
     const isWriteLikeTool = part.tool === 'write' || part.tool === 'create' || part.tool === 'file_write';
+    const isTodoTool = part.tool === 'todowrite' || part.tool === 'todoread';
+    const todoContent = React.useMemo(() => {
+        if (Array.isArray(input?.todos)) {
+            return JSON.stringify(input.todos);
+        }
+        return outputString;
+    }, [input?.todos, outputString]);
     const writeLikeInputPatch = React.useMemo(() => {
         if (!isWriteLikeTool || !hasInputText) {
             return undefined;
@@ -1544,6 +1773,36 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     );
 
     const renderResultContent = () => {
+        const getEntryAbsolutePath = (entry: DiffPatchEntry) => (
+            entry.title.startsWith('/') ? entry.title : `${currentDirectory}/${entry.title}`.replace(/\/+/g, '/')
+        );
+        const openEntryFile = (entry: DiffPatchEntry, event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            const line = extractFirstChangedLineFromDiff(entry.patch);
+            const absolutePath = getEntryAbsolutePath(entry);
+            if (runtime?.editor && runtime.runtime.isVSCode) {
+                void runtime.editor.openFile(absolutePath, line);
+                return;
+            }
+            useUIStore.getState().openContextFileAtLine(currentDirectory, absolutePath, line ?? 1, 1);
+        };
+        const openEntryDiff = (entry: DiffPatchEntry, event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            const line = extractFirstChangedLineFromDiff(entry.patch);
+            const absolutePath = getEntryAbsolutePath(entry);
+            if (runtime?.editor && runtime.runtime.isVSCode) {
+                void runtime.editor.openDiff('', absolutePath, `${getRelativePath(absolutePath, currentDirectory)} (changes)`, { line, patch: entry.patch });
+                return;
+            }
+            const store = useUIStore.getState();
+            const relativePath = getRelativePath(absolutePath, currentDirectory);
+            if (store.isMobile) {
+                store.navigateToDiff(relativePath);
+                store.setRightSidebarOpen(false);
+                return;
+            }
+            store.openContextDiff(currentDirectory, relativePath);
+        };
         const renderDiagnosticsSection = () => {
             if (!diagnosticSection) {
                 return null;
@@ -1616,7 +1875,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             color: 'var(--status-error)',
                             borderColor: 'var(--status-error-border)',
                         }}>
-                            {state.error}
+                            {coerceToText(state.error)}
                         </div>
                     </div>
                 );
@@ -1632,14 +1891,14 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         {questionInput.questions.map((q, index) => (
                             <div key={index} className="space-y-0.5">
                                 {q.header ? (
-                                    <div className="typography-micro text-muted-foreground">{q.header}</div>
+                                    <div className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
                                 ) : null}
-                                <div className="typography-meta text-foreground">{q.question}</div>
+                                <div className="typography-meta text-foreground">{coerceToText(q.question)}</div>
                                 {Array.isArray(q.options) && q.options.length > 0 ? (
                                     <div className="flex flex-wrap gap-1 mt-0.5">
                                         {q.options.map((opt) => (
-                                            <span key={opt.label} className="typography-micro px-1.5 py-0.5 rounded bg-muted/30 border border-border/30 text-muted-foreground">
-                                                {opt.label}
+                                            <span key={coerceToText(opt.label)} className="typography-micro px-1.5 py-0.5 rounded bg-muted/30 border border-border/30 text-muted-foreground">
+                                                {coerceToText(opt.label)}
                                             </span>
                                         ))}
                                     </div>
@@ -1657,7 +1916,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (part.tool === 'task' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
+                    <SimpleMarkdownRenderer content={coerceToText(outputString)} variant="tool" onShowPopup={onShowPopup} />
                 </div>
             );
         }
@@ -1667,11 +1926,31 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
                         <div key={entry.id} className="w-full min-w-0">
-                            {diffEntries.length > 1 ? (
-                                <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground rounded-lg mb-1">
+                            <div className="mb-1 flex min-w-0 items-center gap-1 px-2 py-1">
+                                <div className="min-w-0 flex-1 typography-meta font-medium text-muted-foreground">
                                     {renderPathLikeGitChanges(entry.title)}
                                 </div>
-                            ) : null}
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                                    onClick={(event) => openEntryFile(entry, event)}
+                                    aria-label={t('chat.toolPart.openFileAtFirstChange')}
+                                    title={t('chat.toolPart.openFileAtFirstChange')}
+                                >
+                                    <Icon name="file-edit" className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                                    onClick={(event) => openEntryDiff(entry, event)}
+                                    aria-label={t('chat.toolPart.openFileDiff')}
+                                    title={t('chat.toolPart.openFileDiff')}
+                                >
+                                    <Icon name="git-pull-request" className="h-3.5 w-3.5" />
+                                </Button>
+                            </div>
                             {entry.renderMode === 'diff' ? (
                                 <DiffPreview
                                     diff={entry.patch}
@@ -1706,11 +1985,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (hasStringOutput && outputString.trim()) {
             return renderScrollableBlock(
                 <ToolScrollableTextOutput
-                    output={outputString}
+                    output={coerceToText(outputString)}
                     part={part}
                     metadata={metadata}
                     input={input}
-                    syntaxTheme={syntaxTheme}
                 />,
                 {
                     className: part.tool === 'bash' ? 'p-1 rounded-none' : 'p-1',
@@ -1724,6 +2002,47 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             { maxHeightClass: 'max-h-60' }
         );
     };
+
+    if (isTodoTool) {
+        if (state.status === 'error' && 'error' in state) {
+            return (
+                <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-4">
+                    <div className="typography-meta font-medium text-muted-foreground/80 mb-1">{t('chat.toolPart.error')}</div>
+                    <div className="typography-meta p-2 rounded-xl border" style={{
+                        backgroundColor: 'var(--status-error-background)',
+                        color: 'var(--status-error)',
+                        borderColor: 'var(--status-error-border)',
+                    }}>
+                        {state.error}
+                    </div>
+                </div>
+            );
+        }
+
+        const todoOutput = renderTodoOutput(todoContent, {
+            total: t('chat.todo.total'),
+            inProgress: t('chat.todo.inProgress'),
+            pending: t('chat.todo.pending'),
+            completed: t('chat.todo.completed'),
+            cancelled: t('chat.todo.cancelled'),
+        }, { unstyled: true });
+
+        return (
+            <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-4">
+                {renderScrollableBlock(
+                    todoOutput ?? (
+                        <ToolScrollableTextOutput
+                            output={todoContent}
+                            part={part}
+                            metadata={metadata}
+                            input={input}
+                        />
+                    ),
+                    { className: 'p-2', maxHeightClass: 'max-h-[46vh]' },
+                )}
+            </div>
+        );
+    }
 
     return (
         <div
@@ -1755,7 +2074,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                     </blockquote>
                                 ),
                                 {
-                                    maxHeightClass: 'max-h-60',
+                                    maxHeightClass: isWriteLikeTool && writeLikeInputPatch && isExpanded ? 'max-h-[50vh]' : 'max-h-60',
                                     className: part.tool === 'bash' ? 'tool-input-surface p-0 rounded-none' : 'tool-input-surface',
                                 }
                             )}
@@ -1785,7 +2104,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 color: 'var(--status-error)',
                                 borderColor: 'var(--status-error-border)',
                             }}>
-                                {state.error}
+                                {coerceToText(state.error)}
                             </div>
                         </div>
                     )}
@@ -1801,16 +2120,14 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     part,
     isExpanded,
     onToggle,
-    syntaxTheme,
     isMobile,
-    alwaysShowActions = isMobile,
     onContentChange,
     onShowPopup,
     animateTailText = true,
 }) => {
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
-    const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const currentDirectory = useEffectiveDirectory() ?? '';
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
     const normalizedPartTool = normalizeToolName(part.tool);
@@ -1861,8 +2178,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const onContentChangeRef = React.useRef(onContentChange);
     onContentChangeRef.current = onContentChange;
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
-    const expandedContentAnimationRef = React.useRef<AnimationPlaybackControls | null>(null);
-    const expandedContentMountedRef = React.useRef(false);
 
     React.useLayoutEffect(() => {
         if (isTaskTool) {
@@ -1874,63 +2189,13 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             return;
         }
 
-        expandedContentAnimationRef.current?.stop();
+        element.style.height = isExpanded ? 'auto' : '0px';
+        element.style.overflow = isExpanded ? 'visible' : 'hidden';
 
-        if (!expandedContentMountedRef.current) {
-            expandedContentMountedRef.current = true;
-            element.style.height = isExpanded ? 'auto' : '0px';
-            element.style.opacity = isExpanded ? '1' : '0';
-            element.style.overflow = isExpanded ? 'visible' : 'hidden';
-            return;
+        if (shouldNotifyStructuralChange) {
+            onContentChangeRef.current?.('structural');
         }
-
-        element.style.overflow = 'hidden';
-
-        if (isExpanded) {
-            element.style.height = '0px';
-            element.style.opacity = '0';
-        } else {
-            element.style.height = `${element.scrollHeight}px`;
-            element.style.opacity = '1';
-        }
-
-        const animation = animate(
-            element,
-            { height: isExpanded ? 'auto' : '0px', opacity: isExpanded ? 1 : 0 },
-            EXPANDED_CONTENT_SPRING,
-        );
-        expandedContentAnimationRef.current = animation;
-
-        void animation.finished.then(() => {
-            if (expandedContentAnimationRef.current !== animation) {
-                return;
-            }
-            expandedContentAnimationRef.current = null;
-            if (isExpanded) {
-                element.style.overflow = 'visible';
-                element.style.height = 'auto';
-            } else {
-                element.style.overflow = 'hidden';
-            }
-            if (shouldNotifyStructuralChange) {
-                onContentChangeRef.current?.('structural');
-            }
-        }).catch(() => undefined);
-
-        return () => {
-            animation.stop();
-            if (expandedContentAnimationRef.current === animation) {
-                expandedContentAnimationRef.current = null;
-            }
-        };
     }, [isExpanded, isTaskTool, shouldNotifyStructuralChange]);
-
-    React.useEffect(() => {
-        return () => {
-            expandedContentAnimationRef.current?.stop();
-            expandedContentAnimationRef.current = null;
-        };
-    }, []);
 
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
@@ -1938,7 +2203,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const input = stateWithData.input;
     const time = stateWithData.time;
 
-    const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>({});
+    const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>(() => ({
+        start: typeof time?.start === 'number' ? time.start : undefined,
+        end: typeof time?.end === 'number' ? time.end : undefined,
+    }));
     const [localStartAt, setLocalStartAt] = React.useState<number | undefined>(undefined);
     const [localFinalizedAt, setLocalFinalizedAt] = React.useState<number | undefined>(undefined);
 
@@ -2063,12 +2331,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 isTaskTool,
                 parentSessionId: currentSessionId ?? undefined,
                 taskStartTime: taskSessionResolutionStart,
-                isTaskFinalized: isFinalized,
                 sessions: storeState.session,
                 sessionStatusMap: storeState.session_status,
                 hasRetried: taskFallbackRetried,
             });
-        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized, taskFallbackRetried]),
+        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, taskFallbackRetried]),
         currentDirectory,
     );
 
@@ -2088,49 +2355,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return buildTaskSummaryEntriesFromSession(childSessionMessages);
     }, [childSessionMessages, isTaskTool, taskSessionId]);
 
-    const childSessionHasInFlightTools = React.useMemo(() => {
-        if (!isTaskTool || !taskSessionId || !Array.isArray(childSessionMessages) || childSessionMessages.length === 0) {
-            return false;
-        }
-
-        for (const message of childSessionMessages) {
-            if (message?.info?.role !== 'assistant') {
-                continue;
-            }
-            const parts = Array.isArray(message.parts) ? message.parts : [];
-            for (const childPart of parts) {
-                if (childPart?.type !== 'tool') {
-                    continue;
-                }
-                const childStatus =
-                    typeof childPart === 'object' && childPart !== null && 'state' in childPart
-                        ? (childPart.state as { status?: string } | undefined)?.status
-                        : undefined;
-                if (childStatus === 'running' || childStatus === 'pending' || childStatus === 'started') {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }, [childSessionMessages, isTaskTool, taskSessionId]);
-
-    const childSessionActivity = useSessionActivity(taskSessionId, currentDirectory);
-    const [taskChildSeenActive, setTaskChildSeenActive] = React.useState(false);
-    const [taskChildPollingStopped, setTaskChildPollingStopped] = React.useState(false);
-    const [taskPendingFinalFetch, setTaskPendingFinalFetch] = React.useState(false);
-
-    const taskPollNoChangeCountRef = React.useRef(0);
-    const taskPollLastSignatureRef = React.useRef<string>('');
-    const taskFinalFetchDoneRef = React.useRef(false);
-
     React.useEffect(() => {
-        setTaskChildSeenActive(false);
-        setTaskChildPollingStopped(false);
-        setTaskPendingFinalFetch(false);
-        taskPollNoChangeCountRef.current = 0;
-        taskPollLastSignatureRef.current = '';
-        taskFinalFetchDoneRef.current = false;
         setTaskFallbackRetried(false);
     }, [taskSessionId]);
 
@@ -2168,148 +2393,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     ]);
 
     React.useEffect(() => {
-        if (hasFinalMetadataTaskSummary || !isTaskTool || !taskSessionId) {
-            return;
-        }
-
-        const childSessionIsActive =
-            childSessionActivity.phase === 'busy'
-            || childSessionActivity.phase === 'retry'
-            || childSessionHasInFlightTools;
-
-        if (childSessionIsActive) {
-            if (!taskChildSeenActive) {
-                setTaskChildSeenActive(true);
-            }
-            if (taskChildPollingStopped) {
-                setTaskChildPollingStopped(false);
-            }
-            if (taskPendingFinalFetch) {
-                setTaskPendingFinalFetch(false);
-            }
-            return;
-        }
-
-        // Always stop polling if already done.
-        if (taskChildPollingStopped && taskFinalFetchDoneRef.current) {
-            return;
-        }
-
-        // Normal settle path: child went idle after we saw it active, and we have entries.
-        // Schedule a grace period before marking polling as stopped.
-        if (taskChildSeenActive && childSessionTaskSummaryEntries.length > 0 && !taskChildPollingStopped) {
-            if (typeof window === 'undefined') {
-                setTaskChildPollingStopped(true);
-                return;
-            }
-
-            const timer = window.setTimeout(() => {
-                setTaskChildPollingStopped(true);
-            }, TASK_TOOL_SETTLE_GRACE_MS);
-
-            return () => {
-                window.clearTimeout(timer);
-            };
-        }
-
-        // Final-fetch path: child went idle before parent saw it active, or we have no
-        // entries yet. First stop polling after the settle grace period. A separate
-        // effect performs the final fetch once polling has fully stopped, avoiding
-        // races with any in-flight polling response.
-        if (!taskChildPollingStopped && !taskFinalFetchDoneRef.current) {
-            if (typeof window === 'undefined') {
-                setTaskPendingFinalFetch(true);
-                setTaskChildPollingStopped(true);
-                return;
-            }
-
-            const timer = window.setTimeout(() => {
-                setTaskPendingFinalFetch(true);
-                setTaskChildPollingStopped(true);
-            }, TASK_TOOL_SETTLE_GRACE_MS);
-
-            return () => {
-                window.clearTimeout(timer);
-            };
-        }
-    }, [
-        childSessionActivity.phase,
-        childSessionHasInFlightTools,
-        childSessionTaskSummaryEntries.length,
-        currentDirectory,
-        hasFinalMetadataTaskSummary,
-        activeLatched,
-        isFinalized,
-        isTaskTool,
-        taskPendingFinalFetch,
-        taskChildPollingStopped,
-        taskChildSeenActive,
-        taskSessionId,
-    ]);
-
-    React.useEffect(() => {
-        if (hasFinalMetadataTaskSummary || !isTaskTool || !taskSessionId || !taskChildPollingStopped || !taskPendingFinalFetch || taskFinalFetchDoneRef.current) {
-            return;
-        }
-
-        let cancelled = false;
-        const capturedSessionId = taskSessionId;
-
-        const runFinalFetch = async () => {
-            try {
-                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
-                const response = await scopedClient.session.messages({
-                    sessionID: capturedSessionId,
-                    limit: isVSCodeRuntime() ? VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT : TASK_TOOL_INITIAL_FETCH_LIMIT,
-                });
-
-                if (cancelled) {
-                    return;
-                }
-
-                const messages = response.data ?? [];
-                if (Array.isArray(messages) && messages.length > 0) {
-                    const childStores = getSyncChildStores();
-                    childStores.update(currentDirectory, (prev) => {
-                        const records = messages as SessionMessageWithParts[];
-                        const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
-                        for (const rec of records) {
-                            partPatch[rec.info.id] = rec.parts;
-                        }
-                        return {
-                            message: { ...prev.message, [capturedSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
-                            part: partPatch,
-                        };
-                    });
-                }
-
-                taskFinalFetchDoneRef.current = true;
-                setTaskPendingFinalFetch(false);
-            } catch {
-                if (cancelled) {
-                    return;
-                }
-
-                setTaskPendingFinalFetch(false);
-                setTaskChildPollingStopped(false);
-            }
-        };
-
-        void runFinalFetch();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [
-        currentDirectory,
-        hasFinalMetadataTaskSummary,
-        isTaskTool,
-        taskChildPollingStopped,
-        taskPendingFinalFetch,
-        taskSessionId,
-    ]);
-
-    React.useEffect(() => {
         if (typeof time?.end === 'number' || typeof pinnedTime.end === 'number') {
             setLocalFinalizedAt(undefined);
             return;
@@ -2341,147 +2424,25 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         return metadataTaskSummaryEntries;
     }, [childSessionTaskSummaryEntries, metadataTaskSummaryEntries]);
+    const taskSummaryRenderSignature = React.useMemo(() => {
+        return taskSummaryEntries.map(getTaskSummaryEntryRenderSignature).join('\u0000');
+    }, [taskSummaryEntries]);
+    const lastTaskSummaryRenderSignatureRef = React.useRef<string | null>(null);
 
-    React.useEffect(() => {
-        if (!isTaskTool || !taskSessionId) {
-            return;
-        }
-
-        const childSessionActive = childSessionActivity.phase === 'busy' || childSessionActivity.phase === 'retry';
-        if (hasFinalMetadataTaskSummary) {
-            return;
-        }
-
-        const shouldPoll =
-            !taskChildPollingStopped
-            && (childSessionHasInFlightTools || childSessionActive || childSessionTaskSummaryEntries.length === 0);
-        const shouldFetchSnapshot = !taskPendingFinalFetch && (childSessionTaskSummaryEntries.length === 0 || shouldPoll);
-        if (!shouldFetchSnapshot) {
-            return;
-        }
-
-        let cancelled = false;
-        let pollTimer: number | undefined;
-
-        const isVisible = () => {
-            if (typeof document === 'undefined') {
-                return true;
-            }
-            return document.visibilityState === 'visible';
-        };
-
-        const resolveFetchLimit = (isInitialFetch: boolean) => {
-            if (isVSCodeRuntime()) {
-                if (isInitialFetch && childSessionTaskSummaryEntries.length === 0) {
-                    return VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT;
-                }
-                if (isActive || childSessionHasInFlightTools || childSessionActive) {
-                    return VSCODE_TASK_TOOL_ACTIVE_FETCH_LIMIT;
-                }
-                return VSCODE_TASK_TOOL_IDLE_FETCH_LIMIT;
-            }
-
-            if (isInitialFetch && childSessionTaskSummaryEntries.length === 0) {
-                return TASK_TOOL_INITIAL_FETCH_LIMIT;
-            }
-            if (isActive || childSessionHasInFlightTools || childSessionActive) {
-                return TASK_TOOL_ACTIVE_FETCH_LIMIT;
-            }
-            return TASK_TOOL_IDLE_FETCH_LIMIT;
-        };
-
-        const resolvePollDelay = () => {
-            if (!isVisible()) {
-                return TASK_TOOL_POLL_HIDDEN_MS;
-            }
-            if (taskPollNoChangeCountRef.current >= TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS) {
-                return TASK_TOOL_POLL_IDLE_MS;
-            }
-            return TASK_TOOL_POLL_FAST_MS;
-        };
-
-        const scheduleNextPoll = () => {
-            if (!shouldPoll || typeof window === 'undefined' || cancelled) {
-                return;
-            }
-            pollTimer = window.setTimeout(() => {
-                pollTimer = undefined;
-                void fetchSessionMessages(false);
-            }, resolvePollDelay());
-        };
-
-        const fetchSessionMessages = async (isInitialFetch: boolean) => {
-            try {
-                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
-                const response = await scopedClient.session.messages({
-                    sessionID: taskSessionId,
-                    limit: resolveFetchLimit(isInitialFetch),
-                });
-                const messages = response.data ?? [];
-                if (cancelled || !Array.isArray(messages) || messages.length === 0) {
-                    return;
-                }
-
-                const nextSignature = buildTaskSessionMessagesSignature(messages as SessionMessageWithParts[]);
-                if (nextSignature === taskPollLastSignatureRef.current) {
-                    taskPollNoChangeCountRef.current += 1;
-                    return;
-                }
-
-                taskPollLastSignatureRef.current = nextSignature;
-                taskPollNoChangeCountRef.current = 0;
-                // Inject fetched subagent messages into sync child store
-                const childStores = getSyncChildStores();
-                childStores.update(currentDirectory, (prev) => {
-                    const records = messages as SessionMessageWithParts[];
-                    const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
-                    for (const rec of records) {
-                        partPatch[rec.info.id] = rec.parts;
-                    }
-                    return {
-                        message: { ...prev.message, [taskSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
-                        part: partPatch,
-                    };
-                });
-            } catch {
-                // Ignore transient subagent fetch errors.
-            } finally {
-                scheduleNextPoll();
-            }
-        };
-
-        void fetchSessionMessages(true);
-
-        return () => {
-            cancelled = true;
-            if (typeof pollTimer === 'number') {
-                window.clearTimeout(pollTimer);
-            }
-        };
-    }, [
-        childSessionActivity.phase,
-        childSessionHasInFlightTools,
-        childSessionTaskSummaryEntries.length,
-        currentDirectory,
-        hasFinalMetadataTaskSummary,
-        isActive,
-        isTaskTool,
-        taskPendingFinalFetch,
-        taskChildPollingStopped,
-        taskSessionId,
-    ]);
-
-    const taskSummaryLenRef = React.useRef<number>(taskSummaryEntries.length);
     React.useEffect(() => {
         if (!isTaskTool) {
+            lastTaskSummaryRenderSignatureRef.current = null;
             return;
         }
-        if (taskSummaryLenRef.current === taskSummaryEntries.length) {
+
+        const previous = lastTaskSummaryRenderSignatureRef.current;
+        lastTaskSummaryRenderSignatureRef.current = taskSummaryRenderSignature;
+        if (previous === null || previous === taskSummaryRenderSignature || taskSummaryEntries.length === 0) {
             return;
         }
-        taskSummaryLenRef.current = taskSummaryEntries.length;
-        onContentChange?.('structural');
-    }, [isTaskTool, onContentChange, taskSummaryEntries.length]);
+
+        onContentChangeRef.current?.('structural');
+    }, [isTaskTool, taskSummaryEntries.length, taskSummaryRenderSignature]);
 
     const diffStats = React.useMemo(() => {
         return (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch')
@@ -2505,6 +2466,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         if (normalizedPartTool === 'apply_patch') {
             return null;
         }
+        if (normalizedPartTool === 'lsp') {
+            return null;
+        }
         if (
             descriptionPath
             && (normalizedPartTool === 'apply_patch' || normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'write')
@@ -2521,7 +2485,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         return null;
     }, [descriptionPath, normalizedPartTool, stateWithData, input]);
-
     const runtime = React.useContext(RuntimeAPIContext);
 
     const handleMainClick = (e: { stopPropagation: () => void }) => {
@@ -2549,6 +2512,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             }
         } else if (['write', 'create', 'file_write'].includes(part.tool)) {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
+        } else if (part.tool === 'lsp') {
+            filePath = input?.filePath || input?.file_path || input?.path;
+            const line = input?.line;
+            targetLine = typeof line === 'number' && Number.isFinite(line) ? Math.trunc(line) : undefined;
         }
 
         if (typeof filePath === 'string') {
@@ -2578,7 +2545,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
     const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
-    const shouldRenderExpandedContent = useAnimatedExpandedContent(isExpanded);
+    const shouldRenderTaskSummary = useDeferredExpandedContent(isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || !!taskSessionId));
+    const shouldRenderExpandedContent = useDeferredExpandedContent(!isTaskTool && isExpanded);
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
@@ -2608,7 +2576,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                             className={cn(
                                 'absolute inset-0 transition-opacity',
                                 isExpanded && 'opacity-0',
-                                !isExpanded && (alwaysShowActions ? 'opacity-0' : 'group-hover/tool:opacity-0')
+                                !isExpanded && 'group-hover/tool:opacity-0'
                             )}
                             style={iconStyle}
                         >
@@ -2619,7 +2587,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                             className={cn(
                                 'absolute inset-0 transition-opacity flex items-center justify-center',
                                 isExpanded && 'opacity-100',
-                                !isExpanded && (alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100')
+                                !isExpanded && 'opacity-0 group-hover/tool:opacity-100'
                             )}
                         >
                             {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
@@ -2676,7 +2644,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                     {justificationText}
                                 </span>
                             )}
-                            {!justificationText && description && (
+                            {!justificationText && normalizedPartTool === 'lsp' && descriptionPath ? (
+                                renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
+                            ) : null}
+                            {!justificationText && normalizedPartTool !== 'lsp' && description && (
                                 descriptionPath && description === descriptionPath ? (
                                     renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                                 ) : (
@@ -2708,7 +2679,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             </div>
 
             {}
-            {isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || taskSessionId) ? (
+            {shouldRenderTaskSummary ? (
                 <TaskToolSummary
                     entries={taskSummaryEntries}
                     isExpanded={isExpanded}
@@ -2728,13 +2699,14 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                     aria-hidden={!isExpanded}
                     style={{
                         height: isExpanded ? 'auto' : '0px',
-                        opacity: isExpanded ? 1 : 0,
                         overflow: isExpanded ? 'visible' : 'hidden',
                         overflowAnchor: 'none',
                     }}
                 >
                     {shouldRenderExpandedContent ? (
-                        <div className="relative ml-2 pl-3">
+                        <div
+                            className="relative ml-2 pl-3"
+                        >
                             <span
                                 aria-hidden="true"
                                 className="pointer-events-none absolute left-0 top-px bottom-0 w-px"
@@ -2743,8 +2715,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                             <ToolExpandedContent
                                 part={part}
                                 state={state}
-                                syntaxTheme={syntaxTheme}
                                 currentDirectory={currentDirectory}
+                                isExpanded={isExpanded}
                                 onShowPopup={onShowPopup}
                             />
                         </div>
@@ -2824,7 +2796,6 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
 export default React.memo(ToolPart, (prev, next) => {
     return areRenderRelevantPartsEqual([prev.part], [next.part])
         && prev.isExpanded === next.isExpanded
-        && prev.syntaxTheme === next.syntaxTheme
         && prev.isMobile === next.isMobile
         && prev.alwaysShowActions === next.alwaysShowActions
         && prev.onContentChange === next.onContentChange

@@ -1,6 +1,80 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import nodeFsPromises from 'node:fs/promises';
+import nodePath from 'node:path';
 
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
+const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
+
+const outsideFileGrants = new Map();
+
+const pruneOutsideFileGrants = () => {
+  const now = Date.now();
+  for (const [token, grant] of outsideFileGrants.entries()) {
+    if (!grant || grant.expiresAt <= now) {
+      outsideFileGrants.delete(token);
+    }
+  }
+};
+
+export const mintOutsideFileGrant = async (targetPath, {
+  scopes = ['stat', 'read', 'raw'],
+  fsPromises = nodeFsPromises,
+  path = nodePath,
+  crypto = globalThis.crypto,
+} = {}) => {
+  const raw = typeof targetPath === 'string' ? targetPath.trim() : '';
+  if (!raw) {
+    throw new Error('Path is required');
+  }
+  const canonicalPath = await fsPromises.realpath(raw);
+  const stats = await fsPromises.stat(canonicalPath);
+  if (!stats.isFile()) {
+    throw new Error('Outside file grants require a file path');
+  }
+  pruneOutsideFileGrants();
+  const token = typeof crypto?.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const normalizedScopes = new Set(
+    (Array.isArray(scopes) ? scopes : [])
+      .filter((scope) => typeof scope === 'string' && scope.trim())
+      .map((scope) => scope.trim())
+  );
+  if (normalizedScopes.size === 0) {
+    normalizedScopes.add('read');
+  }
+  const grant = {
+    canonicalPath,
+    base: path.dirname(canonicalPath),
+    scopes: normalizedScopes,
+    expiresAt: Date.now() + OUTSIDE_FILE_GRANT_TTL_MS,
+  };
+  outsideFileGrants.set(token, grant);
+  return {
+    path: canonicalPath,
+    outsideFileGrant: token,
+    expiresAt: grant.expiresAt,
+  };
+};
+
+const resolveOutsideFileGrant = async ({ token, targetPath, scope, fsPromises }) => {
+  pruneOutsideFileGrants();
+  if (typeof token !== 'string' || !token.trim()) {
+    return { ok: false, error: 'Outside workspace file access requires a grant' };
+  }
+  const grant = outsideFileGrants.get(token.trim());
+  if (!grant) {
+    return { ok: false, error: 'Outside workspace file grant is invalid or expired' };
+  }
+  if (!grant.scopes.has(scope)) {
+    return { ok: false, error: 'Outside workspace file grant does not allow this operation' };
+  }
+  const canonicalPath = await fsPromises.realpath(targetPath);
+  if (canonicalPath !== grant.canonicalPath) {
+    return { ok: false, error: 'Outside workspace file grant does not match requested path' };
+  }
+  return { ok: true, base: grant.base, resolved: canonicalPath, granted: true };
+};
 
 const createCommandTimeoutMs = () => {
   const raw = Number(process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS);
@@ -17,6 +91,44 @@ const createGitReadCacheTtlMs = () => {
   if (Number.isFinite(raw) && raw >= 0) return raw;
   return 30 * 1000;
 };
+
+const createGitCheckIgnoreTimeoutMs = () => {
+  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  return 2500;
+};
+
+const FILE_MIME_MAP = Object.freeze({
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.mjs': 'application/javascript',
+  '.json': 'application/json',
+  '.wasm': 'application/wasm',
+  '.xml': 'application/xml',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.pdf': 'application/pdf',
+  '.csv': 'text/csv',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
+});
+
+const MAX_SERVE_BYTES = 100 * 1024 * 1024;
 
 // Only deterministic, side-effect-free git plumbing path queries are cacheable.
 // Anything outside this allowlist (including any non-git command) runs normally
@@ -169,14 +281,19 @@ const escapeCloneSshKeyPath = (sshKeyPath) => {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
       return { ok: false, error: 'Path is required' };
     }
     const resolved = path.resolve(normalized);
-    return { ok: true, base: path.dirname(resolved), resolved };
+    return resolveOutsideFileGrant({
+      token: req.query?.outsideFileGrant,
+      targetPath: resolved,
+      scope,
+      fsPromises,
+    });
   }
 
   return resolveWorkspacePathFromContext({
@@ -279,6 +396,7 @@ export const registerFsRoutes = (app, dependencies) => {
   const execJobs = new Map();
   const commandTimeoutMs = createCommandTimeoutMs();
   const gitReadCacheTtlMs = createGitReadCacheTtlMs();
+  const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
   const gitReadCache = new Map();
   const inFlightGitReadCache = new Map();
 
@@ -444,7 +562,8 @@ export const registerFsRoutes = (app, dependencies) => {
 
       let resolvedPath = '';
       if (allowOutsideWorkspace) {
-        resolvedPath = path.resolve(normalizeDirectoryPath(dirPath));
+        console.warn('Rejected outside-workspace mkdir without trusted directory grant');
+        return res.status(403).json({ error: 'Outside workspace directory creation requires a grant' });
       } else {
         const resolved = await resolveWorkspacePathFromContext({
           req,
@@ -580,6 +699,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
   app.get('/api/fs/stat', async (req, res) => {
     const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    const optional = req.query.optional === 'true';
     if (!filePath) {
       return res.status(400).json({ error: 'Path is required' });
     }
@@ -588,13 +708,18 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
+        scope: 'stat',
         resolveProjectDirectory,
         path,
         os,
+        fsPromises,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
+        if (req.query?.allowOutsideWorkspace === 'true') {
+          console.warn(`Rejected outside-workspace stat: ${resolved.error}`);
+        }
         return res.status(400).json({ error: resolved.error });
       }
 
@@ -616,6 +741,9 @@ export const registerFsRoutes = (app, dependencies) => {
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        if (optional) {
+          return res.json({ path: filePath, exists: false });
+        }
         return res.status(404).json({ error: 'File not found' });
       }
       if (err && typeof err === 'object' && err.code === 'EACCES') {
@@ -637,13 +765,18 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
+        scope: 'read',
         resolveProjectDirectory,
         path,
         os,
+        fsPromises,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
+        if (req.query?.allowOutsideWorkspace === 'true') {
+          console.warn(`Rejected outside-workspace read: ${resolved.error}`);
+        }
         return res.status(400).json({ error: resolved.error });
       }
 
@@ -661,7 +794,21 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const content = await fsPromises.readFile(canonicalPath, 'utf8');
+      let content = await fsPromises.readFile(canonicalPath, 'utf8');
+      // Retry empty reads — concurrent writer may have truncated the file
+      // between our stat and read (O_TRUNC window). If the file existed with
+      // content at stat time but we read nothing, the writer hasn't finished
+      // writing yet.
+      if (content.length === 0 && stats.size > 0) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+          content = await fsPromises.readFile(canonicalPath, 'utf8');
+          if (content.length > 0) break;
+        }
+        if (content.length === 0) {
+          console.warn(`Read retry exhausted for ${canonicalPath}: stat reported ${stats.size} bytes but content is empty`);
+        }
+      }
       return res.type('text/plain').send(content);
     } catch (error) {
       const err = error;
@@ -689,13 +836,18 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
+        scope: 'raw',
         resolveProjectDirectory,
         path,
         os,
+        fsPromises,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
       });
       if (!resolved.ok) {
+        if (req.query?.allowOutsideWorkspace === 'true') {
+          console.warn(`Rejected outside-workspace raw read: ${resolved.error}`);
+        }
         return res.status(400).json({ error: resolved.error });
       }
 
@@ -724,17 +876,27 @@ export const registerFsRoutes = (app, dependencies) => {
         '.ico': 'image/x-icon',
         '.bmp': 'image/bmp',
         '.avif': 'image/avif',
+        '.pdf': 'application/pdf',
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
 
       const download = req.query.download === 'true';
       if (download) {
         const fileName = path.basename(canonicalPath);
-        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        // RFC 5987: use filename*= for non-ASCII filenames, with ASCII-only
+        // filename= as fallback for older clients.
+        const asciiOnly = fileName.replace(/[^\u0000-\u007F]/g, '');
+        const fallback = asciiOnly || 'file';
+        // Percent-encode the raw UTF-8 bytes for filename*=
+        const encoded = encodeURIComponent(fileName);
+        res.setHeader('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`);
       }
 
       const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
+      if (resolved.granted) {
+        res.setHeader('Referrer-Policy', 'no-referrer');
+      }
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;
@@ -746,6 +908,67 @@ export const registerFsRoutes = (app, dependencies) => {
       }
       console.error('Failed to read raw file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to read file' });
+    }
+  });
+
+  app.get(/^\/api\/fs\/serve\/(.+)$/, async (req, res) => {
+    const rawPath = req.params[0] || '';
+    if (!rawPath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    try {
+      if (req.query?.allowOutsideWorkspace === 'true') {
+        return res.status(403).json({ error: 'allowOutsideWorkspace is not permitted for this endpoint' });
+      }
+
+      const filePath = path.resolve('/', rawPath);
+      const resolved = await resolveReadPathFromContext({
+        req,
+        targetPath: filePath,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+
+      const stats = await fsPromises.stat(canonicalPath);
+      if (!stats.isFile()) {
+        return res.status(400).json({ error: 'Specified path is not a file' });
+      }
+      if (stats.size > MAX_SERVE_BYTES) {
+        return res.status(413).json({ error: 'File too large to serve' });
+      }
+
+      const ext = path.extname(canonicalPath).toLowerCase();
+      const mimeType = FILE_MIME_MAP[ext] || 'application/octet-stream';
+      const content = await fsPromises.readFile(canonicalPath);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.type(mimeType).send(content);
+    } catch (error) {
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      if (err && typeof err === 'object' && err.code === 'EACCES') {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+      console.error('Failed to serve file:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to serve file' });
     }
   });
 
@@ -772,8 +995,34 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
-      await fsPromises.writeFile(resolved.resolved, content, 'utf8');
+      const writePath = await fsPromises.realpath(resolved.resolved).catch((error) => {
+        if (error && typeof error === 'object' && error.code === 'ENOENT') {
+          return resolved.resolved;
+        }
+        throw error;
+      });
+      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
+      if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
+      if (existing === content) {
+        return res.json({ success: true, path: resolved.resolved });
+      }
+
+      await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
+
+      // Atomic write: write to temp then rename to avoid concurrent readers
+      // seeing an empty file during the O_TRUNC window of direct writeFile.
+      const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      try {
+        await fsPromises.writeFile(tmp, content, 'utf8');
+        await fsPromises.rename(tmp, writePath);
+      } catch (error) {
+        await fsPromises.unlink(tmp).catch(() => {});
+        throw error;
+      }
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
@@ -942,7 +1191,25 @@ export const registerFsRoutes = (app, dependencies) => {
     pruneGitReadCache();
 
     try {
-      const resolvedCwd = path.resolve(normalizeDirectoryPath(cwd));
+      if (background === true) {
+        console.warn('Rejected background /api/fs/exec request');
+        return res.status(400).json({ error: 'Background command execution is not allowed' });
+      }
+      const resolvedCwdCandidate = path.resolve(normalizeDirectoryPath(cwd));
+      const resolvedForWorkspace = await resolveWorkspacePathFromContext({
+        req,
+        targetPath: resolvedCwdCandidate,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolvedForWorkspace.ok) {
+        console.warn(`Rejected /api/fs/exec outside workspace: ${resolvedForWorkspace.error}`);
+        return res.status(403).json({ error: resolvedForWorkspace.error });
+      }
+      const resolvedCwd = resolvedForWorkspace.resolved;
       const stats = await fsPromises.stat(resolvedCwd);
       if (!stats.isDirectory()) {
         return res.status(400).json({ error: 'Specified cwd is not a directory' });
@@ -968,7 +1235,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
       execJobs.set(jobId, job);
 
-      const isBackground = background === true;
+      const isBackground = false;
       if (isBackground) {
         void runExecJob(job).catch((error) => {
           job.status = 'done';
@@ -1060,9 +1327,28 @@ export const registerFsRoutes = (app, dependencies) => {
                 });
 
                 let stdout = '';
+                let settled = false;
+                let timeout = null;
+                const finish = (value) => {
+                  if (settled) return;
+                  settled = true;
+                  if (timeout) clearTimeout(timeout);
+                  resolve(value);
+                };
+
+                if (gitCheckIgnoreTimeoutMs > 0) {
+                  timeout = setTimeout(() => {
+                    try {
+                      child.kill('SIGKILL');
+                    } catch {
+                    }
+                    finish('');
+                  }, gitCheckIgnoreTimeoutMs);
+                }
+
                 child.stdout.on('data', (data) => { stdout += data.toString(); });
-                child.on('close', () => resolve(stdout));
-                child.on('error', () => resolve(''));
+                child.on('close', () => finish(stdout));
+                child.on('error', () => finish(''));
               });
 
               result.split('\n').filter(Boolean).forEach((name) => {

@@ -2,13 +2,15 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import { getThemeKindName } from './theme';
 import type { ConnectionStatus } from './opencode';
+import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
-export type PanelType = 'chat' | 'agentManager';
+type PanelType = 'chat' | 'agentManager';
 
 export interface WebviewHtmlOptions {
   webview: vscode.Webview;
   extensionUri: vscode.Uri;
   workspaceFolder: string;
+  workspaceFolders?: WorkspaceFolderCandidate[];
   initialStatus: ConnectionStatus;
   cliAvailable: boolean;
   panelType?: PanelType;
@@ -46,6 +48,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     webview,
     extensionUri,
     workspaceFolder,
+    workspaceFolders = [],
     initialStatus,
     cliAvailable,
     panelType = 'chat',
@@ -54,6 +57,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     devServerUrl,
     extensionVersion = '',
   } = options;
+  const workspaceFoldersJson = JSON.stringify(workspaceFolders).replace(/</g, '\\u003c');
 
   const scriptPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'assets', 'index.js');
   const scriptUri = webview.asWebviewUri(scriptPath);
@@ -64,6 +68,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const connectSrc = uniqueTokens(['*', 'ws:', 'wss:', 'http:', 'https:', devServerOrigin]);
   const imgSrc = uniqueTokens([webview.cspSource, 'data:', 'https:', devServerOrigin]);
   const fontSrc = uniqueTokens([webview.cspSource, 'data:', devServerOrigin]);
+  const workerSrc = uniqueTokens([webview.cspSource, devServerOrigin]);
 
   const themeKind = getThemeKindName(vscode.window.activeColorTheme.kind);
 
@@ -80,7 +85,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleSrc}; script-src ${scriptSrc}; connect-src ${connectSrc}; img-src ${imgSrc}; font-src ${fontSrc};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleSrc}; script-src ${scriptSrc}; connect-src ${connectSrc}; img-src ${imgSrc}; font-src ${fontSrc}; worker-src ${workerSrc};">
   <style>
     html, body, #root { height: 100%; width: 100%; margin: 0; padding: 0; }
     body { 
@@ -106,6 +111,17 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     #initial-loading.fade-out {
       opacity: 0;
       pointer-events: none;
+    }
+    /* Glow pulse on the OpenCode mark on the cube's top face — signals loading without text. */
+    @keyframes oc-logo-glow {
+      0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+      50% { filter: drop-shadow(0 0 4px var(--vscode-foreground)); }
+    }
+    #initial-loading .logo-inner {
+      animation: oc-logo-glow 1.8s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #initial-loading .logo-inner { animation: none; }
     }
     /* Logo colors use VS Code foreground color */
     #initial-loading .logo-stroke {
@@ -153,10 +169,9 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
         <path class="logo-fill-dim" d="M-8 -4 L8 -4 L8 12 L-8 12 Z"/>
       </g>
     </svg>
-    <div class="status-text" id="loading-status">
-      ${initialStatus === 'connecting' ? 'Starting OpenCode API…' : initialStatus === 'connected' ? 'Initializing…' : 'Connecting…'}
-    </div>
-    ${!cliAvailable ? `<div class="error-text">OpenCode CLI not found. Please install it first.</div>` : ''}
+    <!-- Status text stays empty while things are fine; populated only on error. -->
+    <div class="status-text" id="loading-status"></div>
+    ${!cliAvailable ? `<div class="error-text" id="cli-missing-text">OpenCode CLI not found. Please install it first.</div>` : ''}
   </div>
   
   <div id="root"></div>
@@ -166,6 +181,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
 
     window.__VSCODE_CONFIG__ = {
       workspaceFolder: "${workspaceFolder.replace(/\\/g, '\\\\')}",
+      workspaceFolders: ${workspaceFoldersJson},
       theme: "${themeKind}",
       connectionStatus: "${initialStatus}",
       cliAvailable: ${cliAvailable},
@@ -178,23 +194,65 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     };
     window.__OPENCHAMBER_HOME__ = "${workspaceFolder.replace(/\\/g, '\\\\')}";
     
+    function getBootstrapMessages() {
+      var locale = 'en';
+      try {
+        var rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
+        if (rawLocale) {
+          var parsedLocale = JSON.parse(rawLocale);
+          if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
+            locale = 'fr';
+          }
+        }
+      } catch {}
+
+      return locale === 'fr'
+        ? {
+            startingApi: 'Démarrage de l’API OpenCode…',
+            initializing: 'Initialisation…',
+            connecting: 'Connexion…',
+            connected: 'Connecté !',
+            connectionError: 'Erreur de connexion',
+            reconnecting: 'Reconnexion…',
+            cliNotFound: 'L’interface en ligne de commande OpenCode est introuvable. Veuillez l’installer d’abord.',
+          }
+        : {
+            startingApi: 'Starting OpenCode API…',
+            initializing: 'Initializing…',
+            connecting: 'Connecting…',
+            connected: 'Connected!',
+            connectionError: 'Connection error',
+            reconnecting: 'Reconnecting…',
+            cliNotFound: 'OpenCode CLI not found. Please install it first.',
+          };
+    }
+
+    (function applyBootstrapLocale() {
+      var statusEl = document.getElementById('loading-status');
+      var cliMissingEl = document.getElementById('cli-missing-text');
+      var messages = getBootstrapMessages();
+      if (cliMissingEl) {
+        cliMissingEl.textContent = messages.cliNotFound;
+      }
+      if (statusEl) {
+        statusEl.textContent = '';
+      }
+    })();
+
     // Handle connection status updates to update loading screen
     window.addEventListener('message', function(event) {
       var msg = event.data;
       if (msg && msg.type === 'connectionStatus') {
+        var messages = getBootstrapMessages();
         var statusEl = document.getElementById('loading-status');
         if (statusEl) {
-          if (msg.status === 'connecting') {
-            statusEl.textContent = 'Starting OpenCode API…';
-            statusEl.classList.remove('error-text');
-          } else if (msg.status === 'connected') {
-            statusEl.textContent = 'Connected!';
-            statusEl.classList.remove('error-text');
-          } else if (msg.status === 'error') {
-            statusEl.textContent = msg.error || 'Connection error';
+          // Only show text when something is wrong — progress states stay silent
+          // (the animated logo already signals "working").
+          if (msg.status === 'error') {
+            statusEl.textContent = msg.error || messages.connectionError;
             statusEl.classList.add('error-text');
           } else {
-            statusEl.textContent = 'Reconnecting…';
+            statusEl.textContent = '';
             statusEl.classList.remove('error-text');
           }
         }
@@ -218,6 +276,24 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       const baseUrl = devServerUrl;
 
       const statusEl = document.getElementById('loading-status');
+      const getDevMessages = () => {
+        try {
+          const rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
+          if (rawLocale) {
+            const parsedLocale = JSON.parse(rawLocale);
+            if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
+              return {
+                startingDevServer: (host) => 'Démarrage du serveur de développement de la webview (' + host + ')...',
+                waitingDevServer: (host, attempt) => 'En attente du serveur de développement de la webview (' + host + ')... tentative ' + attempt,
+              };
+            }
+          }
+        } catch {}
+        return {
+          startingDevServer: (host) => 'Starting webview dev server (' + host + ')...',
+          waitingDevServer: (host, attempt) => 'Waiting for webview dev server (' + host + ')... attempt ' + attempt,
+        };
+      };
       const setStatus = (text) => {
         if (statusEl) {
           statusEl.textContent = text;
@@ -266,7 +342,8 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
           }
         })();
 
-        setStatus('Starting webview dev server (' + hostLabel + ')...');
+        const devMessages = getDevMessages();
+        setStatus(devMessages.startingDevServer(hostLabel));
 
         Promise.resolve()
           .then(() => import(viteClientUrl))
@@ -290,7 +367,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
           .catch((error) => {
             attempt += 1;
             console.warn('[OpenChamber] VS Code webview dev bundle unavailable, retrying...', error);
-            setStatus('Waiting for webview dev server (' + hostLabel + ')... attempt ' + attempt);
+            setStatus(devMessages.waitingDevServer(hostLabel, attempt));
             window.setTimeout(() => {
               tryLoadDevBundle();
             }, retryDelayMs);

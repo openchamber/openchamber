@@ -157,7 +157,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
         <div className="flex flex-col gap-4">
           {(tab === 'npm' || tab === 'path') && (
             <>
-              <div className="flex flex-col gap-1.5">
+              <div data-settings-item="plugins.spec" className="flex flex-col gap-1.5">
                 <label htmlFor="plugin-spec" className="typography-ui-label text-foreground">
                   {t('settings.plugins.page.field.spec')}
                 </label>
@@ -176,7 +176,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                 )}
               </div>
 
-              <div className="flex flex-col gap-1.5">
+              <div data-settings-item="plugins.options" className="flex flex-col gap-1.5">
                 <label htmlFor="plugin-options" className="typography-ui-label text-foreground">
                   {t('settings.plugins.page.field.options')}
                 </label>
@@ -200,7 +200,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
 
           {tab === 'file' && (
             <>
-              <div className="flex flex-col gap-1.5">
+              <div data-settings-item="plugins.content" className="flex flex-col gap-1.5">
                 <label htmlFor="plugin-filename" className="typography-ui-label text-foreground">
                   {t('settings.plugins.page.field.fileName')}
                 </label>
@@ -300,5 +300,3 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
     </Dialog>
   );
 };
-
-export default AddPluginDialog;

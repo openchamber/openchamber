@@ -213,7 +213,7 @@ export const PluginsPage: React.FC = () => {
 
         <RegistryBanner entryId={selectedEntry.id} spec={selectedEntry.spec} />
 
-        <div className="space-y-1.5">
+        <div data-settings-item="plugins.spec" className="space-y-1.5">
           <label className="typography-meta text-muted-foreground">
             {t('settings.plugins.page.field.spec')}
           </label>
@@ -228,7 +228,7 @@ export const PluginsPage: React.FC = () => {
           />
         </div>
 
-        <div className="space-y-1.5">
+        <div data-settings-item="plugins.options" className="space-y-1.5">
           <label className="typography-meta text-muted-foreground">
             {t('settings.plugins.page.field.options')}
           </label>
@@ -338,7 +338,7 @@ export const PluginsPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="space-y-1.5">
+        <div data-settings-item="plugins.content" className="space-y-1.5">
           <label className="typography-meta text-muted-foreground">
             {t('settings.plugins.page.field.content')}
           </label>

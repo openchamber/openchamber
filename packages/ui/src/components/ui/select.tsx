@@ -272,50 +272,12 @@ function SelectSeparator({
   )
 }
 
-function SelectScrollUpButton({
-  className,
-  ...props
-}: React.ComponentProps<typeof BaseSelect.ScrollUpArrow>) {
-  return (
-    <BaseSelect.ScrollUpArrow
-      data-slot="select-scroll-up-button"
-      className={cn(
-        "flex cursor-pointer items-center justify-center py-1",
-        className
-      )}
-      {...props}
-    >
-      <Icon name="arrow-up-s" className="size-4" />
-    </BaseSelect.ScrollUpArrow>
-  )
-}
-
-function SelectScrollDownButton({
-  className,
-  ...props
-}: React.ComponentProps<typeof BaseSelect.ScrollDownArrow>) {
-  return (
-    <BaseSelect.ScrollDownArrow
-      data-slot="select-scroll-down-button"
-      className={cn(
-        "flex cursor-pointer items-center justify-center py-1",
-        className
-      )}
-      {...props}
-    >
-      <Icon name="arrow-down-s" className="size-4" />
-    </BaseSelect.ScrollDownArrow>
-  )
-}
-
 export {
   Select,
   SelectContent,
   SelectGroup,
   SelectItem,
   SelectLabel,
-  SelectScrollDownButton,
-  SelectScrollUpButton,
   SelectSeparator,
   SelectTrigger,
   SelectValue,

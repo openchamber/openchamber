@@ -1,7 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
@@ -26,14 +26,17 @@ import { DiffViewToggle } from './DiffViewToggle';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { Icon } from "@/components/icon/Icon";
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isCurrentMermaidLoadRequest, isMermaidLoadFailure, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
     onOpenChange: (open: boolean) => void;
-    syntaxTheme: { [key: string]: React.CSSProperties };
     isMobile: boolean;
 }
+
+const mermaidLoadFailure = (key: I18nKey, params?: I18nParams): MermaidLoadFailure => new MermaidLoadFailure(key, params);
 
 const getToolIcon = (toolName: string) => {
     const iconClass = 'h-3.5 w-3.5 flex-shrink-0';
@@ -97,7 +100,7 @@ const MERMAID_ASPECT_MAX_RETRIES = 3;
 
 const DIALOG_CODE_TAG_PROPS = { style: { background: 'transparent', backgroundColor: 'transparent', fontSize: 'inherit' } };
 
-const MERMAID_CONTROLS = { download: false, copy: false, fullscreen: false, panZoom: true };
+const MERMAID_CONTROLS = { download: false, copy: false, showPanZoomControls: true };
 
 type PierreThemeConfig = {
     theme: { light: string; dark: string };
@@ -118,7 +121,7 @@ const TOOL_DIFF_METRICS = {
     lineHeight: 24,
     diffHeaderHeight: 44,
     hunkSeparatorHeight: 24,
-    fileGap: 0,
+    spacing: 0,
 };
 
 const usePierreThemeConfig = (): PierreThemeConfig => {
@@ -549,9 +552,8 @@ DialogUnifiedDiff.displayName = 'DialogUnifiedDiff';
 
 const DialogReadContent: React.FC<{
     popup: ToolPopupContent;
-    syntaxTheme: Record<string, React.CSSProperties>;
     pierreThemeConfig: PierreThemeConfig;
-}> = React.memo(({ popup, syntaxTheme, pierreThemeConfig }) => {
+}> = React.memo(({ popup, pierreThemeConfig }) => {
     const parsedReadOutput = React.useMemo(() => parseReadToolOutput(popup.content), [popup.content]);
 
     const inputMeta = popup.metadata?.input;
@@ -626,7 +628,6 @@ const DialogReadContent: React.FC<{
         <VirtualizedCodeBlock
             lines={codeLines}
             language={detectedLanguage}
-            syntaxTheme={syntaxTheme}
             maxHeight="70vh"
         />
     );
@@ -696,22 +697,11 @@ const MermaidPreviewDialog: React.FC<{
         return isSafeLocalPath(decoded) ? decoded : (isSafeLocalPath(stripped) ? stripped : null);
     }, []);
 
-    const decodeDataUrl = React.useCallback((value: string): string => {
-        const commaIndex = value.indexOf(',');
-        if (commaIndex < 0) {
-            throw new Error('Malformed data URL');
-        }
-
-        const metadata = value.slice(0, commaIndex).toLowerCase();
-        const payload = value.slice(commaIndex + 1);
-        if (metadata.includes(';base64')) {
-            return atob(payload);
-        }
-        return decodeURIComponent(payload);
-    }, []);
-
     const loadMermaidSource = React.useCallback(async () => {
         const target = popup.mermaid;
+        const requestId = nextMermaidLoadRequestId(requestIdRef.current);
+        requestIdRef.current = requestId;
+
         if (!target?.url) {
             setStatus('error');
             setErrorMessage(t('chat.toolOutputDialog.mermaid.missingSource'));
@@ -725,24 +715,21 @@ const MermaidPreviewDialog: React.FC<{
             return;
         }
 
-        const requestId = requestIdRef.current + 1;
-        requestIdRef.current = requestId;
-
         setStatus('loading');
         setErrorMessage('');
 
         let sourcePromise: Promise<string>;
         if (target.url.startsWith('data:')) {
-            sourcePromise = Promise.resolve(decodeDataUrl(target.url));
+            sourcePromise = getMermaidDataUrlSourcePromise(target.url);
         } else if (target.url.toLowerCase().startsWith('file://')) {
             const normalizedPath = normalizeFilePath(target.url);
             if (!normalizedPath) {
-                sourcePromise = Promise.reject(new Error('Invalid local file path for Mermaid preview.'));
+                sourcePromise = Promise.reject(mermaidLoadFailure('chat.toolOutputDialog.mermaid.invalidLocalPath'));
             } else {
-                sourcePromise = fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`)
+                sourcePromise = runtimeFetch('/api/fs/raw', { query: { path: normalizedPath } })
                     .then((response) => {
                         if (!response.ok) {
-                            return Promise.reject(new Error(`Failed to read diagram file (${response.status})`));
+                            return Promise.reject(mermaidLoadFailure('chat.toolOutputDialog.mermaid.readFileFailedWithStatus', { status: response.status }));
                         }
                         return response.text();
                     });
@@ -754,12 +741,12 @@ const MermaidPreviewDialog: React.FC<{
             const resolvedUrl = canParse ? new URL(target.url, window.location.origin) : null;
 
             if (!resolvedUrl || (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:')) {
-                sourcePromise = Promise.reject(new Error('Unsupported Mermaid URL protocol.'));
+                sourcePromise = Promise.reject(mermaidLoadFailure('chat.toolOutputDialog.mermaid.unsupportedUrlProtocol'));
             } else {
                 sourcePromise = fetch(resolvedUrl.toString())
                     .then((response) => {
                         if (!response.ok) {
-                            return Promise.reject(new Error(`Failed to load diagram (${response.status})`));
+                            return Promise.reject(mermaidLoadFailure('chat.toolOutputDialog.mermaid.loadFailedWithStatus', { status: response.status }));
                         }
                         return response.text();
                     });
@@ -768,7 +755,7 @@ const MermaidPreviewDialog: React.FC<{
 
         await sourcePromise
             .then((resolvedSource) => {
-                if (requestIdRef.current !== requestId) {
+                if (!isCurrentMermaidLoadRequest(requestIdRef.current, requestId)) {
                     return;
                 }
 
@@ -776,13 +763,13 @@ const MermaidPreviewDialog: React.FC<{
                 setStatus('ready');
             })
             .catch((error) => {
-                if (requestIdRef.current !== requestId) {
+                if (!isCurrentMermaidLoadRequest(requestIdRef.current, requestId)) {
                     return;
                 }
                 setStatus('error');
-                setErrorMessage(error instanceof Error ? error.message : t('chat.toolOutputDialog.mermaid.loadFailed'));
+                setErrorMessage(isMermaidLoadFailure(error) ? t(error.key, error.params) : t('chat.toolOutputDialog.mermaid.loadFailed'));
             });
-    }, [decodeDataUrl, normalizeFilePath, popup.mermaid, t]);
+    }, [normalizeFilePath, popup.mermaid, t]);
 
     React.useEffect(() => {
         if (!popup.open || !popup.mermaid) {
@@ -898,10 +885,11 @@ const MermaidPreviewDialog: React.FC<{
             <div
                 aria-hidden="true"
                 className={cn(
-                    'absolute inset-0 bg-black/40',
+                    'absolute inset-0',
                     isTransitioning && 'transition-opacity duration-150 ease-out',
                     isVisible ? 'opacity-100' : 'opacity-0'
                 )}
+                style={{ backgroundColor: 'color-mix(in srgb, var(--surface-background) 70%, transparent)' }}
                 onMouseDown={() => onOpenChange(false)}
             />
 
@@ -943,7 +931,13 @@ const MermaidPreviewDialog: React.FC<{
                             )}
 
                             {status === 'error' && (
-                                <div className="rounded-xl border border-border/30 bg-muted/20 p-3 space-y-3">
+                                <div
+                                    className="rounded-xl border p-3 space-y-3"
+                                    style={{
+                                        backgroundColor: 'var(--status-error-background)',
+                                        borderColor: 'var(--status-error-border)',
+                                    }}
+                                >
                                     <p className="typography-markdown" style={{ color: 'var(--status-error)' }}>
                                         {errorMessage || t('chat.toolOutputDialog.mermaid.renderFailed')}
                                     </p>
@@ -968,9 +962,10 @@ const MermaidPreviewDialog: React.FC<{
                                     <SimpleMarkdownRenderer
                                         content={mermaidMarkdown}
                                         variant="tool"
-                                        allowMermaidWheelZoom
-                                        className="markdown-mermaid-fullscreen h-full [&_[data-markdown='mermaid-block']_button]:hidden"
+                                        allowMermaidWheelEvents
+                                        className="markdown-mermaid-fullscreen h-full"
                                         mermaidControls={MERMAID_CONTROLS}
+                                        enableFileReferences={false}
                                     />
                                 </div>
                             )}
@@ -984,7 +979,7 @@ const MermaidPreviewDialog: React.FC<{
     return createPortal(content, document.body);
 };
 
-const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, syntaxTheme, isMobile }) => {
+const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, isMobile }) => {
     const { t } = useI18n();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const pierreThemeConfig = usePierreThemeConfig();
@@ -1053,16 +1048,13 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                     </div>
                                     {meta.tool === 'bash' && getInputValue('command') ? (
                                         <div className="tool-input-surface bg-transparent rounded-xl border border-border/20 mx-3">
-                                            <SyntaxHighlighter
-                                                style={syntaxTheme}
+                                            <WorkerHighlightedCode
                                                 language="bash"
-                                                PreTag="div"
-                                                customStyle={toolDisplayStyles.getPopupStyles()}
-                                                codeTagProps={DIALOG_CODE_TAG_PROPS}
-                                                wrapLongLines
-                                            >
-                                                {getInputValue('command')!}
-                                            </SyntaxHighlighter>
+                                                code={getInputValue('command')!}
+                                                style={toolDisplayStyles.getPopupStyles()}
+                                                codeStyle={DIALOG_CODE_TAG_PROPS.style}
+                                                wrap
+                                            />
                                         </div>
                                     ) : meta.tool === 'task' && getInputValue('prompt') ? (
                                         <div
@@ -1122,16 +1114,13 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                             completed: t('chat.todo.completed'),
                                             cancelled: t('chat.todo.cancelled'),
                                         }) || (
-                                            <SyntaxHighlighter
-                                                style={syntaxTheme}
+                                            <WorkerHighlightedCode
                                                 language="json"
-                                                PreTag="div"
-                                                wrapLongLines
-                                                customStyle={toolDisplayStyles.getPopupContainerStyles()}
-                                                codeTagProps={DIALOG_CODE_TAG_PROPS}
-                                            >
-                                                {popup.content}
-                                            </SyntaxHighlighter>
+                                                code={popup.content}
+                                                style={toolDisplayStyles.getPopupContainerStyles()}
+                                                codeStyle={DIALOG_CODE_TAG_PROPS.style}
+                                                wrap
+                                            />
                                         )
                                     );
                                 }
@@ -1176,23 +1165,20 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                                 if (tool === 'web-search' || tool === 'websearch' || tool === 'search_web') {
                                     return (
-                                        renderWebSearchOutput(popup.content, syntaxTheme) || (
-                                            <SyntaxHighlighter
-                                                style={syntaxTheme}
+                                        renderWebSearchOutput(popup.content) || (
+                                            <WorkerHighlightedCode
                                                 language="text"
-                                                PreTag="div"
-                                                wrapLongLines
-                                                customStyle={toolDisplayStyles.getPopupContainerStyles()}
-                                                codeTagProps={DIALOG_CODE_TAG_PROPS}
-                                            >
-                                                {popup.content}
-                                            </SyntaxHighlighter>
+                                                code={popup.content}
+                                                style={toolDisplayStyles.getPopupContainerStyles()}
+                                                codeStyle={DIALOG_CODE_TAG_PROPS.style}
+                                                wrap
+                                            />
                                         )
                                     );
                                 }
 
                                 if (tool === 'read') {
-                                    return <DialogReadContent popup={popup} syntaxTheme={syntaxTheme} pierreThemeConfig={pierreThemeConfig} />;
+                                    return <DialogReadContent popup={popup} pierreThemeConfig={pierreThemeConfig} />;
                                 }
 
                                 // JSON tree viewer for generic JSON outputs
@@ -1208,16 +1194,13 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 }
 
                                 return (
-                                    <SyntaxHighlighter
-                                        style={syntaxTheme}
+                                    <WorkerHighlightedCode
                                         language={popup.language || 'text'}
-                                        PreTag="div"
-                                        wrapLongLines
-                                        customStyle={toolDisplayStyles.getPopupContainerStyles()}
-                                        codeTagProps={DIALOG_CODE_TAG_PROPS}
-                                    >
-                                        {popup.content}
-                                    </SyntaxHighlighter>
+                                        code={popup.content}
+                                        style={toolDisplayStyles.getPopupContainerStyles()}
+                                        codeStyle={DIALOG_CODE_TAG_PROPS.style}
+                                        wrap
+                                    />
                                 );
                             })()}
                         </div>

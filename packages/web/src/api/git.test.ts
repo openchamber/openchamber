@@ -10,6 +10,9 @@ vi.mock('@openchamber/ui/lib/gitApiHttp', () => ({
   stageGitFiles: vi.fn(),
   unstageGitFile: vi.fn(),
   unstageGitFiles: vi.fn(),
+  stageGitHunk: vi.fn(),
+  unstageGitHunk: vi.fn(),
+  revertGitHunk: vi.fn(),
   isLinkedWorktree: vi.fn(),
   getGitBranches: vi.fn(),
   deleteGitBranch: vi.fn(),
@@ -55,6 +58,16 @@ vi.mock('@openchamber/ui/lib/gitApiHttp', () => ({
   stash: vi.fn(),
   stashPop: vi.fn(),
   getConflictDetails: vi.fn(),
+  checkoutCommit: vi.fn(),
+  cherryPick: vi.fn(),
+  revertCommit: vi.fn(),
+  resetToCommit: vi.fn(),
+  getCommitFileDiff: vi.fn(),
+  previewGitWorktree: vi.fn(),
+  getGitWorktreeBootstrapStatus: vi.fn(),
+  discoverGitCredentials: vi.fn(),
+  getGlobalGitIdentity: vi.fn(),
+  getRemoteUrl: vi.fn(),
 }));
 
 describe('createWebGitAPI', () => {
@@ -64,5 +77,8 @@ describe('createWebGitAPI', () => {
 
     expect(typeof api.stageGitFiles).toBe('function');
     expect(typeof api.unstageGitFiles).toBe('function');
+    expect(typeof api.stageGitHunk).toBe('function');
+    expect(typeof api.unstageGitHunk).toBe('function');
+    expect(typeof api.revertGitHunk).toBe('function');
   });
 });

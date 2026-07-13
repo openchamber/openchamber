@@ -12,9 +12,16 @@ const readArgValue = (name) => {
 };
 
 const localOrigin = readArgValue('--openchamber-local-origin');
+const apiBaseUrl = readArgValue('--openchamber-api-base-url');
+const clientToken = readArgValue('--openchamber-client-token');
+const runtimeHeadersRaw = readArgValue('--openchamber-runtime-headers');
 const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
+const macVibrancySupported = process.platform === 'darwin';
+// Effective state for this window (main process resolves the saved preference
+// and passes it in). Defaults on when supported unless explicitly '0'.
+const hasMacVibrancy = macVibrancySupported && readArgValue('--openchamber-mac-vibrancy') !== '0';
 
 // Preload re-executes on every cross-origin navigation (we run with
 // sandbox:false, per-document). Two separate concerns to balance:
@@ -22,10 +29,9 @@ const macosMajor = Number.parseInt(macosMajorRaw, 10);
 //    Remote UIs still need it so isDesktopShell() returns true and the
 //    window renders with desktop affordances (DesktopHostSwitcher,
 //    title bar offsets, etc.). Expose unconditionally.
-//  - __TAURI__ is the IPC channel to the main process. Remote pages must
-//    not get it — otherwise any page loaded via DesktopHostSwitcher could
-//    read local files, open apps, relaunch, etc. Expose only on local
-//    pages (loopback / state.localOrigin / file:// for dev).
+//  - __OPENCHAMBER_DESKTOP__ is the IPC channel to the main process. It is
+//    exposed broadly, but privileged commands are gated in main.mjs.
+//    Local-only globals below stay limited to packaged UI / exact localOrigin.
 // Everything driven by localOrigin (home dir, macOS hints) also stays
 // local-only since it leaks info about the Electron host machine.
 const currentOrigin = (() => {
@@ -35,10 +41,9 @@ const currentOrigin = (() => {
     return '';
   }
 })();
-const isLoopbackOrigin = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(currentOrigin);
-const isLocalPage = currentOrigin === 'null'
-  || isLoopbackOrigin
-  || (localOrigin && currentOrigin === localOrigin);
+const isLocalPage = currentOrigin !== 'null'
+  && (currentOrigin === 'openchamber-ui://app'
+  || (localOrigin && currentOrigin === localOrigin));
 
 // Remote pages need __OPENCHAMBER_LOCAL_ORIGIN__ so the HostSwitcher knows
 // the URL of the Local entry (isDesktopLocalOriginActive() falls back to
@@ -47,6 +52,32 @@ const isLocalPage = currentOrigin === 'null'
 // IPC channel, and CORS on the local server prevents remote-origin fetches.
 if (localOrigin) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_LOCAL_ORIGIN__', localOrigin);
+}
+
+if (apiBaseUrl) {
+  contextBridge.exposeInMainWorld('__OPENCHAMBER_API_BASE_URL__', apiBaseUrl);
+}
+
+if (clientToken && isLocalPage) {
+  contextBridge.exposeInMainWorld('__OPENCHAMBER_CLIENT_TOKEN__', clientToken);
+}
+
+// Which saved host this window should connect to over the relay-capable path
+// (direct probe first, E2EE tunnel fallback). Local pages only — the id is
+// only useful together with the desktop IPC channel anyway.
+const relayHostId = readArgValue('--openchamber-relay-host-id');
+if (relayHostId && isLocalPage) {
+  contextBridge.exposeInMainWorld('__OPENCHAMBER_RELAY_HOST_ID__', relayHostId);
+}
+
+if (runtimeHeadersRaw && isLocalPage) {
+  try {
+    const runtimeHeaders = JSON.parse(runtimeHeadersRaw);
+    if (runtimeHeaders && typeof runtimeHeaders === 'object') {
+      contextBridge.exposeInMainWorld('__OPENCHAMBER_RUNTIME_HEADERS__', runtimeHeaders);
+    }
+  } catch {
+  }
 }
 
 // Home directory leaks the OS username — keep local-only. Remote pages
@@ -64,7 +95,11 @@ if (Number.isFinite(macosMajor) && macosMajor > 0) {
 
 contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
   runtime: 'electron',
+  macVibrancy: hasMacVibrancy,
+  macVibrancySupported,
 });
+
+contextBridge.exposeInMainWorld('__OPENCHAMBER_PLATFORM__', process.platform);
 
 // Note: bootOutcome must stay writable from the main world's initScript so
 // re-navigations (host switch via deep link) can refresh it. contextBridge-
@@ -110,6 +145,18 @@ const dispatchNativeEvent = (event, detail) => {
   }
 };
 
+// Toggles the frost on/off in response to the main process around the
+// minimize/restore cycle. The default ("ready") state is set reliably in the
+// renderer (cssGenerator) — not here — because this preload runs at
+// document-start when documentElement may not exist yet.
+const setVibrancyReady = (ready) => {
+  if (!hasMacVibrancy) return;
+  try {
+    document.documentElement.toggleAttribute('data-oc-vibrancy-ready', ready === true);
+  } catch {
+  }
+};
+
 // Main-process events are read-only notifications (update progress,
 // window focus, etc.) — safe to deliver to any page rendered in this
 // webContents. The events themselves don't grant capability.
@@ -123,24 +170,21 @@ ipcRenderer.on('openchamber:emit', (_evt, payload) => {
     return;
   }
 
+  if (event === 'openchamber:vibrancy-ready') {
+    setVibrancyReady(payload.detail?.ready === true);
+  }
+
   dispatchNativeEvent(event, payload.detail);
 });
 
-// __TAURI__ is exposed on all pages; the main-process gate in
+// The desktop bridge is exposed on all pages; the main-process gate in
 // ipcMain.handle('openchamber:invoke') decides per-command what is safe
 // for non-local callers (window/host-switcher ops yes, file/shell ops
 // no). See COMMANDS_SAFE_FOR_REMOTE in main.mjs.
-contextBridge.exposeInMainWorld('__TAURI__', {
-  core: {
-    invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
-  },
-  dialog: {
-    open: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
-  },
-  shell: {
-    open: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
-  },
-  event: {
-    listen: async (event, handler) => addListener(event, handler),
-  },
+contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', {
+  invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
+  openDialog: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
+  grantFileAccess: (filePath) => ipcRenderer.invoke('openchamber:file:grant-existing', filePath),
+  openExternal: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
+  listen: async (event, handler) => addListener(event, handler),
 });

@@ -4,6 +4,7 @@ import {
   DialogContent,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from "@/components/icon/Icon";
@@ -11,7 +12,8 @@ import { cn } from '@/lib/utils';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -26,10 +28,10 @@ interface UpdateDialogProps {
   onDownload: () => void;
   onRestart: () => void;
   /** Runtime type to show different UI for desktop vs web */
-  runtimeType?: 'desktop' | 'web' | 'vscode' | null;
+  runtimeType?: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
 }
 
-const GITHUB_RELEASES_URL = 'https://github.com/btriapitsyn/openchamber/releases';
+const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 
 type ChangelogSection = {
   version: string;
@@ -56,7 +58,7 @@ function formatIsoDateForUI(isoDate: string): string {
   if (Number.isNaN(d.getTime())) {
     return isoDate;
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getCurrentIntlLocale(), {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -120,7 +122,7 @@ const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
 
 async function installWebUpdate(): Promise<InstallWebUpdateResult> {
   try {
-    const response = await fetch('/api/openchamber/update-install', {
+    const response = await runtimeFetch('/api/openchamber/update-install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -142,7 +144,7 @@ async function installWebUpdate(): Promise<InstallWebUpdateResult> {
 
 async function isServerReachable(): Promise<boolean> {
   try {
-    const response = await fetch('/health', {
+    const response = await runtimeFetch('/health', {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -159,7 +161,7 @@ async function waitForUpdateApplied(
 ): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      const response = await fetch('/api/openchamber/update-check', {
+      const response = await runtimeFetch('/api/openchamber/update-check', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
@@ -205,14 +207,16 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const [webError, setWebError] = useState<string | null>(null);
 
   const releaseUrl = info?.version
-    ? `${GITHUB_RELEASES_URL}/tag/v${info.version}`
+    ? (info.releaseUrl || `${GITHUB_RELEASES_URL}/tag/v${info.version}`)
     : GITHUB_RELEASES_URL;
+  const mobileUpdateUrl = info?.downloadUrl || releaseUrl;
 
   const progressPercent = progress?.total
     ? Math.round((progress.downloaded / progress.total) * 100)
     : 0;
 
   const isWebRuntime = runtimeType === 'web';
+  const isMobileRuntime = runtimeType === 'mobile';
   const updateCommand = info?.updateCommand || 'openchamber update';
 
   // Reset state when dialog closes
@@ -262,6 +266,10 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       setWebError(t('updateDialog.error.takingLonger'));
     }
   }, [info?.currentVersion, t]);
+
+  const handleMobileUpdate = useCallback(() => {
+    void handleOpenExternal(mobileUpdateUrl);
+  }, [handleOpenExternal, mobileUpdateUrl]);
 
   const isWebUpdating = webUpdateState !== 'idle' && webUpdateState !== 'error';
 
@@ -368,7 +376,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                       }
                     }}
                   >
-                    <SimpleMarkdownRenderer content={changelog.content} disableLinkSafety={true} />
+                    <SimpleMarkdownRenderer content={changelog.content} disableLinkSafety={true} enableFileReferences={false} />
                   </div>
                 ) : (
                   <div className="divide-y divide-[var(--surface-subtle)]">
@@ -394,7 +402,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                             }
                           }}
                         >
-                          <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} />
+                          <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} enableFileReferences={false} />
                         </div>
                       </div>
                     ))}
@@ -436,7 +444,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           )}
 
           {/* Desktop progress bar */}
-          {!isWebRuntime && downloading && (
+          {!isWebRuntime && !isMobileRuntime && downloading && (
             <div className="space-y-2 mt-4">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">{t('updateDialog.status.downloadingPayload')}</span>
@@ -473,7 +481,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
           <div className="flex-1 flex justify-end">
             {/* Desktop Buttons */}
-            {!isWebRuntime && !downloaded && !downloading && (
+            {!isWebRuntime && !isMobileRuntime && !downloaded && !downloading && (
               <button
                 onClick={onDownload}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
@@ -483,7 +491,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               </button>
             )}
 
-            {!isWebRuntime && downloading && (
+            {!isWebRuntime && !isMobileRuntime && downloading && (
               <button
                 disabled
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)]/50 text-[var(--primary-foreground)] cursor-not-allowed"
@@ -493,7 +501,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               </button>
             )}
 
-            {!isWebRuntime && downloaded && (
+            {!isWebRuntime && !isMobileRuntime && downloaded && (
               <button
                 onClick={onRestart}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity"
@@ -504,6 +512,16 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             )}
 
             {/* Web Buttons */}
+            {isMobileRuntime && (
+              <Button
+                onClick={handleMobileUpdate}
+                size="default"
+              >
+                <Icon name="external-link" className="h-4 w-4" />
+                {t('updateDialog.actions.openMobileUpdate')}
+              </Button>
+            )}
+
             {isWebRuntime && !isWebUpdating && (
               <button
                 onClick={handleWebUpdate}

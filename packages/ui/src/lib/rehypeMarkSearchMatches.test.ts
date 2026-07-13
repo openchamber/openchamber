@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import rehypeMarkSearchMatches from './rehypeMarkSearchMatches';
+import rehypeMarkSearchMatches, { findSegmentMatchFragments } from './rehypeMarkSearchMatches';
 
 // Minimal inline HAST types to avoid importing the 'hast' package
 interface HastText { type: 'text'; value: string }
@@ -16,6 +16,33 @@ interface HastRoot { type: 'root'; children: HastChild[] }
 type Root = HastRoot;
 type Text = HastText;
 type Element = HastElement;
+
+describe('findSegmentMatchFragments', () => {
+  test('gives every fragment of one cross-boundary match the same occurrence', () => {
+    const regex = /bold/gi;
+
+    expect(findSegmentMatchFragments(['prefix ', 'bo', 'ld suffix'], regex)).toEqual([
+      { segmentIndex: 1, start: 0, end: 2, occurrence: 0 },
+      { segmentIndex: 2, start: 0, end: 2, occurrence: 0 },
+    ]);
+  });
+
+  test('keeps cross-boundary matches when the same sequence has an ordinary match', () => {
+    const regex = /foo/gi;
+
+    expect(findSegmentMatchFragments(['foo then f', 'oo'], regex)).toEqual([
+      { segmentIndex: 0, start: 0, end: 3, occurrence: 0 },
+      { segmentIndex: 0, start: 9, end: 10, occurrence: 1 },
+      { segmentIndex: 1, start: 0, end: 2, occurrence: 1 },
+    ]);
+  });
+
+  test('applies a part-global occurrence offset to a later inline sequence', () => {
+    expect(findSegmentMatchFragments(['foo'], /foo/gi, 1)).toEqual([
+      { segmentIndex: 0, start: 0, end: 3, occurrence: 1 },
+    ]);
+  });
+});
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -71,6 +98,19 @@ function collectMarks(tree: Root): Element[] {
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe('rehypeMarkSearchMatches plugin', () => {
+  test('numbers matches across block sequences within one part', () => {
+    const tree: Root = {
+      type: 'root',
+      children: [
+        { type: 'element', tagName: 'p', children: [{ type: 'text', value: 'foo' }] } as Element,
+        { type: 'element', tagName: 'p', children: [{ type: 'text', value: 'foo' }] } as Element,
+      ],
+    };
+
+    const marks = collectMarks(run(tree, 'foo'));
+    expect(marks.map((mark) => mark.properties?.['data-search-occurrence'])).toEqual([0, 1]);
+  });
+
   test('wraps a matching word in <mark data-search-match>', () => {
     const tree = run(makeTree('hello world'), 'world');
     const marks = collectMarks(tree);

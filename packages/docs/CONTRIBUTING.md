@@ -98,9 +98,8 @@ running.
    - `foo.mdx` -> `/foo/`
    - `folder/index.mdx` -> `/folder/`
    - `folder/bar.mdx` -> `/folder/bar/`
-4. Add translations for the page — see [Localization](#localization). Translations
-   are optional per page (a missing translation falls back to English), but ship
-   them together with the page when you can.
+4. Add translations for the page — see [Localization](#localization). New pages
+   must include translated files for every supported locale before they ship.
 5. If the page is linked from the sidebar, add its localized labels too — see
    [Translate the sidebar](#translate-the-sidebar).
 6. Run validation:
@@ -203,12 +202,14 @@ other language mirrors the English files under a locale folder.
 | Brazilian Portuguese | `pt-br/` | `pt-BR` |
 | Korean | `ko/` | `ko` |
 | Polish | `pl/` | `pl` |
+| French | `fr/` | `fr` |
+| Japanese | `ja/` | `ja` |
 
 > [!IMPORTANT]
 > The **content folder** uses the lowercase locale key (`zh-cn`, `pt-br`); the
 > **sidebar `translations`** key uses the BCP-47 language tag (`zh-CN`, `pt-BR`).
 > They look similar but are not interchangeable — Starlight resolves them with
-> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `en`) is identical
+> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `fr`, `ja`, `en`) is identical
 > in both columns.
 
 This locale set is mirrored in the website at
@@ -229,6 +230,8 @@ content/docs/
   pt-br/install.mdx        # Brazilian Portuguese
   ko/install.mdx           # Korean
   pl/install.mdx           # Polish
+  fr/install.mdx           # French
+  ja/install.mdx           # Japanese
 
   guides/tunnels.mdx       # nested English page
   uk/guides/tunnels.mdx    # its Ukrainian translation
@@ -244,9 +247,9 @@ description: Встановіть OpenChamber для десктопа, вебу 
 ---
 ```
 
-You do **not** have to translate every page at once. A page that is missing in a
-locale automatically falls back to the English version, so translations can land
-incrementally.
+Every new page must include translated files for all supported locales before it
+ships. Starlight can fall back to English when a translation is missing, but do
+not rely on that fallback for new docs pages.
 
 ### Translate the sidebar
 
@@ -264,7 +267,9 @@ to each section and item in `sidebar.config.json`:
     "es": "Empieza aquí",
     "pt-BR": "Comece aqui",
     "ko": "여기서 시작",
-    "pl": "Zacznij tutaj"
+    "pl": "Zacznij tutaj",
+    "fr": "Commencer ici",
+    "ja": "ここから開始"
   },
   "items": [
     {
@@ -276,7 +281,9 @@ to each section and item in `sidebar.config.json`:
         "es": "Instalación",
         "pt-BR": "Instalação",
         "ko": "설치",
-        "pl": "Instalacja"
+        "pl": "Instalacja",
+        "fr": "Installation",
+        "ja": "インストール"
       }
     }
   ]

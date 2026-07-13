@@ -155,19 +155,26 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   const { t } = useI18n();
   const [isExpanded, setIsExpanded] = React.useState(false);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const todosRecord = useDirectorySync((state) => state.todo);
+  const liveTodos = useDirectorySync(
+    React.useCallback(
+      (state) => {
+        if (!showTodos || !currentSessionId) return EMPTY_TODOS;
+        return state.todo[currentSessionId] ?? EMPTY_TODOS;
+      },
+      [currentSessionId, showTodos],
+    ),
+  );
   const persistedSessionTodos = useTodosPersistStore(
     React.useCallback(
-      (state) => (currentSessionId ? state.sessions[currentSessionId]?.todos : undefined),
-      [currentSessionId],
+      (state) => (showTodos && currentSessionId ? state.sessions[currentSessionId]?.todos : undefined),
+      [currentSessionId, showTodos],
     ),
   );
   const todos: TodoItem[] = React.useMemo(() => {
     if (!currentSessionId) return EMPTY_TODOS;
-    const live = todosRecord[currentSessionId];
-    if (live && live.length > 0) return live;
+    if (liveTodos.length > 0) return liveTodos;
     return persistedSessionTodos ?? EMPTY_TODOS;
-  }, [todosRecord, persistedSessionTodos, currentSessionId]);
+  }, [liveTodos, persistedSessionTodos, currentSessionId]);
   const isMobile = useUIStore((state) => state.isMobile);
   const isCompact = isMobile || isVSCodeRuntime();
 

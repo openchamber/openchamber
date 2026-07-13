@@ -10,7 +10,7 @@ import {
 } from "./optimistic"
 import { dropCachedSessionMessageRecordsSnapshots, useDirectoryStore, useSyncSDK, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
-import { stripMessageDiffSnapshots } from "./sanitize"
+import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import {
@@ -22,9 +22,11 @@ import {
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
-const MESSAGE_PAGE_SIZE = 150
-const VSCODE_MESSAGE_PAGE_SIZE = 30
-const MOBILE_MESSAGE_PAGE_SIZE = 30
+const INITIAL_MESSAGE_PAGE_SIZE = 50
+const VSCODE_INITIAL_MESSAGE_PAGE_SIZE = 30
+const MOBILE_INITIAL_MESSAGE_PAGE_SIZE = 30
+const HISTORY_MESSAGE_PAGE_SIZE = 100
+const INITIAL_PAGE_EXPANSION_LIMITS = [100, 150] as const
 const VSCODE_INITIAL_PAGE_EXPANSION_LIMITS = [50, 80, 120] as const
 const MAX_SEEN_DIRS = 30
 const VSCODE_SESSION_CACHE_LIMIT = 4
@@ -39,11 +41,46 @@ const seenByDirectory = new Map<string, Set<string>>()
 // all request the same session during startup; coalesce them into one HTTP load.
 const syncSessionInflightByKey = new Map<string, Promise<void>>()
 
+// Per-session generation counter. When a newer syncSession request starts for
+// the same session, older in-flight requests become stale and must not write
+// to the store. This prevents rapid session switches (e.g. 1→2→3 in the
+// sidebar) from having each completed fetch fight for focus.
+const syncSessionGenerationByKey = new Map<string, number>()
+
 type SyncMeta = {
   limit: number
   cursor: string | undefined
   complete: boolean
   loading: boolean
+}
+
+type SdkResult<T> = {
+  data?: T
+  error?: unknown
+  response?: {
+    status?: number
+    headers?: { get?: (name: string) => string | null }
+  }
+}
+
+function formatSdkError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === "string" && message.length > 0) return message
+  }
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
+
+function assertSdkSuccess<T>(result: SdkResult<T>, operation: string): void {
+  if (!result.error) return
+  const status = result.response?.status
+  throw new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`)
 }
 
 const isConstrainedSessionRuntime = () => isVSCodeRuntime() || isMobileSurfaceRuntime()
@@ -53,12 +90,15 @@ const getEffectiveSessionCacheLimit = () => {
   if (isMobileSurfaceRuntime()) return MOBILE_SESSION_CACHE_LIMIT
   return SESSION_CACHE_LIMIT
 }
-const getEffectiveMessagePageSize = () => {
-  if (isVSCodeRuntime()) return VSCODE_MESSAGE_PAGE_SIZE
-  if (isMobileSurfaceRuntime()) return MOBILE_MESSAGE_PAGE_SIZE
-  return MESSAGE_PAGE_SIZE
+const getInitialMessagePageSize = () => {
+  if (isVSCodeRuntime()) return VSCODE_INITIAL_MESSAGE_PAGE_SIZE
+  if (isMobileSurfaceRuntime()) return MOBILE_INITIAL_MESSAGE_PAGE_SIZE
+  return INITIAL_MESSAGE_PAGE_SIZE
 }
-const getDefaultMeta = (): SyncMeta => ({ limit: getEffectiveMessagePageSize(), cursor: undefined, complete: false, loading: false })
+const getInitialPageExpansionLimits = () => isConstrainedSessionRuntime()
+  ? VSCODE_INITIAL_PAGE_EXPANSION_LIMITS
+  : INITIAL_PAGE_EXPANSION_LIMITS
+const getDefaultMeta = (): SyncMeta => ({ limit: getInitialMessagePageSize(), cursor: undefined, complete: false, loading: false })
 
 function getPrefetchMeta(directory: string, sessionID: string): SyncMeta | undefined {
   const info = getSessionPrefetch(directory, sessionID)
@@ -78,7 +118,7 @@ function sortParts(parts: Part[]) {
 function isHeavyConstrainedSessionCache(state: Pick<State, "message" | "part">, sessionID: string): boolean {
   const messages = state.message[sessionID]
   if (!messages || messages.length === 0) return false
-  return messages.length > getEffectiveMessagePageSize()
+  return messages.length > getInitialMessagePageSize()
 }
 
 function isUserMessage(message: Message): boolean {
@@ -87,8 +127,16 @@ function isUserMessage(message: Message): boolean {
   return role === "user"
 }
 
-function hasUserMessage(messages: Message[] | undefined): boolean {
+export function hasUserMessage(messages: Message[] | undefined): boolean {
   return Boolean(messages?.some(isUserMessage))
+}
+
+export function shouldFetchSessionForRenderableSync(input: {
+  hasSession: boolean
+  shouldLoadMessages: boolean
+  force?: boolean
+}): boolean {
+  return Boolean(input.force) || !input.hasSession || input.shouldLoadMessages
 }
 
 // ---------------------------------------------------------------------------
@@ -227,16 +275,16 @@ export function useSync() {
 
   // Optimistic operations
   const getOptimistic = useCallback(
-    (sessionID: string): OptimisticItem[] => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, directoryOverride?: string | null): OptimisticItem[] => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       return [...(optimistic.current.get(key)?.values() ?? [])]
     },
     [directory],
   )
 
   const setOptimistic = useCallback(
-    (sessionID: string, item: OptimisticItem) => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, item: OptimisticItem, directoryOverride?: string | null) => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       const list = optimistic.current.get(key)
       const sorted: OptimisticItem = { message: item.message, parts: sortParts(item.parts) }
       if (list) {
@@ -249,8 +297,8 @@ export function useSync() {
   )
 
   const clearOptimistic = useCallback(
-    (sessionID: string, messageID?: string) => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, messageID?: string, directoryOverride?: string | null) => {
+      const key = `${directoryOverride || directory}\n${sessionID}`
       if (!messageID) {
         optimistic.current.delete(key)
         return
@@ -263,12 +311,22 @@ export function useSync() {
     [directory],
   )
 
+  const getOptimisticStore = useCallback(
+    (directoryOverride?: string | null) => {
+      if (!directoryOverride || directoryOverride === directory) return store
+      return childStores.ensureChild(directoryOverride, { bootstrap: false })
+    },
+    [childStores, directory, store],
+  )
+
   // Fetch messages from API
   const fetchMessages = useCallback(
     async (sessionID: string, limit: number, before?: string) => {
-      const result = await retry(() =>
-        sdk.session.messages({ sessionID, directory, limit, before }),
-      )
+      const result = await retry(async () => {
+        const response = await sdk.session.messages({ sessionID, directory, limit, before })
+        assertSdkSuccess(response, "session.messages")
+        return response
+      })
       const items = (result.data ?? []).filter((x: { info?: { id?: string } }) => !!x?.info?.id)
       const session = items
         .map((x: { info: Message }) => stripMessageDiffSnapshots(x.info))
@@ -285,59 +343,158 @@ export function useSync() {
 
   // Load messages for a session
   const loadMessages = useCallback(
-    async (sessionID: string, options?: { before?: string; mode?: "replace" | "prepend" }) => {
+    async (sessionID: string, options?: { before?: string; mode?: "replace" | "prepend"; isStale?: () => boolean }) => {
       const m = getMetaFor(sessionID)
       if (m.loading) return
       setMetaFor(sessionID, { loading: true })
 
       try {
-        const limit = options?.before ? getEffectiveMessagePageSize() : m.limit
-        let page = await fetchMessages(sessionID, limit, options?.before)
+        // Commit a fetched page to the store: merge optimistic items, run
+        // materialization, and write the result so the UI can render it.
+        // Returns the committed meta so the caller can update pagination
+        // state once at the end. The store write happens here (per page) so
+        // the hydrating skeleton disappears after the first fetch instead of
+        // waiting for the full expansion sequence.
+        const commitMessagesToStore = (
+          page: Awaited<ReturnType<typeof fetchMessages>>,
+          mode: "replace" | "prepend" | undefined,
+          isStale?: () => boolean,
+        ) => {
+          if (isStale?.()) {
+            return { messages: [], cursor: page.cursor, complete: page.complete }
+          }
 
-        // Constrained shells keep the initial page small for switch performance. Some
-        // sessions have a very large final turn, so the latest 30 records can
+          const items = getOptimistic(sessionID)
+          const merged = mergeOptimisticPage(page, items)
+          for (const messageID of merged.confirmed) {
+            clearOptimistic(sessionID, messageID)
+          }
+
+          const current = store.getState()
+          const materialized = materializeSessionSnapshots(
+            current,
+            sessionID,
+            merged.session.map((info) => ({
+              info,
+              parts: merged.part.find((item) => item.id === info.id)?.part ?? [],
+            })),
+            { skipPartTypes: SKIP_PARTS, mode: mode === "prepend" ? "prepend" : "merge" },
+          )
+
+          // materializeSessionSnapshots is synchronous today, so this check
+          // is defense-in-depth: it guards the store write if materialization
+          // ever becomes async or yields between the check above and setState.
+          if (isStale?.()) {
+            return { messages: [], cursor: merged.cursor, complete: merged.complete }
+          }
+
+          if (materialized.messagesChanged || materialized.partsChanged) {
+            store.setState({
+              ...(materialized.messagesChanged ? { message: materialized.message } : {}),
+              ...(materialized.partsChanged ? { part: materialized.part } : {}),
+            })
+          }
+          return { messages: materialized.messages, cursor: merged.cursor, complete: merged.complete }
+        }
+
+        // Live events can append messages without growing m.limit. A resync
+        // must cover everything already rendered or it can manufacture an
+        // "older" cursor for history that is already on screen.
+        const storeMessageCount = store.getState().message[sessionID]?.length ?? 0
+        const limit = options?.before
+          ? HISTORY_MESSAGE_PAGE_SIZE
+          : Math.max(m.limit, storeMessageCount)
+        const page = await fetchMessages(sessionID, limit, options?.before)
+
+        // Commit the first page to the store immediately so the hydrating
+        // skeleton disappears after a single round-trip — but only when the
+        // page already contains a user message boundary. If the tail is
+        // assistant/tool-only (a very large final turn), committing now would
+        // drop the skeleton and render an empty chat (turn projection skips
+        // assistant messages without a user parent), which looks like a fresh
+        // session instead of a loading state. In that case defer the first
+        // commit to the expansion loop below, which fetches older records
+        // until a user boundary appears and commits that page instead.
+        //
+        // The deferral only applies to the initial fetch (no `before`).
+        // Prepend mode (loading older history) always commits — messages are
+        // already rendered, so there is no skeleton to protect, and skipping
+        // the store write would drop the fetched older messages entirely.
+        //
+        // The deferred fallback carries page.session (not []) so that if the
+        // expansion loop is ever a no-op (e.g. all nextLimit <= limit after a
+        // constant change), the final setMetaFor reflects the real fetched
+        // count instead of overwriting it with 0.
+        const deferFirstCommit =
+          !options?.before && !page.complete && !hasUserMessage(page.session)
+        let committed = deferFirstCommit
+          ? { messages: page.session, cursor: page.cursor, complete: page.complete }
+          : commitMessagesToStore(page, options?.mode, options?.isStale)
+
+        // If the first commit detected a stale session, bail out immediately
+        // instead of relying on downstream guards to skip the final setMetaFor.
+        if (options?.isStale?.()) {
+          setMetaFor(sessionID, { loading: false })
+          return
+        }
+
+        // Keep the initial page small for switch performance. Some sessions
+        // have a very large final turn, so the latest records can
         // contain only assistant/tool records and no user boundary. That makes
         // turn projection render an empty chat until the user manually loads
         // older messages. Expand only this initial tail fetch, with a hard cap.
-        if (!options?.before && isConstrainedSessionRuntime() && !page.complete && !hasUserMessage(page.session)) {
-          for (const nextLimit of VSCODE_INITIAL_PAGE_EXPANSION_LIMITS) {
-            if (nextLimit <= limit) continue
-            page = await fetchMessages(sessionID, nextLimit)
-            if (page.complete || hasUserMessage(page.session)) break
+        // Each expanded page is committed to the store incrementally so the
+        // user sees content as soon as a user boundary appears, instead of
+        // waiting for the full expansion sequence before the first paint.
+        if (!options?.before && !page.complete && !hasUserMessage(page.session)) {
+          const expansionLimits = getInitialPageExpansionLimits().filter((nextLimit) => nextLimit > limit)
+          for (let index = 0; index < expansionLimits.length; index += 1) {
+            const nextLimit = expansionLimits[index]
+            if (options?.isStale?.()) {
+              setMetaFor(sessionID, { loading: false })
+              return
+            }
+            const expandedPage = await fetchMessages(sessionID, nextLimit)
+            if (options?.isStale?.()) {
+              setMetaFor(sessionID, { loading: false })
+              return
+            }
+            const hasBoundary = hasUserMessage(expandedPage.session)
+            const isFinalExpansion = index === expansionLimits.length - 1
+            if (expandedPage.complete || hasBoundary || isFinalExpansion) {
+              committed = commitMessagesToStore(expandedPage, options?.mode, options?.isStale)
+            } else {
+              committed = {
+                messages: expandedPage.session,
+                cursor: expandedPage.cursor,
+                complete: expandedPage.complete,
+              }
+            }
+            if (options?.isStale?.()) {
+              setMetaFor(sessionID, { loading: false })
+              return
+            }
+            if (expandedPage.complete || hasBoundary) break
           }
         }
 
-        // Merge optimistic items
-        const items = getOptimistic(sessionID)
-        const merged = mergeOptimisticPage(page, items)
-        for (const messageID of merged.confirmed) {
-          clearOptimistic(sessionID, messageID)
+        if (options?.isStale?.()) {
+          setMetaFor(sessionID, { loading: false })
+          return
         }
 
-        const current = store.getState()
-        const materialized = materializeSessionSnapshots(
-          current,
-          sessionID,
-          merged.session.map((info) => ({
-            info,
-            parts: merged.part.find((item) => item.id === info.id)?.part ?? [],
-          })),
-          { skipPartTypes: SKIP_PARTS, mode: options?.mode === "prepend" ? "prepend" : "merge" },
-        )
-
         setMetaFor(sessionID, {
-          limit: materialized.messages.length,
-          cursor: merged.cursor,
-          complete: merged.complete,
+          limit: committed.messages.length,
+          cursor: committed.cursor,
+          complete: committed.complete,
           loading: false,
         })
-        store.setState({ message: materialized.message, part: materialized.part })
         setSessionPrefetch({
           directory,
           sessionID,
-          limit: materialized.messages.length,
-          cursor: merged.cursor,
-          complete: merged.complete,
+          limit: committed.messages.length,
+          cursor: committed.cursor,
+          complete: committed.complete,
         })
       } catch {
         setMetaFor(sessionID, { loading: false })
@@ -355,6 +512,13 @@ export function useSync() {
       // Dedup inflight requests
       const existing = syncSessionInflightByKey.get(key)
       if (existing) return existing
+
+      // This is a new request. Bump generation so any older request that
+      // might still be finishing (e.g. from a previous component lifecycle)
+      // knows it is stale and should not write to the store.
+      const generation = (syncSessionGenerationByKey.get(key) ?? 0) + 1
+      syncSessionGenerationByKey.set(key, generation)
+      const isStale = () => syncSessionGenerationByKey.get(key) !== generation
 
       const current = store.getState()
       const m = getMetaFor(sessionID)
@@ -385,36 +549,59 @@ export function useSync() {
         if (shouldSkipSessionPrefetch({
           hasMessages: cachedReady,
           info: prefetchInfo,
-          pageSize: getEffectiveMessagePageSize(),
+          pageSize: getInitialMessagePageSize(),
         })) return
       }
 
-      const shouldFetchSession = !hasSession || force
-      const shouldLoadMessages = !cachedReady || force
+      const shouldLoadMessages = Boolean(!cachedReady || force)
+      const shouldFetchSession = shouldFetchSessionForRenderableSync({ hasSession, shouldLoadMessages, force: Boolean(force) })
       const promise = (async () => {
         await Promise.all([
           shouldFetchSession
             ? (async () => {
                 try {
-                  const result = await retry(() => sdk.session.get({ sessionID, directory }))
-                  if (result.data) {
+                  const result = await retry(async () => {
+                    const response = await sdk.session.get({ sessionID, directory })
+                    assertSdkSuccess(response, "session.get")
+                    return response
+                  })
+                  if (result.data && !isStale()) {
+                    const nextSession = stripSessionDiffSnapshots(result.data)
                     const s = store.getState()
                     const sessions = [...s.session]
                     const idx = Binary.search(sessions, sessionID, (s) => s.id)
                     if (idx.found) {
-                      sessions[idx.index] = result.data
+                      sessions[idx.index] = nextSession
                     } else {
-                      sessions.splice(idx.index, 0, result.data)
+                      sessions.splice(idx.index, 0, nextSession)
                     }
-                    store.setState({ session: sessions })
+                    if (!isStale()) {
+                      store.setState({ session: sessions })
+                    }
                   }
                 } catch (e) {
                   console.error("[sync] failed to fetch session", sessionID, e)
                 }
               })()
             : Promise.resolve(),
-          shouldLoadMessages ? loadMessages(sessionID) : Promise.resolve(),
+          shouldLoadMessages ? loadMessages(sessionID, { isStale }) : Promise.resolve(),
         ])
+
+        // Progressive mount (desktop/VS Code): after the initial page
+        // resolves, if the session isn't stale and the server indicated more
+        // messages, dispatch a second fetch to prepend older history — it
+        // gives the scroll container headroom so the scroll-up trigger fires
+        // seamlessly. Mobile deliberately opts out: it has no scroll-position
+        // trigger at all — ALL older history loads happen through the
+        // explicit "load older" button at the top, so every prepend lands
+        // from a resting state the user initiated. (The initial page itself,
+        // including the turn-boundary extension, is unaffected.)
+        if (!isStale() && !isMobileSurfaceRuntime()) {
+          const currentMeta = getMetaFor(sessionID)
+          if (currentMeta.cursor && !currentMeta.complete) {
+            loadMessages(sessionID, { before: currentMeta.cursor, mode: "prepend", isStale })
+          }
+        }
       })()
 
       syncSessionInflightByKey.set(key, promise)
@@ -452,11 +639,20 @@ export function useSync() {
     [getMetaFor],
   )
 
+  // True only when a fetch has positively confirmed the history is fully
+  // loaded (no next cursor). Distinct from !hasMore(), which is also true for
+  // sessions whose meta simply hasn't been populated yet.
+  const isComplete = useCallback(
+    (sessionID: string) => getMetaFor(sessionID).complete,
+    [getMetaFor],
+  )
+
   // Optimistic add (for prompt submission)
   const optimisticAdd = useCallback(
-    (input: { sessionID: string; message: Message; parts: Part[] }) => {
-      setOptimistic(input.sessionID, { message: input.message, parts: input.parts })
-      const current = store.getState()
+    (input: { sessionID: string; directory?: string | null; message: Message; parts: Part[] }) => {
+      setOptimistic(input.sessionID, { message: input.message, parts: input.parts }, input.directory)
+      const targetStore = getOptimisticStore(input.directory)
+      const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
 
@@ -469,16 +665,17 @@ export function useSync() {
       // Insert parts
       part[input.message.id] = sortParts(input.parts)
 
-      store.setState({ message, part })
+      targetStore.setState({ message, part })
     },
-    [store, setOptimistic],
+    [getOptimisticStore, setOptimistic],
   )
 
   // Optimistic remove (for rollback on error)
   const optimisticRemove = useCallback(
-    (input: { sessionID: string; messageID: string }) => {
-      clearOptimistic(input.sessionID, input.messageID)
-      const current = store.getState()
+    (input: { sessionID: string; directory?: string | null; messageID: string }) => {
+      clearOptimistic(input.sessionID, input.messageID, input.directory)
+      const targetStore = getOptimisticStore(input.directory)
+      const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
 
@@ -493,9 +690,16 @@ export function useSync() {
       }
       delete part[input.messageID]
 
-      store.setState({ message, part })
+      targetStore.setState({ message, part })
     },
-    [store, clearOptimistic],
+    [clearOptimistic, getOptimisticStore],
+  )
+
+  const optimisticConfirm = useCallback(
+    (input: { sessionID: string; directory?: string | null; messageID: string }) => {
+      clearOptimistic(input.sessionID, input.messageID, input.directory)
+    },
+    [clearOptimistic],
   )
 
   return useMemo(
@@ -505,11 +709,13 @@ export function useSync() {
       loadMore,
       hasMore,
       isLoading,
+      isComplete,
       optimistic: {
         add: optimisticAdd,
         remove: optimisticRemove,
+        confirm: optimisticConfirm,
       },
     }),
-    [syncSession, loadMore, hasMore, isLoading, optimisticAdd, optimisticRemove],
+    [syncSession, loadMore, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove, optimisticConfirm],
   )
 }

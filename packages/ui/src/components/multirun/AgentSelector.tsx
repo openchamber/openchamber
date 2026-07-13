@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useI18n } from '@/lib/i18n';
 
@@ -44,14 +45,14 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
   const defaultAgentName = useConfigStore((state) => state.currentAgentName);
   const agents = getVisibleAgents();
   const selectableAgents = React.useMemo(
-    () => agents.filter((agent) => agent.mode !== 'subagent'),
+    () => agents.filter((agent) => isPrimaryMode(agent.mode)),
     [agents]
   );
 
   // Load agents on mount
   React.useEffect(() => {
-    loadAgents();
-  }, [loadAgents]);
+    if (agents.length === 0) void loadAgents();
+  }, [agents.length, loadAgents]);
 
   // Ensure we always have a valid selection (defaults to current default agent, then first selectable agent).
   React.useEffect(() => {

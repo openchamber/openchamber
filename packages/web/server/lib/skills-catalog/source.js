@@ -1,4 +1,5 @@
 const GITHUB_HOST = 'github.com';
+const CLAWDHUB_SOURCE_PREFIX = 'clawdhub:';
 
 
 function normalizeGitOwnerRepo(owner, repo) {
@@ -17,7 +18,7 @@ export function parseSkillRepoSource(input, options = {}) {
     return { ok: false, error: { kind: 'invalidSource', message: 'Repository source is required' } };
   }
   const explicitSubpath = typeof options.subpath === 'string' && options.subpath.trim() ? options.subpath.trim() : null;
-  
+
   const urlFormat = raw.startsWith('https://') ? 'https' : raw.startsWith('git@') ? 'ssh' : 'shorthand';
   const gitHost = urlFormat === 'https' ? raw.split('/')[2] : urlFormat === 'ssh' ? raw.split('@')[1].split(':')[0] : null;
 
@@ -84,4 +85,8 @@ export function parseSkillRepoSource(input, options = {}) {
   }
 
   return { ok: false, error: { kind: 'invalidSource', message: 'Unsupported repository source format' } };
+}
+
+export function isClawdHubSource(input) {
+  return typeof input === 'string' && input.trim().toLowerCase().startsWith(CLAWDHUB_SOURCE_PREFIX);
 }

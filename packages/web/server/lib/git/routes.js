@@ -222,6 +222,94 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.get('/api/git/primary-root', async (req, res) => {
+    const { resolvePrimaryWorktreeRoot } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const result = await resolvePrimaryWorktreeRoot(directory);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to resolve git primary root:', error);
+      res.status(500).json({ error: error.message || 'Failed to resolve git primary root' });
+    }
+  });
+
+  app.get('/api/git/toplevel', async (req, res) => {
+    const { resolveWorktreeTopLevel } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const result = await resolveWorktreeTopLevel(directory);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to resolve git worktree toplevel:', error);
+      res.status(500).json({ error: error.message || 'Failed to resolve git worktree toplevel' });
+    }
+  });
+
+  app.post('/api/git/commit-summaries', async (req, res) => {
+    const { getCommitSummaries } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const result = await getCommitSummaries(directory, req.body?.shas);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to get git commit summaries:', error);
+      res.status(400).json({ error: error.message || 'Failed to get git commit summaries' });
+    }
+  });
+
+  const handleIntegrateAction = (action, loadHandler) => {
+    app.post(`/api/git/integrate/${action}`, async (req, res) => {
+      try {
+        const handler = await loadHandler();
+        const result = await handler(req.body || {});
+        res.json(result);
+      } catch (error) {
+        console.error(`Failed to run git integrate ${action}:`, error);
+        res.status(400).json({ error: error.message || `Failed to run git integrate ${action}` });
+      }
+    });
+  };
+
+  handleIntegrateAction('plan', async () => {
+    const { computeIntegratePlan } = await getGitLibraries();
+    return (body) => computeIntegratePlan(body);
+  });
+
+  handleIntegrateAction('conflict-details', async () => {
+    const { getIntegrateConflictDetails } = await getGitLibraries();
+    return (body) => getIntegrateConflictDetails(body?.tempWorktreePath);
+  });
+
+  handleIntegrateAction('cherry-pick-status', async () => {
+    const { isCherryPickInProgress } = await getGitLibraries();
+    return (body) => isCherryPickInProgress(body?.tempWorktreePath);
+  });
+
+  handleIntegrateAction('run', async () => {
+    const { integrateWorktreeCommits } = await getGitLibraries();
+    return (body) => integrateWorktreeCommits(body?.plan);
+  });
+
+  handleIntegrateAction('abort', async () => {
+    const { abortIntegrate } = await getGitLibraries();
+    return (body) => abortIntegrate(body?.state);
+  });
+
+  handleIntegrateAction('continue', async () => {
+    const { continueIntegrate } = await getGitLibraries();
+    return (body) => continueIntegrate(body?.state);
+  });
+
   app.get('/api/git/diff', async (req, res) => {
     const { getDiff } = await getGitLibraries();
     try {
@@ -345,6 +433,33 @@ export function registerGitRoutes(app) {
     } catch (error) {
       console.error('Failed to unstage git file:', error);
       res.status(500).json({ error: error.message || 'Failed to unstage git file' });
+    }
+  });
+
+  app.post('/api/git/apply-hunk', async (req, res) => {
+    const { applyHunk } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const { path: filePath, patch, action } = req.body || {};
+      if (!filePath || typeof filePath !== 'string') {
+        return res.status(400).json({ error: 'path parameter is required' });
+      }
+      if (typeof patch !== 'string' || !patch.trim()) {
+        return res.status(400).json({ error: 'patch is required' });
+      }
+      if (action !== 'stage' && action !== 'unstage' && action !== 'discard') {
+        return res.status(400).json({ error: 'action must be stage, unstage, or discard' });
+      }
+
+      await applyHunk(directory, filePath, { patch, action });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to apply git hunk:', error);
+      res.status(500).json({ error: error.message || 'Failed to apply git hunk' });
     }
   });
 
@@ -766,6 +881,85 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.post('/api/git/checkout-commit', async (req, res) => {
+    const { checkoutCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      const result = await checkoutCommit(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to checkout commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to checkout commit' });
+    }
+  });
+
+  app.post('/api/git/cherry-pick', async (req, res) => {
+    const { cherryPick } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      const result = await cherryPick(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to cherry-pick:', error);
+      res.status(500).json({ error: error.message || 'Failed to cherry-pick' });
+    }
+  });
+
+  app.post('/api/git/revert-commit', async (req, res) => {
+    const { revertCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      const result = await revertCommit(directory, hash);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to revert commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to revert commit' });
+    }
+  });
+
+  app.post('/api/git/reset-to-commit', async (req, res) => {
+    const { resetToCommit } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const { hash, mode, force } = req.body;
+      if (!req.body.hash || typeof req.body.hash !== 'string' || !/^[0-9a-fA-F]{7,40}$/.test(req.body.hash)) {
+        return res.status(400).json({ error: 'Invalid commit hash' });
+      }
+      if (!['soft', 'mixed', 'hard'].includes(mode)) {
+        return res.status(400).json({ error: 'mode must be soft, mixed, or hard' });
+      }
+      const result = await resetToCommit(directory, hash, mode, force === true);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to reset to commit:', error);
+      res.status(500).json({ error: error.message || 'Failed to reset' });
+    }
+  });
+
   app.get('/api/git/worktrees', async (req, res) => {
     const { getWorktrees } = await getGitLibraries();
     try {
@@ -956,11 +1150,13 @@ export function registerGitRoutes(app) {
       }
 
       const { maxCount, from, to, file } = req.query;
+      const all = req.query.all === 'true';
       const log = await getLog(directory, {
         maxCount: maxCount ? parseInt(maxCount) : undefined,
         from,
         to,
-        file
+        file,
+        all
       });
       res.json(log);
     } catch (error) {

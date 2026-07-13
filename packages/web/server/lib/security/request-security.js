@@ -1,5 +1,16 @@
 export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated } = deps;
+  // Origins of packaged (non-browser) clients whose WebView origin never
+  // matches the server host: the desktop shell, the iOS Capacitor WebView
+  // (capacitor://localhost), and the Android Capacitor WebView, which uses
+  // androidScheme 'https' and therefore reports 'https://localhost'. Missing
+  // the Android origin 403'd every WebSocket upgrade from the Android app
+  // (message stream, terminal, dictation) while SSE kept working.
+  const packagedClientOrigins = new Set([
+    'openchamber-ui://app',
+    'capacitor://localhost',
+    'https://localhost',
+  ]);
 
   const getUiSessionTokenFromRequest = (req) => {
     const cookieHeader = req?.headers?.cookie;
@@ -94,6 +105,10 @@ export const createRequestSecurityRuntime = (deps) => {
     const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
     if (!originHeader) {
       return false;
+    }
+
+    if (packagedClientOrigins.has(originHeader)) {
+      return true;
     }
 
     let normalizedOrigin = '';

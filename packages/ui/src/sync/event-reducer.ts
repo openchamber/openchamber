@@ -14,6 +14,7 @@ import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
+import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
@@ -102,6 +103,44 @@ function areSessionStatusesEqual(left: SessionStatus | undefined, right: Session
   return true
 }
 
+function areJsonEquivalent(left: unknown, right: unknown): boolean {
+  if (left === right) return true
+  if (left === undefined || right === undefined) return left === right
+  try {
+    return JSON.stringify(left) === JSON.stringify(right)
+  } catch {
+    return false
+  }
+}
+
+function areMessageUpdateFieldsEqual(existing: Message, next: Message): boolean {
+  if (existing.role !== next.role) return false
+  if ((existing as { finish?: unknown }).finish !== (next as { finish?: unknown }).finish) return false
+  if ((existing.time as { completed?: number })?.completed !== (next.time as { completed?: number })?.completed) return false
+
+  const fields: Array<keyof Message | "structured" | "summary" | "tokens" | "error" | "cost" | "model" | "tools" | "format" | "variant" | "agent" | "system"> = [
+    "summary",
+    "error",
+    "cost",
+    "tokens",
+    "structured",
+    "model",
+    "tools",
+    "format",
+    "variant",
+    "agent",
+    "system",
+  ]
+
+  for (const field of fields) {
+    if (!areJsonEquivalent((existing as Record<string, unknown>)[field], (next as Record<string, unknown>)[field])) {
+      return false
+    }
+  }
+
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // Global events
 // ---------------------------------------------------------------------------
@@ -113,10 +152,23 @@ export type GlobalEventResult = {
   project: Project
 } | null
 
+export type SessionMaterializationReason =
+  | "missing-owning-message"
+  | "orphan-delta"
+  | "missing-delta-part"
+  | "empty-assistant-message"
+  | "child-session-idle"
+  | "child-session-discovered"
+  | "ensure-session-messages"
+  | "stream-reconnect"
+  | "transport-switch"
+  | "stale-status-resync"
+
 export type DirectoryEventResult = boolean | {
   changed: boolean
   materialization: {
     type: "incomplete-session-snapshot"
+    reason: SessionMaterializationReason
     sessionID?: string
     messageID: string
     partID?: string
@@ -175,6 +227,9 @@ export function applyDirectoryEvent(
       const info = stripSessionDiffSnapshots((event.properties as { info: Session }).info)
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
+      if (result.found && shouldSkipStaleSessionEvent(sessions[result.index], info)) {
+        return false
+      }
       if (result.found) {
         sessions[result.index] = info
       } else {
@@ -189,6 +244,13 @@ export function applyDirectoryEvent(
       const info = stripSessionDiffSnapshots((event.properties as { info: Session }).info)
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
+      // Keep the freshness check ahead of the archive branch: direct archive
+      // responses handle the store update on their own (optimistic removal +
+      // SDK response), so stale SSE echoes should not win just because they
+      // mark the session archived.
+      if (result.found && shouldSkipStaleSessionEvent(sessions[result.index], info)) {
+        return false
+      }
 
       if (info.time.archived) {
         if (result.found) sessions.splice(result.index, 1)
@@ -269,9 +331,7 @@ export function applyDirectoryEvent(
       if (result.found) {
         // Skip message replacement if unchanged — preserves reference, avoids re-render
         const existing = messages[result.index]
-        const unchanged = existing.role === info.role
-          && (existing as { finish?: unknown }).finish === (info as { finish?: unknown }).finish
-          && (existing.time as { completed?: number })?.completed === (info.time as { completed?: number })?.completed
+        const unchanged = areMessageUpdateFieldsEqual(existing, info)
         if (unchanged) {
           syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, (info as { finish?: unknown }).finish, (info.time as { completed?: number })?.completed)
           return false
@@ -303,13 +363,15 @@ export function applyDirectoryEvent(
     }
 
     case "message.part.updated": {
-      const part = (event.properties as { part: Part }).part
+      const props = event.properties as { sessionID?: string; part: Part }
+      const part = props.part
       if (SKIP_PARTS.has(part.type)) {
         syncDebug.reducer.partSkipped((part as { messageID: string }).messageID, part.id, part.type)
         return false
       }
-      const messageID = (part as { messageID: string }).messageID
-      const sessionID = (part as { sessionID?: string }).sessionID
+      const messageID = (part as { messageID?: string }).messageID
+      const sessionID = props.sessionID ?? (part as { sessionID?: string }).sessionID
+      if (!messageID) return false
       const missingOwningMessage = !hasMessage(draft, sessionID, messageID)
       const parts = draft.part[messageID]
       if (!parts) {
@@ -318,7 +380,7 @@ export function applyDirectoryEvent(
         return missingOwningMessage
           ? {
             changed: true,
-            materialization: { type: "incomplete-session-snapshot", sessionID, messageID, partID: part.id },
+            materialization: { type: "incomplete-session-snapshot", reason: "missing-owning-message", sessionID, messageID, partID: part.id },
           }
           : true
       }
@@ -352,7 +414,7 @@ export function applyDirectoryEvent(
       return missingOwningMessage
         ? {
           changed: true,
-          materialization: { type: "incomplete-session-snapshot", sessionID, messageID, partID: part.id },
+          materialization: { type: "incomplete-session-snapshot", reason: "missing-owning-message", sessionID, messageID, partID: part.id },
         }
         : true
     }
@@ -377,6 +439,7 @@ export function applyDirectoryEvent(
 
     case "message.part.delta": {
       const props = event.properties as {
+        sessionID?: string
         messageID: string
         partID: string
         field: string
@@ -387,7 +450,7 @@ export function applyDirectoryEvent(
         syncDebug.reducer.partDeltaNoParts(props.messageID, props.partID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", reason: "orphan-delta", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
       const result = Binary.search(parts, props.partID, (p) => p.id)
@@ -395,7 +458,7 @@ export function applyDirectoryEvent(
         syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", reason: "missing-delta-part", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
       const existing = parts[result.index] as Record<string, unknown>

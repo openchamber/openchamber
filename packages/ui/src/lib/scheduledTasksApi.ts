@@ -1,3 +1,5 @@
+import { runtimeFetch } from './runtime-fetch';
+
 export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error';
 
 export type ScheduledTask = {
@@ -19,6 +21,8 @@ export type ScheduledTask = {
     modelID: string;
     variant?: string;
     agent?: string;
+    goalEnabled?: boolean;
+    goalTokenBudget?: number;
   };
   state: {
     createdAt: number;
@@ -54,7 +58,7 @@ const ensureProjectID = (projectID: string): string => {
 
 export const fetchScheduledTasks = async (projectID: string): Promise<ScheduledTask[]> => {
   const safeProjectID = ensureProjectID(projectID);
-  const response = await fetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks`);
+  const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks`);
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response, 'Failed to load scheduled tasks'));
   }
@@ -67,7 +71,7 @@ export const fetchScheduledTasks = async (projectID: string): Promise<ScheduledT
 
 export const upsertScheduledTask = async (projectID: string, task: Partial<ScheduledTask>): Promise<ScheduledTask[]> => {
   const safeProjectID = ensureProjectID(projectID);
-  const response = await fetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks`, {
+  const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks`, {
     method: 'PUT',
     headers: {
       'content-type': 'application/json',
@@ -88,7 +92,7 @@ export const upsertScheduledTask = async (projectID: string, task: Partial<Sched
 export const deleteScheduledTask = async (projectID: string, taskID: string): Promise<ScheduledTask[]> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);
-  const response = await fetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}`, {
+  const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}`, {
     method: 'DELETE',
     headers: {
       accept: 'application/json',
@@ -107,7 +111,7 @@ export const deleteScheduledTask = async (projectID: string, taskID: string): Pr
 export const runScheduledTaskNow = async (projectID: string, taskID: string): Promise<{ sessionId?: string }> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);
-  const response = await fetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/run`, {
+  const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/run`, {
     method: 'POST',
     headers: {
       accept: 'application/json',

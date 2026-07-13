@@ -24,7 +24,25 @@ OpenChamber przeprowadza przez kolejne kroki — sprawdzenie połączenia, skonf
 
 Sam decydujesz, czy zapisać hasła SSH i UI, czy wpisywać je za każdym razem. Jeśli połączenie zostanie zerwane, OpenChamber zgłasza, który krok zawiódł, byś mógł to naprawić — zobacz [Dostęp zdalny](/pl/troubleshooting/remote-access/).
 
+## Linki połączenia
+
+Jeśli zdalna maszyna już uruchamia OpenChamber, najprostszym sposobem połączenia aplikacji desktopowej jest link parowania. W UI zdalnego serwera otwórz **Settings → Remote Instances → Połącz z tym serwerem → Dodaj urządzenie**, utwórz link i zaimportuj go na swoim komputerze w **Settings → Remote Instances → Inne serwery OpenChamber → Importuj link**. Pełny opis znajdziesz w [Połącz urządzenie](/pl/connect-devices/).
+
+Link utworzony z opcją **Wszędzie** zawiera zarówno adres bezpośredni, jak i trasę przez [Private Relay](/pl/private-relay/): aplikacja desktopowa łączy się bezpośrednio, gdy może dotrzeć do serwera (ta sama sieć), a poza domem przełącza się na szyfrowany end-to-end relay. Status obok każdego zapisanego serwera pokazuje, która trasa jest używana.
+
+Link możesz też utworzyć z terminala na zdalnej maszynie:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` najpierw uruchamia serwer, jeśli nic nie działa na tym porcie. Dodaj `--api-only` dla serwera headless, `--lan` aby nasłuchiwać w LAN przy starcie, `--ui-password` aby chronić dostęp z przeglądarki oraz `--name` aby nazwać zapisane połączenie. Dodaj `--relay`, aby link działał także poza siecią lokalną: urządzenie preferuje połączenie bezpośrednie, gdy serwer jest osiągalny, a w przeciwnym razie przełącza się na [Private Relay](/pl/private-relay/) — instancja sama uruchomi relay.
+
+Wygenerowany link zawiera jednorazowy sekret parowania. Po zaimportowaniu urządzenie ma własny token klienta — osobny od hasła UI w przeglądarce — który przetrwa restarty serwera, dopóki nie unieważnisz go na serwerze, który go wydał.
+
 ## Powiązane
 
+- [Połącz urządzenie](/pl/connect-devices/) — linki parowania, kody QR i zarządzanie urządzeniami
+- [Private Relay](/pl/private-relay/) — jak działają połączenia „Wszędzie"
 - [OpenCode Server](/pl/opencode-server/) — połącz się ze zdalnym serwerem w wersji webowej lub VS Code
 - [Dostęp zdalny](/pl/troubleshooting/remote-access/) — gdy połączenie nie chce się nawiązać

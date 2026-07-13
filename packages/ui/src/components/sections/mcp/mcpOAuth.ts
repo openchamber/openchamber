@@ -53,7 +53,7 @@ export const parseMcpOAuthCallbackStateKey = (params: URLSearchParams): string |
   return trimmed || null;
 };
 
-export const parseMcpOAuthState = (raw: string | null | undefined): {
+const parseMcpOAuthState = (raw: string | null | undefined): {
   name: string;
   directory: string | null;
 } | null => {

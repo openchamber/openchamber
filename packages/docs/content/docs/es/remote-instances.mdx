@@ -24,7 +24,25 @@ OpenChamber recorre los pasos —comprobar la conexión, configurar el remoto, i
 
 Tú decides si guardar las contraseñas de SSH y de UI o introducirlas cada vez. Si la conexión se cae, OpenChamber informa qué paso falló para que puedas arreglarlo; consulta [Acceso remoto](/es/troubleshooting/remote-access/).
 
+## Enlaces de conexión
+
+Si una máquina remota ya ejecuta OpenChamber, la forma más fácil de conectar la app de escritorio es un enlace de vinculación. En la UI del servidor remoto, abre **Settings → Remote Instances → Conectarse a este servidor → Añadir un dispositivo**, crea un enlace e impórtalo en tu escritorio en **Settings → Remote Instances → Otros servidores de OpenChamber → Importar enlace**. Consulta [Conectar un dispositivo](/es/connect-devices/) para el flujo completo.
+
+Un enlace creado con **En cualquier lugar** lleva tanto una dirección directa como una ruta por el [Private Relay](/es/private-relay/): el escritorio se conecta directamente cuando puede alcanzar el servidor (misma red) y recurre al relay cifrado de extremo a extremo cuando estás fuera. El estado junto a cada servidor guardado muestra qué ruta se está usando.
+
+También puedes crear un enlace desde una terminal en la máquina remota:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` inicia el servidor primero si no hay nada ejecutándose en ese puerto. Añade `--api-only` para un servidor headless, `--lan` para escuchar en la LAN al iniciar, `--ui-password` para proteger el acceso del navegador y `--name` para etiquetar la conexión guardada. Añade `--relay` para un enlace que también funciona fuera de la red local: el dispositivo prefiere la conexión directa cuando el servidor está accesible y recurre al [Private Relay](/es/private-relay/) en caso contrario; la instancia levanta el relay por sí sola.
+
+El enlace generado contiene un secreto de vinculación de un solo uso. Una vez importado, el dispositivo conserva su propio token de cliente —independiente de la contraseña de la UI del navegador— que sobrevive a los reinicios del servidor hasta que lo revoques en el servidor emisor.
+
 ## Relacionado
 
+- [Conectar un dispositivo](/es/connect-devices/) — enlaces de vinculación, códigos QR y gestión de dispositivos
+- [Private Relay](/es/private-relay/) — cómo funcionan las conexiones «En cualquier lugar»
 - [OpenCode Server](/es/opencode-server/) — conéctate a un servidor remoto en la web o en VS Code
 - [Acceso remoto](/es/troubleshooting/remote-access/) — cuando una conexión no se completa

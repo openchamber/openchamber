@@ -1,4 +1,5 @@
 import type { MainTab } from '@/stores/useUIStore';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { ROUTE_PARAMS } from './types';
 
 /**
@@ -21,7 +22,7 @@ const DEFAULT_TAB: MainTab = 'chat';
  * Serialize application state to URL search parameters.
  * Only includes parameters that differ from defaults to keep URLs clean.
  */
-export function serializeRoute(state: AppRouteState): URLSearchParams {
+function serializeRoute(state: AppRouteState): URLSearchParams {
   const params = new URLSearchParams();
 
   // Session ID - always include if present
@@ -54,7 +55,7 @@ export function serializeRoute(state: AppRouteState): URLSearchParams {
  * Convert URLSearchParams to a URL string.
  * Returns just the pathname if no params, otherwise pathname + search string.
  */
-export function buildURL(params: URLSearchParams, pathname?: string): string {
+function buildURL(params: URLSearchParams, pathname?: string): string {
   const path = pathname ?? (typeof window !== 'undefined' ? window.location.pathname : '/');
   const search = params.toString();
 
@@ -69,7 +70,7 @@ export function buildURL(params: URLSearchParams, pathname?: string): string {
  * Check if the current URL matches the given route state.
  * Used to avoid unnecessary URL updates.
  */
-export function routeMatchesURL(state: AppRouteState): boolean {
+function routeMatchesURL(state: AppRouteState): boolean {
   if (typeof window === 'undefined') {
     return true;
   }
@@ -100,7 +101,8 @@ export function routeMatchesURL(state: AppRouteState): boolean {
 
 /**
  * Update the browser URL using pushState or replaceState.
- * Does nothing if URL already matches or in VS Code context.
+ * Does nothing if URL already matches, in VS Code context, or in the
+ * embedded session-chat iframe (whose URL identity is fixed at mount).
  */
 export function updateBrowserURL(
   state: AppRouteState,
@@ -110,8 +112,10 @@ export function updateBrowserURL(
     return;
   }
 
-  // Skip URL updates in VS Code webview
-  if (isVSCodeContext()) {
+  // Both VS Code webviews and embedded session-chat iframes carry session
+  // identity outside the route params (`__VSCODE_CONFIG__` / `?ocPanel=…`).
+  // Rebuilding the URL here would strip those params, so skip entirely.
+  if (isVSCodeContext() || isEmbeddedSessionChat()) {
     return;
   }
 

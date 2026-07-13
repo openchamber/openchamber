@@ -3,6 +3,9 @@ import type { ChatMessageEntry } from '../lib/turns/types';
 import { useChatSearchStore } from '@/stores/useChatSearchStore';
 import type { MatchRecord } from '@/stores/useChatSearchStore';
 import { buildSearchRegex } from '@/lib/splitByHighlight';
+import { getSearchablePartId } from './chatSearchPartIdentity';
+import { getSearchablePartType } from './useChatSearchContext';
+import { stripMarkdownForSearch } from './chatSearchNormalization';
 
 // ── text extraction helpers ───────────────────────────────────────────────────
 
@@ -33,43 +36,7 @@ function getBestPartText(part: Record<string, unknown>): string {
  * This ensures "hello world" matches "hello **world**" in the data layer,
  * consistent with the cross-boundary highlighting the DOM produces.
  */
-export function stripMarkdownForSearch(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/gm, ' ')
-    .replace(/`([^`\n]+)`/g, '$1')
-    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
-    .replace(/(^|[^\w])__([^_\n]+)__($|[^\w])/g, '$1$2$3')
-    .replace(/\*([^*\n]+)\*/g, '$1')
-    .replace(/(^|[^\w])_([^_\n]+)_($|[^\w])/g, '$1$2$3')
-    .replace(/~~([^~\n]+)~~/g, '$1')
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
-}
-
-/**
- * Returns the combined searchable text for a message, consistent with what
- * the rendering layer will actually mark up in the DOM:
- *
- * Searches user/assistant text and reasoning parts (code blocks stripped).
- *
- * Keeping this consistent with what the DOM highlights is critical so that
- * data-layer match count equals DOM mark count within each message.
- */
-function getSearchableText(message: ChatMessageEntry, includeThinking: boolean): string {
-  const texts: string[] = [];
-
-  for (const part of message.parts) {
-    const p = part as unknown as Record<string, unknown>;
-    const isText = p.type === 'text';
-    const isReasoning = p.type === 'reasoning';
-    if (isText || (isReasoning && (includeThinking ?? false))) {
-      const raw = getBestPartText(p);
-      if (raw) texts.push(stripMarkdownForSearch(raw));
-    }
-  }
-
-  return texts.join('\n');
-}
+export { stripMarkdownForSearch } from './chatSearchNormalization';
 
 // ── hook ─────────────────────────────────────────────────────────────────────
 
@@ -96,6 +63,7 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
   // Keep a stable ref to the latest messages so the timer callback always
   // sees the most recent data even if it was queued before the last update.
   const messagesRef = useRef(messages);
+  const searchSignatureRef = useRef<string | null>(null);
   useEffect(() => {
     messagesRef.current = messages;
   });
@@ -103,8 +71,13 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
   useEffect(() => {
     if (!isOpen || !query) {
       useChatSearchStore.getState().setMatches([], null);
+      searchSignatureRef.current = null;
       return;
     }
+
+    const searchSignature = JSON.stringify({ query, caseSensitive, wholeWord, isRegex, includeThinking });
+    const preserveActiveMatch = searchSignatureRef.current === searchSignature;
+    searchSignatureRef.current = searchSignature;
 
     const timer = setTimeout(() => {
       const regex = buildSearchRegex(query, { caseSensitive, wholeWord, regex: isRegex, includeThinking });
@@ -116,26 +89,41 @@ export function useChatSearchMatcher(messages: ChatMessageEntry[]): void {
       const newMatches: MatchRecord[] = [];
 
       for (const message of messagesRef.current) {
-        const text = getSearchableText(message, includeThinking);
-        if (!text) continue;
-
-        regex.lastIndex = 0;
-        let occurrenceInMessage = 0;
-        let m: RegExpExecArray | null;
-        while ((m = regex.exec(text)) !== null) {
-          if (m[0].length === 0) {
-            regex.lastIndex++;
-            continue;
+        message.parts.forEach((part, partIndex) => {
+          const partType = getSearchablePartType(part);
+          if (!partType || (partType === 'reasoning' && !includeThinking)) {
+            return;
           }
-          newMatches.push({ messageId: message.info.id, occurrenceInMessage: occurrenceInMessage++ });
-        }
+
+          const raw = getBestPartText(part as unknown as Record<string, unknown>);
+          const text = stripMarkdownForSearch(raw);
+          if (!text) {
+            return;
+          }
+
+          regex.lastIndex = 0;
+          let occurrenceInPart = 0;
+          let match: RegExpExecArray | null;
+          while ((match = regex.exec(text)) !== null) {
+            if (match[0].length === 0) {
+              regex.lastIndex += 1;
+              continue;
+            }
+            newMatches.push({
+              messageId: message.info.id,
+              partId: getSearchablePartId(message.info.id, part, partIndex),
+              partType,
+              occurrenceInPart: occurrenceInPart++,
+            });
+          }
+        });
       }
 
-      // Preserve the user's position if the same message is still in results —
-      // only reset to 0 when query/flags change (handled by the null path in setMatches).
+      // Preserve the user's position when the same logical part occurrence is
+      // still present. Query/flag changes deliberately reset to the first hit.
       const { matches: prevMatches, activeIndex } = useChatSearchStore.getState();
-      const currentMessageId = prevMatches[activeIndex]?.messageId ?? null;
-      useChatSearchStore.getState().setMatches(newMatches, currentMessageId);
+      const currentMatch = preserveActiveMatch ? prevMatches[activeIndex] ?? null : null;
+      useChatSearchStore.getState().setMatches(newMatches, currentMatch);
     }, 350);
 
     return () => clearTimeout(timer);

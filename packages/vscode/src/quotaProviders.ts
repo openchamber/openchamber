@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
+import { readCredential } from './quotaCredentials';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -123,7 +125,6 @@ export type ProviderResult = {
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
-const OLLAMA_CLOUD_COOKIE_PATH = path.join(os.homedir(), '.config', 'ollama-quota', 'cookie');
 
 
 const ANTIGRAVITY_ACCOUNTS_PATHS = [
@@ -215,19 +216,6 @@ const readJsonFile = (filePath: string): Record<string, unknown> | null => {
     return parsed as Record<string, unknown>;
   } catch (error) {
     console.warn(`Failed to read JSON file: ${filePath}`, error);
-    return null;
-  }
-};
-
-const readTextFile = (filePath: string): string | null => {
-  if (!fs.existsSync(filePath)) {
-    return null;
-  }
-  try {
-    const content = fs.readFileSync(filePath, 'utf8').trim();
-    return content || null;
-  } catch (error) {
-    console.warn(`Failed to read text file: ${filePath}`, error);
     return null;
   }
 };
@@ -388,6 +376,9 @@ const durationToSeconds = (duration?: number, unit?: string) => {
 export const listConfiguredQuotaProviders = () => {
   const auth = readAuthFile();
   const configured = new Set<string>();
+  if (readCredential('opencode-go')) configured.add('opencode-go');
+  if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
+  if (readCredential('cursor')) configured.add('cursor');
 
   const anthropicAuth = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude']));
   if (anthropicAuth && ((anthropicAuth as Record<string, unknown>).access || (anthropicAuth as Record<string, unknown>).token)) {
@@ -444,9 +435,6 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('github-copilot-addon');
   }
 
-  if (readTextFile(OLLAMA_CLOUD_COOKIE_PATH)) {
-    configured.add('ollama-cloud');
-  }
 
   const waferAuth = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai']));
   if (waferAuth && ((waferAuth as Record<string, unknown>).key || (waferAuth as Record<string, unknown>).token)) {
@@ -456,7 +444,7 @@ export const listConfiguredQuotaProviders = () => {
   return Array.from(configured);
 };
 
-export const fetchCodexQuota = async (): Promise<ProviderResult> => {
+const fetchCodexQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openai', 'codex', 'chatgpt'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
@@ -499,16 +487,18 @@ export const fetchCodexQuota = async (): Promise<ProviderResult> => {
 
     const windows: Record<string, UsageWindow> = {};
     if (primary) {
-      windows['5h'] = toUsageWindow({
+      const windowSeconds = toNumber(primary.limit_window_seconds);
+      windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
         usedPercent: toNumber(primary.used_percent),
-        windowSeconds: toNumber(primary.limit_window_seconds),
+        windowSeconds,
         resetAt: toTimestamp(primary.reset_at),
       });
     }
     if (secondary) {
-      windows['weekly'] = toUsageWindow({
+      const windowSeconds = toNumber(secondary.limit_window_seconds);
+      windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
         usedPercent: toNumber(secondary.used_percent),
-        windowSeconds: toNumber(secondary.limit_window_seconds),
+        windowSeconds,
         resetAt: toTimestamp(secondary.reset_at),
       });
     }
@@ -518,9 +508,9 @@ export const fetchCodexQuota = async (): Promise<ProviderResult> => {
       const valueLabel = unlimited
         ? 'Unlimited'
         : balance !== null
-          ? `$${formatMoney(balance)} remaining`
+          ? `$${formatMoney(balance)}`
           : null;
-      windows.credits = toUsageWindow({
+      windows.credits_balance = toUsageWindow({
         usedPercent: null,
         windowSeconds: null,
         resetAt: null,
@@ -723,7 +713,7 @@ const fetchGoogleModels = async (accessToken: string, projectId?: string) => {
   return null;
 };
 
-export const fetchGoogleQuota = async (): Promise<ProviderResult> => {
+const fetchGoogleQuota = async (): Promise<ProviderResult> => {
   const authSources = resolveGoogleAuthSources();
   if (!authSources.length) {
     return buildResult({
@@ -851,7 +841,7 @@ export const fetchGoogleQuota = async (): Promise<ProviderResult> => {
   });
 };
 
-export const fetchClaudeQuota = async (): Promise<ProviderResult> => {
+const fetchClaudeQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
@@ -969,7 +959,7 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
   return windows;
 };
 
-export const fetchCopilotQuota = async (): Promise<ProviderResult> => {
+const fetchCopilotQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['github-copilot', 'copilot'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
@@ -1024,7 +1014,7 @@ export const fetchCopilotQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
+const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['github-copilot', 'copilot'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
@@ -1082,7 +1072,7 @@ export const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchKimiQuota = async (): Promise<ProviderResult> => {
+const fetchKimiQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1293,14 +1283,14 @@ const fetchMiniMaxQuota = async (data: {
   }
 };
 
-export const fetchMiniMaxCodingPlanQuota = () => fetchMiniMaxQuota({
+const fetchMiniMaxCodingPlanQuota = () => fetchMiniMaxQuota({
   providerId: 'minimax-coding-plan',
   providerName: 'MiniMax Coding Plan (minimax.io)',
   endpoint: 'https://api.minimax.io/v1/api/openplatform/coding_plan/remains',
   usageFieldsAreRemaining: false,
 });
 
-export const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
+const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
   providerId: 'minimax-cn-coding-plan',
   providerName: 'MiniMax Coding Plan (minimaxi.com)',
   endpoint: 'https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains',
@@ -1343,8 +1333,8 @@ const parseOllamaSettingsHtml = (html: string) => {
   return windows;
 };
 
-export const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
-  const cookie = readTextFile(OLLAMA_CLOUD_COOKIE_PATH);
+const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
+  const cookie = readCredential('ollama-cloud')?.cookie;
 
   if (!cookie) {
     return buildResult({
@@ -1393,7 +1383,20 @@ export const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
+const fetchCursorQuota = async (): Promise<ProviderResult> => {
+  const accessToken = readCredential('cursor')?.accessToken;
+  if (!accessToken) return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: false, configured: false, error: 'Not configured' });
+  try {
+    const response = await fetch('https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1' }, body: '{}', signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(response.status === 401 ? 'Cursor session expired' : `API error: ${response.status}`);
+    const payload = await response.json() as Record<string, unknown>;
+    const plan = (payload.planUsage as Record<string, unknown> | undefined) ?? {};
+    const usedPercent = toNumber(plan.totalPercentUsed);
+    return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: true, configured: true, usage: { windows: { billing_cycle: toUsageWindow({ usedPercent, windowSeconds: null, resetAt: toTimestamp(payload.billingCycleEnd) }) } } });
+  } catch (error) { return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' }); }
+};
+
+const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openrouter'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1491,7 +1494,7 @@ const resolveWindowLabel = (windowSeconds: number | null) => {
   return `${windowSeconds}s`;
 };
 
-export const fetchZaiQuota = async (): Promise<ProviderResult> => {
+const fetchZaiQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['zai-coding-plan', 'zai', 'z.ai'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1560,7 +1563,7 @@ export const fetchZaiQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
+const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['zhipuai-coding-plan'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1649,7 +1652,7 @@ export const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => 
 
 const NANO_GPT_DAILY_WINDOW_SECONDS = 86400;
 
-export const fetchNanoGptQuota = async (): Promise<ProviderResult> => {
+const fetchNanoGptQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['nano-gpt', 'nanogpt', 'nano_gpt'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1755,7 +1758,7 @@ export const fetchNanoGptQuota = async (): Promise<ProviderResult> => {
 const WAFER_QUOTA_URL = 'https://pass.wafer.ai/v1/inference/quota';
 const WAFER_WINDOW_SECONDS = 5 * 3600;
 
-export const fetchWaferQuota = async (): Promise<ProviderResult> => {
+const fetchWaferQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
@@ -1892,6 +1895,17 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchZhipuaiCodingPlanQuota();
     case 'wafer':
       return fetchWaferQuota();
+    case 'opencode-go': {
+      const credential = readCredential('opencode-go') as { workspaceId: string; authCookie: string } | null;
+      if (!credential) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
+      try {
+        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(credential) } });
+      } catch (error) {
+        return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
+      }
+    }
+    case 'cursor':
+      return fetchCursorQuota();
     default:
       return buildResult({
         providerId,

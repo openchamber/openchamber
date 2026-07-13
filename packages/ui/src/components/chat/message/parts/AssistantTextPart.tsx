@@ -1,14 +1,15 @@
 import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
-import type { StreamPhase } from '../types';
+import type { StreamPhase, ToolPopupContent } from '../types';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { resolveAssistantDisplayText, shouldRenderAssistantText } from './assistantTextVisibility';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { GeneratedJsonResultCard } from './GeneratedJsonResultCard';
 import { parseGeneratedJsonResult } from './generatedJsonResult';
-import { useChatSearchStore, type SearchContext } from '@/stores/useChatSearchStore';
+import type { SearchContext } from '@/stores/useChatSearchStore';
+import { useChatSearchContext } from '../../hooks/useChatSearchContext';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
@@ -19,6 +20,9 @@ interface AssistantTextPartProps {
     streamPhase: StreamPhase;
     chatRenderMode?: 'sorted' | 'live';
     onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
+    onShowPopup?: (content: ToolPopupContent) => void;
+    partIndex: number;
+    searchContext?: SearchContext;
 }
 
 const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
@@ -26,6 +30,9 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     messageId,
     streamPhase,
     chatRenderMode = 'live',
+    onShowPopup,
+    partIndex,
+    searchContext: searchContextOverride,
 }) => {
     // Use part directly from props — parent provides the latest version from the store.
     // No store subscription here to avoid re-render cascade from unrelated delta events.
@@ -57,31 +64,9 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
         isStreaming,
     });
 
+    const searchContext = useChatSearchContext(messageId, part, partIndex, searchContextOverride);
+
     streamPerfObserve('ui.assistant_text_part.display_len', displayTextContent.length);
-
-    // Search highlighting — read only isOpen/query/flags (NOT activeIndex/totalMatches)
-    // so navigation never causes this component to re-render.
-    const searchIsOpen = useChatSearchStore((s) => s.isOpen);
-    const searchQuery = useChatSearchStore((s) => s.query);
-    const searchFlags = useChatSearchStore((s) => s.flags);
-
-    // Skip highlighting during streaming to avoid running the rehype plugin on
-    // every streaming tick. Highlights appear once the message is finalized.
-    const baseSearchContext: SearchContext | undefined =
-        searchIsOpen && searchQuery && !isStreaming
-            ? {
-                query: searchQuery,
-                caseSensitive: searchFlags.caseSensitive,
-                wholeWord: searchFlags.wholeWord,
-                isRegex: searchFlags.regex,
-                messageId,
-            }
-            : undefined;
-
-    // For reasoning parts: only highlight when the "include thinking" toggle is on.
-    const searchContext = part.type === 'reasoning' && !(searchFlags.includeThinking ?? false)
-        ? undefined
-        : baseSearchContext;
 
     const time = partWithText.time;
     const isFinalized = Boolean(time && typeof time.end !== 'undefined');
@@ -124,6 +109,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 disableStreamAnimation={chatRenderMode === 'sorted'}
                 variant={part.type === 'reasoning' ? 'reasoning' : 'assistant'}
                 enableFileReferences={isFinalized}
+                onShowPopup={onShowPopup}
                 searchContext={searchContext}
             />
         </div>

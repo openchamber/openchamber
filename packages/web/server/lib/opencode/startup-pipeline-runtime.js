@@ -1,6 +1,7 @@
 export const createStartupPipelineRuntime = (dependencies) => {
   const {
     createTerminalRuntime,
+    createDictationRuntime,
     createMessageStreamWsRuntime,
     createServerStartupRuntime,
   } = dependencies;
@@ -51,6 +52,8 @@ export const createStartupPipelineRuntime = (dependencies) => {
       onTunnelReady,
       tunnelRuntimeContext,
       attachSignals,
+      apiOnly,
+      dictationModelsDir,
     } = options;
 
     const terminalRuntime = createTerminalRuntime({
@@ -68,6 +71,16 @@ export const createStartupPipelineRuntime = (dependencies) => {
       TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS: terminalHeartbeatIntervalMs,
       TERMINAL_INPUT_WS_REBIND_WINDOW_MS: terminalRebindWindowMs,
       TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW: terminalMaxRebindsPerWindow,
+    });
+
+    const dictationRuntime = createDictationRuntime({
+      app,
+      server,
+      express,
+      uiAuthController,
+      isRequestOriginAllowed,
+      rejectWebSocketUpgrade,
+      modelsDir: dictationModelsDir,
     });
 
     const messageStreamRuntime = createMessageStreamWsRuntime({
@@ -88,7 +101,11 @@ export const createStartupPipelineRuntime = (dependencies) => {
     scheduleOpenCodeApiDetection();
     void bootstrapOpenCodeAtStartup();
 
-    staticRoutesRuntime.registerStaticRoutes(app);
+    if (apiOnly) {
+      staticRoutesRuntime.registerApiOnlyFallbackRoutes(app);
+    } else {
+      staticRoutesRuntime.registerStaticRoutes(app);
+    }
 
     const serverStartupRuntime = createServerStartupRuntime({
       process,
@@ -120,6 +137,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
 
     return {
       terminalRuntime,
+      dictationRuntime,
       messageStreamRuntime,
     };
   };

@@ -1,14 +1,8 @@
 import type { ProjectEntry } from "@/lib/api/types";
 import type { WorktreeMetadata } from "@/types/worktree";
 
-export const normalizeProjectPath = (value?: string | null): string | null => {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const replaced = trimmed.replace(/\\/g, "/");
-  if (replaced === "/") return "/";
-  return replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced;
-};
+import { normalizePath } from "@/lib/pathNormalization";
+export const normalizeProjectPath = normalizePath;
 
 export const resolveProjectForDirectory = (
   projects: ProjectEntry[],
@@ -26,7 +20,7 @@ export const resolveProjectForDirectory = (
   return best;
 };
 
-export const resolveProjectFromWorktreeDirectory = (
+const resolveProjectFromWorktreeDirectory = (
   projects: ProjectEntry[],
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
   directory: string | null,

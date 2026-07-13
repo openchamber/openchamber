@@ -28,6 +28,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
+import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -309,6 +310,7 @@ export const PullRequestSection: React.FC<{
   onGeneratedDescription?: () => void;
 }> = ({ directory, branch, baseBranch, trackingBranch, remotes = [], remoteBranches = [], onGeneratedDescription }) => {
   const { t } = useI18n();
+  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
@@ -515,7 +517,7 @@ export const PullRequestSection: React.FC<{
     setHydratingPrBodyKey(hydrationKey);
 
     let cancelled = false;
-    void github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: false })
+    void github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: false, sourceRepo: status?.repo ?? null })
       .then((ctx) => {
         if (cancelled) {
           return;
@@ -548,7 +550,7 @@ export const PullRequestSection: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, [directory, github, pr, prStatusKey, updatePrStatus]);
+  }, [directory, github, pr, prStatusKey, status?.repo, updatePrStatus]);
 
   React.useEffect(() => {
     if (!pr) {
@@ -588,6 +590,7 @@ export const PullRequestSection: React.FC<{
       const ctx = await github.prContext(directory, pr.number, {
         includeDiff: false,
         includeCheckDetails: true,
+        sourceRepo: status?.repo ?? null,
       });
       setCheckDetails(ctx);
     } catch (e) {
@@ -596,7 +599,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsLoadingCheckDetails(false);
     }
-  }, [directory, github, pr, t]);
+  }, [directory, github, pr, status?.repo, t]);
 
   const openCommentsDialog = React.useCallback(async () => {
     if (!github?.prContext) {
@@ -611,6 +614,7 @@ export const PullRequestSection: React.FC<{
       const ctx = await github.prContext(directory, pr.number, {
         includeDiff: false,
         includeCheckDetails: false,
+        sourceRepo: status?.repo ?? null,
       });
       setCommentsDetails(ctx);
     } catch (e) {
@@ -619,7 +623,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsLoadingCommentsDetails(false);
     }
-  }, [directory, github, pr, t]);
+  }, [directory, github, pr, status?.repo, t]);
 
   const formatTimestamp = React.useCallback((value?: string) => {
     if (!value) return '';
@@ -627,8 +631,14 @@ export const PullRequestSection: React.FC<{
     if (!Number.isFinite(ts)) {
       return value;
     }
-    return new Date(ts).toLocaleString();
-  }, []);
+    return formatDateTimeForPreference(ts, timeFormatPreference, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }, [timeFormatPreference]);
 
   const connectedGitHubLogin = React.useMemo(() => {
     const login = githubAuthStatus?.user?.login;
@@ -878,7 +888,7 @@ export const PullRequestSection: React.FC<{
     }
 
     try {
-      const context = await github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: true });
+      const context = await github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: true, sourceRepo: status?.repo ?? null });
       const runs = context.checkRuns ?? [];
       const failed = runs.filter((r) => {
         const conclusion = typeof r.conclusion === 'string' ? r.conclusion.toLowerCase() : '';
@@ -918,7 +928,7 @@ export const PullRequestSection: React.FC<{
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.loadChecksFailed'), { description: message });
     }
-  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, t]);
+  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, status?.repo, t]);
 
   const sendCommentsToChat = React.useCallback(async () => {
     setActiveMainTab('chat');
@@ -934,7 +944,7 @@ export const PullRequestSection: React.FC<{
     }
 
     try {
-      const context = await github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: false });
+      const context = await github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: false, sourceRepo: status?.repo ?? null });
       const issueComments = context.issueComments ?? [];
       const reviewComments = context.reviewComments ?? [];
       const total = issueComments.length + reviewComments.length;
@@ -957,7 +967,7 @@ export const PullRequestSection: React.FC<{
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.loadPrCommentsFailed'), { description: message });
     }
-  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, t]);
+  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, status?.repo, t]);
 
   const sendSingleCommentToChat = React.useCallback(async (comment: TimelineCommentItem) => {
     setCommentsDialogOpen(false);
@@ -1519,6 +1529,7 @@ export const PullRequestSection: React.FC<{
                           <SimpleMarkdownRenderer
                             content={pr.body}
                             className="typography-markdown-body text-muted-foreground break-words mt-1"
+                            enableFileReferences={false}
                           />
                         ) : (
                           <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words mt-1">
@@ -2023,6 +2034,7 @@ export const PullRequestSection: React.FC<{
                                   'typography-markdown-body text-foreground break-words [&_a]:no-underline [&_a:hover]:no-underline',
                                   selfMentionHighlightClass,
                                 ].filter(Boolean).join(' ')}
+                                enableFileReferences={false}
                               />
                             </div>
                           </div>

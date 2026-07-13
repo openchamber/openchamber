@@ -120,7 +120,7 @@ async function buildGitEnv(): Promise<NodeJS.ProcessEnv> {
 /**
  * Initialize the git extension API
  */
-export async function initGitExtension(): Promise<GitAPI | null> {
+async function initGitExtension(): Promise<GitAPI | null> {
   if (gitApi && gitExtensionEnabled) {
     return gitApi;
   }
@@ -163,7 +163,7 @@ export async function initGitExtension(): Promise<GitAPI | null> {
 /**
  * Get the git API, initializing if necessary
  */
-export async function getGitApi(): Promise<GitAPI | null> {
+async function getGitApi(): Promise<GitAPI | null> {
   if (gitApi && gitExtensionEnabled) {
     return gitApi;
   }
@@ -173,7 +173,7 @@ export async function getGitApi(): Promise<GitAPI | null> {
 /**
  * Get repository for a given directory
  */
-export async function getRepository(directory: string): Promise<Repository | null> {
+async function getRepository(directory: string): Promise<Repository | null> {
   const api = await getGitApi();
   if (!api) return null;
 
@@ -279,6 +279,10 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
   });
 }
 
+function isValidCommitHash(hash: string): boolean {
+  return /^[0-9a-fA-F]{7,40}$/.test(hash);
+}
+
 function extractGitStatusPath(status: string, pathPart: string): string {
   if ((status === 'R' || status === 'C') && pathPart.includes('\t')) {
     return pathPart.split('\t').pop() || pathPart;
@@ -329,20 +333,20 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
 
 // ============== Status Operations ==============
 
-export interface GitStatusFile {
+interface GitStatusFile {
   path: string;
   index: string;
   working_dir: string;
 }
 
-export interface GitMergeInProgress {
+interface GitMergeInProgress {
   /** Short SHA of MERGE_HEAD */
   head: string;
   /** First line of MERGE_MSG */
   message: string;
 }
 
-export interface GitRebaseInProgress {
+interface GitRebaseInProgress {
   /** Branch name being rebased */
   headName: string;
   /** Short SHA of the onto commit */
@@ -587,7 +591,7 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
 
 // ============== Branch Operations ==============
 
-export interface GitBranchDetails {
+interface GitBranchDetails {
   current: boolean;
   name: string;
   commit: string;
@@ -716,43 +720,6 @@ export async function checkoutBranch(directory: string, branch: string): Promise
 }
 
 /**
- * Detach HEAD at current commit
- * This allows the current branch to be used in a worktree
- */
-export async function detachHead(directory: string): Promise<{ success: boolean; commit: string }> {
-  // Get current HEAD commit
-  const headResult = await execGit(['rev-parse', 'HEAD'], directory);
-  if (headResult.exitCode !== 0) {
-    return { success: false, commit: '' };
-  }
-  
-  const commit = headResult.stdout.trim();
-  
-  // Checkout the commit directly to detach HEAD
-  const result = await execGit(['checkout', '--detach', 'HEAD'], directory);
-  return { success: result.exitCode === 0, commit };
-}
-
-/**
- * Get the current HEAD branch name (null if detached)
- */
-export async function getCurrentBranch(directory: string): Promise<string | null> {
-  const repo = await getRepository(directory);
-  
-  if (repo) {
-    const head = repo.state.HEAD;
-    return head?.name || null;
-  }
-
-  // Fallback to raw git
-  const result = await execGit(['symbolic-ref', '--short', 'HEAD'], directory);
-  if (result.exitCode === 0) {
-    return result.stdout.trim();
-  }
-  return null; // Detached HEAD
-}
-
-/**
  * Create a new branch
  */
 export async function createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }> {
@@ -810,6 +777,8 @@ export interface GitWorktreeInfo {
   name: string;
   branch: string;
   path: string;
+  directoryCreated?: true;
+  bootstrapStatus?: { status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number };
 }
 
 type WorktreeListEntry = {
@@ -819,7 +788,7 @@ type WorktreeListEntry = {
   branch?: string;
 };
 
-export interface GitWorktreeValidationError {
+interface GitWorktreeValidationError {
   code: string;
   message: string;
 }
@@ -846,6 +815,7 @@ export interface CreateGitWorktreePayload {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  returnAfterDirectoryCreated?: boolean;
 }
 
 export interface RemoveGitWorktreePayload {
@@ -1355,6 +1325,54 @@ const syncProjectSandboxRemove = async (projectID: string, primaryWorktree: stri
   });
 };
 
+const isInsideOrSameDirectory = (root: string, target: string): boolean => {
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+};
+
+const isAttachedGitWorktreeDirectory = async (directory: string): Promise<boolean> => {
+  try {
+    const result = await runGitCommand(directory, ['rev-parse', '--is-inside-work-tree']);
+    return result.success && String(result.stdout || '').trim() === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const cleanupFailedFastWorktreeCreate = async (
+  context: Awaited<ReturnType<typeof resolveWorktreeProjectContext>>,
+  candidate: { directory: string }
+): Promise<void> => {
+  const candidateDirectory = path.resolve(candidate.directory);
+  const worktreeRoot = path.resolve(context.worktreeRoot);
+  const isInsideWorktreeRoot = isInsideOrSameDirectory(worktreeRoot, candidateDirectory) && candidateDirectory !== worktreeRoot;
+  const isAttached = await isAttachedGitWorktreeDirectory(candidateDirectory);
+
+  if (!isAttached) {
+    try {
+      await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, candidateDirectory);
+    } catch (error) {
+      console.warn('[GitService] Failed to clean up OpenCode sandbox metadata after worktree failure:', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (!isInsideWorktreeRoot || isAttached) {
+    return;
+  }
+
+  try {
+    const entries = await fs.promises.readdir(candidateDirectory);
+    if (entries.length === 0) {
+      await fs.promises.rmdir(candidateDirectory);
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(String(code || ''))) {
+      console.warn('[GitService] Failed to clean up empty worktree directory after creation failure:', error instanceof Error ? error.message : String(error));
+    }
+  }
+};
+
 const runWorktreeStartScripts = async (directory: string, projectID: string, startCommand: string | undefined) => {
   const projectStart = await loadProjectStartCommand(projectID);
   if (projectStart) {
@@ -1699,6 +1717,19 @@ export async function validateWorktreeCreate(directory: string, input: CreateGit
   }
 }
 
+const assertWorktreeCreatePreflight = async (directory: string, input: CreateGitWorktreePayload = {}): Promise<void> => {
+  const validation = await validateWorktreeCreate(directory, input);
+  if (validation?.ok) {
+    return;
+  }
+
+  const message = validation?.errors
+    ?.map((error) => error?.message)
+    .filter(Boolean)
+    .join('\n') || 'Failed to validate worktree creation';
+  throw new Error(message);
+};
+
 export async function previewWorktreeCreate(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
@@ -1721,23 +1752,16 @@ export async function previewWorktreeCreate(directory: string, input: CreateGitW
   };
 }
 
-export async function createWorktree(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
+async function attachGitWorktreeToCandidate(
+  context: Awaited<ReturnType<typeof resolveWorktreeProjectContext>>,
+  candidate: { name: string; directory: string; branch: string },
+  input: CreateGitWorktreePayload = {},
+): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
-  const context = await resolveWorktreeProjectContext(directory);
-  await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
-
-  const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
   const startRef = normalizeStartRef(input?.startRef);
   const ensureRemoteName = String(input?.ensureRemoteName || '').trim();
   const ensureRemoteUrl = String(input?.ensureRemoteUrl || '').trim();
-
-  const candidate = await resolveCandidateDirectory(
-    context.worktreeRoot,
-    preferredName,
-    mode === 'new' && preferredBranchName ? preferredBranchName : '',
-    context.primaryWorktree
-  );
 
   let localBranch = '';
   let inferredUpstream: { remote: string; branch: string } | null = null;
@@ -1824,6 +1848,11 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
   const upstreamBranch = String(input?.upstreamBranch || inferredUpstream?.branch || '').trim();
 
   setWorktreeBootstrapState(candidate.directory, WORKTREE_BOOTSTRAP_PENDING);
+  const bootstrapStatus = worktreeBootstrapState.get(toBootstrapStateKey(candidate.directory)) ?? {
+    status: WORKTREE_BOOTSTRAP_PENDING,
+    error: null,
+    updatedAt: Date.now(),
+  };
 
   queueWorktreeBootstrap({
     directory: candidate.directory,
@@ -1846,7 +1875,71 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
     name: candidate.name,
     branch: localBranch,
     path: candidate.directory,
+    directoryCreated: true,
+    bootstrapStatus,
   };
+}
+
+export async function createWorktree(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
+  const mode = input?.mode === 'existing' ? 'existing' : 'new';
+  const context = await resolveWorktreeProjectContext(directory);
+
+  if (input?.returnAfterDirectoryCreated === true) {
+    await assertWorktreeCreatePreflight(directory, input);
+  }
+
+  await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
+
+  const preferredName = String(input?.worktreeName || input?.name || '').trim();
+  const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
+
+  const candidate = await resolveCandidateDirectory(
+    context.worktreeRoot,
+    preferredName,
+    mode === 'new' && preferredBranchName ? preferredBranchName : '',
+    context.primaryWorktree
+  );
+
+  if (input?.returnAfterDirectoryCreated === true) {
+    await fs.promises.mkdir(candidate.directory, { recursive: false });
+
+    try {
+      await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
+    } catch (error) {
+      console.warn('[GitService] Failed to sync OpenCode sandbox metadata (add):', error instanceof Error ? error.message : String(error));
+    }
+
+    setWorktreeBootstrapState(candidate.directory, WORKTREE_BOOTSTRAP_PENDING);
+    const bootstrapStatus = worktreeBootstrapState.get(toBootstrapStateKey(candidate.directory)) ?? {
+      status: WORKTREE_BOOTSTRAP_PENDING,
+      error: null,
+      updatedAt: Date.now(),
+    };
+    const localBranch = mode === 'existing'
+      ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
+      : candidate.branch;
+
+    void attachGitWorktreeToCandidate(context, candidate, input).catch((error) => {
+      setWorktreeBootstrapState(
+        candidate.directory,
+        WORKTREE_BOOTSTRAP_FAILED,
+        error instanceof Error ? error.message : String(error)
+      );
+      void cleanupFailedFastWorktreeCreate(context, candidate);
+      console.warn('[GitService] Background worktree creation failed:', error instanceof Error ? error.message : String(error));
+    });
+
+    return {
+      head: '',
+      name: candidate.name,
+      branch: localBranch,
+      path: candidate.directory,
+      directoryCreated: true,
+      bootstrapStatus,
+    };
+  }
+
+  return attachGitWorktreeToCandidate(context, candidate, input);
 }
 
 export async function getWorktreeBootstrapStatus(directory: string): Promise<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }> {
@@ -1939,43 +2032,6 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   clearWorktreeBootstrapState(matchedEntry.worktree);
 
   return true;
-}
-
-/**
- * Get branches that are available for worktree checkout
- * (branches not already checked out in any worktree)
- */
-export async function getAvailableBranchesForWorktree(directory: string): Promise<GitBranchDetails[]> {
-  const [branches, worktrees] = await Promise.all([
-    getGitBranches(directory),
-    listGitWorktrees(directory),
-  ]);
-
-  // Get set of branches already checked out in worktrees
-  const checkedOutBranches = new Set<string>();
-  for (const wt of worktrees) {
-    if (wt.branch) {
-      checkedOutBranches.add(wt.branch.replace(/^refs\/heads\//, ''));
-    }
-  }
-
-  // Filter out branches that are already checked out
-  const availableBranches: GitBranchDetails[] = [];
-  for (const name of branches.all) {
-    // Skip remote branches for worktree creation
-    if (name.startsWith('remotes/')) {
-      continue;
-    }
-    
-    if (!checkedOutBranches.has(name)) {
-      const details = branches.branches[name];
-      if (details) {
-        availableBranches.push(details);
-      }
-    }
-  }
-
-  return availableBranches;
 }
 
 // ============== Diff Operations ==============
@@ -2150,10 +2206,6 @@ export async function revertGitFile(
   }
 }
 
-export async function stageGitFile(directory: string, filePath: string): Promise<void> {
-  await stageGitFiles(directory, [filePath]);
-}
-
 export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
   const paths = filePaths.map((path) => path.trim()).filter(Boolean);
 
@@ -2189,10 +2241,6 @@ export async function stageGitFiles(directory: string, filePaths: string[]): Pro
   }
 }
 
-export async function unstageGitFile(directory: string, filePath: string): Promise<void> {
-  await unstageGitFiles(directory, [filePath]);
-}
-
 export async function unstageGitFiles(directory: string, filePaths: string[]): Promise<void> {
   const paths = filePaths.map((path) => path.trim()).filter(Boolean);
 
@@ -2206,6 +2254,128 @@ export async function unstageGitFiles(directory: string, filePaths: string[]): P
   const fallback = await execGit(['reset', 'HEAD', '--', ...paths], directory);
   if (fallback.exitCode !== 0) {
     throw new Error(fallback.stderr || result.stderr || 'Failed to unstage git file');
+  }
+}
+
+const HUNK_ACTION_ARGS: Record<'stage' | 'unstage' | 'discard', string[]> = {
+  stage: ['--cached'],
+  unstage: ['--cached', '--reverse'],
+  discard: ['--reverse'],
+};
+
+const parsePatchPathToken = (line: string): string | null => {
+  const value = String(line || '').replace(/^(?:-{3}|\+{3})\s+/, '');
+  if (!value || value === '/dev/null') {
+    return null;
+  }
+
+  if (value.startsWith('"')) {
+    let token = '"';
+    let escaped = false;
+    for (let index = 1; index < value.length; index += 1) {
+      const char = value[index];
+      token += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        break;
+      }
+    }
+
+    try {
+      return JSON.parse(token) as string;
+    } catch {
+      return token.slice(1, token.endsWith('"') ? -1 : undefined);
+    }
+  }
+
+  return value.split('\t', 1)[0] || null;
+};
+
+const normalizePatchTargetPath = (value: string | null): string | null => {
+  if (!value || value === '/dev/null') {
+    return null;
+  }
+  return value.replace(/^[ab]\//, '').replace(/\\/g, '/');
+};
+
+const extractPatchTargetPath = (patch: string): string | null => {
+  const matches = [...patch.matchAll(/^(?:-{3}|\+{3})\s+.+$/gm)];
+  const realTargets = matches
+    .map((match) => normalizePatchTargetPath(parsePatchPathToken(match[0] ?? '')))
+    .filter((value): value is string => Boolean(value));
+  return realTargets[0] || null;
+};
+
+const getRepoRelativePath = async (directory: string, filePath: string): Promise<string> => {
+  const normalizedFilePath = normalizePath(filePath).replace(/\\/g, '/');
+  if (!path.isAbsolute(normalizedFilePath)) {
+    return normalizedFilePath.replace(/^\.?\//, '');
+  }
+
+  const rootResult = await execGit(['rev-parse', '--show-toplevel'], directory);
+  if (rootResult.exitCode !== 0) {
+    throw new Error(rootResult.stderr || 'Failed to resolve repository root');
+  }
+
+  const repoRoot = normalizePath(rootResult.stdout.trim());
+  return path.relative(repoRoot, normalizedFilePath).replace(/\\/g, '/');
+};
+
+/**
+ * Apply a single-hunk patch to stage, unstage, or discard it.
+ * The patch is written to a temp file and applied with `git apply`.
+ */
+export async function applyGitHunk(
+  directory: string,
+  filePath: string,
+  patch: string,
+  action: 'stage' | 'unstage' | 'discard',
+): Promise<void> {
+  if (!HUNK_ACTION_ARGS[action]) {
+    throw new Error('Invalid hunk action');
+  }
+  if (!filePath) {
+    throw new Error('path is required');
+  }
+  if (typeof patch !== 'string' || !patch.trim()) {
+    throw new Error('patch is required');
+  }
+  if (!/^@@\s/m.test(patch)) {
+    throw new Error('patch does not contain a hunk header');
+  }
+
+  const repoRelativePath = await getRepoRelativePath(directory, filePath);
+  const targetPath = extractPatchTargetPath(patch);
+  if (targetPath && targetPath !== repoRelativePath && targetPath !== filePath.replace(/\\/g, '/')) {
+    throw new Error('patch target path does not match the requested file');
+  }
+
+  const flags = HUNK_ACTION_ARGS[action];
+  const tmpDir = os.tmpdir();
+  const tmpPath = path.join(tmpDir, `openchamber-hunk-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`);
+
+  try {
+    await fs.promises.writeFile(tmpPath, patch, 'utf8');
+
+    const check = await execGit(['apply', ...flags, '--check', tmpPath], directory);
+    if (check.exitCode !== 0) {
+      const detail = (check.stderr || '').trim();
+      throw new Error(
+        detail
+          ? `Hunk no longer applies — refresh and try again.\n${detail}`
+          : 'Hunk no longer applies — refresh and try again.'
+      );
+    }
+
+    const apply = await execGit(['apply', ...flags, tmpPath], directory);
+    if (apply.exitCode !== 0) {
+      throw new Error(apply.stderr || 'Failed to apply git hunk');
+    }
+  } finally {
+    await fs.promises.rm(tmpPath, { force: true }).catch(() => {});
   }
 }
 
@@ -2564,7 +2734,7 @@ export async function gitPull(
   const files = changedFiles.exitCode === 0
     ? changedFiles.stdout.split('\n').map((line) => line.trim()).filter(Boolean)
     : [];
-   
+
   return {
     success: result.exitCode === 0,
     summary: { changes: files.length, insertions: 0, deletions: 0 },
@@ -2678,6 +2848,7 @@ export interface GitLogEntry {
   filesChanged: number;
   insertions: number;
   deletions: number;
+  parents: string[];
 }
 
 /**
@@ -2713,9 +2884,72 @@ async function resolveBaseRefForLog(
  */
 export async function getGitLog(
   directory: string,
-  options?: { maxCount?: number; from?: string; to?: string; file?: string }
+  options?: { maxCount?: number; from?: string; to?: string; file?: string; all?: boolean }
 ): Promise<{ all: GitLogEntry[]; latest: GitLogEntry | null; total: number }> {
   const maxCount = options?.maxCount || 50;
+
+  if (options?.all) {
+    const logArgs = [
+      'log',
+      `--max-count=${maxCount}`,
+      '--all',
+      '--topo-order',
+      '--date=iso',
+      '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+      '--shortstat',
+    ];
+
+    const result = await execGit(logArgs, directory);
+
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || 'Failed to get git log');
+    }
+
+    const records = result.stdout
+      .split('\x1e')
+      .map((e) => e.trim())
+      .filter(Boolean);
+
+    const entries: GitLogEntry[] = [];
+    for (const record of records) {
+      const lines = record.split('\n').filter((l) => l.trim().length > 0);
+      const header = lines.shift() || '';
+      const [hash, parentsRaw, author_name, author_email, date, message, refsRaw] =
+        header.split('\x1f');
+      if (!hash) continue;
+
+      const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
+      const refs = refsRaw ? refsRaw.trim() : '';
+
+      let filesChanged = 0;
+      let insertions = 0;
+      let deletions = 0;
+      for (const line of lines) {
+        const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+        const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+        const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+        if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+        if (insertMatch) insertions = parseInt(insertMatch[1], 10);
+        if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
+      }
+
+      entries.push({
+        hash,
+        date: date || '',
+        message: message || '',
+        refs,
+        body: '',
+        author_name: author_name || '',
+        author_email: author_email || '',
+        filesChanged,
+        insertions,
+        deletions,
+        parents,
+      });
+    }
+
+    return { all: entries, latest: entries[0] || null, total: entries.length };
+  }
 
   // Prefer the local ref; fall back to origin/<from> only when the local ref
   // cannot be resolved (e.g. user has never checked out the base branch).
@@ -2724,10 +2958,11 @@ export async function getGitLog(
   const args = [
     'log',
     `--max-count=${maxCount}`,
-    '--format=%H|%aI|%s|%D|%b|%an|%ae',
+    '--date=iso',
+    '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
     '--shortstat',
   ];
-  
+
   if (resolvedFrom && options?.to) {
     args.push(`${resolvedFrom}..${options.to}`);
   } else if (resolvedFrom) {
@@ -2735,51 +2970,70 @@ export async function getGitLog(
   } else if (options?.to) {
     args.push(options.to);
   }
-  
+
   if (options?.file) {
     args.push('--', options.file);
   }
 
   const result = await execGit(args, directory);
-  
+
   if (result.exitCode !== 0) {
     throw new Error(result.stderr.trim() || result.stdout.trim() || 'Failed to get git log');
   }
 
-  const entries: GitLogEntry[] = [];
-  const lines = result.stdout.split('\n');
-  let current: Partial<GitLogEntry> | null = null;
+  const records = result.stdout
+    .split('\x1e')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 
-  for (const line of lines) {
-    if (line.includes('|') && !line.startsWith(' ')) {
-      if (current?.hash) {
-        entries.push(current as GitLogEntry);
-      }
-      const parts = line.split('|');
-      current = {
-        hash: parts[0] || '',
-        date: parts[1] || '',
-        message: parts[2] || '',
-        refs: parts[3] || '',
-        body: parts[4] || '',
-        author_name: parts[5] || '',
-        author_email: parts[6] || '',
-        filesChanged: 0,
-        insertions: 0,
-        deletions: 0,
-      };
-    } else if (current && line.includes('file')) {
-      const statsMatch = line.match(/(\d+)\s+files?\s+changed(?:,\s+(\d+)\s+insertions?)?(?:,\s+(\d+)\s+deletions?)?/);
-      if (statsMatch) {
-        current.filesChanged = parseInt(statsMatch[1] || '0', 10);
-        current.insertions = parseInt(statsMatch[2] || '0', 10);
-        current.deletions = parseInt(statsMatch[3] || '0', 10);
-      }
+  const statsMap = new Map<string, { filesChanged: number; insertions: number; deletions: number; parents: string[] }>();
+
+  for (const record of records) {
+    const lines = record.split('\n').filter((line) => line.trim().length > 0);
+    const header = lines.shift() || '';
+    const [hash, parentsRaw] = header.split('\x1f');
+    const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
+    if (!hash) continue;
+
+    let filesChanged = 0;
+    let insertions = 0;
+    let deletions = 0;
+
+    for (const line of lines) {
+      const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+      const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+      const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+      if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+      if (insertMatch) insertions = parseInt(insertMatch[1], 10);
+      if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
     }
+
+    statsMap.set(hash, { filesChanged, insertions, deletions, parents });
   }
 
-  if (current?.hash) {
-    entries.push(current as GitLogEntry);
+  const entries: GitLogEntry[] = [];
+  for (const record of records) {
+    const header = record.split('\n').filter((l) => l.trim().length > 0)[0] || '';
+    const [hash] = header.split('\x1f');
+    if (!hash) continue;
+    const stats = statsMap.get(hash) || { filesChanged: 0, insertions: 0, deletions: 0, parents: [] };
+    // Need to re-parse header fields for the final entries array
+    const lines = record.split('\n').filter((l) => l.trim().length > 0);
+    const lineHeader = lines.shift() || '';
+    const [, , author_name, author_email, date, message, refs] = lineHeader.split('\x1f');
+    entries.push({
+      hash,
+      date: date || '',
+      message: message || '',
+      refs: refs?.trim() || '',
+      body: '',
+      author_name: author_name || '',
+      author_email: author_email || '',
+      filesChanged: stats.filesChanged,
+      insertions: stats.insertions,
+      deletions: stats.deletions,
+      parents: stats.parents,
+    });
   }
 
   return {
@@ -2966,12 +3220,15 @@ export async function setGitIdentity(
   directory: string,
   userName: string,
   userEmail: string,
-  sshKey?: string | null
+  sshKey?: string | null,
+  signCommits?: boolean | null,
+  signingKey?: string | null
 ): Promise<{ success: boolean }> {
   const repo = await getRepository(directory);
   
   // Build SSH command once if needed
   const sshCommand = sshKey ? buildSshCommand(sshKey) : null;
+  const shouldSignCommits = signCommits === true && typeof signingKey === 'string' && signingKey.trim().length > 0;
   
   if (repo) {
     try {
@@ -2979,6 +3236,11 @@ export async function setGitIdentity(
       await repo.setConfig('user.email', userEmail);
       if (sshCommand) {
         await repo.setConfig('core.sshCommand', sshCommand);
+      }
+      if (shouldSignCommits) {
+        await repo.setConfig('gpg.format', 'ssh');
+        await repo.setConfig('user.signingkey', signingKey.trim());
+        await repo.setConfig('commit.gpgsign', 'true');
       }
       return { success: true };
     } catch (error) {
@@ -2991,6 +3253,11 @@ export async function setGitIdentity(
   await execGit(['config', 'user.email', userEmail], directory);
   if (sshCommand) {
     await execGit(['config', 'core.sshCommand', sshCommand], directory);
+  }
+  if (shouldSignCommits) {
+    await execGit(['config', 'gpg.format', 'ssh'], directory);
+    await execGit(['config', 'user.signingkey', signingKey.trim()], directory);
+    await execGit(['config', 'commit.gpgsign', 'true'], directory);
   }
 
   return { success: true };
@@ -3205,36 +3472,97 @@ export async function continueMerge(directory: string): Promise<{ success: boole
   throw new Error(result.stderr || 'Continue merge failed');
 }
 
-// ============== Stash Operations ==============
+// ============== Commit Actions ==============
 
-/**
- * Stash changes
- */
-export async function stash(
-  directory: string,
-  options?: { message?: string; includeUntracked?: boolean }
-): Promise<{ success: boolean }> {
-  const args = ['stash', 'push'];
-
-  // Include untracked files by default
-  if (options?.includeUntracked !== false) {
-    args.push('--include-untracked');
+export async function checkoutCommit(directory: string, hash: string): Promise<{ success: boolean }> {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
   }
-
-  if (options?.message) {
-    args.push('-m', options.message);
+  const result = await execGit(['checkout', hash], directory);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr || 'Failed to checkout commit');
   }
-
-  const result = await execGit(args, directory);
-  return { success: result.exitCode === 0 };
+  return { success: true };
 }
 
-/**
- * Pop the most recent stash
- */
-export async function stashPop(directory: string): Promise<{ success: boolean }> {
-  const result = await execGit(['stash', 'pop'], directory);
-  return { success: result.exitCode === 0 };
+export async function cherryPick(directory: string, hash: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  const result = await execGit(['cherry-pick', hash], directory);
+
+  if (result.exitCode === 0) {
+    return { success: true, conflict: false };
+  }
+
+  const output = (result.stdout + result.stderr).toLowerCase();
+  const isConflict =
+    output.includes('conflict') ||
+    output.includes('patch does not apply');
+
+  if (isConflict) {
+    const statusResult = await execGit(['status', '--porcelain'], directory);
+    const conflictFiles = statusResult.stdout
+      .split('\n')
+      .filter((line) => line.startsWith('UU') || line.startsWith('AA') || line.startsWith('DD'))
+      .map((line) => line.slice(3).trim());
+
+    return { success: false, conflict: true, conflictFiles };
+  }
+
+  throw new Error(result.stderr || 'Cherry-pick failed');
+}
+
+export async function revertCommit(directory: string, hash: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }> {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  const result = await execGit(['revert', '--no-commit', hash], directory);
+
+  if (result.exitCode === 0) {
+    return { success: true, conflict: false };
+  }
+
+  const output = (result.stdout + result.stderr).toLowerCase();
+  const isConflict =
+    output.includes('conflict') ||
+    output.includes('revert failed');
+
+  if (isConflict) {
+    const statusResult = await execGit(['status', '--porcelain'], directory);
+    const conflictFiles = statusResult.stdout
+      .split('\n')
+      .filter((line) => line.startsWith('UU') || line.startsWith('AA') || line.startsWith('DD'))
+      .map((line) => line.slice(3).trim());
+
+    return { success: false, conflict: true, conflictFiles };
+  }
+
+  throw new Error(result.stderr || 'Revert failed');
+}
+
+export async function resetToCommit(
+  directory: string,
+  hash: string,
+  mode: 'soft' | 'mixed' | 'hard',
+  force = false
+): Promise<{ success: boolean }> {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  if (mode === 'hard' && !force) {
+    const statusResult = await execGit(['status', '--porcelain'], directory);
+    const isDirty = statusResult.stdout.trim().length > 0;
+    if (isDirty) {
+      throw new Error('Cannot hard reset: uncommitted changes in working tree. Stash or commit first, or use force.');
+    }
+  }
+
+  const result = await execGit(['reset', `--${mode}`, hash], directory);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr || 'Reset failed');
+  }
+  return { success: true };
 }
 
 // ============== Worktree Validation & Canonicalization ==============

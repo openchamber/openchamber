@@ -12,6 +12,7 @@ interface PierreDiffCommentOverlaysProps {
   selection: SelectedLineRange | null;
   editingDraftId: string | null;
   commentText: string;
+  onTextChange: (text: string) => void;
   fileLabel: string;
   onSave: (text: string, range?: SelectedLineRange) => void;
   onCancel: () => void;
@@ -48,6 +49,7 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
     selection,
     editingDraftId,
     commentText,
+    onTextChange,
     fileLabel,
     onSave,
     onCancel,
@@ -178,6 +180,7 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
           return createPortal(
             <InlineCommentInput
               initialText={commentText}
+              onTextChange={onTextChange}
               fileLabel={fileLabel}
               lineRange={{
                 start: draft.startLine,
@@ -214,6 +217,7 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
         return createPortal(
           <InlineCommentInput
             initialText={commentText}
+            onTextChange={onTextChange}
             fileLabel={fileLabel}
             lineRange={selection}
             isEditing={false}

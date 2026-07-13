@@ -10,6 +10,7 @@ import { buildResult } from '../utils/index.js';
 import * as claude from './claude.js';
 import * as codex from './codex.js';
 import * as copilot from './copilot.js';
+import * as cursor from './cursor.js';
 import * as google from './google/index.js';
 import * as kimi from './kimi.js';
 import * as nanogpt from './nanogpt.js';
@@ -21,6 +22,7 @@ import * as minimaxCodingPlan from './minimax-coding-plan.js';
 import * as minimaxCnCodingPlan from './minimax-cn-coding-plan.js';
 import * as ollamaCloud from './ollama-cloud.js';
 import * as wafer from './wafer.js';
+import * as opencodeGo from './opencode-go.js';
 
 const registry = {
   claude: {
@@ -35,10 +37,16 @@ const registry = {
     isConfigured: codex.isConfigured,
     fetchQuota: codex.fetchQuota
   },
+  cursor: {
+    providerId: cursor.providerId,
+    providerName: cursor.providerName,
+    isConfigured: cursor.isConfigured,
+    fetchQuota: cursor.fetchQuota
+  },
   google: {
-    providerId: 'google',
-    providerName: 'Google',
-    isConfigured: () => google.resolveGoogleAuthSources().length > 0,
+    providerId: google.providerId,
+    providerName: google.providerName,
+    isConfigured: google.isConfigured,
     fetchQuota: google.fetchGoogleQuota
   },
   'zai-coding-plan': {
@@ -106,6 +114,12 @@ const registry = {
     providerName: wafer.providerName,
     isConfigured: wafer.isConfigured,
     fetchQuota: wafer.fetchQuota
+  },
+  'opencode-go': {
+    providerId: opencodeGo.providerId,
+    providerName: opencodeGo.providerName,
+    isConfigured: opencodeGo.isConfigured,
+    fetchQuota: opencodeGo.fetchQuota
   }
 };
 
@@ -155,12 +169,13 @@ export const fetchClaudeQuota = claude.fetchQuota;
 export const fetchOpenaiQuota = openai.fetchQuota;
 export const fetchGoogleQuota = google.fetchGoogleQuota;
 export const fetchCodexQuota = codex.fetchQuota;
+export const fetchCursorQuota = cursor.fetchQuota;
 export const fetchCopilotQuota = copilot.fetchQuota;
 export const fetchCopilotAddonQuota = copilot.fetchQuotaAddon;
 export const fetchKimiQuota = kimi.fetchQuota;
 export const fetchOpenRouterQuota = openrouter.fetchQuota;
 export const fetchZaiQuota = zai.fetchQuota;
-export const fetchZhipuaiCodingPlanQuota = zhipuaiCodingPlan.fetchQuota;
+const fetchZhipuaiCodingPlanQuota = zhipuaiCodingPlan.fetchQuota;
 export const fetchNanoGptQuota = nanogpt.fetchQuota;
 export const fetchMinimaxCodingPlanQuota = minimaxCodingPlan.fetchQuota;
 export const fetchMinimaxCnCodingPlanQuota = minimaxCnCodingPlan.fetchQuota;

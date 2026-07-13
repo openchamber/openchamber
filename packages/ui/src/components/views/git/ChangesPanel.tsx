@@ -49,9 +49,11 @@ interface ChangesPanelProps {
   diffStats: Record<string, { insertions: number; deletions: number }> | undefined;
   revertingPaths: Set<string>;
   isRevertingAll?: boolean;
+  headerBackgroundClassName?: string;
   onVisiblePathsChange?: (paths: string[]) => void;
   /** Reverts every changed path across all groups; rendered once for the panel. */
   onRevertAll?: (paths: string[]) => Promise<void> | void;
+  onRevertDirectory?: (paths: string[]) => Promise<void> | void;
 }
 
 const CHANGE_LIST_VIRTUALIZE_THRESHOLD = 1000;
@@ -66,6 +68,12 @@ type PanelRow =
   | { type: 'directory'; key: string; groupIndex: number; directory: ChangesTreeDirectoryNode; depth: number }
   | { type: 'revert-all'; key: string };
 
+type PendingDirectoryRevert = {
+  path: string;
+  paths: string[];
+  count: number;
+};
+
 const expandedKey = (groupId: string, path: string): string => `${groupId} ${path}`;
 
 export const ChangesPanel: React.FC<ChangesPanelProps> = ({
@@ -73,8 +81,10 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   diffStats,
   revertingPaths,
   isRevertingAll = false,
+  headerBackgroundClassName = 'bg-sidebar',
   onVisiblePathsChange,
   onRevertAll,
+  onRevertDirectory,
 }) => {
   const { t } = useI18n();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
@@ -86,6 +96,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(new Set());
   const [expandedDirectories, setExpandedDirectories] = React.useState<Set<string>>(new Set());
   const [revertAllOpen, setRevertAllOpen] = React.useState(false);
+  const [pendingDirectoryRevert, setPendingDirectoryRevert] = React.useState<PendingDirectoryRevert | null>(null);
 
   const trees = React.useMemo(
     () => visibleGroups.map((group) => buildChangesTree(group.entries)),
@@ -184,30 +195,26 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
 
   const rowCount = rows.length;
   const shouldVirtualize = rowCount >= CHANGE_LIST_VIRTUALIZE_THRESHOLD;
-  const rowVirtualizer = useVirtualizer({
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: rowCount,
+    enabled: shouldVirtualize,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => CHANGE_ROW_ESTIMATE_PX,
     overscan: 12,
-    enabled: shouldVirtualize,
+    getItemKey: (index) => rows[index]?.key ?? index,
   });
-
-  // Remeasure when the container transitions from display:none (hidden tab) back
-  // to visible layout, otherwise stale zero-height measurements render no rows.
-  React.useEffect(() => {
-    if (!shouldVirtualize) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(() => rowVirtualizer.measure());
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [shouldVirtualize, rowVirtualizer]);
-
-  const totalSize = rowVirtualizer.getTotalSize();
-  const virtualRows = React.useMemo(
-    () => (shouldVirtualize && totalSize >= 0 ? rowVirtualizer.getVirtualItems() : []),
-    [shouldVirtualize, rowVirtualizer, totalSize]
-  );
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  // First VISIBLE row index drives the visible-path prefetch window (the
+  // virtua findItemIndex/onScroll pair this replaces). virtualRows starts at
+  // the overscan boundary — up to `overscan` rows above the viewport — so
+  // skip rows that end above the current scroll offset; otherwise the
+  // prefetch budget leaks to offscreen files above the viewport.
+  const visibleStartIndex = React.useMemo(() => {
+    if (!shouldVirtualize) return 0;
+    const scrollTop = scrollRef.current?.scrollTop ?? 0;
+    const firstVisible = virtualRows.find((item) => item.end > scrollTop);
+    return firstVisible?.index ?? 0;
+  }, [shouldVirtualize, virtualRows, scrollRef]);
 
   React.useEffect(() => {
     if (!onVisiblePathsChange) {
@@ -235,11 +242,16 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     }
 
     onVisiblePathsChange(
-      virtualRows
-        .map((item) => collectFromRow(rows[item.index]))
+      rows
+        .slice(
+          visibleStartIndex,
+          visibleStartIndex + Math.ceil((scrollRef.current?.clientHeight ?? 0) / CHANGE_ROW_ESTIMATE_PX) + VISIBLE_PREFETCH_LIMIT
+        )
+        .map((row) => collectFromRow(row))
         .filter((value): value is string => Boolean(value))
+        .slice(0, VISIBLE_PREFETCH_LIMIT)
     );
-  }, [onVisiblePathsChange, rowCount, rows, shouldVirtualize, virtualRows]);
+  }, [onVisiblePathsChange, rowCount, rows, shouldVirtualize, visibleStartIndex]);
 
   const toggleGroupCollapsed = React.useCallback((groupId: string) => {
     setCollapsedGroups((previous) => {
@@ -274,6 +286,9 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     return Array.from(seen);
   }, [visibleGroups]);
   const revertAllCount = allChangePaths.length;
+  const isPendingDirectoryReverting = pendingDirectoryRevert
+    ? isRevertingAll || pendingDirectoryRevert.paths.some((path) => revertingPaths.has(path))
+    : false;
 
   const handleConfirmRevertAll = React.useCallback(async () => {
     if (!onRevertAll || isRevertingAll || allChangePaths.length === 0) {
@@ -283,6 +298,14 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     setRevertAllOpen(false);
   }, [allChangePaths, isRevertingAll, onRevertAll]);
 
+  const handleConfirmRevertDirectory = React.useCallback(async () => {
+    if (!onRevertDirectory || !pendingDirectoryRevert || isPendingDirectoryReverting) {
+      return;
+    }
+    await onRevertDirectory(pendingDirectoryRevert.paths);
+    setPendingDirectoryRevert(null);
+  }, [isPendingDirectoryReverting, onRevertDirectory, pendingDirectoryRevert]);
+
   const renderHeader = React.useCallback(
     (group: ChangesGroupConfig, isFirst: boolean) => {
       const collapsed = collapsedGroups.has(group.id);
@@ -290,7 +313,8 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       return (
         <div
           className={cn(
-            'sticky top-0 z-10 flex items-center gap-2 bg-sidebar py-2',
+            'sticky top-0 z-10 flex items-center gap-2 py-2',
+            headerBackgroundClassName,
             ROW_PADDING_CLASSNAME,
             !isFirst && 'mt-1 border-t border-border/40'
           )}
@@ -324,15 +348,17 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         </div>
       );
     },
-    [collapsedGroups, toggleGroupCollapsed]
+    [collapsedGroups, headerBackgroundClassName, toggleGroupCollapsed]
   );
 
   const renderDirectory = React.useCallback(
     (group: ChangesGroupConfig, directory: ChangesTreeDirectoryNode, depth: number) => {
       const isExpanded = expandedDirectories.has(expandedKey(group.id, directory.path));
+      const directoryPaths = directory.files.map((file) => file.path);
+      const isDirectoryReverting = isRevertingAll || directoryPaths.some((path) => revertingPaths.has(path));
       return (
         <div
-          className={cn('group flex items-center gap-2 py-1.5 hover:bg-sidebar/40', ROW_PADDING_CLASSNAME)}
+          className={cn('group flex items-center gap-2 py-1.5', ROW_PADDING_CLASSNAME)}
           style={{ paddingLeft: `${depth * TREE_INDENT_PX}px` }}
         >
           <button
@@ -355,6 +381,22 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             </span>
             <span className="ml-auto shrink-0 typography-micro text-muted-foreground">{directory.files.length}</span>
           </button>
+          {group.showRevertActions !== false && onRevertDirectory ? (
+            <button
+              type="button"
+              onClick={() => setPendingDirectoryRevert({ path: directory.path, paths: directoryPaths, count: directoryPaths.length })}
+              disabled={isDirectoryReverting}
+              className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={t('gitView.changes.revertDirectoryAria', { path: directory.path })}
+              title={t('gitView.changes.revertDirectoryTooltip')}
+            >
+              {isDirectoryReverting ? (
+                <Icon name="loader-4" className="size-3.5 animate-spin" />
+              ) : (
+                <Icon name="arrow-go-back" className="size-3.5" />
+              )}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => group.onActionAll(directory.files.map((file) => file.path))}
@@ -373,7 +415,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         </div>
       );
     },
-    [expandedDirectories, t, toggleDirectoryExpanded]
+    [expandedDirectories, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
   );
 
   const renderRow = React.useCallback(
@@ -449,21 +491,28 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           className="overlay-scrollbar-target overlay-scrollbar-container min-h-0 w-full flex-1 overflow-x-hidden overflow-y-auto"
         >
           {shouldVirtualize ? (
-            <div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+            <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
+              {/* Absolutely positioned rows: variable-height rows can drift from
+                  the computed total height under flow stacking until measured. */}
               {virtualRows.map((item) => {
                 const row = rows[item.index];
                 if (!row) return null;
                 return (
                   <div
                     key={row.key}
-                    ref={rowVirtualizer.measureElement}
                     data-index={item.index}
+                    ref={rowVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${item.start}px)`,
+                    }}
                     className={cn(
-                      'absolute left-0 top-0 w-full',
                       showDivider(item.index) &&
                         'before:pointer-events-none before:absolute before:left-0 before:right-2 before:top-0 before:border-t before:border-border/60'
                     )}
-                    style={{ transform: `translateY(${item.start}px)` }}
                   >
                     {renderRow(row, item.index === 0)}
                   </div>
@@ -516,6 +565,39 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
               disabled={isRevertingAll}
             >
               {isRevertingAll ? t('gitView.changes.reverting') : t('gitView.changes.revertAll')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!pendingDirectoryRevert}
+        onOpenChange={(open) => {
+          if (!isPendingDirectoryReverting && !open) setPendingDirectoryRevert(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('gitView.changes.revertDirectoryDialogTitle')}</DialogTitle>
+            <DialogDescription>
+              {pendingDirectoryRevert
+                ? pendingDirectoryRevert.count === 1
+                  ? t('gitView.changes.revertDirectoryDescriptionSingle', { count: pendingDirectoryRevert.count, path: pendingDirectoryRevert.path })
+                  : t('gitView.changes.revertDirectoryDescriptionPlural', { count: pendingDirectoryRevert.count, path: pendingDirectoryRevert.path })
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setPendingDirectoryRevert(null)} disabled={isPendingDirectoryReverting}>
+              {t('gitView.common.cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void handleConfirmRevertDirectory()}
+              disabled={isPendingDirectoryReverting || !pendingDirectoryRevert}
+            >
+              {isPendingDirectoryReverting ? t('gitView.changes.reverting') : t('gitView.changes.revertDirectory')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -5,6 +5,7 @@ import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import type { MainTab } from '@/stores/useUIStore';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 /**
  * Check if running in VS Code webview context.
@@ -27,11 +28,20 @@ function isVSCodeContext(): boolean {
  *
  * Works in:
  * - Web: Full bidirectional sync
- * - Desktop (Tauri): Full bidirectional sync
+ * - Desktop: Full bidirectional sync
  * - VS Code: State-only (no URL updates, reads initial params)
+ * - Embedded session-chat iframe (`?ocPanel=session-chat`): No URL updates.
+ *   The iframe's session identity is fixed at mount (the parent builds the
+ *   src with `sessionId`); in-place subtask navigation must NOT rewrite the
+ *   URL, otherwise `ocPanel` (and `directory`/`readOnly`) get stripped and
+ *   `isEmbeddedSessionChat()` starts returning false, breaking subsequent
+ *   "Open subtask" clicks.
  */
 export function useRouter(): void {
   const isVSCode = React.useMemo(() => isVSCodeContext(), []);
+  // Captured once at mount: the iframe's embedded-ness never changes during
+  // its lifetime (a parent src swap is a full reload).
+  const isEmbeddedChat = React.useMemo(() => isEmbeddedSessionChat(), []);
 
   // Track initialization to avoid duplicate applies
   const initializedRef = React.useRef(false);
@@ -60,7 +70,8 @@ export function useRouter(): void {
         if (route.sessionId) {
           const currentSessionId = useSessionUIStore.getState().currentSessionId;
           if (route.sessionId !== currentSessionId) {
-            await setCurrentSession(route.sessionId);
+            const directoryHint = useSessionUIStore.getState().getDirectoryForSession(route.sessionId);
+            setCurrentSession(route.sessionId, directoryHint);
           }
         }
 
@@ -114,14 +125,14 @@ export function useRouter(): void {
    */
   const syncURLFromState = React.useCallback(
     (options: { replace?: boolean } = {}) => {
-      if (isVSCode || isApplyingRouteRef.current) {
+      if (isVSCode || isEmbeddedChat || isApplyingRouteRef.current) {
         return;
       }
 
       const state = getCurrentAppState();
       updateBrowserURL(state, options);
     },
-    [isVSCode, getCurrentAppState]
+    [isVSCode, isEmbeddedChat, getCurrentAppState]
   );
 
   // Initialize: parse URL and apply route on mount
@@ -143,18 +154,27 @@ export function useRouter(): void {
     const initializeRoute = async () => {
       await applyRoute(route);
 
-      // After applying, update URL to normalized form (use replaceState)
-      if (!isVSCode) {
-        syncURLFromState({ replace: true });
+      // After applying, update URL to normalized form (use replaceState).
+      // Use the parsed route values instead of an immediate store snapshot so
+      // deep links do not briefly normalize `?session=...` back to `/` while
+      // the session's directory/message bootstrap is still catching up.
+      if (!isVSCode && !isEmbeddedChat) {
+        updateBrowserURL({
+          ...getCurrentAppState(),
+          sessionId: route.sessionId ?? useSessionUIStore.getState().currentSessionId,
+          tab: route.tab ?? useUIStore.getState().activeMainTab,
+          settingsPath: route.settingsPath ?? useUIStore.getState().settingsPage,
+          diffFile: route.diffFile ?? useUIStore.getState().pendingDiffFile,
+        }, { replace: true, force: true });
       }
     };
 
     void initializeRoute();
-  }, [applyRoute, isVSCode, syncURLFromState]);
+  }, [applyRoute, getCurrentAppState, isVSCode, isEmbeddedChat]);
 
   // Subscribe to session changes
   React.useEffect(() => {
-    if (isVSCode) {
+    if (isVSCode || isEmbeddedChat) {
       return;
     }
 
@@ -173,11 +193,11 @@ export function useRouter(): void {
     });
 
     return unsubscribe;
-  }, [isVSCode, syncURLFromState]);
+  }, [isVSCode, isEmbeddedChat, syncURLFromState]);
 
   // Subscribe to UI store changes (tab, settings)
   React.useEffect(() => {
-    if (isVSCode) {
+    if (isVSCode || isEmbeddedChat) {
       return;
     }
 
@@ -210,11 +230,11 @@ export function useRouter(): void {
     });
 
     return unsubscribe;
-  }, [isVSCode, syncURLFromState]);
+  }, [isVSCode, isEmbeddedChat, syncURLFromState]);
 
   // Listen for browser back/forward navigation
   React.useEffect(() => {
-    if (typeof window === 'undefined' || isVSCode) {
+    if (typeof window === 'undefined' || isVSCode || isEmbeddedChat) {
       return;
     }
 
@@ -244,104 +264,5 @@ export function useRouter(): void {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [applyRoute, isVSCode, setActiveMainTab, setSettingsDialogOpen]);
-}
-
-/**
- * Programmatically navigate to a route.
- * Can be used from outside React components.
- */
-export function navigateToRoute(route: Partial<RouteState>): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  // Check VS Code context
-  const win = window as { __VSCODE_CONFIG__?: unknown };
-  if (win.__VSCODE_CONFIG__ !== undefined) {
-    // In VS Code, just apply state changes directly
-    if (route.sessionId) {
-      void useSessionUIStore.getState().setCurrentSession(route.sessionId);
-    }
-    if (route.settingsPath) {
-      useUIStore.getState().setSettingsPage(resolveSettingsSlug(route.settingsPath));
-      useUIStore.getState().setSettingsDialogOpen(true);
-    } else if (route.tab) {
-      useUIStore.getState().setActiveMainTab(route.tab);
-    }
-    if (route.diffFile) {
-      useUIStore.getState().navigateToDiff(route.diffFile);
-    }
-    return;
-  }
-
-  // Build URL and navigate
-  const params = new URLSearchParams();
-
-  if (route.sessionId) {
-    params.set('session', route.sessionId);
-  }
-  if (route.settingsPath) {
-    params.set('settings', route.settingsPath);
-  } else if (route.tab && route.tab !== 'chat') {
-    if (useUIStore.getState().isSettingsDialogOpen) {
-      useUIStore.getState().setSettingsDialogOpen(false);
-    }
-    params.set('tab', route.tab);
-  }
-  if (route.diffFile) {
-    params.set('file', route.diffFile);
-  }
-
-  const search = params.toString();
-  const url = search ? `${window.location.pathname}?${search}` : window.location.pathname;
-
-  window.history.pushState({ route }, '', url);
-
-  // Also apply to state
-  if (route.sessionId) {
-    void useSessionUIStore.getState().setCurrentSession(route.sessionId);
-  }
-  if (route.settingsPath) {
-    useUIStore.getState().setSettingsPage(resolveSettingsSlug(route.settingsPath));
-    useUIStore.getState().setSettingsDialogOpen(true);
-  } else if (route.tab) {
-    useUIStore.getState().setActiveMainTab(route.tab);
-  }
-  if (route.diffFile) {
-    useUIStore.getState().navigateToDiff(route.diffFile);
-  }
-}
-
-/**
- * Get a shareable URL for the current state.
- */
-export function getShareableURL(): string {
-  if (typeof window === 'undefined') {
-    return '/';
-  }
-
-  const sessionState = useSessionUIStore.getState();
-  const uiState = useUIStore.getState();
-
-  const params = new URLSearchParams();
-
-  if (sessionState.currentSessionId) {
-    params.set('session', sessionState.currentSessionId);
-  }
-
-  if (uiState.isSettingsDialogOpen) {
-    params.set('settings', uiState.settingsPage || 'home');
-  } else if (uiState.activeMainTab !== 'chat') {
-    params.set('tab', uiState.activeMainTab);
-  }
-
-  if (uiState.activeMainTab === 'diff' && uiState.pendingDiffFile) {
-    params.set('file', uiState.pendingDiffFile);
-  }
-
-  const search = params.toString();
-  const base = `${window.location.origin}${window.location.pathname}`;
-
-  return search ? `${base}?${search}` : base;
+  }, [applyRoute, isVSCode, isEmbeddedChat, setActiveMainTab, setSettingsDialogOpen]);
 }

@@ -5,6 +5,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
+import { updateDesktopSettings } from '@/lib/persistence';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import {
   formatShortcutForDisplay,
   getCustomizableShortcutActions,
@@ -53,7 +55,13 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   const clearShortcutOverride = useUIStore((state) => state.clearShortcutOverride);
   const resetAllShortcutOverrides = useUIStore((state) => state.resetAllShortcutOverrides);
 
-  const actions = React.useMemo(() => getCustomizableShortcutActions(), []);
+  const actions = React.useMemo(() => {
+    const all = getCustomizableShortcutActions();
+    if (!isVSCodeRuntime()) {
+      return all;
+    }
+    return all.filter((action) => action.id !== 'toggle_prompt_navigator');
+  }, []);
   const actionLabel = React.useCallback((id: string, fallbackLabel: string): string => {
     const key = `settings.openchamber.keyboardShortcuts.action.${id}.label`;
     const translated = tUnsafe(key);
@@ -69,6 +77,10 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     combo: ShortcutCombo;
     conflictActionId: string;
   } | null>(null);
+
+  const persistShortcutOverrides = React.useCallback((nextOverrides: Record<string, ShortcutCombo>) => {
+    void updateDesktopSettings({ shortcutOverrides: nextOverrides });
+  }, []);
 
   const findConflict = React.useCallback((actionId: string, combo: ShortcutCombo): string | null => {
     const normalized = normalizeCombo(combo);
@@ -93,7 +105,9 @@ export const KeyboardShortcutsSettings: React.FC = () => {
       return;
     }
 
+    const nextOverrides = { ...shortcutOverrides, [actionId]: normalized };
     setShortcutOverride(actionId, normalized);
+    persistShortcutOverrides(nextOverrides);
     setPendingOverwrite(null);
     setErrorText('');
     setWarningText(isRiskyBrowserShortcut(normalized) ? t('settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut') : '');
@@ -102,15 +116,21 @@ export const KeyboardShortcutsSettings: React.FC = () => {
       delete rest[actionId];
       return rest;
     });
-  }, [findConflict, setShortcutOverride, t]);
+  }, [findConflict, persistShortcutOverrides, setShortcutOverride, shortcutOverrides, t]);
 
   const confirmOverwrite = React.useCallback(() => {
     if (!pendingOverwrite) {
       return;
     }
 
+    const nextOverrides = {
+      ...shortcutOverrides,
+      [pendingOverwrite.conflictActionId]: UNASSIGNED_SHORTCUT,
+      [pendingOverwrite.actionId]: pendingOverwrite.combo,
+    };
     setShortcutOverride(pendingOverwrite.conflictActionId, UNASSIGNED_SHORTCUT);
     setShortcutOverride(pendingOverwrite.actionId, pendingOverwrite.combo);
+    persistShortcutOverrides(nextOverrides);
     setPendingOverwrite(null);
     setErrorText('');
     setWarningText(isRiskyBrowserShortcut(pendingOverwrite.combo) ? t('settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut') : '');
@@ -119,10 +139,13 @@ export const KeyboardShortcutsSettings: React.FC = () => {
       delete rest[pendingOverwrite.actionId];
       return rest;
     });
-  }, [pendingOverwrite, setShortcutOverride, t]);
+  }, [pendingOverwrite, persistShortcutOverrides, setShortcutOverride, shortcutOverrides, t]);
 
   const resetOne = React.useCallback((actionId: string) => {
+    const nextOverrides = { ...shortcutOverrides };
+    delete nextOverrides[actionId];
     clearShortcutOverride(actionId);
+    persistShortcutOverrides(nextOverrides);
     setDraftByAction((current) => {
       const rest = { ...current };
       delete rest[actionId];
@@ -131,10 +154,10 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     setPendingOverwrite(null);
     setErrorText('');
     setWarningText('');
-  }, [clearShortcutOverride]);
+  }, [clearShortcutOverride, persistShortcutOverrides, shortcutOverrides]);
 
   return (
-    <div className="mb-8">
+    <div data-settings-item="shortcuts.keyboard-shortcuts" className="mb-8">
       <div className="mb-1 px-1">
         <div className="flex items-center gap-2">
           <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.keyboardShortcuts.title')}</h3>
@@ -145,6 +168,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             className="!font-normal"
             onClick={() => {
               resetAllShortcutOverrides();
+              persistShortcutOverrides({});
               setDraftByAction({});
               setPendingOverwrite(null);
               setErrorText('');

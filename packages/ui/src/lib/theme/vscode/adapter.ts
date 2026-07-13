@@ -4,7 +4,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 
 export type VSCodeThemeKind = 'light' | 'dark' | 'high-contrast';
 
-export type VSCodeThemeColorToken =
+type VSCodeThemeColorToken =
   // Editor core
   | 'editor.background'
   | 'editor.foreground'
@@ -12,6 +12,37 @@ export type VSCodeThemeColorToken =
   | 'editor.selectionForeground'
   | 'editor.lineHighlightBackground'
   | 'editorCursor.foreground'
+  // Chat
+  | 'interactive-session.foreground'
+  | 'chat.list.background'
+  | 'chat.requestBorder'
+  | 'chat.requestBackground'
+  | 'chat.requestBubbleBackground'
+  | 'chat.requestBubbleHoverBackground'
+  | 'chat.avatarBackground'
+  | 'chat.avatarForeground'
+  | 'chat.slashCommandBackground'
+  | 'chat.slashCommandForeground'
+  | 'chat.editedFileForeground'
+  | 'chat.requestCodeBorder'
+  | 'chat.linesAddedForeground'
+  | 'chat.linesRemovedForeground'
+  | 'chat.thinkingShimmer'
+  | 'chat.inputWorkingBorderColor1'
+  | 'chat.inputWorkingBorderColor2'
+  | 'chat.inputWorkingBorderColor3'
+  | 'textBlockQuote.background'
+  | 'textBlockQuote.border'
+  | 'toolbar.hoverBackground'
+  | 'toolbar.activeBackground'
+  | 'toolbar.hoverOutline'
+  | 'icon.foreground'
+  | 'inputOption.activeForeground'
+  | 'inputOption.activeBorder'
+  | 'inputOption.activeBackground'
+  | 'notificationsWarningIcon.foreground'
+  | 'problemsWarningIcon.foreground'
+  | 'problemsInfoIcon.foreground'
   // UI borders and focus
   | 'focusBorder'
   | 'contrastBorder'
@@ -80,6 +111,7 @@ export type VSCodeThemeColorToken =
   // Preformatted text (code)
   | 'textPreformat.foreground'
   | 'textPreformat.background'
+  | 'textPreformat.border'
   // Editor widgets
   | 'editorWidget.background'
   | 'editorWidget.foreground'
@@ -113,6 +145,37 @@ const VARIABLE_MAP: Record<VSCodeThemeColorToken, string> = {
   'editor.selectionForeground': '--vscode-editor-selectionForeground',
   'editor.lineHighlightBackground': '--vscode-editor-lineHighlightBackground',
   'editorCursor.foreground': '--vscode-editorCursor-foreground',
+  // Chat
+  'interactive-session.foreground': '--vscode-interactive-session-foreground',
+  'chat.list.background': '--vscode-chat-list-background',
+  'chat.requestBorder': '--vscode-chat-requestBorder',
+  'chat.requestBackground': '--vscode-chat-requestBackground',
+  'chat.requestBubbleBackground': '--vscode-chat-requestBubbleBackground',
+  'chat.requestBubbleHoverBackground': '--vscode-chat-requestBubbleHoverBackground',
+  'chat.avatarBackground': '--vscode-chat-avatarBackground',
+  'chat.avatarForeground': '--vscode-chat-avatarForeground',
+  'chat.slashCommandBackground': '--vscode-chat-slashCommandBackground',
+  'chat.slashCommandForeground': '--vscode-chat-slashCommandForeground',
+  'chat.editedFileForeground': '--vscode-chat-editedFileForeground',
+  'chat.requestCodeBorder': '--vscode-chat-requestCodeBorder',
+  'chat.linesAddedForeground': '--vscode-chat-linesAddedForeground',
+  'chat.linesRemovedForeground': '--vscode-chat-linesRemovedForeground',
+  'chat.thinkingShimmer': '--vscode-chat-thinkingShimmer',
+  'chat.inputWorkingBorderColor1': '--vscode-chat-inputWorkingBorderColor1',
+  'chat.inputWorkingBorderColor2': '--vscode-chat-inputWorkingBorderColor2',
+  'chat.inputWorkingBorderColor3': '--vscode-chat-inputWorkingBorderColor3',
+  'textBlockQuote.background': '--vscode-textBlockQuote-background',
+  'textBlockQuote.border': '--vscode-textBlockQuote-border',
+  'toolbar.hoverBackground': '--vscode-toolbar-hoverBackground',
+  'toolbar.activeBackground': '--vscode-toolbar-activeBackground',
+  'toolbar.hoverOutline': '--vscode-toolbar-hoverOutline',
+  'icon.foreground': '--vscode-icon-foreground',
+  'inputOption.activeForeground': '--vscode-inputOption-activeForeground',
+  'inputOption.activeBorder': '--vscode-inputOption-activeBorder',
+  'inputOption.activeBackground': '--vscode-inputOption-activeBackground',
+  'notificationsWarningIcon.foreground': '--vscode-notificationsWarningIcon-foreground',
+  'problemsWarningIcon.foreground': '--vscode-problemsWarningIcon-foreground',
+  'problemsInfoIcon.foreground': '--vscode-problemsInfoIcon-foreground',
   // UI borders and focus
   focusBorder: '--vscode-focusBorder',
   contrastBorder: '--vscode-contrastBorder',
@@ -181,6 +244,7 @@ const VARIABLE_MAP: Record<VSCodeThemeColorToken, string> = {
   // Preformat
   'textPreformat.foreground': '--vscode-textPreformat-foreground',
   'textPreformat.background': '--vscode-textPreformat-background',
+  'textPreformat.border': '--vscode-textPreformat-border',
   // Editor widgets
   'editorWidget.background': '--vscode-editorWidget-background',
   'editorWidget.foreground': '--vscode-editorWidget-foreground',
@@ -291,18 +355,18 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   // SURFACE COLORS - Layered backgrounds
   // ===========================================
   
-  // Main app background: sidebar is the outermost container
-  const background = read('sideBar.background', base.colors.surface.background);
+  // Main chat background: match VS Code's chat list first, then fall back to shell surfaces.
+  const background = read('chat.list.background', read('sideBar.background', base.colors.surface.background));
   
   // Main foreground text color
-  const foreground = read('foreground', read('editor.foreground', base.colors.surface.foreground));
+  const foreground = read('interactive-session.foreground', read('foreground', read('editor.foreground', base.colors.surface.foreground)));
   
   // Elevated surfaces: panels, cards, dialogs - use editorWidget or panel
   const elevated = read('editorWidget.background', read('panel.background', read('editor.background', base.colors.surface.elevated)));
   const elevatedForeground = read('editorWidget.foreground', read('panel.foreground', foreground));
   
   // Muted background: used for inactive/deemphasized areas - use list inactive selection
-  const muted = read('list.inactiveSelectionBackground', read('editor.lineHighlightBackground', base.colors.surface.muted));
+  const muted = read('chat.requestBackground', read('list.inactiveSelectionBackground', read('editor.lineHighlightBackground', base.colors.surface.muted)));
   
   // Muted foreground: secondary text - description foreground is perfect semantic match
   const mutedForeground = read('descriptionForeground', read('input.placeholderForeground', base.colors.surface.mutedForeground));
@@ -328,7 +392,8 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   
   // Border: Use widget.border (most generic), then input.border, panel.border
   // DO NOT reduce opacity - these are already properly set by VS Code themes
-  const border = read('widget.border', '') ||
+  const border = read('chat.requestBorder', '') ||
+    read('widget.border', '') ||
     read('input.border', '') ||
     read('panel.border', '') ||
     read('sideBar.border', '') ||
@@ -338,15 +403,15 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   const effectiveBorder = border || applyAlpha(foreground, isDark ? 0.25 : 0.2);
   
   // Hover/active backgrounds
-  const hoverBg = read('list.hoverBackground', base.colors.interactive.hover);
-  const activeBg = read('list.activeSelectionBackground', hoverBg);
+  const hoverBg = read('toolbar.hoverBackground', read('chat.requestBubbleHoverBackground', read('list.hoverBackground', base.colors.interactive.hover)));
+  const activeBg = read('toolbar.activeBackground', read('inputOption.activeBackground', read('list.activeSelectionBackground', hoverBg)));
   
   // Selection
   const selection = read('editor.selectionBackground', base.colors.interactive.selection);
   const selectionForeground = read('editor.selectionForeground', read('list.activeSelectionForeground', foreground));
   
   // Focus
-  const focus = read('focusBorder', accent);
+  const focus = read('focusBorder', read('inputOption.activeBorder', accent));
   const focusRing = applyAlpha(focus, isDark ? 0.45 : 0.35);
   
   // Cursor
@@ -359,13 +424,13 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   const errorColor = read('editorError.foreground', read('testing.iconFailed', base.colors.status.error));
   const errorBg = read('editorError.background', applyAlpha(errorColor, isDark ? 0.16 : 0.12));
   
-  const warningColor = read('editorWarning.foreground', base.colors.status.warning);
+  const warningColor = read('problemsWarningIcon.foreground', read('notificationsWarningIcon.foreground', read('editorWarning.foreground', base.colors.status.warning)));
   const warningBg = read('editorWarning.background', applyAlpha(warningColor, isDark ? 0.16 : 0.12));
   
   const successColor = read('testing.iconPassed', read('gitDecoration.addedResourceForeground', base.colors.status.success));
   const successBg = applyAlpha(successColor, isDark ? 0.16 : 0.12);
   
-  const infoColor = read('editorInfo.foreground', base.colors.status.info);
+  const infoColor = read('problemsInfoIcon.foreground', read('editorInfo.foreground', base.colors.status.info));
   const infoBg = read('editorInfo.background', applyAlpha(infoColor, isDark ? 0.16 : 0.12));
 
   // ===========================================
@@ -385,15 +450,15 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   // ===========================================
   
   // Tools border should be visible! Use border directly without extra opacity reduction
-  const toolsBorder = effectiveBorder;
-  const toolsBackground = applyAlpha(muted, 0.5);
-  const toolsHeaderHover = applyAlpha(hoverBg, 0.5);
+  const toolsBorder = read('chat.requestBorder', effectiveBorder);
+  const toolsBackground = read('editor.background', applyAlpha(muted, 0.5));
+  const toolsHeaderHover = read('toolbar.hoverBackground', applyAlpha(hoverBg, 0.5));
   
   // Diff colors from VS Code diff editor
   const diffAddedBg = read('diffEditor.insertedLineBackground', read('diffEditor.insertedTextBackground', successBg));
   const diffRemovedBg = read('diffEditor.removedLineBackground', read('diffEditor.removedTextBackground', errorBg));
-  const diffAddedColor = read('gitDecoration.addedResourceForeground', successColor);
-  const diffRemovedColor = read('gitDecoration.deletedResourceForeground', errorColor);
+  const diffAddedColor = read('chat.linesAddedForeground', read('gitDecoration.addedResourceForeground', successColor));
+  const diffRemovedColor = read('chat.linesRemovedForeground', read('gitDecoration.deletedResourceForeground', errorColor));
   const diffModifiedColor = read('gitDecoration.modifiedResourceForeground', infoColor);
 
   // ===========================================
@@ -408,7 +473,7 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   // ===========================================
   
   // User messages: same as chat input (subtle surface)
-  const userMessageBg = subtle;
+  const userMessageBg = read('chat.requestBubbleBackground', read('chat.requestBackground', subtle));
   
   return {
     ...base,
@@ -444,10 +509,10 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
       },
       interactive: {
         border: effectiveBorder,
-        borderHover: effectiveBorder,
+        borderHover: read('toolbar.hoverOutline', effectiveBorder),
         borderFocus: focus,
         selection,
-        selectionForeground,
+        selectionForeground: read('inputOption.activeForeground', selectionForeground),
         focus,
         focusRing,
         cursor,
@@ -492,7 +557,7 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
         background: toolsBackground,
         border: toolsBorder,
         headerHover: toolsHeaderHover,
-        icon: mutedForeground,
+        icon: read('icon.foreground', mutedForeground),
         title: foreground,
         description: applyAlpha(mutedForeground, 0.8),
         edit: {
@@ -507,12 +572,21 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
       },
       // Explicit chat section
       chat: {
+        background,
         userMessage: foreground,
         userMessageBackground: userMessageBg,
         assistantMessage: foreground,
         assistantMessageBackground: background,
         timestamp: mutedForeground,
         divider: effectiveBorder,
+        typing: read('chat.thinkingShimmer', mutedForeground),
+        avatarBackground: read('chat.avatarBackground', background),
+        avatarForeground: read('chat.avatarForeground', foreground),
+        slashCommandBackground: read('chat.slashCommandBackground', accent),
+        slashCommandForeground: read('chat.slashCommandForeground', accentForeground),
+        inputWorkingBorderColor1: read('chat.inputWorkingBorderColor1', accent),
+        inputWorkingBorderColor2: read('chat.inputWorkingBorderColor2', accentHover),
+        inputWorkingBorderColor3: read('chat.inputWorkingBorderColor3', accentMuted),
       },
       // Badges
       badges: {
@@ -531,10 +605,12 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
         heading4: foreground,
         link: accentMuted,
         linkHover: read('textLink.activeForeground', accentHover),
-        inlineCode: syntaxString,
+        inlineCode: read('textPreformat.foreground', syntaxString),
         inlineCodeBackground: subtle,
-        blockquote: mutedForeground,
-        blockquoteBorder: effectiveBorder,
+        inlineCodeBorder: read('textPreformat.border', read('chat.requestCodeBorder', effectiveBorder)),
+        blockquote: foreground,
+        blockquoteBackground: read('textBlockQuote.background', 'transparent'),
+        blockquoteBorder: read('textBlockQuote.border', effectiveBorder),
         listMarker: applyAlpha(accent, 0.6),
       },
       // Scrollbar

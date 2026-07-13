@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+
+const originalFetch = globalThis.fetch;
 
 import type { PluginEntry, PluginFile, RegistryResult } from './usePluginsStore';
 
@@ -29,6 +31,16 @@ mock.module('@/stores/useAgentsStore', () => ({
 mock.module('@/lib/configUpdate', () => ({
   startConfigUpdate: startConfigUpdateMock,
   finishConfigUpdate: finishConfigUpdateMock,
+}));
+
+// mock.module is process-global in bun: another test file (e.g.
+// useCommandsStore.test.ts) may have replaced '@/lib/runtime-fetch' with its
+// own stub before this file runs. Register our own mock so this suite always
+// reaches its fetch double regardless of test file ordering. Delegating to
+// globalThis.fetch (instead of this file's double directly) keeps later test
+// files that stub global fetch working if this registration outlives us.
+mock.module('@/lib/runtime-fetch', () => ({
+  runtimeFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
 }));
 
 const { usePluginsStore } = await import('./usePluginsStore');
@@ -113,6 +125,11 @@ const requestBody = (callIndex: number): unknown => {
   return init?.body ? JSON.parse(String(init.body)) : undefined;
 };
 
+const flushPluginFollowUps = async (): Promise<void> => {
+  await Promise.resolve();
+  await Promise.resolve();
+};
+
 describe('usePluginsStore', () => {
   beforeEach(() => {
     resetStore();
@@ -121,10 +138,15 @@ describe('usePluginsStore', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
 
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
+  });
+
   test('loadPlugins calls config plugins endpoint once and populates entries/files', async () => {
     queueFetchResponses([jsonResponse(pluginListPayload), jsonResponse({ results: [registryOk] })]);
 
     const result = await usePluginsStore.getState().loadPlugins();
+    await flushPluginFollowUps();
 
     expect(result).toBe(true);
     expect(fetchCalls).toHaveLength(2);
@@ -139,6 +161,7 @@ describe('usePluginsStore', () => {
 
     await usePluginsStore.getState().loadPlugins();
     await usePluginsStore.getState().loadPlugins();
+    await flushPluginFollowUps();
 
     expect(fetchCalls).toHaveLength(2);
   });
@@ -279,6 +302,7 @@ describe('usePluginsStore', () => {
     queueFetchResponses([jsonResponse(pluginListPayload), jsonResponse({ results: [registryOk] })]);
 
     const result = await usePluginsStore.getState().loadPlugins();
+    await flushPluginFollowUps();
 
     expect(result).toBe(true);
     expect(fetchCalls[0]?.input).toBe('/api/config/plugins?directory=%2Fworkspace%2Fproject');
@@ -289,6 +313,7 @@ describe('usePluginsStore', () => {
     queueFetchResponses([jsonResponse(okMutationPayload), jsonResponse(pluginListPayload), jsonResponse({ results: [] })]);
 
     const result = await usePluginsStore.getState().createEntry({ spec: 'new-plugin@1', scope: 'user' });
+    await flushPluginFollowUps();
 
     expect(result.ok).toBe(true);
     expect(registryCalls()).toHaveLength(1);
@@ -301,6 +326,7 @@ describe('usePluginsStore', () => {
     queueFetchResponses([jsonResponse(okMutationPayload), jsonResponse(pluginListPayload), jsonResponse({ results: [] })]);
 
     const result = await usePluginsStore.getState().updateEntry(entry.id, { spec: 'plugin-b@2' });
+    await flushPluginFollowUps();
 
     expect(result.ok).toBe(true);
     expect(registryCalls()).toHaveLength(1);
@@ -313,6 +339,7 @@ describe('usePluginsStore', () => {
     queueFetchResponses([jsonResponse(okMutationPayload), jsonResponse(pluginListPayload), jsonResponse({ results: [] })]);
 
     const result = await usePluginsStore.getState().updateEntry(entry.id, { options: { enabled: true } });
+    await flushPluginFollowUps();
 
     expect(result.ok).toBe(true);
     expect(String(registryCalls()[0]?.input)).toContain('specs=plugin-a');

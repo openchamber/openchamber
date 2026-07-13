@@ -12,6 +12,10 @@ const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
 let resolvedGitBinary = null;
 const worktreeBootstrapState = new Map();
+const remoteExistenceCache = new Map();
+const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
+const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
+const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
 const gitIndexMutationQueues = new Map();
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
@@ -86,6 +90,30 @@ const normalizeGitExecutableCandidate = (candidate) => {
   return trimmed;
 };
 
+const isSafeSimpleGitBinary = (candidate) => (
+  typeof candidate === 'string' && SIMPLE_GIT_SAFE_BINARY_PATTERN.test(candidate)
+);
+
+const createSimpleGit = (options) => {
+  if (!options?.unsafe?.allowUnsafeCustomBinary) {
+    return simpleGit(options);
+  }
+
+  const originalWarn = console.warn;
+  console.warn = (...args) => {
+    if (String(args[0] || '').includes(SIMPLE_GIT_UNSAFE_BINARY_WARNING)) {
+      return;
+    }
+    originalWarn(...args);
+  };
+
+  try {
+    return simpleGit(options);
+  } finally {
+    console.warn = originalWarn;
+  }
+};
+
 const listPathExecutableCandidates = (binaryName) => {
   const currentPath = process.env.PATH || '';
   const seen = new Set();
@@ -133,22 +161,34 @@ const resolveGitBinary = () => {
     .map((value) => (typeof value === 'string' ? value.trim() : ''))
     .filter(Boolean);
   for (const candidate of explicit) {
-    if (isExecutableFile(candidate)) {
-      resolvedGitBinary = candidate;
+    const normalized = normalizeGitExecutableCandidate(candidate);
+    if (isExecutableFile(normalized)) {
+      resolvedGitBinary = normalized;
       return resolvedGitBinary;
     }
   }
 
-  const discovered = [
+  const pathDiscovered = [
     ...listPathExecutableCandidates('git.exe'),
     ...listPathExecutableCandidates('git'),
+  ]
+    .map(normalizeGitExecutableCandidate)
+    .filter(Boolean)
+    .filter((candidate) => isExecutableFile(candidate));
+  if (pathDiscovered.length > 0) {
+    resolvedGitBinary = 'git';
+    return resolvedGitBinary;
+  }
+
+  const discovered = [
     ...listWindowsGitInstallCandidates(),
   ]
     .map(normalizeGitExecutableCandidate)
     .filter(Boolean)
     .filter((candidate) => isExecutableFile(candidate));
 
-  const preferredExe = discovered.find((candidate) => candidate.toLowerCase().endsWith('.exe'));
+  const preferredExe = discovered.find((candidate) => isSafeSimpleGitBinary(candidate) && candidate.toLowerCase().endsWith('.exe'))
+    || discovered.find((candidate) => candidate.toLowerCase().endsWith('.exe'));
   resolvedGitBinary = preferredExe || discovered[0] || 'git.exe';
   return resolvedGitBinary;
 };
@@ -276,9 +316,9 @@ const createGit = async (directory) => {
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
   const unsafe = hasCustomBinary ? { allowUnsafeCustomBinary: true } : undefined;
   if (!directory) {
-    return simpleGit({ env, spawnOptions, binary, unsafe });
+    return createSimpleGit({ env, spawnOptions, binary, unsafe });
   }
-  return simpleGit({
+  return createSimpleGit({
     baseDir: normalizeDirectoryPath(directory),
     env,
     spawnOptions,
@@ -306,6 +346,14 @@ const normalizeDirectoryPath = (value) => {
   }
 
   return trimmed;
+};
+
+const normalizePath = (value) => {
+  const normalized = normalizeDirectoryPath(value);
+  if (typeof normalized !== 'string') {
+    return normalized;
+  }
+  return normalized.replace(/\\/g, '/');
 };
 
 const getGitIndexMutationQueueKey = (directory) => {
@@ -596,6 +644,10 @@ const normalizeStartRef = (value) => {
   return trimmed;
 };
 
+function isValidCommitHash(hash) {
+  return typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash);
+}
+
 const parseRemoteBranchRef = (value) => {
   const trimmed = String(value || '').trim();
   if (!trimmed) {
@@ -677,9 +729,112 @@ const parseGitErrorText = (error) => {
     .trim();
 };
 
+const parseAheadBehindCounts = (value) => {
+  const [aheadRaw, behindRaw] = String(value || '').trim().split(/\s+/);
+  const ahead = parseInt(aheadRaw, 10);
+  const behind = parseInt(behindRaw, 10);
+  if (!Number.isFinite(ahead) || !Number.isFinite(behind)) {
+    return null;
+  }
+  return { ahead, behind };
+};
+
+const getRemoteExistenceCacheKey = (directory, remoteName) => {
+  const normalizedDirectory = normalizeDirectoryPath(directory) || '';
+  return `${path.resolve(normalizedDirectory)}\0${remoteName}`;
+};
+
+const hasRemote = async (git, directory, remoteName) => {
+  const remote = String(remoteName || '').trim();
+  if (!remote) {
+    return false;
+  }
+
+  const key = getRemoteExistenceCacheKey(directory, remote);
+  const cached = remoteExistenceCache.get(key);
+  if (cached && Date.now() - cached.checkedAt < REMOTE_EXISTENCE_CACHE_TTL_MS) {
+    return cached.exists;
+  }
+
+  const exists = await git
+    .raw(['remote', 'get-url', remote])
+    .then((value) => String(value || '').trim().length > 0)
+    .catch(() => false);
+
+  remoteExistenceCache.set(key, { exists, checkedAt: Date.now() });
+  return exists;
+};
+
+const buildRawGitOptions = (raw) => {
+  if (Array.isArray(raw)) {
+    return raw.map((value) => String(value || '').trim()).filter(Boolean);
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return [];
+  }
+
+  return Object.entries(raw).flatMap(([key, value]) => {
+    const option = String(key || '').trim();
+    if (!option || value === false) {
+      return [];
+    }
+    if (value === true || value == null) {
+      return [option];
+    }
+    return [option, String(value)];
+  });
+};
+
+const getRemoteBranchComparison = async (git, remoteName, branchName) => {
+  const remote = String(remoteName || '').trim();
+  const branch = String(branchName || '').trim();
+  if (!remote || !branch) {
+    return null;
+  }
+
+  const remoteRef = `refs/remotes/${remote}/${branch}`;
+  const exists = await git
+    .raw(['rev-parse', '--verify', remoteRef])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  if (!exists) {
+    return null;
+  }
+
+  const countsRaw = await git
+    .raw(['rev-list', '--left-right', '--count', `HEAD...${remoteRef}`])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  const counts = parseAheadBehindCounts(countsRaw);
+  if (!counts) {
+    return null;
+  }
+
+  return {
+    remote,
+    branch,
+    ahead: counts.ahead,
+    behind: counts.behind,
+  };
+};
+
 const isNotGitRepositoryError = (error) => {
   const text = parseGitErrorText(error);
   return /not a git repository/i.test(text);
+};
+
+// A directory that no longer exists (e.g. a worktree deleted while something
+// was still polling its status) is an expected, benign condition — not a fault
+// to scream about. simple-git throws "Cannot use simple-git on a directory that
+// does not exist"; the underlying fs errors are ENOENT/ENOTDIR.
+const isMissingDirectoryError = (error) => {
+  const code = error?.code;
+  if (code === 'ENOENT' || code === 'ENOTDIR') {
+    return true;
+  }
+  const text = parseGitErrorText(error);
+  return /directory that does not exist|does not exist|no such file or directory/i.test(text);
 };
 
 const runGitCommand = async (cwd, args) => {
@@ -729,6 +884,407 @@ const runGitCommandOrThrow = async (cwd, args, fallbackMessage) => {
   }
   return result;
 };
+
+const derivePrimaryWorktreeRootFromGitDir = (gitDir) => {
+  const normalized = normalizePath(gitDir);
+  if (!normalized) return null;
+  if (normalized.endsWith('/.git')) {
+    return normalized.slice(0, -'/.git'.length) || null;
+  }
+  const marker = '/.git/worktrees/';
+  const markerIndex = normalized.indexOf(marker);
+  if (markerIndex > 0) {
+    return normalized.slice(0, markerIndex) || null;
+  }
+  return null;
+};
+
+export async function resolvePrimaryWorktreeRoot(directory) {
+  const result = await runGitCommand(directory, ['rev-parse', '--absolute-git-dir', '--git-common-dir']);
+  if (!result.success) {
+    return { root: directory };
+  }
+  const lines = String(result.stdout || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const absoluteGitDir = normalizePath(lines[0] || '');
+  const rootFromAbsoluteGitDir = derivePrimaryWorktreeRootFromGitDir(absoluteGitDir);
+  if (rootFromAbsoluteGitDir) {
+    return { root: rootFromAbsoluteGitDir };
+  }
+  const rawCommonDir = normalizePath(lines[1] || '');
+  if (rawCommonDir) {
+    const commonDir = path.isAbsolute(rawCommonDir)
+      ? rawCommonDir
+      : path.resolve(directory, rawCommonDir);
+    const rootFromCommonDir = derivePrimaryWorktreeRootFromGitDir(commonDir);
+    if (rootFromCommonDir) {
+      return { root: rootFromCommonDir };
+    }
+  }
+  return { root: directory };
+}
+
+export async function resolveWorktreeTopLevel(directory) {
+  const result = await runGitCommand(directory, ['rev-parse', '--show-toplevel']);
+  if (!result.success) {
+    return { root: directory };
+  }
+  const root = normalizePath(String(result.stdout || '').trim());
+  return { root: root || directory };
+}
+
+export async function getCommitSummaries(directory, shas) {
+  const commits = Array.isArray(shas)
+    ? shas.map((sha) => String(sha || '').trim()).filter(Boolean)
+    : [];
+  if (commits.length === 0) {
+    return { commits: [] };
+  }
+  if (commits.some((sha) => !/^[0-9a-fA-F]{4,64}$/.test(sha))) {
+    throw new Error('Invalid commit SHA');
+  }
+  const result = await runGitCommandOrThrow(
+    directory,
+    ['show', '-s', '--format=%H%x09%h%x09%s', ...commits, '--'],
+    'Failed to get commit summaries'
+  );
+  const parsed = String(result.stdout || '')
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const [sha, short, subject] = line.split('\t');
+      return { sha: sha || '', short: short || '', subject: subject || '' };
+    })
+    .filter((entry) => entry.sha && entry.short);
+  return { commits: parsed };
+}
+
+const trimGitLines = (value) => String(value || '')
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter(Boolean);
+
+const gitStdoutText = (result) => String(result?.stdout || '').trim();
+const gitStderrText = (result) => String(result?.stderr || result?.message || '').trim();
+
+const normalizeIntegrateBranch = (value, fieldName) => {
+  const branch = String(value || '').trim();
+  if (!branch) {
+    throw new Error(`${fieldName} is required`);
+  }
+  if (branch.startsWith('-') || branch.includes('\0')) {
+    throw new Error(`Invalid ${fieldName}`);
+  }
+  return branch;
+};
+
+const normalizeIntegrateSha = (value) => {
+  const sha = String(value || '').trim();
+  if (!/^[0-9a-fA-F]{4,64}$/.test(sha)) {
+    throw new Error('Invalid commit SHA');
+  }
+  return sha;
+};
+
+const normalizeIntegratePath = (value, fieldName) => {
+  const target = normalizeDirectoryPath(value);
+  if (!target) {
+    throw new Error(`${fieldName} is required`);
+  }
+  return path.resolve(target);
+};
+
+const runGitOk = (result) => Boolean(result?.success);
+
+const listGitWorktreesForIntegrate = async (repoRoot) => {
+  const out = await runGitCommandOrThrow(repoRoot, ['worktree', 'list', '--porcelain'], 'Failed to list git worktrees');
+  const entries = [];
+  let current = null;
+  for (const line of String(out.stdout || '').split(/\r?\n/)) {
+    if (line.startsWith('worktree ')) {
+      if (current) entries.push(current);
+      current = { path: line.slice('worktree '.length).trim(), branchRef: null };
+      continue;
+    }
+    if (!current) continue;
+    if (line.startsWith('branch ')) {
+      current.branchRef = line.slice('branch '.length).trim();
+    }
+  }
+  if (current) entries.push(current);
+  return entries.filter((entry) => Boolean(entry.path));
+};
+
+const ensureLocalIntegrateBranch = async (repoRoot, candidate) => {
+  const raw = normalizeIntegrateBranch(candidate, 'targetBranch');
+  if (raw === 'HEAD') {
+    return 'HEAD';
+  }
+
+  const hasLocal = await runGitCommand(repoRoot, ['show-ref', '--verify', '--quiet', `refs/heads/${raw}`]);
+  if (runGitOk(hasLocal)) {
+    return raw;
+  }
+
+  if (raw.startsWith('remotes/')) {
+    const remoteRef = raw.slice('remotes/'.length);
+    const parts = remoteRef.split('/');
+    const remote = normalizeIntegrateBranch(parts[0] || 'origin', 'remote');
+    const name = normalizeIntegrateBranch(parts.slice(1).join('/'), 'branch');
+    await runGitCommandOrThrow(repoRoot, ['branch', '--track', name, `${remote}/${name}`], 'Failed to track remote branch');
+    return name;
+  }
+
+  const remoteCheck = await runGitCommand(repoRoot, ['show-ref', '--verify', '--quiet', `refs/remotes/origin/${raw}`]);
+  if (runGitOk(remoteCheck)) {
+    await runGitCommandOrThrow(repoRoot, ['branch', '--track', raw, `origin/${raw}`], 'Failed to track remote branch');
+    return raw;
+  }
+
+  return raw;
+};
+
+export async function computeIntegratePlan(input = {}) {
+  const repoRoot = normalizeIntegratePath(input.repoRoot, 'repoRoot');
+  const sourceBranch = normalizeIntegrateBranch(input.sourceBranch, 'sourceBranch');
+  const targetBranchRaw = normalizeIntegrateBranch(input.targetBranch, 'targetBranch');
+  if (sourceBranch === 'HEAD' || targetBranchRaw === 'HEAD') {
+    return { repoRoot, sourceBranch, targetBranch: targetBranchRaw, commits: [] };
+  }
+
+  const targetBranch = await ensureLocalIntegrateBranch(repoRoot, targetBranchRaw);
+  const cherry = await runGitCommandOrThrow(repoRoot, ['cherry', targetBranch, sourceBranch], 'Failed to compute cherry commits');
+  const plus = new Set();
+  for (const line of trimGitLines(cherry.stdout)) {
+    const match = line.match(/^\+\s+([0-9a-f]{7,40})\b/i);
+    if (match) {
+      plus.add(match[1]);
+    }
+  }
+
+  const revList = await runGitCommandOrThrow(repoRoot, ['rev-list', '--reverse', `${targetBranch}..${sourceBranch}`], 'Failed to list commits');
+  const commits = trimGitLines(revList.stdout).filter((sha) => plus.has(sha));
+  return { repoRoot, sourceBranch, targetBranch, commits };
+}
+
+const createIntegrateTempWorktree = async (repoRoot, targetBranch) => {
+  const tmpParent = path.join(os.homedir(), '.config', 'openchamber', 'tmp');
+  await fsp.mkdir(tmpParent, { recursive: true });
+  const tmpDir = await fsp.mkdtemp(path.join(tmpParent, 'oc-integrate-'));
+  try {
+    await runGitCommandOrThrow(repoRoot, ['worktree', 'add', '--force', tmpDir, targetBranch], 'Failed to create temp worktree');
+    return tmpDir;
+  } catch (error) {
+    await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+};
+
+const removeIntegrateTempWorktree = async (repoRoot, tmpDir) => {
+  await runGitCommand(repoRoot, ['worktree', 'remove', '--force', tmpDir]).catch(() => undefined);
+  await runGitCommand(repoRoot, ['worktree', 'prune']).catch(() => undefined);
+};
+
+const maybeFastForwardIntegrateUpstream = async (tmpDir) => {
+  const upstream = await runGitCommand(tmpDir, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
+  const upstreamRef = gitStdoutText(upstream);
+  if (!upstreamRef) {
+    return;
+  }
+  await runGitCommand(tmpDir, ['fetch']);
+  const ff = await runGitCommand(tmpDir, ['merge', '--ff-only', upstreamRef]);
+  if (!runGitOk(ff)) {
+    throw new Error(gitStderrText(ff) || 'Fast-forward failed');
+  }
+};
+
+export async function getIntegrateConflictDetails(tmpDir) {
+  const target = normalizeIntegratePath(tmpDir, 'tempWorktreePath');
+  const [status, unmerged, diff, meta, patch] = await Promise.all([
+    runGitCommand(target, ['status', '--porcelain']),
+    runGitCommand(target, ['diff', '--name-only', '--diff-filter=U']),
+    runGitCommand(target, ['diff']),
+    runGitCommand(target, ['show', '--no-patch', '--pretty=fuller', 'CHERRY_PICK_HEAD']),
+    runGitCommand(target, ['show', 'CHERRY_PICK_HEAD']),
+  ]);
+
+  return {
+    statusPorcelain: String(status.stdout || ''),
+    unmergedFiles: trimGitLines(unmerged.stdout),
+    diff: String(diff.stdout || diff.stderr || ''),
+    currentPatchMeta: String(meta.stdout || meta.stderr || ''),
+    currentPatch: String(patch.stdout || patch.stderr || ''),
+  };
+}
+
+export async function isCherryPickInProgress(tmpDir) {
+  const target = normalizeIntegratePath(tmpDir, 'tempWorktreePath');
+  const head = await runGitCommand(target, ['rev-parse', '--verify', '--quiet', 'CHERRY_PICK_HEAD']);
+  return { inProgress: runGitOk(head) };
+}
+
+const computeCleanIntegrateWorktreesToSync = async ({ repoRoot, targetBranch, excludePaths }) => {
+  const targetRef = `refs/heads/${targetBranch}`;
+  const exclude = new Set(excludePaths);
+  const entries = await listGitWorktreesForIntegrate(repoRoot);
+  const candidates = entries
+    .filter((entry) => entry.branchRef === targetRef)
+    .map((entry) => entry.path)
+    .filter((candidate) => candidate && !exclude.has(candidate));
+
+  const clean = [];
+  for (const candidate of candidates) {
+    const status = await runGitCommand(candidate, ['status', '--porcelain']);
+    if (!gitStdoutText(status)) {
+      clean.push(candidate);
+    }
+  }
+  return clean;
+};
+
+const syncCleanIntegrateTargetWorktrees = async (paths) => {
+  for (const target of paths) {
+    await runGitCommand(target, ['reset', '--hard']).catch(() => undefined);
+  }
+};
+
+const normalizeIntegratePlan = async (plan = {}) => {
+  const repoRoot = normalizeIntegratePath(plan.repoRoot, 'repoRoot');
+  const sourceBranch = normalizeIntegrateBranch(plan.sourceBranch, 'sourceBranch');
+  const targetBranch = normalizeIntegrateBranch(plan.targetBranch, 'targetBranch');
+  const commits = Array.isArray(plan.commits) ? plan.commits.map(normalizeIntegrateSha) : [];
+  return { repoRoot, sourceBranch, targetBranch, commits };
+};
+
+const normalizeIntegrateState = (state = {}) => ({
+  repoRoot: normalizeIntegratePath(state.repoRoot, 'repoRoot'),
+  tempWorktreePath: normalizeIntegratePath(state.tempWorktreePath, 'tempWorktreePath'),
+  sourceBranch: normalizeIntegrateBranch(state.sourceBranch, 'sourceBranch'),
+  targetBranch: normalizeIntegrateBranch(state.targetBranch, 'targetBranch'),
+  cleanTargetWorktrees: Array.isArray(state.cleanTargetWorktrees)
+    ? state.cleanTargetWorktrees.map((entry) => normalizeIntegratePath(entry, 'cleanTargetWorktree'))
+    : [],
+  remainingCommits: Array.isArray(state.remainingCommits) ? state.remainingCommits.map(normalizeIntegrateSha) : [],
+  currentCommit: normalizeIntegrateSha(state.currentCommit),
+});
+
+export async function integrateWorktreeCommits(inputPlan = {}) {
+  const plan = await normalizeIntegratePlan(inputPlan);
+  if (plan.commits.length === 0) {
+    return { kind: 'noop', reason: 'No commits to move' };
+  }
+
+  const tmpDir = await createIntegrateTempWorktree(plan.repoRoot, plan.targetBranch);
+  let cleanTargetWorktrees = [];
+  let remaining = [];
+  try {
+    await maybeFastForwardIntegrateUpstream(tmpDir);
+
+    const clean = await runGitCommand(tmpDir, ['status', '--porcelain']);
+    if (gitStdoutText(clean)) {
+      throw new Error('Target branch has local changes; abort integration and retry');
+    }
+
+    cleanTargetWorktrees = await computeCleanIntegrateWorktreesToSync({
+      repoRoot: plan.repoRoot,
+      targetBranch: plan.targetBranch,
+      excludePaths: [tmpDir],
+    }).catch(() => []);
+
+    remaining = [...plan.commits];
+    while (remaining.length > 0) {
+      const sha = remaining[0];
+      const pick = await runGitCommand(tmpDir, ['cherry-pick', sha]);
+      if (runGitOk(pick)) {
+        remaining.shift();
+        continue;
+      }
+
+      const unmerged = await runGitCommand(tmpDir, ['diff', '--name-only', '--diff-filter=U']);
+      const unmergedFiles = trimGitLines(unmerged.stdout);
+      if (unmergedFiles.length > 0) {
+        const details = await getIntegrateConflictDetails(tmpDir);
+        return {
+          kind: 'conflict',
+          state: {
+            repoRoot: plan.repoRoot,
+            tempWorktreePath: tmpDir,
+            sourceBranch: plan.sourceBranch,
+            targetBranch: plan.targetBranch,
+            cleanTargetWorktrees,
+            remainingCommits: remaining,
+            currentCommit: sha,
+          },
+          details,
+        };
+      }
+
+      throw new Error(gitStderrText(pick) || 'Cherry-pick failed');
+    }
+
+    await removeIntegrateTempWorktree(plan.repoRoot, tmpDir);
+    await syncCleanIntegrateTargetWorktrees(cleanTargetWorktrees).catch(() => undefined);
+    return { kind: 'success', moved: plan.commits.length };
+  } catch (error) {
+    await removeIntegrateTempWorktree(plan.repoRoot, tmpDir).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function abortIntegrate(stateInput = {}) {
+  const state = normalizeIntegrateState(stateInput);
+  await runGitCommand(state.tempWorktreePath, ['cherry-pick', '--abort']).catch(() => undefined);
+  await removeIntegrateTempWorktree(state.repoRoot, state.tempWorktreePath);
+  return { success: true };
+}
+
+export async function continueIntegrate(stateInput = {}) {
+  const state = normalizeIntegrateState(stateInput);
+  const cont = await runGitCommand(state.tempWorktreePath, ['cherry-pick', '--continue']);
+  if (!runGitOk(cont)) {
+    const unmerged = await runGitCommand(state.tempWorktreePath, ['diff', '--name-only', '--diff-filter=U']);
+    if (trimGitLines(unmerged.stdout).length > 0) {
+      const details = await getIntegrateConflictDetails(state.tempWorktreePath);
+      return { kind: 'conflict', state, details };
+    }
+    throw new Error(gitStderrText(cont) || 'Cherry-pick continue failed');
+  }
+
+  const remaining = [...state.remainingCommits];
+  if (remaining.length > 0 && remaining[0] === state.currentCommit) {
+    remaining.shift();
+  }
+
+  const still = [...remaining];
+  while (still.length > 0) {
+    const sha = still[0];
+    const pick = await runGitCommand(state.tempWorktreePath, ['cherry-pick', sha]);
+    if (runGitOk(pick)) {
+      still.shift();
+      continue;
+    }
+    const unmerged = await runGitCommand(state.tempWorktreePath, ['diff', '--name-only', '--diff-filter=U']);
+    if (trimGitLines(unmerged.stdout).length > 0) {
+      const details = await getIntegrateConflictDetails(state.tempWorktreePath);
+      return {
+        kind: 'conflict',
+        state: {
+          ...state,
+          remainingCommits: still,
+          currentCommit: sha,
+        },
+        details,
+      };
+    }
+    throw new Error(gitStderrText(pick) || 'Cherry-pick failed');
+  }
+
+  await removeIntegrateTempWorktree(state.repoRoot, state.tempWorktreePath);
+  await syncCleanIntegrateTargetWorktrees(state.cleanTargetWorktrees).catch(() => undefined);
+  return { kind: 'success', moved: state.remainingCommits.length };
+}
 
 const ensureOpenCodeProjectId = async (primaryWorktree) => {
   const gitDir = path.join(primaryWorktree, '.git');
@@ -1034,6 +1590,45 @@ const syncProjectSandboxRemove = async (projectID, primaryWorktree, sandboxPath)
   });
 };
 
+const isAttachedGitWorktreeDirectory = async (directory) => {
+  try {
+    const result = await runGitCommand(directory, ['rev-parse', '--is-inside-work-tree']);
+    return result.success && String(result.stdout || '').trim() === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const cleanupFailedFastWorktreeCreate = async (context, candidate) => {
+  const candidateDirectory = path.resolve(candidate.directory);
+  const worktreeRoot = path.resolve(context.worktreeRoot);
+  const isInsideWorktreeRoot = isInsideOrSameDirectory(worktreeRoot, candidateDirectory) && candidateDirectory !== worktreeRoot;
+  const isAttached = await isAttachedGitWorktreeDirectory(candidateDirectory);
+
+  if (!isAttached) {
+    try {
+      await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, candidateDirectory);
+    } catch (error) {
+      console.warn('Failed to clean up OpenCode sandbox metadata after worktree failure:', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (!isInsideWorktreeRoot || isAttached) {
+    return;
+  }
+
+  try {
+    const entries = await fsp.readdir(candidateDirectory);
+    if (entries.length === 0) {
+      await fsp.rmdir(candidateDirectory);
+    }
+  } catch (error) {
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error?.code)) {
+      console.warn('Failed to clean up empty worktree directory after creation failure:', error instanceof Error ? error.message : String(error));
+    }
+  }
+};
+
 const runWorktreeStartScripts = async (directory, projectID, startCommand) => {
   const projectStart = await loadProjectStartCommand(projectID);
   if (projectStart) {
@@ -1331,6 +1926,12 @@ export async function setLocalIdentity(directory, profile) {
       await git.raw(['config', '--local', '--unset', 'core.sshCommand']).catch(() => {});
     }
 
+    if (profile.signCommits === true && typeof profile.signingKey === 'string' && profile.signingKey.trim()) {
+      await git.addConfig('gpg.format', 'ssh', false, 'local');
+      await git.addConfig('user.signingkey', profile.signingKey.trim(), false, 'local');
+      await git.addConfig('commit.gpgsign', 'true', false, 'local');
+    }
+
     return true;
   } catch (error) {
     console.error('Failed to set Git identity:', error);
@@ -1342,7 +1943,7 @@ export async function getStatus(directory, options = {}) {
   const lightMode = options.mode === 'light';
 
   try {
-    const { repoRoot, git } = await createRepositoryGitContext(directory);
+    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(directory);
 
     // Use -uall to show all untracked files individually, not just directories
     const status = await git.status(['-uall']);
@@ -1495,6 +2096,7 @@ export async function getStatus(directory, options = {}) {
     let tracking = status.tracking || null;
     let ahead = status.ahead;
     let behind = status.behind;
+    let upstreamComparison;
 
     // When no upstream is configured (common for new worktree branches), Git doesn't report ahead/behind.
     // We still want to show the number of unpublished commits to the user.
@@ -1512,6 +2114,15 @@ export async function getStatus(directory, options = {}) {
           behind = 0;
         }
       }
+    }
+
+    if (
+      !lightMode
+      && status.current
+      && (!tracking || !tracking.startsWith('upstream/'))
+      && await hasRemote(git, directoryPath, 'upstream')
+    ) {
+      upstreamComparison = await getRemoteBranchComparison(git, 'upstream', status.current);
     }
 
     // Check for in-progress operations
@@ -1574,6 +2185,7 @@ export async function getStatus(directory, options = {}) {
       tracking,
       ahead,
       behind,
+      upstreamComparison,
       files: status.files.map((f) => ({
         path: f.path,
         index: f.index,
@@ -1585,7 +2197,7 @@ export async function getStatus(directory, options = {}) {
       rebaseInProgress,
     };
   } catch (error) {
-    if (!isNotGitRepositoryError(error)) {
+    if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
       console.error('Failed to get Git status:', error);
     }
     throw error;
@@ -1962,6 +2574,113 @@ export async function revertFile(directory, filePath, options = {}) {
   });
 }
 
+const HUNK_ACTION_FLAGS = {
+  stage: ['--cached'],
+  unstage: ['--cached', '--reverse'],
+  discard: ['--reverse'],
+};
+
+const parsePatchPathToken = (line) => {
+  const value = String(line || '').replace(/^(?:-{3}|\+{3})\s+/, '');
+  if (!value || value === '/dev/null') {
+    return null;
+  }
+
+  if (value.startsWith('"')) {
+    let token = '"';
+    let escaped = false;
+    for (let index = 1; index < value.length; index += 1) {
+      const char = value[index];
+      token += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        break;
+      }
+    }
+
+    try {
+      return JSON.parse(token);
+    } catch {
+      return token.slice(1, token.endsWith('"') ? -1 : undefined);
+    }
+  }
+
+  return value.split('\t', 1)[0] || null;
+};
+
+const normalizePatchTargetPath = (value) => {
+  if (!value || value === '/dev/null') {
+    return null;
+  }
+  return value.replace(/^[ab]\//, '');
+};
+
+const extractPatchTargetPath = (patch) => {
+  const matches = [...patch.matchAll(/^(?:-{3}|\+{3})\s+.+$/gm)];
+  const realTargets = matches
+    .map((match) => normalizePatchTargetPath(parsePatchPathToken(match[0])))
+    .filter(Boolean);
+  return realTargets[0] || null;
+};
+
+const writeTempPatchFile = async (patch) => {
+  const tmpDir = os.tmpdir();
+  const tmpPath = path.join(tmpDir, `openchamber-hunk-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`);
+  await fsp.writeFile(tmpPath, patch, 'utf8');
+  return tmpPath;
+};
+
+export async function applyHunk(directory, filePath, options = {}) {
+  const action = options?.action;
+  if (!action || !HUNK_ACTION_FLAGS[action]) {
+    throw new Error('Invalid hunk action');
+  }
+  const patch = typeof options?.patch === 'string' ? options.patch : '';
+  if (!patch.trim()) {
+    throw new Error('patch is required to apply a hunk');
+  }
+  if (!/^@@\s/m.test(patch)) {
+    throw new Error('patch does not contain a hunk header');
+  }
+
+  return withGitIndexMutationQueue(directory, async () => {
+    const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
+    const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+    validateRepositoryFilePaths(repoRoot, [fileContext.repoPath]);
+
+    const targetPath = extractPatchTargetPath(patch);
+    if (targetPath && targetPath !== fileContext.repoPath && targetPath !== filePath) {
+      throw new Error('patch target path does not match the requested file');
+    }
+
+    const flags = HUNK_ACTION_FLAGS[action];
+    let tmpPath = null;
+    try {
+      tmpPath = await writeTempPatchFile(patch);
+
+      try {
+        await git.raw(['apply', ...flags, '--check', tmpPath]);
+      } catch (checkError) {
+        const text = parseGitErrorText(checkError);
+        throw new Error(
+          text
+            ? `Hunk no longer applies — refresh and try again.\n${text}`
+            : 'Hunk no longer applies — refresh and try again.'
+        );
+      }
+
+      await git.raw(['apply', ...flags, tmpPath]);
+    } finally {
+      if (tmpPath) {
+        await fsp.rm(tmpPath, { force: true }).catch(() => {});
+      }
+    }
+  });
+}
+
 export async function collectDiffs(directory, files = []) {
   const results = [];
   for (const filePath of files) {
@@ -1984,9 +2703,20 @@ export async function pull(directory, options = {}) {
     : options.options || {};
 
   try {
+    const remote = String(options.remote || '').trim();
+    const requestedBranch = String(options.branch || '').trim();
+    let branch = requestedBranch;
+
+    if (remote && !branch) {
+      // simple-git only includes the remote when both remote and branch are provided.
+      // Resolve the current branch so selecting a remote in the UI really runs `git pull <remote> <branch>`.
+      const status = await git.status();
+      branch = String(status.current || '').trim();
+    }
+
     const result = await git.pull(
-      options.remote || 'origin',
-      options.branch,
+      remote || 'origin',
+      branch || undefined,
       pullOptions
     );
 
@@ -2240,11 +2970,20 @@ export async function fetch(directory, options = {}) {
   const { git } = await createRepositoryGitContext(directory);
 
   try {
-    await git.fetch(
-      options.remote || 'origin',
-      options.branch,
-      options.options || {}
-    );
+    const remote = String(options.remote || '').trim();
+    const branch = String(options.branch || '').trim();
+    const fetchOptions = options.options || {};
+
+    if (remote && !branch) {
+      // simple-git drops the remote when branch is omitted, so use raw to preserve `git fetch <remote>`.
+      await git.raw(['fetch', ...buildRawGitOptions(fetchOptions), remote]);
+    } else {
+      await git.fetch(
+        remote || 'origin',
+        branch || undefined,
+        fetchOptions
+      );
+    }
 
     return { success: true };
   } catch (error) {
@@ -2531,6 +3270,99 @@ export async function checkoutBranch(directory, branchName) {
   }
 }
 
+export async function checkoutCommit(directory, hash) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  const { git } = await createRepositoryGitContext(directory);
+  try {
+    await git.checkout(hash);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to checkout commit:', error);
+    throw error;
+  }
+}
+
+export async function cherryPick(directory, hash) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  const { git } = await createRepositoryGitContext(directory);
+  try {
+    await git.raw(['cherry-pick', hash]);
+    return { success: true, conflict: false };
+  } catch (error) {
+    const errorMessage = String(error?.message || error || '').toLowerCase();
+    const isConflict =
+      errorMessage.includes('conflict') ||
+      errorMessage.includes('patch does not apply');
+
+    if (isConflict) {
+      const status = await git.status().catch(() => ({ conflicted: [] }));
+      return {
+        success: false,
+        conflict: true,
+        conflictFiles: status.conflicted || [],
+      };
+    }
+
+    console.error('Failed to cherry-pick:', error);
+    throw error;
+  }
+}
+
+export async function revertCommit(directory, hash) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  const { git } = await createRepositoryGitContext(directory);
+  try {
+    await git.raw(['revert', '--no-commit', hash]);
+    return { success: true, conflict: false };
+  } catch (error) {
+    const errorMessage = String(error?.message || error || '').toLowerCase();
+    const isConflict =
+      errorMessage.includes('conflict') ||
+      errorMessage.includes('revert failed');
+
+    if (isConflict) {
+      const status = await git.status().catch(() => ({ conflicted: [] }));
+      return {
+        success: false,
+        conflict: true,
+        conflictFiles: status.conflicted || [],
+      };
+    }
+
+    console.error('Failed to revert commit:', error);
+    throw error;
+  }
+}
+
+export async function resetToCommit(directory, hash, mode, force = false) {
+  if (!isValidCommitHash(hash)) {
+    throw new Error('Invalid commit hash');
+  }
+  const { git } = await createRepositoryGitContext(directory);
+
+  if (mode === 'hard' && !force) {
+    const status = await git.status();
+    const isDirty = !status.isClean();
+    if (isDirty) {
+      throw new Error('Cannot hard reset: uncommitted changes in working tree. Stash or commit first, or use force.');
+    }
+  }
+
+  try {
+    await git.raw(['reset', `--${mode}`, hash]);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to reset to commit:', error);
+    throw error;
+  }
+}
+
 export async function getWorktrees(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {
@@ -2731,6 +3563,19 @@ export async function validateWorktreeCreate(directory, input = {}) {
   }
 }
 
+const assertWorktreeCreatePreflight = async (directory, input = {}) => {
+  const validation = await validateWorktreeCreate(directory, input);
+  if (validation?.ok) {
+    return;
+  }
+
+  const message = validation?.errors
+    ?.map((error) => error?.message)
+    .filter(Boolean)
+    .join('\n') || 'Failed to validate worktree creation';
+  throw new Error(message);
+};
+
 export async function previewWorktreeCreate(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
@@ -2752,23 +3597,12 @@ export async function previewWorktreeCreate(directory, input = {}) {
   };
 }
 
-export async function createWorktree(directory, input = {}) {
+async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
-  const context = await resolveWorktreeProjectContext(directory);
-  await fsp.mkdir(context.worktreeRoot, { recursive: true });
-
-  const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
   const startRef = normalizeStartRef(input?.startRef);
   const ensureRemoteName = String(input?.ensureRemoteName || '').trim();
   const ensureRemoteUrl = String(input?.ensureRemoteUrl || '').trim();
-
-  const candidate = await resolveCandidateDirectory(
-    context.worktreeRoot,
-    preferredName,
-    mode === 'new' && preferredBranchName ? preferredBranchName : '',
-    context.primaryWorktree
-  );
 
   let localBranch = '';
   let inferredUpstream = null;
@@ -2855,6 +3689,11 @@ export async function createWorktree(directory, input = {}) {
   const upstreamBranch = String(input?.upstreamBranch || inferredUpstream?.branch || '').trim();
 
   setWorktreeBootstrapState(candidate.directory, WORKTREE_BOOTSTRAP_PENDING);
+  const bootstrapStatus = worktreeBootstrapState.get(toBootstrapStateKey(candidate.directory)) ?? {
+    status: WORKTREE_BOOTSTRAP_PENDING,
+    error: null,
+    updatedAt: Date.now(),
+  };
 
   queueWorktreeBootstrap({
     directory: candidate.directory,
@@ -2877,7 +3716,71 @@ export async function createWorktree(directory, input = {}) {
     name: candidate.name,
     branch: localBranch,
     path: candidate.directory,
+    directoryCreated: true,
+    bootstrapStatus,
   };
+}
+
+export async function createWorktree(directory, input = {}) {
+  const mode = input?.mode === 'existing' ? 'existing' : 'new';
+  const context = await resolveWorktreeProjectContext(directory);
+
+  if (input?.returnAfterDirectoryCreated === true) {
+    await assertWorktreeCreatePreflight(directory, input);
+  }
+
+  await fsp.mkdir(context.worktreeRoot, { recursive: true });
+
+  const preferredName = String(input?.worktreeName || input?.name || '').trim();
+  const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
+
+  const candidate = await resolveCandidateDirectory(
+    context.worktreeRoot,
+    preferredName,
+    mode === 'new' && preferredBranchName ? preferredBranchName : '',
+    context.primaryWorktree
+  );
+
+  if (input?.returnAfterDirectoryCreated === true) {
+    await fsp.mkdir(candidate.directory, { recursive: false });
+
+    try {
+      await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
+    } catch (error) {
+      console.warn('Failed to sync OpenCode sandbox metadata (add):', error instanceof Error ? error.message : String(error));
+    }
+
+    setWorktreeBootstrapState(candidate.directory, WORKTREE_BOOTSTRAP_PENDING);
+    const bootstrapStatus = worktreeBootstrapState.get(toBootstrapStateKey(candidate.directory)) ?? {
+      status: WORKTREE_BOOTSTRAP_PENDING,
+      error: null,
+      updatedAt: Date.now(),
+    };
+    const localBranch = mode === 'existing'
+      ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
+      : candidate.branch;
+
+    void attachGitWorktreeToCandidate(context, candidate, input).catch((error) => {
+      setWorktreeBootstrapState(
+        candidate.directory,
+        WORKTREE_BOOTSTRAP_FAILED,
+        error instanceof Error ? error.message : String(error)
+      );
+      void cleanupFailedFastWorktreeCreate(context, candidate);
+      console.warn('Background worktree creation failed:', error instanceof Error ? error.message : String(error));
+    });
+
+    return {
+      head: '',
+      name: candidate.name,
+      branch: localBranch,
+      path: candidate.directory,
+      directoryCreated: true,
+      bootstrapStatus,
+    };
+  }
+
+  return attachGitWorktreeToCandidate(context, candidate, input);
 }
 
 export async function getWorktreeBootstrapStatus(directory) {
@@ -2912,6 +3815,7 @@ export async function removeWorktree(directory, input = {}) {
   if (targetCanonical === primaryCanonical) {
     throw new Error('Cannot remove the primary workspace');
   }
+  const worktreeRootCanonical = await canonicalPath(context.worktreeRoot);
 
   const entries = await listWorktreeEntries(context.primaryWorktree);
   const matchedEntry = await (async () => {
@@ -2928,8 +3832,11 @@ export async function removeWorktree(directory, input = {}) {
   })();
 
   if (!matchedEntry?.worktree) {
+    const isManagedOrphan = targetCanonical !== worktreeRootCanonical
+      && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical);
+
     const targetExists = await checkPathExists(targetDirectory);
-    if (targetExists) {
+    if (targetExists && isManagedOrphan) {
       await fsp.rm(targetDirectory, { recursive: true, force: true });
     }
 
@@ -3018,6 +3925,65 @@ export async function getLog(directory, options = {}) {
 
   try {
     const maxCount = options.maxCount || 50;
+
+    if (options.all) {
+      const logArgs = [
+        'log',
+        `--max-count=${maxCount}`,
+        '--all',
+        '--topo-order',
+        '--date=iso',
+        '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+        '--shortstat',
+      ];
+
+      const rawLog = await git.raw(logArgs);
+      const records = rawLog
+        .split('\x1e')
+        .map((e) => e.trim())
+        .filter(Boolean);
+
+      const entries = [];
+      for (const record of records) {
+        const lines = record.split('\n').filter((l) => l.trim().length > 0);
+        const header = lines.shift() || '';
+        const [hash, parentsRaw, author_name, author_email, date, message, refsRaw] =
+          header.split('\x1f');
+        if (!hash) continue;
+
+        const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
+        const refs = refsRaw ? refsRaw.trim() : '';
+
+        let filesChanged = 0;
+        let insertions = 0;
+        let deletions = 0;
+        for (const line of lines) {
+          const filesMatch = line.match(/(\d+)\s+files?\s+changed/);
+          const insertMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+          const deleteMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+          if (filesMatch) filesChanged = parseInt(filesMatch[1], 10);
+          if (insertMatch) insertions = parseInt(insertMatch[1], 10);
+          if (deleteMatch) deletions = parseInt(deleteMatch[1], 10);
+        }
+
+        entries.push({
+          hash,
+          date: date || '',
+          message: message || '',
+          refs,
+          body: '',
+          author_name: author_name || '',
+          author_email: author_email || '',
+          filesChanged,
+          insertions,
+          deletions,
+          parents,
+        });
+      }
+
+      return { all: entries, latest: entries[0] || null, total: entries.length };
+    }
+
     const filePath = options.file
       ? (await resolveGitFileContext(directoryPath, directoryGit, options.file, repoRoot)).repoPath
       : undefined;
@@ -3045,7 +4011,7 @@ export async function getLog(directory, options = {}) {
       'log',
       `--max-count=${maxCount}`,
       '--date=iso',
-      '--pretty=format:%H%x1f%an%x1f%ae%x1f%ad%x1f%s%x1e',
+      '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s',
       '--shortstat'
     ];
 
@@ -3072,7 +4038,8 @@ export async function getLog(directory, options = {}) {
     records.forEach((record) => {
       const lines = record.split('\n').filter((line) => line.trim().length > 0);
       const header = lines.shift() || '';
-      const [hash] = header.split('\x1f');
+      const [hash, parentsRaw] = header.split('\x1f');
+      const parents = parentsRaw ? parentsRaw.trim().split(' ').filter(Boolean) : [];
       if (!hash) {
         return;
       }
@@ -3097,11 +4064,11 @@ export async function getLog(directory, options = {}) {
         }
       });
 
-      statsMap.set(hash, { filesChanged, insertions, deletions });
+      statsMap.set(hash, { filesChanged, insertions, deletions, parents });
     });
 
     const merged = baseLog.all.map((entry) => {
-      const stats = statsMap.get(entry.hash) || { filesChanged: 0, insertions: 0, deletions: 0 };
+      const stats = statsMap.get(entry.hash) || { filesChanged: 0, insertions: 0, deletions: 0, parents: [] };
       return {
         hash: entry.hash,
         date: entry.date,
@@ -3112,7 +4079,8 @@ export async function getLog(directory, options = {}) {
         author_email: entry.author_email,
         filesChanged: stats.filesChanged,
         insertions: stats.insertions,
-        deletions: stats.deletions
+        deletions: stats.deletions,
+        parents: stats.parents || [],
       };
     });
 

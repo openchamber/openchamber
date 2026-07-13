@@ -3,7 +3,8 @@ import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { I18nProvider } from '@/lib/i18n';
-import { getNextReasoningExpansionForSearch, getReasoningSearchContext, ReasoningTimelineBlock, shouldExpandReasoningForSearch } from './ReasoningPart';
+import { ReasoningTimelineBlock } from './ReasoningPart';
+import { getNextReasoningExpansionForSearch, getReasoningSearchContext, shouldExpandReasoningForSearch } from './reasoningSearch';
 
 // A reasoning text whose summary (first 120 chars) fits in the header but
 // whose expanded body content should only appear when the disclosure is open.
@@ -25,6 +26,7 @@ describe('ReasoningTimelineBlock', () => {
       query: 'needle',
       includeThinking: true,
       activeMessageId: 'message-1',
+      activePartType: 'reasoning',
       messageId: 'message-1',
     })).toBe(true);
 
@@ -33,6 +35,7 @@ describe('ReasoningTimelineBlock', () => {
       query: 'needle',
       includeThinking: false,
       activeMessageId: 'message-1',
+      activePartType: 'reasoning',
       messageId: 'message-1',
     })).toBe(false);
 
@@ -41,6 +44,16 @@ describe('ReasoningTimelineBlock', () => {
       query: 'needle',
       includeThinking: true,
       activeMessageId: 'message-2',
+      activePartType: 'reasoning',
+      messageId: 'message-1',
+    })).toBe(false);
+
+    expect(shouldExpandReasoningForSearch({
+      searchIsOpen: true,
+      query: 'needle',
+      includeThinking: true,
+      activeMessageId: 'message-1',
+      activePartType: 'text',
       messageId: 'message-1',
     })).toBe(false);
   });
@@ -169,5 +182,21 @@ describe('ReasoningTimelineBlock', () => {
     expect(markup).not.toContain('remain hidden in the collapsed header view');
     // The ellipsis character marks that the text was truncated
     expect(markup).toContain('…');
+  });
+
+  test('omits trailing empty HTML comments from the header summary', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <ReasoningTimelineBlock
+          text={'Planning accessible icon labels with translations <!-- -->'}
+          variant="thinking"
+          blockId="reasoning-comment-test"
+          showDuration={false}
+        />
+      </I18nProvider>,
+    );
+
+    expect(markup).toContain('Planning accessible icon labels with translations');
+    expect(markup).not.toContain('&lt;!-- --&gt;');
   });
 });

@@ -15,6 +15,22 @@ function part(id: string, messageID: string, type = "text", text = id): Part {
 }
 
 describe("materializeSessionSnapshots", () => {
+  test("marks an empty successful page as materialized", () => {
+    const result = materializeSessionSnapshots(
+      { message: {}, part: {} },
+      "ses_1",
+      [],
+    )
+
+    expect(result.message.ses_1).toEqual([])
+    expect(result.messagesChanged).toBe(true)
+    expect(getSessionMaterializationStatus(result, "ses_1")).toEqual({
+      hasMessages: true,
+      renderable: true,
+      missingPartMessageIDs: [],
+    })
+  })
+
   test("materializes messages and parts together", () => {
     const result = materializeSessionSnapshots(
       { message: {}, part: {} },
@@ -105,6 +121,37 @@ describe("materializeSessionSnapshots", () => {
     )
 
     expect(result.part.msg_1).toEqual([serverPart])
+  })
+
+  test("preserves state.time from existing part when snapshot drops it", () => {
+    const livePart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "completed", time: { start: 1000, end: 2000 } },
+    } as unknown as Part
+    const snapshotPart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "completed" },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [livePart] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotPart] }],
+    )
+
+    const mergedPart = result.part.msg_1[0] as { state?: { time?: { start?: number; end?: number } } }
+    expect(mergedPart.state?.time?.start).toBe(1000)
+    expect(mergedPart.state?.time?.end).toBe(2000)
   })
 })
 

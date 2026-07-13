@@ -6,19 +6,27 @@ import { classHighlighter, tags as t } from '@lezer/highlight';
 
 import type { Theme } from '@/types/theme';
 
-export function createFlexokiCodeMirrorTheme(theme: Theme): Extension {
+export function createFlexokiCodeMirrorTheme(
+  theme: Theme,
+  // When syntax colors are provided elsewhere (e.g. the Shiki decoration
+  // extension), pass `{ syntaxColors: false }` to keep only the editor UI theme
+  // (gutters, selection, cursor) and avoid a competing token color source.
+  options?: { syntaxColors?: boolean; fontSize?: number },
+): Extension {
   const isDark = theme.metadata.variant === 'dark';
 
   const monoFont = theme.config?.fonts?.mono || 'monospace';
   const highlights = theme.colors.syntax.highlights || {};
   const tokens = theme.colors.syntax.tokens || {};
 
+  const contentFontSize = options?.fontSize ? `${options.fontSize}px` : 'var(--text-code)';
+
   const ui = EditorView.theme({
     '&': {
       backgroundColor: 'var(--background)',
       color: theme.colors.syntax.base.foreground,
-      fontSize: 'var(--text-code)',
-      lineHeight: '1.5rem',
+      fontSize: contentFontSize,
+      lineHeight: '1.5',
       position: 'relative' as const,
     },
     '.cm-scroller': {
@@ -142,6 +150,20 @@ export function createFlexokiCodeMirrorTheme(theme: Theme): Extension {
       right: '14px',
       left: 'auto',
       width: 'auto',
+    },
+    '.cm-panels-bottom': {
+      position: 'static' as const,
+      width: '100%',
+      pointerEvents: 'auto',
+    },
+    '.cm-panels-bottom .cm-vim-panel': {
+      borderTop: `1px solid ${theme.colors.interactive.border}`,
+      backgroundColor: theme.colors.surface.elevated,
+      color: theme.colors.surface.mutedForeground,
+      fontFamily: 'var(--font-mono)',
+      fontSize: '12px',
+      minHeight: '22px',
+      padding: '2px 8px',
     },
 
     /* ── Floating search panel ── */
@@ -539,6 +561,10 @@ export function createFlexokiCodeMirrorTheme(theme: Theme): Extension {
       color: tokens.punctuation || theme.colors.syntax.base.comment,
     },
   ]);
+
+  if (options?.syntaxColors === false) {
+    return [ui];
+  }
 
   return [
     ui,

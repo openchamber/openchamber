@@ -1,6 +1,13 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
-import type { SessionSummaryMeta } from './types';
+import { getCurrentIntlLocale } from '@/lib/i18n';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+
+import { normalizePath } from '@/lib/pathNormalization';
+export { normalizePath };
+
+const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
+  formatMessage(useI18nStore.getState().dictionary, key, params);
 
 const formatDateLabel = (value: string | number) => {
   const targetDate = new Date(value);
@@ -14,12 +21,12 @@ const formatDateLabel = (value: string | number) => {
   yesterday.setDate(today.getDate() - 1);
 
   if (isSameDay(targetDate, today)) {
-    return 'Today';
+    return t('common.date.today');
   }
   if (isSameDay(targetDate, yesterday)) {
-    return 'Yesterday';
+    return t('common.date.yesterday');
   }
-  const formatted = targetDate.toLocaleDateString('en-US', {
+  const formatted = targetDate.toLocaleDateString(getCurrentIntlLocale(), {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -37,9 +44,9 @@ export const formatSessionDateLabel = (updatedMs: number): string => {
 
   if (isSameDay(updatedDate, today)) {
     const diff = Date.now() - updatedMs;
-    if (diff < 60_000) return 'Just now';
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}min ago`;
-    return `${Math.floor(diff / 3_600_000)}h ago`;
+    if (diff < 60_000) return t('common.relative.justNow');
+    if (diff < 3_600_000) return t('common.relative.minutesAgoShort', { count: Math.floor(diff / 60_000) });
+    return t('common.relative.hoursAgoShort', { count: Math.floor(diff / 3_600_000) });
   }
 
   return formatDateLabel(updatedMs);
@@ -62,23 +69,15 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
     return `${Math.floor(diff / hour)}h`;
   }
   if (diff < week) {
-    return `${Math.floor(diff / day)}d`;
+    return t('common.relative.daysAgoCompact', { count: Math.floor(diff / day) });
   }
   if (diff < 5 * week) {
-    return `${Math.floor(diff / week)}w`;
+    return t('common.relative.weeksAgoCompact', { count: Math.floor(diff / week) });
   }
   if (diff < year) {
     return `${Math.floor(diff / month)}mo`;
   }
-  return `${Math.floor(diff / year)}y`;
-};
-
-export const normalizePath = (value?: string | null) => {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
-  return normalized.length === 0 ? '/' : normalized;
+  return t('common.relative.yearsAgoCompact', { count: Math.floor(diff / year) });
 };
 
 export const isPathWithinProject = (directory?: string | null, projectPath?: string | null): boolean => {
@@ -88,6 +87,61 @@ export const isPathWithinProject = (directory?: string | null, projectPath?: str
   if (normalizedDirectory === normalizedProjectPath) return true;
   if (normalizedProjectPath === '/') return normalizedDirectory.startsWith('/');
   return normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
+};
+
+type NormalizedProjectPath = { normalizedPath: string };
+type WorktreePath = { path: string };
+
+export const collectKnownProjectDirectories = (
+  normalizedProjects: NormalizedProjectPath[],
+  availableWorktreesByProject: Map<string, WorktreePath[]>,
+  isVSCode: boolean,
+): Set<string> => {
+  const knownDirectories = new Set<string>();
+
+  normalizedProjects.forEach((project) => {
+    if (project.normalizedPath) {
+      knownDirectories.add(project.normalizedPath);
+    }
+  });
+
+  if (isVSCode) {
+    return knownDirectories;
+  }
+
+  for (const worktrees of availableWorktreesByProject.values()) {
+    for (const worktree of worktrees) {
+      const normalized = normalizePath(worktree.path);
+      if (normalized) {
+        knownDirectories.add(normalized);
+      }
+    }
+  }
+
+  return knownDirectories;
+};
+
+const findBestProjectDirectoryMatch = (
+  value: string | null,
+  knownDirectories?: Iterable<string>,
+): string | null => {
+  if (!value || !knownDirectories) {
+    return null;
+  }
+
+  let bestMatch: string | null = null;
+  for (const candidate of knownDirectories) {
+    const normalizedCandidate = normalizePath(candidate);
+    if (!normalizedCandidate || !isPathWithinProject(value, normalizedCandidate)) {
+      continue;
+    }
+
+    if (!bestMatch || normalizedCandidate.length > bestMatch.length) {
+      bestMatch = normalizedCandidate;
+    }
+  }
+
+  return bestMatch;
 };
 
 export const normalizeForBranchComparison = (value: string): string => {
@@ -142,20 +196,6 @@ export const compareSessionsByPinnedAndTime = (
   return getSessionUpdatedAt(b) - getSessionUpdatedAt(a);
 };
 
-export const compareSessionsByPinnedAndCreated = (
-  a: Session,
-  b: Session,
-  pinnedSessionIds: Set<string>,
-): number => {
-  const aPinned = pinnedSessionIds.has(a.id);
-  const bPinned = pinnedSessionIds.has(b.id);
-  if (aPinned !== bPinned) {
-    return aPinned ? -1 : 1;
-  }
-
-  return getSessionCreatedAt(b) - getSessionCreatedAt(a);
-};
-
 export const dedupeSessionsById = (sessions: Session[]): Session[] => {
   const byId = new Map<string, Session>();
   sessions.forEach((session) => {
@@ -187,64 +227,28 @@ export const isSessionRelatedToProject = (
   session: Session,
   projectRoot: string,
   validDirectories?: Set<string>,
+  knownDirectories?: Iterable<string>,
 ): boolean => {
   const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
   const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+  const resolvedDirectory = sessionDirectory ?? projectWorktree;
 
-  if (projectWorktree && (projectWorktree === projectRoot || projectWorktree.startsWith(`${projectRoot}/`))) {
+  if (resolvedDirectory && validDirectories?.has(resolvedDirectory)) {
     return true;
   }
 
-  if (!sessionDirectory) {
+  if (!resolvedDirectory) {
     return false;
   }
-  if (validDirectories && validDirectories.has(sessionDirectory)) {
-    return true;
+
+  const bestMatch = findBestProjectDirectoryMatch(resolvedDirectory, knownDirectories);
+  if (bestMatch) {
+    return validDirectories ? validDirectories.has(bestMatch) : bestMatch === projectRoot;
   }
-  return sessionDirectory === projectRoot || sessionDirectory.startsWith(`${projectRoot}/`);
+
+  return resolvedDirectory === projectRoot || resolvedDirectory.startsWith(`${projectRoot}/`);
 };
 
-const parseSummaryCount = (value: number | string | null | undefined): number | null => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return null;
-};
-
-export const resolveSessionDiffStats = (summary?: SessionSummaryMeta): { additions: number; deletions: number } | null => {
-  if (!summary) {
-    return null;
-  }
-
-  const directAdditions = parseSummaryCount(summary.additions);
-  const directDeletions = parseSummaryCount(summary.deletions);
-  if (directAdditions !== null || directDeletions !== null) {
-    const stats = {
-      additions: Math.max(0, directAdditions ?? 0),
-      deletions: Math.max(0, directDeletions ?? 0),
-    };
-    return stats.additions === 0 && stats.deletions === 0 ? null : stats;
-  }
-
-  const diffs = Array.isArray(summary.diffs) ? summary.diffs : [];
-  if (diffs.length === 0) {
-    return null;
-  }
-
-  let additions = 0;
-  let deletions = 0;
-  diffs.forEach((diff) => {
-    additions += Math.max(0, parseSummaryCount(diff.additions) ?? 0);
-    deletions += Math.max(0, parseSummaryCount(diff.deletions) ?? 0);
-  });
-  return additions === 0 && deletions === 0 ? null : { additions, deletions };
-};
 
 export const formatProjectLabel = (label: string): string => {
   return label

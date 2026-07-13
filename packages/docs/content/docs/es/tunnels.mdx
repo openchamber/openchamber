@@ -5,7 +5,9 @@ description: Expón OpenChamber de forma segura para acceso remoto y móvil.
 
 # Túneles
 
-Un túnel es un enlace público a tu OpenChamber, para que puedas acceder a él desde tu teléfono u otra red. Usa `openchamber tunnel` para crear uno para una instancia en marcha.
+Un túnel es un enlace público a tu OpenChamber, para que puedas acceder a él desde un navegador corriente en otra red. Usa `openchamber tunnel` para crear uno para una instancia en marcha.
+
+> Conectar tus **propios dispositivos** (la app móvil, otro escritorio) normalmente no necesita un túnel: [vincúlalos](/es/connect-devices/) y deja que el [Private Relay](/es/private-relay/), cifrado de extremo a extremo, se encargue del acceso fuera de casa sin configuración.
 
 ## Requisitos previos
 
@@ -29,6 +31,8 @@ ngrok config add-authtoken <your-ngrok-token>
 ```bash
 openchamber
 ```
+
+Si omites este paso, `openchamber tunnel start` puede iniciar automáticamente un servidor CLI. Al hacerlo, puedes pasar opciones del servidor como `--port`, `--host`, `--lan`, `--ui-password` y `--api-only`.
 
 2. Inicia un túnel de Cloudflare:
 
@@ -105,9 +109,11 @@ openchamber tunnel stop --port 3000
 - un único túnel activo por instancia de OpenChamber (puerto)
 - iniciar un nuevo modo/proveedor en la misma instancia reemplaza el túnel anterior
 - generar un nuevo enlace de conexión revoca el anterior sin usar
+- el autoarranque del túnel conserva flags del servidor como `--ui-password` y `--api-only` en los ajustes de instancia usados por reinicios y actualizaciones
 
 ## Relacionado
 
+- [Conectar un dispositivo](/es/connect-devices/) — vincula tus propios dispositivos sin una URL pública
 - [Seguridad](/es/security/) — protege la interfaz antes de exponerla
 - [Túneles de escritorio](/es/desktop-tunnels/) — configuración de túneles en la app de escritorio sin iniciar desde CLI
 - [PWA y acceso móvil](/es/mobile/) — accede a OpenChamber desde tu teléfono

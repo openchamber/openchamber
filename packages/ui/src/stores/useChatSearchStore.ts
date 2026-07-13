@@ -15,16 +15,21 @@ export interface SearchContext {
   isRegex: boolean;
   /** Message ID for annotating <mark> elements with data-search-msg. */
   messageId: string;
+  /** Part identity keeps matches distinct when one message has many parts. */
+  partId?: string;
+  partType?: 'text' | 'reasoning';
 }
 
 /**
- * One entry per match found in the message data layer.
- * `messageId` is used to scroll the virtualised list to the right message
- * before the widget activates the corresponding DOM <mark> element.
+ * One entry per logical match found in one message part. A cross-inline
+ * boundary match may produce multiple DOM fragments, all sharing this
+ * part-local occurrence identity.
  */
 export interface MatchRecord {
   messageId: string;
-  occurrenceInMessage: number; // 0-based index within the message
+  partId: string;
+  partType: 'text' | 'reasoning';
+  occurrenceInPart: number; // 0-based index within the part
 }
 
 interface ChatSearchState {
@@ -51,11 +56,11 @@ interface ChatSearchState {
   setActiveIndex: (n: number) => void;
   /**
    * Called by useChatSearchMatcher with the freshly computed match list.
-   * `preserveMessageId`: if provided and still present in the new list, keeps
-   * activeIndex pointing at the first match in that message instead of
-   * resetting to 0. Pass null when query/flags changed (always reset).
+   * `preserveMatch`: if provided and still present in the new list, keeps
+   * activeIndex on the same logical part occurrence instead of resetting to 0.
+   * Pass null when query/flags changed (always reset).
    */
-  setMatches: (matches: MatchRecord[], preserveMessageId: string | null) => void;
+  setMatches: (matches: MatchRecord[], preserveMatch: MatchRecord | null) => void;
   setIsLoadingForSearch: (loading: boolean) => void;
 }
 
@@ -83,10 +88,13 @@ export const useChatSearchStore = create<ChatSearchState>((set, get) => ({
     set({ activeIndex: next });
   },
   setActiveIndex: (n) => set({ activeIndex: n }),
-  setMatches: (newMatches, preserveMessageId) => {
-    if (preserveMessageId !== null) {
+  setMatches: (newMatches, preserveMatch) => {
+    if (preserveMatch !== null) {
       const restoredIndex = newMatches.findIndex(
-        (m) => m.messageId === preserveMessageId,
+        (m) => m.messageId === preserveMatch.messageId
+          && m.partId === preserveMatch.partId
+          && m.partType === preserveMatch.partType
+          && m.occurrenceInPart === preserveMatch.occurrenceInPart,
       );
       if (restoredIndex !== -1) {
         set({ matches: newMatches, totalMatches: newMatches.length, activeIndex: restoredIndex });

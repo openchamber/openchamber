@@ -164,18 +164,21 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
           .querySelectorAll<HTMLElement>('mark[data-search-match].active')
           .forEach((el) => el.classList.remove('active'));
 
-        // Find marks belonging specifically to this message using data-search-msg.
-        // This is robust against earlier messages being virtualized out of the DOM —
-        // we no longer rely on a global mark index.
-        const messageMarks = Array.from(
-          container.querySelectorAll<HTMLElement>(
-            `mark[data-search-match][data-search-msg="${CSS.escape(match.messageId)}"]`,
-          ),
-        );
+        // A logical match may be split into several DOM fragments when it
+        // crosses inline markdown boundaries. Activate every fragment with
+        // the same part-local occurrence, then scroll the first one.
+        const matchFragments = Array.from(
+          container.querySelectorAll<HTMLElement>('mark[data-search-match]'),
+        ).filter((mark) => (
+          mark.dataset.searchMsg === match.messageId
+          && mark.dataset.searchPart === match.partId
+          && mark.dataset.searchPartType === match.partType
+          && mark.dataset.searchOccurrence === String(match.occurrenceInPart)
+        ));
 
-        const target = messageMarks[match.occurrenceInMessage];
+        const target = matchFragments[0];
         if (target) {
-          target.classList.add('active');
+          matchFragments.forEach((fragment) => fragment.classList.add('active'));
           target.scrollIntoView({ block: 'center', behavior: 'smooth' });
         } else if (attempt < 16) {
           requestAnimationFrame(() => activate(attempt + 1));
@@ -317,5 +320,3 @@ export const ChatSearchWidget: React.FC<ChatSearchWidgetProps> = ({
     </div>
   );
 };
-
-export default ChatSearchWidget;

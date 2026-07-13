@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { prunePinnedSessionIds } from './pinnedSessionCleanup';
 
 type SafeStorageLike = {
   getItem: (key: string) => string | null;
@@ -32,7 +33,7 @@ const LEGACY_EXPANSION_CONTEXT_PREFIXES = [
 
 type Args = {
   isVSCode: boolean;
-  hasLoadedGlobalSessions: boolean;
+  hasAuthoritativeGlobalSessions: boolean;
   safeStorage: SafeStorageLike;
   keys: Keys;
   sessions: Session[];
@@ -48,7 +49,7 @@ type Args = {
 export const useSidebarPersistence = (args: Args) => {
   const {
     isVSCode,
-    hasLoadedGlobalSessions,
+    hasAuthoritativeGlobalSessions,
     safeStorage,
     keys,
     sessions,
@@ -150,24 +151,14 @@ export const useSidebarPersistence = (args: Args) => {
   }, [keys.projectCollapse, keys.sessionExpanded, keys.sessionExpandedLegacy, safeStorage, setCollapsedProjects, setExpandedParents]);
 
   React.useEffect(() => {
-    if (!hasLoadedGlobalSessions) {
+    if (!hasAuthoritativeGlobalSessions) {
       return;
     }
 
-    const existingSessionIds = new Set(sessions.map((session) => session.id));
     setPinnedSessionIds((prev) => {
-      let changed = false;
-      const next = new Set<string>();
-      prev.forEach((id) => {
-        if (existingSessionIds.has(id)) {
-          next.add(id);
-        } else {
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
+      return prunePinnedSessionIds(sessions, prev);
     });
-  }, [hasLoadedGlobalSessions, sessions, setPinnedSessionIds]);
+  }, [hasAuthoritativeGlobalSessions, sessions, setPinnedSessionIds]);
 
   React.useEffect(() => {
     try {

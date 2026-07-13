@@ -7,6 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -32,6 +33,7 @@ export function InlineCommentCard({
   const themeContext = useOptionalThemeSystem();
   const currentTheme = themeContext?.currentTheme;
   const [isOpen, setIsOpen] = useState(false);
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
   const draftText = typeof draft.text === 'string' ? draft.text : '';
   
   // Check if content is long enough to warrant collapsing (rough estimate)
@@ -39,18 +41,27 @@ export function InlineCommentCard({
   const isLongContent = draftText.length > 150 || draftText.split('\n').length > 3;
 
   return (
-    <div
-      className={cn(
-        "rounded-lg border shadow-none w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] overflow-hidden transition-all duration-200",
-        className
-      )}
-      style={{
-        backgroundColor: currentTheme?.colors?.surface?.elevated,
-        borderColor: currentTheme?.colors?.interactive?.border,
-        maxWidth: maxWidth ? `${Math.max(200, Math.floor(maxWidth))}px` : undefined,
-      }}
-      data-comment-card="true"
-    >
+    <ContextMenu open={isContextMenuOpen} onOpenChange={setIsContextMenuOpen}>
+      <ContextMenuTrigger
+        render={
+          <div
+            className={cn(
+              "rounded-lg border shadow-none w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] overflow-hidden transition-all duration-200",
+              className
+            )}
+            style={{
+              backgroundColor: currentTheme?.colors?.surface?.elevated,
+              borderColor: currentTheme?.colors?.interactive?.border,
+              maxWidth: maxWidth ? `${Math.max(200, Math.floor(maxWidth))}px` : undefined,
+            }}
+            data-comment-card="true"
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setIsContextMenuOpen(true);
+            }}
+          />
+        }
+      >
       <div className="flex items-start justify-between gap-2 p-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground mb-1.5">
@@ -117,6 +128,17 @@ export function InlineCommentCard({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onClick={onEdit}>
+          <Icon name="edit" className="size-4 mr-2" />
+          {t('inlineComment.actions.editComment')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">
+          <Icon name="delete-bin" className="size-4 mr-2" />
+          {t('inlineComment.actions.deleteComment')}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

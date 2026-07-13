@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { SettingsSidebarLayout } from '@/components/sections/shared/SettingsSidebarLayout';
 import { SettingsSidebarItem } from '@/components/sections/shared/SettingsSidebarItem';
 import { Icon } from "@/components/icon/Icon";
-import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -18,7 +18,6 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
   const selectedId = useUIStore((state) => state.settingsProjectsSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
   const { currentTheme } = useThemeSystem();
-  const [brokenIconIds, setBrokenIconIds] = React.useState<Set<string>>(new Set());
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
@@ -66,45 +65,32 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
       {projects.map((project) => {
         const selected = project.id === selectedId;
         const iconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
-        const imageFailureKey = `${project.id}:${project.iconImage?.updatedAt ?? 0}`;
-        const imageUrl = brokenIconIds.has(imageFailureKey)
-          ? null
-          : getProjectIconImageUrl(project, {
-            themeVariant: currentTheme.metadata.variant,
-            iconColor: currentTheme.colors.surface.foreground,
-          });
         const color = project.color ? (PROJECT_COLOR_MAP[project.color] ?? null) : null;
-        const icon = imageUrl
-          ? (
-            <span
-              className="inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-[2px]"
-              style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
-            >
-              <img
-                src={imageUrl}
-                alt=""
-                className="h-full w-full object-contain"
-                draggable={false}
-                onError={() => {
-                  setBrokenIconIds((prev) => {
-                    if (prev.has(imageFailureKey)) {
-                      return prev;
-                    }
-                    const next = new Set(prev);
-                    next.add(imageFailureKey);
-                    return next;
-                  });
-                }}
-              />
-            </span>
-          )
-          : iconName
+        const fallbackIcon = iconName
           ? (
             <Icon name={iconName} className={cn('h-4 w-4', selected ? 'text-foreground' : 'text-muted-foreground/70')} style={color ? { color } : undefined} />
           )
           : (
             <Icon name="folder" className={cn('h-4 w-4', selected ? 'text-foreground' : 'text-muted-foreground/70')} style={color ? { color } : undefined} />
           );
+        const icon = project.iconImage
+          ? (
+            <span
+              className="inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-[2px]"
+              style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
+            >
+              <ProjectIconImage
+                project={project}
+                options={{
+                  themeVariant: currentTheme.metadata.variant,
+                  iconColor: currentTheme.colors.surface.foreground,
+                }}
+                className="h-full w-full object-contain"
+                fallback={fallbackIcon}
+              />
+            </span>
+          )
+          : fallbackIcon;
 
         return (
           <SettingsSidebarItem

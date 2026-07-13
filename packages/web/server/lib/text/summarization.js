@@ -25,7 +25,7 @@ export function sanitizeForTTS(text) {
     .trim();
 }
 
-export function sanitizeForNotification(text) {
+function sanitizeForNotification(text) {
   if (!text || typeof text !== 'string') return '';
 
   return text

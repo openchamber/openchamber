@@ -1,14 +1,26 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { dedupeSessionsById, isSessionRelatedToProject, normalizePath } from '../utils';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { collectKnownProjectDirectories, dedupeSessionsById, isSessionRelatedToProject, normalizePath } from '../utils';
 
 type WorktreeMeta = { path: string };
+
+type NormalizedProject = { id: string; normalizedPath: string };
 
 type Args = {
   isVSCode: boolean;
   sessions: Session[];
   archivedSessions: Session[];
   availableWorktreesByProject: Map<string, WorktreeMeta[]>;
+  /**
+   * The set of normalized projects the sidebar will render. Used in
+   * Layer 4.13 to precompute the allowed directory set so the per-row
+   * `sessionsByDirectory` Map only contains buckets the sidebar will
+   * actually consume. With 10 projects × 5 worktrees and 100 sessions
+   * per directory this drops the Map from N entries to the small
+   * subset the sidebar needs.
+   */
+  normalizedProjects: NormalizedProject[];
 };
 
 export const useProjectSessionLists = (args: Args) => {
@@ -17,14 +29,32 @@ export const useProjectSessionLists = (args: Args) => {
     sessions,
     archivedSessions,
     availableWorktreesByProject,
+    normalizedProjects,
   } = args;
+
+  // Precompute the set of directories the sidebar will ever ask about:
+  // every project's normalized path plus the path of each registered
+  // worktree. Walking this set is O(P + W) per Sidebar render and lets
+  // us skip the bulk of `sessions` (whose directory is not associated
+  // with a known project) when building `sessionsByDirectory`.
+  const knownProjectDirectories = React.useMemo(
+    () => collectKnownProjectDirectories(normalizedProjects, availableWorktreesByProject, isVSCode),
+    [normalizedProjects, availableWorktreesByProject, isVSCode],
+  );
 
   const sessionsByDirectory = React.useMemo(() => {
     const next = new Map<string, Session[]>();
     sessions.forEach((session) => {
-      const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null)
-        ?? normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+      const directory = resolveGlobalSessionDirectory(session);
       if (!directory) {
+        return;
+      }
+      // Skip sessions whose directory doesn't belong to any known
+      // project or worktree. Without this filter the Map grows with
+      // every session the server has ever seen, even ones for
+      // long-removed worktrees; the sidebar's downstream filters
+      // would then drop them anyway.
+      if (!knownProjectDirectories.has(directory)) {
         return;
       }
 
@@ -33,7 +63,7 @@ export const useProjectSessionLists = (args: Args) => {
       next.set(directory, collection);
     });
     return next;
-  }, [sessions]);
+  }, [sessions, knownProjectDirectories]);
 
   const getSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
@@ -49,7 +79,7 @@ export const useProjectSessionLists = (args: Args) => {
       const collected: Session[] = [];
 
       directories.forEach((directory) => {
-        const sessionsForDirectory = sessionsByDirectory.get(directory) ?? [];
+        const sessionsForDirectory: Session[] = sessionsByDirectory.get(directory) ?? [];
         sessionsForDirectory.forEach((session) => {
           if (seen.has(session.id)) {
             return;
@@ -102,7 +132,7 @@ export const useProjectSessionLists = (args: Args) => {
       ]);
 
       const collect = (input: Session[]): Session[] => input.filter((session) =>
-        isSessionRelatedToProject(session, project.normalizedPath, validDirectories),
+        isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories),
       );
 
       const archived = collect(archivedSessions);
@@ -118,12 +148,12 @@ export const useProjectSessionLists = (args: Args) => {
         if (!projectWorktree) {
           return false;
         }
-        return projectWorktree === project.normalizedPath || projectWorktree.startsWith(`${project.normalizedPath}/`);
+        return isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories);
       });
 
       return dedupeSessionsById([...archived, ...unassignedLive]);
     },
-    [archivedSessions, availableWorktreesByProject, isVSCode, sessions],
+    [archivedSessions, availableWorktreesByProject, isVSCode, knownProjectDirectories, sessions],
   );
 
   return {

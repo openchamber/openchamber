@@ -14,6 +14,10 @@ const requireDirectory = (id: string, type: string, directory?: string): BridgeR
   return null;
 };
 
+const isValidCommitHash = (hash: string | undefined): hash is string => (
+  typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
+);
+
 export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
@@ -247,6 +251,23 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: { success: true } };
     }
 
+    case 'api:git/apply-hunk': {
+      const { directory, path: filePath, patch, action } = (payload || {}) as {
+        directory?: string;
+        path?: string;
+        patch?: string;
+        action?: 'stage' | 'unstage' | 'discard';
+      };
+      if (!directory || !filePath || typeof patch !== 'string' || !patch.trim()) {
+        return { id, type, success: false, error: 'Directory, path, and patch are required' };
+      }
+      if (action !== 'stage' && action !== 'unstage' && action !== 'discard') {
+        return { id, type, success: false, error: 'action must be stage, unstage, or discard' };
+      }
+      await gitService.applyGitHunk(directory, filePath, patch, action);
+      return { id, type, success: true, data: { success: true } };
+    }
+
     case 'api:git/commit': {
       const { directory, message, addAll, files, stageFiles } = (payload || {}) as {
         directory?: string;
@@ -416,17 +437,70 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: result };
     }
 
+    case 'api:git/checkout-commit': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      const result = await gitService.checkoutCommit(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/cherry-pick': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      const result = await gitService.cherryPick(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/revert-commit': {
+      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      const result = await gitService.revertCommit(directory!, hash);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/reset-to-commit': {
+      const { directory, hash, mode, force } = (payload || {}) as {
+        directory?: string;
+        hash?: string;
+        mode?: 'soft' | 'mixed' | 'hard';
+        force?: boolean;
+      };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!isValidCommitHash(hash)) {
+        return { id, type, success: false, error: 'Invalid commit hash' };
+      }
+      if (!mode || !['soft', 'mixed', 'hard'].includes(mode)) {
+        return { id, type, success: false, error: 'mode must be soft, mixed, or hard' };
+      }
+      const result = await gitService.resetToCommit(directory!, hash, mode, force);
+      return { id, type, success: true, data: result };
+    }
+
     case 'api:git/log': {
-      const { directory, maxCount, from, to, file } = (payload || {}) as {
+      const { directory, maxCount, from, to, file, all } = (payload || {}) as {
         directory?: string;
         maxCount?: number;
         from?: string;
         to?: string;
         file?: string;
+        all?: boolean;
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
-      const result = await gitService.getGitLog(directory!, { maxCount, from, to, file });
+      const result = await gitService.getGitLog(directory!, { maxCount, from, to, file, all });
       return { id, type, success: true, data: result };
     }
 
@@ -457,12 +531,14 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
     }
 
     case 'api:git/identity': {
-      const { directory, method, userName, userEmail, sshKey } = (payload || {}) as {
+      const { directory, method, userName, userEmail, sshKey, signCommits, signingKey } = (payload || {}) as {
         directory?: string;
         method?: string;
         userName?: string;
         userEmail?: string;
         sshKey?: string | null;
+        signCommits?: boolean;
+        signingKey?: string | null;
       };
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
@@ -478,7 +554,14 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         if (!userName || !userEmail) {
           return { id, type, success: false, error: 'userName and userEmail are required' };
         }
-        const result = await gitService.setGitIdentity(directory!, userName, userEmail, sshKey);
+        const result = await gitService.setGitIdentity(
+          directory!,
+          userName,
+          userEmail,
+          sshKey,
+          signCommits === true,
+          signingKey ?? null
+        );
         return { id, type, success: true, data: result };
       }
 

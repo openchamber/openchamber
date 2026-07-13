@@ -7,6 +7,7 @@ This module provides notification message preparation utilities for the web serv
 - `packages/web/server/lib/notifications/index.js`: public entrypoint imported by `packages/web/server/index.js`.
 - `packages/web/server/lib/notifications/routes.js`: route registration for push, visibility, and session status/attention endpoints.
 - `packages/web/server/lib/notifications/push-runtime.js`: push subscription persistence, VAPID initialization, and UI visibility runtime.
+- `packages/web/server/lib/notifications/apns-runtime.js`: native iOS APNs device-token persistence + delivery. Two modes: **relay** (default — sign + POST tokens + generic text to the central Cloudflare relay `https://api.openchamber.dev/v1/push/send`, which holds the single project APNs key) and **direct** (fallback — sign ES256 JWT with Node crypto + HTTP/2, when `OPENCHAMBER_PUSH_RELAY_DISABLED=true`). Each server has an auto-generated ECDSA P-256 keypair (`getOrCreateRelayKeypair`, persisted in settings); it binds tokens on the relay (`/v1/push/register-token`) and signs every relay request, so the relay only delivers to tokens bound to that server. APNs is the native app's sole notification channel (no local notifications) and is NOT gated on UI visibility — iOS suppresses the foreground banner instead. Mobile push carries only generic text (scenario title + session name) — see `APNS.md`.
 - `packages/web/server/lib/notifications/emitter-runtime.js`: desktop/stdout + UI SSE notification emission runtime.
 - `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
 - `packages/web/server/lib/notifications/template-runtime.js`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
@@ -24,8 +25,11 @@ This module provides notification message preparation utilities for the web serv
   - `GET /api/push/vapid-public-key`
   - `POST /api/push/subscribe`
   - `DELETE /api/push/subscribe`
+  - `POST /api/push/apns-token` (native iOS APNs device-token registration)
+  - `DELETE /api/push/apns-token`
   - `POST /api/push/visibility`
   - `GET /api/push/visibility`
+  - `GET /api/notifications/stream`
   - `GET /api/session-activity`
   - `GET /api/sessions/snapshot`
   - `GET /api/sessions/status`
@@ -41,10 +45,11 @@ This module provides notification message preparation utilities for the web serv
 - Returned API:
   - `maybeSendPushForTrigger(payload)`
 - Owns:
-  - completion/error/question/permission trigger routing
+  - completion/error/question/permission trigger routing; permission suppression consults the authoritative permission-auto-accept runtime
   - session parent cache for subtask suppression
   - template resolution and fallback behavior
   - native notification fanout and web push payload fanout
+  - push suppression while any fresh UI visibility heartbeat reports a focused client
 
 ### Push runtime API (push-runtime.js)
 - `createPushRuntime(dependencies)`: creates runtime for web push and UI visibility state.
@@ -58,6 +63,16 @@ This module provides notification message preparation utilities for the web serv
   - `updateUiVisibility(token, visible)`
   - `isAnyUiVisible()`
   - `isUiVisible(token)`
+
+### APNs runtime API (apns-runtime.js)
+- `createApnsRuntime(dependencies)`: creates runtime for native iOS APNs push and device-token state. Dependencies: `fsPromises`, `path`, `crypto`, `http2`, `APNS_TOKENS_FILE_PATH`, `readSettingsFromDiskMigrated`, `writeSettingsToDisk` (persists the auto-generated relay signing keypair).
+- Returned API:
+  - `addOrUpdateApnsToken(uiSessionToken, deviceToken, userAgent)` — also binds a newly-seen token on the relay (signed `/v1/push/register-token`).
+  - `removeApnsToken(uiSessionToken, deviceToken)`
+  - `removeApnsTokenFromAllSessions(deviceToken)`
+  - `sendApnsToAllUiSessions(payload)` — signs + sends to all registered tokens (no UI-visibility gate; iOS suppresses the foreground banner). No-ops with a single warning when APNs is unconfigured. Drops tokens on `410` / `BadDeviceToken` / `Unregistered`.
+  - `resolveApnsConfig()`
+- Configuration (env first, then `settings.apnsConfig`): `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8` (PEM contents; literal `\n` accepted) or `OPENCHAMBER_APNS_P8_PATH`, `OPENCHAMBER_APNS_BUNDLE_ID` (default `com.openchamber.app`), `OPENCHAMBER_APNS_ENVIRONMENT` (`sandbox` default, or `production`).
 
 ### Emitter runtime API (emitter-runtime.js)
 - `createNotificationEmitterRuntime(dependencies)`: creates runtime for unified notification emission channels.
@@ -85,6 +100,7 @@ This module provides notification message preparation utilities for the web serv
 
 ### Default values
 - `DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH`: 250 (default max length for notification text).
+- `NOTIFICATION_SSE_HEARTBEAT_INTERVAL_MS`: 20000 (notification SSE comment heartbeat interval).
 
 ## Settings object format
 

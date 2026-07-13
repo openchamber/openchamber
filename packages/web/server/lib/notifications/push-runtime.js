@@ -1,4 +1,5 @@
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
+const UI_VISIBILITY_TTL_MS = 30_000;
 
 const isLoopbackHttpOrigin = (value) => {
   if (typeof value !== 'string') {
@@ -24,7 +25,13 @@ export const createPushRuntime = (deps) => {
   let pushInitialized = false;
 
   const uiVisibilityByToken = new Map();
-  let globalVisibilityState = false;
+  const pruneUiVisibility = (now = Date.now()) => {
+    for (const [token, state] of uiVisibilityByToken) {
+      if (!state || now - state.updatedAt > UI_VISIBILITY_TTL_MS) {
+        uiVisibilityByToken.delete(token);
+      }
+    }
+  };
 
   const readPushSubscriptionsFromDisk = async () => {
     try {
@@ -108,12 +115,13 @@ export const createPushRuntime = (deps) => {
           p256dh,
           auth,
           createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : null,
+          platform: typeof entry.platform === 'string' ? entry.platform : undefined,
         };
       })
       .filter(Boolean);
   };
 
-  const addOrUpdatePushSubscription = async (uiSessionToken, subscription, userAgent) => {
+  const addOrUpdatePushSubscription = async (uiSessionToken, subscription, userAgent, platform) => {
     if (!uiSessionToken) {
       return;
     }
@@ -128,6 +136,7 @@ export const createPushRuntime = (deps) => {
 
       const filtered = existing.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== subscription.endpoint);
 
+      const previous = existing.find((entry) => entry && entry.endpoint === subscription.endpoint);
       filtered.unshift({
         endpoint: subscription.endpoint,
         p256dh: subscription.p256dh,
@@ -135,6 +144,13 @@ export const createPushRuntime = (deps) => {
         createdAt: now,
         lastSeenAt: now,
         userAgent: typeof userAgent === 'string' && userAgent.length > 0 ? userAgent : undefined,
+        // Platform lets the sender route mobile PWA push through the same presence gate as APNs.
+        platform:
+          typeof platform === 'string' && platform
+            ? platform
+            : typeof previous?.platform === 'string'
+              ? previous.platform
+              : undefined,
       });
 
       subsBySession[uiSessionToken] = filtered.slice(0, 10);
@@ -223,24 +239,70 @@ export const createPushRuntime = (deps) => {
     }
 
     await Promise.all(Array.from(subscriptionsByEndpoint.values()).map(async (sub) => {
-      if (requireNoSse && isAnyUiVisible()) {
-        return;
+      if (requireNoSse) {
+        // Mobile PWA subscriptions follow the same presence model as native push: suppress only
+        // when an interactive (desktop/web) client is visible. The phone PWA's own foreground is
+        // handled in the service worker (focused-client check), so it won't double-notify.
+        // Non-mobile (desktop/web) subscriptions keep the existing any-visible gate.
+        const suppressed = isMobilePlatform(sub.platform) ? isAnyInteractiveClientVisible() : isAnyUiVisible();
+        if (suppressed) return;
       }
       await sendPushToSubscription(sub, payload);
     }));
   };
 
-  const updateUiVisibility = (token, visible) => {
+  // A client is "mobile" if it reports a native mobile platform. Anything else (web, desktop,
+  // vscode, or an older client that doesn't report a platform) is treated as interactive — i.e.
+  // a surface where the user would actually see the in-app notification.
+  const MOBILE_PLATFORMS = new Set(['ios', 'android']);
+  const isMobilePlatform = (platform) => typeof platform === 'string' && MOBILE_PLATFORMS.has(platform);
+
+  const updateUiVisibility = (token, visible, platform) => {
     if (!token) return;
     const now = Date.now();
     const nextVisible = Boolean(visible);
-    uiVisibilityByToken.set(token, { visible: nextVisible, updatedAt: now });
-    globalVisibilityState = nextVisible;
+    const existing = uiVisibilityByToken.get(token);
+    // Keep the last known platform if this beacon didn't carry one (e.g. a heartbeat).
+    const nextPlatform = typeof platform === 'string' && platform ? platform : existing?.platform;
+    uiVisibilityByToken.set(token, { visible: nextVisible, updatedAt: now, platform: nextPlatform });
   };
 
-  const isAnyUiVisible = () => globalVisibilityState === true;
+  const isAnyUiVisible = () => {
+    const now = Date.now();
+    pruneUiVisibility(now);
+    for (const state of uiVisibilityByToken.values()) {
+      if (state.visible === true && now - state.updatedAt <= UI_VISIBILITY_TTL_MS) {
+        return true;
+      }
+    }
+    return false;
+  };
 
-  const isUiVisible = (token) => uiVisibilityByToken.get(token)?.visible === true;
+  // True when at least one NON-mobile client (desktop/web/vscode) is currently visible. Used to
+  // suppress native push to the phone: an active desktop already shows the notification, so the
+  // phone doesn't need it. Deliberately based on the desktop's visibility (reliable), never the
+  // phone's own (a backgrounded WKWebView can't report "hidden" before iOS suspends it).
+  const isAnyInteractiveClientVisible = () => {
+    const now = Date.now();
+    pruneUiVisibility(now);
+    for (const state of uiVisibilityByToken.values()) {
+      if (
+        state.visible === true &&
+        now - state.updatedAt <= UI_VISIBILITY_TTL_MS &&
+        !isMobilePlatform(state.platform)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const isUiVisible = (token) => {
+    const now = Date.now();
+    pruneUiVisibility(now);
+    const state = uiVisibilityByToken.get(token);
+    return state?.visible === true && now - state.updatedAt <= UI_VISIBILITY_TTL_MS;
+  };
 
   const resolveVapidSubject = async () => {
     const configured = process.env.OPENCHAMBER_VAPID_SUBJECT;
@@ -297,6 +359,7 @@ export const createPushRuntime = (deps) => {
     sendPushToAllUiSessions,
     updateUiVisibility,
     isAnyUiVisible,
+    isAnyInteractiveClientVisible,
     isUiVisible,
     ensurePushInitialized,
     setPushInitialized,

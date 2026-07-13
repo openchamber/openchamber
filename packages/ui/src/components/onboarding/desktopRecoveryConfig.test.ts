@@ -60,6 +60,15 @@ describe('getDesktopRecoveryConfig', () => {
     expect(config.useRemoteLabel).toBe('Use Remote');
   });
 
+  test('remote-incompatible exposes retry and both actions', () => {
+    const config = getDesktopRecoveryConfig('remote-incompatible', 'Old Server', 'https://old.example');
+
+    expect(config.showRetry).toBe(true);
+    expect(config.showUseLocal).toBe(true);
+    expect(config.showUseRemote).toBe(true);
+    expect(config.titleKey).toBe('onboarding.desktopRecovery.remoteIncompatible.title');
+  });
+
   // ---------------------------------------------------------------------------
   // 4. missing-default-host: chooser-with-context (both actions, no retry)
   // ---------------------------------------------------------------------------

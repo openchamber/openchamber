@@ -41,7 +41,7 @@ export interface AgentGroup {
   sessionCount: number;
 }
 
-export interface DeleteAgentGroupResult {
+interface DeleteAgentGroupResult {
   failedIds: string[];
   failedWorktreePaths: string[];
 }
@@ -50,7 +50,7 @@ export interface DeleteAgentGroupResult {
 // parseSessionTitle
 // ---------------------------------------------------------------------------
 
-export function parseSessionTitle(title: string | undefined): {
+function parseSessionTitle(title: string | undefined): {
   groupSlug: string;
   provider: string;
   model: string;

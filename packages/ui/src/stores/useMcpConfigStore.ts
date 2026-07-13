@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
-import { getSafeStorage } from './utils/safeStorage';
+import { devtools, persist } from 'zustand/middleware';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import {
   startConfigUpdate,
   finishConfigUpdate,
@@ -8,6 +8,7 @@ import {
 import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export type McpScope = 'user' | 'project';
 
@@ -38,21 +39,21 @@ const getConfigDirectory = (): string | null => {
 
 // ============== TYPES ==============
 
-export interface McpLocalConfig {
+interface McpLocalConfig {
   type: 'local';
   command: string[];
   environment?: Record<string, string>;
   enabled: boolean;
 }
 
-export interface McpOAuthConfig {
+interface McpOAuthConfig {
   clientId?: string;
   clientSecret?: string;
   scope?: string;
   redirectUri?: string;
 }
 
-export interface McpRemoteConfig {
+interface McpRemoteConfig {
   type: 'remote';
   url: string;
   environment?: Record<string, string>;
@@ -63,7 +64,7 @@ export interface McpRemoteConfig {
 }
 
 export type McpServerConfig = (McpLocalConfig | McpRemoteConfig) & { name: string };
-export type McpServerWithScope = McpServerConfig & { scope?: McpScope | null };
+type McpServerWithScope = McpServerConfig & { scope?: McpScope | null };
 
 export interface McpDraft {
   name: string;
@@ -89,7 +90,7 @@ export const envRecordToArray = (env?: Record<string, string>): Array<{ key: str
   return Object.entries(env).map(([key, value]) => ({ key, value }));
 };
 
-export const envArrayToRecord = (arr: Array<{ key: string; value: string }>): Record<string, string> | undefined => {
+const envArrayToRecord = (arr: Array<{ key: string; value: string }>): Record<string, string> | undefined => {
   const filtered = arr.filter((e) => e.key.trim());
   if (filtered.length === 0) return undefined;
   return Object.fromEntries(filtered.map((e) => [e.key.trim(), e.value]));
@@ -165,7 +166,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             set({ isLoading: true });
             try {
               const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-              const response = await fetch(`/api/config/mcp${queryParams}`, {
+              const response = await runtimeFetch(`/api/config/mcp${queryParams}`, {
                 headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
               });
               if (!response.ok) {
@@ -197,7 +198,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             const body = buildMcpBody(config);
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(`/api/config/mcp/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/mcp/${encodeURIComponent(config.name)}${queryParams}`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -251,7 +252,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             const body = buildMcpBody(config);
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -304,7 +305,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           try {
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
               headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
             });
@@ -349,7 +350,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
       }),
       {
         name: 'mcp-config-store',
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({ selectedMcpName: state.selectedMcpName }),
       },
     ),

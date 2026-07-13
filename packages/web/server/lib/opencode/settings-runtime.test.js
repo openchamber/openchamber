@@ -82,4 +82,43 @@ describe('settings runtime', () => {
       await cleanup();
     }
   });
+
+  it.skipIf(process.platform !== 'win32')('falls back when Windows blocks atomic settings replacement', async () => {
+    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
+    const settingsFilePath = path.join(tempRoot, 'settings.json');
+    const wrappedFs = {
+      ...fsPromises,
+      rename: async () => {
+        const error = new Error('operation not permitted');
+        error.code = 'EPERM';
+        throw error;
+      },
+    };
+    const runtime = createSettingsRuntime({
+      fsPromises: wrappedFs,
+      path,
+      crypto,
+      SETTINGS_FILE_PATH: settingsFilePath,
+      sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
+      sanitizeSettingsUpdate: (settings) => settings,
+      mergePersistedSettings: (_current, changes) => changes,
+      normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
+      normalizeStringArray: (values) => Array.isArray(values) ? values.filter((value) => typeof value === 'string') : [],
+      formatSettingsResponse: (settings) => settings,
+      resolveDirectoryCandidate: (value) => value,
+      normalizeManagedRemoteTunnelHostname: (value) => value,
+      normalizeManagedRemoteTunnelPresets: (value) => value,
+      normalizeManagedRemoteTunnelPresetTokens: (value) => value,
+      syncManagedRemoteTunnelConfigWithPresets: async () => {},
+      upsertManagedRemoteTunnelToken: async () => {},
+    });
+
+    try {
+      await runtime.writeSettingsToDisk({ theme: 'dark' });
+
+      await expect(fsPromises.readFile(settingsFilePath, 'utf8')).resolves.toBe(JSON.stringify({ theme: 'dark' }, null, 2));
+    } finally {
+      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });

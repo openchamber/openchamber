@@ -7,6 +7,7 @@ import type {
   GitLogResponse,
   GitIdentitySummary,
 } from '@/lib/api/types';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -140,6 +141,53 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
   isLoadingIdentity: false,
 });
 
+// ---------------------------------------------------------------------------
+// Persisted branch cache (stale-while-revalidate)
+//
+// `git branch` is slow on cold start and the draft branch selector above the
+// composer is gated behind it — it's the slowest-loading composer element.
+// Cache the per-directory branch list to localStorage and seed the store on
+// init so the selector paints instantly from the last-known branches; a stale
+// refresh runs in the background (see ChatInput's draft-branch effect). Only the
+// branch list is cached — never status/log/diff.
+// ---------------------------------------------------------------------------
+const GIT_BRANCH_CACHE_KEY = 'oc.gitBranchCache';
+
+const readBranchCache = (): Record<string, GitBranch> => {
+  try {
+    const raw = getDeferredSafeStorage().getItem(GIT_BRANCH_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, GitBranch>;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeCachedBranches = (directory: string, branches: GitBranch): void => {
+  if (!directory || !branches) return;
+  try {
+    const cache = readBranchCache();
+    cache[directory] = branches;
+    getDeferredSafeStorage().setItem(GIT_BRANCH_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // quota / serialization — ignore; live fetch still refreshes the store
+  }
+};
+
+const seedDirectoriesFromBranchCache = (): Map<string, DirectoryGitState> => {
+  const directories = new Map<string, DirectoryGitState>();
+  const cache = readBranchCache();
+  for (const [directory, branches] of Object.entries(cache)) {
+    if (!directory || !branches || !Array.isArray(branches.all)) continue;
+    // A cached branch list implies the directory was a git repo. Seed isGitRepo
+    // so the selector's gate passes immediately; lastBranchesFetch stays 0 so the
+    // ChatInput effect treats it as stale and refreshes in the background.
+    directories.set(directory, { ...createEmptyDirectoryState(), isGitRepo: true, branches });
+  }
+  return directories;
+};
+
 // LRU eviction helper for diff cache
 const evictDiffCacheIfNeeded = (
   diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>,
@@ -204,6 +252,21 @@ const haveDiffStatsChanged = (
   return false;
 };
 
+const haveRemoteComparisonChanged = (
+  previous?: GitStatus['upstreamComparison'],
+  next?: GitStatus['upstreamComparison']
+): boolean => {
+  if (!previous && !next) return false;
+  if (!previous || !next) return true;
+
+  return (
+    previous.remote !== next.remote
+    || previous.branch !== next.branch
+    || previous.ahead !== next.ahead
+    || previous.behind !== next.behind
+  );
+};
+
 const hasStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | null): boolean => {
   if (!oldStatus && !newStatus) return false;
   if (!oldStatus || !newStatus) return true;
@@ -217,6 +280,12 @@ const hasStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | nu
   if (oldStatus.current !== newStatus.current) return true;
   if (oldStatus.tracking !== newStatus.tracking) return true;
   if (oldStatus.isClean !== newStatus.isClean) return true;
+  if (
+    newStatus.upstreamComparison !== undefined
+    && haveRemoteComparisonChanged(oldStatus.upstreamComparison, newStatus.upstreamComparison)
+  ) {
+    return true;
+  }
 
   const oldPaths = new Set(oldFiles.map(f => `${f.path}:${f.index}:${f.working_dir}`));
   for (const file of newFiles) {
@@ -352,7 +421,7 @@ const isCleanStatusFile = (file: GitStatus['files'][number]): boolean =>
 export const useGitStore = create<GitStore>()(
   devtools(
     (set, get) => ({
-      directories: new Map(),
+      directories: seedDirectoriesFromBranchCache(),
       activeDirectory: null,
 
       setActiveDirectory: (directory) => {
@@ -465,9 +534,17 @@ export const useGitStore = create<GitStore>()(
               }
 
               // Preserve diffStats from previous status when light mode returns none
-              const mergedStatus = newStatus.diffStats === undefined && currentDirState.status?.diffStats
-                ? { ...newStatus, diffStats: currentDirState.status.diffStats }
-                : newStatus;
+              const mergedStatus = {
+                ...newStatus,
+                diffStats:
+                  newStatus.diffStats === undefined && currentDirState.status?.diffStats !== undefined
+                    ? currentDirState.status.diffStats
+                    : newStatus.diffStats,
+                upstreamComparison:
+                  newStatus.upstreamComparison === undefined
+                    ? currentDirState.status?.upstreamComparison
+                    : newStatus.upstreamComparison,
+              };
 
               newDirectories.set(directory, {
                 ...currentDirState,
@@ -621,6 +698,7 @@ export const useGitStore = create<GitStore>()(
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, { ...dirState, branches, isLoadingBranches: false, lastBranchesFetch: Date.now() });
           set({ directories: newDirectories });
+          writeCachedBranches(directory, branches);
         } catch (error) {
           console.error('Failed to fetch git branches:', error);
           const newDirectories = new Map(get().directories);
@@ -970,13 +1048,6 @@ export const useIsGitRepo = (directory: string | null) => {
   });
 };
 
-export const useGitFileCount = (directory: string | null) => {
-  return useGitStore((state) => {
-    if (!directory) return 0;
-    return state.directories.get(directory)?.status?.files?.length ?? 0;
-  });
-};
-
 export const useGitBranchLabel = (directory: string | null) => {
   return useGitStore((state) => {
     if (!directory) return null;
@@ -1001,26 +1072,6 @@ export const useGitAllBranches = () => {
       result.set(dir, dirState.status?.current ?? null);
     }
     allBranchesCacheRef.current = result;
-    return result;
-  });
-};
-
-export const useGitBranchMap = (directories: string[]) => {
-  const cacheRef = React.useRef<Map<string, string | null>>(new Map());
-  return useGitStore((state) => {
-    const prev = cacheRef.current;
-    let same = prev.size === directories.length;
-    if (same) {
-      for (const dir of directories) {
-        if (prev.get(dir) !== (state.directories.get(dir)?.status?.current ?? null)) { same = false; break; }
-      }
-    }
-    if (same) return prev;
-    const result = new Map<string, string | null>();
-    for (const dir of directories) {
-      result.set(dir, state.directories.get(dir)?.status?.current ?? null);
-    }
-    cacheRef.current = result;
     return result;
   });
 };
@@ -1066,12 +1117,5 @@ export const useGitLoadingBranches = (directory: string | null) => {
   return useGitStore((state) => {
     if (!directory) return false;
     return state.directories.get(directory)?.isLoadingBranches ?? false;
-  });
-};
-
-export const useGitLoadingIdentity = (directory: string | null) => {
-  return useGitStore((state) => {
-    if (!directory) return false;
-    return state.directories.get(directory)?.isLoadingIdentity ?? false;
   });
 };

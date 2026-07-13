@@ -1,0 +1,33 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "tailwindcss": {
+      "command": ["tailwindcss-language-server", "--stdio"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".css", ".html"]
+    },
+    "css": {
+      "command": ["vscode-css-language-server", "--stdio"],
+      "extensions": [".css", ".scss", ".less"]
+    },
+    "html": {
+      "command": ["vscode-html-language-server", "--stdio"],
+      "extensions": [".html"]
+    },
+    "json": {
+      "command": ["vscode-json-language-server", "--stdio"],
+      "extensions": [".json", ".jsonc"]
+    },
+    "mdx": {
+      "command": ["mdx-language-server", "--stdio"],
+      "extensions": [".mdx"]
+    },
+    "marksman": {
+      "command": ["marksman", "server"],
+      "extensions": [".md"]
+    },
+    "dockerfile": {
+      "command": ["docker-langserver", "--stdio"],
+      "extensions": ["Dockerfile", ".dockerfile"]
+    }
+  }
+}

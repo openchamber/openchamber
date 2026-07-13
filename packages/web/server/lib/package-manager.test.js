@@ -6,7 +6,12 @@ vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' })),
 }));
 
-const { checkForUpdates } = await import('./package-manager.js');
+const {
+  checkForUpdates,
+  detectPackageManager,
+  executeUpdate,
+  getCurrentVersion,
+} = await import('./package-manager.js');
 
 /** Helper: create a fetch mock that routes by URL pattern */
 function createFetchMock() {
@@ -113,27 +118,6 @@ describe('checkForUpdates', () => {
     const result = await checkForUpdates({ currentVersion: '1.10.0' });
 
     expect(result.available).toBe(false);
-  });
-
-  it('does not cross-check desktop update claims against npm', async () => {
-    fetchMock
-      .when('api.openchamber.dev', {
-        ok: true,
-        json: async () => ({
-          latestVersion: '1.10.0',
-          updateAvailable: true,
-          releaseNotes: '## [1.10.0] - 2026-05-01\n\n- Great new feature',
-        }),
-      });
-
-    const result = await checkForUpdates({
-      appType: 'desktop-tauri',
-      currentVersion: '1.9.10',
-    });
-
-    expect(result.available).toBe(true);
-    expect(result.version).toBe('1.10.0');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('accepts electron desktop update claims without npm cross-checking', async () => {
@@ -263,5 +247,19 @@ describe('checkForUpdates', () => {
     const result = await checkForUpdates({ currentVersion: '1.9.10' });
 
     expect(result.available).toBe(false);
+  });
+});
+
+describe('getCurrentVersion', () => {
+  it('is exported for the CLI update command', () => {
+    expect(typeof getCurrentVersion).toBe('function');
+    expect(getCurrentVersion()).toMatch(/^\d+\.\d+\.\d+|unknown$/);
+  });
+});
+
+describe('CLI update exports', () => {
+  it('exports package-manager helpers used by the update command', () => {
+    expect(typeof detectPackageManager).toBe('function');
+    expect(typeof executeUpdate).toBe('function');
   });
 });

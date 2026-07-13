@@ -5,7 +5,9 @@ description: Expose OpenChamber safely for remote and mobile access.
 
 # Tunnels
 
-A tunnel is a public link to your OpenChamber, so you can reach it from your phone or another network. Use `openchamber tunnel` to create one for a running instance.
+A tunnel is a public link to your OpenChamber, so you can reach it from an ordinary browser on another network. Use `openchamber tunnel` to create one for a running instance.
+
+> Connecting your **own devices** (the mobile app, another desktop) usually doesn't need a tunnel — [pair them](/connect-devices/) instead and let the end-to-end encrypted [Private Relay](/private-relay/) handle away-from-home access with zero setup.
 
 ## Prerequisites
 
@@ -29,6 +31,8 @@ ngrok config add-authtoken <your-ngrok-token>
 ```bash
 openchamber
 ```
+
+If you skip this step, `openchamber tunnel start` can auto-start a CLI server. When auto-starting, you can pass server options such as `--port`, `--host`, `--lan`, `--ui-password`, and `--api-only`.
 
 2. Start a Cloudflare tunnel:
 
@@ -105,9 +109,11 @@ openchamber tunnel stop --port 3000
 - one active tunnel per OpenChamber instance (port)
 - starting a new mode/provider on same instance replaces previous tunnel
 - generating a new connect link revokes previous unused one
+- tunnel auto-start preserves server flags like `--ui-password` and `--api-only` in the instance settings used by restart/update flows
 
 ## Related
 
+- [Connect a Device](/connect-devices/) — pair your own devices without a public URL
 - [Security](/security/) — protect the UI before exposing it
 - [Desktop Tunnels](/desktop-tunnels/) — desktop app tunnel setup without CLI startup
 - [PWA & Mobile](/mobile/) — reach OpenChamber from your phone

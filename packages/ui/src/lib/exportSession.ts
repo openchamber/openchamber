@@ -1,5 +1,6 @@
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getCurrentIntlLocale } from '@/lib/i18n';
 import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdownFile } from '@/lib/desktop';
 import { getRevealLabelKey } from '@/lib/utils';
 
@@ -22,7 +23,7 @@ function formatTimestamp(timestamp: number | undefined): string {
     return '';
   }
 
-  const monthPart = date.toLocaleString(undefined, { month: 'short' });
+  const monthPart = date.toLocaleString(getCurrentIntlLocale(), { month: 'short' });
   const dayPart = date.getDate();
   const yearPart = date.getFullYear();
   const hours = String(date.getHours()).padStart(2, '0');
@@ -141,17 +142,10 @@ export async function saveAsMarkdownDesktop(content: string, filename: string): 
   }
 
   try {
-    const response = await fetch('/api/vscode/save-markdown', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: filename, content }),
-    });
-
-    if (!response.ok) {
+    const payload = await getRegisteredRuntimeAPIs()?.vscode?.saveMarkdown?.({ fileName: filename, content }) as { saved?: boolean; path?: string } | undefined;
+    if (!payload) {
       return null;
     }
-
-    const payload = await response.json() as { saved?: boolean; path?: string };
     if (payload.saved !== true) {
       return null;
     }

@@ -6,6 +6,8 @@ import { randomUUID } from 'crypto';
 import { removeProviderConfig, getProviderSources } from './opencodeConfig';
 import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
+import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
+import { credentialStatus, deleteCredential, importCursorCredential, normalizeCredential, readCredential, validateCredential, writeCredential, type ManagedProvider } from './quotaCredentials';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
@@ -51,8 +53,8 @@ const getOpenChamberConfigDir = (): string => {
   return path.join(os.homedir(), '.config', 'openchamber');
 };
 
-const sanitizeInstallScope = (scope: string): 'desktop-tauri' | 'vscode' | 'web' => {
-  if (scope === 'desktop-tauri' || scope === 'vscode' || scope === 'web') return scope;
+const sanitizeInstallScope = (scope: string): 'vscode' | 'web' => {
+  if (scope === 'vscode' || scope === 'web') return scope;
   return 'web';
 };
 
@@ -238,6 +240,32 @@ export async function handleSystemBridgeMessage(
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:opencode/version': {
+      try {
+        const apiUrl = ctx?.manager?.getApiUrl();
+        if (!apiUrl) {
+          return { id, type, success: true, data: { version: null, error: 'OpenCode manager unavailable' } };
+        }
+        const base = `${apiUrl.replace(/\/+$/, '')}/`;
+        const response = await fetch(new URL('global/health', base).toString(), {
+          method: 'GET',
+          headers: { Accept: 'application/json', ...ctx?.manager?.getOpenCodeAuthHeaders() },
+        });
+        const health = await response.json().catch(() => null) as { version?: unknown; error?: unknown } | null;
+        if (!response.ok) {
+          const message = typeof health?.error === 'string' ? health.error : response.statusText || 'Failed to read OpenCode version';
+          return { id, type, success: true, data: { version: null, error: message } };
+        }
+        const version = typeof health?.version === 'string' && health.version.trim().length > 0
+          ? health.version.trim().replace(/^v/, '')
+          : null;
+        return { id, type, success: true, data: { version } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: true, data: { version: null, error: errorMessage } };
       }
     }
 
@@ -452,6 +480,38 @@ export async function handleSystemBridgeMessage(
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota:credentials': {
+      const { providerId, method, credential: input } = (payload || {}) as { providerId?: ManagedProvider; method?: string; credential?: unknown };
+      try {
+        if (!providerId || !['opencode-go', 'ollama-cloud', 'cursor'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
+        if (method === 'GET') return { id, type, success: true, data: credentialStatus(providerId) };
+        if (method === 'DELETE') { deleteCredential(providerId); return { id, type, success: true, data: { configured: false } }; }
+        if (method === 'IMPORT') {
+          if (providerId !== 'cursor') return { id, type, success: false, error: 'Import unavailable' };
+          const credential = importCursorCredential();
+          await validateCredential(providerId, credential);
+          return { id, type, success: true, data: writeCredential(providerId, credential) };
+        }
+        if (method === 'PUT') {
+          const credential = normalizeCredential(providerId, input);
+          if (!credential) return { id, type, success: false, error: 'Invalid credential' };
+          if (providerId === 'opencode-go') await fetchOpenCodeGoUsage(credential as { workspaceId: string; authCookie: string });
+          else await validateCredential(providerId, credential);
+          return { id, type, success: true, data: writeCredential(providerId, credential) };
+        }
+        if (method === 'VALIDATE') {
+          const credential = readCredential(providerId);
+          if (!credential) return { id, type, success: false, error: 'Not configured' };
+          if (providerId === 'opencode-go') await fetchOpenCodeGoUsage(credential as { workspaceId: string; authCookie: string });
+          else await validateCredential(providerId, credential);
+          return { id, type, success: true, data: { valid: true } };
+        }
+        return { id, type, success: false, error: 'Unsupported method' };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
 

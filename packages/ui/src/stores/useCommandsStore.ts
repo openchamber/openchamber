@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import { opencodeClient } from "@/lib/opencode/client";
 import {
   startConfigUpdate,
@@ -8,8 +8,9 @@ import {
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
-import { getSafeStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useProjectsStore } from "@/stores/useProjectsStore";
+import { runtimeFetch } from "@/lib/runtime-fetch";
 
 
 export type CommandScope = 'user' | 'project';
@@ -44,6 +45,10 @@ const commandsLoadInFlight = new Map<string, Promise<boolean>>();
 
 const getCommandsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_COMMANDS_CACHE_KEY;
+};
+
+export const invalidateCommandsLoadCache = (directory: string | null = getRequestDirectory()) => {
+  commandsLastLoadedAt.delete(getCommandsCacheKey(directory));
 };
 
 const buildCommandsSignature = (commands: Command[]): string => {
@@ -174,7 +179,7 @@ export const useCommandsStore = create<CommandsStore>()(
                   configurableCommands.map(async (cmd) => {
                     try {
                       // Force no-cache
-                      const response = await fetch(`/api/config/commands/${encodeURIComponent(cmd.name)}${queryParams}`, {
+                      const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(cmd.name)}${queryParams}`, {
                         headers: {
                           'Cache-Control': 'no-cache',
                           ...(directory ? { 'x-opencode-directory': directory } : {}),
@@ -258,7 +263,7 @@ export const useCommandsStore = create<CommandsStore>()(
             const directory = getRequestDirectory();
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await fetch(`/api/config/commands/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(config.name)}${queryParams}`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -276,6 +281,7 @@ export const useCommandsStore = create<CommandsStore>()(
             console.log('[CommandsStore] Command created successfully');
 
             const needsReload = payload?.requiresReload ?? true;
+            invalidateCommandsLoadCache(directory);
             if (needsReload) {
               requiresReload = true;
               await performFullConfigRefresh({
@@ -319,7 +325,7 @@ export const useCommandsStore = create<CommandsStore>()(
             const directory = getRequestDirectory();
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await fetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -337,6 +343,7 @@ export const useCommandsStore = create<CommandsStore>()(
             console.log('[CommandsStore] Command updated successfully');
 
             const needsReload = payload?.requiresReload ?? true;
+            invalidateCommandsLoadCache(directory);
             if (needsReload) {
               requiresReload = true;
               await performFullConfigRefresh({
@@ -369,7 +376,7 @@ export const useCommandsStore = create<CommandsStore>()(
             const directory = getRequestDirectory();
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await fetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
               headers: directory ? { 'x-opencode-directory': directory } : undefined,
             });
@@ -383,6 +390,7 @@ export const useCommandsStore = create<CommandsStore>()(
             console.log('[CommandsStore] Command deleted successfully');
 
             const needsReload = payload?.requiresReload ?? true;
+            invalidateCommandsLoadCache(directory);
             if (needsReload) {
               requiresReload = true;
               await performFullConfigRefresh({
@@ -419,7 +427,7 @@ export const useCommandsStore = create<CommandsStore>()(
       }),
       {
         name: "commands-store",
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({
           selectedCommandName: state.selectedCommandName,
         }),
@@ -494,6 +502,7 @@ async function performFullConfigRefresh(options: { message?: string; delayMs?: n
 
     const commandsStore = useCommandsStore.getState();
 
+    invalidateCommandsLoadCache();
     await commandsStore.loadCommands();
 
     emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
@@ -501,41 +510,9 @@ async function performFullConfigRefresh(options: { message?: string; delayMs?: n
     console.error("[CommandsStore] Failed to refresh configuration after OpenCode restart:", error);
     updateConfigUpdateMessage("OpenCode refresh failed. Please retry refreshing configuration manually.");
     await sleep(1500);
+    throw error;
   } finally {
     finishConfigUpdate();
-  }
-}
-
-export async function reloadOpenCodeConfiguration(options?: { message?: string; delayMs?: number }) {
-  startConfigUpdate(options?.message || "Reloading OpenCode configuration…");
-
-  try {
-    const response = await fetch('/api/config/reload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    const payload = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      const message = payload?.error || 'Failed to reload configuration';
-      throw new Error(message);
-    }
-
-    if (payload?.requiresReload) {
-      await performFullConfigRefresh({
-        message: payload.message,
-        delayMs: payload.reloadDelayMs,
-      });
-    } else {
-      await performFullConfigRefresh(options);
-    }
-  } catch (error) {
-    console.error('[reloadOpenCodeConfiguration] Failed:', error);
-    updateConfigUpdateMessage('Failed to reload configuration. Please try again.');
-    await sleep(2000);
-    finishConfigUpdate();
-    throw error;
   }
 }
 

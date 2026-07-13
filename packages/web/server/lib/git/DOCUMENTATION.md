@@ -33,6 +33,7 @@ The following functions are exported and used by the web server:
 - `revertFile(directory, filePath, options)`: Revert a file. Default scope `all` discards staged and working-tree changes; scope `working` discards only unstaged/working-tree changes.
 - `stageFile(directory, filePath)`: Add one file path to the index.
 - `unstageFile(directory, filePath)`: Remove one file path from the index while preserving working-tree content.
+- `applyHunk(directory, filePath, options)`: Apply a single-hunk patch via `git apply`. `options.action` is `stage` (`git apply --cached`), `unstage` (`git apply --cached --reverse`), or `discard` (`git apply --reverse` in the working tree). The patch is written to a temp file; a `--check` runs first so a stale hunk fails with a clear "refresh and try again" error instead of a partial mutation. The patch target path must match the requested file.
 
 ### Branch Operations
 - `getBranches(directory)`: Get list of local and remote branches (filtered to active remote branches).
@@ -101,6 +102,7 @@ The following functions are internal helpers used by exported functions:
 - `tracking`: Upstream branch (e.g., 'origin/main').
 - `ahead`: Number of commits ahead of upstream.
 - `behind`: Number of commits behind upstream.
+- `upstreamComparison`: Optional comparison against `upstream/<current-branch>`, with `{ remote, branch, ahead, behind }`.
 - `files`: Array of file objects with `path`, `index`, `working_dir` status codes.
 - `isClean`: Boolean indicating if working tree is clean.
 - `diffStats`: Object mapping file paths to `{ insertions, deletions }`.
@@ -117,6 +119,9 @@ The following functions are internal helpers used by exported functions:
 - `name`: Worktree name.
 - `branch`: Local branch name.
 - `path`: Absolute path to worktree directory.
+- `directoryCreated`: Present when create returned after the target directory exists while background Git/bootstrap work continues.
+- `bootstrapStatus`: Background setup status, with `pending`, `ready`, or `failed`.
+- Fast-create background failures remove OpenCode sandbox metadata for directories that never became Git worktrees, and remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
 
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.

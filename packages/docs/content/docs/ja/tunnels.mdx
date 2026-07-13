@@ -1,0 +1,120 @@
+---
+title: トンネル
+description: リモートおよびモバイルアクセス向けに OpenChamber を安全に公開します。
+---
+
+# トンネル
+
+トンネルは OpenChamber への公開リンクです。別ネットワークの普通のブラウザからアクセスできます。実行中のインスタンスに対して作成するには `openchamber tunnel` を使います。
+
+> **自分のデバイス**（モバイルアプリ、別のデスクトップ）の接続には、通常トンネルは不要です。代わりに [ペアリング](/connect-devices/) して、エンドツーエンド暗号化の [Private Relay](/private-relay/) にセットアップ不要で外出先アクセスを任せましょう。
+
+## 前提条件
+
+OpenChamber はあなたのマシン上でトンネルプロバイダー CLI を起動します。使いたいプロバイダーを先にインストールしてください。
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare quick tunnel は `cloudflared` で実行できます。Ngrok には ngrok アカウントと ngrok ダッシュボードの authtoken が必要です。
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## クイックスタート
+
+1. OpenChamber を起動します。
+
+```bash
+openchamber
+```
+
+この手順を省いた場合、`openchamber tunnel start` は CLI サーバーを自動起動できます。自動起動時には `--port`、`--host`、`--lan`、`--ui-password`、`--api-only` などのサーバーオプションを渡せます。
+
+2. Cloudflare トンネルを開始します。
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+または Ngrok トンネルを開始します。
+
+```bash
+openchamber tunnel start --provider ngrok --mode quick
+```
+
+3. 状態を確認します。
+
+```bash
+openchamber tunnel status
+```
+
+トンネルが起動すると、`status` に公開 URL が表示されます。それを開くか QR コードをスキャンすると、どこからでも OpenChamber にアクセスできます。
+
+デフォルトでは、OpenChamber は対話型 TTY セッションで QR コードを表示します。QR 出力を強制するには `--qr`、無効にするには `--no-qr` を使います。
+
+## プロバイダー
+
+- `cloudflare`: quick、managed remote、managed local モード
+- `ngrok`: quick モード
+
+## 管理対象モード
+
+### Managed remote
+
+Cloudflare が管理する token + hostname を使います。
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### Managed local
+
+ローカルの `cloudflared` 設定を使います。
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## プロファイル（managed-remote）
+
+再利用可能なプロファイルを保存します。
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+保存したプロファイルで起動します。
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## 便利なコマンド
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel ready --provider ngrok
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel doctor --provider ngrok
+openchamber tunnel stop --port 3000
+```
+
+## 動作メモ
+
+- OpenChamber インスタンス（ポート）ごとにアクティブなトンネルは 1 つです
+- 同じインスタンスで新しい mode/provider を開始すると、前のトンネルは置き換えられます
+- 新しい接続リンクを生成すると、以前の未使用リンクは無効化されます
+- トンネルの自動起動は、restart/update フローで使うインスタンス設定に `--ui-password` や `--api-only` などのサーバーフラグを保持します
+
+## 関連
+
+- [デバイスを接続する](/connect-devices/) — 公開 URL なしで自分のデバイスをペアリングする
+- [セキュリティ](/security/) — 公開する前に UI を保護する
+- [デスクトップトンネル](/desktop-tunnels/) — CLI 起動なしでデスクトップアプリからトンネルを設定する
+- [モバイルアプリと PWA](/mobile/) — スマートフォンから OpenChamber にアクセスする
+- [トラブルシューティング](/troubleshooting/) — トンネルリンクが動かない場合

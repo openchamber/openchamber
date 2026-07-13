@@ -5,6 +5,7 @@ import {
   normalizeTunnelStartRequest,
   validateTunnelStartRequest,
 } from './types.js';
+import { getTunnelDependencyInstallInfo } from './install-help.js';
 
 export function createTunnelService({
   registry,
@@ -82,8 +83,9 @@ export function createTunnelService({
 
       let publicUrl = provider.resolvePublicUrl(getController());
       const activeMode = resolveActiveMode();
+      const activeProvider = resolveActiveProvider();
 
-      if (publicUrl && activeMode !== request.mode) {
+      if (publicUrl && (activeMode !== request.mode || activeProvider !== request.provider)) {
         stop();
         publicUrl = null;
       }
@@ -94,7 +96,7 @@ export function createTunnelService({
           const missingDependencyMessage = typeof availability?.message === 'string' && availability.message.trim().length > 0
             ? availability.message
             : (request.provider === TUNNEL_PROVIDER_CLOUDFLARE
-              ? 'cloudflared is not installed. Install it with: brew install cloudflared'
+              ? getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_CLOUDFLARE).message
               : `Required dependency for provider '${request.provider}' is missing`);
           throw new TunnelServiceError('missing_dependency', missingDependencyMessage);
         }
@@ -102,11 +104,22 @@ export function createTunnelService({
         const activePort = Number.isFinite(getActivePort?.()) ? getActivePort() : null;
         const originUrl = activePort !== null ? `http://127.0.0.1:${activePort}` : undefined;
 
-        const controller = await provider.start(request, {
-          activePort,
-          originUrl,
-          ...options,
-        });
+        let controller;
+        try {
+          controller = await provider.start(request, {
+            activePort,
+            originUrl,
+            ...options,
+          });
+        } catch (error) {
+          if (error instanceof TunnelServiceError) {
+            throw error;
+          }
+          const message = error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : 'Failed to start tunnel';
+          throw new TunnelServiceError('startup_failed', message);
+        }
         controller.provider = request.provider;
         setController(controller);
 

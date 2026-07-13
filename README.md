@@ -1,7 +1,7 @@
 # <picture><source media="(prefers-color-scheme: dark)" srcset="docs/references/badges/openchamber-logo-dark.svg"><img src="docs/references/badges/openchamber-logo-light.svg" width="32" height="32" align="absmiddle" /></picture> OpenChamber
 
-[![GitHub stars](https://img.shields.io/github/stars/btriapitsyn/openchamber?style=flat&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgZmlsbD0iI2YxZWNlYyIgdmlld0JveD0iMCAwIDI1NiAyNTYiPjxwYXRoIGQ9Ik0yMjkuMDYsMTA4Ljc5bC00OC43LDQyLDE0Ljg4LDYyLjc5YTguNCw4LjQsMCwwLDEtMTIuNTIsOS4xN0wxMjgsMTg5LjA5LDczLjI4LDIyMi43NGE4LjQsOC40LDAsMCwxLTEyLjUyLTkuMTdsMTQuODgtNjIuNzktNDguNy00MkE4LjQ2LDguNDYsMCwwLDEsMzEuNzMsOTRMOTUuNjQsODguOGwyNC42Mi01OS42YTguMzYsOC4zNiwwLDAsMSwxNS40OCwwbDI0LjYyLDU5LjZMMjI0LjI3LDk0QTguNDYsOC40NiwwLDAsMSwyMjkuMDYsMTA4Ljc5WiIgb3BhY2l0eT0iMC4yIj48L3BhdGg%2BPHBhdGggZD0iTTIzOS4xOCw5Ny4yNkExNi4zOCwxNi4zOCwwLDAsMCwyMjQuOTIsODZsLTU5LTQuNzZMMTQzLjE0LDI2LjE1YTE2LjM2LDE2LjM2LDAsMCwwLTMwLjI3LDBMOTAuMTEsODEuMjMsMzEuMDgsODZhMTYuNDYsMTYuNDYsMCwwLDAtOS4zNywyOC44Nmw0NSwzOC44M0w1MywyMTEuNzVhMTYuMzgsMTYuMzgsMCwwLDAsMjQuNSwxNy44MkwxMjgsMTk4LjQ5bDUwLjUzLDMxLjA4QTE2LjQsMTYuNCwwLDAsMCwyMDMsMjExLjc1bC0xMy43Ni01OC4wNyw0NS0zOC44M0ExNi40MywxNi40MywwLDAsMCwyMzkuMTgsOTcuMjZabS0xNS4zNCw1LjQ3LTQ4LjcsNDJhOCw4LDAsMCwwLTIuNTYsNy45MWwxNC44OCw2Mi44YS4zNy4zNywwLDAsMS0uMTcuNDhjLS4xOC4xNC0uMjMuMTEtLjM4LDBsLTU0LjcyLTMzLjY1YTgsOCwwLDAsMC04LjM4LDBMNjkuMDksMjE1Ljk0Yy0uMTUuMDktLjE5LjEyLS4zOCwwYS4zNy4zNywwLDAsMS0uMTctLjQ4bDE0Ljg4LTYyLjhhOCw4LDAsMCwwLTIuNTYtNy45MWwtNDguNy00MmMtLjEyLS4xLS4yMy0uMTktLjEzLS41cy4xOC0uMjcuMzMtLjI5bDYzLjkyLTUuMTZBOCw4LDAsMCwwLDEwMyw5MS44NmwyNC42Mi01OS42MWMuMDgtLjE3LjExLS4yNS4zNS0uMjVzLjI3LjA4LjM1LjI1TDE1Myw5MS44NmE4LDgsMCwwLDAsNi43NSw0LjkybDYzLjkyLDUuMTZjLjE1LDAsLjI0LDAsLjMzLjI5UzIyNCwxMDIuNjMsMjIzLjg0LDEwMi43M1oiPjwvcGF0aD48L3N2Zz4%3D&logoColor=FFFCF0&labelColor=100F0F&color=66800B)](https://github.com/btriapitsyn/openchamber/stargazers)
-[![GitHub release](https://img.shields.io/github/v/release/btriapitsyn/openchamber?style=flat&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgZmlsbD0iI2YxZWNlYyIgdmlld0JveD0iMCAwIDI1NiAyNTYiPjxwYXRoIGQ9Ik0xMjgsMTI5LjA5VjIzMmE4LDgsMCwwLDEtMy44NC0xbC04OC00OC4xOGE4LDgsMCwwLDEtNC4xNi03VjgwLjE4YTgsOCwwLDAsMSwuNy0zLjI1WiIgb3BhY2l0eT0iMC4yIj48L3BhdGg%2BPHBhdGggZD0iTTIyMy42OCw2Ni4xNSwxMzUuNjgsMThhMTUuODgsMTUuODgsMCwwLDAtMTUuMzYsMGwtODgsNDguMTdhMTYsMTYsMCwwLDAtOC4zMiwxNHY5NS42NGExNiwxNiwwLDAsMCw4LjMyLDE0bDg4LDQ4LjE3YTE1Ljg4LDE1Ljg4LDAsMCwwLDE1LjM2LDBsODgtNDguMTdhMTYsMTYsMCwwLDAsOC4zMi0xNFY4MC4xOEExNiwxNiwwLDAsMCwyMjMuNjgsNjYuMTVaTTEyOCwzMmw4MC4zNCw0NC0yOS43NywxNi4zLTgwLjM1LTQ0Wk0xMjgsMTIwLDQ3LjY2LDc2bDMzLjktMTguNTYsODAuMzQsNDRaTTQwLDkwbDgwLDQzLjc4djg1Ljc5TDQwLDE3NS44MlptMTc2LDg1Ljc4aDBsLTgwLDQzLjc5VjEzMy44MmwzMi0xNy41MVYxNTJhOCw4LDAsMCwwLDE2LDBWMTA3LjU1TDIxNiw5MHY4NS43N1oiPjwvcGF0aD48L3N2Zz4%3D&logoColor=FFFCF0&labelColor=100F0F&color=205EA6)](https://github.com/btriapitsyn/openchamber/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/openchamber/openchamber?style=flat&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgZmlsbD0iI2YxZWNlYyIgdmlld0JveD0iMCAwIDI1NiAyNTYiPjxwYXRoIGQ9Ik0yMjkuMDYsMTA4Ljc5bC00OC43LDQyLDE0Ljg4LDYyLjc5YTguNCw4LjQsMCwwLDEtMTIuNTIsOS4xN0wxMjgsMTg5LjA5LDczLjI4LDIyMi43NGE4LjQsOC40LDAsMCwxLTEyLjUyLTkuMTdsMTQuODgtNjIuNzktNDguNy00MkE4LjQ2LDguNDYsMCwwLDEsMzEuNzMsOTRMOTUuNjQsODguOGwyNC42Mi01OS42YTguMzYsOC4zNiwwLDAsMSwxNS40OCwwbDI0LjYyLDU5LjZMMjI0LjI3LDk0QTguNDYsOC40NiwwLDAsMSwyMjkuMDYsMTA4Ljc5WiIgb3BhY2l0eT0iMC4yIj48L3BhdGg%2BPHBhdGggZD0iTTIzOS4xOCw5Ny4yNkExNi4zOCwxNi4zOCwwLDAsMCwyMjQuOTIsODZsLTU5LTQuNzZMMTQzLjE0LDI2LjE1YTE2LjM2LDE2LjM2LDAsMCwwLTMwLjI3LDBMOTAuMTEsODEuMjMsMzEuMDgsODZhMTYuNDYsMTYuNDYsMCwwLDAtOS4zNywyOC44Nmw0NSwzOC44M0w1MywyMTEuNzVhMTYuMzgsMTYuMzgsMCwwLDAsMjQuNSwxNy44MkwxMjgsMTk4LjQ5bDUwLjUzLDMxLjA4QTE2LjQsMTYuNCwwLDAsMCwyMDMsMjExLjc1bC0xMy43Ni01OC4wNyw0NS0zOC44M0ExNi40MywxNi40MywwLDAsMCwyMzkuMTgsOTcuMjZabS0xNS4zNCw1LjQ3LTQ4LjcsNDJhOCw4LDAsMCwwLTIuNTYsNy45MWwxNC44OCw2Mi44YS4zNy4zNywwLDAsMS0uMTcuNDhjLS4xOC4xNC0uMjMuMTEtLjM4LDBsLTU0LjcyLTMzLjY1YTgsOCwwLDAsMC04LjM4LDBMNjkuMDksMjE1Ljk0Yy0uMTUuMDktLjE5LjEyLS4zOCwwYS4zNy4zNywwLDAsMS0uMTctLjQ4bDE0Ljg4LTYyLjhhOCw4LDAsMCwwLTIuNTYtNy45MWwtNDguNy00MmMtLjEyLS4xLS4yMy0uMTktLjEzLS41cy4xOC0uMjcuMzMtLjI5bDYzLjkyLTUuMTZBOCw4LDAsMCwwLDEwMyw5MS44NmwyNC42Mi01OS42MWMuMDgtLjE3LjExLS4yNS4zNS0uMjVzLjI3LjA4LjM1LjI1TDE1Myw5MS44NmE4LDgsMCwwLDAsNi43NSw0LjkybDYzLjkyLDUuMTZjLjE1LDAsLjI0LDAsLjMzLjI5UzIyNCwxMDIuNjMsMjIzLjg0LDEwMi43M1oiPjwvcGF0aD48L3N2Zz4%3D&logoColor=FFFCF0&labelColor=100F0F&color=66800B)](https://github.com/openchamber/openchamber/stargazers)
+[![GitHub release](https://img.shields.io/github/v/release/openchamber/openchamber?style=flat&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgZmlsbD0iI2YxZWNlYyIgdmlld0JveD0iMCAwIDI1NiAyNTYiPjxwYXRoIGQ9Ik0xMjgsMTI5LjA5VjIzMmE4LDgsMCwwLDEtMy44NC0xbC04OC00OC4xOGE4LDgsMCwwLDEtNC4xNi03VjgwLjE4YTgsOCwwLDAsMSwuNy0zLjI1WiIgb3BhY2l0eT0iMC4yIj48L3BhdGg%2BPHBhdGggZD0iTTIyMy42OCw2Ni4xNSwxMzUuNjgsMThhMTUuODgsMTUuODgsMCwwLDAtMTUuMzYsMGwtODgsNDguMTdhMTYsMTYsMCwwLDAtOC4zMiwxNHY5NS42NGExNiwxNiwwLDAsMCw4LjMyLDE0bDg4LDQ4LjE3YTE1Ljg4LDE1Ljg4LDAsMCwwLDE1LjM2LDBsODgtNDguMTdhMTYsMTYsMCwwLDAsOC4zMi0xNFY4MC4xOEExNiwxNiwwLDAsMCwyMjMuNjgsNjYuMTVaTTEyOCwzMmw4MC4zNCw0NC0yOS43NywxNi4zLTgwLjM1LTQ0Wk0xMjgsMTIwLDQ3LjY2LDc2bDMzLjktMTguNTYsODAuMzQsNDRaTTQwLDkwbDgwLDQzLjc4djg1Ljc5TDQwLDE3NS44MlptMTc2LDg1Ljc4aDBsLTgwLDQzLjc5VjEzMy44MmwzMi0xNy41MVYxNTJhOCw4LDAsMCwwLDE2LDBWMTA3LjU1TDIxNiw5MHY4NS43N1oiPjwvcGF0aD48L3N2Zz4%3D&logoColor=FFFCF0&labelColor=100F0F&color=205EA6)](https://github.com/openchamber/openchamber/releases/latest)
 [![Created with OpenCode](docs/references/badges/created-with-opencode.svg)](https://opencode.ai)
 [![Discord](https://img.shields.io/badge/Discord-join.svg?style=flat&labelColor=100F0F&color=8B7EC8&logo=discord&logoColor=FFFCF0)](https://discord.gg/ZYRSdnwwKA)
 [![Support the project](https://img.shields.io/badge/Support-Project-black?style=flat&labelColor=100F0F&color=EC8B49&logo=ko-fi&logoColor=FFFCF0)](https://ko-fi.com/G2G41SAWNS)
@@ -57,13 +57,16 @@
 - Background notifications plus reliable cross-tab session activity tracking
 - Built-in self-update + restart flow that keeps your server settings intact
 
-### Desktop (macOS)
+### Desktop (macOS + Windows + Linux)
 
-- Native macOS menu integration with polished app actions and deep-link handling
-- Multi-window support for parallel project/session workflows
-- "Open In" shortcuts for Finder, Terminal, and your preferred editor
-- Fast switching between local and remote instances
-- Workspace-first startup flow with directory picker and steadier window restore behavior
+- Floating Mini Chat: keep a small always-on-top assistant beside your editor, browser, or terminal
+- Multiple native windows for separate projects or sessions
+- Native notifications for task alerts while OpenChamber is hidden
+- One-click open in VS Code, Cursor, Terminal, Finder, Explorer, and more
+- Desktop host switcher for local and remote OpenChamber instances
+- Convenient tunnel management without manual setup
+- Deep-link connections for joining remote OpenChamber from a link
+- SSH remote access with host import, connection management, and port forwarding
 
 ### VS Code Extension
 
@@ -83,19 +86,35 @@
 
 ## Quick Start
 
-> **Prerequisite:** [OpenCode CLI](https://opencode.ai) installed.
+> **Prerequisite:** Desktop bundles the matching OpenCode CLI. CLI/Web and VS Code use your installed [OpenCode CLI](https://opencode.ai).
 
-### **Desktop (macOS)**
-Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
+### **Desktop (macOS + Windows + Linux)**
+
+Download the latest Desktop release from [GitHub Releases](https://github.com/openchamber/openchamber/releases).
+
+On Linux, choose the AppImage for your system:
+
+- `linux-x86_64.AppImage` for 64-bit Intel or AMD systems
+- `linux-arm64.AppImage` for ARM64/aarch64 systems
+
+Make the AppImage executable before launching it, for example with `chmod +x <downloaded-appimage>`. Keep the AppImage in a location your user can write to so OpenChamber can download and apply in-app updates.
+
+Linux AppImages need FUSE (`libfuse.so.2`). On Ubuntu/Debian install `libfuse2` (or `fuse` / `libfuse2t64` on newer releases). If FUSE is unavailable, run with extraction instead:
+
+```bash
+APPIMAGE_EXTRACT_AND_RUN=1 ./OpenChamber-*-linux-*.AppImage
+```
+
+Linux Desktop ships as AppImage with in-app window controls and auto-update when running from a writable AppImage. System tray and launch-at-login are not available on Linux yet (macOS/Windows only).
 
 ### **VS Code**
 Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.
 
 ### **CLI (Web + PWA)**
-_requires Node.js 20+_
+_requires Node.js 22+_
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
 openchamber --ui-password be-creative-here
 ```
 
@@ -104,6 +123,7 @@ openchamber --ui-password be-creative-here
 
 ```bash
 openchamber --port 8080              # Custom port
+openchamber --lan --port 3000        # Listen on LAN (0.0.0.0)
 openchamber --ui-password secret     # Password-protect UI
 openchamber startup enable           # Start at login as a native service
 OPENCHAMBER_UI_PASSWORD=secret openchamber startup enable # Save service password env
@@ -117,6 +137,9 @@ openchamber tunnel start --provider cloudflare --mode quick --qr
 openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
 openchamber tunnel status --all      # Show tunnel state across instances
 openchamber tunnel stop --port 3000  # Stop tunnel only (server stays running)
+openchamber connect-url --port 3000  # Add this server to OpenChamber Desktop
+openchamber connect-url --server http://host:3000 --qr
+openchamber connect-url --port 3000 --qr
 openchamber logs                     # Follow latest instance logs
 OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber                    # Connect to external OpenCode server
 OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber  # Connect via custom host/HTTPS
@@ -137,6 +160,29 @@ Bind managed OpenCode server to all interfaces (use only on trusted networks):
 OPENCHAMBER_OPENCODE_HOSTNAME=0.0.0.0 openchamber --port 3000
 ```
 
+Expose OpenChamber itself on your LAN:
+```bash
+openchamber --lan --port 3000 --ui-password secret
+```
+
+Add this server to OpenChamber Desktop or another OpenChamber app:
+```bash
+openchamber connect-url --port 3000 --qr
+```
+
+If no OpenChamber server is running on that port, `connect-url` starts one before generating the link.
+
+Headless/API-only setup for a remote machine:
+```bash
+openchamber connect-url --port 3000 --api-only --lan --server http://your-host-or-ip:3000 --qr --ui-password secret
+```
+
+This runs OpenChamber as an API-only server without the desktop app or browser UI assets on that machine, then creates a link for Desktop to import. `--lan` makes the server reachable from other machines. `--server` is the address Desktop should use.
+
+When OpenChamber was started with `--lan` or `--host 0.0.0.0`, `connect-url` automatically uses a detected LAN IP instead of `127.0.0.1`. Use `--server http://host:3000` to override the advertised address, and include `--lan` when `connect-url` needs to start the server for LAN access.
+
+Paste the printed `openchamber://connect?...` link in Desktop under Settings -> Remote Instances -> Direct Instances -> Import Link. The link contains the server URL and a client token. It does not enable browser UI password protection; use `--ui-password` when exposing a server beyond localhost.
+
 </details>
 
 <details>
@@ -147,7 +193,7 @@ dev machine over a VPN (e.g. Tailscale) or LAN without a Cloudflare tunnel.
 
 **How it works:**
 - OpenCode runs as its own service, binding only to `localhost`.
-- OpenChamber connects to it via `OPENCODE_HOST` and `--host 0.0.0.0` makes it reachable on your VPN IP.
+- OpenChamber connects to it via `OPENCODE_HOST` and `--lan` makes it reachable on your VPN IP.
 - `--foreground` keeps the CLI process alive so systemd can track and restart it.
 
 **`~/.config/systemd/user/opencode.service`**
@@ -302,7 +348,7 @@ chown -R 1000:1000 data/
 <details>
 <summary><strong>Files, Diff & Terminal</strong></summary>
 
-- Workspace file browser with inline editing, syntax highlighting, and markdown preview
+- Workspace file browser with inline editing, syntax highlighting, Vim mode, and markdown preview
 - Beautiful diff viewer with stacked/inline modes, lazy loading for large changesets
 - Integrated terminal with per-directory sessions, tabbed interface, and stable heavy-output performance
 - Clickable file paths in messages - jump to exact line locations
@@ -322,14 +368,16 @@ chown -R 1000:1000 data/
 </details>
 
 <details>
-<summary><strong>Desktop (macOS)</strong></summary>
+<summary><strong>Desktop (macOS + Windows + Linux)</strong></summary>
 
-- Connect to remote OpenChamber instances over SSH with dedicated lifecycle flows
-- Project Actions: run dev servers, SSH port forwarding, open remote URLs locally
-- Multi-window support for parallel project workflows
-- "Open In" shortcuts for Finder, Terminal, and your preferred editor
-- Fast switching between local and remote instances
-- Native macOS menu, deep-link handling, and polished startup
+- Floating Mini Chat: keep a small always-on-top assistant beside your editor, browser, or terminal
+- Multiple native windows for separate projects or sessions
+- Native notifications for task alerts while OpenChamber is hidden
+- One-click open in VS Code, Cursor, Terminal, Finder, Explorer, and more
+- Desktop host switcher for local and remote OpenChamber instances
+- Convenient tunnel management without manual setup
+- Deep-link connections for joining remote OpenChamber from a link
+- SSH remote access with host import, connection management, and port forwarding
 
 </details>
 
@@ -374,7 +422,6 @@ chown -R 1000:1000 data/
 
 Active development. Here's what's being worked on or planned:
 
-- Windows and Linux desktop apps
 - Mobile app with remote instance and laptop connectivity
 - More built-in tunneling options
 - Kanban board for multi-agent management - keeping the human in the loop and in control
@@ -391,7 +438,6 @@ Independent project, not affiliated with the OpenCode team.
 - [OpenCode](https://opencode.ai) - For the excellent API and extensible architecture.
 - [Flexoki](https://github.com/kepano/flexoki) - Beautiful color scheme by [Steph Ango](https://stephango.com/flexoki).
 - [Pierre](https://pierrejs-docs.vercel.app/) - Fast, beautiful diff viewer with syntax highlighting.
-- [Tauri](https://github.com/tauri-apps/tauri) - Desktop application framework.
 - [Ghostty-web](https://github.com/coder/ghostty-web) - Great implementation of a Ghostty web renderer.
 - [David Hill](https://x.com/iamdavidhill) - Who inspired me to release this without [overthinking](https://x.com/iamdavidhill/status/1993648326450020746).
 - [My wife](https://github.com/yulia-ivashko), who - with zero AI background - sat down with the app for the first time and built the firework celebration that plays on every successful push.

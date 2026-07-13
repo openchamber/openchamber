@@ -17,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
@@ -236,6 +237,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">{t('settings.skills.sidebar.total', { count: skills.length })}</span>
           <Button size="sm"
+            data-settings-item="skills.create"
             variant="ghost"
             className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}
@@ -460,17 +462,26 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
       : t('settings.skills.sidebar.badge.opencode');
   const badgeClassName = 'typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1 rounded flex-shrink-0 leading-none pb-px border border-[var(--interactive-border)]/50';
   const isBuiltIn = isBuiltInSkill(skill);
+  const [isContextMenuOpen, setIsContextMenuOpen] = React.useState(false);
+  const renderMenuItems = (Item: React.ElementType) => (
+    <>
+      <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRename(); }}>
+        <Icon name="edit" className="h-4 w-4 mr-px" />
+        {t('settings.common.actions.rename')}
+      </Item>
+      <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDuplicate(); }}>
+        <Icon name="file-copy" className="h-4 w-4 mr-px" />
+        {t('settings.common.actions.duplicate')}
+      </Item>
+      <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onDelete(); }} className="text-destructive focus:text-destructive">
+        <Icon name="delete-bin" className="h-4 w-4 mr-px" />
+        {t('settings.common.actions.delete')}
+      </Item>
+    </>
+  );
   return (
-    <div
-      className={cn(
-        'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
-        isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover'
-      )}
-      onContextMenu={!isMobile ? (e) => {
-        e.preventDefault();
-        onMenuOpenChange(true);
-      } : undefined}
-    >
+    <ContextMenu open={!isBuiltIn && isContextMenuOpen} onOpenChange={setIsContextMenuOpen}>
+      <ContextMenuTrigger render={<div className={cn('group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none', isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover')} onContextMenu={!isMobile && !isBuiltIn ? (e) => { e.preventDefault(); setIsContextMenuOpen(true); } : undefined} />}>
       <div className="flex min-w-0 flex-1 items-center">
         <button
           onClick={onSelect}
@@ -488,7 +499,7 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
           </div>
         </button>
 
-        {!isBuiltIn ? <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
+        {!isBuiltIn ? <DropdownMenu open={isMenuOpen} onOpenChange={(open) => { if (open) setIsContextMenuOpen(false); onMenuOpenChange(open); }}>
           <DropdownMenuTrigger asChild>
             <Button size="sm"
               variant="ghost"
@@ -498,39 +509,16 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                onRename();
-              }}
-            >
-              <Icon name="edit" className="h-4 w-4 mr-px" />
-              {t('settings.common.actions.rename')}
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                onDuplicate();
-              }}
-            >
-              <Icon name="file-copy" className="h-4 w-4 mr-px" />
-              {t('settings.common.actions.duplicate')}
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-              className="text-destructive focus:text-destructive"
-            >
-              <Icon name="delete-bin" className="h-4 w-4 mr-px" />
-              {t('settings.common.actions.delete')}
-            </DropdownMenuItem>
+            {renderMenuItems(DropdownMenuItem)}
           </DropdownMenuContent>
         </DropdownMenu> : null}
       </div>
-    </div>
+      </ContextMenuTrigger>
+      {!isBuiltIn ? (
+        <ContextMenuContent className="w-fit min-w-20">
+          {renderMenuItems(ContextMenuItem)}
+        </ContextMenuContent>
+      ) : null}
+    </ContextMenu>
   );
 };

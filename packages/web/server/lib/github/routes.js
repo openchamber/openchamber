@@ -1,6 +1,25 @@
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
+// Upper bound for resolving a single PR status. resolveGitHubPrStatus makes many
+// serial GitHub API calls; under GitHub secondary-rate-limiting a single request
+// can otherwise hang 20s+. We bound it so the route fails fast instead of holding
+// the response (and a client socket) open — the client keeps its last-known
+// status on error, and a later poll fills it in.
+const PR_STATUS_RESOLVE_TIMEOUT_MS = 12_000;
 const prStatusCache = new Map();
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+      error.code = 'ETIMEDOUT';
+      reject(error);
+    }, timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function getRequestedRepo(req) {
   const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
@@ -76,16 +95,51 @@ export function registerGitHubRoutes(app) {
 
   app.get('/api/github/auth/status', async (_req, res) => {
     try {
-      const { getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts } = await getGitHubLibraries();
+      const { getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, isGhCliActive, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
+      const { getGhCliToken } = await import('./gh-cli-credential.js');
+
       const auth = getGitHubAuth();
-      const accounts = getGitHubAuthAccounts();
-      if (!auth?.accessToken) {
-        return res.json({ connected: false, accounts });
+      let accounts = getGitHubAuthAccounts();
+      const ghCliDisabled = isGhCliDisabled();
+      const ghCliActive = isGhCliActive();
+      const ghToken = getGhCliToken();
+      const usingOwnToken = Boolean(auth?.accessToken);
+      let ghCliUser = null;
+
+      if (ghToken !== null && !ghCliDisabled) {
+        try {
+          const { createOctokit } = await import('./octokit.js');
+          ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
+        } catch {
+          ghCliUser = null;
+        }
       }
+      if (ghCliActive && !ghCliUser) {
+        setGhCliActive(false);
+      }
+
+      const ghCliCurrent = ghToken !== null && !ghCliDisabled && Boolean(ghCliUser) && (ghCliActive || !usingOwnToken);
+      if (ghCliUser) {
+        accounts = accounts
+          .map((account) => ({ ...account, current: ghCliCurrent ? false : Boolean(account.current) }))
+          .concat({
+            id: GH_CLI_ACCOUNT_ID,
+            user: ghCliUser,
+            current: ghCliCurrent,
+            source: 'gh-cli',
+          });
+      }
+
+      const buildGhCli = (activeUser = null) => ({
+        available: ghToken !== null,
+        disabled: ghCliDisabled,
+        active: ghCliCurrent,
+        ...(!ghCliDisabled && (activeUser || ghCliUser) ? { user: activeUser || ghCliUser } : {}),
+      });
 
       const octokit = getOctokitOrNull();
       if (!octokit) {
-        return res.json({ connected: false, accounts });
+        return res.json({ connected: false, accounts, ghCli: buildGhCli() });
       }
 
       let user = null;
@@ -93,23 +147,37 @@ export function registerGitHubRoutes(app) {
         user = await getGitHubUserSummary(octokit);
       } catch (error) {
         if (isGitHubAuthInvalid(error)) {
-          clearGitHubAuth();
-          return res.json({ connected: false, accounts: getGitHubAuthAccounts() });
+          if (usingOwnToken) clearGitHubAuth();
+          return res.json({ connected: false, accounts: getGitHubAuthAccounts(), ghCli: buildGhCli() });
         }
       }
 
-      const fallback = auth.user;
+      const fallback = usingOwnToken ? auth.user : null;
       const mergedUser = user || fallback;
-
       return res.json({
         connected: true,
         user: mergedUser,
-        scope: auth.scope,
+        scope: ghCliCurrent ? undefined : auth?.scope,
         accounts,
+        ghCli: buildGhCli(ghCliCurrent ? mergedUser : null),
       });
     } catch (error) {
       console.error('Failed to get GitHub auth status:', error);
       return res.status(500).json({ error: error.message || 'Failed to get GitHub auth status' });
+    }
+  });
+
+  app.post('/api/github/auth/gh-cli', async (req, res) => {
+    try {
+      const { setGhCliDisabled, isGhCliDisabled } = await getGitHubLibraries();
+      const { clearGhCliTokenCache } = await import('./gh-cli-credential.js');
+      const disabled = Boolean(req.body?.disabled);
+      setGhCliDisabled(disabled);
+      clearGhCliTokenCache();
+      return res.json({ disabled: isGhCliDisabled() });
+    } catch (error) {
+      console.error('Failed to update gh CLI setting:', error);
+      return res.status(500).json({ error: error.message || 'Failed to update gh CLI setting' });
     }
   });
 
@@ -178,8 +246,8 @@ export function registerGitHubRoutes(app) {
         return res.status(500).json({ error: 'Missing access_token from GitHub' });
       }
 
-      const { Octokit } = await import('@octokit/rest');
-      const octokit = new Octokit({ auth: accessToken });
+      const { createOctokit } = await import('./octokit.js');
+      const octokit = createOctokit(accessToken);
       const user = await getGitHubUserSummary(octokit);
 
       setGitHubAuth({
@@ -203,25 +271,70 @@ export function registerGitHubRoutes(app) {
 
   app.post('/api/github/auth/activate', async (req, res) => {
     try {
-      const { activateGitHubAuth, getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts } = await getGitHubLibraries();
+      const { activateGitHubAuth, getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
       const accountId = typeof req.body?.accountId === 'string' ? req.body.accountId : '';
       if (!accountId) {
         return res.status(400).json({ error: 'accountId is required' });
       }
+      if (accountId === GH_CLI_ACCOUNT_ID) {
+        const { getGhCliToken } = await import('./gh-cli-credential.js');
+        const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
+        if (!ghToken) {
+          return res.status(404).json({ error: 'GitHub CLI account not found' });
+        }
+
+        const { createOctokit } = await import('./octokit.js');
+        const user = await getGitHubUserSummary(createOctokit(ghToken));
+        setGhCliActive(true);
+        const accounts = getGitHubAuthAccounts()
+          .map((account) => ({ ...account, current: false }))
+          .concat({ id: GH_CLI_ACCOUNT_ID, user, current: true, source: 'gh-cli' });
+        return res.json({
+          connected: true,
+          user,
+          accounts,
+          ghCli: {
+            available: true,
+            disabled: false,
+            active: true,
+            user,
+          },
+        });
+      }
+
       const activated = activateGitHubAuth(accountId);
       if (!activated) {
         return res.status(404).json({ error: 'GitHub account not found' });
       }
 
       const auth = getGitHubAuth();
-      const accounts = getGitHubAuthAccounts();
+      let accounts = getGitHubAuthAccounts();
       if (!auth?.accessToken) {
         return res.json({ connected: false, accounts });
       }
 
+      const { getGhCliToken } = await import('./gh-cli-credential.js');
+      const ghCliDisabled = isGhCliDisabled();
+      const ghToken = !ghCliDisabled ? getGhCliToken() : null;
+      let ghCliUser = null;
+      if (ghToken) {
+        try {
+          const { createOctokit } = await import('./octokit.js');
+          ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
+          accounts = accounts.concat({
+            id: GH_CLI_ACCOUNT_ID,
+            user: ghCliUser,
+            current: false,
+            source: 'gh-cli',
+          });
+        } catch {
+          ghCliUser = null;
+        }
+      }
+
       const octokit = getOctokitOrNull();
       if (!octokit) {
-        return res.json({ connected: false, accounts });
+        return res.json({ connected: false, accounts, ghCli: { available: ghToken !== null, disabled: ghCliDisabled, active: false, ...(ghCliUser ? { user: ghCliUser } : {}) } });
       }
 
       let user = auth.user || null;
@@ -239,6 +352,12 @@ export function registerGitHubRoutes(app) {
         user,
         scope: auth.scope,
         accounts,
+        ghCli: {
+          available: ghToken !== null,
+          disabled: ghCliDisabled,
+          active: false,
+          ...(ghCliUser ? { user: ghCliUser } : {}),
+        },
       });
     } catch (error) {
       console.error('Failed to activate GitHub account:', error);
@@ -300,6 +419,17 @@ export function registerGitHubRoutes(app) {
         return res.json(cached.data);
       }
 
+      // If GitHub recently rate-limited us, don't pile on more calls that will
+      // also fail. Serve whatever we last cached (even if stale); otherwise
+      // report a transient failure so the client keeps its last-known status.
+      const { isGitHubRateLimited } = await import('./rate-limit.js');
+      if (isGitHubRateLimited()) {
+        if (cached) {
+          return res.json(cached.data);
+        }
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+
       // Intercept res.json to cache successful responses before sending
       // Only caches responses with connected:true — error/edge-case responses are not cached
       const originalJson = res.json.bind(res);
@@ -317,12 +447,16 @@ export function registerGitHubRoutes(app) {
       }
 
       const { resolveGitHubPrStatus } = await import('./pr-status.js');
-      const resolvedStatus = await resolveGitHubPrStatus({
-        octokit,
-        directory,
-        branch,
-        remoteName: remote,
-      });
+      const resolvedStatus = await withTimeout(
+        resolveGitHubPrStatus({
+          octokit,
+          directory,
+          branch,
+          remoteName: remote,
+        }),
+        PR_STATUS_RESOLVE_TIMEOUT_MS,
+        'resolveGitHubPrStatus',
+      );
       const searchRepo = resolvedStatus.repo;
       const first = resolvedStatus.pr;
       if (!searchRepo) {
@@ -453,6 +587,24 @@ export function registerGitHubRoutes(app) {
         const { clearGitHubAuth } = await getGitHubLibraries();
         clearGitHubAuth();
         return res.json({ connected: false });
+      }
+      // Transient failures — a rate limit, or the overall resolve timeout
+      // firing — are expected under heavy load and should not be logged as hard
+      // errors. Record a rate-limit cooldown when applicable, then serve the
+      // last cached status (even if stale) or a 503 so the client keeps its
+      // last-known value instead of clearing the badge.
+      const { noteIfGitHubRateLimit } = await import('./rate-limit.js');
+      const wasRateLimited = noteIfGitHubRateLimit(error);
+      const wasTimeout = error?.code === 'ETIMEDOUT';
+      if (wasRateLimited || wasTimeout) {
+        const dir = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+        const br = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
+        const rem = typeof req.query?.remote === 'string' ? req.query.remote.trim() : 'origin';
+        const cached = prStatusCache.get(`${dir}::${br}::${rem}`);
+        if (cached) {
+          return res.json(cached.data);
+        }
+        return res.status(503).json({ error: wasRateLimited ? 'GitHub rate limited' : 'GitHub request timed out' });
       }
       if (isGitHubResourceUnavailable(error)) {
         return res.json({
@@ -882,6 +1034,7 @@ export function registerGitHubRoutes(app) {
       if (upstream) {
         try {
           const { getRemotes } = await import('../git/index.js');
+          const { resolveGitHubRepoFromDirectory } = await import('./index.js');
           const remotes = await getRemotes(directory);
           for (const r of remotes) {
             if (r?.name) {
@@ -947,6 +1100,7 @@ export function registerGitHubRoutes(app) {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
+      const searchQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
       if (!directory) {
         return res.status(400).json({ error: 'directory is required' });
       }
@@ -969,6 +1123,54 @@ export function registerGitHubRoutes(app) {
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
 
+      const mapIssueSummary = (item, repoRef) => ({
+        number: item.number,
+        title: item.title,
+        url: item.html_url,
+        state: item.state === 'closed' ? 'closed' : 'open',
+        author: item.user ? { login: item.user.login, id: item.user.id, avatarUrl: item.user.avatar_url } : null,
+        labels: Array.isArray(item.labels)
+          ? item.labels
+              .map((label) => {
+                if (typeof label === 'string') return null;
+                const name = typeof label?.name === 'string' ? label.name : '';
+                if (!name) return null;
+                return { name, color: typeof label?.color === 'string' ? label.color : undefined };
+              })
+              .filter(Boolean)
+          : [],
+        sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
+      });
+
+      if (searchQuery) {
+        const repoQualifiers = reposToQuery
+          .map((r) => `repo:${r.owner}/${r.repo}`)
+          .join(' ');
+        const q = `${repoQualifiers} ${searchQuery} type:issue state:open`;
+        try {
+          const searchResult = await octokit.rest.search.issuesAndPullRequests({
+            q,
+            per_page: 50,
+            page: effectivePage,
+          });
+          const totalCount = searchResult.data.total_count;
+          const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
+          const issues = items
+            .filter((item) => !item?.pull_request)
+            .map((item) => {
+              const repoFullName = (item.repository_url || '').replace('https://api.github.com/repos/', '');
+              const matched = reposToQuery.find((r) => `${r.owner}/${r.repo}` === repoFullName);
+              return mapIssueSummary(item, matched || reposToQuery[0]);
+            });
+          const fetchedCount = (effectivePage - 1) * 50 + items.length;
+          const hasMore = fetchedCount < totalCount;
+          return res.json({ connected: true, repo, issues, page: effectivePage, hasMore });
+        } catch (error) {
+          console.error('Failed to search GitHub issues:', error);
+          return res.json({ connected: true, repo, issues: [], page: effectivePage, hasMore: false });
+        }
+      }
+
       const queryRepo = async (repoRef) => {
         try {
           const list = await octokit.rest.issues.listForRepo({
@@ -982,24 +1184,7 @@ export function registerGitHubRoutes(app) {
           const hasMore = /rel="next"/.test(link);
           const issues = (Array.isArray(list?.data) ? list.data : [])
             .filter((item) => !item?.pull_request)
-            .map((item) => ({
-              number: item.number,
-              title: item.title,
-              url: item.html_url,
-              state: item.state === 'closed' ? 'closed' : 'open',
-              author: item.user ? { login: item.user.login, id: item.user.id, avatarUrl: item.user.avatar_url } : null,
-              labels: Array.isArray(item.labels)
-                ? item.labels
-                    .map((label) => {
-                      if (typeof label === 'string') return null;
-                      const name = typeof label?.name === 'string' ? label.name : '';
-                      if (!name) return null;
-                      return { name, color: typeof label?.color === 'string' ? label.color : undefined };
-                    })
-                    .filter(Boolean)
-                : [],
-              sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
-            }));
+            .map((item) => mapIssueSummary(item, repoRef));
           return { issues, hasMore };
         } catch (error) {
           console.warn(`Failed to list issues for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
@@ -1128,6 +1313,7 @@ export function registerGitHubRoutes(app) {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
+      const searchQuery = typeof req.query?.query === 'string' ? req.query.query.trim() : '';
       if (!directory) {
         return res.status(400).json({ error: 'directory is required' });
       }
@@ -1150,6 +1336,86 @@ export function registerGitHubRoutes(app) {
       const effectivePage = Number.isFinite(page) && page > 0 ? page : 1;
       const reposToQuery = repoNetwork || [{ ...repo, source: 'origin' }];
 
+      const mapPrSummary = (pr, repoRef) => {
+        const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
+        const headRepo = pr.head?.repo
+          ? {
+              owner: pr.head.repo.owner?.login,
+              repo: pr.head.repo.name,
+              url: pr.head.repo.html_url,
+              cloneUrl: pr.head.repo.clone_url,
+              sshUrl: pr.head.repo.ssh_url,
+            }
+          : null;
+        return {
+          number: pr.number,
+          title: pr.title,
+          url: pr.html_url,
+          state: mergedState,
+          draft: Boolean(pr.draft),
+          base: pr.base?.ref,
+          head: pr.head?.ref,
+          headSha: pr.head?.sha,
+          mergeable: pr.mergeable,
+          mergeableState: pr.mergeable_state,
+          author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
+          headLabel: pr.head?.label,
+          headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
+            ? headRepo
+            : null,
+          sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
+        };
+      };
+
+      if (searchQuery) {
+        const repoQualifiers = reposToQuery
+          .map((r) => `repo:${r.owner}/${r.repo}`)
+          .join(' ');
+        const q = `${repoQualifiers} ${searchQuery} type:pr state:open`;
+        try {
+          const searchResult = await octokit.rest.search.issuesAndPullRequests({
+            q,
+            per_page: 50,
+            page: effectivePage,
+          });
+          const totalCount = searchResult.data.total_count;
+          const items = Array.isArray(searchResult.data.items) ? searchResult.data.items : [];
+          const findRepoForSearchItem = (item) => {
+            const repositoryUrl = typeof item?.repository_url === 'string' ? item.repository_url : '';
+            const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
+            if (!match) return reposToQuery[0];
+            return reposToQuery.find((repoRef) => repoRef.owner === match[1] && repoRef.repo === match[2]) || reposToQuery[0];
+          };
+          const prRefs = items
+            .map((item) => ({ number: item.number, repoRef: findRepoForSearchItem(item) }))
+            .filter((ref) => Number.isFinite(ref.number) && ref.number > 0 && ref.repoRef);
+          let prs;
+          if (prRefs.length === 0) {
+            prs = [];
+          } else {
+            const results = await Promise.all(prRefs.map(async ({ number, repoRef }) => {
+              try {
+                const pr = await octokit.rest.pulls.get({
+                  owner: repoRef.owner,
+                  repo: repoRef.repo,
+                  pull_number: number,
+                });
+                return mapPrSummary(pr.data, repoRef);
+              } catch {
+                return null;
+              }
+            }));
+            prs = results.filter(Boolean);
+          }
+          const fetchedCount = (effectivePage - 1) * 50 + items.length;
+          const hasMore = fetchedCount < totalCount;
+          return res.json({ connected: true, repo, prs, page: effectivePage, hasMore });
+        } catch (error) {
+          console.error('Failed to search GitHub PRs:', error);
+          return res.json({ connected: true, repo, prs: [], page: effectivePage, hasMore: false });
+        }
+      }
+
       const queryRepo = async (repoRef) => {
         try {
           const list = await octokit.rest.pulls.list({
@@ -1161,36 +1427,7 @@ export function registerGitHubRoutes(app) {
           });
           const link = typeof list?.headers?.link === 'string' ? list.headers.link : '';
           const hasMore = /rel="next"/.test(link);
-          const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => {
-            const mergedState = pr.merged_at ? 'merged' : (pr.state === 'closed' ? 'closed' : 'open');
-            const headRepo = pr.head?.repo
-              ? {
-                  owner: pr.head.repo.owner?.login,
-                  repo: pr.head.repo.name,
-                  url: pr.head.repo.html_url,
-                  cloneUrl: pr.head.repo.clone_url,
-                  sshUrl: pr.head.repo.ssh_url,
-                }
-              : null;
-            return {
-              number: pr.number,
-              title: pr.title,
-              url: pr.html_url,
-              state: mergedState,
-              draft: Boolean(pr.draft),
-              base: pr.base?.ref,
-              head: pr.head?.ref,
-              headSha: pr.head?.sha,
-              mergeable: pr.mergeable,
-              mergeableState: pr.mergeable_state,
-              author: pr.user ? { login: pr.user.login, id: pr.user.id, avatarUrl: pr.user.avatar_url } : null,
-              headLabel: pr.head?.label,
-              headRepo: headRepo && headRepo.owner && headRepo.repo && headRepo.url
-                ? headRepo
-                : null,
-              sourceRepo: { owner: repoRef.owner, repo: repoRef.repo, source: repoRef.source },
-            };
-          });
+          const prs = (Array.isArray(list?.data) ? list.data : []).map((pr) => mapPrSummary(pr, repoRef));
           return { prs, hasMore };
         } catch (error) {
           console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);

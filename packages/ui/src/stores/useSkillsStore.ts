@@ -1,13 +1,14 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import {
   startConfigUpdate,
   finishConfigUpdate,
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
-import { getSafeStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
+import { runtimeFetch } from "@/lib/runtime-fetch";
 
 import { opencodeClient } from '@/lib/opencode/client';
 
@@ -39,7 +40,7 @@ export interface SupportingFile {
   fullPath: string;
 }
 
-export interface SkillSources {
+interface SkillSources {
   md: {
     exists: boolean;
     path: string | null;
@@ -122,7 +123,7 @@ export interface SkillDraft {
   pendingFiles?: PendingFile[];
 }
 
-export interface SkillDetail {
+interface SkillDetail {
   name: string;
   sources: SkillSources;
   scope?: SkillScope | null;
@@ -165,6 +166,10 @@ const skillsLoadInFlight = new Map<string, Promise<boolean>>();
 
 const getSkillsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_SKILLS_CACHE_KEY;
+};
+
+export const invalidateSkillsLoadCache = (directory: string | null = getCurrentDirectory()) => {
+  skillsLastLoadedAt.delete(getSkillsCacheKey(directory));
 };
 
 const MAX_HEALTH_WAIT_MS = 20000;
@@ -216,7 +221,7 @@ export const useSkillsStore = create<SkillsStore>()(
               try {
                 const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-                const response = await fetch(`/api/config/skills${queryParams}`);
+                const response = await runtimeFetch(`/api/config/skills${queryParams}`);
                 if (!response.ok) {
                   throw new Error(`Failed to list skills: ${response.status}`);
                 }
@@ -260,7 +265,7 @@ export const useSkillsStore = create<SkillsStore>()(
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
             
-            const response = await fetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`);
+            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`);
             if (!response.ok) {
               return null;
             }
@@ -288,7 +293,7 @@ export const useSkillsStore = create<SkillsStore>()(
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-            const response = await fetch(`/api/config/skills/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(config.name)}${queryParams}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(skillConfig)
@@ -301,6 +306,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
+            invalidateSkillsLoadCache(currentDirectory);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
@@ -338,7 +344,7 @@ export const useSkillsStore = create<SkillsStore>()(
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-            const response = await fetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(skillConfig)
@@ -351,6 +357,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
+            invalidateSkillsLoadCache(currentDirectory);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
@@ -381,7 +388,7 @@ export const useSkillsStore = create<SkillsStore>()(
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-            const response = await fetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE'
             });
 
@@ -392,6 +399,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
+            invalidateSkillsLoadCache(currentDirectory);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
@@ -430,7 +438,7 @@ export const useSkillsStore = create<SkillsStore>()(
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `&directory=${encodeURIComponent(currentDirectory)}` : '';
             
-            const response = await fetch(
+            const response = await runtimeFetch(
               `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}?${queryParams.slice(1)}`
             );
             if (!response.ok) {
@@ -449,7 +457,7 @@ export const useSkillsStore = create<SkillsStore>()(
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
             
-            const response = await fetch(
+            const response = await runtimeFetch(
               `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`,
               {
                 method: 'PUT',
@@ -469,7 +477,7 @@ export const useSkillsStore = create<SkillsStore>()(
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
             
-            const response = await fetch(
+            const response = await runtimeFetch(
               `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`,
               { method: 'DELETE' }
             );
@@ -482,7 +490,7 @@ export const useSkillsStore = create<SkillsStore>()(
       }),
       {
         name: "skills-store",
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({
           selectedSkillName: state.selectedSkillName,
         }),
@@ -553,13 +561,15 @@ export async function refreshSkillsAfterOpenCodeRestart(options?: { message?: st
     await waitForOpenCodeConnection(options?.delayMs);
     updateConfigUpdateMessage("Refreshing skills…");
     const skillsStore = useSkillsStore.getState();
+    invalidateSkillsLoadCache();
     const loaded = await skillsStore.loadSkills();
     if (loaded) {
       emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
     }
-  } catch {
+  } catch (error) {
     updateConfigUpdateMessage("OpenCode refresh failed. Please retry.");
     await sleep(1500);
+    throw error;
   } finally {
     finishConfigUpdate();
   }

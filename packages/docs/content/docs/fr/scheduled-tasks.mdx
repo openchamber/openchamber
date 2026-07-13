@@ -1,0 +1,35 @@
+---
+title: Tâches planifiées
+description: Lancez automatiquement un prompt selon un planning.
+---
+
+# Tâches planifiées
+
+Une tâche planifiée lance un prompt pour vous selon un planning — par exemple un « résume les changements d’hier » quotidien ou un nettoyage hebdomadaire. Quand elle s’exécute, OpenChamber démarre une nouvelle session et envoie le prompt tout seul. Ouvrez le planificateur depuis le bouton en haut de la barre latérale des sessions.
+
+## Créer une tâche
+
+1. Ouvrez la boîte de dialogue des tâches planifiées depuis la barre latérale des sessions.
+2. Ajoutez une tâche et donnez-lui un nom.
+3. Choisissez quand elle s’exécute :
+   - **daily** — à une ou plusieurs heures chaque jour
+   - **weekly** — certains jours de la semaine et à certaines heures
+   - **once** — une seule date et heure
+4. Définissez ce qu’elle fait : le prompt à envoyer, ainsi que le fournisseur, le modèle et l’agent à utiliser. Le prompt peut être une commande slash, comme `/review`.
+5. Enregistrez, puis vérifiez que la tâche est activée.
+
+Vous pouvez lancer n’importe quelle tâche immédiatement avec **run now** pour vérifier qu’elle fait ce que vous attendez.
+
+Cochez **Exécuter comme objectif** pour que l'exécution poursuive son prompt jusqu'au bout au lieu de s'arrêter après une réponse — voir [Objectifs de session](/session-goals/).
+
+## À quoi ressemble une réussite
+
+Après une exécution, la tâche indique quand elle a tourné pour la dernière fois, si elle a réussi et un lien vers la session créée. Si une exécution échoue, l’erreur s’affiche aussi à cet endroit.
+
+## À garder en tête
+
+Les tâches ne se déclenchent que lorsque le serveur OpenChamber tourne. Si vous le fermez, les exécutions planifiées sont en pause jusqu’à son retour.
+
+## Pages liées
+
+- [Commandes et snippets](/commands-snippets/) — réutiliser une commande slash comme prompt

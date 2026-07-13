@@ -99,7 +99,7 @@ const PerfSection: React.FC<{ title: string; snapshot: StreamPerfSnapshot; empty
   );
 };
 
-export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
+const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = React.useState<DebugTab>('memory');
   const [copyState, setCopyState] = React.useState<'idle' | 'copied' | 'error'>('idle');
@@ -149,22 +149,43 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
     return () => window.clearTimeout(timeoutId);
   }, [copyState]);
 
-  const totalMessages = React.useMemo(() => {
+  const messageRoleCounts = React.useMemo(() => {
+    let assistant = 0;
     let total = 0;
+    let user = 0;
     for (const sessionId of Object.keys(messageRecord)) {
-      total += messageRecord[sessionId]?.length ?? 0;
+      const messages = messageRecord[sessionId] ?? [];
+      total += messages.length;
+      for (const message of messages) {
+        if (message.role === 'user') {
+          user += 1;
+        } else if (message.role === 'assistant') {
+          assistant += 1;
+        }
+      }
     }
-    return total;
+    return { assistant, total, user };
   }, [messageRecord]);
 
   const sessionStats = React.useMemo(() => {
     return sessions.map(session => {
-      const messageCount = messageRecord[session.id]?.length || 0;
+      const messages = messageRecord[session.id] ?? [];
+      let assistantMessageCount = 0;
+      let userMessageCount = 0;
+      for (const message of messages) {
+        if (message.role === 'user') {
+          userMessageCount += 1;
+        } else if (message.role === 'assistant') {
+          assistantMessageCount += 1;
+        }
+      }
       const memoryState = sessionMemoryState.get(session.id);
       return {
         id: session.id,
         title: session.title || t('memoryDebugPanel.common.untitled'),
-        messageCount,
+        assistantMessageCount,
+        messageCount: messages.length,
+        userMessageCount,
         isStreaming: memoryState?.isStreaming || false,
         isZombie: memoryState?.isZombie || false,
         backgroundCount: memoryState?.backgroundMessageCount || 0,
@@ -256,8 +277,10 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
       {activeTab === 'memory' ? (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2 typography-meta">
-            <MetricCard label={t('memoryDebugPanel.metric.totalMessages')} value={totalMessages} />
+            <MetricCard label={t('memoryDebugPanel.metric.totalMessages')} value={messageRoleCounts.total} />
             <MetricCard label={t('memoryDebugPanel.metric.cachedSessions')} value={`${cachedSessionCount} / ${MEMORY_LIMITS.MAX_SESSIONS}`} />
+            <MetricCard label={t('memoryDebugPanel.metric.userMessages')} value={messageRoleCounts.user} />
+            <MetricCard label={t('memoryDebugPanel.metric.assistantMessages')} value={messageRoleCounts.assistant} />
           </div>
 
           <div className="typography-meta space-y-1 border-t border-[var(--interactive-border)] pt-2">
@@ -294,6 +317,12 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                     {stat.isZombie ? <span className="text-[var(--status-warning)]">!</span> : null}
                   </div>
                   <div className="flex items-center gap-2">
+                    <span className="font-mono text-[var(--surface-muted-foreground)]">
+                      {t('memoryDebugPanel.metric.roleMsgsValue', {
+                        assistant: stat.assistantMessageCount,
+                        user: stat.userMessageCount,
+                      })}
+                    </span>
                     <span className="font-mono text-[var(--surface-foreground)]">
                       {t('memoryDebugPanel.metric.msgsValue', { count: stat.messageCount })}
                     </span>
@@ -318,6 +347,14 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                       sessions: sessions.map(s => ({ id: s.id, title: s.title })),
                       currentSessionId,
                       cachedSessions: Object.keys(messageRecord),
+                      messageRoleCounts,
+                      sessionMessageRoleCounts: sessionStats.map(stat => ({
+                        id: stat.id,
+                        title: stat.title,
+                        total: stat.messageCount,
+                        user: stat.userMessageCount,
+                        assistant: stat.assistantMessageCount,
+                      })),
                       memoryStates: Object.fromEntries(sessionMemoryState),
                     });
                   }}

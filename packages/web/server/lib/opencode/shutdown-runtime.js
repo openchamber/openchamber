@@ -8,6 +8,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     syncToHmrState,
     openCodeWatcherRuntime,
     sessionRuntime,
+    sessionAssistRuntime,
+    sessionGoalRuntime,
     scheduledTasksRuntime,
     getHealthCheckInterval,
     clearHealthCheckInterval,
@@ -29,7 +31,9 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     tunnelAuthController,
   } = dependencies;
 
-  const gracefulShutdown = async (options = {}) => {
+  let shutdownPromise = null;
+
+  const runShutdown = async (options = {}) => {
     if (getIsShuttingDown()) return;
 
     setIsShuttingDown(true);
@@ -39,6 +43,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
 
     openCodeWatcherRuntime.stop();
     sessionRuntime.dispose();
+    sessionAssistRuntime?.stop?.();
+    sessionGoalRuntime?.stop?.();
     scheduledTasksRuntime?.stop?.();
 
     const healthCheckInterval = getHealthCheckInterval();
@@ -131,6 +137,12 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     if (exitProcess) {
       process.exit(0);
     }
+  };
+
+  const gracefulShutdown = (options = {}) => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = runShutdown(options);
+    return shutdownPromise;
   };
 
   return {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { execCommand } from '@/lib/execCommands';
+import { resolveGitPrimaryRoot, resolveGitTopLevel } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 const normalizePath = (value: string): string => {
@@ -10,28 +10,9 @@ const normalizePath = (value: string): string => {
 };
 
 /**
- * Derive the primary worktree (project) root from the absolute git directory.
- *
- * Secondary worktree:  /project/.git/worktrees/<name>  → /project
- * Primary worktree:    /project/.git                   → null (not a secondary)
- */
-const deriveProjectRoot = (gitDir: string): string | null => {
-  const normalized = normalizePath(gitDir);
-  if (!normalized) return null;
-
-  const marker = '/.git/worktrees/';
-  const idx = normalized.indexOf(marker);
-  if (idx > 0) {
-    return normalized.slice(0, idx) || null;
-  }
-
-  return null;
-};
-
-/**
  * When the store-based WorktreeMetadata lookup fails, this hook falls back to
- * a single `git rev-parse --absolute-git-dir` call to detect whether
- * `currentDirectory` is a secondary worktree.  If it is, a minimal
+ * narrow git runtime APIs to detect whether `currentDirectory` is a secondary
+ * worktree. If it is, a minimal
  * WorktreeMetadata is synthesised so that "Re-integrate commits" and other
  * worktree features can function without explicit store entries.
  *
@@ -62,29 +43,19 @@ export function useDetectedWorktreeMetadata(
 
     let cancelled = false;
     void (async () => {
-      const [gitDirResult, toplevelResult] = await Promise.all([
-        execCommand('git rev-parse --absolute-git-dir', currentDirectory),
-        execCommand('git rev-parse --show-toplevel', currentDirectory),
-      ]);
+      const [projectRootRaw, worktreePathRaw] = await Promise.all([
+        resolveGitPrimaryRoot(currentDirectory),
+        resolveGitTopLevel(currentDirectory),
+      ]).catch(() => ['', '']);
       if (cancelled) return;
 
-      if (!gitDirResult.success || !toplevelResult.success) {
-        return;
-      }
-
-      const gitDir = normalizePath((gitDirResult.stdout || '').trim());
-      const projectRoot = deriveProjectRoot(gitDir);
-
-      if (!projectRoot) {
-        return;
-      }
-
+      const projectRoot = normalizePath(projectRootRaw);
       // Use the worktree toplevel, not the active sub-directory, so that
       // worktree operations (e.g. `git worktree remove`) receive a valid root path.
-      const worktreePath = normalizePath((toplevelResult.stdout || '').trim());
+      const worktreePath = normalizePath(worktreePathRaw);
 
       // Sanity-check: secondary worktree path must differ from project root
-      if (!worktreePath || worktreePath === projectRoot) {
+      if (!projectRoot || !worktreePath || worktreePath === projectRoot) {
         return;
       }
 

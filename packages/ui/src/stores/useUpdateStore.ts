@@ -8,12 +8,15 @@ import {
   restartToApplyUpdate,
   isDesktopLocalOriginActive,
   isElectronShell,
-  isTauriShell,
   isVSCodeRuntime,
   isWebRuntime,
 } from '@/lib/desktop';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 
-export type UpdateState = {
+declare const __APP_VERSION__: string | undefined;
+
+type UpdateState = {
   checking: boolean;
   available: boolean;
   downloading: boolean;
@@ -21,7 +24,7 @@ export type UpdateState = {
   info: UpdateInfo | null;
   progress: UpdateProgress | null;
   error: string | null;
-  runtimeType: 'desktop' | 'web' | 'vscode' | null;
+  runtimeType: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
   lastChecked: number | null;
   nextCheckInSec: number | null;
 };
@@ -34,7 +37,7 @@ interface UpdateStore extends UpdateState {
   reset: () => void;
 }
 
-type ClientRuntime = 'desktop' | 'web' | 'vscode';
+type ClientRuntime = 'desktop' | 'web' | 'vscode' | 'mobile';
 
 function detectDeviceClass(): 'mobile' | 'tablet' | 'desktop' | 'unknown' {
   if (typeof window === 'undefined') return 'unknown';
@@ -64,7 +67,9 @@ function detectArch(): 'arm64' | 'x64' | 'unknown' {
   return 'unknown';
 }
 
-function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' {
+function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' | 'android' | 'ios' {
+  const clientPlatform = getClientPlatform();
+  if (clientPlatform === 'android' || clientPlatform === 'ios') return clientPlatform;
   if (typeof navigator === 'undefined') return 'web';
   const platform = (navigator.platform || '').toLowerCase();
   if (platform.includes('mac')) return 'macos';
@@ -82,7 +87,7 @@ function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
   params.set('arch', detectArch());
   params.set('platform', detectPlatform());
   if (runtime === 'desktop') {
-    params.set('appType', isElectronShell() ? 'desktop-electron' : 'desktop-tauri');
+    params.set('appType', 'desktop-electron');
     params.set('instanceMode', isDesktopLocalOriginActive() ? 'local' : 'remote');
     return params;
   }
@@ -90,6 +95,12 @@ function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
   if (runtime === 'vscode') {
     params.set('appType', 'vscode');
     params.set('instanceMode', 'local');
+    return params;
+  }
+
+  if (runtime === 'mobile') {
+    params.set('appType', 'mobile-capacitor');
+    params.set('instanceMode', 'remote');
     return params;
   }
 
@@ -106,7 +117,7 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
       : undefined;
     if (currentVersion) params.set('currentVersion', currentVersion);
     else if (runtime === 'vscode' && vscodeVersion) params.set('currentVersion', vscodeVersion);
-    const response = await fetch(`/api/openchamber/update-check?${params.toString()}`, {
+    const response = await runtimeFetch(`/api/openchamber/update-check?${params.toString()}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -121,6 +132,8 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
       version: data.version,
       currentVersion: data.currentVersion ?? 'unknown',
       body: data.body,
+      releaseUrl: data.releaseUrl,
+      downloadUrl: data.downloadUrl,
       nextSuggestedCheckInSec:
         typeof data.nextSuggestedCheckInSec === 'number' && Number.isFinite(data.nextSuggestedCheckInSec)
           ? data.nextSuggestedCheckInSec
@@ -134,11 +147,12 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
   }
 }
 
-function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | null {
-  if (isTauriShell()) {
-    // Only use Tauri updater when we're on the local instance.
-    // When viewing a remote host inside the desktop shell, treat update as web update.
-    return isDesktopLocalOriginActive() ? 'desktop' : 'web';
+function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | 'mobile' | null {
+  if (isCapacitorApp()) {
+    return 'mobile';
+  }
+  if (isElectronShell()) {
+    return 'desktop';
   }
   if (isVSCodeRuntime()) return 'vscode';
   if (isWebRuntime()) return 'web';
@@ -172,7 +186,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       let suggestedSec: number | null = null;
 
       if (runtime === 'desktop') {
-        let desktopInfo = await checkForDesktopUpdates();
+        const desktopInfo = await checkForDesktopUpdates();
         set({
           checking: false,
           available: desktopInfo?.available ?? false,
@@ -181,33 +195,6 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
           nextCheckInSec: null,
         });
 
-        const sidecarInfo = await checkForWebUpdates('desktop', desktopInfo?.currentVersion);
-        suggestedSec = sidecarInfo?.nextSuggestedCheckInSec ?? null;
-
-        if (sidecarInfo?.available && !desktopInfo?.available) {
-          const forcedDesktopInfo = await checkForDesktopUpdates();
-          if (forcedDesktopInfo) {
-            desktopInfo = forcedDesktopInfo;
-          }
-        }
-
-        if (sidecarInfo) {
-          const mergedInfo: UpdateInfo = {
-            ...(desktopInfo ?? { available: false, currentVersion: sidecarInfo.currentVersion ?? 'unknown' }),
-            ...sidecarInfo,
-            currentVersion: desktopInfo?.currentVersion ?? sidecarInfo.currentVersion ?? 'unknown',
-            available: sidecarInfo.available,
-          };
-
-          set({
-            available: mergedInfo.available,
-            info: mergedInfo,
-            nextCheckInSec: suggestedSec,
-          });
-        } else {
-          set({ nextCheckInSec: suggestedSec });
-        }
-
         return suggestedSec;
       } else if (runtime === 'web') {
         info = await checkForWebUpdates('web');
@@ -215,6 +202,10 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       } else if (runtime === 'vscode') {
         const vscodeInfo = await checkForWebUpdates('vscode');
         suggestedSec = vscodeInfo?.nextSuggestedCheckInSec ?? null;
+      } else if (runtime === 'mobile') {
+        const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined;
+        info = await checkForWebUpdates('mobile', appVersion);
+        suggestedSec = info?.nextSuggestedCheckInSec ?? null;
       }
 
       set({

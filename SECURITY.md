@@ -4,7 +4,7 @@
 
 If you discover a security vulnerability in OpenChamber, please report it responsibly.
 
-**Email:** [artmore@protonmail.com](mailto:artmore@protonmail.com)
+**Email:** [security@openchamber.dev](mailto:security@openchamber.dev)
 
 Please include:
 - Description of the vulnerability

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { Session } from "@opencode-ai/sdk/v2"
 import type { Event, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { applyDirectoryEvent } from "../event-reducer"
 import { INITIAL_STATE, type State } from "../types"
@@ -40,13 +41,36 @@ function partUpdatedEvent(): Event {
   } as Event
 }
 
+function topLevelSessionOnlyPartUpdatedEvent(): Event {
+  return {
+    type: "message.part.updated",
+    properties: {
+      sessionID: "ses_1",
+      part: {
+        id: "prt_1",
+        messageID: "msg_1",
+        type: "text",
+        text: "hello",
+      },
+    },
+  } as Event
+}
+
+function buildSession(title: string, time: Session["time"]): Session {
+  return {
+    id: "ses_1",
+    title,
+    time,
+  } as Session
+}
+
 describe("applyDirectoryEvent", () => {
   test("returns typed materialization when delta arrives before parts", () => {
     const result = applyDirectoryEvent(state(), deltaEvent())
 
     expect(result).toEqual({
       changed: false,
-      materialization: { type: "incomplete-session-snapshot", messageID: "msg_1", partID: "prt_1" },
+      materialization: { type: "incomplete-session-snapshot", reason: "orphan-delta", messageID: "msg_1", partID: "prt_1" },
     })
   })
 
@@ -58,7 +82,7 @@ describe("applyDirectoryEvent", () => {
 
     expect(result).toEqual({
       changed: false,
-      materialization: { type: "incomplete-session-snapshot", messageID: "msg_1", partID: "prt_1" },
+      materialization: { type: "incomplete-session-snapshot", reason: "missing-delta-part", messageID: "msg_1", partID: "prt_1" },
     })
   })
 
@@ -71,11 +95,61 @@ describe("applyDirectoryEvent", () => {
       changed: true,
       materialization: {
         type: "incomplete-session-snapshot",
+        reason: "missing-owning-message",
         sessionID: "ses_1",
         messageID: "msg_1",
         partID: "prt_1",
       },
     })
+  })
+
+  test("uses top-level session id and part message id for part update materialization", () => {
+    const draft = state()
+    const result = applyDirectoryEvent(draft, topLevelSessionOnlyPartUpdatedEvent())
+
+    expect(draft.part.msg_1.map((item) => item.id)).toEqual(["prt_1"])
+    expect(result).toEqual({
+      changed: true,
+      materialization: {
+        type: "incomplete-session-snapshot",
+        reason: "missing-owning-message",
+        sessionID: "ses_1",
+        messageID: "msg_1",
+        partID: "prt_1",
+      },
+    })
+  })
+
+  test("uses top-level session id for delta materialization", () => {
+    const result = applyDirectoryEvent(state(), {
+      type: "message.part.delta",
+      properties: {
+        sessionID: "ses_1",
+        messageID: "msg_1",
+        partID: "prt_1",
+        field: "text",
+        delta: "hello",
+      },
+    } as Event)
+
+    expect(result).toEqual({
+      changed: false,
+      materialization: { type: "incomplete-session-snapshot", reason: "orphan-delta", sessionID: "ses_1", messageID: "msg_1", partID: "prt_1" },
+    })
+  })
+
+  test("skips stale session.updated events so a newer title survives", () => {
+    const draft = state({ session: [buildSession("New Title", { created: 1, updated: 20 })] })
+
+    const result = applyDirectoryEvent(draft, {
+      type: "session.updated",
+      properties: {
+        info: buildSession("Old Title", { created: 1, updated: 10 }),
+      },
+    } as Event)
+
+    expect(result).toBe(false)
+    expect(draft.session[0]?.title).toBe("New Title")
   })
 
   test("applies part update without materialization when owning message exists", () => {

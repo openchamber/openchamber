@@ -3,44 +3,110 @@
 ## Getting Started
 
 ```bash
-git clone https://github.com/btriapitsyn/openchamber.git
+git clone https://github.com/openchamber/openchamber.git
 cd openchamber
 bun install
 ```
 
 ## Dev Scripts
 
+Run commands from the project root unless a section says otherwise.
+
 ### Web
 
 | Script | Description | Ports |
 |--------|-------------|-------|
+| `bun run dev` | Default web HMR dev flow. | auto-selected dev ports |
 | `bun run dev:web:full` | Build watcher + Express server. No HMR — manual refresh after changes. | `3001` (server + static) |
 | `bun run dev:web:hmr` | Vite dev server + Express API. **Open the Vite URL for HMR**, not the backend. | `5180` (Vite HMR), `3902` (API) |
+| `bun run start:web` | Start the packaged web server. | `3000` by default |
 
 Both are configurable via env vars: `OPENCHAMBER_PORT`, `OPENCHAMBER_HMR_UI_PORT`, `OPENCHAMBER_HMR_API_PORT`.
 
-### Desktop (Tauri)
+### Desktop (Electron)
 
 ```bash
-bun run desktop:dev
+bun run electron:dev          # HMR web UI + Electron shell
+bun run electron:dev:bundled  # Electron shell using built web assets
+bun run electron:build        # Package desktop app for the current platform
 ```
 
-Launches Tauri in dev mode with WebView devtools enabled and a distinct dev icon.
+Desktop supports macOS, Windows, and Linux. The build output is written to `packages/electron/dist`.
+
+macOS builds create `dmg` and `zip` files. You need Xcode/build tools for notarized packaging and icon asset work.
+
+Windows builds create an NSIS installer. If signing env vars are not set, the build script makes an unsigned installer.
+
+Linux builds produce an AppImage for the native x64 or arm64 host.
+
+For desktop-specific details, see [`packages/electron/README.md`](./packages/electron/README.md).
 
 ### VS Code Extension
 
 ```bash
-bun run vscode:dev    # Watch mode (extension + webview rebuild on save)
+bun run vscode:dev      # Watch mode + Extension Development Host
+bun run vscode:build    # Build extension + webview
+bun run vscode:package  # Create a local .vsix package
 ```
 
-To test in VS Code:
-```bash
-bun run vscode:build && code --extensionDevelopmentPath="$(pwd)/packages/vscode"
-```
+`bun run vscode:dev` opens an Extension Development Host automatically. You can override the editor or workspace with `OPENCHAMBER_VSCODE_BIN` and `OPENCHAMBER_VSCODE_DEV_WORKSPACE`.
+
+Example: `OPENCHAMBER_VSCODE_BIN=cursor bun run vscode:dev`.
 
 ### Shared UI (`packages/ui`)
 
-No dev server — this is a source-level library consumed by other packages. During development, `bun run dev` runs type-checking in watch mode.
+No standalone app server. This is a source-level library used by Web, Desktop, and VS Code.
+
+Useful package commands:
+
+```bash
+bun run build:ui
+bun run type-check:ui
+bun run lint:ui
+```
+
+## Build And Package Commands
+
+| Command | What it does |
+|---------|--------------|
+| `bun run build` | Build all workspaces |
+| `bun run build:web` | Build only `packages/web` |
+| `bun run build:ui` | Build only `packages/ui` |
+| `bun run build:electron` | Run Electron package build script without full packaging |
+| `bun run electron:build` | Build packaged desktop app for the current OS |
+| `bun run vscode:build` | Build the VS Code extension |
+| `bun run vscode:package` | Package the VS Code extension as `.vsix` |
+| `bun run pack:web` | Create a package archive for `@openchamber/web` |
+
+## Platform Build Notes
+
+You usually build desktop installers on the target platform.
+
+macOS:
+
+```bash
+bun run electron:build
+bun run release:test:intel
+bun run release:test:arm
+```
+
+Windows:
+
+```bash
+bun run electron:build
+```
+
+Linux x64 and arm64 AppImages are packaged natively on the matching host architecture. Use Bun for dependency installation and packaging orchestration:
+
+```bash
+OPENCHAMBER_TARGET_ARCH=x64 bun run electron:build
+# On an arm64 host:
+OPENCHAMBER_TARGET_ARCH=arm64 bun run electron:build
+
+bun run --cwd packages/electron verify:linux-appimage
+```
+
+The final AppImage verifier checks desktop identity and the architecture of Electron, the bundled OpenCode CLI, and packaged native modules.
 
 ## Before Submitting
 
@@ -48,6 +114,12 @@ No dev server — this is a source-level library consumed by other packages. Dur
 bun run type-check   # Must pass
 bun run lint         # Must pass
 bun run build        # Must succeed
+```
+
+For docs-only changes, validation may be enough:
+
+```bash
+bun run docs:validate
 ```
 
 ## Code Style
@@ -72,7 +144,7 @@ bun run build        # Must succeed
 packages/
   ui/        Shared React components, hooks, stores, and theme system
   web/       Web server (Express) + frontend (Vite) + CLI
-  desktop/   Tauri macOS app (thin shell around the web UI)
+  electron/  Electron desktop shell
   vscode/    VS Code extension (extension host + webview)
 ```
 
@@ -89,4 +161,4 @@ You can still help:
 
 ## Questions?
 
-Open an [issue](https://github.com/btriapitsyn/openchamber/issues) or ask in [Discord](https://discord.gg/ZYRSdnwwKA).
+Open an [issue](https://github.com/openchamber/openchamber/issues) or ask in [Discord](https://discord.gg/ZYRSdnwwKA).

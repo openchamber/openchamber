@@ -14,8 +14,19 @@ import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
-import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime, usesFramelessElectronChrome } from '@/lib/desktop';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { OpenChamberSection } from './types';
+
+const useRuntimeEndpointEpoch = (): number => {
+    const [epoch, setEpoch] = React.useState(0);
+
+    React.useEffect(() => {
+        return subscribeRuntimeEndpointChanged(() => setEpoch((current) => current + 1));
+    }, []);
+
+    return epoch;
+};
 
 interface OpenChamberPageProps {
     /** Which section to display. If undefined, shows all sections (mobile/legacy behavior) */
@@ -24,9 +35,11 @@ interface OpenChamberPageProps {
 
 export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => {
     const { isMobile } = useDeviceInfo();
+    const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
     const showAbout = isMobile && isWebRuntime();
     const isVSCode = isVSCodeRuntime();
-    const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
+    void runtimeEndpointEpoch;
+    const showDesktopNetworkSettings = isDesktopShell() && (isDesktopLocalOriginActive() || usesFramelessElectronChrome());
 
     // If no section specified, show all (mobile/legacy behavior)
     if (!section) {
@@ -117,25 +130,60 @@ const VisualSectionContent: React.FC = () => {
         'pwaOrientation',
         'mobileKeyboardMode',
         'timeFormat',
-        'weekStart',
+        ...(!isVSCode ? ['weekStart' as const] : []),
         'fontSize',
         'terminalFontSize',
+        'editorFontSize',
+        'fileEditorKeymap',
         'spacing',
         'inputBarOffset',
+        'expandedEditorToolbar',
         ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
         'reportUsage',
     ]} />;
 };
 
-// Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Queue mode, Persist draft
+// Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Follow-up behavior, Persist draft
 const ChatSectionContent: React.FC = () => {
-    return <OpenChamberVisualSettings visibleSettings={['chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'expandedTools', 'stickyUserHeader', 'wideChatLayout', 'splitAssistantMessageActions', 'diffLayout', 'mobileStatusBar', 'dotfiles', 'queueMode', 'persistDraft', 'inputSpellcheck']} />;
+    const isVSCode = isVSCodeRuntime();
+    return (
+        <OpenChamberVisualSettings
+            visibleSettings={[
+                'sessionGoal',
+                'sessionAssist',
+                'chatRenderMode',
+                'messageTransport',
+                'activityRenderMode',
+                'userMessageRendering',
+                'mermaidRendering',
+                'reasoning',
+                'showToolFileIcons',
+                'showTurnChangedFiles',
+                'expandedTools',
+                'collapsibleUserMessages',
+                'stickyUserHeader',
+                ...(!isVSCode ? ['promptNavigatorEnabled' as const] : []),
+                'wideChatLayout',
+                'codeBlockLineWrap',
+                'splitAssistantMessageActions',
+                'subagentReadOnlyBanner',
+                'diffLayout',
+                'dotfiles',
+                'fileViewerPreview',
+                'followUpBehavior',
+                'persistDraft',
+                'inputSpellcheck',
+            ]}
+        />
+    );
 };
 
 // Sessions section: Default model & agent, Session retention
 const SessionsSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
-    const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
+    const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
+    void runtimeEndpointEpoch;
+    const showDesktopNetworkSettings = isDesktopShell() && (isDesktopLocalOriginActive() || usesFramelessElectronChrome());
     return (
         <div className="space-y-6">
             <DefaultsSettings />

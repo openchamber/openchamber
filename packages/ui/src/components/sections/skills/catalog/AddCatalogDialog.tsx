@@ -1,5 +1,6 @@
 import React from 'react';
 import { toast } from '@/components/ui';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import {
   Dialog,
@@ -36,7 +37,7 @@ const guessLabelFromSource = (value: string) => {
     : trimmed.startsWith("git@")
       ? "ssh"
       : "shorthand";
-  
+
   if (urlFormat === 'ssh') {
     return `${trimmed.split(":")[1].replace(/\.git$/i, '')}`;
   }
@@ -60,7 +61,7 @@ const loadSettings = async (): Promise<DesktopSettings | null> => {
       return (result?.settings || {}) as DesktopSettings;
     }
 
-    const response = await fetch('/api/config/settings', {
+    const response = await runtimeFetch('/api/config/settings', {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -84,6 +85,8 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
   const { t } = useI18n();
   const scanRepo = useSkillsCatalogStore((s) => s.scanRepo);
   const loadCatalog = useSkillsCatalogStore((s) => s.loadCatalog);
+  const loadSource = useSkillsCatalogStore((s) => s.loadSource);
+  const setSelectedSource = useSkillsCatalogStore((s) => s.setSelectedSource);
   const isScanning = useSkillsCatalogStore((s) => s.isScanning);
   const defaultGitIdentityId = useGitIdentitiesStore((s) => s.defaultGitIdentityId);
   const loadDefaultGitIdentityId = useGitIdentitiesStore((s) => s.loadDefaultGitIdentityId);
@@ -247,6 +250,8 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
       setExistingCatalogs(updated);
       toast.success(t('settings.skills.catalog.add.toast.catalogAdded'));
       await loadCatalog({ refresh: true });
+      await loadSource(next.id, { refresh: true });
+      setSelectedSource(next.id);
       onOpenChange(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('settings.skills.catalog.add.toast.saveFailed'));

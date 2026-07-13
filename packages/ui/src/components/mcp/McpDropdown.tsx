@@ -62,9 +62,13 @@ interface McpDropdownProps {
 interface McpDropdownContentProps {
   active: boolean;
   className?: string;
+  headerAction?: React.ReactNode;
+  listClassName?: string;
+  hideHeader?: boolean;
+  mobileListDensity?: boolean;
 }
 
-export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, className }) => {
+export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, className, headerAction, listClassName, hideHeader = false, mobileListDensity = false }) => {
   const { t } = useI18n();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const directory = currentDirectory ?? null;
@@ -115,7 +119,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
 
   return (
     <div className={cn('w-full', className)}>
-      <div className="border-b border-[var(--interactive-border)]">
+      {!hideHeader ? <div className="border-b border-[var(--interactive-border)]">
         <div className="flex items-center justify-between gap-3 px-4 py-2.5">
           <div className="min-w-0 flex items-baseline gap-2">
             <div className="typography-ui-header font-semibold text-foreground">{t('mcpDropdown.title')}</div>
@@ -125,19 +129,25 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
               </div>
             )}
           </div>
-          <button
-            type="button"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            disabled={isSpinning}
-            onClick={handleRefresh}
-            aria-label={t('mcpDropdown.actions.refreshAria')}
-          >
-            <Icon name="refresh" className={cn('h-4 w-4', isSpinning && 'animate-spin')} />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            {headerAction}
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              disabled={isSpinning}
+              onClick={handleRefresh}
+              aria-label={t('mcpDropdown.actions.refreshAria')}
+            >
+              <Icon name="refresh" className={cn('h-4 w-4', isSpinning && 'animate-spin')} />
+            </button>
+          </div>
         </div>
-      </div>
+      </div> : null}
 
-      <div className="max-h-64 overflow-y-auto py-2">
+      {/* Desktop dropdown: servers grouped in one mobile-style card; the mobile
+          sheet variant keeps its own density and chrome. */}
+      <div className={cn('max-h-64 overflow-y-auto', mobileListDensity ? 'space-y-1 py-3' : 'px-3 py-2.5', listClassName)}>
+        <div className={cn(!mobileListDensity && sortedNames.length > 0 && 'rounded-xl bg-[var(--surface-muted)] p-1.5')}>
         {sortedNames.map((serverName) => {
           const serverStatus = status[serverName];
           const tone = statusTone(serverStatus);
@@ -148,7 +158,10 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
           return (
             <div
               key={serverName}
-              className="flex items-center justify-between gap-2 px-4 py-1.5 rounded-lg hover:bg-interactive-hover/50"
+              className={cn(
+                'flex items-center justify-between rounded-lg hover:bg-interactive-hover/50',
+                mobileListDensity ? 'gap-3 px-4 py-3' : 'gap-2 px-2.5 py-2',
+              )}
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 min-w-0">
@@ -156,7 +169,8 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
                     <TooltipTrigger asChild>
                       <span
                         className={cn(
-                          'h-2 w-2 rounded-full flex-shrink-0',
+                          'rounded-full flex-shrink-0',
+                          mobileListDensity ? 'h-2.5 w-2.5' : 'h-2 w-2',
                           tone === 'success' && 'bg-status-success',
                           tone === 'error' && 'bg-status-error',
                           tone === 'warning' && 'bg-status-warning',
@@ -169,7 +183,9 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
                       <p>{tooltip}</p>
                     </TooltipContent>
                   </Tooltip>
-                  <span className="typography-ui-label truncate">{serverName}</span>
+                  <span className={cn('truncate', mobileListDensity ? 'text-[17px] leading-6 font-medium' : 'typography-ui-label')}>
+                    {serverName}
+                  </span>
                 </div>
               </div>
 
@@ -199,6 +215,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
             {t('mcpDropdown.empty.configureInConfig')}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

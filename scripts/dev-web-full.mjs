@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
-const useDetachedChildren = process.platform === 'darwin';
+const useDetachedChildren = process.platform === 'darwin' || process.platform === 'linux';
 
 function run(label, command, args, options = {}) {
   const child = spawn(command, args, {

@@ -1,0 +1,41 @@
+---
+title: Workflows Git et GitHub
+description: Stagez, commitez et gérez les branches sans quitter OpenChamber.
+---
+
+# Workflows Git et GitHub
+
+OpenChamber possède une vue git intégrée pour relire les changements, commiter et gérer les branches sans passer au terminal. Ouvrez-la depuis l’onglet **Git** dans la barre latérale droite.
+
+## Relire et commiter
+
+La vue git sépare vos changements en **staged** et **unstaged** :
+
+- cliquez sur le **+** d’un fichier pour le stage, ou sur **−** pour le retirer du stage
+- stagez ou retirez du stage tout un groupe à la fois
+- cliquez sur un fichier pour voir son diff
+
+Écrivez ensuite un message de commit et commitez. Vous pouvez demander à OpenChamber de **générer un message de commit** à partir de vos changements staged — il utilise le modèle de la session actuelle, donc une session doit être ouverte.
+
+## Branches et historique
+
+La vue git couvre aussi le reste du quotidien git :
+
+- créer, changer, renommer et supprimer des branches
+- push, pull et fetch
+- parcourir l’historique et les diffs par commit
+- stash et restaurer des changements
+
+## Pull requests
+
+Connectez GitHub (voir [Issues et PR GitHub](/github/)) et l’onglet **PR** vous permet d’ouvrir une pull request, de la mettre à jour, de la marquer comme prête ou de la merger — et de générer son titre et sa description comme pour les messages de commit.
+
+## Gérer les conflits
+
+Si un merge, rebase ou integrate tombe sur un conflit, OpenChamber montre ce qui est bloqué et vous laisse le résoudre — y compris en le confiant à l’agent.
+
+## Pages liées
+
+- [Issues et PR GitHub](/github/) — connecter GitHub et démarrer le travail depuis des issues
+- [Sessions worktree](/worktrees/) — isoler une branche dans son propre dossier
+- [Identités Git](/git-identities/) — commiter avec la bonne identité par dépôt

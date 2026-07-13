@@ -1,10 +1,13 @@
 import React from 'react';
+import { flushSync } from 'react-dom';
+import { isCapacitorApp } from '@/lib/platform';
 import { Textarea } from '@/components/ui/textarea';
-import { BrowserVoiceButton } from '@/components/voice';
+import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
@@ -15,10 +18,14 @@ import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/us
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { startReviewFlow } from '@/lib/reviewFlow';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import ToolOutputDialog from './message/ToolOutputDialog';
 import type { ToolPopupContent } from './message/types';
 import { QueuedMessageChips } from './QueuedMessageChips';
+import { AutoReviewBanner } from './AutoReviewBanner';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from './CommandAutocomplete';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomplete';
@@ -31,12 +38,12 @@ import { PendingChangesBar } from './PendingChangesBar';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
-import { MobileSessionStatusBar } from './MobileSessionStatusBar';
+import { MobileSessionStatusBar, MobileSessionPanelTrigger } from './MobileSessionStatusBar';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
-import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -48,27 +55,34 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
 import { Icon } from "@/components/icon/Icon";
+import { DraftPresetChips } from './DraftPresetChips';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
+import { togglePermissionAutoAccept } from './permissionAutoAccept';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
 import { getSyncMessages } from '@/sync/sync-refs';
+import { EMPTY_REVERTED_MESSAGE_DOCK_STATE, buildRevertedMessageDockState, type RevertedMessageDockState } from './revertedMessageDockState';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { isSyntheticPart } from '@/lib/messages/synthetic';
 import {
@@ -84,11 +98,14 @@ import {
     buildAttachmentCitationText,
     findAttachmentCitationRanges,
 } from './attachmentCitations';
-import type { Message, Part } from '@opencode-ai/sdk/v2/client';
+import { getFileMentionAutocompleteQuery, type FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
+import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
+import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
+import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
+import type { Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
-const EMPTY_MESSAGES: Message[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
 // Single-line URL pasted over a selection becomes a markdown link.
 const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
@@ -122,6 +139,38 @@ const buildImagePasteInsertion = (pastedText: string, citationText: string): str
     }
     return `${text}${/\s$/.test(text) ? '' : ' '}${citationText}`;
 };
+
+const getInsertedTextFromChange = (previousValue: string, nextValue: string): string => {
+    if (previousValue === nextValue) {
+        return '';
+    }
+
+    let prefixLength = 0;
+    while (
+        prefixLength < previousValue.length
+        && prefixLength < nextValue.length
+        && previousValue[prefixLength] === nextValue[prefixLength]
+    ) {
+        prefixLength += 1;
+    }
+
+    let previousSuffix = previousValue.length;
+    let nextSuffix = nextValue.length;
+    while (
+        previousSuffix > prefixLength
+        && nextSuffix > prefixLength
+        && previousValue[previousSuffix - 1] === nextValue[nextSuffix - 1]
+    ) {
+        previousSuffix -= 1;
+        nextSuffix -= 1;
+    }
+
+    return nextValue.slice(prefixLength, nextSuffix);
+};
+
+const getFileMentionInputSourceForInsertedText = (insertedText: string): FileMentionAutocompleteInputSource => (
+    insertedText.includes('@') ? 'paste' : 'manual'
+);
 
 const withInlineInsertionBoundaries = (content: string, before: string, after: string): string => {
     if (!content) {
@@ -318,6 +367,20 @@ const getProjectDisplayLabel = (project: { label?: string; path: string }): stri
     return formatDirectoryName(project.path);
 };
 
+const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
+    if (!projectLabel) return title;
+    const projectIndex = title.indexOf(projectLabel);
+    if (projectIndex === -1) return title;
+
+    return (
+        <>
+            {title.slice(0, projectIndex)}
+            <span className="font-medium">{projectLabel}</span>
+            {title.slice(projectIndex + projectLabel.length)}
+        </>
+    );
+};
+
 const getProjectIconColor = (projectColor?: string | null): string | undefined => {
     if (!projectColor) {
         return undefined;
@@ -326,7 +389,7 @@ const getProjectIconColor = (projectColor?: string | null): string | undefined =
 };
 
 const MemoModelControls = React.memo(ModelControls);
-const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton);
+const MemoComposerDictation = React.memo(ComposerDictation);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 const MemoMobileModelButton = React.memo(MobileModelButton);
 const MemoStatusRow = React.memo(StatusRow);
@@ -344,34 +407,28 @@ const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ se
     const [restoringId, setRestoringId] = React.useState<string | null>(null);
     const [forkingId, setForkingId] = React.useState<string | null>(null);
     const [collapsed, setCollapsed] = React.useState(true);
-    const revertMessageID = useDirectorySync(
+    const revertedStateRef = React.useRef<RevertedMessageDockState>(EMPTY_REVERTED_MESSAGE_DOCK_STATE);
+    const revertedState = useDirectorySync(
         React.useCallback((state) => {
-            if (!sessionId) return undefined;
-            const session = state.session.find((item) => item.id === sessionId);
-            return (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+            const next = buildRevertedMessageDockState(state, sessionId, revertedStateRef.current);
+            revertedStateRef.current = next;
+            return next;
         }, [sessionId]),
         directory,
     );
-    const sessionMessages = useDirectorySync(
-        React.useCallback((state) => (sessionId ? state.message[sessionId] ?? EMPTY_MESSAGES : EMPTY_MESSAGES), [sessionId]),
-        directory,
-    );
-    const partsByMessage = useDirectorySync(React.useCallback((state) => state.part, []), directory);
-
+    const revertMessageID = revertedState.revertMessageID;
     const userMessages = React.useMemo(
-        () => sessionMessages.filter((message): message is Message & { role: 'user' } => message.role === 'user'),
-        [sessionMessages],
+        () => revertedState.records.map((record) => record.message),
+        [revertedState],
     );
     const noTextContent = t('chat.revertPopover.noTextContent');
     const items = React.useMemo(() => {
         if (!revertMessageID) return [];
-        return userMessages
-            .filter((message) => message.id >= revertMessageID)
-            .map((message) => ({
-                id: message.id,
-                text: getRevertedPreview(partsByMessage[message.id] ?? [], noTextContent),
-            }));
-    }, [noTextContent, partsByMessage, revertMessageID, userMessages]);
+        return revertedState.records.map((record) => ({
+            id: record.message.id,
+            text: getRevertedPreview(record.parts, noTextContent),
+        }));
+    }, [noTextContent, revertMessageID, revertedState]);
     const firstRevertedMessageId = items[0]?.id;
 
     React.useEffect(() => {
@@ -473,12 +530,13 @@ type ComposerAttachmentControlsProps = {
     isVSCode: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
-    fileInputRef: React.RefObject<HTMLInputElement | null>;
-    handleLocalFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void | Promise<void>;
     handlePickLocalFiles: () => void;
     openIssuePicker: () => void;
     openPrPicker: () => void;
     onOpenSettings?: () => void;
+    onMenuOpenChange?: (open: boolean) => void;
+    /** Mobile: open the attachment bottom sheet instead of the dropdown menu. */
+    onOpenMobileSheet?: () => void;
 };
 
 const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
@@ -487,8 +545,6 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
         isVSCode,
         footerIconButtonClass,
         iconSizeClass,
-        fileInputRef,
-        handleLocalFileSelect,
         handlePickLocalFiles,
         openIssuePicker,
         openPrPicker,
@@ -497,17 +553,28 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
 
     return (
         <div className="flex items-center gap-x-1.5">
-            <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={handleLocalFileSelect}
-                accept="*/*"
-            />
-
             <div className="relative inline-flex">
-                {isVSCode ? (
+                {props.onOpenMobileSheet ? (
+                    <button
+                        type="button"
+                        className={footerIconButtonClass}
+                        onClick={props.onOpenMobileSheet}
+                        // Same guard as PermissionAutoAcceptButton: keep the tap
+                        // from dismissing the keyboard. On Android's
+                        // resizes-content viewport the keyboard-close relayout
+                        // moves this button mid-tap and the click never lands.
+                        onMouseDown={(event) => event.preventDefault()}
+                        onPointerDownCapture={(event) => {
+                            if (event.pointerType === 'touch') {
+                                event.preventDefault();
+                            }
+                        }}
+                        title={t('chat.chatInput.actions.addAttachment')}
+                        aria-label={t('chat.chatInput.actions.addAttachment')}
+                    >
+                        <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
+                    </button>
+                ) : isVSCode ? (
                     <button
                         type="button"
                         className={footerIconButtonClass}
@@ -518,7 +585,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                         <Icon name="attachment-2" className={cn(iconSizeClass, 'text-current')} />
                     </button>
                 ) : (
-                    <DropdownMenu>
+                    <DropdownMenu onOpenChange={props.onMenuOpenChange}>
                         <DropdownMenuTrigger asChild>
                             <button
                                 type="button"
@@ -577,12 +644,14 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.iconSizeClass === next.iconSizeClass
     && prev.onOpenSettings === next.onOpenSettings
+    && prev.onMenuOpenChange === next.onMenuOpenChange
+    && prev.onOpenMobileSheet === next.onOpenMobileSheet
 ));
 
 type PermissionAutoAcceptButtonProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
-    permissionScopeSessionId: string | null;
+    isInteractive: boolean;
     permissionAutoAcceptEnabled: boolean;
     handlePermissionAutoAcceptToggle: () => void;
     withTooltip?: boolean;
@@ -593,7 +662,7 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
     const {
         footerIconButtonClass,
         iconSizeClass,
-        permissionScopeSessionId,
+        isInteractive,
         permissionAutoAcceptEnabled,
         handlePermissionAutoAcceptToggle,
         withTooltip = false,
@@ -613,7 +682,7 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
             className={cn(
                 footerIconButtonClass,
                 'rounded-md hover:bg-transparent',
-                !permissionScopeSessionId && 'opacity-30',
+                !isInteractive && 'opacity-30',
             )}
             onMouseDown={(event) => {
                 event.preventDefault();
@@ -940,6 +1009,44 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [snippetQuery, setSnippetQuery] = React.useState('');
     const [textareaSize, setTextareaSize] = React.useState<{ height: number; maxHeight: number } | null>(null);
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
+    // Mobile pill composer: when the keyboard is closed the composer collapses
+    // into a narrow pill (+ / placeholder / mic) with a round new-session button
+    // beside it. Any interaction expands back into the full composer. The swap
+    // is deliberately INSTANT and synchronized with the keyboard choreography,
+    // so the chat compensates keyboard + composer height in a single motion.
+    const [mobileComposerExpanded, setMobileComposerExpanded] = React.useState(false);
+    const [mobileTextareaFocused, setMobileTextareaFocused] = React.useState(false);
+    // Mobile browser / installed PWA: tapping a composer control while the
+    // keyboard is up blurs the textarea first, and the keyboard-resize reflow
+    // moves the control out from under the finger BEFORE the browser
+    // synthesizes the click — the tap dismisses the keyboard but the control's
+    // onClick never fires. Defer the blur-driven state flip so the pinned
+    // composer holds still through the tap; a refocus cancels it. Capacitor
+    // keeps the immediate flip.
+    const mobileBlurTimerRef = React.useRef<number | null>(null);
+    React.useEffect(() => () => {
+        if (mobileBlurTimerRef.current !== null) {
+            window.clearTimeout(mobileBlurTimerRef.current);
+        }
+    }, []);
+    const [mobileDictationActive, setMobileDictationActive] = React.useState(false);
+    const [mobileAttachMenuOpen, setMobileAttachMenuOpen] = React.useState(false);
+    const [mobileDraftPicker, setMobileDraftPicker] = React.useState<'project' | 'branch' | null>(null);
+    const [mobileDraftPickerQuery, setMobileDraftPickerQuery] = React.useState('');
+    // True while ANY MobileOverlayPanel is open (sessions sheet, model/agent
+    // panels, pickers...). Opening one closes the keyboard, which must not
+    // collapse the composer into the pill under the overlay.
+    const [mobileOverlayHostBusy, setMobileOverlayHostBusy] = React.useState(false);
+    // Set while an expansion is settling (focus/dictation not yet active) so the
+    // collapse watcher doesn't immediately fold the composer back into the pill.
+    const mobileExpandIntentRef = React.useRef<'focus' | null>(null);
+    // Keyboard restore across overlays: opening an overlay closes the keyboard;
+    // if it was open at that moment, reopen it when the overlay closes.
+    const lastMobileBlurAtRef = React.useRef(0);
+    const restoreKeyboardAfterOverlayRef = React.useRef(false);
+    // Pill ↔ full composer morph: the wrapper FLIP-animates its height between
+    // the two shapes while the swapped content fades in.
+    const composerHandleTouchRef = React.useRef<{ startY: number; fired: boolean } | null>(null);
     // Message history navigation state (up/down arrow to recall previous messages)
     const [historyIndex, setHistoryIndex] = React.useState(-1); // -1 = not browsing, 0+ = index from most recent
     const [draftMessage, setDraftMessage] = React.useState(''); // Preserves input when entering history mode
@@ -950,9 +1057,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const dragEnterCountRef = React.useRef(0);
     const suppressNextFileDropTextInsertRef = React.useRef(false);
     const suppressNextFileDropTextInsertTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const suppressNextFileMentionPasteRef = React.useRef(false);
+    const suppressNextFileMentionPasteTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingDroppedAbsolutePathsRef = React.useRef<string[]>([]);
     const canAcceptDropRef = React.useRef(false);
-    const nativeDragInsideDropZoneRef = React.useRef(false);
     const mentionRef = React.useRef<FileMentionHandle>(null);
     const commandRef = React.useRef<CommandAutocompleteHandle>(null);
     const skillRef = React.useRef<SkillAutocompleteHandle>(null);
@@ -971,13 +1079,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
     ).current;
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const fallbackDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const currentDirectory = useEffectiveDirectory() ?? fallbackDirectory;
     const currentSessionDirectoryForSync = useSessionUIStore(
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
+    const draftPermissionAutoAcceptEnabled = useSessionUIStore((s) => (
+        s.newSessionDraft?.open ? s.newSessionDraft.permissionAutoAcceptEnabled === true : false
+    ));
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
+    const setDraftPermissionAutoAcceptEnabled = useSessionUIStore((s) => s.setDraftPermissionAutoAcceptEnabled);
+    const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
     const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
@@ -986,6 +1100,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const clearAttachedFiles = useInputStore((s) => s.clearAttachedFiles);
     const saveSessionAgentSelection = useSelectionStore((s) => s.saveSessionAgentSelection);
     const consumePendingInputText = useInputStore((s) => s.consumePendingInputText);
+    const pendingPresetSubmit = useInputStore((s) => s.pendingPresetSubmit);
     const setPendingInputText = useInputStore((s) => s.setPendingInputText);
     const pendingInputText = useInputStore((s) => s.pendingInputText);
     const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
@@ -998,6 +1113,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const projects = useProjectsStore((state) => state.projects);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
+    const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
+    const [reviewFlowSubmitting, setReviewFlowSubmitting] = React.useState(false);
 
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
     const currentModelId = useConfigStore((state) => state.currentModelId);
@@ -1014,17 +1131,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
+    const { git: runtimeGit, vscode: vscodeApi } = useRuntimeAPIs();
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
     const cycleAgentShortcut = React.useMemo(() => (
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
     ), [cycleAgentShortcutOverride]);
-    const { git: runtimeGit } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
     const isGitRepo = useIsGitRepo(currentDirectory);
     const currentGitStatus = useGitStore((state) =>
         currentDirectory ? state.directories.get(currentDirectory)?.status ?? null : null,
     );
+    const ensureGitStatus = useGitStore((state) => state.ensureStatus);
+    const fetchGitStatus = useGitStore((state) => state.fetchStatus);
     const [showAbortStatus, setShowAbortStatus] = React.useState(false);
     const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
     const composerHighlightRef = React.useRef<HTMLDivElement | null>(null);
@@ -1046,8 +1165,55 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setImagePreviewOpen(open);
     }, [setImagePreviewOpen]);
 
+    React.useEffect(() => {
+        if (!currentDirectory || !runtimeGit) return;
+        void ensureGitStatus(currentDirectory, runtimeGit);
+    }, [currentDirectory, runtimeGit, ensureGitStatus]);
+
+    React.useEffect(() => {
+        if (!currentDirectory || !runtimeGit) return;
+        return sessionEvents.onGitRefreshHint((hint) => {
+            if (normalizePath(hint.directory) !== normalizePath(currentDirectory)) return;
+            void fetchGitStatus(currentDirectory, runtimeGit);
+        });
+    }, [currentDirectory, runtimeGit, fetchGitStatus]);
+
+    const handleStartReviewFlow = React.useCallback(async (execution: ReviewFlowExecution) => {
+        if (!currentSessionId) return;
+        const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || '';
+        if (!directory) {
+            toast.error(t('diffView.reviewDialog.toast.noSessionDirectory'));
+            return;
+        }
+
+        setReviewFlowSubmitting(true);
+        try {
+            await startReviewFlow({
+                originalSessionID: currentSessionId,
+                directory,
+                providerID: execution.providerID,
+                modelID: execution.modelID,
+                agent: execution.agent || undefined,
+                variant: execution.variant || undefined,
+                generateHandoff: execution.generateHandoff,
+                returnAfterHandoffRequest: execution.generateHandoff,
+                autoReview: execution.autoReview,
+            });
+            setReviewDialogOpen(false);
+        } catch (error) {
+            console.error('[review-flow] failed to start review flow', error);
+            toast.error(error instanceof Error ? error.message : t('diffView.reviewDialog.toast.startFailed'));
+        } finally {
+            setReviewFlowSubmitting(false);
+        }
+    }, [currentSessionId, currentDirectory, t]);
+
     const isDesktopExpanded = isExpandedInput && !isMobile;
-    const chatInputRadius = 'var(--radius-xl)';
+    // Mobile fullscreen composer (entered via the drag handle's swipe-up).
+    const isMobileExpanded = isExpandedInput && isMobile;
+    const isComposerExpanded = isDesktopExpanded || isMobileExpanded;
+    // Rounder composer on mobile (touch UI reads better with a softer corner).
+    const chatInputRadius = isMobile ? '1.5rem' : 'var(--radius-xl)';
     const useCompactChatPlaceholder = isMobile || isNarrowComposer;
 
     React.useEffect(() => {
@@ -1089,12 +1255,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const availableSkills = useSkillsStore((s) => s.skills);
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
-            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review',
+            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'catch-up', 'debug', 'weigh', 'explore',
         ]);
+        if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
         for (const skill of availableSkills) names.add(skill.name.toLowerCase());
         return names;
-    }, [availableCommands, availableSkills]);
+    }, [availableCommands, availableSkills, isMobile]);
 
     // /command and /skill spans (primary color). Only tokens that match a known
     // command/skill name are highlighted — partial/unknown tokens stay plain.
@@ -1320,7 +1487,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     } | null>(null);
 
     // Message queue
-    const queueModeEnabled = useMessageQueueStore((state) => state.queueModeEnabled);
+    const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
@@ -1332,6 +1499,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     );
     const addToQueue = useMessageQueueStore((state) => state.addToQueue);
     const clearQueue = useMessageQueueStore((state) => state.clearQueue);
+    const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
 
     // Inline comment drafts
     const draftCount = useInlineCommentDraftStore(
@@ -1372,6 +1540,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
         for (const draft of drafts) {
             if (draft.source === source) {
+                removeInlineCommentDraft(sessionKey, draft.id);
+            }
+        }
+    }, [currentSessionId, newSessionDraftOpen, removeInlineCommentDraft]);
+    // Review comments are the inline-comment drafts that aren't preview sources.
+    const removeReviewDrafts = React.useCallback(() => {
+        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
+        if (!sessionKey) return;
+        const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
+        for (const draft of drafts) {
+            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation') {
                 removeInlineCommentDraft(sessionKey, draft.id);
             }
         }
@@ -1527,15 +1706,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Session activity for queue availability and controls
     const { phase: sessionPhase } = useCurrentSessionActivity();
+    const autoReviewRunning = useAutoReviewStore(React.useCallback((state) => {
+        if (!currentSessionId) return false;
+        const run = state.runsByOriginalSessionID[currentSessionId];
+        return run?.status === 'running' && run.runtimeKey === getRuntimeKey();
+    }, [currentSessionId]));
 
     const handleOpenMobilePanel = React.useCallback((panel: MobileControlsPanel) => {
         if (!isMobile) {
             return;
         }
+        // Set the panel state BEFORE blurring: the collapse watcher and the
+        // overlay-host observer must already see the overlay as open when the
+        // keyboard-close lands, otherwise the composer folds into the pill
+        // under the sheet.
+        setMobileControlsPanel(panel);
         textareaRef.current?.blur();
-        requestAnimationFrame(() => {
-            setMobileControlsPanel(panel);
-        });
     }, [isMobile]);
 
     // Consume pending input text (e.g., from revert action)
@@ -1579,6 +1765,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
         queuedOnly?: boolean;
+        queuedMessageId?: string;
+        delivery?: 'steer';
+        /** Submit this text instead of the composer input. Used by preset
+            starter chips: on mobile the collapsed pill has no mounted textarea,
+            so the DOM-first input snapshot would read empty content. */
+        presetText?: string;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
@@ -1627,6 +1819,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }, 0);
     }, []);
 
+    const handleQueuedMessageSend = React.useCallback((messageId: string) => {
+        // Force-sending from the queue during a busy session counts as steer
+        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId, delivery: 'steer' });
+    }, []);
+
     const handleOpenAgentPanel = React.useCallback(() => {
         setMobileControlsPanel('agent');
     }, []);
@@ -1645,18 +1842,62 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
-        const inputSnapshot = getCurrentInputSnapshot();
+        const queuedMessageId = options?.queuedMessageId;
+        const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
+        const inputSnapshot = options?.presetText != null
+            ? {
+                message: options.presetText,
+                hasContent: options.presetText.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts,
+            }
+            : getCurrentInputSnapshot();
+        const queuedMessagesToSend = queuedMessageId
+            ? queuedMessages.filter((message) => message.id === queuedMessageId)
+            : queuedMessages;
+
+        if (queuedOnly && autoReviewRunning) {
+            return;
+        }
 
         if (queuedOnly) {
-            if (!hasQueuedMessages || !currentSessionId) return;
+            if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
         } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
             return;
         }
 
-        if (!currentProviderId || !currentModelId) {
+        const capturedSendConfig = queuedOnly ? queuedMessagesToSend[0]?.sendConfig : undefined;
+        const providerIdToSend = capturedSendConfig?.providerID ?? currentProviderId;
+        const modelIdToSend = capturedSendConfig?.modelID ?? currentModelId;
+        const agentNameToSend = capturedSendConfig?.agent ?? currentAgentName;
+        const variantToSend = capturedSendConfig?.variant ?? currentVariant;
+
+        if (!providerIdToSend || !modelIdToSend) {
             console.warn('Cannot send message: provider or model not selected');
             return;
         }
+
+        // Sending is authoritative: if a question prompt is open, dismiss it
+        // so the prompt cannot linger or strand the session. The dismiss clears
+        // the card instantly (optimistic) and formally rejects the question.
+        // Rejecting unblocks the agent's tool but does NOT end its turn, so a
+        // direct send would race with the still-active run and be silently
+        // discarded by the OpenCode runner. Instead we queue the message; the
+        // queued-message auto-send hook delivers it as the next turn once the
+        // rejected turn winds down and the session returns to idle. This avoids
+        // aborting the turn (which would surface an "aborted" notice).
+        if (currentSessionId && !queuedOnly && autoReviewRunning) {
+            handleQueueMessage();
+            return;
+        }
+
+        if (currentSessionId && !queuedOnly) {
+            const dismissedQuestions = await sessionActions.dismissOpenQuestionsForSession(currentSessionId);
+            if (dismissedQuestions) {
+                handleQueueMessage();
+                return;
+            }
+        }
+
+        const sendMessageOptions = delivery ? { delivery } : undefined;
 
         // Build the primary message (first part) and additional parts
         let primaryText = '';
@@ -1675,8 +1916,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const syntheticParts = consumePendingSyntheticParts();
 
         // Process queued messages first
-        for (let i = 0; i < queuedMessages.length; i++) {
-            const queuedMsg = queuedMessages[i];
+        for (let i = 0; i < queuedMessagesToSend.length; i++) {
+            const queuedMsg = queuedMessagesToSend[i];
             const { sanitizedText, mention } = parseAgentMentions(queuedMsg.content, agents);
             const { sanitizedText: queuedText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
             addMentionedSkills(queuedText);
@@ -1715,7 +1956,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 agentMentionName = mention.name;
             }
 
-            if (queuedMessages.length === 0) {
+            if (queuedMessagesToSend.length === 0) {
                 // No queue - current input is primary
                 primaryText = messageText;
                 primaryAttachments = [...attachmentsToSend, ...mentionAttachments];
@@ -1735,7 +1976,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         if (drafts.length > 0) {
-            if (queuedMessages.length === 0) {
+            if (queuedMessagesToSend.length === 0) {
                 primaryText = appendInlineComments(primaryText, drafts);
             } else if (additionalParts.length > 0) {
                 const lastPart = additionalParts[additionalParts.length - 1];
@@ -1786,7 +2027,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
 
         // Clear queue and input
-        if (currentSessionId && hasQueuedMessages) {
+        if (currentSessionId && queuedMessageId) {
+            removeFromQueue(currentSessionId, queuedMessageId);
+        } else if (currentSessionId && hasQueuedMessages) {
             clearQueue(currentSessionId);
         }
         if (!queuedOnly) {
@@ -1835,14 +2078,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             else if (commandName === 'compact' && currentSessionId) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
-                    const { opencodeClient } = await import('@/lib/opencode/client');
-                    const sdk = opencodeClient.getSdkClient();
-                    const configState = useConfigStore.getState();
-                    await sdk.session.summarize({
-                        sessionID: currentSessionId,
-                        modelID: configState.currentModelId || '',
-                        providerID: configState.currentProviderId || '',
-                    });
+                    const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
+                    await opencodeClient.summarizeSession(currentSessionId, currentProviderId, currentModelId, compactDirectory);
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
                 }
@@ -1862,14 +2099,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     const instructionsText = await renderMagicPrompt('session.summary.instructions', { topic_block: topicBlock });
                     await sendMessage(
                         visibleText,
-                        currentProviderId,
-                        currentModelId,
-                        currentAgentName,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
                         [],
                         agentMentionName,
                         [{ text: instructionsText, synthetic: true }],
-                        currentVariant,
+                        variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -1884,18 +2122,164 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     const instructionsText = await renderMagicPrompt('session.review.instructions');
                     await sendMessage(
                         visibleText,
-                        currentProviderId,
-                        currentModelId,
-                        currentAgentName,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
                         [],
                         agentMentionName,
                         [{ text: instructionsText, synthetic: true }],
-                        currentVariant,
+                        variantToSend,
                         inputMode,
+                        sendMessageOptions,
                     );
                     scrollToBottom?.();
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.reviewFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'handoff-review' && currentSessionId && !isMobile && !isVSCodeRuntime()) {
+                setReviewDialogOpen(true);
+                return;
+            }
+            else if (commandName === 'plan-feature' && (currentSessionId || newSessionDraftOpen)) {
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const visibleText = await renderMagicPrompt('session.plan.visible');
+                    const instructionsText = await renderMagicPrompt('session.plan.instructions');
+                    await sendMessage(
+                        visibleText,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        variantToSend,
+                        inputMode,
+                        sendMessageOptions,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.planFeatureFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'craft-goal' && (currentSessionId || newSessionDraftOpen)) {
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const idea = normalizedCommand.replace(/^\/craft-goal\b/i, '').trim();
+                    const visibleText = await renderMagicPrompt('session.craftGoal.visible', {
+                        idea_block: idea ? `\n\nHere is my initial idea:\n${idea}` : '',
+                    });
+                    const instructionsText = await renderMagicPrompt('session.craftGoal.instructions');
+                    await sendMessage(
+                        visibleText,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        variantToSend,
+                        inputMode,
+                        sendMessageOptions,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.craftGoalFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'catch-up' && (currentSessionId || newSessionDraftOpen)) {
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const visibleText = await renderMagicPrompt('session.catchup.visible');
+                    const instructionsText = await renderMagicPrompt('session.catchup.instructions');
+                    await sendMessage(
+                        visibleText,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        variantToSend,
+                        inputMode,
+                        sendMessageOptions,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.catchUpFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'debug' && (currentSessionId || newSessionDraftOpen)) {
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const visibleText = await renderMagicPrompt('session.debug.visible');
+                    const instructionsText = await renderMagicPrompt('session.debug.instructions');
+                    await sendMessage(
+                        visibleText,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        variantToSend,
+                        inputMode,
+                        sendMessageOptions,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.debugFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'weigh' && (currentSessionId || newSessionDraftOpen)) {
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const visibleText = await renderMagicPrompt('session.weigh.visible');
+                    const instructionsText = await renderMagicPrompt('session.weigh.instructions');
+                    await sendMessage(
+                        visibleText,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        variantToSend,
+                        inputMode,
+                        sendMessageOptions,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.weighFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'explore' && (currentSessionId || newSessionDraftOpen)) {
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const visibleText = await renderMagicPrompt('session.explore.visible');
+                    const instructionsText = await renderMagicPrompt('session.explore.instructions');
+                    await sendMessage(
+                        visibleText,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        variantToSend,
+                        inputMode,
+                        sendMessageOptions,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.exploreFailed'));
                 }
                 return;
             }
@@ -1933,14 +2317,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const sendPromise = sendMessage(
             primaryText,
-            currentProviderId,
-            currentModelId,
-            currentAgentName,
+            providerIdToSend,
+            modelIdToSend,
+            agentNameToSend,
             primaryAttachments,
             agentMentionName,
             additionalParts.length > 0 ? additionalParts : undefined,
-            currentVariant,
-            inputMode
+            variantToSend,
+            inputMode,
+            sendMessageOptions,
         );
 
         if (typeof window === 'undefined') {
@@ -2011,16 +2396,62 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Update ref with latest handleSubmit on every render
     handleSubmitRef.current = handleSubmit;
 
-    // Primary action for send button - respects queue mode setting
+    // Primary action for send/queue button — respects selected follow-up behavior
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && sessionPhase !== 'idle';
-        if (queueModeEnabled && canQueue) {
+        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
+        if (followUpBehavior === 'queue' && canQueue) {
             handleQueueMessage();
+        } else if (followUpBehavior === 'steer' && canQueue) {
+            void handleSubmitRef.current({ delivery: 'steer' });
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
+
+    // Draft welcome presets: submit immediately.
+    const submitPresetPrompt = React.useCallback((text: string) => {
+        // The text goes straight into the submit (see SubmitOptions.presetText)
+        // instead of through the composer input — the collapsed mobile pill has
+        // no mounted textarea to stage it in.
+        const draft = (textareaRef.current?.value ?? messageRef.current).trim();
+        const presetText = draft ? `${text}\n${draft}` : text;
+        void handleSubmitRef.current({ presetText });
+    }, []);
+
+    // Dictation: insert the transcript inline; optionally submit immediately.
+    // getCurrentInputSnapshot reads textareaRef.current.value first, so setting
+    // it synchronously lets handleSubmit pick up the text in the same tick.
+    const handleDictationInsert = React.useCallback((text: string) => {
+        setMessage((prev) => {
+            const next = appendInlineText(prev, text);
+            const textarea = textareaRef.current;
+            if (textarea) {
+                textarea.value = next;
+            }
+            return next;
+        });
+        setTimeout(() => {
+            textareaRef.current?.focus();
+        }, 0);
+    }, []);
+
+    const handleDictationInsertAndSend = React.useCallback((text: string) => {
+        // Same as preset chips: the composed text goes into the submit as an
+        // explicit override instead of being staged in the textarea, which may
+        // not be mounted (collapsed mobile pill).
+        const next = appendInlineText(textareaRef.current?.value ?? messageRef.current, text);
+        void handleSubmitRef.current({ presetText: next });
+    }, []);
+
+    // Preset chips rendered outside this component (e.g. under the welcome
+    // message on narrow surfaces) request a submit via the input store; consume
+    // it here so it routes through the same command-aware submit path.
+    React.useEffect(() => {
+        if (pendingPresetSubmit == null) return;
+        const text = useInputStore.getState().consumePendingPresetSubmit();
+        if (text) submitPresetPrompt(text);
+    }, [pendingPresetSubmit, submitPresetPrompt]);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Early return during IME composition to prevent interference with autocomplete.
@@ -2087,6 +2518,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showCommandAutocomplete && commandRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 commandRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2095,6 +2527,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showSkillAutocomplete && skillRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 skillRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2103,6 +2536,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showSnippetAutocomplete && snippetRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 snippetRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2111,6 +2545,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (showFileMention && mentionRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
+                e.stopPropagation();
                 mentionRef.current.handleKeyDown(e.key);
                 return;
             }
@@ -2234,33 +2669,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on queue mode
+        // Handle Enter/Ctrl+Enter based on selected follow-up behavior.
         if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
 
-            // Queue mode: Enter queues, Ctrl+Enter sends
-            // Normal mode: Enter sends, Ctrl+Enter queues
-            // Note: Queueing only works when there's an existing session (currentSessionId)
-            // For new sessions (draft), always send immediately
-            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && sessionPhase !== 'idle';
+            // Queueing / steering only works when there's an existing busy
+            // session (or an active auto-review run).
+            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
 
-            if (queueModeEnabled) {
+            if (followUpBehavior === 'queue') {
                 if (isCtrlEnter || !canQueue) {
-                    // Ctrl+Enter sends, or Enter when can't queue (new session)
                     handleSubmit();
                 } else {
-                    // Enter queues when we have a session
                     handleQueueMessage();
                 }
             } else {
-                if (isCtrlEnter && canQueue) {
-                    // Ctrl+Enter queues when we have a session
-                    handleQueueMessage();
-                } else {
-                    // Enter sends
+                // steer: Enter steers into the running turn, Ctrl+Enter sends now.
+                if (isCtrlEnter || !canQueue) {
                     handleSubmit();
+                } else {
+                    handleSubmit({ delivery: 'steer' });
                 }
             }
         }
@@ -2421,6 +2851,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [agents, currentAgentName, currentSessionId, setAgent, saveSessionAgentSelection]);
 
+    // Height the dictation transcript needs (null when idle): the overlay sits
+    // absolutely over the composer, so the underlying textarea must grow for
+    // the composer to grow — feed this into the autosize below.
+    const dictationContentHeightRef = React.useRef<number | null>(null);
+    const [dictationContentHeight, setDictationContentHeight] = React.useState<number | null>(null);
+    const handleDictationContentHeightChange = React.useCallback((height: number | null) => {
+        setDictationContentHeight((prev) => (prev === height ? prev : height));
+    }, []);
+
     const adjustTextareaHeight = React.useCallback((options?: { allowShrink?: boolean }) => {
         const textarea = textareaRef.current;
         if (!textarea) {
@@ -2429,7 +2868,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const previousScrollTop = textarea.scrollTop;
 
-        if (isDesktopExpanded) {
+        if (isComposerExpanded) {
             textarea.style.height = '100%';
             textarea.style.maxHeight = 'none';
             setTextareaSize(null);
@@ -2456,7 +2895,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const targetLineHeight = Number.isNaN(lineHeight) ? fallbackLineHeight : lineHeight;
         const maxHeight = targetLineHeight * MAX_VISIBLE_TEXTAREA_LINES + paddingTotal;
         const scrollHeight = textarea.scrollHeight || textarea.offsetHeight;
-        const nextHeight = Math.min(scrollHeight, maxHeight);
+        const dictationHeight = dictationContentHeightRef.current ?? 0;
+        const nextHeight = Math.min(Math.max(scrollHeight, dictationHeight), maxHeight);
 
         textarea.style.height = `${nextHeight}px`;
         textarea.style.maxHeight = `${maxHeight}px`;
@@ -2470,7 +2910,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
             return { height: nextHeight, maxHeight };
         });
-    }, [isDesktopExpanded]);
+    }, [isComposerExpanded]);
 
     React.useLayoutEffect(() => {
         const allowShrink = message.length < previousMessageLengthRef.current;
@@ -2478,7 +2918,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         adjustTextareaHeight({ allowShrink });
     }, [adjustTextareaHeight, message, isMobile]);
 
-    const updateAutocompleteState = React.useCallback((value: string, cursorPosition: number) => {
+    React.useLayoutEffect(() => {
+        dictationContentHeightRef.current = dictationContentHeight;
+        // Growing transcript never shrinks mid-recording (matches typing);
+        // dictation ending (null) releases the height back to the message.
+        adjustTextareaHeight({ allowShrink: dictationContentHeight === null });
+    }, [adjustTextareaHeight, dictationContentHeight]);
+
+    const updateAutocompleteState = React.useCallback((
+        value: string,
+        cursorPosition: number,
+        inputSource: FileMentionAutocompleteInputSource = 'manual',
+        insertedText?: string,
+    ) => {
         if (inputMode === 'shell') {
             setShowCommandAutocomplete(false);
             setShowFileMention(false);
@@ -2543,23 +2995,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setShowSnippetAutocomplete(false);
 
-        const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
-        if (lastAtSymbol !== -1) {
-            const charBefore = lastAtSymbol > 0 ? textBeforeCursor[lastAtSymbol - 1] : null;
-            const textAfterAt = textBeforeCursor.substring(lastAtSymbol + 1);
-            const isWordBoundary = !charBefore || /\s/.test(charBefore);
-            if (isWordBoundary && !textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
-                setMentionQuery(textAfterAt);
-                setShowFileMention(true);
-            } else {
-                setShowFileMention(false);
-            }
-        } else {
+        const nextMentionQuery = getFileMentionAutocompleteQuery({ value, cursorPosition, inputSource, insertedText });
+        if (nextMentionQuery === null) {
             setShowFileMention(false);
+        } else {
+            setMentionQuery(nextMentionQuery);
+            setShowFileMention(true);
         }
-    }, [inputMode, setCommandQuery, setMentionQuery, setShowCommandAutocomplete, setShowFileMention, setShowSkillAutocomplete, setSkillQuery]);
+    }, [
+        inputMode,
+        setCommandQuery,
+        setMentionQuery,
+        setShowCommandAutocomplete,
+        setShowFileMention,
+        setShowSkillAutocomplete,
+        setShowSnippetAutocomplete,
+        setSkillQuery,
+        setSnippetQuery,
+    ]);
 
-    const insertTextAtSelection = React.useCallback((text: string) => {
+    const insertTextAtSelection = React.useCallback((
+        text: string,
+        inputSource: FileMentionAutocompleteInputSource = 'manual',
+    ) => {
         if (!text) {
             return;
         }
@@ -2568,7 +3026,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!textarea) {
             const nextValue = message + text;
             setMessage(nextValue);
-            updateAutocompleteState(nextValue, nextValue.length);
+            updateAutocompleteState(nextValue, nextValue.length, inputSource, text);
             requestAnimationFrame(() => adjustTextareaHeight());
             return;
         }
@@ -2588,7 +3046,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             adjustTextareaHeight();
         });
 
-        updateAutocompleteState(nextValue, cursorPosition);
+        updateAutocompleteState(nextValue, cursorPosition, inputSource, text);
     }, [adjustTextareaHeight, message, updateAutocompleteState]);
 
     const clearDropTextSuppression = React.useCallback(() => {
@@ -2608,6 +3066,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             clearDropTextSuppression();
         }, 700);
     }, [clearDropTextSuppression]);
+
+    const clearFileMentionPasteSuppression = React.useCallback(() => {
+        suppressNextFileMentionPasteRef.current = false;
+        if (suppressNextFileMentionPasteTimeoutRef.current) {
+            clearTimeout(suppressNextFileMentionPasteTimeoutRef.current);
+            suppressNextFileMentionPasteTimeoutRef.current = null;
+        }
+    }, []);
+
+    const markFileMentionPasteSuppression = React.useCallback(() => {
+        suppressNextFileMentionPasteRef.current = true;
+        if (suppressNextFileMentionPasteTimeoutRef.current) {
+            clearTimeout(suppressNextFileMentionPasteTimeoutRef.current);
+        }
+        suppressNextFileMentionPasteTimeoutRef.current = setTimeout(() => {
+            suppressNextFileMentionPasteRef.current = false;
+            suppressNextFileMentionPasteTimeoutRef.current = null;
+        }, 700);
+    }, []);
 
     const handleBeforeInput = React.useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
         if (!isVSCodeRuntime() || !suppressNextFileDropTextInsertRef.current) {
@@ -2636,6 +3113,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const value = e.target.value;
         const cursorPosition = e.target.selectionStart ?? value.length;
+        const pastedInsertedText = nativeInputEvent?.inputType?.startsWith('insertFromPaste')
+            ? getInsertedTextFromChange(messageRef.current, value)
+            : '';
+        const isPasteInput = pastedInsertedText.includes('@') || suppressNextFileMentionPasteRef.current;
+        if (suppressNextFileMentionPasteRef.current) {
+            clearFileMentionPasteSuppression();
+        }
+        const inputSource: FileMentionAutocompleteInputSource = isPasteInput
+            ? 'paste'
+            : 'manual';
 
         if (inputMode === 'normal' && value.startsWith('!')) {
             const shellCommand = value.slice(1);
@@ -2657,14 +3144,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setMessage(value);
         adjustTextareaHeight();
-        updateAutocompleteState(value, cursorPosition);
+        updateAutocompleteState(value, cursorPosition, inputSource, pastedInsertedText);
     };
 
     React.useEffect(() => {
         return () => {
             clearDropTextSuppression();
+            clearFileMentionPasteSuppression();
         };
-    }, [clearDropTextSuppression]);
+    }, [clearDropTextSuppression, clearFileMentionPasteSuppression]);
 
     const handlePaste = React.useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         // Pasting a URL over a selection wraps it as a markdown link:
@@ -2695,7 +3183,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         }
                         adjustTextareaHeight();
                     });
-                    updateAutocompleteState(next, caret);
+                    updateAutocompleteState(next, caret, getFileMentionInputSourceForInsertedText(url), url);
                     return;
                 }
             }
@@ -2719,17 +3207,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         });
 
         const imageFiles = Array.from(fileMap.values());
+        const pastedText = e.clipboardData.getData('text');
         if (imageFiles.length === 0) {
+            if (pastedText.includes('@')) {
+                markFileMentionPasteSuppression();
+            }
             return;
         }
 
         if (!currentSessionId && !newSessionDraftOpen) {
+            if (pastedText.includes('@')) {
+                markFileMentionPasteSuppression();
+            }
             return;
         }
 
         e.preventDefault();
 
-        const pastedText = e.clipboardData.getData('text');
         const assignedFilenames = assignImageAttachmentFilenames(
             imageFiles,
             [
@@ -2747,7 +3241,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             message.slice(selectionEnd),
         );
 
-        insertTextAtSelection(insertionText);
+        insertTextAtSelection(insertionText, getFileMentionInputSourceForInsertedText(insertionText));
 
         for (let index = 0; index < imageFiles.length; index += 1) {
             const filename = assignedFilenames[index];
@@ -2762,7 +3256,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 pendingPastedAttachmentFilenamesRef.current.delete(filename);
             }
         }
-    }, [addAttachedFile, attachedFiles, adjustTextareaHeight, currentSessionId, inputMode, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
+    }, [addAttachedFile, attachedFiles, adjustTextareaHeight, currentSessionId, inputMode, markFileMentionPasteSuppression, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
@@ -3226,121 +3720,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     };
 
-    // Tauri desktop: handle native file drops via onDragDropEvent
-    React.useEffect(() => {
-        if (!isTauriShell()) return;
-        let cancelled = false;
-        let unlisten: (() => void) | null = null;
-
-        void (async () => {
-            try {
-                const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-                const webviewWindow = getCurrentWebviewWindow();
-                const removeListener = await webviewWindow.onDragDropEvent(async (event) => {
-                    if (!canAcceptDropRef.current) return;
-
-                    const payload = (event as { payload?: unknown }).payload;
-                    if (!payload || typeof payload !== 'object') return;
-
-                    const typed = payload as { type?: string; paths?: string[]; position?: { x?: number; y?: number } };
-                    const type = typed.type;
-                    const x = typed.position?.x;
-                    const y = typed.position?.y;
-
-                    // Check if drop is inside the chat input area
-                    const zone = dropZoneRef.current;
-                    let inZone: boolean | null = null;
-                    if (zone && typeof x === 'number' && typeof y === 'number') {
-                        const rect = zone.getBoundingClientRect();
-                        inZone = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-                        // Handle retina displays where Tauri might report physical pixels
-                        if (!inZone && window.devicePixelRatio > 1) {
-                            const sx = x / window.devicePixelRatio;
-                            const sy = y / window.devicePixelRatio;
-                            inZone = sx >= rect.left && sx <= rect.right && sy >= rect.top && sy <= rect.bottom;
-                        }
-                    }
-
-                    if (type === 'enter' || type === 'over') {
-                        if (inZone !== null) {
-                            nativeDragInsideDropZoneRef.current = inZone;
-                        }
-                        setIsDragging(nativeDragInsideDropZoneRef.current);
-                        return;
-                    }
-                    if (type === 'leave') {
-                        nativeDragInsideDropZoneRef.current = false;
-                        setIsDragging(false);
-                        return;
-                    }
-                    if (type === 'drop') {
-                        const shouldHandleDrop = inZone ?? nativeDragInsideDropZoneRef.current;
-                        nativeDragInsideDropZoneRef.current = false;
-                        setIsDragging(false);
-                        if (!shouldHandleDrop) return;
-
-                        const paths = Array.isArray(typed.paths)
-                            ? typed.paths.filter((p): p is string => typeof p === 'string')
-                            : [];
-                        if (paths.length === 0) return;
-
-                        for (const path of paths) {
-                            try {
-                                const normalizedPath = normalizeDroppedPath(path);
-                                const fileName = normalizedPath.split(/[\\/]/).pop() || normalizedPath;
-                                let file: File;
-
-                                // In Tauri shell, dropped paths are local machine paths.
-                                // Read bytes via native command to avoid workspace-bound /api/fs/raw restrictions.
-                                if (isTauriShell()) {
-                                    const { invoke } = await import('@tauri-apps/api/core');
-                                    const result = await invoke<{ mime: string; base64: string }>('desktop_read_file', { path: normalizedPath });
-                                    const byteCharacters = atob(result.base64);
-                                    const byteNumbers = new Array(byteCharacters.length);
-                                    for (let i = 0; i < byteCharacters.length; i++) {
-                                        byteNumbers[i] = byteCharacters.charCodeAt(i);
-                                    }
-                                    const byteArray = new Uint8Array(byteNumbers);
-                                    const blob = new Blob([byteArray], { type: result.mime || 'application/octet-stream' });
-                                    file = new File([blob], fileName, { type: result.mime || 'application/octet-stream' });
-                                } else {
-                                    const response = await fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`);
-                                    if (!response.ok) {
-                                        throw new Error(`Failed to read dropped file (${response.status})`);
-                                    }
-                                    const blob = await response.blob();
-                                    file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
-                                }
-
-                                await addAttachedFile(file);
-                            } catch (error) {
-                                console.error('Failed to attach dropped file:', path, error);
-                                toast.error(t('chat.chatInput.toast.attachNamedFailed', {
-                                    name: path.split(/[\\/]/).pop() || t('chat.chatInput.fileFallback'),
-                                }));
-                            }
-                        }
-                    }
-                });
-
-                if (cancelled) {
-                    removeListener();
-                    return;
-                }
-                unlisten = removeListener;
-            } catch (error) {
-                if (!cancelled) {
-                    console.warn('Failed to register Tauri drag-drop listener:', error);
-                }
-            }
-        })();
-
-        return () => {
-            cancelled = true;
-            if (unlisten) unlisten();
-        };
-    }, [addAttachedFile, normalizeDroppedPath, t]);
-
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     const attachFiles = React.useCallback(async (files: FileList | File[]) => {
@@ -3358,8 +3737,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
-            const response = await fetch('/api/vscode/pick-files');
-            const data = await response.json();
+            const data = (await vscodeApi?.pickFiles?.()) as {
+                files?: Array<{ name: string; mimeType?: string; dataUrl?: string }>;
+                skipped?: Array<{ name?: string; reason?: string }>;
+            } | undefined;
             const picked = Array.isArray(data?.files) ? data.files : [];
             const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
 
@@ -3398,7 +3779,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             console.error('VS Code file pick failed', error);
             toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.vscodePickFailed'));
         }
-    }, [attachFiles, t]);
+    }, [attachFiles, t, vscodeApi]);
 
     const handlePickLocalFiles = React.useCallback(() => {
         if (isVSCodeRuntime()) {
@@ -3441,10 +3822,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         () => normalizePath(selectedDraftProject?.path ?? null),
         [selectedDraftProject?.path],
     );
+    const draftProjectLabel = selectedDraftProject ? getProjectDisplayLabel(selectedDraftProject) : null;
 
     const selectedDraftProjectBranches = useGitBranches(selectedDraftProjectPath);
+    const selectedDraftProjectBranchesFetchedAt = useGitStore(
+        (s) => (selectedDraftProjectPath ? s.directories.get(selectedDraftProjectPath)?.lastBranchesFetch ?? 0 : 0),
+    );
     const selectedDraftProjectIsGitRepo = useIsGitRepo(selectedDraftProjectPath);
-    const fetchGitStatus = useGitStore((state) => state.fetchStatus);
+    const hasDraftBranchList = Boolean(selectedDraftProjectBranches?.all);
     const fetchBranches = useGitStore((state) => state.fetchBranches);
     const [isDiscoveringDraftBranches, setIsDiscoveringDraftBranches] = React.useState(false);
 
@@ -3462,13 +3847,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        if (selectedDraftProjectBranches?.all) {
+        // Stale-while-revalidate: branches seeded from the persisted cache show
+        // instantly. Refresh based on staleness (not mere presence) so a cached
+        // list can't go stale, while only showing the discovering spinner when
+        // there is nothing to display yet.
+        const DRAFT_BRANCHES_SWR_TTL_MS = 30_000;
+        const isStale =
+            !selectedDraftProjectBranchesFetchedAt ||
+            Date.now() - selectedDraftProjectBranchesFetchedAt > DRAFT_BRANCHES_SWR_TTL_MS;
+
+        if (hasDraftBranchList && !isStale) {
             setIsDiscoveringDraftBranches(false);
             return;
         }
 
         let cancelled = false;
-        setIsDiscoveringDraftBranches(true);
+        setIsDiscoveringDraftBranches(!hasDraftBranchList);
 
         void fetchBranches(selectedDraftProjectPath, runtimeGit)
             .finally(() => {
@@ -3480,7 +3874,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return () => {
             cancelled = true;
         };
-    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranches?.all, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
+    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranchesFetchedAt, hasDraftBranchList, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
 
     const selectedDraftProjectCurrentBranch = selectedDraftProjectBranches?.current?.trim() ?? '';
 
@@ -3520,7 +3914,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             rootBranch: selectedDraftProjectCurrentBranch,
             worktrees,
             pendingBootstrapDirectory: newSessionDraft?.bootstrapPendingDirectory ?? null,
-        });
+        }).filter((option) => option.kind === 'worktree');
     }, [availableWorktreesByProject, newSessionDraft?.bootstrapPendingDirectory, selectedDraftProject, selectedDraftProjectCurrentBranch, selectedDraftProjectPath]);
 
     const selectedDraftDirectory = React.useMemo(
@@ -3657,30 +4051,32 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' } | null;
         iconBackground?: string | null;
     }) => {
-        const imageUrl = getProjectIconImageUrl(
-            { id: project.id, iconImage: project.iconImage ?? null },
-            {
-                themeVariant: currentTheme.metadata.variant,
-                iconColor: currentTheme.colors.surface.foreground,
-            },
-        );
         const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
         const iconColor = getProjectIconColor(project.color);
+        const fallbackIcon = projectIconName ? (
+            <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
+        ) : (
+            <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
+        );
 
         return (
             <span className="inline-flex min-w-0 items-center gap-1.5">
-                {imageUrl ? (
+                {project.iconImage ? (
                     <span
                         className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center overflow-hidden rounded-[3px]"
                         style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
                     >
-                        <img src={imageUrl} alt="" className="h-full w-full object-contain" draggable={false} />
+                        <ProjectIconImage
+                            project={{ id: project.id, iconImage: project.iconImage ?? null }}
+                            options={{
+                                themeVariant: currentTheme.metadata.variant,
+                                iconColor: currentTheme.colors.surface.foreground,
+                            }}
+                            className="h-full w-full object-contain"
+                            fallback={fallbackIcon}
+                        />
                     </span>
-                ) : projectIconName ? (
-                    <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
-                ) : (
-                    <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
-                )}
+                ) : fallbackIcon}
                 <span className="truncate">{getProjectDisplayLabel(project)}</span>
             </span>
         );
@@ -3703,6 +4099,453 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         });
     }, [draftBranchItems, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget, showDraftTargetSelectors]);
 
+    // ── Mobile pill composer state machine ─────────────────────────────────
+    const expandMobileComposer = React.useCallback((intent: 'focus') => {
+        mobileExpandIntentRef.current = intent;
+        // flushSync so the textarea exists NOW and focus() still runs inside
+        // the user gesture's call stack: mobile browsers only open the soft
+        // keyboard for focus calls made synchronously from the tap (an rAF
+        // here worked in the Capacitor WebView but not in Safari/Chrome).
+        flushSync(() => {
+            setMobileComposerExpanded(true);
+        });
+        // Capacitor: our keyboard choreography positions everything, so the
+        // browser's own scroll-into-view must stay off. Mobile BROWSERS have no
+        // choreography — the native reveal (viewport pan that lifts the focused
+        // field above the keyboard) is the only thing that moves the composer.
+        textareaRef.current?.focus({ preventScroll: isCapacitorApp() });
+    }, []);
+
+    const applyAssistSuggestion = React.useCallback((text: string) => {
+        setMessage(text);
+        if (isMobile && !mobileComposerExpanded) {
+            expandMobileComposer('focus');
+        } else {
+            requestAnimationFrame(() => textareaRef.current?.focus());
+        }
+    }, [expandMobileComposer, isMobile, mobileComposerExpanded]);
+
+
+    const handleMobileNewSession = React.useCallback(() => {
+        if (newSessionDraftOpen) return;
+        openNewSessionDraft(currentDirectory ? { directoryOverride: currentDirectory } : undefined);
+    }, [newSessionDraftOpen, openNewSessionDraft, currentDirectory]);
+
+    const openMobileAttachSheet = React.useCallback(() => {
+        // Same order as handleOpenMobilePanel: mark the sheet open BEFORE the
+        // blur so the collapse watcher sees an overlay when the keyboard-close
+        // lands. The trigger button blocks the tap's own focus transfer, so
+        // the keyboard must be dismissed explicitly here.
+        setMobileAttachMenuOpen(true);
+        textareaRef.current?.blur();
+    }, []);
+
+    const mobileComposerExpandedRef = React.useRef(mobileComposerExpanded);
+    React.useEffect(() => {
+        mobileComposerExpandedRef.current = mobileComposerExpanded;
+    });
+
+    const handleMobileDictationActiveChange = React.useCallback((active: boolean) => {
+        setMobileDictationActive(active);
+        if (active) {
+            mobileExpandIntentRef.current = null;
+            // Dictation engine went live (possibly started from the pill):
+            // switch straight into the voice variant of the full composer.
+            if (!mobileComposerExpandedRef.current) {
+                setMobileComposerExpanded(true);
+            }
+            return;
+        }
+        // Dictation ended. The insert flow hands focus back to the textarea a
+        // tick later — if that happened, stay expanded; otherwise (cancel,
+        // discard, insert-and-send) collapse straight back to the pill without
+        // parking on the normal composer for the usual grace period.
+        window.setTimeout(() => {
+            if (!mobileComposerExpandedRef.current) return;
+            if (document.activeElement === textareaRef.current) return;
+            setMobileComposerExpanded(false);
+            setExpandedInput(false);
+        }, 30);
+    }, [setExpandedInput]);
+
+    // Watch the shared overlay portal root: any mounted MobileOverlayPanel
+    // (sessions sheet, model/agent panels, draft pickers, ...) counts as busy.
+    // Observing the host catches overlays whose open-state lives in other
+    // components without threading their state here.
+    React.useEffect(() => {
+        if (!isMobile || typeof document === 'undefined') return;
+        let host = document.getElementById('mobile-overlay-root');
+        if (!host) {
+            // Same lazy-create contract as MobileOverlayPanel's ensureOverlayRoot.
+            host = document.createElement('div');
+            host.id = 'mobile-overlay-root';
+            document.body.appendChild(host);
+        }
+        const hostEl = host;
+        const update = () => setMobileOverlayHostBusy(hostEl.childElementCount > 0);
+        update();
+        const observer = new MutationObserver(update);
+        observer.observe(hostEl, { childList: true });
+        return () => observer.disconnect();
+    }, [isMobile]);
+
+    // If the keyboard was open (or closed just moments ago by the overlay's own
+    // blur) when an overlay appeared, bring it back once every overlay is gone.
+    // The attach dropdown and the GitHub issue/PR pickers join the same chain,
+    // so menu → picker → close restores the keyboard at the end of the flow.
+    const mobileOverlayOpen = mobileOverlayHostBusy
+        || Boolean(mobileControlsPanel)
+        || mobileAttachMenuOpen
+        || issuePickerOpen
+        || prPickerOpen;
+    // Installed PWA (standalone): a focus() from a bare timeout is outside the
+    // user gesture and iOS refuses to raise the keyboard for it (Safari
+    // in-browser is lenient). MobileOverlayPanel dispatches
+    // 'oc:mobile-overlay-closed' synchronously from the same React flush as
+    // the click that closed it — refocus right there, while the gesture is
+    // still live. Chained flows (attach menu → GitHub picker) set the skip ref
+    // so the keyboard doesn't flash open under the next overlay.
+    const mobilePickerDialogsOpenRef = React.useRef(false);
+    mobilePickerDialogsOpenRef.current = issuePickerOpen || prPickerOpen;
+    const skipNextOverlayCloseRestoreRef = React.useRef(false);
+    const openSheetCountRef = React.useRef(0);
+    const holdComposerFocusUntilRef = React.useRef(0);
+    React.useEffect(() => {
+        if (!isMobile || isCapacitorApp() || typeof window === 'undefined') return;
+        if (!window.matchMedia?.('(display-mode: standalone)')?.matches) return;
+        const handleOverlayOpened = () => {
+            openSheetCountRef.current += 1;
+        };
+        const handleOverlayClosed = () => {
+            // Counter instead of a DOM check: the close event fires from a
+            // layout-effect cleanup, when the closing sheet's portal nodes may
+            // still be attached — the DOM can't tell "this sheet going away"
+            // from "another sheet still up".
+            openSheetCountRef.current = Math.max(0, openSheetCountRef.current - 1);
+            if (skipNextOverlayCloseRestoreRef.current) {
+                skipNextOverlayCloseRestoreRef.current = false;
+                return;
+            }
+            if (!restoreKeyboardAfterOverlayRef.current) return;
+            if (mobilePickerDialogsOpenRef.current) return;
+            if (openSheetCountRef.current > 0) return;
+            restoreKeyboardAfterOverlayRef.current = false;
+            // iOS can still dismiss the freshly-raised keyboard when the tap
+            // that closed the overlay finishes over non-input content — hold
+            // focus through that window (see the onBlur guard).
+            holdComposerFocusUntilRef.current = Date.now() + 600;
+            textareaRef.current?.focus();
+            // The native focus lands mid-commit; React's delegated onFocus may
+            // not make it into this flush, leaving mobileComposerBusy false for
+            // a beat — enough for the pill-collapse timer to unmount the
+            // focused textarea and kill the rising keyboard. Set the state
+            // explicitly instead of relying on the synthetic event.
+            if (document.activeElement === textareaRef.current) {
+                setMobileTextareaFocused(true);
+            }
+            // iOS reveals a field above the keyboard only for user-initiated
+            // focus; a programmatic one leaves the composer parked behind it
+            // (the chat screen has no viewport pin of its own — the draft
+            // screen's pinned form ignores these no-op scrolls). Reveal once
+            // the keyboard has mostly risen, and again after it settles.
+            const reveal = () => {
+                const ta = textareaRef.current;
+                if (!ta || document.activeElement !== ta) return;
+                // Align the BOTTOM of the whole composer form with the visible
+                // bottom: 'nearest' on the textarea alone leaves the footer
+                // icon row parked behind the keyboard accessory bar.
+                (composerFormRef.current ?? ta).scrollIntoView({ block: 'end' });
+            };
+            window.setTimeout(reveal, 300);
+            window.setTimeout(reveal, 650);
+        };
+        window.addEventListener('oc:mobile-overlay-opened', handleOverlayOpened);
+        window.addEventListener('oc:mobile-overlay-closed', handleOverlayClosed);
+        return () => {
+            window.removeEventListener('oc:mobile-overlay-opened', handleOverlayOpened);
+            window.removeEventListener('oc:mobile-overlay-closed', handleOverlayClosed);
+        };
+    }, [isMobile]);
+    React.useEffect(() => {
+        if (!isMobile) return;
+        if (mobileOverlayOpen) {
+            if (mobileTextareaFocused || Date.now() - lastMobileBlurAtRef.current < 800) {
+                restoreKeyboardAfterOverlayRef.current = true;
+            }
+            return;
+        }
+        if (!restoreKeyboardAfterOverlayRef.current) return;
+        // Debounced: overlay chains hand off with a frame of "nothing open"
+        // between steps (attach sheet closes → issue/PR picker opens a frame
+        // later). Restoring instantly in that gap would pop the keyboard open
+        // inside the next overlay — wait out the gap and cancel if another
+        // overlay appears.
+        const timer = window.setTimeout(() => {
+            restoreKeyboardAfterOverlayRef.current = false;
+            // Browsers need their native scroll-into-view (see expandMobileComposer).
+            textareaRef.current?.focus({ preventScroll: isCapacitorApp() });
+        }, 180);
+        return () => window.clearTimeout(timer);
+    }, [isMobile, mobileOverlayOpen, mobileTextareaFocused]);
+
+    // Fold the full composer back into the pill once nothing keeps it open:
+    // keyboard closed (textarea blurred), no dictation, no sheet/menu/dialog.
+    // The short delay bridges focus moving between composer controls.
+    const mobileComposerBusy = mobileTextareaFocused
+        || mobileOverlayHostBusy
+        || mobileDictationActive
+        || Boolean(mobileControlsPanel)
+        || mobileAttachMenuOpen
+        || mobileDraftPicker !== null
+        || issuePickerOpen
+        || prPickerOpen
+        || isDragging;
+    React.useEffect(() => {
+        if (!isMobile || !mobileComposerExpanded || mobileComposerBusy) return;
+        const timer = window.setTimeout(() => {
+            // Authoritative DOM check: the React focus state can lag a
+            // programmatic refocus (overlay-close keyboard restore). Collapsing
+            // would unmount the focused textarea and kill the keyboard.
+            if (document.activeElement === textareaRef.current) return;
+            mobileExpandIntentRef.current = null;
+            setMobileComposerExpanded(false);
+            setExpandedInput(false);
+        }, 250);
+        return () => window.clearTimeout(timer);
+    }, [isMobile, mobileComposerExpanded, mobileComposerBusy, setExpandedInput]);
+
+    const mobileComposerBusyRef = React.useRef(false);
+    mobileComposerBusyRef.current = mobileComposerBusy;
+
+    // Browser counterpart of Capacitor's oc-keyboard-open root class (which is
+    // driven by native keyboard events): the focused composer textarea is the
+    // best keyboard proxy a browser has. CSS keyed on it hides the draft
+    // starters while typing, mirroring the native app.
+    React.useEffect(() => {
+        if (!isMobile || isCapacitorApp() || typeof document === 'undefined') return;
+        const root = document.documentElement;
+        if (mobileTextareaFocused) {
+            root.classList.add('oc-browser-keyboard-open');
+        } else {
+            root.classList.remove('oc-browser-keyboard-open');
+            // Installed PWA (standalone): after the keyboard dismisses, WebKit
+            // can leave the layout viewport stuck smaller / panned (content
+            // shifted up with a dead strip at the bottom) until something
+            // forces it to recompute. A zero scroll after the keyboard's exit
+            // animation settles snaps it back; harmless when nothing is stuck.
+            if (window.matchMedia?.('(display-mode: standalone)')?.matches) {
+                window.setTimeout(() => {
+                    if (root.classList.contains('oc-browser-keyboard-open')) return;
+                    window.scrollTo(0, 0);
+                    document.body.scrollTop = 0;
+                    root.scrollTop = 0;
+                }, 350);
+            }
+        }
+        return () => root.classList.remove('oc-browser-keyboard-open');
+    }, [isMobile, mobileTextareaFocused]);
+
+    // Capacitor: collapse in the SAME frame the keyboard starts hiding. The
+    // hide choreography dispatches oc:keyboard-intent BEFORE restoring the
+    // shell layout and measuring the chat compensation; flushSync commits the
+    // pill swap first, so keyboard land + composer shrink are measured (and
+    // compensated) as ONE motion instead of a two-step staircase. The delayed
+    // effect above stays as the fallback for non-Capacitor and for overlays
+    // closing without a keyboard transition.
+    React.useEffect(() => {
+        if (!isMobile || typeof window === 'undefined') return;
+        const handleIntent = (event: Event) => {
+            const detail = (event as CustomEvent<{ open?: boolean }>).detail;
+            if (!detail || detail.open !== false) return;
+            if (!mobileComposerExpandedRef.current) return;
+            // Something still holds the composer open (dictation, an overlay
+            // that closed the keyboard, drag) — the fallback path handles it.
+            if (mobileComposerBusyRef.current) return;
+            mobileExpandIntentRef.current = null;
+            flushSync(() => {
+                setMobileComposerExpanded(false);
+                setExpandedInput(false);
+            });
+        };
+        window.addEventListener('oc:keyboard-intent', handleIntent);
+        return () => window.removeEventListener('oc:keyboard-intent', handleIntent);
+    }, [isMobile, setExpandedInput]);
+
+    // Reset the picker search whenever a draft picker sheet opens/closes.
+    React.useEffect(() => {
+        setMobileDraftPickerQuery('');
+    }, [mobileDraftPicker]);
+
+
+    // ── Composer drag handle (mobile): swipe up = fullscreen, swipe down =
+    // leave fullscreen or dismiss the keyboard. ────────────────────────────
+    const handleComposerHandleTouchStart = React.useCallback((event: React.TouchEvent) => {
+        const touch = event.touches.item(0);
+        composerHandleTouchRef.current = touch ? { startY: touch.clientY, fired: false } : null;
+    }, []);
+    const handleComposerHandleTouchMove = React.useCallback((event: React.TouchEvent) => {
+        const state = composerHandleTouchRef.current;
+        if (!state || state.fired) return;
+        const touch = event.touches.item(0);
+        if (!touch) return;
+        const dy = touch.clientY - state.startY;
+        if (dy <= -28) {
+            state.fired = true;
+            if (!isExpandedInput) setExpandedInput(true);
+        } else if (dy >= 28) {
+            state.fired = true;
+            if (isExpandedInput) {
+                setExpandedInput(false);
+            } else {
+                textareaRef.current?.blur();
+            }
+        }
+    }, [isExpandedInput, setExpandedInput]);
+    const handleComposerHandleTouchEnd = React.useCallback(() => {
+        composerHandleTouchRef.current = null;
+    }, []);
+
+    // Fullscreen composer in a mobile BROWSER: the page layout doesn't shrink
+    // for the keyboard there — Safari pans/scrolls instead, so any flow-based
+    // sizing ends up partly off-screen or under the keyboard (the chat page is
+    // usually already panned when fullscreen is entered). Pin the form to the
+    // VISUAL viewport directly: fixed at its offset with its height, updated
+    // as the browser pans. Capacitor is excluded — its shell already resizes
+    // via the keyboard choreography.
+    const composerFormRef = React.useRef<HTMLFormElement | null>(null);
+    React.useLayoutEffect(() => {
+        if (!isMobile || !isMobileExpanded || isCapacitorApp()) return;
+        const vv = window.visualViewport;
+        const form = composerFormRef.current;
+        const textarea = textareaRef.current;
+        if (!vv || !form) return;
+        // The form is trapped inside lower stacking contexts (the composer
+        // wrapper's z-10), so it cannot out-stack the app header with z-index
+        // alone — hide the header for the duration via a root class instead.
+        document.documentElement.classList.add('oc-browser-kb-fullscreen');
+        const apply = () => {
+            const top = Math.max(0, Math.floor(vv.offsetTop));
+            // Same stale-visualViewport guard as the draft pin below: when the
+            // layout viewport is keyboard-resized (interactive-widget), its
+            // clientHeight is the authoritative above-keyboard height.
+            const layoutHeight = document.documentElement.clientHeight;
+            form.style.position = 'fixed';
+            form.style.left = '0';
+            form.style.right = '0';
+            form.style.top = `${top}px`;
+            form.style.height = `${Math.floor(Math.min(vv.height, layoutHeight - top))}px`;
+            form.style.zIndex = '40';
+            form.style.background = 'var(--background)';
+        };
+        apply();
+        vv.addEventListener('resize', apply);
+        vv.addEventListener('scroll', apply);
+        window.addEventListener('resize', apply);
+        window.addEventListener('scroll', apply, true);
+        return () => {
+            vv.removeEventListener('resize', apply);
+            vv.removeEventListener('scroll', apply);
+            window.removeEventListener('resize', apply);
+            window.removeEventListener('scroll', apply, true);
+            document.documentElement.classList.remove('oc-browser-kb-fullscreen');
+            form.style.position = '';
+            form.style.left = '';
+            form.style.right = '';
+            form.style.top = '';
+            form.style.height = '';
+            form.style.zIndex = '';
+            form.style.background = '';
+            // Back in flow: the browser panned/scrolled for the fullscreen
+            // session and won't re-reveal the (still focused) field on its own,
+            // which left the composer parked behind the keyboard.
+            requestAnimationFrame(() => {
+                if (textarea && document.activeElement === textarea) {
+                    textarea.scrollIntoView({ block: 'nearest' });
+                }
+            });
+        };
+    }, [isMobile, isMobileExpanded]);
+
+    // Draft screen in a mobile BROWSER with the keyboard open: Safari's own
+    // focused-field reveal is unreliable there (leaving the composer behind
+    // the keyboard, e.g. after collapsing from fullscreen), so the NORMAL
+    // composer is pinned to the visual viewport too — anchored to its visible
+    // bottom at its natural height. The chat screen doesn't need this (its
+    // reveal works) and Capacitor has the keyboard choreography.
+    React.useLayoutEffect(() => {
+        if (!isMobile || isCapacitorApp()) return;
+        if (!newSessionDraftOpen || isMobileExpanded || !mobileTextareaFocused) return;
+        const vv = window.visualViewport;
+        const form = composerFormRef.current;
+        if (!vv || !form) return;
+        // Keep the in-flow horizontal geometry (page paddings) while fixed.
+        const rect = form.getBoundingClientRect();
+        form.style.position = 'fixed';
+        form.style.left = `${Math.floor(rect.left)}px`;
+        form.style.width = `${Math.floor(rect.width)}px`;
+        form.style.zIndex = '40';
+        form.style.background = 'var(--background)';
+        // Safari's visualViewport events are unreliable mid keyboard pan (they
+        // can simply not fire), so track the pan with a rAF loop instead —
+        // cheap math per frame, a style write only when the value changes.
+        let lastTop = Number.NaN;
+        let frame = 0;
+        const track = () => {
+            // iOS standalone (PWA) can serve stale visualViewport metrics after
+            // the keyboard rises (full pre-keyboard height, intermittently),
+            // parking the form behind the keyboard. When interactive-widget
+            // resizes the layout viewport, documentElement.clientHeight is the
+            // true above-keyboard bottom — anchor to whichever is smaller. In
+            // pan-mode browsers clientHeight stays full height, so the min
+            // keeps the visual-viewport anchor there.
+            const layoutBottom = document.documentElement.clientHeight;
+            const vvBottom = vv.offsetTop + vv.height;
+            const top = Math.max(0, Math.floor(Math.min(vvBottom, layoutBottom) - form.offsetHeight));
+            if (top !== lastTop) {
+                lastTop = top;
+                form.style.top = `${top}px`;
+            }
+            frame = requestAnimationFrame(track);
+        };
+        track();
+        return () => {
+            cancelAnimationFrame(frame);
+            form.style.position = '';
+            form.style.left = '';
+            form.style.width = '';
+            form.style.top = '';
+            form.style.zIndex = '';
+            form.style.background = '';
+        };
+    }, [isMobile, isMobileExpanded, newSessionDraftOpen, mobileTextareaFocused]);
+
+    // Shared drag handle: rendered at the top of the full composer AND inside
+    // the dictation overlay, so swipe-expand/collapse works in Listening mode.
+    // Memoized so the always-mounted dictation instance's memo stays effective.
+    const mobileComposerHandle = React.useMemo(() => isMobile ? (
+        <div
+            // Generous hit area (~28px tall, full width); the visible bar stays
+            // slim inside it.
+            className="relative z-10 flex touch-none items-center justify-center py-2"
+            onTouchStart={handleComposerHandleTouchStart}
+            onTouchMove={handleComposerHandleTouchMove}
+            onTouchEnd={handleComposerHandleTouchEnd}
+            onTouchCancel={handleComposerHandleTouchEnd}
+            aria-hidden="true"
+        >
+            <div
+                className="h-1.5 w-12 rounded-full"
+                style={{ backgroundColor: currentTheme.colors.interactive.border }}
+            />
+        </div>
+    ) : null, [
+        isMobile,
+        handleComposerHandleTouchStart,
+        handleComposerHandleTouchMove,
+        handleComposerHandleTouchEnd,
+        currentTheme.colors.interactive.border,
+    ]);
+
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
     const buttonSizeClass = isMobile ? 'h-8 w-8' : (isVSCode ? 'h-5 w-5' : 'h-6 w-6');
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
@@ -3714,22 +4557,32 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const permissionScopeSessionId = currentSessionId ?? currentManagementSessionId;
     const permissionAutoAcceptEnabled = usePermissionStore((state) => {
         if (!permissionScopeSessionId) {
-            return false;
+            return draftPermissionAutoAcceptEnabled;
         }
         return state.isSessionAutoAccepting(permissionScopeSessionId);
     });
+    const isPermissionAutoAcceptInteractive = Boolean(permissionScopeSessionId || newSessionDraftOpen);
 
     const handlePermissionAutoAcceptToggle = React.useCallback(() => {
-        if (!permissionScopeSessionId) {
-            toast.error(t('chat.chatInput.toast.openSessionFirst'));
-            return;
-        }
-
-        const nextEnabled = !permissionAutoAcceptEnabled;
-        setSessionAutoAccept(permissionScopeSessionId, nextEnabled).catch(() => {
-            toast.error(t('chat.chatInput.toast.togglePermissionAutoAcceptFailed'));
+        togglePermissionAutoAccept({
+            permissionScopeSessionId,
+            newSessionDraftOpen,
+            draftPermissionAutoAcceptEnabled,
+            permissionAutoAcceptEnabled,
+            setDraftPermissionAutoAcceptEnabled,
+            setSessionAutoAccept,
+            onOpenSessionFirst: () => toast.error(t('chat.chatInput.toast.openSessionFirst')),
+            onToggleFailed: () => toast.error(t('chat.chatInput.toast.togglePermissionAutoAcceptFailed')),
         });
-    }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept, t]);
+    }, [
+        draftPermissionAutoAcceptEnabled,
+        newSessionDraftOpen,
+        permissionAutoAcceptEnabled,
+        permissionScopeSessionId,
+        setDraftPermissionAutoAcceptEnabled,
+        setSessionAutoAccept,
+        t,
+    ]);
 
     React.useEffect(() => {
         const pendingAbortBanner = Boolean(abortPromptSessionId) && abortPromptSessionId === currentSessionId;
@@ -3760,19 +4613,35 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     return (
         <>
         <form
+            ref={composerFormRef}
             onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
             className={cn(
-                "relative pt-0 pb-4",
+                "relative w-full pt-0 pb-4",
                 isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
-                isMobile && 'bottom-safe-area'
+                isMobileExpanded && 'flex h-full min-h-0 flex-col pt-2',
+                isMobile && 'bottom-safe-area oc-mobile-composer'
             )}
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
         >
-            <div className={cn('chat-input-column relative overflow-visible', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+            {newSessionDraftOpen && !isDesktopExpanded && !isMobile && !isVSCode && !isMiniChatSurface ? (
+                <div className="chat-input-column mb-7 text-center">
+                    <h1 className="text-balance text-2xl font-normal tracking-tight text-foreground md:text-3xl">
+                        {renderDraftTitle(
+                            draftProjectLabel
+                                ? t('chat.emptyState.draftTitleWithProject', { project: draftProjectLabel })
+                                : t('chat.emptyState.draftTitle'),
+                            draftProjectLabel,
+                        )}
+                    </h1>
+                </div>
+            ) : null}
+            <div className={cn('chat-input-column relative overflow-visible', isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
                 <AttachedFilesList onShowPopup={handleShowAttachmentPreview} />
                 <QueuedMessageChips
                     onEditMessage={handleQueuedMessageEdit}
+                    onSendMessage={handleQueuedMessageSend}
                 />
+                <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
                         {reviewCount > 0 ? (
@@ -3785,6 +4654,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             >
                                 <span className="text-xs font-medium text-muted-foreground">{t('chat.chatInput.reviewComments')}</span>
                                 <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>{reviewCount}</span>
+                                <button
+                                    type="button"
+                                    className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                                    style={{ minHeight: 0, minWidth: 0 }}
+                                    onClick={removeReviewDrafts}
+                                    aria-label={t('chat.chatInput.reviewCommentsRemove')}
+                                    title={t('chat.chatInput.reviewCommentsRemove')}
+                                >
+                                    <Icon name="close" className="h-3 w-3" />
+                                </button>
                             </div>
                         ) : null}
                         {previewConsoleCount > 0 ? (
@@ -3800,6 +4679,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 <button
                                     type="button"
                                     className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                                    style={{ minHeight: 0, minWidth: 0 }}
                                     onClick={() => removePreviewDrafts('preview-console')}
                                     aria-label={t('chat.chatInput.devServerLogsRemove')}
                                     title={t('chat.chatInput.devServerLogsRemove')}
@@ -3821,6 +4701,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 <button
                                     type="button"
                                     className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                                    style={{ minHeight: 0, minWidth: 0 }}
                                     onClick={() => removePreviewDrafts('preview-annotation')}
                                     aria-label={t('chat.chatInput.previewContextRemove')}
                                     title={t('chat.chatInput.previewContextRemove')}
@@ -3946,7 +4827,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     showTodos
                     leftAccessory={newSessionDraftOpen || !hasPendingChanges ? null : <PendingChangesBar />}
                 />
-                {showDraftTargetSelectors && selectedDraftProject ? (
+                {!isMobile && showDraftTargetSelectors && selectedDraftProject ? (
                     <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">
                         <Select
                             value={selectedDraftProject.id}
@@ -3982,7 +4863,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         {selectedDraftBranchLabel ?? t('chat.chatInput.branch')}
                                     </SelectValue>
                                 </SelectTrigger>
-                                <SelectContent fitContent>
+                                <SelectContent className="w-max min-w-48">
                                     {projectRootBranchOption ? (
                                         <SelectGroup>
                                             <SelectLabel>{t('chat.chatInput.projectRoot')}</SelectLabel>
@@ -4020,10 +4901,142 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         ) : null}
                     </div>
                 ) : null}
+                {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
+                    <div className="mb-1.5 flex min-w-0 items-center gap-x-2 px-0.5">
+                        <button
+                            type="button"
+                            className="inline-flex h-7 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                            onClick={() => setMobileDraftPicker('project')}
+                        >
+                            {renderProjectLabelWithIcon(selectedDraftProject)}
+                            <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                        </button>
+                        {shouldShowDraftBranchSelector ? (
+                            <button
+                                type="button"
+                                className="inline-flex h-7 min-w-0 max-w-[48vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                                onClick={() => setMobileDraftPicker('branch')}
+                            >
+                                <span className="truncate">{selectedDraftBranchLabel ?? t('chat.chatInput.branch')}</span>
+                                <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                            </button>
+                        ) : null}
+                    </div>
+                ) : null}
+                <div
+                    // Desktop: layout-transparent. Mobile: positioning host for
+                    // the wrapper-level dictation overlay across pill/full states.
+                    className={cn(
+                        !isMobile && 'contents',
+                        isMobile && 'relative',
+                        isMobileExpanded && 'flex min-h-0 flex-1 flex-col',
+                    )}
+                >
+                {isMobile && !mobileComposerExpanded ? (
+                    <div className="flex flex-col">
+                    <SessionGoalRow
+                        sessionId={currentSessionId}
+                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                        className="mb-1.5"
+                    />
+                    <SessionSuggestionChip
+                        sessionId={currentSessionId}
+                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                        hidden={hasContent || newSessionDraftOpen}
+                        onApply={applyAssistSuggestion}
+                        className="mb-1.5"
+                    />
+                    <div className="flex items-center gap-2">
+                        <div
+                            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1"
+                            style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
+                        >
+                            <MobileSessionPanelTrigger
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                            />
+                            <ComposerAttachmentControls
+                                isVSCode={isVSCode}
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                                handlePickLocalFiles={handlePickLocalFiles}
+                                openIssuePicker={openIssuePicker}
+                                openPrPicker={openPrPicker}
+                                onOpenMobileSheet={openMobileAttachSheet}
+                            />
+                            <button
+                                type="button"
+                                className="flex h-full min-w-0 flex-1 cursor-text items-center px-1.5 text-left"
+                                onClick={() => expandMobileComposer('focus')}
+                            >
+                                <span
+                                    className={cn(
+                                        'truncate typography-ui-label',
+                                        message.trim() ? 'text-foreground' : 'text-muted-foreground',
+                                    )}
+                                >
+                                    {message.trim()
+                                        ? message
+                                        : currentSessionId || newSessionDraftOpen
+                                            ? t('chat.chatInput.placeholder.chatCompact')
+                                            : t('chat.chatInput.placeholder.selectSession')}
+                                </span>
+                            </button>
+                            <button
+                                type="button"
+                                className={footerIconButtonClass}
+                                onClick={() => {
+                                    // Start recording in place; the composer morphs
+                                    // into the voice variant once dictation is live
+                                    // (handleMobileDictationActiveChange).
+                                    window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+                                }}
+                                title={t('chat.dictation.start')}
+                                aria-label={t('chat.dictation.start')}
+                            >
+                                <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
+                            </button>
+                        </div>
+                        {/* New-session button: fades/shrinks away when the draft is
+                            already open, letting the pill expand into its place. */}
+                        <div
+                            className={cn(
+                                'flex-shrink-0 overflow-hidden transition-all duration-200 ease-out',
+                                newSessionDraftOpen ? 'w-0 opacity-0' : 'w-11 opacity-100',
+                            )}
+                        >
+                            <button
+                                type="button"
+                                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground"
+                                style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
+                                onClick={handleMobileNewSession}
+                                disabled={newSessionDraftOpen}
+                                title={t('mobile.sessions.newChat')}
+                                aria-label={t('mobile.sessions.newChat')}
+                            >
+                                <Icon name="add" className="h-5 w-5 text-current" />
+                            </button>
+                        </div>
+                    </div>
+                    </div>
+                ) : (
+                <>
+                <SessionGoalRow
+                    sessionId={currentSessionId}
+                    directory={currentSessionDirectoryForSync ?? currentDirectory}
+                    className="mb-1.5"
+                />
+                <SessionSuggestionChip
+                    sessionId={currentSessionId}
+                    directory={currentSessionDirectoryForSync ?? currentDirectory}
+                    hidden={hasContent || newSessionDraftOpen}
+                    onApply={applyAssistSuggestion}
+                    className="mb-1.5"
+                />
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",
-                        isDesktopExpanded && 'flex-1 min-h-0',
+                        isComposerExpanded && 'flex-1 min-h-0',
                         "border border-border/80",
                         "focus-within:ring-1",
                         inputMode === 'shell'
@@ -4141,19 +5154,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 : undefined}
                         />
                     )}
-                    <div className={cn("overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                    {/* Positioning context for the dictation overlay: covers the
+                        text area + footer exactly, excluding MobileSessionStatusBar. */}
+                    <div className={cn('relative flex flex-col', isComposerExpanded && 'flex-1 min-h-0')}>
+                    <div className={cn("overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                        {mobileComposerHandle}
+                        {isMobile ? (
+                            <div className="scrollbar-none relative z-10 flex items-center gap-x-2 overflow-x-auto px-3 pb-0.5 pt-1.5">
+                                <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="flex-shrink-0" />
+                                <MemoMobileAgentButton
+                                    onOpenAgentPanel={handleOpenAgentPanel}
+                                    onCycleAgent={handleCycleAgent}
+                                    className="flex-shrink-0"
+                                />
+                            </div>
+                        ) : null}
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
                             <AttachedVSCodeFileChips onShowPopup={handleShowAttachmentPreview} />
                             <ActiveEditorFileSuggestion />
                         </div>
-                        <div className={cn("relative overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
-                            {highlightedComposerContent && (
+                        <div className={cn("relative overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                            {/* No highlight mirror on mobile: over wrapped text its
+                                layout drifts from the real textarea, which visually
+                                misplaces the caret. Plain textarea text keeps caret
+                                and text in the same layout. */}
+                            {highlightedComposerContent && !isMobile && (
                                 <div
                                     aria-hidden
                                     className={cn(
                                         'pointer-events-none absolute inset-0 z-0 whitespace-pre-wrap break-words px-3 rounded-b-none',
-                                        isDesktopExpanded
-                                            ? 'h-full min-h-0 py-4'
+                                        isComposerExpanded
+                                            ? cn('h-full min-h-0', isMobile ? 'py-2.5' : 'py-4')
                                             : isMobile
                                                 ? 'py-2.5'
                                                 : 'pt-4 pb-2',
@@ -4199,6 +5230,60 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     cursorPosRef.current = ta.selectionStart ?? 0;
                                     updateAutocompleteOverlayPosition();
                                 }}
+                                onFocus={() => {
+                                    if (!isMobile) return;
+                                    if (mobileBlurTimerRef.current !== null) {
+                                        window.clearTimeout(mobileBlurTimerRef.current);
+                                        mobileBlurTimerRef.current = null;
+                                    }
+                                    mobileExpandIntentRef.current = null;
+                                    setMobileTextareaFocused(true);
+                                }}
+                                onBlur={() => {
+                                    if (!isMobile) return;
+                                    // Focus hold after an overlay-close restore:
+                                    // iOS may retract the rising keyboard as the
+                                    // closing tap settles — take the focus right
+                                    // back instead of accepting the blur.
+                                    if (Date.now() < holdComposerFocusUntilRef.current) {
+                                        const ta = textareaRef.current;
+                                        if (ta) {
+                                            ta.focus();
+                                            window.setTimeout(() => {
+                                                if (Date.now() < holdComposerFocusUntilRef.current
+                                                    && document.activeElement !== ta) {
+                                                    ta.focus();
+                                                }
+                                            }, 50);
+                                            return;
+                                        }
+                                    }
+                                    lastMobileBlurAtRef.current = Date.now();
+                                    // Mobile browsers and installed PWAs share the
+                                    // blur race: the keyboard-dismiss reflow moves
+                                    // composer buttons before the tap's synthesized
+                                    // click lands, so the click misses its target.
+                                    // Capacitor's WebView does not need the hold.
+                                    if (isCapacitorApp()) {
+                                        setMobileTextareaFocused(false);
+                                        return;
+                                    }
+                                    // See mobileBlurTimerRef: hold the pinned
+                                    // composer still until the tap's click has
+                                    // been delivered.
+                                    if (mobileBlurTimerRef.current !== null) {
+                                        window.clearTimeout(mobileBlurTimerRef.current);
+                                    }
+                                    // 120ms is enough to outlive the tap's
+                                    // synthesized click (which lands within a
+                                    // few ms of the blur) while keeping the
+                                    // padding's return visually tied to the
+                                    // keyboard dismissal.
+                                    mobileBlurTimerRef.current = window.setTimeout(() => {
+                                        mobileBlurTimerRef.current = null;
+                                        setMobileTextareaFocused(false);
+                                    }, 120);
+                                }}
                                 placeholder={currentSessionId || newSessionDraftOpen
                                     ? inputMode === 'shell'
                                         ? t('chat.chatInput.placeholder.shell')
@@ -4208,22 +5293,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 autoCorrect={isMobile ? "on" : "off"}
                                 autoCapitalize={isMobile ? "sentences" : "off"}
                                 spellCheck={isMobile || inputSpellcheckEnabled}
-                                fillContainer={isDesktopExpanded}
-                                outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isDesktopExpanded && 'flex-1 min-h-0')}
+                                fillContainer={isComposerExpanded}
+                                outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isComposerExpanded && 'flex-1 min-h-0')}
                                 className={cn(
                                     'min-h-[52px] resize-none border-0 px-3 rounded-b-none appearance-none hover:border-transparent bg-transparent relative z-10',
-                                    isDesktopExpanded
-                                        ? 'h-full min-h-0 py-4'
+                                    isComposerExpanded
+                                        ? cn('h-full min-h-0', isMobile ? 'py-2.5' : 'py-4')
                                         : isMobile
                                             ? 'py-2.5'
                                             : 'pt-4 pb-2',
                                     inputMode === 'shell' && 'font-mono',
-                                    highlightedComposerContent && 'text-transparent caret-[var(--surface-foreground)]',
+                                    highlightedComposerContent && !isMobile && 'text-transparent caret-[var(--surface-foreground)]',
                                 )}
                                 style={{
-                                    flex: isDesktopExpanded ? '1 1 auto' : 'none',
-                                    height: !isDesktopExpanded && textareaSize ? `${textareaSize.height}px` : undefined,
-                                    maxHeight: !isDesktopExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
+                                    flex: isComposerExpanded ? '1 1 auto' : 'none',
+                                    height: !isComposerExpanded && textareaSize ? `${textareaSize.height}px` : undefined,
+                                    maxHeight: !isComposerExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
                                     borderTopLeftRadius: chatInputRadius,
                                     borderTopRightRadius: chatInputRadius,
                                 }}
@@ -4246,37 +5331,61 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         {isMobile ? (
                             <>
                                 <div className="flex w-full items-center justify-between gap-x-1.5">
-                                    <div className="flex items-center gap-x-1.5">
+                                    <div className="composer-mobile-actions flex items-center gap-x-2 pl-1">
+                                        <MobileSessionPanelTrigger
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                        />
                                         <ComposerAttachmentControls
                                             isVSCode={isVSCode}
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
-                                            fileInputRef={fileInputRef}
-                                            handleLocalFileSelect={handleLocalFileSelect}
                                             handlePickLocalFiles={handlePickLocalFiles}
                                             openIssuePicker={openIssuePicker}
                                             openPrPicker={openPrPicker}
                                             onOpenSettings={onOpenSettings}
+                                            onOpenMobileSheet={openMobileAttachSheet}
                                         />
                                         <PermissionAutoAcceptButton
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
-                                            permissionScopeSessionId={permissionScopeSessionId}
+                                            isInteractive={isPermissionAutoAcceptInteractive}
                                             permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                             handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         />
+                                        <SessionGoalButton
+                                            sessionId={currentSessionId}
+                                            directory={currentSessionDirectoryForSync ?? currentDirectory}
+                                            draftOpen={newSessionDraftOpen}
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                        />
+                                        <SessionGoalObjectiveCounter length={message.length} />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
-                                        <div className="flex items-center gap-x-1 min-w-0 max-w-[60vw] flex-shrink">
-                                            <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 flex-shrink" />
-                                            <MemoMobileAgentButton
-                                                onOpenAgentPanel={handleOpenAgentPanel}
-                                                onCycleAgent={handleCycleAgent}
-                                                className="min-w-0 flex-shrink"
-                                            />
-                                        </div>
                                         <div className="flex items-center gap-x-1 flex-shrink-0">
-                                            <MemoBrowserVoiceButton />
+                                            <button
+                                                type="button"
+                                                className={footerIconButtonClass}
+                                                // Keep the soft keyboard open (same guard as
+                                                // PermissionAutoAcceptButton); the recording
+                                                // engine lives in the wrapper-level
+                                                // ComposerDictation instance.
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onPointerDownCapture={(event) => {
+                                                    if (event.pointerType === 'touch') {
+                                                        event.preventDefault();
+                                                    }
+                                                }}
+                                                onClick={() => {
+                                                    window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+                                                }}
+                                                disabled={mobileDictationActive}
+                                                title={t('chat.dictation.start')}
+                                                aria-label={t('chat.dictation.start')}
+                                            >
+                                                <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
+                                            </button>
                                             <ComposerActionButtons
                                                 isMobile={isMobile}
                                                 footerIconButtonClass={footerIconButtonClass}
@@ -4294,11 +5403,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         </div>
                                     </div>
                                 </div>
-                                <MemoModelControls
-                                    className="hidden"
-                                    mobilePanel={mobileControlsPanel}
-                                    onMobilePanelChange={setMobileControlsPanel}
-                                />
                             </>
                         ) : (
                             <>
@@ -4307,8 +5411,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         isVSCode={isVSCode}
                                         footerIconButtonClass={footerIconButtonClass}
                                         iconSizeClass={iconSizeClass}
-                                        fileInputRef={fileInputRef}
-                                        handleLocalFileSelect={handleLocalFileSelect}
                                         handlePickLocalFiles={handlePickLocalFiles}
                                         openIssuePicker={openIssuePicker}
                                         openPrPicker={openPrPicker}
@@ -4323,15 +5425,34 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     <PermissionAutoAcceptButton
                                         footerIconButtonClass={footerIconButtonClass}
                                         iconSizeClass={iconSizeClass}
-                                        permissionScopeSessionId={permissionScopeSessionId}
+                                        isInteractive={isPermissionAutoAcceptInteractive}
                                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                         handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         withTooltip
                                     />
+                                    <SessionGoalButton
+                                        sessionId={currentSessionId}
+                                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                                        draftOpen={newSessionDraftOpen}
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        withTooltip
+                                    />
+                                    <SessionGoalObjectiveCounter length={message.length} />
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
                                     <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />
-                                    <MemoBrowserVoiceButton />
+                                    <MemoComposerDictation
+                                        radius={chatInputRadius}
+                                        isMobile={isMobile}
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        footerPaddingClass={footerPaddingClass}
+                                        iconSizeClass={iconSizeClass}
+                                        sendIconSizeClass={sendIconSizeClass}
+                                        onInsert={handleDictationInsert}
+                                        onInsertAndSend={handleDictationInsertAndSend}
+                                        onContentHeightChange={handleDictationContentHeightChange}
+                                    />
                                     <ComposerActionButtons
                                         isMobile={isMobile}
                                         footerIconButtonClass={footerIconButtonClass}
@@ -4350,11 +5471,50 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             </>
                         )}
                     </div>
+                    </div>
 
-                    {/* Mobile Session Status Bar - above input */}
-                    {isMobile && <MobileSessionStatusBar />}
                 </div>
+                </>
+                )}
+                {/* Wrapper-level dictation engine + overlay: stays mounted across
+                    the pill ↔ composer swap so a recording started from the pill
+                    survives the morph. Its absolute overlay covers whichever
+                    shape the wrapper currently has. */}
+                {isMobile ? (
+                    <MemoComposerDictation
+                        radius={chatInputRadius}
+                        isMobile={isMobile}
+                        footerIconButtonClass={footerIconButtonClass}
+                        footerPaddingClass={footerPaddingClass}
+                        iconSizeClass={iconSizeClass}
+                        sendIconSizeClass={sendIconSizeClass}
+                        onInsert={handleDictationInsert}
+                        onInsertAndSend={handleDictationInsertAndSend}
+                        onActiveChange={handleMobileDictationActiveChange}
+                        onContentHeightChange={handleDictationContentHeightChange}
+                        renderTrigger={false}
+                        topAccessory={mobileComposerHandle}
+                    />
+                ) : null}
+                </div>
+                {/* Mobile session panel: slide-up overlay toggled by
+                    MobileSessionPanelTrigger. Mounted outside the pill
+                    conditional so the pill's trigger works too. */}
+                {isMobile && <MobileSessionStatusBar />}
+                {/* Hidden host for the model/agent/variant bottom sheets. Kept
+                    outside the pill conditional so an open panel survives (and
+                    stays visible over) the collapsed composer. */}
+                {isMobile ? (
+                    <MemoModelControls
+                        className="hidden"
+                        mobilePanel={mobileControlsPanel}
+                        onMobilePanelChange={setMobileControlsPanel}
+                    />
+                ) : null}
             </div>
+            {newSessionDraftOpen && !isDesktopExpanded && !isMobile && !isVSCode && !isMiniChatSurface ? (
+                <DraftPresetChips onSubmit={submitPresetPrompt} className="chat-input-column mt-4" />
+            ) : null}
         </form>
 
         {/* Issue Picker Dialog */}
@@ -4375,12 +5535,203 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 setLinkedIssue(null);
             }}
         />
+        <ReviewFlowDialog
+            open={reviewDialogOpen}
+            onOpenChange={setReviewDialogOpen}
+            projectDirectory={currentSessionDirectoryForSync ?? currentDirectory ?? null}
+            submitting={reviewFlowSubmitting}
+            onConfirm={handleStartReviewFlow}
+        />
         <ToolOutputDialog
             popup={attachmentPreview}
             onOpenChange={handleAttachmentPreviewOpenChange}
-            syntaxTheme={{}}
             isMobile={isMobile}
         />
+
+        {/* Single always-mounted picker input. It must NOT live inside
+            ComposerAttachmentControls: that component mounts once per composer
+            variant (pill / expanded footer), so a shared ref got nulled when a
+            variant unmounted, and a variant swap while the OS file picker was
+            open detached the clicked input — its change event was silently
+            lost and the picked files never attached. */}
+        <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleLocalFileSelect}
+            accept="*/*"
+        />
+
+        {/* Mobile attachment sheet: replaces the dropdown (which stole focus and
+            dismissed the keyboard) and leaves room for more actions later. */}
+        {isMobile ? (
+            <MobileOverlayPanel
+                open={mobileAttachMenuOpen}
+                title={t('chat.chatInput.actions.addAttachment')}
+                onClose={() => setMobileAttachMenuOpen(false)}
+            >
+                <div className="flex flex-col px-3 pb-4 pt-1">
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            // The native file/photo picker takes over next — restoring
+                            // the keyboard in between would flash it open and shut.
+                            restoreKeyboardAfterOverlayRef.current = false;
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(handlePickLocalFiles);
+                        }}
+                    >
+                        <Icon name="attachment-2" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.attachFiles')}
+                    </button>
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            // Hand-off to the picker: don't sync-restore the
+                            // keyboard under the overlay that opens next frame.
+                            skipNextOverlayCloseRestoreRef.current = true;
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(openIssuePicker);
+                        }}
+                    >
+                        <Icon name="github" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.linkGithubIssue')}
+                    </button>
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            skipNextOverlayCloseRestoreRef.current = true;
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(openPrPicker);
+                        }}
+                    >
+                        <Icon name="git-pull-request" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.linkGithubPr')}
+                    </button>
+                </div>
+            </MobileOverlayPanel>
+        ) : null}
+
+        {/* Mobile draft target pickers: bottom sheets replacing the inline
+            project/branch Selects (which desktop keeps). */}
+        {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
+            <>
+                <MobileOverlayPanel
+                    open={mobileDraftPicker === 'project'}
+                    title={t('chat.chatInput.draftPicker.projectTitle')}
+                    onClose={() => setMobileDraftPicker(null)}
+                >
+                    <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
+                        <Input
+                            value={mobileDraftPickerQuery}
+                            onChange={(event) => setMobileDraftPickerQuery(event.target.value)}
+                            placeholder={t('chat.chatInput.draftPicker.searchProjects')}
+                            className="h-9"
+                        />
+                        <div className="flex flex-col">
+                            {projects
+                                .filter((project) => {
+                                    const query = mobileDraftPickerQuery.trim().toLowerCase();
+                                    if (!query) return true;
+                                    return getProjectDisplayLabel(project).toLowerCase().includes(query)
+                                        || project.path.toLowerCase().includes(query);
+                                })
+                                .map((project) => (
+                                    <button
+                                        key={project.id}
+                                        type="button"
+                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                        onClick={() => {
+                                            handleDraftProjectChange(project.id);
+                                            setMobileDraftPicker(null);
+                                        }}
+                                    >
+                                        <span className="min-w-0 flex-1">{renderProjectLabelWithIcon(project)}</span>
+                                        {project.id === selectedDraftProject.id ? (
+                                            <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                        ) : null}
+                                    </button>
+                                ))}
+                        </div>
+                    </div>
+                </MobileOverlayPanel>
+                <MobileOverlayPanel
+                    open={mobileDraftPicker === 'branch'}
+                    title={t('chat.chatInput.branch')}
+                    onClose={() => setMobileDraftPicker(null)}
+                >
+                    <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
+                        <Input
+                            value={mobileDraftPickerQuery}
+                            onChange={(event) => setMobileDraftPickerQuery(event.target.value)}
+                            placeholder={t('chat.chatInput.draftPicker.searchBranches')}
+                            className="h-9"
+                        />
+                        <div className="flex flex-col">
+                            {(() => {
+                                const query = mobileDraftPickerQuery.trim().toLowerCase();
+                                const matches = (label: string) => !query || label.toLowerCase().includes(query);
+                                const selectedValue = selectedDraftDirectory
+                                    ?? draftBranchItems[0]?.value
+                                    ?? normalizePath(selectedDraftProject.path)
+                                    ?? '';
+                                const renderRow = (value: string, label: React.ReactNode, key?: string) => (
+                                    <button
+                                        key={key ?? value}
+                                        type="button"
+                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                        onClick={() => {
+                                            handleDraftDirectoryChange(value);
+                                            setMobileDraftPicker(null);
+                                        }}
+                                    >
+                                        <span className="min-w-0 flex-1 truncate">{label}</span>
+                                        {value === selectedValue ? (
+                                            <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                        ) : null}
+                                    </button>
+                                );
+                                return (
+                                    <>
+                                        {projectRootBranchOption && matches(projectRootBranchOption.label) ? (
+                                            <>
+                                                <div className="px-2 pb-1 pt-1.5 text-muted-foreground typography-meta">
+                                                    {t('chat.chatInput.projectRoot')}
+                                                </div>
+                                                {renderRow(projectRootBranchOption.value, projectRootBranchOption.label)}
+                                            </>
+                                        ) : null}
+                                        <div className="flex items-center justify-between px-2 pb-1 pt-2">
+                                            <span className="text-muted-foreground typography-meta">{t('chat.chatInput.worktrees')}</span>
+                                            <button
+                                                type="button"
+                                                className="cursor-pointer text-muted-foreground typography-meta hover:text-foreground"
+                                                onClick={() => {
+                                                    setMobileDraftPicker(null);
+                                                    void createWorktreeDraft();
+                                                }}
+                                            >
+                                                {t('chat.chatInput.worktreeNew')}
+                                            </button>
+                                        </div>
+                                        {worktreeBranchOptions
+                                            .filter((option) => matches(option.label))
+                                            .map((option) => renderRow(option.value, `${option.pending ? '⏳ ' : ''}${option.label}`))}
+                                        {selectedDraftDirectory && !selectedDraftBranchIsKnown && matches(selectedDraftBranchLabel ?? '')
+                                            ? renderRow(selectedDraftDirectory, selectedDraftBranchLabel, 'unknown-current')
+                                            : null}
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                </MobileOverlayPanel>
+            </>
+        ) : null}
         </>
     );
 };
