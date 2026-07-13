@@ -37,7 +37,8 @@ export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: 
     <section className="space-y-3 px-2 pb-2 pt-0">
       {providerId === 'opencode-go' && field('workspaceId', t('settings.providers.page.openCodeGo.workspaceId'), 'wrk_...')}
       {providerId === 'opencode-go' && field('authCookie', t('settings.providers.page.openCodeGo.authCookie'), 'auth=...')}
-      {providerId === 'ollama-cloud' && field('cookie', t('settings.providers.page.openCodeGo.authCookie'), 'session=...')}
+      {providerId === 'ollama-cloud' && field('cookie', t('settings.providers.page.ollamaCloud.cookie'), 'session=...')}
+      {providerId === 'ollama-cloud' && <p className="typography-meta text-muted-foreground mt-1">{t('settings.providers.page.ollamaCloud.help')}</p>}
       {providerId === 'cursor' && field('accessToken', t('settings.providers.page.auth.apiKeyLabel'), t('settings.providers.page.auth.apiKeyPlaceholder'))}
       {providerId === 'cursor' && field('refreshToken', t('settings.providers.page.auth.apiKeyLabel'), t('settings.providers.page.auth.apiKeyPlaceholder'))}
       <div className="flex flex-wrap gap-2">

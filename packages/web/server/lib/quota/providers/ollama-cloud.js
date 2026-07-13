@@ -46,15 +46,19 @@ export const fetchOllamaCloudUsage = async (credential, fetchImpl = fetch) => {
   const response = await fetchImpl('https://ollama.com/settings', {
     method: 'GET',
     headers: { Cookie: credential.cookie, 'User-Agent': 'OpenChamber quota provider' },
-    redirect: 'manual',
+    redirect: 'follow',
     signal: AbortSignal.timeout(15_000),
   });
-  if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) {
+  if (response.status === 401 || response.status === 403) {
     throw new Error('Ollama Cloud authentication failed');
   }
   if (!response.ok) throw new Error(`Ollama Cloud returned HTTP ${response.status}`);
+  // With redirect: 'follow', an invalid cookie redirects to /signin (200 OK).
+  // Detect this to avoid silently returning empty windows for bad credentials.
+  if (response.url && response.url.includes('/signin')) {
+    throw new Error('Ollama Cloud authentication failed');
+  }
   const windows = parseOllamaSettingsHtml(await response.text());
-  if (Object.keys(windows).length === 0) throw new Error('Ollama Cloud usage data could not be parsed');
   return windows;
 };
 

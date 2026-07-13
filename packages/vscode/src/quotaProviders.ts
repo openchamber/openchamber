@@ -1353,7 +1353,18 @@ const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
         Cookie: cookie,
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
       },
+      redirect: 'follow',
     });
+
+    if (response.status === 401 || response.status === 403) {
+      return buildResult({
+        providerId: 'ollama-cloud',
+        providerName: 'Ollama Cloud',
+        ok: false,
+        configured: true,
+        error: 'Ollama Cloud authentication failed',
+      });
+    }
 
     if (!response.ok) {
       return buildResult({
@@ -1362,6 +1373,18 @@ const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
         ok: false,
         configured: true,
         error: `API error: ${response.status}`,
+      });
+    }
+
+    // With redirect: 'follow', an invalid cookie redirects to /signin (200 OK).
+    // Detect this to avoid silently returning empty windows for bad credentials.
+    if (response.url && response.url.includes('/signin')) {
+      return buildResult({
+        providerId: 'ollama-cloud',
+        providerName: 'Ollama Cloud',
+        ok: false,
+        configured: true,
+        error: 'Ollama Cloud authentication failed',
       });
     }
 
