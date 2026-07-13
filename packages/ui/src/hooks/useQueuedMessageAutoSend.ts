@@ -13,6 +13,24 @@ type SessionStatusType = 'idle' | 'busy' | 'retry';
 
 const RECENT_ABORT_WINDOW_MS = 2000;
 
+const AUTO_SEND_RETRY_BASE_DELAY_MS = 2000;
+const AUTO_SEND_RETRY_MAX_DELAY_MS = 60000;
+
+export type QueuedAutoSendFailure = {
+  messageId: string;
+  failures: number;
+  nextAttemptAt: number;
+};
+
+export const getQueuedAutoSendRetryDelayMs = (failures: number): number =>
+  Math.min(AUTO_SEND_RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), AUTO_SEND_RETRY_MAX_DELAY_MS);
+
+export const isQueuedAutoSendBackedOff = (
+  failure: QueuedAutoSendFailure | undefined,
+  messageId: string,
+  now: number,
+): boolean => failure !== undefined && failure.messageId === messageId && now < failure.nextAttemptAt;
+
 const hasRecentAbort = (sessionId: string): boolean => {
   const abortRecord = useSessionUIStore.getState().sessionAbortFlags.get(sessionId);
   if (!abortRecord) {
@@ -124,6 +142,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const sessionStatusRecord = useDirectorySync((state) => state.session_status);
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
+  const sendFailuresRef = React.useRef<Map<string, QueuedAutoSendFailure>>(new Map());
   const previousStatusRef = React.useRef<Map<string, SessionStatusType>>(new Map());
   const autoReviewBlockedSessionsRef = React.useRef<Set<string>>(new Set());
 
@@ -157,6 +176,13 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
+      const failure = sendFailuresRef.current.get(sessionId);
+      if (failure && failure.messageId !== payload.queuedMessageId) {
+        sendFailuresRef.current.delete(sessionId);
+      } else if (isQueuedAutoSendBackedOff(failure, payload.queuedMessageId, Date.now())) {
+        return;
+      }
+
       // Use send config captured at queue time; fall back to current config
       const captured = payload.sendConfig;
       const resolved = captured?.providerID && captured?.modelID
@@ -176,8 +202,16 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           variant: resolved.variant,
         });
         useMessageQueueStore.getState().removeFromQueue(sessionId, payload.queuedMessageId);
+        sendFailuresRef.current.delete(sessionId);
       } catch (error) {
         console.warn('[queue] queued auto-send failed:', error);
+        const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
+        const failures = priorFailures + 1;
+        sendFailuresRef.current.set(sessionId, {
+          messageId: payload.queuedMessageId,
+          failures,
+          nextAttemptAt: Date.now() + getQueuedAutoSendRetryDelayMs(failures),
+        });
       } finally {
         inFlightSessionsRef.current.delete(sessionId);
       }

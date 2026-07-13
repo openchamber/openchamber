@@ -33,7 +33,7 @@ const LEGACY_EXPANSION_CONTEXT_PREFIXES = [
 
 type Args = {
   isVSCode: boolean;
-  hasLoadedGlobalSessions: boolean;
+  hasAuthoritativeGlobalSessions: boolean;
   safeStorage: SafeStorageLike;
   keys: Keys;
   sessions: Session[];
@@ -49,7 +49,7 @@ type Args = {
 export const useSidebarPersistence = (args: Args) => {
   const {
     isVSCode,
-    hasLoadedGlobalSessions,
+    hasAuthoritativeGlobalSessions,
     safeStorage,
     keys,
     sessions,
@@ -151,14 +151,14 @@ export const useSidebarPersistence = (args: Args) => {
   }, [keys.projectCollapse, keys.sessionExpanded, keys.sessionExpandedLegacy, safeStorage, setCollapsedProjects, setExpandedParents]);
 
   React.useEffect(() => {
-    if (!hasLoadedGlobalSessions) {
+    if (!hasAuthoritativeGlobalSessions) {
       return;
     }
 
     setPinnedSessionIds((prev) => {
       return prunePinnedSessionIds(sessions, prev);
     });
-  }, [hasLoadedGlobalSessions, sessions, setPinnedSessionIds]);
+  }, [hasAuthoritativeGlobalSessions, sessions, setPinnedSessionIds]);
 
   React.useEffect(() => {
     try {

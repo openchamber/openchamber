@@ -231,7 +231,7 @@ const toCreatePayload = (args: {
 
 /**
  * Compare two worktree-by-project maps for equality.
- * Compares per-element `path` and `branch` (not reference equality)
+ * Compares discovery-owned metadata (not reference equality)
  * because readStableProjectWorktrees creates new object instances on
  * each call, making reference checks always report changed.
  *
@@ -246,22 +246,27 @@ const toCreatePayload = (args: {
  * flow through `setStoredWorktreeStatus`, which writes a new Map
  * reference that the persist subscriber picks up directly.
  *
- * Generic over `T extends { path: string; branch: string }` so the
- * helper documents its equality contract at the type level and
- * stays reusable for any future map-of-arrays shape that has both
- * fields.
  */
-export const worktreeMapsEqual = <T extends { path: string; branch: string }>(
-  a: Map<string, T[]>,
-  b: Map<string, T[]>,
+export const worktreeMapsEqual = (
+  a: Map<string, WorktreeMetadata[]>,
+  b: Map<string, WorktreeMetadata[]>,
 ): boolean => {
   if (a.size !== b.size) return false;
   for (const [key, value] of a) {
     const existing = b.get(key);
     if (!existing || existing.length !== value.length) return false;
     for (let i = 0; i < value.length; i++) {
-      if (value[i].path !== existing[i].path) return false;
-      if (value[i].branch !== existing[i].branch) return false;
+      const next = value[i];
+      const current = existing[i];
+      if (next.path !== current.path
+        || next.branch !== current.branch
+        || next.name !== current.name
+        || next.label !== current.label
+        || next.projectDirectory !== current.projectDirectory
+        || next.worktreeRoot !== current.worktreeRoot
+        || next.headState !== current.headState
+        || next.worktreeSource !== current.worktreeSource
+        || next.source !== current.source) return false;
     }
   }
   return true;

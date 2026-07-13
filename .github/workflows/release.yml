@@ -359,6 +359,148 @@ jobs:
           path: packages/electron/dist/latest.yml
           retention-days: 1
 
+  build-desktop-electron-linux:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+            host_arch: x86_64
+            artifact_arch: x86_64
+            manifest: latest-linux.yml
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            host_arch: aarch64
+            artifact_arch: arm64
+            manifest: latest-linux-arm64.yml
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Verify native Linux architecture
+        env:
+          EXPECTED_HOST_ARCH: ${{ matrix.host_arch }}
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "$EXPECTED_HOST_ARCH"
+          test "$(node -p 'process.arch')" = "$OPENCHAMBER_TARGET_ARCH"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache bundled OpenCode CLI artifact
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: Run focused Electron release tests
+        working-directory: packages/electron
+        run: |
+          bun run test:architecture
+          bun run test:updater
+
+      - name: Build and package Linux AppImage
+        working-directory: packages/electron
+        env:
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          bun run build:web-assets
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+          bun run bundle:main
+          bun run rebuild:native
+          node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
+          bun run verify:opencode-cli:packaged
+          bun run verify:linux-appimage
+
+      - name: Validate Linux update manifest
+        working-directory: packages/electron
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+          ARTIFACT_ARCH: ${{ matrix.artifact_arch }}
+          MANIFEST: ${{ matrix.manifest }}
+        run: |
+          set -euo pipefail
+          APPIMAGE="dist/OpenChamber-${VERSION}-linux-${ARTIFACT_ARCH}.AppImage"
+          node ./scripts/verify-update-manifest.mjs "dist/${MANIFEST}" "$APPIMAGE" "$VERSION"
+
+      - name: Upload validated Linux release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-release-${{ matrix.arch }}
+          path: |
+            packages/electron/dist/OpenChamber-${{ needs.create-release.outputs.version }}-linux-${{ matrix.artifact_arch }}.AppImage
+            packages/electron/dist/${{ matrix.manifest }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-electron-linux:
+    needs: [create-release, build-desktop-electron-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Download x64 Linux release files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: linux-release-x64
+          path: artifacts/x64
+
+      - name: Download arm64 Linux release files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: linux-release-arm64
+          path: artifacts/arm64
+
+      - name: Revalidate separate Linux manifests
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          node packages/electron/scripts/verify-update-manifest.mjs \
+            artifacts/x64/latest-linux.yml \
+            "artifacts/x64/OpenChamber-${VERSION}-linux-x86_64.AppImage" \
+            "$VERSION"
+          node packages/electron/scripts/verify-update-manifest.mjs \
+            artifacts/arm64/latest-linux-arm64.yml \
+            "artifacts/arm64/OpenChamber-${VERSION}-linux-arm64.AppImage" \
+            "$VERSION"
+
+      - name: Upload Linux AppImages and manifests to release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: |
+            artifacts/x64/OpenChamber-${{ needs.create-release.outputs.version }}-linux-x86_64.AppImage
+            artifacts/x64/latest-linux.yml
+            artifacts/arm64/OpenChamber-${{ needs.create-release.outputs.version }}-linux-arm64.AppImage
+            artifacts/arm64/latest-linux-arm64.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   combine-electron-manifests:
     needs: [create-release, build-desktop-electron-macos]
     runs-on: ubuntu-latest
@@ -404,12 +546,47 @@ jobs:
     secrets: inherit
 
   finalize-release:
-    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, publish-npm, combine-electron-manifests, mobile-release]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, build-desktop-electron-linux, publish-electron-linux, publish-npm, combine-electron-manifests, mobile-release]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       DISCORD_UPDATE_ROLE_ID: ${{ secrets.DISCORD_UPDATE_ROLE_ID }}
     steps:
+      - name: Verify final Linux release asset inventory
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          node - <<'NODE'
+          (async () => {
+          const { REPOSITORY: repo, VERSION: version, GITHUB_TOKEN: token } = process.env;
+          const expected = [
+            `OpenChamber-${version}-linux-x86_64.AppImage`,
+            'latest-linux.yml',
+            `OpenChamber-${version}-linux-arm64.AppImage`,
+            'latest-linux-arm64.yml',
+          ];
+          const response = await fetch(`https://api.github.com/repos/${repo}/releases/tags/v${version}`, {
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+          });
+          if (!response.ok) throw new Error(`Failed to inspect release assets: ${response.status} ${await response.text()}`);
+          const release = await response.json();
+          for (const name of expected) {
+            const matches = release.assets.filter((asset) => asset.name === name);
+            if (matches.length !== 1) throw new Error(`Expected exactly one ${name} release asset, found ${matches.length}`);
+            if (!Number.isSafeInteger(matches[0].size) || matches[0].size <= 0) {
+              throw new Error(`Release asset ${name} has invalid size ${matches[0].size}`);
+            }
+          }
+          console.log(`Verified ${expected.length} Linux release assets and both architecture manifests.`);
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
       - name: Publish release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:

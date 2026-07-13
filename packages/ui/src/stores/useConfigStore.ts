@@ -19,6 +19,7 @@ import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
+import { normalizePath } from "@/lib/pathNormalization";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
@@ -742,9 +743,9 @@ const rememberWorktreeProject = (worktree: string, project: string): void => {
 };
 
 const normalizeConfigPath = (value: string | null | undefined): string | null => {
-    const trimmed = typeof value === 'string' ? value.trim() : '';
-    if (!trimmed) return null;
-    return trimmed.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+    const result = normalizePath(value);
+    if (result === null) return null;
+    return result || '/';
 };
 
 const getKnownProjectDirectories = (): string[] => {

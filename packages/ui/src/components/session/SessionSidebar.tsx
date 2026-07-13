@@ -320,6 +320,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const liveSessions = useAllLiveSessions();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
+  const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -539,7 +540,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const { scheduleCollapsedProjectsPersist } = useSidebarPersistence({
     isVSCode,
-    hasLoadedGlobalSessions,
+    hasAuthoritativeGlobalSessions,
     safeStorage,
     keys: {
       sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,
@@ -1036,28 +1037,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
 
-  const recentProjectIds = React.useMemo(() => {
-    const recentSessions = deriveRecentSessions(sessions);
-    if (recentSessions.length === 0) return new Set<string>();
-
-    const pathToId = new Map<string, string>();
-    for (const project of normalizedProjects) {
-      if (project.normalizedPath) {
-        pathToId.set(project.normalizedPath, project.id);
-      }
-    }
-
-    const ids = new Set<string>();
-    for (const session of recentSessions) {
-      const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-      if (directory) {
-        const projectId = pathToId.get(directory);
-        if (projectId) ids.add(projectId);
-      }
-    }
-    return ids;
-  }, [sessions, normalizedProjects]);
-
   const sortedProjects = React.useMemo(() => {
     const list = [...normalizedProjects];
 
@@ -1093,14 +1072,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       }
     }
 
-    if (projectSortOrder === 'manual') {
-      return list;
-    }
-
-    const recent = list.filter((p) => recentProjectIds.has(p.id));
-    const rest = list.filter((p) => !recentProjectIds.has(p.id));
-    return [...recent, ...rest];
-  }, [normalizedProjects, projectSortOrder, manualProjectOrder, recentProjectIds]);
+    return list;
+  }, [normalizedProjects, projectSortOrder, manualProjectOrder]);
 
   const {
     projectSections,

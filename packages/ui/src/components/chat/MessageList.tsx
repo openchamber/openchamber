@@ -1345,12 +1345,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     const baseDisplayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.base_display_ms', () => {
         const seenIds = new Set<string>();
+        const latestById = new Map<string, ChatMessageEntry>();
         const dedupedMessages: ChatMessageEntry[] = [];
-        // Deduplicate from head to tail (oldest to newest) to preserve chronological
-        // order during history pagination (prepend). Older messages have smaller
-        // time-sortable IDs and appear first in the array. Keeping the first
-        // occurrence ensures prepended history isn't incorrectly discarded in favor
-        // of newer duplicates from the existing view.
+        for (const message of messages) {
+            const messageId = message.info?.id;
+            if (typeof messageId === 'string') latestById.set(messageId, message);
+        }
+
+        // Preserve the first occurrence's chronological position, but use the last
+        // value because prepended history can overlap with newer live store data.
         for (let index = 0; index < messages.length; index += 1) {
             const message = messages[index];
             const messageId = message.info?.id;
@@ -1360,7 +1363,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 }
                 seenIds.add(messageId);
             }
-            dedupedMessages.push(getNormalizedMessageForDisplay(message));
+            dedupedMessages.push(getNormalizedMessageForDisplay(
+                typeof messageId === 'string' ? latestById.get(messageId) ?? message : message,
+            ));
         }
 
         const output: ChatMessageEntry[] = [];

@@ -153,6 +153,18 @@ describe('worktreeMapsEqual', () => {
     expect(worktreeMapsEqual(a, b)).toBe(false);
   });
 
+  test('returns false when head state changes without a branch change', () => {
+    const a = new Map([['/repo', [wt('/r/main', '', { headState: 'unborn' })]]]);
+    const b = new Map([['/repo', [wt('/r/main', '', { headState: 'detached' })]]]);
+    expect(worktreeMapsEqual(a, b)).toBe(false);
+  });
+
+  test('returns false when discovered display metadata changes', () => {
+    const a = new Map([['/repo', [wt('/r/main', '', { name: 'old', label: 'old' })]]]);
+    const b = new Map([['/repo', [wt('/r/main', '', { name: 'new', label: 'new' })]]]);
+    expect(worktreeMapsEqual(a, b)).toBe(false);
+  });
+
   test('returns false when paths differ', () => {
     const a = new Map([['/repo', [wt('/r/main', 'main')]]]);
     const b = new Map([['/repo', [wt('/r/other', 'main')]]]);

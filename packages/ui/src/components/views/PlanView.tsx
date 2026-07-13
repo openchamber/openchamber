@@ -29,6 +29,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -594,6 +595,28 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         }
 
         setCurrentSession(sessionId, directoryHint);
+        // "Run as goal" rides the same arm mechanism as the composer target
+        // button; set explicitly either way so a stray armed flag cannot
+        // leak into a non-goal plan send. The objective override carries the
+        // plan substance — "Implement this plan: X" alone would give the
+        // progress audit nothing to judge against. Plans that exceed the
+        // objective limit are distilled into completion criteria by the
+        // small model (the working agent always reads the full plan from
+        // its file); on distillation failure a head+tail excerpt keeps the
+        // intent (top) and acceptance criteria (bottom), sacrificing the
+        // implementation middle the agent reads from the file anyway.
+        // Oversized objectives (huge plans) are distilled into audit
+        // criteria inside setSessionGoal — the shared path for every goal
+        // source. Here we only compose header + full content.
+        const goalObjective = execution.runAsGoal === true
+          ? [
+              `Implement the plan "${sendPromptTitle}" end-to-end${resolvedPath ? ` (plan file: ${resolvedPath})` : ''}.`,
+              'Re-read that file for full details — it is the source of truth.',
+              '',
+              content,
+            ].join('\n')
+          : null;
+        useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true, goalObjective);
         await sendMessage(
           visiblePrompt,
           execution.providerID,
@@ -610,7 +633,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         setIsPlanSendSubmitting(false);
       }
     },
-    [canCreateWorktree, createSession, currentProjectRef, initializeNewOpenChamberSession, pendingPlanSend, resolvedPath, routeToChat, sendMessage, sendPromptTitle, setCurrentSession]
+    [canCreateWorktree, content, createSession, currentProjectRef, initializeNewOpenChamberSession, pendingPlanSend, resolvedPath, routeToChat, sendMessage, sendPromptTitle, setCurrentSession]
   );
 
   const blockWidgets = React.useMemo(() => {
@@ -778,6 +801,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         target={pendingPlanSend?.target ?? 'session'}
         projectDirectory={currentProjectRef?.path ?? null}
         submitting={isPlanSendSubmitting}
+        allowRunAsGoal
         onConfirm={handleConfirmPlanSend}
       />
 

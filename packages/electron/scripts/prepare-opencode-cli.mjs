@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveTargetArchitecture } from './target-architecture.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
@@ -39,8 +40,8 @@ const readPinnedSdkVersion = () => {
   return trimmed;
 };
 
-const artifactForCurrentPlatform = () => {
-  const { platform, arch } = process;
+const artifactForPlatform = (platform, targetArchitecture) => {
+  const arch = targetArchitecture.opencode;
   if (platform === 'darwin') {
     if (arch === 'arm64') return { name: 'opencode-darwin-arm64.zip', binary: 'opencode' };
     if (arch === 'x64') return { name: 'opencode-darwin-x64-baseline.zip', binary: 'opencode' };
@@ -134,7 +135,8 @@ const main = async () => {
     throw new Error(`Invalid OpenCode CLI version: ${version}`);
   }
 
-  const artifact = artifactForCurrentPlatform();
+  const targetArchitecture = resolveTargetArchitecture();
+  const artifact = artifactForPlatform(process.platform, targetArchitecture);
   const outputBinary = outputBinaryPath(artifact.binary);
   const existingVersion = readBinaryVersion(outputBinary);
   if (existingVersion === version) {
@@ -142,7 +144,7 @@ const main = async () => {
     return;
   }
 
-  const cacheDir = path.join(cacheRoot, version, `${process.platform}-${process.arch}`);
+  const cacheDir = path.join(cacheRoot, version, `${process.platform}-${targetArchitecture.opencode}`);
   const archivePath = path.join(cacheDir, artifact.name);
   const url = `https://github.com/anomalyco/opencode/releases/download/v${version}/${artifact.name}`;
   if (!fs.existsSync(archivePath)) {

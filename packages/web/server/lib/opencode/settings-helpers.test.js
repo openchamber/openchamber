@@ -111,6 +111,20 @@ describe('settings helpers', () => {
     });
   });
 
+  it('sanitizes the persisted permission auto-accept policy', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      permissionAutoAccept: {
+        sessions: { root: true, child: false, invalid: 'true' },
+      },
+    })).toEqual({
+      permissionAutoAccept: {
+        sessions: { root: true, child: false },
+      },
+    });
+  });
+
   it('accepts desktopUiPassword as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
