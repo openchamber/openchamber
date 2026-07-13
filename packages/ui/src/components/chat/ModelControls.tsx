@@ -2501,12 +2501,19 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 providerOrder={providerOrder}
                                 onReorderProvider={setProviderOrder}
                                 reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}
-                                footerContent={(
-                                    <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
-                                        <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
-                                        <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: 'Tab' })}</span>
-                                    </div>
-                                )}
+                                footerContent={(activeEntry) => {
+                                    const activeHasThinkingVariants = activeEntry
+                                        ? getModelVariantOptions(activeEntry.providerID, activeEntry.modelID).length > 0
+                                        : false;
+
+                                    return (
+                                        <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
+                                            <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
+                                            <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: 'Tab' })}</span>
+                                            {activeHasThinkingVariants ? <span>{t('chat.modelControls.keyboardHintThinking')}</span> : null}
+                                        </div>
+                                    );
+                                }}
                                 tooltipsEnabled={agentMenuOpen}
                                 onEscape={() => setAgentMenuOpen(false)}
                             />
