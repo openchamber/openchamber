@@ -434,6 +434,19 @@ const isLoopbackHost = (host: string): boolean => {
   return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
 };
 
+export const isDesktopTrustedLocalPage = (): boolean => {
+  if (typeof window === 'undefined' || !isElectronShell()) return false;
+
+  const localOrigin = typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string'
+    ? window.__OPENCHAMBER_LOCAL_ORIGIN__
+    : '';
+  const currentOrigin = typeof window.location.origin === 'string' ? window.location.origin : '';
+  return currentOrigin !== 'null' && (
+    currentOrigin === 'openchamber-ui://app' ||
+    Boolean(localOrigin && currentOrigin === localOrigin)
+  );
+};
+
 export const isDesktopLocalOriginActive = (): boolean => {
   if (typeof window === 'undefined') return false;
   if (!isDesktopShell()) return false;
