@@ -2630,6 +2630,7 @@ export const dict: Record<I18nKey, string> = {
   "updateDialog.actions.openMobileUpdate": "Abrir actualización",
   "updateDialog.status.updating": "Actualizando...",
   "updateDialog.error.updateFailed": "No se pudo actualizar",
+  "updateDialog.error.recoveredOldVersion": "La actualización falló y se restauró la versión anterior.",
   "updateDialog.error.takingLonger": "La actualización está tardando más de lo esperado. Espera un poco y refresca, o ejecuta: openchamber update",
   "mobileUpdate.toast.available.title": "Actualización de OpenChamber disponible",
   "mobileUpdate.toast.available.description": "La versión {version} está lista para Android.",

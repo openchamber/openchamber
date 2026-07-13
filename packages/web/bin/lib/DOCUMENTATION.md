@@ -15,7 +15,7 @@ Command modules implement user-facing commands and preserve output contracts acr
 
 - `commands-serve.js`
   - Implements `openchamber serve`.
-  - Owns OpenCode CLI checks, port resolution, log rotation, PID/instance registry writes, foreground/background server launch, startup summaries, and foreground shutdown behavior.
+  - Owns OpenCode CLI checks, port resolution, log rotation, PID/instance registry writes, foreground/background server launch, startup summaries, foreground shutdown behavior, and defers startup while a live update helper owns the maintenance marker.
 
 - `commands-lifecycle.js`
   - Implements `openchamber stop` and `openchamber restart`.
@@ -42,7 +42,7 @@ Command modules implement user-facing commands and preserve output contracts acr
 
 - `commands-update.js`
   - Implements `openchamber update`.
-  - Loads the package-manager helper, performs update flow, and coordinates restart behavior after updates.
+  - Loads the package-manager helper, pins installation to the checked target version, and coordinates restart behavior after updates using the same shell-free launch contract as web updates.
 
 - `commands-tunnel.js`
   - Implements `openchamber tunnel` and its subcommands: `profile`, `providers`, `ready`, `doctor`, `status`, `start`, `stop`, and `completion`.

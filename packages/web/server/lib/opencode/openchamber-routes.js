@@ -8,6 +8,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     openchamberDataDir,
     modelsDevApiUrl,
     modelsMetadataCacheTtl,
+    gracefulShutdown,
     readSettingsFromDiskMigrated,
     fetchFreeZenModels,
     getCachedZenModels,
@@ -53,50 +54,51 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   app.post('/api/openchamber/update-install', async (_req, res) => {
     try {
-      const { spawn: spawnChild } = await import('child_process');
+      if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+        return res.status(409).json({ error: 'Desktop installations must use the native application updater' });
+      }
+      const { spawn: spawnChild, spawnSync } = await import('child_process');
       const {
         checkForUpdates,
-        getUpdateCommand,
+        getUpdateLaunchSpec,
         detectPackageManagerDetails,
       } = await import('../package-manager.js');
+      const { startUpdateTransaction } = await import('../openchamber-update/runtime.js');
 
       const updateInfo = await checkForUpdates();
+      if (updateInfo.error) {
+        return res.status(503).json({ error: updateInfo.error });
+      }
       if (!updateInfo.available) {
         return res.status(400).json({ error: 'No update available' });
       }
+      const versionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+      const currentVersion = typeof updateInfo.currentVersion === 'string' ? updateInfo.currentVersion.trim() : '';
+      const targetVersion = typeof updateInfo.version === 'string' ? updateInfo.version.trim() : '';
+      if (!versionPattern.test(targetVersion)) {
+        return res.status(502).json({ error: 'Update service returned an invalid target version' });
+      }
+      if (!versionPattern.test(currentVersion)) {
+        return res.status(500).json({ error: 'The installed OpenChamber version could not be verified' });
+      }
 
-      const pmDetails = detectPackageManagerDetails();
-      const pm = pmDetails.packageManager;
-      const updateCmd = getUpdateCommand(pm);
       const isContainer =
         fs.existsSync('/.dockerenv') ||
         Boolean(process.env.CONTAINER) ||
         process.env.container === 'docker';
 
       if (isContainer) {
-        res.json({
-          success: true,
-          message: 'Update starting, server will stay online',
-          version: updateInfo.version,
-          packageManager: pm,
-          autoRestart: false,
+        return res.status(409).json({
+          error: 'Container installations must be updated by replacing the container image',
         });
-
-        setTimeout(() => {
-          console.log(`\nInstalling update using ${pm} (container mode)...`);
-          console.log(`Running: ${updateCmd}`);
-
-          const shell = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'sh';
-          const shellFlag = process.platform === 'win32' ? '/c' : '-c';
-          const child = spawnChild(shell, [shellFlag, updateCmd], {
-            detached: true,
-            stdio: 'ignore',
-            env: process.env,
-          });
-          child.unref();
-        }, 500);
-
-        return;
+      }
+      const pmDetails = detectPackageManagerDetails();
+      const pm = pmDetails.packageManager;
+      const ownershipReasons = new Set(['install-path-owner', 'global-root-owner', 'forced-env-owner']);
+      if (!ownershipReasons.has(pmDetails.reason) || !pmDetails.packagePath) {
+        return res.status(409).json({
+          error: 'The package manager that owns this OpenChamber installation could not be verified. Run openchamber update from the installation environment.',
+        });
       }
 
       const currentPort = server.address()?.port || 3000;
@@ -108,146 +110,123 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       } catch {
       }
       const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
-      const isForegroundService = launchMode === 'foreground';
-
-      const isWindows = process.platform === 'win32';
-      const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
-      const quoteCmd = (value) => {
-        const stringValue = String(value);
-        return `"${stringValue.replace(/"/g, '""')}"`;
-      };
-
-      const cliPath = path.resolve(__dirname, '..', 'bin', 'cli.js');
-      const restartParts = [
-        isWindows ? quoteCmd(process.execPath) : quotePosix(process.execPath),
-        isWindows ? quoteCmd(cliPath) : quotePosix(cliPath),
-        'serve',
-        '--port',
-        String(storedOptions.port),
-      ];
-      let restartCmdPrimary = restartParts.join(' ');
-      let restartCmdFallback = `openchamber serve --port ${storedOptions.port}`;
-      if (storedOptions.host) {
-        if (isWindows) {
-          const escapedHost = storedOptions.host.replace(/"/g, '""');
-          restartCmdPrimary += ` --host "${escapedHost}"`;
-          restartCmdFallback += ` --host "${escapedHost}"`;
-        } else {
-          const escapedHost = storedOptions.host.replace(/'/g, "'\\''");
-          restartCmdPrimary += ` --host '${escapedHost}'`;
-          restartCmdFallback += ` --host '${escapedHost}'`;
-        }
+      const knownServiceManagers = new Set(['systemd', 'launchd', 'windows-task']);
+      const persistedServiceManager = typeof storedOptions.serviceManager === 'string' ? storedOptions.serviceManager : '';
+      const environmentServiceManager = typeof process.env.OPENCHAMBER_SERVICE_MANAGER === 'string'
+        ? process.env.OPENCHAMBER_SERVICE_MANAGER
+        : '';
+      let serviceManager = null;
+      if (knownServiceManagers.has(persistedServiceManager)) {
+        serviceManager = persistedServiceManager;
+      } else if (knownServiceManagers.has(environmentServiceManager)) {
+        serviceManager = environmentServiceManager;
       }
-      if (storedOptions.uiPassword) {
-        if (isWindows) {
-          const escapedPw = storedOptions.uiPassword.replace(/"/g, '""');
-          restartCmdPrimary += ` --ui-password "${escapedPw}"`;
-          restartCmdFallback += ` --ui-password "${escapedPw}"`;
-        } else {
-          const escapedPw = storedOptions.uiPassword.replace(/'/g, "'\\''");
-          restartCmdPrimary += ` --ui-password '${escapedPw}'`;
-          restartCmdFallback += ` --ui-password '${escapedPw}'`;
-        }
+      if (!serviceManager && launchMode === 'foreground' && process.platform === 'win32') {
+        const taskStatus = spawnSync('schtasks.exe', ['/Query', '/TN', 'dev.openchamber.web'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+        if (taskStatus.status === 0) serviceManager = 'windows-task';
+      }
+      if (launchMode === 'foreground' && !serviceManager) {
+        return res.status(409).json({
+          error: 'Automatic update requires a recognized service manager for foreground servers. Run openchamber update from the terminal.',
+        });
+      }
+      const isForegroundService = launchMode === 'foreground';
+      const packagePath = pmDetails.packagePath || path.resolve(__dirname, '..');
+      const cliPath = path.join(packagePath, 'bin', 'cli.js');
+      const restartArgs = [cliPath, 'serve', '--port', String(storedOptions.port || currentPort), '--quiet'];
+      if (storedOptions.host) {
+        restartArgs.push('--host', storedOptions.host);
       }
       if (storedOptions.apiOnly === true) {
-        restartCmdPrimary += ' --api-only';
-        restartCmdFallback += ' --api-only';
+        restartArgs.push('--api-only');
       }
-      const restartCmd = isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
-      const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
-      const logPreamble = [
-        '',
-        `=== OpenChamber update ${new Date().toISOString()} ===`,
-        `currentVersion=${updateInfo.currentVersion || 'unknown'}`,
-        `targetVersion=${updateInfo.version || 'unknown'}`,
-        `packageManager=${pm}`,
-        `packageManagerReason=${pmDetails.reason || 'unknown'}`,
-        `packageManagerCommand=${pmDetails.packageManagerCommand || 'unknown'}`,
-        `packagePath=${pmDetails.packagePath || 'unknown'}`,
-        `globalNodeModulesRoot=${pmDetails.globalNodeModulesRoot || 'unknown'}`,
-        `mode=${isContainer ? 'container' : 'restart'}`,
-        `launchMode=${launchMode}`,
-        `updateCommand=${updateCmd}`,
-        `restartCommand=${restartCmd || 'service-manager'}`,
-        `logPath=${updateLogPath}`,
-      ].join('\n');
-
-      res.json({
-        success: true,
-        message: 'Update starting, server will restart shortly',
-        version: updateInfo.version,
+      const configuredHealthHost = typeof storedOptions.host === 'string' ? storedOptions.host.trim() : '';
+      let healthHost = configuredHealthHost.replace(/^\[|\]$/g, '');
+      if (!configuredHealthHost || configuredHealthHost === '0.0.0.0') {
+        healthHost = '127.0.0.1';
+      } else if (configuredHealthHost === '::' || configuredHealthHost === '[::]') {
+        healthHost = '::1';
+      }
+      const healthUrl = new URL('/health', `http://${healthHost.includes(':') ? `[${healthHost}]` : healthHost}:${storedOptions.port || currentPort}`).toString();
+      const install = getUpdateLaunchSpec(pm, targetVersion, {
+        command: pmDetails.packageManagerCommand || undefined,
+      });
+      const rollback = getUpdateLaunchSpec(pm, currentVersion, {
+        command: pmDetails.packageManagerCommand || undefined,
+      });
+      const transaction = await startUpdateTransaction({
+        openchamberDataDir,
+        currentVersion,
+        targetVersion,
         packageManager: pm,
-        autoRestart: true,
-        restartManager: isForegroundService ? 'service' : 'cli',
+        packagePath,
+        install,
+        rollback,
+        stop: {
+          command: process.execPath,
+          args: [cliPath, 'stop', '--port', String(storedOptions.port || currentPort), '--quiet'],
+        },
+        restart: {
+          mode: isForegroundService ? 'service' : 'daemon',
+          command: process.execPath,
+          args: restartArgs,
+          env: storedOptions.uiPassword
+            ? { OPENCHAMBER_UI_PASSWORD: storedOptions.uiPassword }
+            : {},
+          healthUrl,
+          serviceManager,
+          ...(serviceManager === 'windows-task'
+            ? { serviceCommand: 'schtasks.exe', serviceArgs: ['/Run', '/TN', 'dev.openchamber.web'] }
+            : {}),
+        },
+        oldPid: process.pid,
+        helperManager: serviceManager === 'systemd' || serviceManager === 'launchd' ? serviceManager : null,
+        spawnChild,
       });
 
-        setTimeout(() => {
-          console.log(`\nInstalling update using ${pm}...`);
-          console.log(`Running: ${updateCmd}`);
-          console.log(logPreamble);
-
-          const shell = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'sh';
-          const shellFlag = isWindows ? '/c' : '-c';
-          const script = isWindows
-            ? `
-            echo ${quoteCmd(logPreamble)}
-            timeout /t 2 /nobreak >nul
-            ${updateCmd}
-            if %ERRORLEVEL% EQU 0 (
-              echo Update successful, restarting OpenChamber...
-              ${restartCmd || 'echo Service manager will restart OpenChamber.'}
-            ) else (
-              echo Update failed
-              exit /b 1
-            )
-            `
-          : `
-            printf '%s\n' ${quotePosix(logPreamble)}
-            sleep 2
-            ${updateCmd}
-            if [ $? -eq 0 ]; then
-              echo "Update successful, restarting OpenChamber..."
-              ${restartCmd || 'echo "Service manager will restart OpenChamber."'}
-            else
-              echo "Update failed"
-              exit 1
-            fi
-          `;
-
-        let logFd = null;
-        try {
-          fs.mkdirSync(path.dirname(updateLogPath), { recursive: true });
-          logFd = fs.openSync(updateLogPath, 'a');
-        } catch (logError) {
-          console.warn('Failed to open update log file, continuing without log capture:', logError);
-        }
-
-        const child = spawnChild(shell, [shellFlag, script], {
-          detached: true,
-          stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
-          env: process.env,
-        });
-        child.unref();
-
-        if (logFd !== null) {
-          try {
-            fs.closeSync(logFd);
-          } catch {
+      console.log(`OpenChamber update transaction ${transaction.id} prepared (${currentVersion} -> ${targetVersion}, ${pm})`);
+      let shutdownScheduled = false;
+      const scheduleShutdown = () => {
+        if (shutdownScheduled) return;
+        shutdownScheduled = true;
+        const shutdownTimer = setTimeout(() => {
+          if (typeof gracefulShutdown === 'function') {
+            void gracefulShutdown({ exitProcess: true });
+          } else {
+            process.exit(0);
           }
-        }
-
-        console.log('Update process spawned, shutting down server...');
-
-        setTimeout(() => {
-          process.exit(0);
-        }, 500);
-      }, 500);
+        }, 250);
+        shutdownTimer.unref?.();
+      };
+      res.once('finish', scheduleShutdown);
+      res.once('close', scheduleShutdown);
+      return res.status(202).json({
+        accepted: true,
+        transactionId: transaction.id,
+        currentVersion: transaction.currentVersion,
+        targetVersion: transaction.targetVersion,
+        packageManager: pm,
+        restartManager: isForegroundService ? 'service' : 'cli',
+      });
     } catch (error) {
       console.error('Failed to install update:', error);
-      res.status(500).json({
+      res.status(Number.isInteger(error?.statusCode) ? error.statusCode : 500).json({
         error: error instanceof Error ? error.message : 'Failed to install update',
       });
     }
+  });
+
+  app.get('/api/openchamber/update-status/:transactionId', async (req, res) => {
+    const { readUpdateTransactionStatus } = await import('../openchamber-update/runtime.js');
+    const status = readUpdateTransactionStatus(openchamberDataDir, req.params.transactionId);
+    if (!status) {
+      return res.status(404).json({ error: 'Update transaction not found' });
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(status);
   });
 
   app.get('/api/openchamber/models-metadata', async (_req, res) => {

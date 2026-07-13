@@ -2630,6 +2630,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.actions.openMobileUpdate': '打开更新',
   'updateDialog.status.updating': '更新中...',
   'updateDialog.error.updateFailed': '更新失败',
+  'updateDialog.error.recoveredOldVersion': '更新失败，已恢复到之前的版本。',
   'updateDialog.error.takingLonger': '更新耗时超出预期。请稍等后刷新，或运行：openchamber update',
   'mobileUpdate.toast.available.title': 'OpenChamber 更新可用',
   'mobileUpdate.toast.available.description': '版本 {version} 已可用于 Android。',

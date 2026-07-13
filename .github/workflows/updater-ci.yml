@@ -1,0 +1,57 @@
+name: updater cross-platform
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/updater-ci.yml'
+      - 'packages/web/bin/lib/commands-serve.js'
+      - 'packages/web/bin/lib/commands-update.js'
+      - 'packages/web/bin/lib/cli-process.js'
+      - 'packages/web/bin/lib/cli-startup.js'
+      - 'packages/web/server/lib/openchamber-update/**'
+      - 'packages/web/server/lib/opencode/openchamber-routes.js'
+      - 'packages/web/server/lib/package-manager.js'
+      - 'packages/ui/src/components/ui/UpdateDialog.tsx'
+      - 'packages/ui/src/lib/webUpdate.ts'
+      - 'packages/ui/src/lib/i18n/messages/**'
+  workflow_dispatch:
+
+jobs:
+  updater:
+    name: Updater (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-14
+          - windows-2022
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test server updater
+        working-directory: packages/web
+        run: >-
+          bun run test --
+          server/lib/package-manager.test.js
+          server/lib/openchamber-update/maintenance.test.js
+          server/lib/openchamber-update/runtime.test.js
+          server/lib/openchamber-update/helper.integration.test.js
+          server/lib/opencode/openchamber-routes.test.js
+          bin/lib/commands-update.test.js
+
+      - name: Test client update contract
+        run: bun test packages/ui/src/lib/webUpdate.test.ts packages/ui/src/lib/i18n/messages.test.ts

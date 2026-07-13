@@ -14,6 +14,8 @@ const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/btriapitsyn/openchamber/main/CHANGELOG.md';
 const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 let cachedDetectedPm = null;
+let cachedDetectedPmReason = null;
+let cachedDetectedPackagePath = null;
 
 function getSpawnSyncBaseOptions() {
   return process.platform === 'win32' ? { windowsHide: true } : {};
@@ -200,9 +202,10 @@ function getUniquePaths(paths) {
   return result;
 }
 
-function getCommandOutput(command, args) {
+function getCommandOutput(pm, args) {
   try {
-    const result = spawnSync(command, args, {
+    const launchSpec = getPackageManagerLaunchSpec(pm);
+    const result = spawnSync(launchSpec.command, [...launchSpec.argsPrefix, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10000,
@@ -221,32 +224,27 @@ function getCommandOutput(command, args) {
 }
 
 function getGlobalBinDirs(pm) {
-  const pmCommand = resolvePackageManagerCommand(pm);
-  if (!isCommandAvailable(pmCommand)) {
-    return [];
-  }
-
   const dirs = [];
   switch (pm) {
     case 'pnpm': {
-      const pnpmBin = getCommandOutput(pmCommand, ['bin', '-g']);
+      const pnpmBin = getCommandOutput(pm, ['bin', '-g']);
       if (pnpmBin) dirs.push(pnpmBin);
-      const pnpmPrefix = getCommandOutput(pmCommand, ['prefix', '-g']);
+      const pnpmPrefix = getCommandOutput(pm, ['prefix', '-g']);
       if (pnpmPrefix) dirs.push(process.platform === 'win32' ? pnpmPrefix : path.join(pnpmPrefix, 'bin'));
       break;
     }
     case 'yarn': {
-      const yarnBin = getCommandOutput(pmCommand, ['global', 'bin']);
+      const yarnBin = getCommandOutput(pm, ['global', 'bin']);
       if (yarnBin) dirs.push(yarnBin);
       break;
     }
     case 'bun': {
-      const bunBin = getCommandOutput(pmCommand, ['pm', 'bin', '-g']);
+      const bunBin = getCommandOutput(pm, ['pm', 'bin', '-g']);
       if (bunBin) dirs.push(bunBin);
       break;
     }
     default: {
-      const npmPrefix = getCommandOutput(pmCommand, ['prefix', '-g']);
+      const npmPrefix = getCommandOutput(pm, ['prefix', '-g']);
       if (npmPrefix) dirs.push(process.platform === 'win32' ? npmPrefix : path.join(npmPrefix, 'bin'));
       break;
     }
@@ -257,28 +255,23 @@ function getGlobalBinDirs(pm) {
 
 function getGlobalNodeModulesRoots(pm) {
   try {
-    const pmCommand = resolvePackageManagerCommand(pm);
-    if (!isCommandAvailable(pmCommand)) {
-      return [];
-    }
-
     const roots = [];
 
     switch (pm) {
       case 'pnpm': {
-        const pnpmRoot = getCommandOutput(pmCommand, ['root', '-g']);
+        const pnpmRoot = getCommandOutput(pm, ['root', '-g']);
         if (pnpmRoot) roots.push(pnpmRoot);
-        const pnpmPrefix = getCommandOutput(pmCommand, ['prefix', '-g']);
+        const pnpmPrefix = getCommandOutput(pm, ['prefix', '-g']);
         if (pnpmPrefix) roots.push(process.platform === 'win32' ? path.join(pnpmPrefix, 'node_modules') : path.join(pnpmPrefix, 'lib', 'node_modules'));
         break;
       }
       case 'yarn': {
-        const yarnDir = getCommandOutput(pmCommand, ['global', 'dir']);
+        const yarnDir = getCommandOutput(pm, ['global', 'dir']);
         if (yarnDir) roots.push(path.join(yarnDir, 'node_modules'));
         break;
       }
       case 'bun': {
-        const bunBinDir = getCommandOutput(pmCommand, ['pm', 'bin', '-g']);
+        const bunBinDir = getCommandOutput(pm, ['pm', 'bin', '-g']);
         if (bunBinDir) {
           roots.push(path.resolve(bunBinDir, '..', 'install', 'global', 'node_modules'));
           roots.push(path.resolve(bunBinDir, '..', '..', 'node_modules'));
@@ -287,9 +280,9 @@ function getGlobalNodeModulesRoots(pm) {
       }
       default:
       {
-        const npmRoot = getCommandOutput(pmCommand, ['root', '-g']);
+        const npmRoot = getCommandOutput(pm, ['root', '-g']);
         if (npmRoot) roots.push(npmRoot);
-        const npmPrefix = getCommandOutput(pmCommand, ['prefix', '-g']);
+        const npmPrefix = getCommandOutput(pm, ['prefix', '-g']);
         if (npmPrefix) roots.push(process.platform === 'win32' ? path.join(npmPrefix, 'node_modules') : path.join(npmPrefix, 'lib', 'node_modules'));
         break;
       }
@@ -322,7 +315,7 @@ function detectPackageManagerFromCurrentInstallPath() {
   return detectPackageManagerFromInstallPath(getCurrentPackagePath());
 }
 
-function packageManagerOwnsCurrentInstall(pm) {
+function findPackageManagerOwnedInstallPath(pm) {
   const currentPackagePaths = getComparablePaths(getCurrentPackagePath());
   const candidatePackagePaths = [
     ...getGlobalNodeModulesRoots(pm).map(getPackagePathForGlobalRoot),
@@ -332,11 +325,11 @@ function packageManagerOwnsCurrentInstall(pm) {
   for (const candidatePath of candidatePackagePaths) {
     if (!candidatePath) continue;
     if (pathSetContains(currentPackagePaths, getComparablePaths(candidatePath))) {
-      return true;
+      return path.resolve(candidatePath);
     }
   }
 
-  return false;
+  return null;
 }
 
 export function detectPackageManagerDetails() {
@@ -359,8 +352,8 @@ export function detectPackageManagerDetails() {
   if (cachedDetectedPm) {
       return {
         packageManager: cachedDetectedPm,
-        reason: 'cached',
-        packagePath: getCurrentPackagePath(),
+        reason: cachedDetectedPmReason || 'cached',
+        packagePath: cachedDetectedPackagePath || getCurrentPackagePath(),
         packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
         globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
       };
@@ -369,12 +362,15 @@ export function detectPackageManagerDetails() {
   const forcedPm = process.env.OPENCHAMBER_PACKAGE_MANAGER?.trim();
   if (forcedPm && ['npm', 'pnpm', 'yarn', 'bun'].includes(forcedPm)) {
     const forcedPmCommand = resolvePackageManagerCommand(forcedPm);
-    if (isCommandAvailable(forcedPmCommand)) {
+    const ownedPackagePath = findPackageManagerOwnedInstallPath(forcedPm);
+    if (ownedPackagePath && isCommandAvailable(forcedPmCommand, forcedPm)) {
       cachedDetectedPm = forcedPm;
+      cachedDetectedPmReason = 'forced-env-owner';
+      cachedDetectedPackagePath = ownedPackagePath;
       return {
         packageManager: cachedDetectedPm,
-        reason: 'forced-env',
-        packagePath: getCurrentPackagePath(),
+        reason: cachedDetectedPmReason,
+        packagePath: cachedDetectedPackagePath,
         packageManagerCommand: forcedPmCommand,
         globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
       };
@@ -383,12 +379,15 @@ export function detectPackageManagerDetails() {
 
   // First prefer the package manager that demonstrably owns the current install.
   const installPathPm = detectPackageManagerFromCurrentInstallPath();
-  if (installPathPm && packageManagerOwnsCurrentInstall(installPathPm)) {
+  const installPathOwnedPackage = installPathPm ? findPackageManagerOwnedInstallPath(installPathPm) : null;
+  if (installPathPm && installPathOwnedPackage) {
     cachedDetectedPm = installPathPm;
+    cachedDetectedPmReason = 'install-path-owner';
+    cachedDetectedPackagePath = installPathOwnedPackage;
     return {
       packageManager: cachedDetectedPm,
-      reason: 'install-path-owner',
-      packagePath: getCurrentPackagePath(),
+      reason: cachedDetectedPmReason,
+      packagePath: cachedDetectedPackagePath,
       packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
       globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
     };
@@ -396,12 +395,15 @@ export function detectPackageManagerDetails() {
 
   const ownershipCandidates = ['pnpm', 'yarn', 'bun', 'npm'];
   for (const candidate of ownershipCandidates) {
-    if (packageManagerOwnsCurrentInstall(candidate)) {
+    const ownedPackagePath = findPackageManagerOwnedInstallPath(candidate);
+    if (ownedPackagePath) {
       cachedDetectedPm = candidate;
+      cachedDetectedPmReason = 'global-root-owner';
+      cachedDetectedPackagePath = ownedPackagePath;
       return {
         packageManager: cachedDetectedPm,
-        reason: 'global-root-owner',
-        packagePath: getCurrentPackagePath(),
+        reason: cachedDetectedPmReason,
+        packagePath: cachedDetectedPackagePath,
         packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
         globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
       };
@@ -436,24 +438,28 @@ export function detectPackageManagerDetails() {
   }
 
   // Validate the hint against package visibility, but only after ownership checks failed.
-  if (hintedPm && isCommandAvailable(resolvePackageManagerCommand(hintedPm)) && isPackageInstalledWith(hintedPm)) {
+  if (hintedPm && isCommandAvailable(resolvePackageManagerCommand(hintedPm), hintedPm) && isPackageInstalledWith(hintedPm)) {
     cachedDetectedPm = hintedPm;
+    cachedDetectedPmReason = 'hinted-visible-install';
+    cachedDetectedPackagePath = getCurrentPackagePath();
     return {
       packageManager: cachedDetectedPm,
-      reason: 'hinted-visible-install',
-      packagePath: getCurrentPackagePath(),
+      reason: cachedDetectedPmReason,
+      packagePath: cachedDetectedPackagePath,
       packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
       globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
     };
   }
 
   const runtimePm = detectPackageManagerFromRuntimePath(process.execPath);
-  if (runtimePm && isCommandAvailable(resolvePackageManagerCommand(runtimePm)) && isPackageInstalledWith(runtimePm)) {
+  if (runtimePm && isCommandAvailable(resolvePackageManagerCommand(runtimePm), runtimePm) && isPackageInstalledWith(runtimePm)) {
     cachedDetectedPm = runtimePm;
+    cachedDetectedPmReason = 'runtime-visible-install';
+    cachedDetectedPackagePath = getCurrentPackagePath();
     return {
       packageManager: cachedDetectedPm,
-      reason: 'runtime-visible-install',
-      packagePath: getCurrentPackagePath(),
+      reason: cachedDetectedPmReason,
+      packagePath: cachedDetectedPackagePath,
       packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
       globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
     };
@@ -461,10 +467,10 @@ export function detectPackageManagerDetails() {
 
   // Last resort: pick a PM that can at least see the package.
   const pmChecks = [
-    { name: 'pnpm', check: () => isCommandAvailable(resolvePackageManagerCommand('pnpm')) },
-    { name: 'yarn', check: () => isCommandAvailable(resolvePackageManagerCommand('yarn')) },
-    { name: 'bun', check: () => isCommandAvailable(resolvePackageManagerCommand('bun')) },
-    { name: 'npm', check: () => isCommandAvailable(resolvePackageManagerCommand('npm')) },
+    { name: 'pnpm', check: () => isCommandAvailable(resolvePackageManagerCommand('pnpm'), 'pnpm') },
+    { name: 'yarn', check: () => isCommandAvailable(resolvePackageManagerCommand('yarn'), 'yarn') },
+    { name: 'bun', check: () => isCommandAvailable(resolvePackageManagerCommand('bun'), 'bun') },
+    { name: 'npm', check: () => isCommandAvailable(resolvePackageManagerCommand('npm'), 'npm') },
   ];
 
   for (const { name, check } of pmChecks) {
@@ -472,10 +478,12 @@ export function detectPackageManagerDetails() {
       // Verify this PM actually has the package installed globally
       if (isPackageInstalledWith(name)) {
         cachedDetectedPm = name;
+        cachedDetectedPmReason = 'last-resort-visible-install';
+        cachedDetectedPackagePath = getCurrentPackagePath();
         return {
           packageManager: cachedDetectedPm,
-          reason: 'last-resort-visible-install',
-          packagePath: getCurrentPackagePath(),
+          reason: cachedDetectedPmReason,
+          packagePath: cachedDetectedPackagePath,
           packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
           globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
         };
@@ -484,10 +492,12 @@ export function detectPackageManagerDetails() {
   }
 
   cachedDetectedPm = 'npm';
+  cachedDetectedPmReason = 'default-fallback';
+  cachedDetectedPackagePath = getCurrentPackagePath();
   return {
     packageManager: cachedDetectedPm,
-    reason: 'default-fallback',
-    packagePath: getCurrentPackagePath(),
+    reason: cachedDetectedPmReason,
+    packagePath: cachedDetectedPackagePath,
     packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
     globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
   };
@@ -549,11 +559,122 @@ function getPackageManagerCommandCandidates(pm) {
 function resolvePackageManagerCommand(pm) {
   const candidates = getPackageManagerCommandCandidates(pm);
   for (const candidate of candidates) {
-    if (isCommandAvailable(candidate)) {
+    if (isCommandAvailable(candidate, pm)) {
       return candidate;
     }
   }
   return pm;
+}
+
+function getPackageManagerUpdateArgs(pm, targetVersion = 'latest') {
+  if (targetVersion !== 'latest' && !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(targetVersion)) {
+    throw new Error(`Invalid OpenChamber update target version: ${targetVersion}`);
+  }
+  const packageSpec = `${PACKAGE_NAME}@${targetVersion}`;
+  switch (pm) {
+    case 'pnpm':
+      return ['add', '-g', packageSpec];
+    case 'yarn':
+      return ['global', 'add', packageSpec];
+    case 'bun':
+      return ['add', '-g', packageSpec];
+    default:
+      return ['install', '-g', packageSpec];
+  }
+}
+
+function resolveWindowsCommandPath(command, spawnSyncImpl = spawnSync) {
+  if (path.isAbsolute(command) && fs.existsSync(command)) {
+    return command;
+  }
+
+  try {
+    const result = spawnSyncImpl('where.exe', [command], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 5000,
+      windowsHide: true,
+    });
+    if (result.status !== 0) return null;
+    const matches = String(result.stdout || '')
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+    return matches.find((value) => ['.exe', '.cmd', '.bat', '.com'].includes(path.extname(value).toLowerCase()))
+      || matches[0]
+      || null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveWindowsPackageManagerShim(commandPath, pm, execPath = process.execPath) {
+  const extension = path.extname(commandPath).toLowerCase();
+  if (extension !== '.cmd' && extension !== '.bat') {
+    return { command: commandPath, argsPrefix: [], source: 'executable' };
+  }
+
+  const shimDirectory = path.dirname(commandPath);
+  const relativeCandidates = {
+    npm: [
+      ['node_modules', 'npm', 'bin', 'npm-cli.js'],
+    ],
+    pnpm: [
+      ['node_modules', 'pnpm', 'bin', 'pnpm.cjs'],
+      ['node_modules', 'corepack', 'dist', 'pnpm.js'],
+    ],
+    yarn: [
+      ['node_modules', 'yarn', 'bin', 'yarn.js'],
+      ['node_modules', 'corepack', 'dist', 'yarn.js'],
+    ],
+  };
+  const scriptPath = (relativeCandidates[pm] || [])
+    .map((segments) => path.join(shimDirectory, ...segments))
+    .find((candidate) => fs.existsSync(candidate));
+  if (!scriptPath) {
+    throw new Error(`Unable to safely resolve the ${pm} Windows command shim: ${commandPath}`);
+  }
+
+  const adjacentNode = path.join(shimDirectory, 'node.exe');
+  const nodeCommand = fs.existsSync(adjacentNode) ? adjacentNode : execPath;
+  return {
+    command: nodeCommand,
+    argsPrefix: [scriptPath],
+    source: 'node-shim',
+  };
+}
+
+export function getPackageManagerLaunchSpec(pm = detectPackageManager(), options = {}) {
+  const platform = options.platform || process.platform;
+  const packageManagerCommand = options.command || resolvePackageManagerCommand(pm);
+
+  if (platform !== 'win32' || pm === 'bun') {
+    return {
+      command: packageManagerCommand,
+      argsPrefix: [],
+      source: 'executable',
+    };
+  }
+
+  const commandPath = resolveWindowsCommandPath(packageManagerCommand, options.spawnSync || spawnSync);
+  if (!commandPath) {
+    throw new Error(`Unable to resolve the ${pm} executable on Windows`);
+  }
+  const resolved = resolveWindowsPackageManagerShim(commandPath, pm, options.execPath || process.execPath);
+  return {
+    command: resolved.command,
+    argsPrefix: resolved.argsPrefix,
+    source: resolved.source,
+  };
+}
+
+export function getUpdateLaunchSpec(pm = detectPackageManager(), targetVersion = 'latest', options = {}) {
+  const launchSpec = getPackageManagerLaunchSpec(pm, options);
+  return {
+    command: launchSpec.command,
+    args: [...launchSpec.argsPrefix, ...getPackageManagerUpdateArgs(pm, targetVersion)],
+    source: launchSpec.source,
+  };
 }
 
 function quoteCommand(command) {
@@ -565,9 +686,18 @@ function quoteCommand(command) {
   return `'${command.replace(/'/g, "'\\''")}'`;
 }
 
-function isCommandAvailable(command) {
+function isCommandAvailable(command, pm) {
   try {
-    const result = spawnSync(command, ['--version'], {
+    let executable = command;
+    let args = ['--version'];
+    if (process.platform === 'win32' && pm) {
+      const commandPath = resolveWindowsCommandPath(command);
+      if (!commandPath) return false;
+      const launchSpec = resolveWindowsPackageManagerShim(commandPath, pm, process.execPath);
+      executable = launchSpec.command;
+      args = [...launchSpec.argsPrefix, '--version'];
+    }
+    const result = spawnSync(executable, args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 5000,
@@ -581,7 +711,7 @@ function isCommandAvailable(command) {
 
 function isPackageInstalledWith(pm) {
   try {
-    const pmCommand = resolvePackageManagerCommand(pm);
+    const launchSpec = getPackageManagerLaunchSpec(pm);
     let args;
     switch (pm) {
       case 'pnpm':
@@ -597,7 +727,7 @@ function isPackageInstalledWith(pm) {
         args = ['list', '-g', '--depth=0', PACKAGE_NAME];
     }
 
-    const result = spawnSync(pmCommand, args, {
+    const result = spawnSync(launchSpec.command, [...launchSpec.argsPrefix, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10000,
@@ -614,18 +744,9 @@ function isPackageInstalledWith(pm) {
 /**
  * Get the update command for the detected package manager
  */
-export function getUpdateCommand(pm = detectPackageManager()) {
+export function getUpdateCommand(pm = detectPackageManager(), targetVersion = 'latest') {
   const pmCommand = quoteCommand(resolvePackageManagerCommand(pm));
-  switch (pm) {
-    case 'pnpm':
-      return `${pmCommand} add -g ${PACKAGE_NAME}@latest`;
-    case 'yarn':
-      return `${pmCommand} global add ${PACKAGE_NAME}@latest`;
-    case 'bun':
-      return `${pmCommand} add -g ${PACKAGE_NAME}@latest`;
-    default:
-      return `${pmCommand} install -g ${PACKAGE_NAME}@latest`;
-  }
+  return [pmCommand, ...getPackageManagerUpdateArgs(pm, targetVersion)].join(' ');
 }
 
 /**
@@ -783,15 +904,16 @@ export async function checkForUpdates(options = {}) {
  * Execute the update (used by CLI)
  */
 export function executeUpdate(pm = detectPackageManager(), options = {}) {
-  const command = getUpdateCommand(pm);
+  const targetVersion = options.targetVersion || 'latest';
+  const command = getUpdateCommand(pm, targetVersion);
+  const launchSpec = getUpdateLaunchSpec(pm, targetVersion);
   if (!options?.silent) {
     console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);
     console.log(`Running: ${command}`);
   }
 
-  const result = spawnSync(command, {
+  const result = spawnSync(launchSpec.command, launchSpec.args, {
     stdio: 'inherit',
-    shell: true,
     ...getSpawnSyncBaseOptions(),
   });
 

@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // Mock child_process to prevent real spawnSync calls that would hang in tests
 vi.mock('node:child_process', () => ({
@@ -10,6 +13,7 @@ const {
   checkForUpdates,
   detectPackageManager,
   executeUpdate,
+  getUpdateLaunchSpec,
   getCurrentVersion,
 } = await import('./package-manager.js');
 
@@ -261,5 +265,61 @@ describe('CLI update exports', () => {
   it('exports package-manager helpers used by the update command', () => {
     expect(typeof detectPackageManager).toBe('function');
     expect(typeof executeUpdate).toBe('function');
+  });
+});
+
+describe('getUpdateLaunchSpec', () => {
+  it('pins the package-manager arguments to the requested target version', () => {
+    expect(getUpdateLaunchSpec('npm', '2.3.4', { platform: 'linux', command: '/usr/bin/npm' })).toEqual({
+      command: '/usr/bin/npm',
+      args: ['install', '-g', '@openchamber/web@2.3.4'],
+      source: 'executable',
+    });
+  });
+
+  it('resolves the standard Windows npm shim to npm-cli.js', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-npm-shim-'));
+    try {
+      const shimPath = path.join(directory, 'npm.cmd');
+      const npmCliPath = path.join(directory, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+      fs.mkdirSync(path.dirname(npmCliPath), { recursive: true });
+      fs.writeFileSync(shimPath, '@echo off\r\n');
+      fs.writeFileSync(npmCliPath, '');
+
+      expect(getUpdateLaunchSpec('npm', '2.3.4', {
+        platform: 'win32',
+        command: 'npm',
+        execPath: 'C:\\Program Files\\nodejs\\node.exe',
+        spawnSync: vi.fn(() => ({ status: 0, stdout: `${shimPath}\r\n`, stderr: '' })),
+      })).toEqual({
+        command: 'C:\\Program Files\\nodejs\\node.exe',
+        args: [npmCliPath, 'install', '-g', '@openchamber/web@2.3.4'],
+        source: 'node-shim',
+      });
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed when a Windows package-manager shim cannot be resolved safely', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-bad-shim-'));
+    try {
+      const shimPath = path.join(directory, 'npm.cmd');
+      fs.writeFileSync(shimPath, '@echo off\r\n');
+      expect(() => getUpdateLaunchSpec('npm', '2.3.4', {
+        platform: 'win32',
+        command: 'npm',
+        spawnSync: vi.fn(() => ({ status: 0, stdout: `${shimPath}\r\n`, stderr: '' })),
+      })).toThrow('Unable to safely resolve');
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects non-version package targets before launching a package manager', () => {
+    expect(() => getUpdateLaunchSpec('npm', 'file:untrusted-package.tgz', {
+      platform: 'linux',
+      command: '/usr/bin/npm',
+    })).toThrow('Invalid OpenChamber update target version');
   });
 });

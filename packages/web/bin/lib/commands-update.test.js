@@ -41,7 +41,7 @@ describe('update command', () => {
       try {
         await updateCommand({ json: true });
 
-        expect(executeUpdate).toHaveBeenCalledWith('npm', { silent: true });
+        expect(executeUpdate).toHaveBeenCalledWith('npm', { silent: true, targetVersion: '9.9.9' });
       } finally {
         process.stdout.write = originalWrite;
       }
