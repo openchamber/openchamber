@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -64,7 +64,7 @@ type Props = {
   setActiveProjectIdOnly: (id: string) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
   openNewWorktreeDialog: () => void;
   openProjectEditDialog: (id: string) => void;
   removeProject: (id: string) => void;
@@ -240,10 +240,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     alwaysShowActions={props.alwaysShowActions}
                     onToggle={() => props.toggleProject(projectKey)}
                     onNewSession={() => {
+                      props.openNewSessionDraft({
+                        selectedProjectId: projectKey,
+                        directoryOverride: project.normalizedPath,
+                      });
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
                       props.setActiveMainTab('chat');
                       if (props.mobileVariant) props.setSessionSwitcherOpen(false);
-                      props.openNewSessionDraft({ directoryOverride: project.normalizedPath });
                     }}
                     onNewWorktreeSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
