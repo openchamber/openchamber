@@ -8,8 +8,8 @@ describe('validateCredential for ollama-cloud', () => {
     globalThis.fetch = originalFetch;
   });
 
-  const mockFetch = (response: Response) => {
-    globalThis.fetch = (async () => response) as typeof fetch;
+  const mockFetch = (response) => {
+    globalThis.fetch = async () => response;
   };
 
   it('accepts a valid cookie (200 settings page)', async () => {
