@@ -444,7 +444,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       const worktreesByProject = new Map<string, WorktreeMetadata[]>();
       const allWorktrees: WorktreeMetadata[] = [];
-      let discoveryFailed = false;
 
       // Constrain fanout: previously `Promise.all(projects.map(...))` could
       // spawn dozens of concurrent `git worktree list` and
@@ -474,7 +473,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
             worktreesByProject.set(projectPath, worktrees);
             allWorktrees.push(...worktrees);
           } catch {
-            discoveryFailed = true;
+            // A single unavailable project must not leave discovery loading forever.
           }
         }
       });
@@ -490,7 +489,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           availableWorktreesByProject: worktreesByProject,
         });
       }
-      setIsWorktreeTopologyLoading(discoveryFailed);
+      setIsWorktreeTopologyLoading(false);
     };
 
     // Skip if we already discovered worktrees for this exact project set.
