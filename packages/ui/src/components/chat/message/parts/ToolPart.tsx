@@ -1249,6 +1249,15 @@ const TaskSummaryEntriesList = React.memo(({
 
 TaskSummaryEntriesList.displayName = 'TaskSummaryEntriesList';
 
+// Monotonic counter for unique SimpleMarkdownRenderer cache keys per
+// TaskToolSummary instance. Prevents cache key collision between different
+// task tool outputs that share the static "simple:tool" cache key prefix.
+let taskToolSummaryIdCounter = 0;
+const nextTaskToolSummaryId = (): number => {
+    taskToolSummaryIdCounter += 1;
+    return taskToolSummaryIdCounter;
+};
+
 const stripTaskMetadataFromOutput = (output: string): string => {
     // Strip only a trailing <task_metadata>...</task_metadata> block.
     return output.replace(/\n*<task_metadata>[\s\S]*?<\/task_metadata>\s*$/i, '').trimEnd();
@@ -1366,6 +1375,15 @@ const TaskToolSummary: React.FC<{
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const runtime = React.useContext(RuntimeAPIContext);
 
+    // Unique cache key per TaskToolSummary instance so SimpleMarkdownRenderer
+    // instances don't share the same cache namespace. Using a ref-based counter
+    // ensures uniqueness across mounts/unmounts.
+    const instanceId = React.useRef(0);
+    if (instanceId.current === 0) {
+        instanceId.current = nextTaskToolSummaryId();
+    }
+    const toolCacheKey = `simple:tool:${instanceId.current}`;
+
     const trimmedOutput = typeof output === 'string'
         ? stripTaskMetadataFromOutput(output)
         : '';
@@ -1458,7 +1476,7 @@ const TaskToolSummary: React.FC<{
                     {isOutputExpanded ? (
                         <ToolScrollableSection maxHeightClass="max-h-[50vh]">
                             <div className="w-full min-w-0">
-                                <SimpleMarkdownRenderer content={trimmedOutput} variant="tool" onShowPopup={onShowPopup} />
+                                <SimpleMarkdownRenderer content={trimmedOutput} variant="tool" onShowPopup={onShowPopup} cacheKey={toolCacheKey} />
                             </div>
                         </ToolScrollableSection>
                     ) : null}
