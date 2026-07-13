@@ -122,7 +122,12 @@ export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken
     deactivateRelayTunnel();
   }
   void refreshRuntimeUrlAuthToken(apiBaseUrl).catch(() => {});
-  if (typeof window !== 'undefined') {
+  // Dispatch (which remounts the epoch-keyed <SyncProvider> + re-bootstraps) only
+  // on a real endpoint change, so repeated same-endpoint startup calls stop
+  // churning the sync layer. Relay always dispatches to keep its tunnel branch
+  // unchanged; transport state above is re-applied regardless.
+  const endpointChanged = apiBaseUrl !== previousApiBaseUrl || runtimeKey !== previousRuntimeKey;
+  if ((endpointChanged || Boolean(options.relay)) && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent<RuntimeEndpointChangedDetail>(RUNTIME_ENDPOINT_CHANGED_EVENT, {
       detail: { apiBaseUrl, previousApiBaseUrl, runtimeKey, previousRuntimeKey },
     }));
