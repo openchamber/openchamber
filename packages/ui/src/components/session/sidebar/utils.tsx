@@ -3,6 +3,9 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 
+import { normalizePath } from '@/lib/pathNormalization';
+export { normalizePath };
+
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
 
@@ -77,14 +80,6 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
   return t('common.relative.yearsAgoCompact', { count: Math.floor(diff / year) });
 };
 
-export const normalizePath = (value?: string | null) => {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
-  return normalized.length === 0 ? '/' : normalized;
-};
-
 export const isPathWithinProject = (directory?: string | null, projectPath?: string | null): boolean => {
   const normalizedDirectory = normalizePath(directory);
   const normalizedProjectPath = normalizePath(projectPath);
@@ -92,6 +87,61 @@ export const isPathWithinProject = (directory?: string | null, projectPath?: str
   if (normalizedDirectory === normalizedProjectPath) return true;
   if (normalizedProjectPath === '/') return normalizedDirectory.startsWith('/');
   return normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
+};
+
+type NormalizedProjectPath = { normalizedPath: string };
+type WorktreePath = { path: string };
+
+export const collectKnownProjectDirectories = (
+  normalizedProjects: NormalizedProjectPath[],
+  availableWorktreesByProject: Map<string, WorktreePath[]>,
+  isVSCode: boolean,
+): Set<string> => {
+  const knownDirectories = new Set<string>();
+
+  normalizedProjects.forEach((project) => {
+    if (project.normalizedPath) {
+      knownDirectories.add(project.normalizedPath);
+    }
+  });
+
+  if (isVSCode) {
+    return knownDirectories;
+  }
+
+  for (const worktrees of availableWorktreesByProject.values()) {
+    for (const worktree of worktrees) {
+      const normalized = normalizePath(worktree.path);
+      if (normalized) {
+        knownDirectories.add(normalized);
+      }
+    }
+  }
+
+  return knownDirectories;
+};
+
+const findBestProjectDirectoryMatch = (
+  value: string | null,
+  knownDirectories?: Iterable<string>,
+): string | null => {
+  if (!value || !knownDirectories) {
+    return null;
+  }
+
+  let bestMatch: string | null = null;
+  for (const candidate of knownDirectories) {
+    const normalizedCandidate = normalizePath(candidate);
+    if (!normalizedCandidate || !isPathWithinProject(value, normalizedCandidate)) {
+      continue;
+    }
+
+    if (!bestMatch || normalizedCandidate.length > bestMatch.length) {
+      bestMatch = normalizedCandidate;
+    }
+  }
+
+  return bestMatch;
 };
 
 export const normalizeForBranchComparison = (value: string): string => {
@@ -177,21 +227,26 @@ export const isSessionRelatedToProject = (
   session: Session,
   projectRoot: string,
   validDirectories?: Set<string>,
+  knownDirectories?: Iterable<string>,
 ): boolean => {
   const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
   const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+  const resolvedDirectory = sessionDirectory ?? projectWorktree;
 
-  if (projectWorktree && (projectWorktree === projectRoot || projectWorktree.startsWith(`${projectRoot}/`))) {
+  if (resolvedDirectory && validDirectories?.has(resolvedDirectory)) {
     return true;
   }
 
-  if (!sessionDirectory) {
+  if (!resolvedDirectory) {
     return false;
   }
-  if (validDirectories && validDirectories.has(sessionDirectory)) {
-    return true;
+
+  const bestMatch = findBestProjectDirectoryMatch(resolvedDirectory, knownDirectories);
+  if (bestMatch) {
+    return validDirectories ? validDirectories.has(bestMatch) : bestMatch === projectRoot;
   }
-  return sessionDirectory === projectRoot || sessionDirectory.startsWith(`${projectRoot}/`);
+
+  return resolvedDirectory === projectRoot || resolvedDirectory.startsWith(`${projectRoot}/`);
 };
 
 

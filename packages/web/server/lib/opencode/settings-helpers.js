@@ -181,6 +181,27 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
       result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
     }
+    if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+      result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
+    }
+    if (typeof candidate.desktopWindowControlsPosition === 'string') {
+      const mode = candidate.desktopWindowControlsPosition.trim();
+      if (mode === 'auto' || mode === 'left' || mode === 'right') {
+        result.desktopWindowControlsPosition = mode;
+      }
+    }
+    if (candidate.permissionAutoAccept && typeof candidate.permissionAutoAccept === 'object' && !Array.isArray(candidate.permissionAutoAccept)) {
+      const sessions = {};
+      const sourceSessions = candidate.permissionAutoAccept.sessions;
+      if (sourceSessions && typeof sourceSessions === 'object' && !Array.isArray(sourceSessions)) {
+        for (const [sessionId, enabled] of Object.entries(sourceSessions)) {
+          if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
+        }
+      }
+      result.permissionAutoAccept = {
+        sessions,
+      };
+    }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
     }
@@ -244,6 +265,21 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
+    }
+    if (typeof candidate.sessionRecapEnabled === 'boolean') {
+      result.sessionRecapEnabled = candidate.sessionRecapEnabled;
+    }
+    if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
+      result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
+    }
+    if (typeof candidate.sessionGoalEnabled === 'boolean') {
+      result.sessionGoalEnabled = candidate.sessionGoalEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
+      result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget) && candidate.sessionGoalDefaultBudget > 0) {
+      result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
     }
     if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
       result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
@@ -374,6 +410,13 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.defaultAgent.trim();
       result.defaultAgent = trimmed.length > 0 ? trimmed : undefined;
     }
+    if (typeof candidate.smallModelUseDefault === 'boolean') {
+      result.smallModelUseDefault = candidate.smallModelUseDefault;
+    }
+    if (typeof candidate.smallModelOverride === 'string') {
+      const trimmed = candidate.smallModelOverride.trim();
+      result.smallModelOverride = trimmed.length > 0 ? trimmed : undefined;
+    }
     if (typeof candidate.defaultGitIdentityId === 'string') {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;
@@ -488,6 +531,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
+    }
+    if (typeof candidate.promptNavigatorEnabled === 'boolean') {
+      result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
     }
     if (typeof candidate.expandedEditorToolbar === 'boolean') {
       result.expandedEditorToolbar = candidate.expandedEditorToolbar;

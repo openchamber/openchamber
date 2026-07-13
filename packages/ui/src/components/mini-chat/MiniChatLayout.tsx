@@ -8,6 +8,7 @@ import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDro
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { invokeDesktop, isElectronShell } from '@/lib/desktop';
+import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { useSessionMessages, useSessions } from '@/sync/sync-context';
@@ -69,9 +70,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const [pinned, setPinned] = React.useState(false);
   const macosMajor = typeof window !== 'undefined' ? window.__OPENCHAMBER_MACOS_MAJOR__ ?? 0 : 0;
   const hasMacTrafficLights = Number.isFinite(macosMajor) && macosMajor > 0;
-  const isWindowsElectronDesktop = typeof window !== 'undefined'
-    && Boolean(window.__OPENCHAMBER_ELECTRON__)
-    && window.__OPENCHAMBER_PLATFORM__ === 'win32';
+  const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
   const macosHeaderSizeClass = hasMacTrafficLights
     ? macosMajor >= 26
       ? 'h-12'
@@ -256,10 +255,13 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       className={cn(
         'flex items-center gap-3 bg-background pr-3',
         hasMacTrafficLights ? 'pl-[5.5rem]' : 'pl-3',
-        isWindowsElectronDesktop ? 'h-12' : macosHeaderSizeClass || 'min-h-14',
+        usesFramelessChrome ? 'h-12' : macosHeaderSizeClass || 'min-h-14',
       )}
       style={dragRegionStyle}
     >
+      {usesFramelessChrome && windowControlsSide === 'left' ? (
+        <WindowsWindowControls visible position="left" />
+      ) : null}
       <SessionSwitcherDropdown>
         <button
           type="button"
@@ -318,7 +320,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       >
         <Icon name="external-link" className="h-4 w-4" />
       </Button>
-      <WindowsWindowControls visible={isWindowsElectronDesktop} />
+      <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
     </header>
   );
 };

@@ -19,6 +19,7 @@ import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
+import { normalizePath } from "@/lib/pathNormalization";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
@@ -281,7 +282,7 @@ type DefaultAgentModelSelection = {
 // fresh draft (applyDefaultModelAgentSelection), so the two paths stay identical.
 //
 //   Agent: settings.defaultAgent → opencode default_agent → build → first primary → first
-//   Model: settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
+//   Model: project.defaultModel → settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
 //          → opencode/big-pickle → first
 //
 // The opencode default_agent / default model (config fields on the OpenCode server) are honored
@@ -292,6 +293,7 @@ type DefaultAgentModelSelection = {
 const resolveDefaultAgentModelSelection = ({
     agents,
     providers,
+    projectDefaultModel,
     settingsDefaultAgent,
     settingsDefaultModel,
     settingsDefaultVariant,
@@ -300,6 +302,7 @@ const resolveDefaultAgentModelSelection = ({
 }: {
     agents: Agent[];
     providers: ProviderWithModelList[];
+    projectDefaultModel?: string;
     settingsDefaultAgent?: string;
     settingsDefaultModel?: string;
     settingsDefaultVariant?: string;
@@ -348,12 +351,14 @@ const resolveDefaultAgentModelSelection = ({
     let modelId: string | undefined;
     let variant: string | undefined;
 
-    if (settingsDefaultModel) {
-        const parsed = parseModelString(settingsDefaultModel);
+    const effectiveDefaultModel = projectDefaultModel || settingsDefaultModel;
+
+    if (effectiveDefaultModel) {
+        const parsed = parseModelString(effectiveDefaultModel);
         if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
-            variant = resolveVariant(providerId, modelId, settingsDefaultVariant);
+            variant = resolveVariant(providerId, modelId, projectDefaultModel ? undefined : settingsDefaultVariant);
         }
     }
 
@@ -738,9 +743,9 @@ const rememberWorktreeProject = (worktree: string, project: string): void => {
 };
 
 const normalizeConfigPath = (value: string | null | undefined): string | null => {
-    const trimmed = typeof value === 'string' ? value.trim() : '';
-    if (!trimmed) return null;
-    return trimmed.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+    const result = normalizePath(value);
+    if (result === null) return null;
+    return result || '/';
 };
 
 const getKnownProjectDirectories = (): string[] => {
@@ -1004,7 +1009,7 @@ interface ConfigStore {
     sttLocalModel: string;
     sttLanguage: string;
     showMessageTTSButtons: boolean;
-    ttsInputMode: 'sanitized' | 'raw';
+    ttsInputMode: 'sanitized' | 'raw' | 'summarized';
     // Summarization settings
     summarizeMessageTTS: boolean;
     summarizeVoiceConversation: boolean;
@@ -1030,7 +1035,7 @@ interface ConfigStore {
     setSttLocalModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
     setShowMessageTTSButtons: (show: boolean) => void;
-    setTtsInputMode: (mode: 'sanitized' | 'raw') => void;
+    setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => void;
     setSummarizeMessageTTS: (enabled: boolean) => void;
     setSummarizeVoiceConversation: (enabled: boolean) => void;
     setSummarizeCharacterThreshold: (threshold: number) => void;
@@ -1048,7 +1053,7 @@ interface ConfigStore {
     cycleCurrentVariant: () => void;
     getCurrentModelVariants: () => string[];
     setAgent: (agentName: string | undefined) => void;
-    applyDefaultModelAgentSelection: () => void;
+    applyDefaultModelAgentSelection: (options?: { projectDefaultModel?: string }) => void;
     applyOpenCodeConfigDefaults: (directory?: string | null, source?: string, config?: Config) => void;
     setSelectedProvider: (providerId: string) => void;
     setSettingsDefaultModel: (model: string | undefined) => void;
@@ -1299,6 +1304,7 @@ export const useConfigStore = create<ConfigStore>()(
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('ttsInputMode');
                         if (saved === 'raw') return 'raw' as const;
+                        if (saved === 'summarized') return 'summarized' as const;
                     }
                     return 'sanitized' as const;
                 })(),
@@ -2496,10 +2502,10 @@ export const useConfigStore = create<ConfigStore>()(
 
                 // Re-applies the same priority cascade used at app startup (see loadAgents):
                 //   agent: settings.defaultAgent → build → first primary → first agent
-                //   model: settings.defaultModel → agent's preferred model → opencode/big-pickle → first
+                //   model: project.defaultModel → settings.defaultModel → agent's preferred model → opencode/big-pickle → first
                 // Used when entering a fresh draft session so model/agent reset to defaults
                 // instead of sticking to the previously open session's selection.
-                applyDefaultModelAgentSelection: () => {
+                applyDefaultModelAgentSelection: (options) => {
                     const {
                         agents,
                         providers,
@@ -2522,6 +2528,7 @@ export const useConfigStore = create<ConfigStore>()(
                     } = resolveDefaultAgentModelSelection({
                         agents,
                         providers,
+                        projectDefaultModel: options?.projectDefaultModel,
                         settingsDefaultAgent,
                         settingsDefaultModel,
                         settingsDefaultVariant,
@@ -2925,7 +2932,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
-                setTtsInputMode: (mode: 'sanitized' | 'raw') => {
+                setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => {
                     set({ ttsInputMode: mode });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('ttsInputMode', mode);

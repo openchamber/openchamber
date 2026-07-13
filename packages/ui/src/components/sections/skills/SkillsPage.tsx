@@ -39,6 +39,7 @@ import { shikiHighlightExtension } from '@/lib/codemirror/shikiHighlight';
 import { getResolvedShikiTheme } from '@/lib/shiki/appThemeRegistry';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
@@ -244,22 +245,24 @@ const SkillsInstalledPage: React.FC = () => {
     loadSkillDetails();
   }, [selectedSkill, isNewSkill, selectedSkillName, skills, skillDraft, getSkillDetail]);
 
+  const editorFontSize = useUIStore((state) => state.editorFontSize);
+
   const skillEditorExtensions = React.useMemo<Extension[]>(() => {
-    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme)];
+    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, { fontSize: editorFontSize })];
     const markdownExtension = languageByExtension(SKILL_DOCUMENT_PATH);
     if (markdownExtension) {
       extensions.push(markdownExtension);
     }
     extensions.push(EditorView.lineWrapping);
     return extensions;
-  }, [currentTheme]);
+  }, [currentTheme, editorFontSize]);
 
   const supportingFileEditorExtensions = React.useMemo<Extension[]>(() => {
     const filePath = newFileName.trim() || 'supporting-file.md';
     // Shiki token colors for code supporting files; markdown stays on lezer.
     const shikiLanguage = getLanguageFromExtension(filePath);
     const useShiki = Boolean(shikiLanguage) && shikiLanguage !== 'markdown';
-    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false } : undefined)];
+    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme, useShiki ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const languageExtension = languageByExtension(filePath);
     if (languageExtension) {
       extensions.push(languageExtension);
@@ -273,7 +276,7 @@ const SkillsInstalledPage: React.FC = () => {
     }
     extensions.push(EditorView.lineWrapping);
     return extensions;
-  }, [currentTheme, newFileName]);
+  }, [currentTheme, newFileName, editorFontSize]);
 
   const handleDescriptionChange = React.useCallback((nextDescription: string) => {
     setDescription(nextDescription);

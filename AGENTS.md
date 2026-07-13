@@ -91,6 +91,12 @@ Notification message preparation utilities for system notifications, including t
 
 - Module docs: `packages/web/server/lib/notifications/DOCUMENTATION.md`
 
+##### permission-auto-accept
+
+Persistent server-owned permission auto-accept policy, subagent inheritance, retries, and reconnect reconciliation.
+
+- Module docs: `packages/web/server/lib/permission-auto-accept/DOCUMENTATION.md`
+
 ##### scheduled-tasks
 
 Scheduled task persistence, execution, and event fanout for recurring sessions.
@@ -114,6 +120,12 @@ WebSocket protocol utilities for terminal input handling including message norma
 Server-side text-to-speech services and summarization helpers for `/api/tts/*` endpoints.
 
 - Module docs: `packages/web/server/lib/tts/DOCUMENTATION.md`
+
+##### relay
+
+Host side of the private relay: outbound E2EE tunnel that lets remote clients reach this instance through OpenChamber-hosted relay infrastructure without inbound exposure. Load the `relay-transport` skill before changing it or any WebSocket/streaming endpoint that rides it.
+
+- Module docs: `packages/web/server/lib/relay/DOCUMENTATION.md`
 
 ##### tunnels
 
@@ -341,6 +353,7 @@ Project skills live under `.agents/skills/*/SKILL.md`. Before editing, agents **
 | Settings pages, settings dialogs, configuration UI, or visual/layout changes inside Settings | `skill({ name: "settings-ui-patterns" })` |
 | Drag-to-reorder, sortable lists/chips/grids, or `@dnd-kit` behavior including touch/mobile and wrapping variable-width items | `skill({ name: "drag-to-reorder" })` |
 | iOS Simulator preview/control for the mobile app, `serve-sim`, simulator taps/typing/gestures/rotation, or headless install/launch workflows outside Xcode | `skill({ name: "serve-sim" })` |
+| WebSocket/SSE/streaming endpoints (terminal, dictation/voice, event stream, notifications), opening a WebSocket in shared UI, runtime transport refactors (`runtime-fetch`/`runtime-url`/`runtime-switch`/`runtime-auth`), the private relay tunnel, or anything under `packages/ui/src/lib/relay` or `packages/web/server/lib/relay` | `skill({ name: "relay-transport" })` |
 
 Skill docs are the source of truth for detailed patterns. Do not duplicate their full guidance here; load the skill and follow it before making matching changes.
 

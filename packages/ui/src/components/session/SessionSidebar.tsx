@@ -35,6 +35,7 @@ import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
+import { ShareOpinionDialog } from '@/components/feedback/ShareOpinionDialog';
 import { SessionGroupSection } from './sidebar/SessionGroupSection';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarActivitySections } from './sidebar/SidebarActivitySections';
@@ -44,7 +45,7 @@ import { SessionNodeItem } from './sidebar/SessionNodeItem';
 import type { SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { listProjectWorktrees, worktreeMapsEqual } from '@/lib/worktrees/worktreeManager';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SortableDragHandleProps } from './sidebar/sortableItems';
@@ -80,6 +81,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 
+const SHARE_OPINION_TOAST_STORAGE_KEY = 'openchamber.shareOpinionToast.dismissed.v2';
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
@@ -196,6 +198,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const newWorktreeDialogOpen = useUIStore((state) => state.isNewWorktreeDialogOpen);
   const setNewWorktreeDialogOpen = useUIStore((state) => state.setNewWorktreeDialogOpen);
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
+  const [shareOpinionDialogOpen, setShareOpinionDialogOpen] = React.useState(false);
   const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = React.useState<string | null>(null);
   const [renameFolderDraft, setRenameFolderDraft] = React.useState('');
@@ -317,6 +320,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const liveSessions = useAllLiveSessions();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
+  const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -377,6 +381,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       allowEmptyDirectorySet: !isVSCode,
     }));
   }, [globalActiveSessions, isVSCode, knownSessionDirectories, liveSessions]);
+
+  const persistenceSessions = React.useMemo(
+    () => [...globalActiveSessions, ...archivedSessions],
+    [archivedSessions, globalActiveSessions],
+  );
 
   const syncSessionStructureSignature = React.useMemo(
     () => liveSessions
@@ -469,10 +478,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       if (cancelled) return;
 
-      useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
-      });
+      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      if (!worktreeMapsEqual(worktreesByProject, currentByProject)) {
+        useSessionUIStore.setState({
+          availableWorktrees: allWorktrees,
+          availableWorktreesByProject: worktreesByProject,
+        });
+      }
     };
 
     // Skip if we already discovered worktrees for this exact project set.
@@ -527,7 +540,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const { scheduleCollapsedProjectsPersist } = useSidebarPersistence({
     isVSCode,
-    hasLoadedGlobalSessions,
+    hasAuthoritativeGlobalSessions,
     safeStorage,
     keys: {
       sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,
@@ -538,7 +551,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       projectActiveSession: PROJECT_ACTIVE_SESSION_STORAGE_KEY,
       groupCollapse: GROUP_COLLAPSE_STORAGE_KEY,
     },
-    sessions,
+    sessions: persistenceSessions,
     pinnedSessionIds,
     setPinnedSessionIds,
     groupOrderByProject,
@@ -602,12 +615,23 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     [projects, editingProjectDialogId],
   );
 
-  const handleSaveProjectEdit = React.useCallback((data: { label: string; icon: string | null; color: string | null; iconBackground: string | null }) => {
+  const handleSaveProjectEdit = React.useCallback((data: {
+    label: string;
+    icon: string | null;
+    color: string | null;
+    iconBackground: string | null;
+    defaultModel: string | null;
+  }) => {
     if (!editingProjectDialogId) {
       return;
     }
-    updateProjectMeta(editingProjectDialogId, data);
-    setEditingProjectDialogId(null);
+    updateProjectMeta(editingProjectDialogId, {
+      label: data.label,
+      icon: data.icon,
+      color: data.color,
+      iconBackground: data.iconBackground,
+      defaultModel: data.defaultModel ?? null,
+    });
   }, [editingProjectDialogId, updateProjectMeta]);
 
   const openNewWorktreeDialog = React.useCallback(() => {
@@ -634,6 +658,36 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       setUpdateDialogOpen(true);
     });
   }, [t, updateStore]);
+
+  const handleOpenShareOpinionDialog = React.useCallback(() => {
+    setShareOpinionDialogOpen(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      if (window.localStorage.getItem(SHARE_OPINION_TOAST_STORAGE_KEY) === 'true') {
+        return;
+      }
+      window.localStorage.setItem(SHARE_OPINION_TOAST_STORAGE_KEY, 'true');
+    } catch {
+      // If storage is unavailable, still show once for this sidebar mount.
+    }
+    const timeoutId = window.setTimeout(() => {
+      toast.info(t('shareOpinion.toast.title'), {
+        description: t('shareOpinion.toast.description'),
+        action: {
+          label: t('shareOpinion.actions.shareOpinion'),
+          onClick: () => setShareOpinionDialogOpen(true),
+        },
+        duration: 12_000,
+      });
+    }, 1_000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [t]);
 
   const handleOpenSettings = React.useCallback(() => {
     if (mobileVariant) {
@@ -877,6 +931,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         color?: string;
         iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
         iconBackground?: string;
+        addedAt?: number;
+        lastOpenedAt?: number;
+        sidebarCollapsed?: boolean;
       }>;
   }, [projects]);
 
@@ -975,13 +1032,56 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     lastRepoStatusRef.current = Boolean(projectRepoStatus.get(activeProjectId));
   }
 
+  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
+  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
+  const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
+  const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
+
+  const sortedProjects = React.useMemo(() => {
+    const list = [...normalizedProjects];
+
+    switch (projectSortOrder) {
+      case 'a-z':
+        list.sort((a, b) => {
+          const aLabel = (a.label || a.path).toLowerCase();
+          const bLabel = (b.label || b.path).toLowerCase();
+          return aLabel.localeCompare(bLabel);
+        });
+        break;
+      case 'z-a':
+        list.sort((a, b) => {
+          const aLabel = (a.label || a.path).toLowerCase();
+          const bLabel = (b.label || b.path).toLowerCase();
+          return bLabel.localeCompare(aLabel);
+        });
+        break;
+      case 'date-added':
+        list.sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
+        break;
+      case 'recent':
+        list.sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
+        break;
+      case 'manual': {
+        const orderMap = new Map(manualProjectOrder.map((id, i) => [id, i]));
+        list.sort((a, b) => {
+          const ai = orderMap.get(a.id) ?? Infinity;
+          const bi = orderMap.get(b.id) ?? Infinity;
+          return ai - bi;
+        });
+        break;
+      }
+    }
+
+    return list;
+  }, [normalizedProjects, projectSortOrder, manualProjectOrder]);
+
   const {
     projectSections,
     groupSearchDataByGroup,
     sectionsForRender,
     searchMatchCount,
   } = useSessionSidebarSections({
-    normalizedProjects,
+    normalizedProjects: sortedProjects,
     getSessionsForProject,
     getArchivedSessionsForProject,
     availableWorktreesByProject,
@@ -1086,9 +1186,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
     return meta;
   }, [projectSections, homeDirectory]);
-
-  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
-  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
 
   const activeNowSessions = React.useMemo(() => {
     if (!showRecentSection || isVSCode) {
@@ -1592,6 +1689,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         removeProject={removeProject}
         projectHeaderSentinelRefs={projectHeaderSentinelRefs}
         reorderProjects={reorderProjects}
+        projectSortOrder={projectSortOrder}
         getOrderedGroups={getOrderedGroups}
         setGroupOrderByProject={setGroupOrderByProject}
         openSidebarMenuKey={openSidebarMenuKey}
@@ -1619,8 +1717,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}
+        onOpenShareOpinion={handleOpenShareOpinionDialog}
         showRuntimeButtons={!isVSCode}
         showUpdateButton={showSidebarUpdateButton}
+      />
+
+      <ShareOpinionDialog
+        open={shareOpinionDialogOpen}
+        onOpenChange={setShareOpinionDialogOpen}
       />
 
       <UpdateDialog
@@ -1636,23 +1740,16 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         runtimeType={updateStore.runtimeType}
       />
 
-      {editingProject ? (
-        <ProjectEditDialog
-          open={Boolean(editingProject)}
-          onOpenChange={(open) => {
-            if (!open) {
-              setEditingProjectDialogId(null);
-            }
-          }}
-          projectId={editingProject.id}
-          projectName={editingProject.label || formatDirectoryName(editingProject.path, homeDirectory)}
-          projectPath={editingProject.path}
-          initialIcon={editingProject.icon}
-          initialColor={editingProject.color}
-          initialIconBackground={editingProject.iconBackground}
-          onSave={handleSaveProjectEdit}
-        />
-      ) : null}
+      <ProjectEditDialog
+        open={Boolean(editingProject)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingProjectDialogId(null);
+          }
+        }}
+        project={editingProject}
+        onSave={handleSaveProjectEdit}
+      />
 
       <NewWorktreeDialog
         open={newWorktreeDialogOpen}

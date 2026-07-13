@@ -7,19 +7,36 @@ import {
   getDesktopLanAddress,
   getDesktopKeepAwake,
   getDesktopLaunchAtLogin,
+  getDesktopMinimizeToTray,
   isDesktopLocalOriginActive,
   isDesktopShell,
   restartDesktopApp,
   setDesktopKeepAwake,
   setDesktopLaunchAtLogin,
+  setDesktopMinimizeToTray,
+  usesFramelessElectronChrome,
+  type DesktopWindowControlsPosition,
 } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { useUIStore } from '@/stores/useUIStore';
+import { cn } from '@/lib/utils';
+
+const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
+  { id: 'auto', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsAuto' },
+  { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
+  { id: 'right', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsRight' },
+];
 
 export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
+  const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
+  const showWindowControlsPosition = usesFramelessElectronChrome();
+  const desktopWindowControlsPosition = useUIStore((state) => state.desktopWindowControlsPosition);
+  const setDesktopWindowControlsPosition = useUIStore((state) => state.setDesktopWindowControlsPosition);
   const [savedValue, setSavedValue] = React.useState(false);
   const [draftValue, setDraftValue] = React.useState(false);
   const [savedPassword, setSavedPassword] = React.useState('');
@@ -31,6 +48,9 @@ export const DesktopNetworkSettings: React.FC = () => {
   const [launchAtLoginSupported, setLaunchAtLoginSupported] = React.useState(false);
   const [launchAtLoginEnabled, setLaunchAtLoginEnabled] = React.useState(false);
   const [isSavingLaunchAtLogin, setIsSavingLaunchAtLogin] = React.useState(false);
+  const [minimizeToTraySupported, setMinimizeToTraySupported] = React.useState(false);
+  const [minimizeToTrayEnabled, setMinimizeToTrayEnabled] = React.useState(false);
+  const [isSavingMinimizeToTray, setIsSavingMinimizeToTray] = React.useState(false);
   const [keepAwakeSupported, setKeepAwakeSupported] = React.useState(false);
   const [keepAwakeEnabled, setKeepAwakeEnabled] = React.useState(false);
   const [isSavingKeepAwake, setIsSavingKeepAwake] = React.useState(false);
@@ -114,6 +134,27 @@ export const DesktopNetworkSettings: React.FC = () => {
 
   React.useEffect(() => {
     if (!isLocalDesktop) {
+      setMinimizeToTraySupported(false);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const status = await getDesktopMinimizeToTray();
+      if (cancelled) {
+        return;
+      }
+      setMinimizeToTraySupported(status?.supported === true);
+      setMinimizeToTrayEnabled(status?.enabled === true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocalDesktop]);
+
+  React.useEffect(() => {
+    if (!isLocalDesktop) {
       setKeepAwakeSupported(false);
       return;
     }
@@ -185,6 +226,11 @@ export const DesktopNetworkSettings: React.FC = () => {
     }
   }, []);
 
+  const handleWindowControlsPositionChange = React.useCallback((value: DesktopWindowControlsPosition) => {
+    setDesktopWindowControlsPosition(value);
+    void updateDesktopSettings({ desktopWindowControlsPosition: value });
+  }, [setDesktopWindowControlsPosition]);
+
   const handleLaunchAtLoginToggle = React.useCallback(async () => {
     if (!launchAtLoginSupported || isSavingLaunchAtLogin) {
       return;
@@ -208,6 +254,33 @@ export const DesktopNetworkSettings: React.FC = () => {
       setIsSavingLaunchAtLogin(false);
     }
   }, [isSavingLaunchAtLogin, launchAtLoginEnabled, launchAtLoginSupported, t]);
+
+  const handleMinimizeToTrayToggle = React.useCallback(async () => {
+    if (!minimizeToTraySupported || isSavingMinimizeToTray) {
+      return;
+    }
+
+    const nextValue = !minimizeToTrayEnabled;
+    setMinimizeToTrayEnabled(nextValue);
+    setIsSavingMinimizeToTray(true);
+    setError(null);
+
+    try {
+      const status = await setDesktopMinimizeToTray(nextValue);
+      if (!status) {
+        throw new Error(t('settings.openchamber.desktopNetwork.error.minimizeToTraySaveFailed'));
+      }
+      if (!status.supported) {
+        throw new Error(t('settings.openchamber.desktopNetwork.error.minimizeToTrayUnsupported'));
+      }
+      setMinimizeToTrayEnabled(status.enabled);
+    } catch (cause) {
+      setMinimizeToTrayEnabled(!nextValue);
+      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.minimizeToTraySaveFailed'));
+    } finally {
+      setIsSavingMinimizeToTray(false);
+    }
+  }, [isSavingMinimizeToTray, minimizeToTrayEnabled, minimizeToTraySupported, t]);
 
   const handleKeepAwakeToggle = React.useCallback(async () => {
     if (!keepAwakeSupported || isSavingKeepAwake) {
@@ -271,12 +344,54 @@ export const DesktopNetworkSettings: React.FC = () => {
     }
   }, [draftPassword, draftValue, isDirty, t]);
 
-  if (!isLocalDesktop) {
+  if (!isLocalDesktop && !showWindowControlsPosition) {
     return null;
   }
 
   return (
     <div className="mb-8">
+      {showWindowControlsPosition ? (
+        <>
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.desktopNetwork.field.windowControlsPosition')}</h3>
+          </div>
+          <section className="space-y-2 px-2 pb-2 pt-0">
+            <div data-settings-item="sessions.desktop-window-controls-position" className="space-y-1 py-1.5">
+              <div className="typography-micro text-muted-foreground/70">
+                {t('settings.openchamber.desktopNetwork.field.windowControlsPositionDescription')}
+              </div>
+              <div
+                className="mt-1 flex flex-wrap items-center gap-1"
+                role="group"
+                aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsPositionAria')}
+              >
+                {WINDOW_CONTROLS_POSITION_OPTIONS.map((option) => {
+                  const selected = desktopWindowControlsPosition === option.id;
+                  return (
+                    <Button
+                      key={option.id}
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      className={cn(
+                        '!font-normal',
+                        selected ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10' : 'text-foreground',
+                      )}
+                      aria-pressed={selected}
+                      onClick={() => handleWindowControlsPositionChange(option.id)}
+                    >
+                      {tUnsafe(option.labelKey)}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {!isLocalDesktop ? null : (
+        <>
       <div className="mb-1 px-1">
         <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.desktopNetwork.title')}</h3>
       </div>
@@ -306,6 +421,35 @@ export const DesktopNetworkSettings: React.FC = () => {
               <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.launchAtLogin')}</div>
               <div className="typography-micro text-muted-foreground/70">
                 {t('settings.openchamber.desktopNetwork.field.launchAtLoginDescription')}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {minimizeToTraySupported ? (
+          <div
+            data-settings-item="sessions.desktop-minimize-to-tray"
+            className="group flex cursor-pointer items-start gap-2 py-1.5"
+            role="button"
+            tabIndex={0}
+            onClick={handleMinimizeToTrayToggle}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleMinimizeToTrayToggle();
+              }
+            }}
+          >
+            <Checkbox
+              checked={minimizeToTrayEnabled}
+              onChange={handleMinimizeToTrayToggle}
+              ariaLabel={t('settings.openchamber.desktopNetwork.field.minimizeToTrayAria')}
+              disabled={isSavingMinimizeToTray}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.minimizeToTray')}</div>
+              <div className="typography-micro text-muted-foreground/70">
+                {t('settings.openchamber.desktopNetwork.field.minimizeToTrayDescription')}
               </div>
             </div>
           </div>
@@ -420,6 +564,8 @@ export const DesktopNetworkSettings: React.FC = () => {
           </Button>
         </div>
       </section>
+        </>
+      )}
     </div>
   );
 };

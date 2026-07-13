@@ -1,3 +1,35 @@
+## [1.16.0] - 2026-07-13
+
+- Chat: sessions with an active [goal](https://docs.openchamber.dev/session-goals/) (started from the web or desktop app) show the goal strip with its live status above the composer.
+- Chat: code blocks highlight correctly again — the webview's security policy was blocking the syntax highlighter (thanks to @bashrusakh).
+- Chat: queued messages now send when the session is already idle instead of waiting forever (thanks to @bashrusakh).
+- Chat: pending agent questions stay answerable after a restart, and session renames no longer flicker back to the old title (thanks to @bashrusakh).
+- Chat: tool output rendering no longer breaks on tools that return non-text results (thanks to @bashrusakh).
+- Settings: a new editor font size setting for the code editor (thanks to @bashrusakh).
+- Sessions: pinned sessions survive refreshes (thanks to @bashrusakh).
+- Agents: saving agent settings from the UI no longer drops custom YAML frontmatter fields (thanks to @bashrusakh).
+- Notifications: subagent completion notifications now follow the same settings as the main app.
+- Usage: OpenCode Go usage tracking was added.
+- Windows: paths no longer mismatch on drive letter casing, which could split one project into duplicates (thanks to @bashrusakh).
+
+## [1.15.0] - 2026-07-10
+
+- Chat/Tools: every tool call now expands to show its input, result, and errors, including MCP, plugin, and custom tools; Read and Skill stay compact links to their files. JSON results now offer navigable summary, tree, and raw views.
+- Chat/Tools: expanded file-edit and patch results include per-file buttons to open the diff or jump to the first changed line in the editor.
+- Chat/Thinking: reasoning parts stay separate and in chronological order instead of merging into one block, and collapsed previews no longer show empty trailing HTML comments.
+- Chat: Mermaid diagrams now have zoom controls (thanks to @c-w-xiaohei).
+- Chat: code blocks can show line numbers that stay aligned while streaming, and a new Wrap Code Block Lines setting controls long-line wrapping.
+- Chat: with Sticky User Header enabled, user messages no longer float over earlier messages in long conversations.
+- Chat: if sending a message times out or loses the connection after OpenCode accepted it, the extension now keeps the sent message instead of rolling it back as failed.
+- Editor Integration: the "Add to Context" command and active-editor pin-selection now use workspace-relative filenames so the model reads the correct file when names collide (thanks to @Catan).
+
+## [1.14.1] - 2026-07-07
+
+- Chat: the timeline dialog can now load older messages when the current session history has not all been fetched yet.
+- Chat: file references with line ranges like `src/file.ts:10-20` are now clickable in messages (thanks to @Catan).
+- Chat: favorite models now stay saved after restarting the extension (thanks to @Catan).
+- Settings: closing Settings returns to the previous extension view instead of always showing the sessions list (thanks to @Catan).
+
 ## [1.14.0] - 2026-07-05
 
 - Chat: loading older messages keeps your scroll position steady.

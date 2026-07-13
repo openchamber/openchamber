@@ -1133,6 +1133,15 @@ export const VoiceSettings: React.FC = () => {
                                         >
                                             {t('settings.voice.page.field.ttsInputModeRaw')}
                                         </Button>
+                                        <Button
+                                            variant="chip"
+                                            size="xs"
+                                            aria-pressed={ttsInputMode === 'summarized'}
+                                            onClick={() => setTtsInputMode('summarized')}
+                                            className="!font-normal"
+                                        >
+                                            {t('settings.voice.page.field.ttsInputModeSummarized')}
+                                        </Button>
                                     </div>
                                 </div>
                             </div>

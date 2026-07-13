@@ -30,9 +30,12 @@ import {
     formatEditOutput,
     detectLanguageFromOutput,
     formatInputForDisplay,
+    renderTodoOutput,
     tryParseJsonOutput,
+    coerceToText,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
+import { JsonSummaryView } from './JsonSummaryView';
 import { Icon } from "@/components/icon/Icon";
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
@@ -43,7 +46,8 @@ import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
-import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
+import { getDiffPatchEntries, getPatchText, type DiffPatchEntry } from './toolDiffUtils';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -848,17 +852,17 @@ const ToolScrollableTextOutput: React.FC<{
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
-    const [jsonViewMode, setJsonViewMode] = React.useState<'formatted' | 'raw'>('formatted');
+    const [jsonViewMode, setJsonViewMode] = React.useState<'summary' | 'formatted' | 'raw'>('summary');
     const [copiedJson, setCopiedJson] = React.useState(false);
 
     React.useEffect(() => {
-        setJsonViewMode('formatted');
+        setJsonViewMode('summary');
         setCopiedJson(false);
     }, [renderedOutput]);
 
-    const handleToggleJsonView = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const handleJsonViewChange = React.useCallback((view: 'summary' | 'formatted' | 'raw', event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
-        setJsonViewMode((prev) => prev === 'formatted' ? 'raw' : 'formatted');
+        setJsonViewMode(view);
     }, []);
 
     const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -881,13 +885,35 @@ const ToolScrollableTextOutput: React.FC<{
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
-                        onClick={handleToggleJsonView}
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'summary' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('summary', event)}
                         onPointerDown={(event) => event.stopPropagation()}
-                        aria-label={jsonViewMode === 'formatted' ? t('chat.toolPart.showRawJson') : t('chat.toolPart.showFormattedJson')}
-                        title={jsonViewMode === 'formatted' ? t('chat.toolPart.showRawJson') : t('chat.toolPart.showFormattedJson')}
+                        aria-label={t('chat.toolPart.showNavigableJson')}
+                        title={t('chat.toolPart.showNavigableJson')}
                     >
-                        <Icon name={jsonViewMode === 'formatted' ? 'code-box' : 'list-check-2'} className="h-3.5 w-3.5" />
+                        <Icon name="list-unordered" className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'formatted' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('formatted', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showFormattedJson')}
+                        title={t('chat.toolPart.showFormattedJson')}
+                    >
+                        <Icon name="node-tree" className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'raw' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('raw', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showRawJson')}
+                        title={t('chat.toolPart.showRawJson')}
+                    >
+                        <Icon name="code-box" className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                         variant="ghost"
@@ -901,7 +927,9 @@ const ToolScrollableTextOutput: React.FC<{
                         <Icon name={copiedJson ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
                     </Button>
                 </div>
-                {jsonViewMode === 'formatted' ? (
+                {jsonViewMode === 'summary' ? (
+                    <JsonSummaryView data={jsonResult.data} />
+                ) : jsonViewMode === 'formatted' ? (
                     <JsonTreeViewer
                         data={jsonResult.data}
                         initiallyExpandedDepth={1}
@@ -1347,7 +1375,10 @@ const TaskToolSummary: React.FC<{
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
         if (sessionId && currentDirectory) {
-            if (isMobile || runtime?.runtime.isVSCode) {
+            // In contexts with no ContextPanel (embedded session-chat iframe)
+            // or single-surface layouts (mobile, VS Code), navigate in place.
+            // Otherwise open a new side-panel tab.
+            if (isEmbeddedSessionChat() || isMobile || runtime?.runtime.isVSCode) {
                 setCurrentSession(sessionId, currentDirectory);
                 return;
             }
@@ -1654,6 +1685,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     onShowPopup,
 }) => {
     const { t } = useI18n();
+    const runtime = React.useContext(RuntimeAPIContext);
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const stateWithData = state as ToolStateWithMetadata;
@@ -1699,6 +1731,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     }, [input, part.tool]);
     const hasInputText = !hideToolInputPreview && inputTextContent.trim().length > 0;
     const isWriteLikeTool = part.tool === 'write' || part.tool === 'create' || part.tool === 'file_write';
+    const isTodoTool = part.tool === 'todowrite' || part.tool === 'todoread';
+    const todoContent = React.useMemo(() => {
+        if (Array.isArray(input?.todos)) {
+            return JSON.stringify(input.todos);
+        }
+        return outputString;
+    }, [input?.todos, outputString]);
     const writeLikeInputPatch = React.useMemo(() => {
         if (!isWriteLikeTool || !hasInputText) {
             return undefined;
@@ -1732,6 +1771,36 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     );
 
     const renderResultContent = () => {
+        const getEntryAbsolutePath = (entry: DiffPatchEntry) => (
+            entry.title.startsWith('/') ? entry.title : `${currentDirectory}/${entry.title}`.replace(/\/+/g, '/')
+        );
+        const openEntryFile = (entry: DiffPatchEntry, event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            const line = extractFirstChangedLineFromDiff(entry.patch);
+            const absolutePath = getEntryAbsolutePath(entry);
+            if (runtime?.editor && runtime.runtime.isVSCode) {
+                void runtime.editor.openFile(absolutePath, line);
+                return;
+            }
+            useUIStore.getState().openContextFileAtLine(currentDirectory, absolutePath, line ?? 1, 1);
+        };
+        const openEntryDiff = (entry: DiffPatchEntry, event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            const line = extractFirstChangedLineFromDiff(entry.patch);
+            const absolutePath = getEntryAbsolutePath(entry);
+            if (runtime?.editor && runtime.runtime.isVSCode) {
+                void runtime.editor.openDiff('', absolutePath, `${getRelativePath(absolutePath, currentDirectory)} (changes)`, { line, patch: entry.patch });
+                return;
+            }
+            const store = useUIStore.getState();
+            const relativePath = getRelativePath(absolutePath, currentDirectory);
+            if (store.isMobile) {
+                store.navigateToDiff(relativePath);
+                store.setRightSidebarOpen(false);
+                return;
+            }
+            store.openContextDiff(currentDirectory, relativePath);
+        };
         const renderDiagnosticsSection = () => {
             if (!diagnosticSection) {
                 return null;
@@ -1804,7 +1873,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             color: 'var(--status-error)',
                             borderColor: 'var(--status-error-border)',
                         }}>
-                            {state.error}
+                            {coerceToText(state.error)}
                         </div>
                     </div>
                 );
@@ -1820,14 +1889,14 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         {questionInput.questions.map((q, index) => (
                             <div key={index} className="space-y-0.5">
                                 {q.header ? (
-                                    <div className="typography-micro text-muted-foreground">{q.header}</div>
+                                    <div className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
                                 ) : null}
-                                <div className="typography-meta text-foreground">{q.question}</div>
+                                <div className="typography-meta text-foreground">{coerceToText(q.question)}</div>
                                 {Array.isArray(q.options) && q.options.length > 0 ? (
                                     <div className="flex flex-wrap gap-1 mt-0.5">
                                         {q.options.map((opt) => (
-                                            <span key={opt.label} className="typography-micro px-1.5 py-0.5 rounded bg-muted/30 border border-border/30 text-muted-foreground">
-                                                {opt.label}
+                                            <span key={coerceToText(opt.label)} className="typography-micro px-1.5 py-0.5 rounded bg-muted/30 border border-border/30 text-muted-foreground">
+                                                {coerceToText(opt.label)}
                                             </span>
                                         ))}
                                     </div>
@@ -1845,7 +1914,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (part.tool === 'task' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
+                    <SimpleMarkdownRenderer content={coerceToText(outputString)} variant="tool" onShowPopup={onShowPopup} />
                 </div>
             );
         }
@@ -1855,11 +1924,31 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
                         <div key={entry.id} className="w-full min-w-0">
-                            {diffEntries.length > 1 ? (
-                                <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground rounded-lg mb-1">
+                            <div className="mb-1 flex min-w-0 items-center gap-1 px-2 py-1">
+                                <div className="min-w-0 flex-1 typography-meta font-medium text-muted-foreground">
                                     {renderPathLikeGitChanges(entry.title)}
                                 </div>
-                            ) : null}
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                                    onClick={(event) => openEntryFile(entry, event)}
+                                    aria-label={t('chat.toolPart.openFileAtFirstChange')}
+                                    title={t('chat.toolPart.openFileAtFirstChange')}
+                                >
+                                    <Icon name="file-edit" className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                                    onClick={(event) => openEntryDiff(entry, event)}
+                                    aria-label={t('chat.toolPart.openFileDiff')}
+                                    title={t('chat.toolPart.openFileDiff')}
+                                >
+                                    <Icon name="git-pull-request" className="h-3.5 w-3.5" />
+                                </Button>
+                            </div>
                             {entry.renderMode === 'diff' ? (
                                 <DiffPreview
                                     diff={entry.patch}
@@ -1894,7 +1983,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (hasStringOutput && outputString.trim()) {
             return renderScrollableBlock(
                 <ToolScrollableTextOutput
-                    output={outputString}
+                    output={coerceToText(outputString)}
                     part={part}
                     metadata={metadata}
                     input={input}
@@ -1911,6 +2000,47 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             { maxHeightClass: 'max-h-60' }
         );
     };
+
+    if (isTodoTool) {
+        if (state.status === 'error' && 'error' in state) {
+            return (
+                <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-4">
+                    <div className="typography-meta font-medium text-muted-foreground/80 mb-1">{t('chat.toolPart.error')}</div>
+                    <div className="typography-meta p-2 rounded-xl border" style={{
+                        backgroundColor: 'var(--status-error-background)',
+                        color: 'var(--status-error)',
+                        borderColor: 'var(--status-error-border)',
+                    }}>
+                        {state.error}
+                    </div>
+                </div>
+            );
+        }
+
+        const todoOutput = renderTodoOutput(todoContent, {
+            total: t('chat.todo.total'),
+            inProgress: t('chat.todo.inProgress'),
+            pending: t('chat.todo.pending'),
+            completed: t('chat.todo.completed'),
+            cancelled: t('chat.todo.cancelled'),
+        }, { unstyled: true });
+
+        return (
+            <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-4">
+                {renderScrollableBlock(
+                    todoOutput ?? (
+                        <ToolScrollableTextOutput
+                            output={todoContent}
+                            part={part}
+                            metadata={metadata}
+                            input={input}
+                        />
+                    ),
+                    { className: 'p-2', maxHeightClass: 'max-h-[46vh]' },
+                )}
+            </div>
+        );
+    }
 
     return (
         <div
@@ -1972,7 +2102,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 color: 'var(--status-error)',
                                 borderColor: 'var(--status-error-border)',
                             }}>
-                                {state.error}
+                                {coerceToText(state.error)}
                             </div>
                         </div>
                     )}
