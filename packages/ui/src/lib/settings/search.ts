@@ -24,6 +24,7 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMac: boolean;
   // Windows desktop shell — for controls that only render on win32.
   isWindows: boolean;
+  tunnelCanAdminister: boolean | null;
 }
 
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -801,14 +802,14 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tunnel.field.provider',
     descriptionKey: 'settings.openchamber.tunnel.description',
     keywords: ['remote access', 'cloudflare', 'ngrok'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.tunnelCanAdminister === true,
   },
   {
     id: 'tunnel.type',
     page: 'tunnel',
     titleKey: 'settings.openchamber.tunnel.field.tunnelType',
     keywords: ['quick', 'managed remote', 'managed local'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.tunnelCanAdminister === true,
   },
   {
     id: 'tunnel.ttl',
@@ -816,7 +817,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tunnel.field.connectLinkTtl',
     descriptionKey: 'settings.openchamber.tunnel.field.tunnelSessionTtl',
     keywords: ['expiry', 'expiration', 'session ttl', 'connect link ttl'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.tunnelCanAdminister === true,
   },
   {
     id: 'tunnel.direct-e2ee',
@@ -824,14 +825,14 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tunnel.field.directE2eeLabel',
     descriptionKey: 'settings.openchamber.tunnel.field.directE2eeDescription',
     keywords: ['end-to-end encryption', 'e2ee', 'native app', 'direct e2ee'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.tunnelCanAdminister === true,
   },
   {
     id: 'tunnel.managed-remote',
     page: 'tunnel',
     titleKey: 'settings.openchamber.tunnel.section.savedManagedRemoteTunnels',
     keywords: ['cloudflare', 'hostname', 'token', 'managed remote'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.tunnelCanAdminister === true,
   },
   {
     id: 'tunnel.managed-local-config',
@@ -839,7 +840,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tunnel.field.configurationFile',
     descriptionKey: 'settings.openchamber.tunnel.note.managedLocalUsesConfig',
     keywords: ['cloudflared', 'config', 'yaml', 'json', 'managed local'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.tunnelCanAdminister === true,
   },
   {
     id: 'tunnel.start',
@@ -847,7 +848,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tunnel.actions.startTunnel',
     descriptionKey: 'settings.openchamber.tunnel.note.connectLinksOneTime',
     keywords: ['connect link', 'qr code', 'public url', 'remote access'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.tunnelCanAdminister === true,
   },
   {
     id: 'notifications.delivery',
