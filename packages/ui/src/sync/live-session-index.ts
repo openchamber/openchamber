@@ -30,7 +30,7 @@ import type { State } from "./types"
 import {
   areSessionListsEquivalent,
   areStatusMapsEquivalent,
-  areStatusesEquivalent,
+  getStatusPriority,
   getSessionUpdatedAt,
 } from "./live-aggregate"
 
@@ -41,6 +41,41 @@ const EMPTY_STATUS_MAP: Record<string, SessionStatus> = {}
 const EMPTY_SESSIONS: Session[] = []
 const EMPTY_LINEAGE: string[] = []
 
+type SessionCandidate = {
+  session: Session
+  updatedAt: number
+  directoryOrder: number
+  directory: string
+}
+
+type StatusCandidate = {
+  sessionId: string
+  status: SessionStatus
+  sessionUpdatedAt: number
+  priority: number
+  directoryOrder: number
+  directory: string
+}
+
+const isBetterSessionCandidate = (next: SessionCandidate, current: SessionCandidate | undefined): boolean => {
+  if (!current) return true
+  if (next.updatedAt !== current.updatedAt) {
+    return next.updatedAt > current.updatedAt
+  }
+  return next.directoryOrder >= current.directoryOrder
+}
+
+const isBetterStatusCandidate = (next: StatusCandidate, current: StatusCandidate | undefined): boolean => {
+  if (!current) return true
+  if (next.sessionUpdatedAt !== current.sessionUpdatedAt) {
+    return next.sessionUpdatedAt > current.sessionUpdatedAt
+  }
+  if (next.priority !== current.priority) {
+    return next.priority > current.priority
+  }
+  return next.directoryOrder >= current.directoryOrder
+}
+
 /**
  * LiveSessionIndex keeps the merged session/status view in sync with every
  * child store via incremental diffs. Construct one per SyncProvider mount.
@@ -50,11 +85,15 @@ export class LiveSessionIndex {
   private readonly sessionsById = new Map<string, Session>()
   private readonly statusById = new Map<string, SessionStatus>()
   private readonly parentById = new Map<string, string | undefined>()
+  private readonly sessionMetaById = new Map<string, SessionCandidate>()
+  private readonly statusMetaById = new Map<string, StatusCandidate>()
 
   private sortedSessions: { value: Session[] | null } = { value: null }
   private statusSnapshot: { value: Record<string, SessionStatus> | null } = { value: null }
   private prevStatusMapForCompare: Record<string, SessionStatus> = EMPTY_STATUS_MAP
   private prevSessionListForCompare: Session[] = EMPTY_SESSIONS
+  private readonly directoryOrderByName = new Map<string, number>()
+  private nextDirectoryOrder = 0
 
   // Per-store previous views. Used to diff the new slice against the last
   // seen slice from THIS store (not against the merged map) so we can detect
@@ -88,27 +127,40 @@ export class LiveSessionIndex {
    */
   private bulkIngest(states: Array<Pick<State, "session" | "session_status">>): void {
     let touched = false
-    for (const state of states) {
+    for (let index = 0; index < states.length; index += 1) {
+      const state = states[index]
+      const directoryOrder = index
       const sessions = state.session ?? []
+      const sessionById = new Map<string, Session>()
       for (const session of sessions) {
         if (!session?.id) continue
-        const id = session.id
-        const existing = this.sessionsById.get(id)
-        if (existing === session) continue
-        const nextUpdatedAt = getSessionUpdatedAt(session)
-        const existingUpdatedAt = existing ? getSessionUpdatedAt(existing) : -1
-        if (!existing || nextUpdatedAt > existingUpdatedAt) {
-          this.sessionsById.set(id, session)
-          this.parentById.set(id, (session as Session & { parentID?: string | null }).parentID)
-          touched = true
-        }
+        sessionById.set(session.id, session)
       }
+
+      for (const session of sessionById.values()) {
+        const candidate: SessionCandidate = {
+          session,
+          updatedAt: getSessionUpdatedAt(session),
+          directoryOrder,
+          directory: `bulk:${directoryOrder}`,
+        }
+        touched = this.considerSessionCandidate(candidate) || touched
+      }
+
       const statuses = state.session_status ?? {}
       for (const sessionId of Object.keys(statuses)) {
-        const next = statuses[sessionId]
-        if (areStatusesEquivalent(this.statusById.get(sessionId), next)) continue
-        this.statusById.set(sessionId, next)
-        touched = true
+        const status = statuses[sessionId]
+        const session = sessionById.get(sessionId)
+        if (!session) continue
+        const candidate: StatusCandidate = {
+          sessionId,
+          status,
+          sessionUpdatedAt: getSessionUpdatedAt(session),
+          priority: getStatusPriority(status),
+          directoryOrder,
+          directory: `bulk:${directoryOrder}`,
+        }
+        touched = this.considerStatusCandidate(candidate) || touched
       }
     }
     if (touched) {
@@ -120,6 +172,35 @@ export class LiveSessionIndex {
   constructor(childStores: ChildStoreManager) {
     this.childStores = childStores
     this.attachToChildStores()
+  }
+
+  private getDirectoryOrder(directory: string): number {
+    const existing = this.directoryOrderByName.get(directory)
+    if (existing !== undefined) return existing
+    const order = this.nextDirectoryOrder
+    this.nextDirectoryOrder += 1
+    this.directoryOrderByName.set(directory, order)
+    return order
+  }
+
+  private considerSessionCandidate(candidate: SessionCandidate): boolean {
+    const current = this.sessionMetaById.get(candidate.session.id)
+    if (!isBetterSessionCandidate(candidate, current)) return false
+    if (current?.session === candidate.session) return false
+    this.sessionsById.set(candidate.session.id, candidate.session)
+    this.sessionMetaById.set(candidate.session.id, candidate)
+    this.parentById.set(candidate.session.id, (candidate.session as Session & { parentID?: string | null }).parentID)
+    return true
+  }
+
+  private considerStatusCandidate(candidate: StatusCandidate): boolean {
+    const sessionId = candidate.sessionId
+    const current = this.statusMetaById.get(sessionId)
+    if (!isBetterStatusCandidate(candidate, current)) return false
+    if (current?.status === candidate.status) return false
+    this.statusById.set(sessionId, candidate.status)
+    this.statusMetaById.set(sessionId, candidate)
+    return true
   }
 
   private attachToChildStores(): void {
@@ -200,6 +281,7 @@ export class LiveSessionIndex {
 
     const prevSessions = observedPrevSessions ?? EMPTY_SESSIONS
     const prevStatuses = observedPrevStatuses ?? EMPTY_STATUS_MAP
+    const directoryOrder = this.getDirectoryOrder(directory)
 
     // --- Sessions diff for this store ---
     const prevSessionById = new Map<string, Session>()
@@ -214,41 +296,29 @@ export class LiveSessionIndex {
     let sessionsTouched = false
 
     // Added / changed
-    for (const [id, next] of nextSessionById.entries()) {
-      const prev = prevSessionById.get(id)
-      if (prev === next) continue
-      const nextUpdatedAt = getSessionUpdatedAt(next)
-      const existingMerged = this.sessionsById.get(id)
-      const existingMergedUpdatedAt = existingMerged ? getSessionUpdatedAt(existingMerged) : -1
-
-      if (!existingMerged || nextUpdatedAt > existingMergedUpdatedAt) {
-        if (existingMerged !== next) {
-          this.sessionsById.set(id, next)
-          this.parentById.set(id, (next as Session & { parentID?: string | null }).parentID)
-          sessionsTouched = true
-        }
-      } else if (prev === undefined && existingMerged && getSessionUpdatedAt(existingMerged) === nextUpdatedAt) {
-        // First time we see this id from this store and it ties the merged
-        // freshness — prefer the merged entry to keep references stable.
+    for (const next of nextSessionById.values()) {
+      const candidate: SessionCandidate = {
+        session: next,
+        updatedAt: getSessionUpdatedAt(next),
+        directoryOrder,
+        directory,
       }
+      sessionsTouched = this.considerSessionCandidate(candidate) || sessionsTouched
     }
 
     // Removed (was in prev slice, no longer in next slice)
     for (const [id] of prevSessionById.entries()) {
       if (nextSessionById.has(id)) continue
-      // The session left this store. If the merged map's current entry for
-      // this id came from THIS store (same reference as `prev`), we need to
-      // either pick a replacement from another store or drop the id.
-      const merged = this.sessionsById.get(id)
-      if (!merged) continue
-      if (merged !== prevSessionById.get(id)) continue
-      // Search the other stores for a freshest replacement.
-      const replacement = this.findSessionInOtherStores(id, /* excludeDir */ directory)
+      const current = this.sessionMetaById.get(id)
+      if (!current || current.directory !== directory) continue
+      const replacement = this.findBestSessionReplacement(id, directory)
       if (replacement) {
-        this.sessionsById.set(id, replacement)
-        this.parentById.set(id, (replacement as Session & { parentID?: string | null }).parentID)
+        this.sessionsById.set(id, replacement.session)
+        this.sessionMetaById.set(id, replacement)
+        this.parentById.set(id, (replacement.session as Session & { parentID?: string | null }).parentID)
       } else {
         this.sessionsById.delete(id)
+        this.sessionMetaById.delete(id)
         this.parentById.delete(id)
       }
       sessionsTouched = true
@@ -258,21 +328,30 @@ export class LiveSessionIndex {
     let statusesTouched = false
     for (const sessionId of Object.keys(nextStatuses)) {
       const next = nextStatuses[sessionId]
-      const prev = prevStatuses[sessionId]
-      if (areStatusesEquivalent(prev, next)) continue
-      this.statusById.set(sessionId, next)
-      statusesTouched = true
+      const session = nextSessionById.get(sessionId)
+      if (!session) continue
+      const candidate: StatusCandidate = {
+        sessionId,
+        status: next,
+        sessionUpdatedAt: getSessionUpdatedAt(session),
+        priority: getStatusPriority(next),
+        directoryOrder,
+        directory,
+      }
+      statusesTouched = this.considerStatusCandidate(candidate) || statusesTouched
     }
     for (const sessionId of Object.keys(prevStatuses)) {
       if (sessionId in nextStatuses) continue
-      // Status for this id left this store. If the merged map's current
-      // entry came from this store's `prev`, try other stores; otherwise keep.
-      const merged = this.statusById.get(sessionId)
-      if (!merged) continue
-      if (merged !== prevStatuses[sessionId]) continue
-      const replacement = this.findStatusInOtherStores(sessionId, directory)
-      if (replacement) this.statusById.set(sessionId, replacement)
-      else this.statusById.delete(sessionId)
+      const current = this.statusMetaById.get(sessionId)
+      if (!current || current.directory !== directory) continue
+      const replacement = this.findBestStatusReplacement(sessionId, directory)
+      if (replacement) {
+        this.statusById.set(sessionId, replacement.status)
+        this.statusMetaById.set(sessionId, replacement)
+      } else {
+        this.statusById.delete(sessionId)
+        this.statusMetaById.delete(sessionId)
+      }
       statusesTouched = true
     }
 
@@ -284,37 +363,60 @@ export class LiveSessionIndex {
     if (sessionsTouched || statusesTouched) this.notifySubscribers()
   }
 
-  private findSessionInOtherStores(id: string, excludeDir: string): Session | undefined {
-    let best: Session | undefined
-    let bestUpdatedAt = -1
+  private findBestSessionReplacement(id: string, excludeDir: string): SessionCandidate | undefined {
+    let best: SessionCandidate | undefined
     for (const [directory, store] of this.childStores.children.entries()) {
       if (directory === excludeDir) continue
+      const directoryOrder = this.getDirectoryOrder(directory)
       const list = store.getState().session
       for (const s of list) {
         if (s?.id !== id) continue
-        const updatedAt = getSessionUpdatedAt(s)
-        if (updatedAt > bestUpdatedAt) {
-          best = s
-          bestUpdatedAt = updatedAt
+        const next: SessionCandidate = {
+          session: s,
+          updatedAt: getSessionUpdatedAt(s),
+          directoryOrder,
+          directory,
+        }
+        if (isBetterSessionCandidate(next, best)) {
+          best = next
         }
       }
     }
     return best
   }
 
-  private findStatusInOtherStores(id: string, excludeDir: string): SessionStatus | undefined {
+  private findBestStatusReplacement(id: string, excludeDir: string): StatusCandidate | undefined {
+    let best: StatusCandidate | undefined
     for (const [directory, store] of this.childStores.children.entries()) {
       if (directory === excludeDir) continue
-      const statuses = store.getState().session_status ?? EMPTY_STATUS_MAP
-      if (id in statuses) return statuses[id]
+      const directoryOrder = this.getDirectoryOrder(directory)
+      const state = store.getState()
+      const statuses = state.session_status ?? EMPTY_STATUS_MAP
+      const session = state.session.find((candidate) => candidate.id === id)
+      if (!session || !(id in statuses)) continue
+      const next: StatusCandidate = {
+        sessionId: id,
+        status: statuses[id],
+        sessionUpdatedAt: getSessionUpdatedAt(session),
+        priority: getStatusPriority(statuses[id]),
+        directoryOrder,
+        directory,
+      }
+      if (isBetterStatusCandidate(next, best)) {
+        best = next
+      }
     }
-    return undefined
+    return best
   }
 
   private invalidateAllCaches(): void {
     this.sessionsById.clear()
     this.statusById.clear()
     this.parentById.clear()
+    this.sessionMetaById.clear()
+    this.statusMetaById.clear()
+    this.directoryOrderByName.clear()
+    this.nextDirectoryOrder = 0
     this.invalidateSortedCache()
     this.invalidateStatusCache()
   }

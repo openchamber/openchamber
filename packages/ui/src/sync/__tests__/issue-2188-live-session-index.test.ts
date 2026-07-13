@@ -61,6 +61,7 @@ import type { Session } from "@opencode-ai/sdk/v2"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { DirectoryStore } from "../child-store"
 import { LiveSessionIndex } from "../live-session-index"
+import { aggregateLiveSessionStatuses, aggregateLiveSessions } from "../live-aggregate"
 
 mock.module("zustand", () => {
   const makeStore = (
@@ -349,6 +350,35 @@ describe("issue #2188 — LiveSessionIndex hot path", () => {
     expect(before).toBeDefined()
     expect(after).toBe(before)
     expect(before?.type === "busy" || before?.type === "idle").toBe(true)
+  })
+
+  test("matches legacy freshness and priority tie-breaks for duplicate ids across stores", () => {
+    const states = [
+      {
+        session: [buildSession("dup", "/dir-a", 100)],
+        session_status: { dup: { type: "busy" } as SessionStatus },
+      },
+      {
+        session: [buildSession("dup", "/dir-b", 100)],
+        session_status: { dup: { type: "idle" } as SessionStatus },
+      },
+    ]
+
+    const index = LiveSessionIndex.fromStates(states)
+    const legacySessions = aggregateLiveSessions(states)
+    const legacyStatuses = aggregateLiveSessionStatuses(states)
+
+    // Equal updatedAt across stores: the later store wins, matching the
+    // legacy aggregate helper's `>=` tie-break.
+    expect(index.getAllSessions()).toHaveLength(1)
+    expect(index.getAllSessions()[0]?.directory).toBe("/dir-b")
+    expect(index.getAllSessions()[0]?.title).toBe("dup-title")
+    expect(index.getAllSessions()[0]?.directory).toBe(legacySessions[0]?.directory)
+
+    // Equal updatedAt but lower-priority status in the later store must not
+    // replace the fresher/high-priority candidate.
+    expect(index.getStatus("dup")).toEqual(legacyStatuses["dup"])
+    expect(index.getStatus("dup")?.type).toBe("busy")
   })
 
   test("getLineage returns the parent chain O(depth), not a full scan", () => {
