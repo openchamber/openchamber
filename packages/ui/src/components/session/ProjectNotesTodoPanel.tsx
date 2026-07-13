@@ -169,6 +169,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const [notes, setNotes] = React.useState('');
   const [todos, setTodos] = React.useState<OpenChamberProjectTodoItem[]>([]);
   const [newTodoText, setNewTodoText] = React.useState('');
+  const [editingTodo, setEditingTodo] = React.useState<{ id: string; text: string } | null>(null);
   const [sendingTodoId, setSendingTodoId] = React.useState<string | null>(null);
   const [expandedTodoIds, setExpandedTodoIds] = React.useState<Set<string>>(() => new Set());
   const [plans, setPlans] = React.useState<ProjectPlanListItem[]>([]);
@@ -178,6 +179,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const notesHydratedRef = React.useRef(false);
   const lastSavedNotesRef = React.useRef('');
   const notesDebounceTimerRef = React.useRef<number | null>(null);
+  const finalizedTodoEditIdRef = React.useRef<string | null>(null);
   const todoPanelHeight = useUIStore((state) => state.todoPanelHeight);
   const setTodoPanelHeight = useUIStore((state) => state.setTodoPanelHeight);
   const notesPanelHeight = useUIStore((state) => state.notesPanelHeight);
@@ -231,6 +233,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
   React.useEffect(() => {
     if (!projectRef) {
+      finalizedTodoEditIdRef.current = null;
+      setEditingTodo(null);
       setNotes('');
       setTodos([]);
       setPlans([]);
@@ -258,12 +262,16 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         notesHydratedRef.current = true;
         setNewTodoText('');
         setExpandedTodoIds(new Set());
+        finalizedTodoEditIdRef.current = null;
+        setEditingTodo(null);
       } catch {
         if (!cancelled) {
           toast.error(t('rightSidebar.contextNotesTodo.toast.loadNotesFailed'));
           setNotes('');
           setTodos([]);
           setPlans([]);
+          finalizedTodoEditIdRef.current = null;
+          setEditingTodo(null);
           lastSavedNotesRef.current = '';
           notesHydratedRef.current = true;
         }
@@ -439,6 +447,32 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     },
     [notes, persistProjectData, todos]
   );
+
+  const handleStartTodoEdit = React.useCallback((todo: OpenChamberProjectTodoItem) => {
+    finalizedTodoEditIdRef.current = null;
+    setEditingTodo({ id: todo.id, text: todo.text });
+  }, []);
+
+  const handleCancelTodoEdit = React.useCallback((id: string) => {
+    finalizedTodoEditIdRef.current = id;
+    setEditingTodo(null);
+  }, []);
+
+  const handleSaveTodoEdit = React.useCallback((id: string, text: string) => {
+    if (finalizedTodoEditIdRef.current === id) {
+      return;
+    }
+    finalizedTodoEditIdRef.current = id;
+    const nextText = text.trim().slice(0, OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH);
+    const todo = todos.find((item) => item.id === id);
+    setEditingTodo(null);
+    if (!todo || !nextText || todo.text === nextText) {
+      return;
+    }
+    const nextTodos = todos.map((item) => item.id === id ? { ...item, text: nextText } : item);
+    setTodos(nextTodos);
+    void persistProjectData(notes, nextTodos);
+  }, [notes, persistProjectData, todos]);
 
   const handleClearCompletedTodos = React.useCallback(() => {
     const nextTodos = todos.filter((todo) => !todo.completed);
@@ -854,6 +888,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
                 <ul className="divide-y divide-border/50">
                   {todos.map((todo) => {
                     const isExpandedTodo = expandedTodoIds.has(todo.id);
+                    const editingThisTodo = editingTodo?.id === todo.id ? editingTodo : null;
                     return (
                       <SortableTodoItem key={todo.id} id={todo.id}>
                         {(dragHandleProps) => (
@@ -880,24 +915,48 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
                                 ariaLabel={t('rightSidebar.contextNotesTodo.todo.actions.markComplete', { text: todo.text })}
                               />
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleTodoExpanded(todo.id)}
-                              className={cn(
-                                'block min-h-6 min-w-0 flex-1 bg-transparent p-0 text-left typography-ui-label leading-normal text-foreground',
-                                isExpandedTodo ? 'whitespace-normal break-words' : 'overflow-hidden text-ellipsis whitespace-nowrap',
-                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                                todo.completed && 'text-muted-foreground line-through'
-                              )}
-                              title={isExpandedTodo ? undefined : todo.text}
-                              aria-label={
-                                isExpandedTodo
-                                  ? t('rightSidebar.contextNotesTodo.todo.actions.collapse', { text: todo.text })
-                                  : t('rightSidebar.contextNotesTodo.todo.actions.expand', { text: todo.text })
-                              }
-                            >
-                              {todo.text}
-                            </button>
+                            {editingThisTodo ? (
+                              <Input
+                                value={editingThisTodo.text}
+                                autoFocus
+                                aria-label={todo.text}
+                                className="h-6 min-w-0 flex-1 rounded-md px-1.5 py-0 typography-ui-label"
+                                onChange={(event) => {
+                                  const text = event.target.value.slice(0, OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH);
+                                  setEditingTodo((current) => current?.id === todo.id ? { ...current, text } : current);
+                                }}
+                                onBlur={() => handleSaveTodoEdit(todo.id, editingThisTodo.text)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    handleSaveTodoEdit(todo.id, editingThisTodo.text);
+                                  } else if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    handleCancelTodoEdit(todo.id);
+                                  }
+                                }}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleTodoExpanded(todo.id)}
+                                onDoubleClick={() => handleStartTodoEdit(todo)}
+                                className={cn(
+                                  'block min-h-6 min-w-0 flex-1 bg-transparent p-0 text-left typography-ui-label leading-normal text-foreground',
+                                  isExpandedTodo ? 'whitespace-normal break-words' : 'overflow-hidden text-ellipsis whitespace-nowrap',
+                                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                                  todo.completed && 'text-muted-foreground line-through'
+                                )}
+                                title={isExpandedTodo ? undefined : todo.text}
+                                aria-label={
+                                  isExpandedTodo
+                                    ? t('rightSidebar.contextNotesTodo.todo.actions.collapse', { text: todo.text })
+                                    : t('rightSidebar.contextNotesTodo.todo.actions.expand', { text: todo.text })
+                                }
+                              >
+                                {todo.text}
+                              </button>
+                            )}
                             <div className="flex h-6 items-center gap-0.5">
                               <button
                                 type="button"
