@@ -2,7 +2,6 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import {
-  collectKnownProjectDirectories,
   dedupeSessionsById,
   getArchivedScopeKey,
   isSessionRelatedToProject,
@@ -25,6 +24,18 @@ type Args = {
   isVSCode: boolean;
   availableWorktreesByProject: Map<string, WorktreeMeta[]>;
   cleanupSessions: (scopeKey: string, validSessionIds: Set<string>) => void;
+  /**
+   * Pre-normalized set of all project + worktree directories. Passed
+   * from SessionSidebar so it is computed once per render instead of
+   * inside every hook.
+   */
+  knownProjectDirectories: Set<string>;
+  /**
+   * Optional local cache mapping a session directory to its best
+   * matching known directory. Shared across hooks to avoid redundant
+   * path-prefix scans.
+   */
+  directoryMatchCache?: Map<string, string | null>;
 };
 
 export const useSessionFolderCleanup = (args: Args): void => {
@@ -37,12 +48,9 @@ export const useSessionFolderCleanup = (args: Args): void => {
     isVSCode,
     availableWorktreesByProject,
     cleanupSessions,
+    knownProjectDirectories,
+    directoryMatchCache,
   } = args;
-
-  const knownProjectDirectories = React.useMemo(
-    () => collectKnownProjectDirectories(normalizedProjects, availableWorktreesByProject, isVSCode),
-    [normalizedProjects, availableWorktreesByProject, isVSCode],
-  );
 
   React.useEffect(() => {
     if (isSessionsLoading || !hasLoadedGlobalSessions) {
@@ -87,9 +95,9 @@ export const useSessionFolderCleanup = (args: Args): void => {
           if (sessionDirectory) {
             return false;
           }
-          return isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories);
+          return isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories, directoryMatchCache);
         }),
-      ]).filter((session) => isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories));
+      ]).filter((session) => isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories, directoryMatchCache));
 
       idsByScope.set(scopeKey, new Set(archivedForProject.map((session) => session.id)));
     });
@@ -103,6 +111,7 @@ export const useSessionFolderCleanup = (args: Args): void => {
     archivedSessions,
     availableWorktreesByProject,
     cleanupSessions,
+    directoryMatchCache,
     hasLoadedGlobalSessions,
     isSessionsLoading,
     isVSCode,

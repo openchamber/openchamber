@@ -83,6 +83,13 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
 export const isPathWithinProject = (directory?: string | null, projectPath?: string | null): boolean => {
   const normalizedDirectory = normalizePath(directory);
   const normalizedProjectPath = normalizePath(projectPath);
+  return isPathWithinNormalizedProject(normalizedDirectory, normalizedProjectPath);
+};
+
+const isPathWithinNormalizedProject = (
+  normalizedDirectory?: string | null,
+  normalizedProjectPath?: string | null,
+): boolean => {
   if (!normalizedDirectory || !normalizedProjectPath) return false;
   if (normalizedDirectory === normalizedProjectPath) return true;
   if (normalizedProjectPath === '/') return normalizedDirectory.startsWith('/');
@@ -121,26 +128,37 @@ export const collectKnownProjectDirectories = (
   return knownDirectories;
 };
 
+/**
+ * Find the longest known directory that contains `value`. All entries in
+ * `knownDirectories` must already be normalized paths. The optional `cache`
+ * is local to a single render/evaluation and maps a resolved directory to
+ * its best matching known directory (or `null` when none matches).
+ */
 const findBestProjectDirectoryMatch = (
   value: string | null,
   knownDirectories?: Iterable<string>,
+  cache?: Map<string, string | null>,
 ): string | null => {
   if (!value || !knownDirectories) {
     return null;
   }
 
+  if (cache?.has(value)) {
+    return cache.get(value) ?? null;
+  }
+
   let bestMatch: string | null = null;
   for (const candidate of knownDirectories) {
-    const normalizedCandidate = normalizePath(candidate);
-    if (!normalizedCandidate || !isPathWithinProject(value, normalizedCandidate)) {
+    if (!candidate || !isPathWithinNormalizedProject(value, candidate)) {
       continue;
     }
 
-    if (!bestMatch || normalizedCandidate.length > bestMatch.length) {
-      bestMatch = normalizedCandidate;
+    if (!bestMatch || candidate.length > bestMatch.length) {
+      bestMatch = candidate;
     }
   }
 
+  cache?.set(value, bestMatch);
   return bestMatch;
 };
 
@@ -228,6 +246,7 @@ export const isSessionRelatedToProject = (
   projectRoot: string,
   validDirectories?: Set<string>,
   knownDirectories?: Iterable<string>,
+  cache?: Map<string, string | null>,
 ): boolean => {
   const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
   const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
@@ -241,7 +260,7 @@ export const isSessionRelatedToProject = (
     return false;
   }
 
-  const bestMatch = findBestProjectDirectoryMatch(resolvedDirectory, knownDirectories);
+  const bestMatch = findBestProjectDirectoryMatch(resolvedDirectory, knownDirectories, cache);
   if (bestMatch) {
     return validDirectories ? validDirectories.has(bestMatch) : bestMatch === projectRoot;
   }

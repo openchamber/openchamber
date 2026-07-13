@@ -66,6 +66,7 @@ import {
 } from './sidebar/activitySections';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
+  collectKnownProjectDirectories,
   compareSessionsByPinnedAndTime,
   formatProjectLabel,
   normalizePath,
@@ -937,6 +938,20 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       }>;
   }, [projects]);
 
+  const knownProjectDirectories = React.useMemo(
+    () => collectKnownProjectDirectories(normalizedProjects, availableWorktreesByProject, isVSCode),
+    [normalizedProjects, availableWorktreesByProject, isVSCode],
+  );
+
+  // Create a fresh directory-match cache whenever the set of known
+  // directories changes. The dependency is intentionally the identity
+  // of the set so stale best-match lookups are discarded.
+  const directoryMatchCache = React.useMemo(
+    () => new Map<string, string | null>(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [knownProjectDirectories],
+  );
+
   const normalizedProjectPaths = React.useMemo(
     () => normalizedProjects.map((project) => project.normalizedPath),
     [normalizedProjects],
@@ -1000,9 +1015,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     sessions,
     archivedSessions,
     normalizedProjects,
+    knownProjectDirectories,
     isVSCode,
     availableWorktreesByProject,
     cleanupSessions,
+    directoryMatchCache,
   });
 
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({
@@ -1010,7 +1027,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     sessions,
     archivedSessions,
     availableWorktreesByProject,
-    normalizedProjects,
+    knownProjectDirectories,
+    directoryMatchCache,
   });
 
   useArchivedAutoFolders({
@@ -1024,6 +1042,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     createFolder,
     addSessionToFolder,
     cleanupSessions,
+    knownProjectDirectories,
+    directoryMatchCache,
   });
 
   // Keep last-known repo status to avoid UI jiggling during project switch

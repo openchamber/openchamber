@@ -1,11 +1,9 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
-import { collectKnownProjectDirectories, dedupeSessionsById, isSessionRelatedToProject, normalizePath } from '../utils';
+import { dedupeSessionsById, isSessionRelatedToProject, normalizePath } from '../utils';
 
 type WorktreeMeta = { path: string };
-
-type NormalizedProject = { id: string; normalizedPath: string };
 
 type Args = {
   isVSCode: boolean;
@@ -13,14 +11,17 @@ type Args = {
   archivedSessions: Session[];
   availableWorktreesByProject: Map<string, WorktreeMeta[]>;
   /**
-   * The set of normalized projects the sidebar will render. Used in
-   * Layer 4.13 to precompute the allowed directory set so the per-row
-   * `sessionsByDirectory` Map only contains buckets the sidebar will
-   * actually consume. With 10 projects × 5 worktrees and 100 sessions
-   * per directory this drops the Map from N entries to the small
-   * subset the sidebar needs.
+   * Pre-normalized set of all project + worktree directories. Passed
+   * from SessionSidebar so it is computed once per render instead of
+   * inside every hook.
    */
-  normalizedProjects: NormalizedProject[];
+  knownProjectDirectories: Set<string>;
+  /**
+   * Optional local cache mapping a session directory to its best
+   * matching known directory. Shared across hooks to avoid redundant
+   * path-prefix scans.
+   */
+  directoryMatchCache?: Map<string, string | null>;
 };
 
 export const useProjectSessionLists = (args: Args) => {
@@ -29,18 +30,12 @@ export const useProjectSessionLists = (args: Args) => {
     sessions,
     archivedSessions,
     availableWorktreesByProject,
-    normalizedProjects,
+    knownProjectDirectories,
+    directoryMatchCache,
   } = args;
 
-  // Precompute the set of directories the sidebar will ever ask about:
-  // every project's normalized path plus the path of each registered
-  // worktree. Walking this set is O(P + W) per Sidebar render and lets
-  // us skip the bulk of `sessions` (whose directory is not associated
-  // with a known project) when building `sessionsByDirectory`.
-  const knownProjectDirectories = React.useMemo(
-    () => collectKnownProjectDirectories(normalizedProjects, availableWorktreesByProject, isVSCode),
-    [normalizedProjects, availableWorktreesByProject, isVSCode],
-  );
+  // `knownProjectDirectories` is computed once in SessionSidebar and
+  // passed in so every hook shares the same pre-normalized set.
 
   const sessionsByDirectory = React.useMemo(() => {
     const next = new Map<string, Session[]>();
@@ -132,7 +127,7 @@ export const useProjectSessionLists = (args: Args) => {
       ]);
 
       const collect = (input: Session[]): Session[] => input.filter((session) =>
-        isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories),
+        isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories, directoryMatchCache),
       );
 
       const archived = collect(archivedSessions);
@@ -148,12 +143,12 @@ export const useProjectSessionLists = (args: Args) => {
         if (!projectWorktree) {
           return false;
         }
-        return isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories);
+        return isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories, directoryMatchCache);
       });
 
       return dedupeSessionsById([...archived, ...unassignedLive]);
     },
-    [archivedSessions, availableWorktreesByProject, isVSCode, knownProjectDirectories, sessions],
+    [archivedSessions, availableWorktreesByProject, directoryMatchCache, isVSCode, knownProjectDirectories, sessions],
   );
 
   return {
