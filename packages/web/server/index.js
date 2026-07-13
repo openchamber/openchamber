@@ -93,6 +93,7 @@ import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
+import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -1476,6 +1477,14 @@ async function main(options = {}) {
     readSettingsStrict: readSettingsFromDiskStrict,
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
+    // One relay host per machine: every instance sharing this data dir shares
+    // the relay identity (serverId), so concurrent hosts evict each other at
+    // the relay worker and devices land on a random local instance.
+    hostLock: createRelayHostLock({
+      lockFilePath: path.join(OPENCHAMBER_DATA_DIR, 'relay-host.lock'),
+      fs,
+      process,
+    }),
     // Relay demand = any paired device or pending pairing session that uses the
     // relay transport. Drives the auto on/off lifecycle.
     hasRelayDemand: async () => {

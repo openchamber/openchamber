@@ -299,13 +299,20 @@ const RELAY_PROBE_TIMEOUT_MS = 8_000;
  * leaves the tunnel in `connecting` forever — the probe must report
  * unreachable instead of hanging every status/switch flow with it.
  */
-export const probeRelayDesktopHost = async (relay: DesktopHostRelay): Promise<HostProbeResult> => {
+export const probeRelayDesktopHost = async (
+  relay: DesktopHostRelay,
+  // With `keepTunnel`, an 'ok' probe RETURNS its live tunnel (the caller owns
+  // it — typically adopting it as the runtime tunnel, skipping a second
+  // WebSocket connect + E2EE handshake); every other outcome closes it.
+  options?: { keepTunnel?: boolean },
+): Promise<HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> }> => {
   const tunnel = createRelayTunnelClient({
     relayUrl: relay.relayUrl,
     serverId: relay.serverId,
     hostEncPubJwk: relay.hostEncPubJwk,
   });
   const startedAt = Date.now();
+  let keep = false;
   try {
     const response = await Promise.race([
       tunnel.fetch('/health'),
@@ -316,12 +323,13 @@ export const probeRelayDesktopHost = async (relay: DesktopHostRelay): Promise<Ho
         }
       }),
     ]);
-    if (!response) return { status: 'unreachable', latencyMs: 0 };
-    return { status: response.ok ? 'ok' : 'unreachable', latencyMs: Math.max(0, Date.now() - startedAt) };
+    if (!response?.ok) return { status: 'unreachable', latencyMs: 0 };
+    keep = options?.keepTunnel === true;
+    return { status: 'ok', latencyMs: Math.max(0, Date.now() - startedAt), ...(keep ? { tunnel } : {}) };
   } catch {
     return { status: 'unreachable', latencyMs: 0 };
   } finally {
-    tunnel.close();
+    if (!keep) tunnel.close();
   }
 };
 

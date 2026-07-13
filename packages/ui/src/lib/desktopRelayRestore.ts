@@ -6,6 +6,11 @@ import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 // Let the post-switch bootstrap traffic settle before the background refresh.
 const CANDIDATE_REFRESH_DELAY_MS = 5_000;
 
+// How long the stored direct address keeps startup to itself before the relay
+// takes over. A live LAN probe answers well inside this window; a dead one no
+// longer stalls startup for the probe's full timeout.
+const DIRECT_PROBE_HEADSTART_MS = 1_500;
+
 let candidateRefreshInFlight = false;
 
 /**
@@ -120,28 +125,67 @@ export const restoreDesktopRelayRuntime = async (targetHostId?: string): Promise
   const runtimeKey = `host:${host.id}`;
   if (getRuntimeKey() === runtimeKey) return;
 
+  const switchToDirect = (url: string) => {
+    switchRuntimeEndpoint({
+      apiBaseUrl: url,
+      clientToken: host.clientToken || null,
+      requestHeaders: host.requestHeaders || null,
+      runtimeKey,
+    });
+  };
+  const switchToRelay = () => {
+    switchRuntimeEndpoint({
+      apiBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
+      clientToken: host.clientToken || null,
+      runtimeKey,
+      relay: host.relay ?? undefined,
+    });
+    // On the relay because the stored direct address did not answer (yet) —
+    // ask the server for its current LAN address in the background and
+    // hot-switch back to direct if it simply moved (DHCP re-lease).
+    scheduleDesktopHostCandidateRefresh(host.id);
+  };
+
   const directUrl = host.apiUrl ? normalizeHostUrl(getDesktopHostApiUrl(host)) : null;
-  if (directUrl) {
-    const probe = await desktopHostProbe(directUrl, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null })
-      .catch(() => ({ status: 'unreachable' as const, latencyMs: 0 }));
-    if (probe.status !== 'unreachable' && probe.status !== 'wrong-service' && probe.status !== 'incompatible') {
-      switchRuntimeEndpoint({
-        apiBaseUrl: directUrl,
-        clientToken: host.clientToken || null,
-        requestHeaders: host.requestHeaders || null,
-        runtimeKey,
-      });
+  if (!directUrl) {
+    switchToRelay();
+    return;
+  }
+
+  // Race the direct probe against a short headstart instead of serializing the
+  // full probe timeout in front of the relay fallback: a live LAN answers well
+  // inside the window (direct keeps priority); a dead one no longer delays
+  // startup — the relay takes over and a late direct success hot-switches back
+  // (stable runtimeKey → transport-only swap, same as the candidate refresh).
+  const probeOk = (probe: { status: string }) =>
+    probe.status !== 'unreachable' && probe.status !== 'wrong-service' && probe.status !== 'incompatible';
+  const probePromise = desktopHostProbe(directUrl, {
+    clientToken: host.clientToken || null,
+    requestHeaders: host.requestHeaders || null,
+    // Identity gate: a re-leased LAN address may now belong to a different
+    // machine; the probe must not send the token on a serverId mismatch.
+    expectedServerId: host.relay.serverId,
+  }).catch(() => ({ status: 'unreachable' as const, latencyMs: 0 }));
+
+  const winner = await Promise.race([
+    probePromise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), DIRECT_PROBE_HEADSTART_MS)),
+  ]);
+  if (winner) {
+    if (probeOk(winner)) {
+      switchToDirect(directUrl);
       return;
     }
+    switchToRelay();
+    return;
   }
-  switchRuntimeEndpoint({
-    apiBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
-    clientToken: host.clientToken || null,
-    runtimeKey,
-    relay: host.relay,
+
+  // Headstart expired: connect via relay now; adopt the direct transport if the
+  // still-running probe succeeds a moment later.
+  switchToRelay();
+  void probePromise.then((probe) => {
+    if (!probeOk(probe)) return;
+    if (getRuntimeKey() !== runtimeKey) return; // user switched away meanwhile
+    switchToDirect(directUrl);
   });
-  // Landed on the relay because the stored direct address failed — ask the
-  // server for its current LAN address in the background and hot-switch back
-  // to direct if it simply moved (DHCP re-lease).
-  scheduleDesktopHostCandidateRefresh(host.id);
 };

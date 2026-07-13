@@ -1,9 +1,10 @@
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+
 export const readEmbeddedThemeSearchParams = (): URLSearchParams | null => {
-  if (typeof window === 'undefined') {
+  if (!isEmbeddedSessionChat()) {
     return null;
   }
-  const params = new URLSearchParams(window.location.search);
-  return params.get('ocPanel') === 'session-chat' ? params : null;
+  return new URLSearchParams(window.location.search);
 };
 
 const getSystemPreference = (): boolean => {

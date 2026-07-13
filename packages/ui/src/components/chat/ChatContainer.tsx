@@ -50,6 +50,7 @@ import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -463,6 +464,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
+    const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
     const isTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
     const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
 
@@ -622,13 +624,22 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     const parentSession = useParentSession(currentSessionId, effectiveSessionDirectory);
 
+    // In the embedded session-chat iframe, hide "Return to parent" when
+    // viewing the panel's anchor session (the one recorded in the URL). Going
+    // up from the anchor would show the primary session that's already in the
+    // main chat. Drilling into a deeper subtask (currentSessionId ≠ anchor)
+    // re-enables the button to navigate back to the embedded session.
+    const embeddedPanelAnchorSessionId = getEmbeddedSessionChatOriginSessionId();
+    const hideReturnToParent =
+        embeddedPanelAnchorSessionId !== null && currentSessionId === embeddedPanelAnchorSessionId;
+
     const handleReturnToParentSession = React.useCallback(() => {
         if (!parentSession) return;
         const parentDirectory = (parentSession as Session & { directory?: string | null }).directory ?? null;
         setCurrentSession(parentSession.id, parentDirectory);
     }, [parentSession, setCurrentSession]);
 
-    const returnToParentButton = parentSession ? (
+    const returnToParentButton = parentSession && !hideReturnToParent ? (
         <Button
             type="button"
             variant="outline"
@@ -644,7 +655,40 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             {t('chat.container.returnToParent.label')}
         </Button>
     ) : null;
-    const promptReadOnly = readOnly || Boolean(parentSession);
+    const promptReadOnly = parentSession ? !allowPromptingSubagentSessions : readOnly;
+
+    React.useEffect(() => {
+        if (typeof window === 'undefined' || window.parent === window) {
+            return;
+        }
+
+        const applySetting = (value: boolean) => {
+            useUIStore.getState().setAllowPromptingSubagentSessions(value);
+        };
+        const scopedWindow = window as typeof window & {
+            __openchamberApplyChatSettingsSync?: (payload: { allowPromptingSubagentSessions: boolean }) => void;
+        };
+        const applySync = (payload: { allowPromptingSubagentSessions: boolean }) => {
+            applySetting(payload.allowPromptingSubagentSessions);
+        };
+        const handleMessage = (event: MessageEvent) => {
+            if (event.source !== window.parent || event.origin !== window.location.origin) return;
+            const data = event.data as { type?: unknown; payload?: { allowPromptingSubagentSessions?: unknown } };
+            if (data?.type !== 'openchamber:chat-settings-sync'
+                || typeof data.payload?.allowPromptingSubagentSessions !== 'boolean') return;
+            applySetting(data.payload.allowPromptingSubagentSessions);
+        };
+
+        scopedWindow.__openchamberApplyChatSettingsSync = applySync;
+        window.addEventListener('message', handleMessage);
+        window.parent.postMessage({ type: 'openchamber:chat-settings-request' }, window.location.origin);
+        return () => {
+            window.removeEventListener('message', handleMessage);
+            if (scopedWindow.__openchamberApplyChatSettingsSync === applySync) {
+                delete scopedWindow.__openchamberApplyChatSettingsSync;
+            }
+        };
+    }, []);
 
     React.useEffect(() => {
         if (autoOpenDraft && !currentSessionId && !draftOpen) {
@@ -913,7 +957,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 								: 'flex-1 items-center justify-center bg-background px-0 pb-[6vh]'
 					)}
 				>
-						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+                        {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
 				</div>
 			</div>
         );
@@ -973,7 +1017,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 							: 'bg-background'
 					)}
 				>
-					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+                    {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
 				</div>
             </div>
         );
@@ -1008,7 +1052,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 							: 'bg-background'
 					)}
 				>
-					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+                    {promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
 				</div>
             </div>
         );
