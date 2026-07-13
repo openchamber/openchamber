@@ -1735,6 +1735,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftStarters.sectionSkills": "Skills",
   "chat.draftStarters.remove": "Remove",
   "chat.scrollToBottom.aria": "Ir ao final",
+  "chat.turnOutline.open": "Abrir contorno da transcrição",
+  "chat.turnOutline.openTimeline": "Abrir linha do tempo completa",
   "chat.timeline.relative.justNow": "agora mesmo",
   "chat.timeline.relative.minutesAgo": "há {count}m",
   "chat.timeline.relative.hoursAgo": "há {count}h",

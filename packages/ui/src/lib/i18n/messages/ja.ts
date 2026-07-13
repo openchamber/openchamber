@@ -1753,6 +1753,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionSkills': 'スキル',
   'chat.draftStarters.remove': '削除',
   'chat.scrollToBottom.aria': '一番下にスクロール',
+  'chat.turnOutline.open': '文字起こしアウトラインを開く',
+  'chat.turnOutline.openTimeline': '完全なタイムラインを開く',
   'chat.timeline.relative.justNow': 'たった今',
   'chat.timeline.relative.minutesAgo': '{count}分前',
   'chat.timeline.relative.hoursAgo': '{count}時間前',

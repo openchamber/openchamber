@@ -1757,6 +1757,8 @@ export const dict = {
   'chat.draftStarters.sectionSkills': 'Skills',
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': 'Scroll to bottom',
+  'chat.turnOutline.open': 'Open transcript outline',
+  'chat.turnOutline.openTimeline': 'Open full timeline',
   'chat.timeline.relative.justNow': 'just now',
   'chat.timeline.relative.minutesAgo': '{count}m ago',
   'chat.timeline.relative.hoursAgo': '{count}h ago',
