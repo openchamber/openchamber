@@ -32,9 +32,11 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useDirectorySync, useSessionMessages } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { getSessionMaterializationStatus } from '@/sync/materialization';
+import { toast } from '@/components/ui';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { formatEffortLabel, getCycledPrimaryAgentName, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
@@ -376,6 +378,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setModelSelectorOpen = useUIStore((state) => state.setModelSelectorOpen);
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
     const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+    const setSettingsProjectsSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
     const cycleAgentShortcut = React.useMemo(() => (
@@ -385,6 +388,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // Separate state for agent selector to avoid conflict with model selector
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
     const { favoriteModelsList, recentModelsList } = useModelLists();
+    const projects = useProjectsStore((state) => state.projects);
+    const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+    const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
 
     const { isMobile: deviceIsMobile } = useDeviceInfo();
     // The composer decides whether it renders the mobile layout from the UI
@@ -435,6 +441,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const [pendingThinkingVariants, setPendingThinkingVariants] = React.useState<Map<string, string | undefined>>(new Map());
     const [adjustedThinkingModels, setAdjustedThinkingModels] = React.useState<Set<string>>(new Set());
     const [modelPickerRenderVersion, setModelPickerRenderVersion] = React.useState(0);
+    const activeProject = React.useMemo(() => {
+        if (!activeProjectId) {
+            return null;
+        }
+        return projects.find((project) => project.id === activeProjectId) ?? null;
+    }, [activeProjectId, projects]);
 
     React.useEffect(() => {
         if (activeMobilePanel === 'model') {
@@ -1257,7 +1269,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 } else if (result === 'model-missing') {
                     console.error('[ModelControls] Model not available for selection:', { providerId, modelId });
                 }
-                return;
+                return false;
             }
             if (!options?.applyVariant) {
                 // Add to recent models on successful selection.
@@ -1272,8 +1284,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
                 textarea?.focus();
             });
+            return true;
         } catch (error) {
             console.error('[ModelControls] Handle model change error:', error);
+            return false;
         }
     };
 
@@ -2224,9 +2238,76 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             const wasAdjusted = adjustedThinkingModels.has(mapKey);
             const effectiveAgentName = resolveLiveAgentName();
 
-            handleProviderAndModelChange(entry.providerID, entry.modelID, wasAdjusted
+            return handleProviderAndModelChange(entry.providerID, entry.modelID, wasAdjusted
                 ? { applyVariant: true, variant: pendingVariant, agentName: effectiveAgentName }
                 : { agentName: effectiveAgentName });
+        };
+
+        const resolveProjectDefaultTarget = (entry?: ModelPickerEntry) => {
+            if (entry) {
+                return {
+                    providerId: entry.providerID,
+                    modelId: entry.modelID,
+                    modelLabel: getSharedModelDisplayName(entry.model, entry.modelID, { maxLength: 40 }),
+                    defaultModel: `${entry.providerID}/${entry.modelID}`,
+                    entry,
+                };
+            }
+
+            if (!currentProviderId || !currentModelId) {
+                return null;
+            }
+
+            return {
+                providerId: currentProviderId,
+                modelId: currentModelId,
+                modelLabel: currentModelDisplayName,
+                defaultModel: `${currentProviderId}/${currentModelId}`,
+                entry: undefined,
+            };
+        };
+
+        const openProjectSettings = () => {
+            if (!activeProject) {
+                return;
+            }
+            setSettingsProjectsSelectedId(activeProject.id);
+            setSettingsPage('projects');
+            setSettingsDialogOpen(true);
+        };
+
+        const handleSetProjectDefaultFromModelPicker = (entry?: ModelPickerEntry) => {
+            if (!activeProject || isVSCodeRuntime) {
+                return;
+            }
+
+            const target = resolveProjectDefaultTarget(entry);
+            if (!target) {
+                return;
+            }
+
+            try {
+                if (target.entry) {
+                    const applied = handleSharedModelSelect(target.entry);
+                    if (!applied) {
+                        toast.error(t('chat.modelControls.projectDefaultSaveFailed'));
+                        return;
+                    }
+                }
+
+                updateProjectMeta(activeProject.id, { defaultModel: target.defaultModel });
+                toast.success(t('chat.modelControls.projectDefaultSaved'), {
+                    description: t('chat.modelControls.projectDefaultSavedDescription', { model: target.modelLabel }),
+                    action: {
+                        label: t('chat.modelControls.projectDefaultOpenSettings'),
+                        onClick: openProjectSettings,
+                    },
+                });
+            } catch (error) {
+                toast.error(t('chat.modelControls.projectDefaultSaveFailed'), {
+                    description: error instanceof Error ? error.message : undefined,
+                });
+            }
         };
 
         const handleModelShortcutKeyDownCapture = (e: React.KeyboardEvent) => {
@@ -2261,23 +2342,62 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             costPerMillion: t('chat.modelControls.costPerMillion'),
         };
 
-        const renderThinkingSlot = (entry: ModelPickerEntry, { isHighlighted, isSelected }: { isHighlighted: boolean; isSelected: boolean }) => {
+        const renderModelRowEnd = (entry: ModelPickerEntry, { isHighlighted, isSelected }: { isHighlighted: boolean; isSelected: boolean }) => {
             const hasThinkingVariants = getModelVariantOptions(entry.providerID, entry.modelID).length > 0;
             const mapKey = buildModelRefKey(entry.providerID, entry.modelID);
             const wasAdjusted = adjustedThinkingModels.has(mapKey);
-            if (!hasThinkingVariants || (!isHighlighted && !isSelected)) return null;
-
             const hasPendingVariant = pendingThinkingVariants.has(mapKey);
             const pendingVariant = pendingThinkingVariants.get(mapKey);
             const effectiveVariant = hasPendingVariant ? pendingVariant : (isSelected ? currentVariant : undefined);
             const displayLabel = effectiveVariant
                 ? effectiveVariant.charAt(0).toUpperCase() + effectiveVariant.slice(1)
                 : 'Default';
+            const defaultModel = `${entry.providerID}/${entry.modelID}`;
+            const isProjectDefault = activeProject?.defaultModel === defaultModel;
+            const showProjectDefaultAction = Boolean(
+                activeProject
+                && !isVSCodeRuntime
+                && (isHighlighted || isProjectDefault)
+                && !(isProjectDefault && isSelected),
+            );
+
+            if ((!hasThinkingVariants || (!isHighlighted && !isSelected)) && !showProjectDefaultAction) {
+                return null;
+            }
 
             return (
-                <span className={cn('typography-micro whitespace-nowrap', wasAdjusted ? 'text-foreground' : 'text-muted-foreground')}>
-                    Thinking: {displayLabel}
-                </span>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                    {hasThinkingVariants && (isHighlighted || isSelected) ? (
+                        <span className={cn('typography-micro whitespace-nowrap', wasAdjusted ? 'text-foreground' : 'text-muted-foreground')}>
+                            Thinking: {displayLabel}
+                        </span>
+                    ) : null}
+                    {showProjectDefaultAction ? (
+                        <button
+                            type="button"
+                            disabled={isProjectDefault}
+                            className={cn(
+                                'flex size-5 items-center justify-center rounded-sm flex-shrink-0',
+                                isProjectDefault
+                                    ? 'cursor-default text-primary'
+                                    : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+                            )}
+                            aria-label={isProjectDefault
+                                ? t('chat.modelControls.projectDefaultCurrent')
+                                : t('chat.modelControls.projectDefaultAction')}
+                            title={isProjectDefault
+                                ? t('chat.modelControls.projectDefaultCurrent')
+                                : t('chat.modelControls.projectDefaultAction')}
+                            onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleSetProjectDefaultFromModelPicker(entry);
+                            }}
+                        >
+                            <Icon name={isProjectDefault ? 'pushpin-2-fill' : 'pushpin-2'} className="size-3.5" />
+                        </button>
+                    ) : null}
+                </div>
             );
         };
 
@@ -2368,7 +2488,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 onVariantKey={handleThinkingVariantKey}
                                 isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
                                 onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
-                                renderRowEnd={renderThinkingSlot}
+                                renderRowEnd={renderModelRowEnd}
                                 renderVersion={modelPickerRenderVersion}
                                 onReorderFavorite={(active, over) => reorderFavoriteModel(
                                     active.providerID,
@@ -2381,19 +2501,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 providerOrder={providerOrder}
                                 onReorderProvider={setProviderOrder}
                                 reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}
-                                footerContent={(activeEntry) => {
-                                    const activeHasThinkingVariants = activeEntry
-                                        ? getModelVariantOptions(activeEntry.providerID, activeEntry.modelID).length > 0
-                                        : false;
-
-                                    return (
-                                        <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
-                                            <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
-                                            <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: 'Tab' })}</span>
-                                            {activeHasThinkingVariants ? <span>{t('chat.modelControls.keyboardHintThinking')}</span> : null}
-                                        </div>
-                                    );
-                                }}
+                                footerContent={(
+                                    <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
+                                        <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
+                                        <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: 'Tab' })}</span>
+                                    </div>
+                                )}
                                 tooltipsEnabled={agentMenuOpen}
                                 onEscape={() => setAgentMenuOpen(false)}
                             />
