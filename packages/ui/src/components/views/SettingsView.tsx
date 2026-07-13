@@ -89,12 +89,16 @@ const pageOrder: SettingsPageSlug[] = [
   'notifications',
   'sessions',
   'shortcuts',
+  'voice',
+  'about',
   // Workspace & remote
   'projects',
   'remote-instances',
   'tunnel',
+  'git',
   // OpenCode
   'providers',
+  'usage',
   'agents',
   'behavior',
   'commands',
@@ -105,16 +109,9 @@ const pageOrder: SettingsPageSlug[] = [
   'snippets',
   'skills.installed',
   'skills.catalog',
-  // Git
-  'git',
-  // Usage
-  'usage',
-  // Advanced
-  'voice',
-  'about',
 ];
 
-const NAV_GROUP_ORDER = ['general', 'projects', 'opencode', 'content', 'git', 'usage', 'advanced'] as const;
+const NAV_GROUP_ORDER = ['general', 'projects', 'opencode', 'content'] as const;
 
 const SNIPPETS_SETTINGS_ICON = { icon: 'chat-thread' } as const;
 const ADD_PROVIDER_SETTINGS_ID = '__add_provider__';

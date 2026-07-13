@@ -29,10 +29,7 @@ type SettingsPageGroup =
   | 'general'
   | 'projects'
   | 'opencode'
-  | 'content'
-  | 'git'
-  | 'usage'
-  | 'advanced';
+  | 'content';
 
 export interface SettingsRuntimeContext {
   isVSCode: boolean;
@@ -85,7 +82,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   {
     slug: 'usage',
     title: 'Usage',
-    group: 'usage',
+    group: 'opencode',
     kind: 'split',
     keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'],
   },
@@ -141,7 +138,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   {
     slug: 'git',
     title: 'Git',
-    group: 'git',
+    group: 'projects',
     kind: 'single',
     keywords: ['git', 'github', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'],
     isAvailable: (ctx) => !ctx.isVSCode,
@@ -192,9 +189,9 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   },
 
   { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', keywords: ['alerts', 'native', 'summary', 'summarization'], },
-  { slug: 'voice', title: 'Voice', group: 'advanced', kind: 'single', keywords: ['tts', 'speech', 'voice'], isAvailable: (ctx) => !ctx.isVSCode },
+  { slug: 'voice', title: 'Voice', group: 'general', kind: 'single', keywords: ['tts', 'speech', 'voice'], isAvailable: (ctx) => !ctx.isVSCode },
   { slug: 'tunnel', title: 'Remote Tunnel', group: 'projects', kind: 'single', keywords: ['tunnel', 'cloudflare', 'qr', 'remote', 'mobile', 'share'], isAvailable: (ctx) => !ctx.isVSCode },
-  { slug: 'about', title: 'About', group: 'advanced', kind: 'single', keywords: ['about', 'version', 'updates', 'release', 'changelog'], isAvailable: (ctx) => ctx.isMobile },
+  { slug: 'about', title: 'About', group: 'general', kind: 'single', keywords: ['about', 'version', 'updates', 'release', 'changelog'], isAvailable: (ctx) => ctx.isMobile },
 ] as const;
 
 const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, SettingsPageSlug> = {
