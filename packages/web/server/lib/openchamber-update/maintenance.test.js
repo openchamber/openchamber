@@ -47,13 +47,46 @@ describe('update maintenance marker', () => {
       fs.mkdirSync(path.dirname(markerPath), { recursive: true });
       fs.writeFileSync(markerPath, JSON.stringify({
         id: 'transaction-1',
-        helperPid: 123,
+        ownerPid: 123,
         createdAt: new Date().toISOString(),
       }));
       const processLike = { kill: vi.fn(() => { throw new Error('not running'); }) };
 
       expect(readActiveUpdateMaintenance({ openchamberDataDir: directory, processLike })).toBeNull();
       expect(fs.existsSync(markerPath)).toBe(false);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps startup blocked when a helper dies during package replacement', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-update-marker-'));
+    try {
+      const markerPath = getUpdateMaintenancePath(directory);
+      const statusPath = path.join(directory, 'updates', 'transaction-1', 'status.json');
+      fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+      fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+      fs.writeFileSync(statusPath, JSON.stringify({
+        id: 'transaction-1',
+        state: 'installing',
+        targetVersion: '1.2.3',
+      }));
+      fs.writeFileSync(markerPath, JSON.stringify({
+        id: 'transaction-1',
+        helperPid: 123,
+        statusPath,
+        createdAt: new Date().toISOString(),
+      }));
+
+      expect(readActiveUpdateMaintenance({
+        openchamberDataDir: directory,
+        processLike: { kill: vi.fn(() => { throw new Error('dead'); }) },
+      })).toMatchObject({
+        id: 'transaction-1',
+        requiresRecovery: true,
+        recoveryTargetVersion: '1.2.3',
+      });
+      expect(fs.existsSync(markerPath)).toBe(true);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

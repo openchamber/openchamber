@@ -239,6 +239,12 @@ export async function startUpdateTransaction(options) {
       };
     }
     if (status?.state === 'failed') {
+      try {
+        child.kill();
+      } catch {
+      }
+      removeOneShotRequest(requestPath);
+      clearUpdateMaintenance({ openchamberDataDir, transactionId: id });
       throw new Error(status.error || 'Update helper failed during startup');
     }
     await sleep(50);

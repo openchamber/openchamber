@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const SERVER_EXIT_TIMEOUT_MS = 60_000;
 const HEALTH_TIMEOUT_MS = 120_000;
@@ -202,11 +203,43 @@ function clearMaintenanceMarker(request) {
   }
 }
 
+function markRecoveryRequired(request) {
+  writeJsonAtomic(request.markerPath, {
+    id: request.id,
+    helperPid: process.pid,
+    statusPath: request.statusPath,
+    requiresRecovery: true,
+    recoveryTargetVersion: request.targetVersion,
+    createdAt: request.createdAt,
+  });
+}
+
+export function deleteOneShotRequest(requestPath, fsLike = fs) {
+  try {
+    fsLike.unlinkSync(requestPath);
+    return;
+  } catch (unlinkError) {
+    try {
+      fsLike.writeFileSync(requestPath, '{}\n', { mode: 0o600 });
+    } catch (scrubError) {
+      throw Object.assign(new Error('Unable to delete or scrub the update request'), {
+        code: 'request-delete-failed',
+        cause: scrubError,
+      });
+    }
+    throw Object.assign(new Error('Unable to delete the update request'), {
+      code: 'request-delete-failed',
+      cause: unlinkError,
+    });
+  }
+}
+
 function setReplacementStartAllowed(request, allowed) {
   writeJsonAtomic(request.markerPath, {
     id: request.id,
     helperPid: process.pid,
     statusPath: request.statusPath,
+    recoveryTargetVersion: request.targetVersion,
     allowForegroundRestart: allowed && request.restart.mode === 'service',
     createdAt: request.createdAt,
   });
@@ -298,8 +331,14 @@ async function main() {
   const request = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
   request.createdAt = new Date().toISOString();
   try {
-    fs.unlinkSync(requestPath);
-  } catch {
+    deleteOneShotRequest(requestPath);
+  } catch (error) {
+    updateStatus(request, 'failed', {
+      errorCode: error.code || 'request-delete-failed',
+      error: error.message,
+    });
+    clearMaintenanceMarker(request);
+    throw error;
   }
   if (typeof request.logPath === 'string') {
     fs.mkdirSync(path.dirname(request.logPath), { recursive: true, mode: 0o700 });
@@ -310,6 +349,7 @@ async function main() {
     id: request.id,
     helperPid: process.pid,
     statusPath: request.statusPath,
+    recoveryTargetVersion: request.targetVersion,
     createdAt: request.createdAt,
   });
   updateStatus(request, 'waiting-for-server-exit');
@@ -358,16 +398,24 @@ async function main() {
     const failure = error instanceof Error ? error : new Error(String(error));
     logUpdate('error', failure.message);
     if (await attemptRecovery(request, failure)) return;
-    clearMaintenanceMarker(request);
     updateStatus(request, 'failed', {
       errorCode: failure.code || 'update-failed',
       error: failure.message,
     });
+    markRecoveryRequired(request);
     process.exitCode = 1;
   }
 }
 
-main().catch((error) => {
-  logUpdate('error', `fatal startup failure: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
-});
+const invokedPath = typeof process.argv[1] === 'string' ? path.resolve(process.argv[1]) : '';
+const modulePath = path.resolve(fileURLToPath(import.meta.url));
+const isMain = process.platform === 'win32'
+  ? invokedPath.toLowerCase() === modulePath.toLowerCase()
+  : invokedPath === modulePath;
+
+if (isMain) {
+  main().catch((error) => {
+    logUpdate('error', `fatal startup failure: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  });
+}

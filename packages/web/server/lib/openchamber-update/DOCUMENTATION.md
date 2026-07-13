@@ -21,7 +21,7 @@ Transactions live under `<openchamber-data>/updates/<transaction-id>/`:
 - `update.log`: package-manager and helper diagnostics. Restart environment values are never printed.
 - `helper.mjs`: copied outside the package directory before replacement begins.
 
-The active maintenance marker is atomically published at `<openchamber-data>/run/openchamber-update.lock/marker.json`. `openchamber serve` refuses to start while this marker points at a live helper. During replacement verification, only the transaction-tagged daemon or a foreground service restart can pass the gate. Dead or stale helper markers are removed automatically.
+The active maintenance marker is atomically published at `<openchamber-data>/run/openchamber-update.lock/marker.json`. `openchamber serve` refuses to start while this marker points at a live helper. During replacement verification, only the transaction-tagged daemon or a foreground service restart can pass the gate. A helper that dies before package mutation begins is cleaned up automatically. A helper that dies during or after mutation leaves a durable recovery gate; `openchamber update` must successfully reinstall the pinned target before startup is allowed again.
 
 ## States
 
@@ -30,6 +30,8 @@ The active maintenance marker is atomically published at `<openchamber-data>/run
 Only `healthy` means `/health` reported the exact requested target version. A healthy restored old server is `recovered-old-version`, never success.
 
 If installation partially replaces the package or the exact target cannot restart, the helper blocks supervisors again, stops the replacement, reinstalls the exact previous version, and verifies previous-version health before reporting recovery.
+
+If automatic recovery fails or the helper is interrupted after mutation begins, the maintenance marker remains in recovery-required state. This prevents systemd, launchd, Scheduled Tasks, watchdogs, and manual starts from executing an unverified package tree. A successful `openchamber update` repairs the pinned target and clears the marker; a failed repair leaves it intact.
 
 ## Platform Contract
 
@@ -42,5 +44,7 @@ Windows `.cmd` package-manager shims are resolved to their underlying Node entry
 ## Tests
 
 `helper.integration.test.js` creates two local `@openchamber/web` fixture tarballs, installs version A under an isolated global npm prefix containing spaces, replaces it with version B, launches B's fixture health server, and verifies exact target health. It also verifies failed-install recovery and secret redaction.
+
+The suite also covers passive service-manager restart, Windows Scheduled Task retry behavior, request-file deletion failure, and durable interruption recovery gating.
 
 The same integration test runs on Windows, macOS, and Linux CI without publishing a real release or modifying the machine's normal global npm prefix.

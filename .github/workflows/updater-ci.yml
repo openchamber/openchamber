@@ -6,13 +6,16 @@ on:
       - '.github/workflows/updater-ci.yml'
       - 'packages/web/bin/lib/commands-serve.js'
       - 'packages/web/bin/lib/commands-update.js'
+      - 'packages/web/bin/lib/commands-update.test.js'
       - 'packages/web/bin/lib/cli-process.js'
       - 'packages/web/bin/lib/cli-startup.js'
       - 'packages/web/server/lib/openchamber-update/**'
       - 'packages/web/server/lib/opencode/openchamber-routes.js'
       - 'packages/web/server/lib/package-manager.js'
+      - 'packages/web/server/lib/package-manager.test.js'
       - 'packages/ui/src/components/ui/UpdateDialog.tsx'
       - 'packages/ui/src/lib/webUpdate.ts'
+      - 'packages/ui/src/lib/webUpdate.test.ts'
       - 'packages/ui/src/lib/i18n/messages/**'
   workflow_dispatch:
 

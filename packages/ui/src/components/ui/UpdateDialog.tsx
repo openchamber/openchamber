@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -127,6 +127,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const [copied, setCopied] = useState(false);
   const [webUpdateState, setWebUpdateState] = useState<WebUpdateState>('idle');
   const [webError, setWebError] = useState<string | null>(null);
+  const webUpdateAbortRef = useRef<AbortController | null>(null);
 
   const releaseUrl = info?.version
     ? (info.releaseUrl || `${GITHUB_RELEASES_URL}/tag/v${info.version}`)
@@ -144,10 +145,21 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   // Reset state when dialog closes
   useEffect(() => {
     if (!open) {
+      webUpdateAbortRef.current?.abort();
+      webUpdateAbortRef.current = null;
       setWebUpdateState('idle');
       setWebError(null);
     }
   }, [open]);
+
+  useEffect(() => {
+    const cancelWebUpdate = () => webUpdateAbortRef.current?.abort();
+    window.addEventListener('openchamber:runtime-endpoint-changed', cancelWebUpdate);
+    return () => {
+      window.removeEventListener('openchamber:runtime-endpoint-changed', cancelWebUpdate);
+      cancelWebUpdate();
+    };
+  }, []);
 
   const handleCopyCommand = async () => {
     const result = await copyTextToClipboard(updateCommand);
@@ -161,10 +173,15 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     await openExternalUrl(url);
   }, []);
   const handleWebUpdate = useCallback(async () => {
+    webUpdateAbortRef.current?.abort();
+    const abortController = new AbortController();
+    webUpdateAbortRef.current = abortController;
     setWebUpdateState('updating');
     setWebError(null);
 
-    const result = await startWebUpdate();
+    const result = await startWebUpdate(undefined, abortController.signal);
+
+    if (abortController.signal.aborted) return;
 
     if (!result.accepted) {
       setWebUpdateState('error');
@@ -175,6 +192,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     if (result.restartManager === 'cli') {
       setWebUpdateState('restarting');
       await new Promise(resolve => setTimeout(resolve, 2000));
+      if (abortController.signal.aborted) return;
     }
 
     setWebUpdateState('reconnecting');
@@ -190,8 +208,14 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     const outcome = await waitForWebUpdate({
       transactionId: result.transactionId,
       targetVersion: result.targetVersion,
+      signal: abortController.signal,
       onStatus,
     });
+
+    if (webUpdateAbortRef.current === abortController) {
+      webUpdateAbortRef.current = null;
+    }
+    if (outcome.outcome === 'cancelled') return;
 
     if (outcome.outcome === 'healthy') {
       window.location.reload();

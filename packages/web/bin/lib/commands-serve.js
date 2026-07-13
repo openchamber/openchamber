@@ -39,7 +39,9 @@ async function serveCommand(options) {
       foreground: options.foreground === true,
     })) {
       throw new TunnelCliError(
-        `OpenChamber update ${activeUpdate.id} is still in progress; startup is deferred.`,
+        activeUpdate.requiresRecovery === true
+          ? `OpenChamber update ${activeUpdate.id} was interrupted; run \`openchamber update\` to repair the installation before startup.`
+          : `OpenChamber update ${activeUpdate.id} is still in progress; startup is deferred.`,
         EXIT_CODE.GENERAL_ERROR,
       );
     }

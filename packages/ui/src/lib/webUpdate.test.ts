@@ -95,4 +95,30 @@ describe('web update transaction polling', () => {
     })).toEqual({ outcome: 'timeout' });
     expect(requested).not.toContain('/api/openchamber/update-check');
   });
+
+  test('cancels polling while waiting for the next attempt', async () => {
+    const controller = new AbortController();
+    const fetcher = async (input: RequestInfo | URL) => {
+      if (String(input) === '/health') return jsonResponse({ openchamberVersion: '1.0.0' });
+      return jsonResponse({
+        id: 'tx-1',
+        state: 'installing',
+        currentVersion: '1.0.0',
+        targetVersion: '1.1.0',
+      });
+    };
+
+    const resultPromise = waitForWebUpdate({
+      transactionId: 'tx-1',
+      targetVersion: '1.1.0',
+      fetcher: fetcher as never,
+      maxAttempts: 10,
+      intervalMs: 60_000,
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    controller.abort();
+
+    expect(await resultPromise).toEqual({ outcome: 'cancelled' });
+  });
 });

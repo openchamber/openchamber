@@ -4,6 +4,15 @@ import path from 'node:path';
 const UPDATE_MAINTENANCE_DIRECTORY = 'openchamber-update.lock';
 const UPDATE_MAINTENANCE_FILE = 'marker.json';
 const DEFAULT_MAX_AGE_MS = 60 * 60 * 1000;
+const RECOVERY_REQUIRED_STATES = new Set([
+  'installing',
+  'verifying',
+  'rolling-back',
+  'restarting',
+  'awaiting-service-restart',
+  'checking-health',
+  'failed',
+]);
 
 export function getUpdateMaintenancePath(openchamberDataDir) {
   return path.join(openchamberDataDir, 'run', UPDATE_MAINTENANCE_DIRECTORY, UPDATE_MAINTENANCE_FILE);
@@ -34,6 +43,29 @@ function removeOrphanedRequest(marker, openchamberDataDir, fsLike) {
   try {
     fsLike.unlinkSync(requestPath);
   } catch {
+  }
+}
+
+function readInterruptedUpdate(marker, openchamberDataDir, fsLike) {
+  if (marker?.requiresRecovery === true) return marker;
+  if (!Number.isInteger(Number(marker?.helperPid))) return null;
+
+  const updatesRoot = path.resolve(openchamberDataDir, 'updates');
+  const statusPath = typeof marker?.statusPath === 'string' ? path.resolve(marker.statusPath) : null;
+  if (!statusPath || !statusPath.startsWith(`${updatesRoot}${path.sep}`)) {
+    return { ...marker, requiresRecovery: true };
+  }
+
+  try {
+    const status = JSON.parse(fsLike.readFileSync(statusPath, 'utf8'));
+    if (!RECOVERY_REQUIRED_STATES.has(status?.state)) return null;
+    return {
+      ...marker,
+      requiresRecovery: true,
+      recoveryTargetVersion: typeof status.targetVersion === 'string' ? status.targetVersion : undefined,
+    };
+  } catch {
+    return { ...marker, requiresRecovery: true };
   }
 }
 
@@ -100,6 +132,8 @@ export function readActiveUpdateMaintenance(options = {}) {
     if (fresh && isProcessRunning(ownerPid, processLike)) {
       return marker;
     }
+    const interruptedUpdate = readInterruptedUpdate(marker, openchamberDataDir, fsLike);
+    if (interruptedUpdate) return interruptedUpdate;
     removeOrphanedRequest(marker, openchamberDataDir, fsLike);
   } catch {
   }
