@@ -47,14 +47,13 @@ import {
   desktopHostsGet,
   desktopHostsSet,
   desktopInstallIdGet,
+  buildPairedDesktopHostTransportFields,
+  replacePairedDesktopHostTransportFields,
   normalizeHostUrl,
   probeDesktopHostTransports,
   redactSensitiveUrl,
   resolveDesktopHostUrl,
-  relayHostDisplayUrl,
   type DesktopHost,
-  type DesktopHostRelay,
-  type DesktopHostDirectE2ee,
   directE2eeHostFingerprint,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
@@ -560,46 +559,13 @@ export const RemoteInstancesPage: React.FC = () => {
       ? crypto.randomUUID()
       : `host-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
-    // Persist EVERY transport the link carried, not just the one that answered
-    // the redeem — a multi-transport host connects directly on the home network
-    // and falls back to the relay away from it (same model as mobile devices).
-    // The single token works over both transports.
-    const linkRelayCandidate = payload.candidates.find(
-      (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'relay' }> => candidate.type === 'relay',
-    );
-    const relay: DesktopHostRelay | undefined = redeemed.transport.kind === 'relay'
-      ? redeemed.transport
-      : linkRelayCandidate
-        ? { relayUrl: linkRelayCandidate.relayUrl, serverId: linkRelayCandidate.serverId, hostEncPubJwk: linkRelayCandidate.hostEncPubJwk }
-        : undefined;
-    const firstDirectCandidate = payload.candidates.find(
-      (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'lan' | 'tunnel' }> =>
-        candidate.type === 'lan' || candidate.type === 'tunnel',
-    );
-    const firstDirectUrl = normalizeHostUrl(firstDirectCandidate?.url || '') || undefined;
-    const directE2eeCandidate = payload.candidates.find(
-      (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'direct-e2ee' }> => candidate.type === 'direct-e2ee',
-    );
-    const directE2ee: DesktopHostDirectE2ee | undefined = redeemed.transport.kind === 'direct-e2ee'
-      ? redeemed.transport
-      : directE2eeCandidate
-        ? { wssUrl: directE2eeCandidate.wssUrl, hostEncPubJwk: directE2eeCandidate.hostEncPubJwk }
-        : undefined;
-    const directUrl = redeemed.transport.kind === 'direct' ? redeemed.transport.url : firstDirectUrl;
     const { token } = redeemed;
-
-    const url = directUrl || (relay ? relayHostDisplayUrl(relay.serverId) : directE2ee ? `direct-e2ee://${new URL(directE2ee.wssUrl).hostname}` : null);
-    if (!url) {
+    const transportFields = buildPairedDesktopHostTransportFields(payload.candidates, redeemed.transport, token);
+    if (!transportFields) {
       setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
       return;
     }
-    const transportFields = {
-      url,
-      apiUrl: directUrl || undefined,
-      clientToken: token,
-      ...(relay ? { relay } : {}),
-      ...(directE2ee ? { directE2ee } : {}),
-    };
+    const { directE2ee, relay, url } = transportFields;
     // One host per server: match by relay serverId when the link has a relay
     // leg, else by direct URL — re-importing updates the record in place.
     const existing = directHosts.find((host) => (
@@ -609,7 +575,7 @@ export const RemoteInstancesPage: React.FC = () => {
     ));
     if (existing) {
       const nextHosts = directHosts.map((host) => host.id === existing.id
-        ? { ...host, label: payload.label || host.label, ...transportFields }
+        ? { ...replacePairedDesktopHostTransportFields(host, transportFields), label: payload.label || host.label }
         : host);
       await persistDirectHosts(nextHosts, directDefaultHostId);
     } else {
@@ -1668,12 +1634,6 @@ export const RemoteInstancesPage: React.FC = () => {
                           </p>
                         </div>
                       </div>
-                      {transportOptions?.relayAvailable ? (
-                        <label className="flex w-fit cursor-pointer items-center gap-2 pt-1">
-                          <Checkbox checked={addDeviceFallback} onChange={setAddDeviceFallback} ariaLabel={t('settings.remoteInstances.clientAuth.addDevice.fallback.relay')} />
-                          <span className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.addDevice.fallback.relay')}</span>
-                        </label>
-                      ) : null}
                     </div>
                   ) : addDeviceTransport === 'relay' && transportOptions?.lanUrl ? (
                     <label className="flex w-fit cursor-pointer items-center gap-2 pt-1">
