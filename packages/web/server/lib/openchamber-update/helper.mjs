@@ -160,8 +160,23 @@ function logUpdate(level, message) {
   console[level](line.trimEnd());
 }
 
-function getBaseEnvironment(request) {
-  return { ...process.env, ...(request.environment || {}) };
+function mergeEnvironment(...sources) {
+  const result = {};
+  const keys = new Map();
+  for (const source of sources) {
+    for (const [key, value] of Object.entries(source || {})) {
+      const normalizedKey = process.platform === 'win32' ? key.toLowerCase() : key;
+      const previousKey = keys.get(normalizedKey);
+      if (previousKey && previousKey !== key) delete result[previousKey];
+      result[key] = value;
+      keys.set(normalizedKey, key);
+    }
+  }
+  return result;
+}
+
+function getBaseEnvironment(request, overrides) {
+  return mergeEnvironment(process.env, request.environment, overrides);
 }
 
 function readInstalledVersion(packagePath) {
@@ -248,7 +263,7 @@ function setReplacementStartAllowed(request, allowed) {
 async function startReplacement(request, expectedVersion = request.targetVersion) {
   if (request.restart.mode === 'daemon') {
     await spawnAndWait(request.restart.command, request.restart.args, {
-      env: { ...getBaseEnvironment(request), ...(request.restart.env || {}) },
+      env: getBaseEnvironment(request, request.restart.env),
     });
     return;
   }
@@ -297,7 +312,7 @@ async function attemptRecovery(request, failure) {
     });
     try {
       await spawnAndWait(request.rollback.command, request.rollback.args, {
-        env: { ...getBaseEnvironment(request), ...(request.rollback.env || {}) },
+        env: getBaseEnvironment(request, request.rollback.env),
         timeoutMs: request.rollback.timeoutMs || INSTALL_TIMEOUT_MS,
         terminateTree: true,
       });
@@ -359,7 +374,7 @@ async function main() {
     updateStatus(request, 'installing');
     try {
       await spawnAndWait(request.install.command, request.install.args, {
-        env: { ...getBaseEnvironment(request), ...(request.install.env || {}) },
+        env: getBaseEnvironment(request, request.install.env),
         timeoutMs: request.install.timeoutMs || INSTALL_TIMEOUT_MS,
         terminateTree: true,
       });
@@ -407,8 +422,18 @@ async function main() {
   }
 }
 
-const invokedPath = typeof process.argv[1] === 'string' ? path.resolve(process.argv[1]) : '';
-const modulePath = path.resolve(fileURLToPath(import.meta.url));
+function canonicalizeEntrypoint(filePath) {
+  if (!filePath) return '';
+  try {
+    const realPath = fs.realpathSync.native ? fs.realpathSync.native(filePath) : fs.realpathSync(filePath);
+    return path.resolve(realPath);
+  } catch {
+    return path.resolve(filePath);
+  }
+}
+
+const invokedPath = canonicalizeEntrypoint(process.argv[1]);
+const modulePath = canonicalizeEntrypoint(fileURLToPath(import.meta.url));
 const isMain = process.platform === 'win32'
   ? invokedPath.toLowerCase() === modulePath.toLowerCase()
   : invokedPath === modulePath;

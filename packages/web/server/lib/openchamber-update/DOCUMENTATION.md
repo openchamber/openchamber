@@ -41,6 +41,8 @@ Foreground systemd and launchd servers start the helper in an independent transi
 
 Windows `.cmd` package-manager shims are resolved to their underlying Node entrypoint and launched with argument arrays. The updater fails before server shutdown when a shim cannot be resolved safely. It never passes multiline programs to `cmd.exe /c`.
 
+Environment layers are merged case-insensitively on Windows so package-manager overrides such as `npm_config_prefix` cannot be shadowed by a differently cased inherited key.
+
 ## Tests
 
 `helper.integration.test.js` creates two local `@openchamber/web` fixture tarballs, installs version A under an isolated global npm prefix containing spaces, replaces it with version B, launches B's fixture health server, and verifies exact target health. It also verifies failed-install recovery and secret redaction.

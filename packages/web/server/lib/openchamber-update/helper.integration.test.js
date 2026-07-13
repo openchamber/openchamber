@@ -17,10 +17,25 @@ const artifactsDirectory = path.join(fixtureRoot, 'artifacts');
 const npmLaunch = getPackageManagerLaunchSpec('npm');
 const fixtureTarballs = new Map();
 
+function mergeEnvironment(...sources) {
+  const result = {};
+  const keys = new Map();
+  for (const source of sources) {
+    for (const [key, value] of Object.entries(source || {})) {
+      const normalizedKey = process.platform === 'win32' ? key.toLowerCase() : key;
+      const previousKey = keys.get(normalizedKey);
+      if (previousKey && previousKey !== key) delete result[previousKey];
+      result[key] = value;
+      keys.set(normalizedKey, key);
+    }
+  }
+  return result;
+}
+
 function runNpm(args, options = {}) {
   const result = spawnSync(npmLaunch.command, [...npmLaunch.argsPrefix, ...args], {
     cwd: options.cwd,
-    env: { ...process.env, ...(options.env || {}) },
+    env: mergeEnvironment(process.env, options.env),
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 30_000,
@@ -113,6 +128,13 @@ async function runHelper(request, transactionDirectory) {
     child.once('error', reject);
     child.once('exit', resolve);
   });
+  if (exitCode !== 0) {
+    let status = 'unavailable';
+    let log = 'unavailable';
+    try { status = fs.readFileSync(path.join(transactionDirectory, 'status.json'), 'utf8'); } catch {}
+    try { log = fs.readFileSync(logPath, 'utf8'); } catch {}
+    throw new Error(`Updater helper exited with code ${exitCode}\nstatus:\n${status}\nlog:\n${log}`);
+  }
   return { exitCode, requestPath, logPath };
 }
 
@@ -284,6 +306,7 @@ describe('standalone updater helper', () => {
     const markerPath = path.join(testDirectory, 'run', 'openchamber-update.lock', 'marker.json');
     const serverPidPath = path.join(testDirectory, 'server.pid');
     const port = await getFreePort();
+    fs.mkdirSync(testDirectory, { recursive: true });
     runNpm(['install', '-g', fixtureTarballs.get('0.0.2')], { env: { npm_config_prefix: prefix } });
 
     try {
@@ -330,6 +353,7 @@ describe('standalone updater helper', () => {
     const markerPath = path.join(testDirectory, 'run', 'openchamber-update.lock', 'marker.json');
     const serverPidPath = path.join(testDirectory, 'server.pid');
     const port = await getFreePort();
+    fs.mkdirSync(testDirectory, { recursive: true });
     runNpm(['install', '-g', fixtureTarballs.get('0.0.2')], { env: { npm_config_prefix: prefix } });
 
     const helperPromise = runHelper({
@@ -395,6 +419,7 @@ describe('standalone updater helper', () => {
     const attemptPath = path.join(testDirectory, 'restart-attempt.txt');
     const restartScriptPath = path.join(testDirectory, 'restart-task.mjs');
     const port = await getFreePort();
+    fs.mkdirSync(testDirectory, { recursive: true });
     runNpm(['install', '-g', fixtureTarballs.get('0.0.2')], { env: { npm_config_prefix: prefix } });
     fs.writeFileSync(restartScriptPath, `
 import fs from 'node:fs';
@@ -510,6 +535,7 @@ child.unref();
     const sentinelPath = path.join(testDirectory, 'installer-child-survived');
     const hangingInstallerPath = path.join(testDirectory, 'hanging-installer.mjs');
     const port = await getFreePort();
+    fs.mkdirSync(testDirectory, { recursive: true });
     runNpm(['install', '-g', fixtureTarballs.get('0.0.1')], { env: { npm_config_prefix: prefix } });
     fs.writeFileSync(hangingInstallerPath, `
 import { spawn } from 'node:child_process';
@@ -691,14 +717,16 @@ fs.writeFileSync(config.resultPath, JSON.stringify(transaction));
     }));
 
     const parent = spawn(process.execPath, [parentPath, parentConfigPath], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
     });
+    let parentStderr = '';
+    parent.stderr.on('data', (chunk) => { parentStderr += chunk.toString(); });
     const parentExitCode = await new Promise((resolve, reject) => {
       parent.once('error', reject);
       parent.once('exit', resolve);
     });
-    expect(parentExitCode).toBe(0);
+    expect(parentExitCode, parentStderr).toBe(0);
 
     const transaction = JSON.parse(fs.readFileSync(transactionResultPath, 'utf8'));
     try {
