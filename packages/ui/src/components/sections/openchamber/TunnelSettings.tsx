@@ -17,6 +17,8 @@ import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { useTunnelAdminStore } from './tunnelAdminStore';
+import { resolveTunnelAdminCapability, isLocked403Error, resolveTunnelActiveState } from './tunnelAdminHelpers';
 import { setAddDeviceIntent } from '@/lib/pairingTransportOptions';
 
 type TunnelState =
@@ -300,10 +302,13 @@ const createPresetId = (): string => {
 
 export const TunnelSettings: React.FC = () => {
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const setTunnelCanAdminister = useTunnelAdminStore((state) => state.setCanAdminister);
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const [state, setState] = React.useState<TunnelState>('checking');
+  const [canAdminister, setCanAdminister] = React.useState<boolean | null>(null);
+  const [readOnlyTunnelActive, setReadOnlyTunnelActive] = React.useState<boolean>(false);
   const [tunnelInfo, setTunnelInfo] = React.useState<TunnelInfo | null>(null);
   const [activeTunnelMode, setActiveTunnelMode] = React.useState<TunnelMode | null>(null);
   const [qrDataUrl, setQrDataUrl] = React.useState<string | null>(null);
@@ -513,6 +518,10 @@ export const TunnelSettings: React.FC = () => {
 
   const checkAvailabilityAndStatus = React.useCallback(async (signal: AbortSignal) => {
     const presetRefreshToken = managedPresetRequestFenceRef.current.beginRefresh();
+    setCanAdminister(null);
+    setTunnelCanAdminister(null);
+    setReadOnlyTunnelActive(false);
+    setState('checking');
     try {
       const [checkRes, statusRes, settingsRes, providersRes] = await Promise.all([
         runtimeFetch('/api/openchamber/tunnel/check', { signal }),
@@ -568,6 +577,10 @@ export const TunnelSettings: React.FC = () => {
         setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
         setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
       setLocalPort(typeof statusData.localPort === 'number' ? statusData.localPort : null);
+      const resolvedCanAdminister = resolveTunnelAdminCapability(statusData.canAdminister);
+      setCanAdminister(resolvedCanAdminister);
+      setTunnelCanAdminister(resolvedCanAdminister);
+      setReadOnlyTunnelActive(resolveTunnelActiveState(statusData.active));
 
       if (statusData.active && statusData.url) {
         setTunnelInfo({
@@ -586,7 +599,7 @@ export const TunnelSettings: React.FC = () => {
         setErrorMessage(t('settings.openchamber.tunnel.toast.checkAvailabilityFailed'));
       }
     }
-  }, [applyDependencyCheck, applyServerPresetRefresh, t]);
+  }, [applyDependencyCheck, applyServerPresetRefresh, setTunnelCanAdminister, t]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -741,6 +754,20 @@ export const TunnelSettings: React.FC = () => {
         setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
         setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
         setLocalPort(typeof statusData.localPort === 'number' ? statusData.localPort : null);
+        const resolvedCanAdminister = resolveTunnelAdminCapability(statusData.canAdminister);
+        setCanAdminister(resolvedCanAdminister);
+        setTunnelCanAdminister(resolvedCanAdminister);
+        setReadOnlyTunnelActive(resolveTunnelActiveState(statusData.active));
+
+        if (statusData.active && statusData.url) {
+          setTunnelInfo({
+            url: statusData.url,
+            connectUrl: null,
+            bootstrapExpiresAt: typeof statusData.bootstrapExpiresAt === 'number' ? statusData.bootstrapExpiresAt : null,
+          });
+        } else if (!statusData.active) {
+          setTunnelInfo(null);
+        }
       } catch {
         // ignore transient refresh failures
       }
@@ -758,7 +785,7 @@ export const TunnelSettings: React.FC = () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [applyServerPresetRefresh, state]);
+  }, [applyServerPresetRefresh, setTunnelCanAdminister, state]);
 
   const saveTunnelSettings = React.useCallback(async (payload: {
     tunnelProvider?: string;
@@ -950,6 +977,12 @@ export const TunnelSettings: React.FC = () => {
       const data = (await res.json()) as TunnelStartResponse;
 
       if (!res.ok || !data.ok) {
+        if (isLocked403Error(res.status, data)) {
+          setCanAdminister(false);
+          setTunnelCanAdminister(false);
+          setState('idle');
+          return;
+        }
         if (tunnelMode === 'managed-remote' && typeof data.error === 'string' && data.error.includes('Managed remote tunnel token is required')) {
           setState('idle');
           setManagedRemoteValidationError(t('settings.openchamber.tunnel.toast.managedRemoteTokenRequiredBeforeStarting'));
@@ -1017,6 +1050,7 @@ export const TunnelSettings: React.FC = () => {
     saveTunnelSettings,
     selectedPreset,
     sessionTokensByPresetId,
+    setTunnelCanAdminister,
     t,
     tunnelProvider,
     tunnelMode,
@@ -1027,7 +1061,17 @@ export const TunnelSettings: React.FC = () => {
     setState('stopping');
 
     try {
-      await runtimeFetch('/api/openchamber/tunnel/stop', { method: 'POST' });
+      const stopRes = await runtimeFetch('/api/openchamber/tunnel/stop', { method: 'POST' });
+      if (!stopRes.ok) {
+        const data = await stopRes.json().catch(() => null);
+        if (isLocked403Error(stopRes.status, data)) {
+          setCanAdminister(false);
+          setTunnelCanAdminister(false);
+          setState('idle');
+          return;
+        }
+        throw new Error('Stop failed');
+      }
       const presetRefreshToken = managedPresetRequestFenceRef.current.beginRefresh();
       const statusRes = await runtimeFetch('/api/openchamber/tunnel/status');
       if (statusRes.ok) {
@@ -1043,6 +1087,10 @@ export const TunnelSettings: React.FC = () => {
         setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
         setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
         setLocalPort(typeof statusData.localPort === 'number' ? statusData.localPort : null);
+        const resolvedCanAdminister = resolveTunnelAdminCapability(statusData.canAdminister);
+        setCanAdminister(resolvedCanAdminister);
+        setTunnelCanAdminister(resolvedCanAdminister);
+        setReadOnlyTunnelActive(resolveTunnelActiveState(statusData.active));
       }
       setTunnelInfo(null);
       setActiveTunnelMode(null);
@@ -1054,7 +1102,7 @@ export const TunnelSettings: React.FC = () => {
       setErrorMessage(t('settings.openchamber.tunnel.toast.stopFailed'));
       toast.error(t('settings.openchamber.tunnel.toast.stopFailed'));
     }
-  }, [applyServerPresetRefresh, t]);
+  }, [applyServerPresetRefresh, setTunnelCanAdminister, t]);
 
   const handleCopyUrl = React.useCallback(async () => {
     if (!tunnelInfo?.connectUrl) {
@@ -1245,7 +1293,8 @@ export const TunnelSettings: React.FC = () => {
         </p>
       </div>
 
-      {renderedSessionRecords.length > 0 && (
+
+      {renderedSessionRecords.length > 0 && canAdminister && (
         <section className="space-y-2 px-2 pb-2 pt-0">
           <div className="rounded-lg border border-[var(--status-info-border)] bg-[var(--status-info-background)]/30 p-3">
             <div className="mb-2 flex items-center gap-2">
@@ -1297,7 +1346,7 @@ export const TunnelSettings: React.FC = () => {
         </section>
       )}
 
-      {state === 'not-available' && (
+      {state === 'not-available' && canAdminister && (
         <section className="space-y-2 px-2 pb-2 pt-0">
           <div className="flex items-start gap-2 rounded-lg border border-[var(--status-warning)]/30 bg-[var(--status-warning)]/5 p-3">
             <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
@@ -1314,7 +1363,31 @@ export const TunnelSettings: React.FC = () => {
         </section>
       )}
 
-      {(
+
+
+      {canAdminister === false && (
+        <section className="space-y-2 px-2 pb-2 pt-0">
+          <div className="flex items-start gap-2 rounded-lg border border-[var(--status-info-border)] bg-[var(--status-info-background)]/30 p-3">
+            <Icon name="lock" className="mt-0.5 size-4 shrink-0 text-[var(--status-info)]" />
+            <div className="space-y-1">
+              <p className="typography-meta font-medium text-foreground">
+                {tUnsafe('settings.openchamber.tunnel.readOnly.title')}
+              </p>
+              <p className="typography-meta text-muted-foreground/70">
+                {tUnsafe('settings.openchamber.tunnel.readOnly.description')}
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <div className={cn("size-2 shrink-0 rounded-full", readOnlyTunnelActive ? "bg-[var(--status-success)]" : "bg-muted-foreground/50")} />
+                <p className="typography-meta font-medium text-foreground">
+                  {readOnlyTunnelActive ? t('settings.openchamber.tunnel.state.tunnelReady') : t('settings.openchamber.tunnel.state.inactive')}
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {canAdminister && (
         <section className="space-y-4 px-2 pb-2 pt-0">
           <div className="space-y-3">
             <div data-settings-item="tunnel.provider" className="space-y-1.5">
@@ -1873,7 +1946,7 @@ export const TunnelSettings: React.FC = () => {
         </section>
       )}
 
-      {isSelectedModeTunnelReady && tunnelInfo && (
+      {isSelectedModeTunnelReady && tunnelInfo && canAdminister && (
         <section data-settings-item="tunnel.start" className="space-y-4 px-2 pb-2 pt-0">
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -1945,37 +2018,41 @@ export const TunnelSettings: React.FC = () => {
             )}
           </div>
 
-          <div className="pt-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm"
-                variant="outline"
-                onClick={handleStart}
-                disabled={state === 'stopping' || isSavingMode || (tunnelMode === 'managed-local' && isManagedLocalConfigPathInvalid)}
-                className={primaryCtaClass}
-              >
-                <Icon name="restart" className="size-3.5" />
-                {t('settings.openchamber.tunnel.actions.newConnectLink')}
-              </Button>
+          {canAdminister && (
+            <div className="pt-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm"
+                  variant="outline"
+                  onClick={handleStart}
+                  disabled={state === 'stopping' || isSavingMode || (tunnelMode === 'managed-local' && isManagedLocalConfigPathInvalid)}
+                  className={primaryCtaClass}
+                >
+                  <Icon name="restart" className="size-3.5" />
+                  {t('settings.openchamber.tunnel.actions.newConnectLink')}
+                </Button>
 
-              <Button size="sm"
-                variant="ghost"
-                onClick={handleStop}
-                disabled={state === 'stopping' || isSavingMode}
-                className="gap-2 text-[var(--status-error)]"
-              >
-                {state === 'stopping'
-                  ? <><Icon name="loader-4" className="size-3.5 animate-spin" /> {t('settings.openchamber.tunnel.actions.stopping')}</>
-                  : t('settings.openchamber.tunnel.actions.stopTunnel')}
-              </Button>
+                <Button size="sm"
+                  variant="ghost"
+                  onClick={handleStop}
+                  disabled={state === 'stopping' || isSavingMode}
+                  className="gap-2 text-[var(--status-error)]"
+                >
+                  {state === 'stopping'
+                    ? <><Icon name="loader-4" className="size-3.5 animate-spin" /> {t('settings.openchamber.tunnel.actions.stopping')}</>
+                    : t('settings.openchamber.tunnel.actions.stopTunnel')}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </section>
       )}
 
       {state === 'error' && errorMessage && (
         <section className="space-y-3 px-2 pb-2 pt-0">
           <p className="typography-meta text-[var(--status-error)]">{errorMessage}</p>
-          <Button size="sm" variant="ghost" onClick={handleStart}>{t('settings.openchamber.tunnel.actions.retry')}</Button>
+          {canAdminister && (
+            <Button size="sm" variant="ghost" onClick={handleStart}>{t('settings.openchamber.tunnel.actions.retry')}</Button>
+          )}
         </section>
       )}
     </div>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { useTunnelAdminStore } from '@/components/sections/openchamber/tunnelAdminStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
@@ -306,6 +307,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const settingsPageRaw = useUIStore((state) => state.settingsPage);
   const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const tunnelCanAdminister = useTunnelAdminStore((state) => state.canAdminister);
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
 
   const [mobileStage, setMobileStage] = React.useState<MobileStage>(initialMobileStage);
@@ -540,12 +542,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
       query: settingsSearchQuery,
-      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows },
+      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, tunnelCanAdminister },
       visiblePageSlugs,
       t,
       getPageTitle,
     });
-  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
+  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, runtimeCtx, settingsSearchQuery, t, tunnelCanAdminister, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
     if (result.id.startsWith('agents.')) {
