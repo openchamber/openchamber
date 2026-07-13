@@ -171,11 +171,16 @@ function runDev(config) {
   }
   const uiPort = explicitPorts?.uiPort ?? config.uiPort;
   const apiPort = explicitPorts?.apiPort ?? config.apiPort;
+  const effectiveConfig = {
+    ...config,
+    uiPort,
+    apiPort,
+  };
 
   if (explicitPorts) {
     console.log('[worktree-dev] using explicit OPENCHAMBER_HMR_* port overrides');
   }
-  printInfo(config);
+  printInfo(effectiveConfig);
   const child = spawnSync('bun', ['run', 'dev:web:hmr'], {
     cwd: repoRoot,
     stdio: 'inherit',
@@ -193,8 +198,15 @@ function printList() {
   const worktrees = resolveAllWorktrees();
   for (const entry of worktrees) {
     const branch = entry.branch || '(detached)';
-    const collisionFlag = entry.hasCollision ? ' !collision' : '';
-    console.log(`${entry.uiPort}/${entry.apiPort}  slot=${entry.slot}  ${branch}  ${entry.path}${collisionFlag}`);
+    if (!entry.hasCollision) {
+      console.log(`${entry.uiPort}/${entry.apiPort}  slot=${entry.slot}  ${branch}  ${entry.path}`);
+      continue;
+    }
+    const conflictingPaths = entry.conflictingWorktrees.filter((worktreePath) => worktreePath !== entry.path);
+    const conflictDetails = conflictingPaths.length > 0
+      ? ` !collision with: ${conflictingPaths.join(', ')}`
+      : ' !collision';
+    console.log(`${entry.uiPort}/${entry.apiPort}  slot=${entry.slot}  ${branch}  ${entry.path}${conflictDetails}`);
   }
 }
 

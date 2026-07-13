@@ -41,6 +41,9 @@ Run commands from the project root unless a section says otherwise.
 | `bun run dev` | Default web HMR dev flow. | auto-selected dev ports |
 | `bun run dev:web:full` | Build watcher + Express server. No HMR — manual refresh after changes. | `3001` (server + static) |
 | `bun run dev:web:hmr` | Vite dev server + Express API. **Open the Vite URL for HMR**, not the backend. | `5180` (Vite HMR), `3902` (API) |
+| `bun run dev:worktree:list` | List detected worktrees with assigned UI/API ports. | per-worktree assigned |
+| `bun run dev:worktree:ports` | Print export commands for current worktree UI/API ports. | per-worktree assigned |
+| `bun run dev:worktree` | Start web HMR using current worktree assigned ports. | per-worktree assigned |
 | `bun run start:web` | Start the packaged web server. | `3000` by default |
 
 Both are configurable via env vars: `OPENCHAMBER_PORT`, `OPENCHAMBER_HMR_UI_PORT`, `OPENCHAMBER_HMR_API_PORT`.
