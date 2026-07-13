@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Session } from "@opencode-ai/sdk/v2/client";
 import { autoRespondsPermission, type PermissionAutoAcceptMap } from "./utils/permissionAutoAccept";
-import { getAllSyncSessions } from "@/sync/sync-refs";
+import { getAllSyncSessions, getLiveIndexRef } from "@/sync/sync-refs";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
@@ -20,6 +20,7 @@ interface PermissionStore {
     hydrate: () => Promise<void>;
     applySnapshot: (snapshot: PermissionPolicySnapshot) => void;
     reset: () => void;
+    setLiveIndex: (index: import("@/sync/live-session-index").LiveSessionIndex | null) => void;
     isSessionAutoAccepting: (sessionId: string) => boolean;
     setSessionAutoAccept: (sessionId: string, enabled: boolean) => Promise<void>;
 }
@@ -77,9 +78,31 @@ export const usePermissionStore = create<PermissionStore>()(persist((set, get) =
         set({ autoAccept: sessions, loaded: true });
     },
 
+    setLiveIndex: (index) => {
+        // No-op retained for shape compatibility — the LiveSessionIndex lives
+        // in sync-refs and is read on demand. Keeping the action lets the
+        // store shape stay stable for tests/serialization.
+        void index
+    },
+
     isSessionAutoAccepting: (sessionId) => {
         if (!sessionId) return false;
-        return isAutoAccepting(get().autoAccept, getAllSyncSessions(), sessionId);
+        const autoAccept = get().autoAccept;
+        // Most common case: user has never opted in to auto-accept.
+        if (Object.keys(autoAccept).length === 0) return false;
+        const index = getLiveIndexRef();
+        if (index) {
+            const lineage = index.getLineage(sessionId);
+            if (lineage.length === 0) return false;
+            for (const id of lineage) {
+                if (!Object.prototype.hasOwnProperty.call(autoAccept, id)) continue;
+                return autoAccept[id] === true;
+            }
+            return false;
+        }
+        // Fallback: no LiveSessionIndex mounted. Keep today's behavior so
+        // this PR is fully backward-compatible with non-React callers.
+        return isAutoAccepting(autoAccept, getAllSyncSessions(), sessionId);
     },
 
     setSessionAutoAccept: async (sessionId, enabled) => {

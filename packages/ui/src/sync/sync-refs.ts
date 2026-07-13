@@ -9,10 +9,12 @@ import type { Config, OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
+import type { LiveSessionIndex } from "./live-session-index"
 
 let _childStores: ChildStoreManager | null = null
 let _directory: string = ""
 let _registerSessionDirectory: ((sessionID: string, directory: string) => void) | null = null
+let _liveIndex: LiveSessionIndex | null = null
 const configListeners = new Set<(directory: string, config: Config) => void>()
 
 export function setSyncRefs(
@@ -109,4 +111,18 @@ export function getSyncParts(messageId: string, directory?: string) {
 /** Read session status from current directory's child store */
 export function getSyncSessionStatus(sessionId: string, directory?: string) {
   return getDirectoryState(directory)?.session_status[sessionId]
+}
+
+/**
+ * Expose the LiveSessionIndex to non-React consumers (permissionStore).
+ * Pass `null` on unmount to clear the ref. Callers must tolerate a null ref
+ * and fall back to the legacy `getAllSyncSessions` path.
+ */
+export function setLiveIndexRef(index: LiveSessionIndex | null): void {
+  _liveIndex = index
+}
+
+/** Read the LiveSessionIndex, if one is currently registered. */
+export function getLiveIndexRef(): LiveSessionIndex | null {
+  return _liveIndex
 }

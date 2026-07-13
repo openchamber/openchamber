@@ -1,6 +1,6 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 
-const RECENT_SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+export const RECENT_SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 
 const isSubtaskSession = (session: Session): boolean => {
   return Boolean((session as Session & { parentID?: string | null }).parentID);

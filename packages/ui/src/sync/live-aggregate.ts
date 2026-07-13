@@ -4,7 +4,7 @@ import type { State } from './types'
 
 type LiveStateSlice = Pick<State, 'session' | 'session_status'>
 
-const getSessionUpdatedAt = (session: Session): number => {
+export const getSessionUpdatedAt = (session: Session): number => {
   const updatedAt = session.time?.updated
   if (typeof updatedAt === 'number' && Number.isFinite(updatedAt)) {
     return updatedAt
@@ -14,7 +14,7 @@ const getSessionUpdatedAt = (session: Session): number => {
   return typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : 0
 }
 
-const getSessionSignature = (session: Session): string => {
+export const getSessionSignature = (session: Session): string => {
   const directory = (session as Session & { directory?: string | null }).directory ?? ''
   const parentID = (session as Session & { parentID?: string | null }).parentID ?? ''
   return [
@@ -29,7 +29,7 @@ const getSessionSignature = (session: Session): string => {
   ].join('|')
 }
 
-const getStatusPriority = (status: SessionStatus | undefined): number => {
+export const getStatusPriority = (status: SessionStatus | undefined): number => {
   switch (status?.type) {
     case 'retry':
       return 4
@@ -42,17 +42,17 @@ const getStatusPriority = (status: SessionStatus | undefined): number => {
   }
 }
 
-const getStatusMessage = (status: SessionStatus | undefined): string | null => {
+export const getStatusMessage = (status: SessionStatus | undefined): string | null => {
   const message = (status as { message?: unknown } | undefined)?.message
   return typeof message === 'string' ? message : null
 }
 
-const getStatusNumberField = (status: SessionStatus | undefined, field: 'attempt' | 'next'): number | null => {
+export const getStatusNumberField = (status: SessionStatus | undefined, field: 'attempt' | 'next'): number | null => {
   const value = (status as Record<string, unknown> | undefined)?.[field]
   return typeof value === 'number' ? value : null
 }
 
-const areStatusesEquivalent = (left: SessionStatus | undefined, right: SessionStatus | undefined): boolean => {
+export const areStatusesEquivalent = (left: SessionStatus | undefined, right: SessionStatus | undefined): boolean => {
   return left?.type === right?.type
     && getStatusMessage(left) === getStatusMessage(right)
     && getStatusNumberField(left, 'attempt') === getStatusNumberField(right, 'attempt')

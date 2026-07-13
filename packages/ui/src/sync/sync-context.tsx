@@ -11,19 +11,13 @@ import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent, type SessionMaterializationReason } from "./event-reducer"
 import { useGlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
-import {
-  aggregateLiveSessions,
-  aggregateLiveSessionStatuses,
-  areSessionListsEquivalent,
-  areStatusMapsEquivalent,
-  findLiveSession,
-  findLiveSessionStatus,
-} from "./live-aggregate"
+import { findLiveSession } from "./live-aggregate"
+import { LiveSessionIndex } from "./live-session-index"
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
 import { updateStreamingState } from "./streaming"
 import { setActionRefs } from "./session-actions"
-import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
+import { setSyncRefs, setLiveIndexRef, getAllSyncSessions } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { applySessionEventToGlobalSessions } from "./session-event-router"
 import { syncDebug } from "./debug"
@@ -60,6 +54,7 @@ type SyncSystem = {
   childStores: ChildStoreManager
   sdk: OpencodeClient
   directory: string
+  liveIndex: LiveSessionIndex
 }
 
 const SYNC_CONTEXT_GLOBAL_KEY = "__openchamber_sync_context__"
@@ -109,54 +104,51 @@ function getLiveStates(childStores: ChildStoreManager): State[] {
   return Array.from(childStores.children.values(), (store) => store.getState())
 }
 
-function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left: T, right: T) => boolean = Object.is): T {
-  const { childStores } = useSyncSystem()
-  const cacheRef = useRef<T | undefined>(undefined)
-  const initializedRef = useRef(false)
-
-  const getSnapshot = useCallback(() => {
-    const next = selector(getLiveStates(childStores))
-    if (initializedRef.current && isEqual(cacheRef.current as T, next)) {
-      return cacheRef.current as T
-    }
-
-    cacheRef.current = next
-    initializedRef.current = true
-    return next
-  }, [childStores, isEqual, selector])
-
-  return React.useSyncExternalStore(
-    useCallback((notify) => childStores.subscribeAll(notify), [childStores]),
-    getSnapshot,
-    getSnapshot,
-  )
-}
-
 // ---------------------------------------------------------------------------
 // Event handler — applies one SSE event at a time to the live store.
 // Each event reads live state, creates a shallow draft, applies, writes back.
 // React 18 batches synchronous setState calls automatically.
 // ---------------------------------------------------------------------------
 
+/**
+ * Read the LiveSessionIndex for this provider. Prefer the typed hooks below
+ * (useAllLiveSessions, useGlobalSessionStatus, useAllSessionStatuses) for
+ * React subscriptions. The index is exposed for advanced consumers that need
+ * O(1) lookups (e.g. permissionStore.isSessionAutoAccepting via getLineage).
+ */
+export function useLiveIndex(): LiveSessionIndex {
+  return useSyncSystem().liveIndex
+}
+
 /** Read status for a session across all directories */
 export function useGlobalSessionStatus(sessionId: string): SessionStatus | undefined {
-  return useLiveSyncSelector(
-    useCallback((states) => findLiveSessionStatus(states, sessionId), [sessionId]),
+  const index = useSyncSystem().liveIndex
+  const subscribe = useCallback((notify: () => void) => index.subscribe(notify), [index])
+  return React.useSyncExternalStore(
+    subscribe,
+    () => index.getStatus(sessionId),
+    () => index.getStatus(sessionId),
   )
 }
 
 /** Read all session statuses (for sidebar) */
 export function useAllSessionStatuses(): Record<string, SessionStatus> {
-  return useLiveSyncSelector(
-    useCallback((states) => aggregateLiveSessionStatuses(states), []),
-    areStatusMapsEquivalent,
+  const index = useSyncSystem().liveIndex
+  const subscribe = useCallback((notify: () => void) => index.subscribe(notify), [index])
+  return React.useSyncExternalStore(
+    subscribe,
+    () => index.getAllStatuses(),
+    () => index.getAllStatuses(),
   )
 }
 
 export function useAllLiveSessions(): Session[] {
-  return useLiveSyncSelector(
-    useCallback((states) => aggregateLiveSessions(states), []),
-    areSessionListsEquivalent,
+  const index = useSyncSystem().liveIndex
+  const subscribe = useCallback((notify: () => void) => index.subscribe(notify), [index])
+  return React.useSyncExternalStore(
+    subscribe,
+    () => index.getAllSessions(),
+    () => index.getAllSessions(),
   )
 }
 
@@ -1704,14 +1696,20 @@ export function SyncProvider(props: {
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
   const pipelineHasConnectedRef = useRef(false)
   const pipelineDisconnectedBeforeFirstConnectRef = useRef(false)
+  const liveIndexRef = useRef<LiveSessionIndex | null>(null)
+  if (!liveIndexRef.current || liveIndexRef.current.isDisposed()) {
+    liveIndexRef.current = new LiveSessionIndex(childStores)
+  }
+  const liveIndex = liveIndexRef.current
 
   const system = useMemo<SyncSystem>(
     () => ({
       childStores,
       sdk: props.sdk,
       directory: props.directory,
+      liveIndex,
     }),
-    [childStores, props.sdk, props.directory],
+    [childStores, props.sdk, props.directory, liveIndex],
   )
 
   const triggerDirectoryResync = useCallback((directory: string, reason: SessionMaterializationReason) => {
@@ -2114,17 +2112,31 @@ export function SyncProvider(props: {
     }
   }, [props.directory, childStores, routingIndex])
 
-  // Set refs so non-React code (session-actions, session-ui-store) can access sync state
+  // Set refs so non-React code (session-actions, session-ui-store, permissionStore)
+  // can access sync state. `setLiveIndexRef` exposes the LiveSessionIndex to
+  // permissionStore.isSessionAutoAccepting so it can resolve lineage in O(depth)
+  // instead of O(N) per call.
   useEffect(() => {
     setSyncRefs(props.sdk, childStores, props.directory, (sessionID, dir) => {
       setIndexedSessionDirectory(routingIndex, sessionID, dir)
     })
+    setLiveIndexRef(liveIndex)
     setActionRefs(
       props.sdk,
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
     )
-  }, [props.sdk, props.directory, childStores, routingIndex])
+    return () => {
+      setLiveIndexRef(null)
+    }
+  }, [props.sdk, props.directory, childStores, routingIndex, liveIndex])
+
+  // Dispose the LiveSessionIndex on unmount.
+  useEffect(() => {
+    return () => {
+      liveIndex.dispose()
+    }
+  }, [liveIndex])
 
   // Subscribe to child store for streaming state derivation
   useEffect(() => {
