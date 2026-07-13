@@ -91,6 +91,12 @@ Notification message preparation utilities for system notifications, including t
 
 - Module docs: `packages/web/server/lib/notifications/DOCUMENTATION.md`
 
+##### permission-auto-accept
+
+Persistent server-owned permission auto-accept policy, subagent inheritance, retries, and reconnect reconciliation.
+
+- Module docs: `packages/web/server/lib/permission-auto-accept/DOCUMENTATION.md`
+
 ##### scheduled-tasks
 
 Scheduled task persistence, execution, and event fanout for recurring sessions.

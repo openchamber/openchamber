@@ -862,13 +862,37 @@ const fetchVersionPayload = async (versionUrl, { headers, timeoutMs }) => {
   }
 };
 
-const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}) => {
+const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}, expectedServerId = '') => {
   const versionUrl = buildVersionUrl(url);
   if (!versionUrl) {
     throw new Error('Invalid URL');
   }
 
   const started = Date.now();
+
+  // Identity gate for learned/untrusted addresses: verify the UNAUTHENTICATED
+  // /health identity before the token-carrying version fetch, so the bearer
+  // token is never sent to a re-assigned address that now belongs to a
+  // different machine. Older servers omit serverId from /health; only an
+  // explicit mismatch rejects.
+  if (typeof expectedServerId === 'string' && expectedServerId.trim()) {
+    const healthUrl = buildHealthUrl(url);
+    if (healthUrl) {
+      try {
+        const response = await fetch(healthUrl, { signal: AbortSignal.timeout(timeoutMs), headers: { Accept: 'application/json' } });
+        if (response.ok) {
+          const payload = await response.json().catch(() => null);
+          const reported = typeof payload?.serverId === 'string' ? payload.serverId.trim() : '';
+          if (reported && reported !== expectedServerId.trim()) {
+            return { status: 'wrong-service', latencyMs: Date.now() - started };
+          }
+        }
+      } catch {
+        // Unreachable/timeout surfaces in the version fetch below.
+      }
+    }
+  }
+
   try {
     const headers = { ...sanitizeRuntimeRequestHeaders(requestHeaders), Accept: 'application/json' };
     const token = typeof clientToken === 'string' ? clientToken.trim() : '';
@@ -3814,7 +3838,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return getOrCreateDesktopInstallId();
 
     case 'desktop_host_probe':
-      return probeHostWithTimeout(String(args.url || ''), 2_000, String(args.clientToken || ''), args.requestHeaders || {});
+      return probeHostWithTimeout(String(args.url || ''), 2_000, String(args.clientToken || ''), args.requestHeaders || {}, String(args.expectedServerId || ''));
 
     case 'desktop_remote_password_login':
       return loginRemoteAndIssueClientToken({

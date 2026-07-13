@@ -11,7 +11,8 @@ the web server and survives UI disconnects.
 ```
 {
   id,                      // opaque per-logical-goal id; stale-write guard
-  objective,               // user text, <= 2000 chars
+  objective,               // inline user text (fallback), <= 5000 chars
+  objectiveFile,           // true: objective text lives in a server-side file
   status,                  // active | paused | blocked | budgetLimited | complete
   tokenBudget,             // optional positive int
   tokensUsed,              // tokensCommitted + current segment (snapshot - baseline)
@@ -39,6 +40,32 @@ part telling the agent goal mode is active and that each turn should end
 with a factual done/verified/remaining statement for the independent audit.
 Freshness/stale-write protection is by `id`: every runtime write re-reads the
 session and drops the write when the stored goal id no longer matches.
+
+## File-backed objectives
+
+The objective TEXT lives in `<data-dir>/goals/<sessionId>.md` (data dir =
+`OPENCHAMBER_DATA_DIR` or `~/.config/openchamber`), keyed by the SESSION ID:
+sessions are globally unique and carry one goal at a time, so the mapping is
+deterministic and a new goal simply overwrites the file. Metadata carries
+only `objectiveFile: true` — never a path — so user-writable metadata cannot
+become a file-read vector (`objectives.js` also validates the id shape
+before touching the filesystem). Rationale: metadata rides every
+`session.updated`, so multi-KB objectives must not live there.
+
+- `objectives.js` — write/read/delete, 5000-char clamp.
+- `routes.js` — `PUT/GET/DELETE /api/goals/objective/:sessionId`
+  (OpenChamber-owned, registered before the generic proxy; JSON parsing via
+  the `/api/goals` family in core-routes). The UI writes the file BEFORE
+  patching the goal metadata and falls back to an inline objective when the
+  write fails; `clearSessionGoal` deletes the file best-effort.
+- The tick resolves the effective objective fresh on every cycle (the file
+  is live-editable mid-goal) and falls back to the inline `objective` when
+  the file is unreadable — a goal never dies because a file went away.
+- UI display fetches content via the GET route
+  (`useGoalObjectiveContent`); in VS Code the route is unavailable, so the
+  strip degrades to the audit note (display-only fallback by design).
+- Scheduled goal tasks write the file server-side directly via
+  `objectives.js`.
 
 ## Flow
 

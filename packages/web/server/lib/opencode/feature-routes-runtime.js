@@ -1,10 +1,12 @@
 import { registerFsRoutes } from '../fs/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
+import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
+import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
@@ -97,6 +99,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       scheduledTasksRuntime,
       getOpenChamberEventClients,
       writeSseEvent,
+      permissionAutoAcceptRuntime,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
@@ -104,6 +107,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       refreshOpenCodeAfterConfigChange,
       clientReloadDelayMs,
     });
+
+    registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
 
     registerOpenCodeRoutes(app, {
       crypto,
@@ -236,6 +241,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerQuotaRoutes(app, { getQuotaProviders });
     registerSmallModelRoutes(app, { getSmallModelService });
+    registerSessionGoalRoutes(app);
     registerGitHubRoutes(app);
     registerGitRoutes(app);
     registerMagicPromptRoutes(app, {

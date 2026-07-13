@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useSessionStatus } from '@/sync/sync-context';
-import { useSessionGoal } from '@/hooks/useSessionGoal';
+import { useGoalObjectiveContent, useSessionGoal } from '@/hooks/useSessionGoal';
 import { formatGoalTokens } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import { setSessionGoalStatus } from '@/lib/sessionGoalActions';
@@ -22,6 +22,7 @@ interface SessionGoalRowProps {
 export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessionId, directory, className }) => {
   const { t } = useI18n();
   const { goal, enabled } = useSessionGoal(sessionId ?? '', directory);
+  const objectiveContent = useGoalObjectiveContent(sessionId ?? '', goal);
   const sessionStatus = useSessionStatus(sessionId ?? '', directory);
   const [busy, setBusy] = React.useState(false);
 
@@ -65,11 +66,11 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
         className,
       )}
       aria-label={t('chat.goal.row.aria')}
-      title={goal.objective}
+      title={objectiveContent ?? undefined}
     >
       <Icon name="target" className="h-3.5 w-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate typography-meta text-foreground">
-        {goal.note || goal.objective}
+        {goal.note || objectiveContent || ''}
       </span>
       {goal.status === 'active' && (!sessionStatus || sessionStatus.type === 'idle') ? (
         // The agent stopped but the goal is still active: the server is

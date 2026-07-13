@@ -186,7 +186,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                       className={headerActionButtonClass}
                       aria-label={t('sessions.sidebar.header.actions.sortProjects')}
                     >
-                      <Icon name="arrow-up-double" className={headerActionIconClass} />
+                      <Icon name="sort-desc" className={headerActionIconClass} />
                     </button>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>

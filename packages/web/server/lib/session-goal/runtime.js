@@ -18,6 +18,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { GOAL_OBJECTIVE_CHAR_LIMIT, readObjective } from './objectives.js';
+
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
     ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -45,7 +47,6 @@ const RESUME_KICKOFF_MS = 250;
 const FETCH_TIMEOUT_MS = 10_000;
 const MESSAGE_FETCH_LIMIT = 40;
 const TRANSCRIPT_PART_CHAR_LIMIT = 6_000;
-const GOAL_OBJECTIVE_CHAR_LIMIT = 2_000;
 const NOTE_CHAR_LIMIT = 280;
 const REASON_CHAR_LIMIT = 200;
 // Hard safety cap on auto-continuations per goal id. The audit and markers are
@@ -192,12 +193,16 @@ const parseGoalMetadata = (session) => {
   const goal = namespace.goal;
   if (!goal || typeof goal !== 'object') return null;
   const objective = typeof goal.objective === 'string' ? goal.objective.trim() : '';
+  const objectiveFile = goal.objectiveFile === true;
   const id = typeof goal.id === 'string' ? goal.id : '';
   const status = GOAL_STATUSES.includes(goal.status) ? goal.status : '';
-  if (!id || !objective || !status) return null;
+  // File-backed goals carry only the flag (the file is keyed by session id);
+  // inline goals carry the objective text directly.
+  if (!id || !status || (!objective && !objectiveFile)) return null;
   return {
     id,
     objective: objective.slice(0, GOAL_OBJECTIVE_CHAR_LIMIT),
+    objectiveFile,
     status,
     tokenBudget: Number.isFinite(goal.tokenBudget) && goal.tokenBudget > 0 ? Math.floor(goal.tokenBudget) : null,
     tokensUsed: Number.isFinite(goal.tokensUsed) && goal.tokensUsed > 0 ? Math.floor(goal.tokensUsed) : 0,
@@ -414,6 +419,24 @@ export const createSessionGoalRuntime = ({
     const goal = parseGoalMetadata(session);
     if (!goal || goal.status !== 'active') return;
 
+    // File-backed objectives: the metadata carries only a flag; the objective
+    // TEXT lives under the OpenChamber data dir keyed by session id and is
+    // read fresh on every tick (live-editable). A missing file falls back to
+    // whatever inline objective the metadata still has — the goal must never
+    // die just because a file went away.
+    let effectiveObjective = goal.objective;
+    if (goal.objectiveFile) {
+      const fileObjective = await readObjective(sessionId);
+      if (fileObjective) {
+        effectiveObjective = fileObjective;
+      } else if (!effectiveObjective) {
+        console.warn(`[session-goal] ${sessionId} objective file unreadable and no inline fallback`);
+        return;
+      } else {
+        console.warn(`[session-goal] ${sessionId} objective file unreadable, using inline fallback`);
+      }
+    }
+
     const messages = await fetchRecentMessages(sessionId, directory);
     if (!messages) return;
 
@@ -426,6 +449,19 @@ export const createSessionGoalRuntime = ({
     }
     const lastAssistantInfo = lastAssistant?.info;
     const lastMessageInfo = messages.length > 0 ? messages[messages.length - 1]?.info : null;
+
+    // Execution source for audits and continuations: the newest NON-summary
+    // assistant turn. The compaction summary message carries agent/mode
+    // "compaction" and the summarize model — inheriting those would continue
+    // the session with the wrong agent/model.
+    let executionInfo = null;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const info = messages[i]?.info;
+      if (info?.role === 'assistant' && info.summary !== true) {
+        executionInfo = info;
+        break;
+      }
+    }
 
     // Quiescence check: the idle event may have raced a follow-up prompt, and
     // the kickoff path arms without knowing the live status at all. A trailing
@@ -475,8 +511,17 @@ export const createSessionGoalRuntime = ({
       sawNewMessages = true;
       const total = messageTokenTotal(info);
       if (info.summary === true) {
-        const closing = Math.max(segmentSnapshot ?? 0, total);
-        tokensCommitted += Math.max(0, closing - tokensBaseline);
+        // The summary message's own tokens are ZEROED by opencode — never
+        // feed them into the closing value. Close the segment from what is
+        // already known, with the previously displayed total as a continuity
+        // floor (the latest pre-summary snapshot was already folded into
+        // tokensUsed on earlier ticks); otherwise the counter freezes at the
+        // pre-compaction value until the new context outgrows it. Known
+        // undercount: the summarization call itself is reported as 0 tokens.
+        tokensCommitted = Math.max(
+          goal.tokensUsed,
+          tokensCommitted + Math.max(0, (segmentSnapshot ?? 0) - tokensBaseline),
+        );
         tokensBaseline = 0;
         segmentSnapshot = null;
       } else {
@@ -557,7 +602,7 @@ export const createSessionGoalRuntime = ({
     if (lastAssistantInfo.summary === true || abortedTail) {
       blockedStreak = goal.blockedStreak;
     } else {
-      audit = await runAudit({ goal, assistantText, directory, lastAssistantInfo });
+      audit = await runAudit({ goal: { ...goal, objective: effectiveObjective }, assistantText, directory, lastAssistantInfo: executionInfo ?? lastAssistantInfo });
 
       // Audit unavailable: tolerate one consecutive failure (transient
       // hiccup), then stop the goal instead of continuing blind. Blocked is
@@ -622,7 +667,7 @@ export const createSessionGoalRuntime = ({
     }
 
     console.log(`[session-goal] continuing ${sessionId} (turn ${written.turnsUsed}/${maxAutoTurns}, tokens ${written.tokensUsed}${written.tokenBudget ? `/${written.tokenBudget}` : ''})`);
-    await sendContinuation({ sessionId, directory, goal: written, lastAssistantInfo });
+    await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective }, lastAssistantInfo: executionInfo ?? lastAssistantInfo });
   };
 
   const armTimer = (sessionId, directory, quietMs) => {

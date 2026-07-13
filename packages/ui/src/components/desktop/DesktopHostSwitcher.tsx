@@ -31,6 +31,9 @@ import {
   type DesktopHost,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
+import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
+import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
+import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import {
   desktopSshConnect,
@@ -512,13 +515,22 @@ export function DesktopHostSwitcherDialog({
     // Relay legs ride the E2EE tunnel activated in-renderer via
     // switchRuntimeEndpoint({ relay }); the runtime fetch/socket layers route
     // through the tunnel from the singleton registry.
-    const activateRelay = (relay: NonNullable<DesktopHost['relay']>) => {
+    const activateRelay = (relay: NonNullable<DesktopHost['relay']>, liveTunnel?: ReturnType<typeof createRelayTunnelClient>) => {
+      // Adopt the probe's live tunnel (when it kept one) BEFORE the switch: the
+      // activate call inside switchRuntimeEndpoint sees an equal descriptor and
+      // reuses it — no second WebSocket connect + E2EE handshake.
+      if (liveTunnel) {
+        adoptRelayTunnel({ relayUrl: relay.relayUrl, serverId: relay.serverId, hostEncPubJwk: relay.hostEncPubJwk }, liveTunnel);
+      }
       switchRuntimeEndpoint({
         apiBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
         clientToken: host.clientToken || null,
         runtimeKey: runtimeKeyForHost(host),
         relay,
       });
+      // On the relay: learn the server's current LAN address in the background
+      // and hot-switch back to direct if the stored one merely went stale.
+      scheduleDesktopHostCandidateRefresh(host.id);
     };
 
     const origin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(host.url) || '');
@@ -558,11 +570,14 @@ export function DesktopHostSwitcherDialog({
         finalStatus = { status: probe.status, latencyMs: probe.latencyMs };
         if (!isBlockedHostStatus(probe.status)) transport = 'direct';
       }
+      let relayProbeTunnel: ReturnType<typeof createRelayTunnelClient> | undefined;
       if (!transport && host.relay) {
-        const probe = await probeRelayDesktopHost(host.relay).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+        const probe = await probeRelayDesktopHost(host.relay, { keepTunnel: true })
+          .catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
         if (probe.status === 'ok') {
           finalStatus = { status: probe.status, latencyMs: probe.latencyMs, via: 'relay' };
           transport = 'relay';
+          relayProbeTunnel = 'tunnel' in probe ? probe.tunnel : undefined;
         }
       }
       setStatusById((prev) => ({ ...prev, [host.id]: finalStatus }));
@@ -573,7 +588,7 @@ export function DesktopHostSwitcherDialog({
         return;
       }
       if (transport === 'relay' && host.relay) {
-        activateRelay(host.relay);
+        activateRelay(host.relay, relayProbeTunnel);
       } else {
         switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForHost(host) });
       }

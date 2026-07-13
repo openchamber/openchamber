@@ -612,10 +612,27 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     store.setFontSize(settings.fontSize);
   }
   if (Array.isArray(settings.draftStarters)) {
-    const nextStarters = sanitizeStarterRefs(settings.draftStarters);
+    let nextStarters = sanitizeStarterRefs(settings.draftStarters);
+    if (settings.draftStartersCraftGoalAdded !== true && !nextStarters.some((starter) => starter.type === 'command' && starter.name === 'craft-goal')) {
+      const planIndex = nextStarters.findIndex((starter) => starter.type === 'command' && starter.name === 'plan-feature');
+      const insertAt = planIndex >= 0 ? planIndex + 1 : nextStarters.length;
+      nextStarters = [
+        ...nextStarters.slice(0, insertAt),
+        { type: 'command', name: 'craft-goal' },
+        ...nextStarters.slice(insertAt),
+      ];
+    }
     if (JSON.stringify(store.globalDraftStarters) !== JSON.stringify(nextStarters)) {
       store.setGlobalDraftStarters(nextStarters);
     }
+    if (settings.draftStartersCraftGoalAdded !== true) {
+      settings.draftStarters = nextStarters;
+      settings.draftStartersCraftGoalAdded = true;
+    }
+  } else if (settings.draftStartersCraftGoalAdded !== true) {
+    // The built-in default already contains Craft a Goal; only persist the marker
+    // so removing it later remains a durable user choice.
+    settings.draftStartersCraftGoalAdded = true;
   }
   if (typeof settings.terminalFontSize === 'number' && Number.isFinite(settings.terminalFontSize) && settings.terminalFontSize !== store.terminalFontSize) {
     store.setTerminalFontSize(settings.terminalFontSize);
@@ -805,6 +822,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (Array.isArray(candidate.draftStarters)) {
     result.draftStarters = sanitizeStarterRefs(candidate.draftStarters);
+  }
+  if (typeof candidate.draftStartersCraftGoalAdded === 'boolean') {
+    result.draftStartersCraftGoalAdded = candidate.draftStartersCraftGoalAdded;
   }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
@@ -1395,6 +1415,7 @@ export const syncDesktopSettings = async (): Promise<void> => {
   // a TypeError from writing to a contextBridge-protected global) doesn't
   // prevent server settings from reaching the Zustand store.
   const applySettings = async (settings: DesktopSettings) => {
+    const shouldPersistCraftGoalMigration = settings.draftStartersCraftGoalAdded !== true;
     try {
       persistToLocalStorage(settings);
     } catch (error) {
@@ -1405,6 +1426,12 @@ export const syncDesktopSettings = async (): Promise<void> => {
       applyDesktopUiPreferences(settings);
     } catch (error) {
       console.warn('applyDesktopUiPreferences failed:', error);
+    }
+    if (shouldPersistCraftGoalMigration) {
+      await updateDesktopSettings({
+        ...(settings.draftStarters ? { draftStarters: settings.draftStarters } : {}),
+        draftStartersCraftGoalAdded: true,
+      });
     }
 
     dispatchSettingsSynced(settings);
