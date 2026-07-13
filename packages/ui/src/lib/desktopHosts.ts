@@ -2,6 +2,8 @@ import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
 import { createRelayTunnelClient, type RelayTunnelFailureClassification } from '@/lib/relay/tunnel-client';
 import { createDirectE2eeTunnelClient } from '@/lib/relay/direct-e2ee-tunnel-client';
 import { normalizeDirectE2eeCandidate } from '@/lib/connectionPayload';
+import type { PairingEndpointCandidate } from '@/lib/connectionPayload';
+import type { PairingRedeemedTransport } from '@/lib/pairingCandidateRedemption';
 
 type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -124,7 +126,40 @@ export type DesktopHostRuntimeSwitchOptions = {
   tunnel?: { type: 'direct-e2ee' } & DesktopHostDirectE2ee;
 };
 
+export const runtimeKeyForHost = (host: DesktopHost): string => {
+  if (host.id === 'local') return 'local';
+  return `host:${host.id}`;
+};
+
 export const shouldDelegateDesktopHostActivation = (isLocalDesktopOrigin: boolean): boolean => !isLocalDesktopOrigin;
+
+export const resolveActiveDesktopHost = (
+  hosts: DesktopHost[],
+  localOrigin: string,
+  runtimeApiBaseUrl: string | null,
+  activeRuntimeKey: string | null,
+): DesktopHost | null => {
+  if (activeRuntimeKey) {
+    const relayMatch = hosts.find((h) => (h.relay || h.directE2ee) && runtimeKeyForHost(h) === activeRuntimeKey);
+    if (relayMatch) {
+      return relayMatch;
+    }
+  }
+
+  if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
+    return { id: 'local', label: 'Local', url: localOrigin };
+  }
+
+  const match = hosts.find((host) => {
+    return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false;
+  });
+
+  if (match) {
+    return match;
+  }
+
+  return null;
+};
 
 export const getDesktopHostRuntimeSwitchOptions = (
   host: DesktopHost,
@@ -139,6 +174,7 @@ export const getDesktopHostRuntimeSwitchOptions = (
     if (!host.clientToken) return null;
     return { apiBaseUrl: localUiOrigin, clientToken: host.clientToken || null, runtimeKey, tunnel: { type: 'direct-e2ee', ...transport.descriptor } };
   }
+  if (host.directE2ee) return null;
   return { apiBaseUrl: localUiOrigin, clientToken: host.clientToken || null, runtimeKey, relay: transport.descriptor };
 };
 
@@ -172,6 +208,61 @@ export const normalizeHostUrl = (raw: string): string | null => {
   } catch {
     return null;
   }
+};
+
+export const buildPairedDesktopHostTransportFields = (
+  candidates: PairingEndpointCandidate[],
+  redeemedTransport: PairingRedeemedTransport,
+  clientToken: string,
+): Omit<DesktopHost, 'id' | 'label'> | null => {
+  const directCandidate = candidates.find(
+    (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'lan' | 'tunnel' }> =>
+      candidate.type === 'lan' || candidate.type === 'tunnel',
+  );
+  const directE2eeCandidate = candidates.find(
+    (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'direct-e2ee' }> => candidate.type === 'direct-e2ee',
+  );
+  const directE2ee: DesktopHostDirectE2ee | undefined = redeemedTransport.kind === 'direct-e2ee'
+    ? { wssUrl: redeemedTransport.wssUrl, hostEncPubJwk: redeemedTransport.hostEncPubJwk }
+    : directE2eeCandidate
+      ? { wssUrl: directE2eeCandidate.wssUrl, hostEncPubJwk: directE2eeCandidate.hostEncPubJwk }
+      : undefined;
+  const relayCandidate = candidates.find(
+    (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'relay' }> => candidate.type === 'relay',
+  );
+  const relay: DesktopHostRelay | undefined = directE2ee
+    ? undefined
+    : redeemedTransport.kind === 'relay'
+      ? { relayUrl: redeemedTransport.relayUrl, serverId: redeemedTransport.serverId, hostEncPubJwk: redeemedTransport.hostEncPubJwk }
+      : relayCandidate
+        ? { relayUrl: relayCandidate.relayUrl, serverId: relayCandidate.serverId, hostEncPubJwk: relayCandidate.hostEncPubJwk }
+        : undefined;
+  const directUrl = directE2ee
+    ? undefined
+    : normalizeHostUrl(redeemedTransport.kind === 'direct' ? redeemedTransport.url : directCandidate?.url || '') || undefined;
+  const url = directUrl
+    || (directE2ee ? `direct-e2ee://${new URL(directE2ee.wssUrl).hostname}` : null)
+    || (relay ? relayHostDisplayUrl(relay.serverId) : null);
+  if (!url) return null;
+
+  return {
+    url,
+    ...(directUrl ? { apiUrl: directUrl } : {}),
+    clientToken,
+    ...(directE2ee ? { directE2ee } : {}),
+    ...(relay ? { relay } : {}),
+  };
+};
+
+export const replacePairedDesktopHostTransportFields = (
+  host: DesktopHost,
+  transportFields: Omit<DesktopHost, 'id' | 'label'>,
+): DesktopHost => {
+  const identity = { ...host };
+  delete identity.apiUrl;
+  delete identity.directE2ee;
+  delete identity.relay;
+  return { ...identity, ...transportFields };
 };
 
 export const resolveDesktopHostUrl = (raw: string): DesktopHostUrlResolution | null => {
@@ -512,8 +603,7 @@ export const probeDesktopHostTransports = async (
       }
       if (terminalEncryptedFailure(finalProbe)) return { probe: finalProbe, transport: null };
     }
-    if (!host.relay) return { probe: finalProbe, transport: null };
-    return probeRelay();
+    return { probe: finalProbe, transport: null };
   }
 
   if (!directUrl) return probeRelay();
