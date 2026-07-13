@@ -89,6 +89,20 @@ export const useProjectSessionLists = (args: Args) => {
         });
       });
 
+      // Include sessions whose directory is a subdirectory of the project root.
+      // An agent may cd during execution, updating session.directory.
+      const projectRoot = project.normalizedPath;
+      const projectPrefix = `${projectRoot}/`;
+      sessionsByDirectory.forEach((sessionsInDir, dir) => {
+        if (dir.startsWith(projectPrefix)) {
+          sessionsInDir.forEach((session) => {
+            if (seen.has(session.id)) return;
+            seen.add(session.id);
+            collected.push(session);
+          });
+        }
+      });
+
       return collected;
     },
     [availableWorktreesByProject, isVSCode, sessionsByDirectory],
