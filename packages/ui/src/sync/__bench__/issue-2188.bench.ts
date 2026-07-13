@@ -29,6 +29,7 @@ import type { Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { aggregateLiveSessions, findLiveSessionStatus } from "../live-aggregate"
 import { autoRespondsPermission } from "../../stores/utils/permissionAutoAccept"
 import { LiveSessionIndex } from "../live-session-index"
+import { getAllSyncSessions, getLiveIndexRef, setLiveIndexRef, setSyncRefs } from "../sync-refs"
 
 type Slice = { session: Session[]; session_status: Record<string, SessionStatus> }
 
@@ -124,8 +125,13 @@ function buildFixture(): { slices: Slice[]; sessions: Session[] } {
       for (let c = 0; c < take; c++) {
         const id = `child-d${d}-r${rootIdx}-c${c}`
         const session = makeSession(id, directory, ++updatedAt, parentId)
-        // 30% of children are themselves subagents (one level deeper).
-        parentId = Math.random() < 0.3 ? id : root.id
+        // Deterministic lineage: the first root in the first directory has a
+        // deep 8-hop chain so op3 can measure O(depth) without RNG noise.
+        if (d === 0 && rootIdx === 0 && c < 8) {
+          parentId = id
+        } else {
+          parentId = root.id
+        }
         dirSessions.push(session)
         dirStatuses[id] = makeStatus(id, childIdx)
         sessions.push(session)
@@ -200,23 +206,54 @@ function fmt(n: number, digits = 2): string {
   return `${n.toFixed(digits)}n` // nanoseconds
 }
 
+function isSessionAutoAcceptingLegacy(autoAccept: Record<string, boolean>, sessionId: string): boolean {
+  return autoRespondsPermission({ autoAccept, sessions: getAllSyncSessions(), sessionID: sessionId })
+}
+
+function isSessionAutoAcceptingCurrent(autoAccept: Record<string, boolean>, sessionId: string): boolean {
+  if (!sessionId) return false
+  if (Object.keys(autoAccept).length === 0) return false
+
+  const index = getLiveIndexRef()
+  if (index) {
+    const lineage = index.getLineage(sessionId)
+    if (lineage.length === 0) return false
+    for (const id of lineage) {
+      if (!Object.prototype.hasOwnProperty.call(autoAccept, id)) continue
+      return autoAccept[id] === true
+    }
+    return false
+  }
+
+  return autoRespondsPermission({ autoAccept, sessions: getAllSyncSessions(), sessionID: sessionId })
+}
+
 // ---------- run -------------------------------------------------------------
 
 const fixture = buildFixture()
 const { slices, sessions } = fixture
 
-// Find an existing deep-lineage session in the fixture for op3.
-// We use the first root in dir-0 as the lineage target, and a deep subagent
-// as the query id, so the lineage walk is at least 2-3 levels deep.
-const targetRoot = sessions.find((s) => s.parentID === null && s.id.startsWith("root-d0-"))!
-const targetChild = sessions.find((s) => s.parentID === targetRoot.id)!
+const fakeChildStores = {
+  children: new Map<string, { getState: () => Slice }>(),
+}
+for (let d = 0; d < DIRS; d++) {
+  fakeChildStores.children.set(`/project-${d}`, { getState: () => slices[d] })
+}
+setSyncRefs({} as never, fakeChildStores as never, "/project-0")
+
+// Use a deterministic 8-hop lineage in the first directory.
+const targetRoot = sessions.find((s) => s.id === "root-d0-r0")!
+const targetChild = sessions.find((s) => s.id === "child-d0-r0-c7")!
 
 const visibleIds = sessions.slice(0, 30).map((s) => s.id)
+let op2_before_cursor = 0
+let op2_after_cursor = 0
 
 // Pre-build the index (one-time O(N) cost paid at SyncProvider mount).
 // The actual production path does this incrementally as child stores emit
 // events; fromStates() does the same work in one shot. Same algorithmic cost.
 const index = LiveSessionIndex.fromStates(slices)
+setLiveIndexRef(index)
 
 const autoAccept: Record<string, boolean> = { [targetRoot.id]: true }
 
@@ -241,37 +278,33 @@ const op1_after = bench("op1: useAllLiveSessions (after)  — LiveSessionIndex.g
 // --- Op 2: useGlobalSessionStatus(id) × 30 visible rows per "render" -----
 
 const op2_before = bench("op2: 30× findLiveSessionStatus (before)", totalRowsIters, () => {
-  const id = visibleIds[Math.floor(Math.random() * visibleIds.length)]
+  const id = visibleIds[op2_before_cursor++ % visibleIds.length]
   return findLiveSessionStatus(slices, id)
 })
 
 const op2_after = bench("op2: 30× LiveSessionIndex.getStatus (after)", totalRowsIters, () => {
-  const id = visibleIds[Math.floor(Math.random() * visibleIds.length)]
+  const id = visibleIds[op2_after_cursor++ % visibleIds.length]
   return index.getStatus(id)
 })
 
 // --- Op 3: isSessionAutoAccepting (with populated autoAccept) ------------
 
 const op3_before = bench("op3: isSessionAutoAccepting (before) — full getAllSyncSessions scan", ITERS, () => {
-  const allSessions: Session[] = []
-  for (const slice of slices) allSessions.push(...slice.session)
-  return autoRespondsPermission({ autoAccept, sessions: allSessions, sessionID: targetChild.id })
+  return isSessionAutoAcceptingLegacy(autoAccept, targetChild.id)
 })
 
 const op3_after = bench("op3: isSessionAutoAccepting (after)  — index.getLineage (O(depth))", ITERS, () => {
-  return index.getLineage(targetChild.id).some((id) => autoAccept[id] === true)
+  return isSessionAutoAcceptingCurrent(autoAccept, targetChild.id)
 })
 
 // --- Op 4: empty autoAccept short-circuit (the common case) -------------
 
 const op4_before = bench("op4: isSessionAutoAccepting (empty autoAccept, before)", ITERS, () => {
-  const allSessions: Session[] = []
-  for (const slice of slices) allSessions.push(...slice.session)
-  return autoRespondsPermission({ autoAccept: {}, sessions: allSessions, sessionID: "sess-d2-s10" })
+  return isSessionAutoAcceptingLegacy({}, "child-d2-r10-c1")
 })
 
 const op4_after = bench("op4: isSessionAutoAccepting (empty autoAccept, after)", ITERS, () => {
-  return false
+  return isSessionAutoAcceptingCurrent({}, "child-d2-r10-c1")
 })
 
 // --- Report ---------------------------------------------------------------
