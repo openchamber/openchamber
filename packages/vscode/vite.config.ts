@@ -47,7 +47,11 @@ export default defineConfig(({ mode }) => ({
     },
   },
   optimizeDeps: {
-    include: ['@opencode-ai/sdk/v2', 'shiki'],
+    entries: [
+      path.resolve(__dirname, 'webview/index.html'),
+      path.resolve(__dirname, '../ui/src/components/chat/markdown/markdown-shiki.worker.ts'),
+    ],
+    include: ['@opencode-ai/sdk/v2'],
   },
   build: {
     outDir: path.resolve(__dirname, 'dist/webview'),

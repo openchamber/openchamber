@@ -904,6 +904,14 @@ export type GitHubPullRequestReviewComment = {
   updatedAt?: string;
 };
 
+export type GitHubPullRequestCommit = {
+  sha: string;
+  url: string;
+  message: string;
+  author?: GitHubUserSummary | null;
+  authoredAt?: string;
+};
+
 export type GitHubPullRequestsListResult = {
   connected: boolean;
   repo?: GitHubRepoRef | null;
@@ -918,6 +926,7 @@ export type GitHubPullRequestContextResult = {
   pr?: GitHubPullRequestSummary | null;
   issueComments?: GitHubIssueComment[];
   reviewComments?: GitHubPullRequestReviewComment[];
+  commits?: GitHubPullRequestCommit[];
   files?: GitHubPullRequestFile[];
   diff?: string;
   checks?: GitHubChecksSummary | null;

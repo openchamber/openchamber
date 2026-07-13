@@ -1649,6 +1649,20 @@ export function registerGitHubRoutes(app) {
         author: comment.user ? { login: comment.user.login, id: comment.user.id, avatarUrl: comment.user.avatar_url } : null,
       }));
 
+      const commitsResp = await octokit.rest.pulls.listCommits({
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: number,
+        per_page: 100,
+      });
+      const commits = (Array.isArray(commitsResp?.data) ? commitsResp.data : []).map((commit) => ({
+        sha: commit.sha,
+        url: commit.html_url,
+        message: commit.commit?.message || '',
+        authoredAt: commit.commit?.author?.date || commit.commit?.committer?.date || undefined,
+        author: commit.author ? { login: commit.author.login, id: commit.author.id, avatarUrl: commit.author.avatar_url } : null,
+      }));
+
       const filesResp = await octokit.rest.pulls.listFiles({
         owner: repo.owner,
         repo: repo.repo,
@@ -1886,6 +1900,7 @@ export function registerGitHubRoutes(app) {
         pr,
         issueComments,
         reviewComments,
+        commits,
         files,
         ...(diff ? { diff } : {}),
         checks,
