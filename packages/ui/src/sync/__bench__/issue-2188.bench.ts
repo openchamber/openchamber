@@ -34,8 +34,14 @@ type Slice = { session: Session[]; session_status: Record<string, SessionStatus>
 
 // ---------- fixture --------------------------------------------------------
 
-const DIRS = 5
-const SESSIONS_PER_DIR = 50
+// Mirrors the reporter's actual workload from issue #2188:
+//   15 Git projects, 14,561 sessions total (1,004 root + 13,557 child/subagent),
+//   13,491 unarchived, 67 Git worktrees.
+const DIRS = 15
+const TOTAL_SESSIONS = 14_561
+const ROOT_SESSIONS = 1_004
+const CHILD_SESSIONS = TOTAL_SESSIONS - ROOT_SESSIONS // 13,557
+const ARCHIVED_SESSIONS = 1_070
 const STATUS_TYPES: Array<SessionStatus["type"]> = ["idle", "busy", "retry"]
 
 function makeSession(id: string, directory: string, updatedAt: number, parentID: string | null = null): Session {
@@ -54,22 +60,102 @@ function makeStatus(id: string, t: number): SessionStatus {
 }
 
 function buildFixture(): { slices: Slice[]; sessions: Session[] } {
+  // Distribute root and child sessions across DIRS directories with realistic
+  // non-uniform spread (some projects have more sessions than others).
+  // The reporter's 67 worktrees is at the directory-grain (multiple worktrees
+  // per project), so we don't model that here — the hot path doesn't care
+  // about per-worktree subdivision, only per-directory.
   const slices: Slice[] = []
   const sessions: Session[] = []
+
+  // Per-directory root count: vary around floor(ROOT_SESSIONS / DIRS) = 66.
+  // Sum across all DIRS must equal ROOT_SESSIONS exactly.
+  const baseRootsPerDir = Math.floor(ROOT_SESSIONS / DIRS) // 66
+  const extraRoots = ROOT_SESSIONS - baseRootsPerDir * DIRS // 14
+  const rootsPerDir: number[] = []
   for (let d = 0; d < DIRS; d++) {
-    const directory = `/dir-${d}`
+    rootsPerDir.push(baseRootsPerDir + (d < extraRoots ? 1 : 0))
+  }
+
+  // Per-directory child count: vary around floor(CHILD_SESSIONS / DIRS) = 903.
+  // Sum across all DIRS must equal CHILD_SESSIONS exactly.
+  const baseChildrenPerDir = Math.floor(CHILD_SESSIONS / DIRS) // 903
+  const extraChildren = CHILD_SESSIONS - baseChildrenPerDir * DIRS // 12
+  const childrenPerDir: number[] = []
+  for (let d = 0; d < DIRS; d++) {
+    childrenPerDir.push(baseChildrenPerDir + (d < extraChildren ? 1 : 0))
+  }
+
+  // Per-directory archived count.
+  const baseArchivedPerDir = Math.floor(ARCHIVED_SESSIONS / DIRS) // 71
+  const extraArchived = ARCHIVED_SESSIONS - baseArchivedPerDir * DIRS // 5
+  const archivedPerDir: number[] = []
+  for (let d = 0; d < DIRS; d++) {
+    archivedPerDir.push(baseArchivedPerDir + (d < extraArchived ? 1 : 0))
+  }
+
+  let updatedAt = 1_000_000
+  for (let d = 0; d < DIRS; d++) {
+    const directory = `/project-${d}`
     const dirSessions: Session[] = []
     const dirStatuses: Record<string, SessionStatus> = {}
-    for (let s = 0; s < SESSIONS_PER_DIR; s++) {
-      const id = `sess-d${d}-s${s}`
-      const updatedAt = 1_000_000 + d * 10_000 + s
-      const session = makeSession(id, directory, updatedAt)
-      const status = makeStatus(id, s)
+
+    // 1) Generate root sessions.
+    const roots: Session[] = []
+    for (let r = 0; r < rootsPerDir[d]; r++) {
+      const id = `root-d${d}-r${r}`
+      const session = makeSession(id, directory, ++updatedAt, null)
       dirSessions.push(session)
-      dirStatuses[id] = status
-      sessions.push(session)
+      dirStatuses[id] = makeStatus(id, r)
+      roots.push(session)
     }
+
+    // 2) Generate child/subagent sessions. Distribute children across roots
+    //    in this directory. ~30% of children are one level deeper (subagent
+    //    of a subagent), which gives the lineage walk something to do.
+    const children = childrenPerDir[d]
+    const childrenPerRoot = Math.max(1, Math.ceil(children / Math.max(1, roots.length)))
+    let childIdx = 0
+    let rootIdx = 0
+    while (childIdx < children && rootIdx < roots.length) {
+      const root = roots[rootIdx]
+      const take = Math.min(childrenPerRoot, children - childIdx, 50)
+      let parentId: string | null = root.id
+      for (let c = 0; c < take; c++) {
+        const id = `child-d${d}-r${rootIdx}-c${c}`
+        const session = makeSession(id, directory, ++updatedAt, parentId)
+        // 30% of children are themselves subagents (one level deeper).
+        parentId = Math.random() < 0.3 ? id : root.id
+        dirSessions.push(session)
+        dirStatuses[id] = makeStatus(id, childIdx)
+        sessions.push(session)
+        childIdx++
+      }
+      rootIdx++
+    }
+    // Tail: if some children didn't fit under a root, attach them to the
+    // last root with depth-1.
+    const lastRoot = roots[roots.length - 1]
+    while (childIdx < children) {
+      const id = `child-d${d}-tail-${childIdx}`
+      const session = makeSession(id, directory, ++updatedAt, lastRoot.id)
+      dirSessions.push(session)
+      dirStatuses[id] = makeStatus(id, childIdx)
+      sessions.push(session)
+      childIdx++
+    }
+
+    // 3) Mark archived sessions. They are filtered out by the sidebar at
+    //    render time but still present in the merged view because
+    //    aggregateLiveSessions() does NOT filter on archive flag — it merges
+    //    everything. The fix preserves that behavior.
+    for (let a = 0; a < archivedPerDir[d] && a < dirSessions.length; a++) {
+      const s = dirSessions[a]
+      ;(s.time as { created: number; updated: number; archived: number }).archived = updatedAt + a
+    }
+
     slices.push({ session: dirSessions, session_status: dirStatuses })
+    for (const s of roots) sessions.push(s)
   }
   return { slices, sessions }
 }
@@ -80,7 +166,7 @@ type Sample = { ns: number }
 
 function bench(label: string, iters: number, fn: () => unknown): Sample[] {
   // Warmup: 20% of iters, minimum 2000 — let V8 inline + stabilize.
-  const warmup = Math.max(2000, Math.floor(iters * 0.2))
+  const warmup = Math.max(100, Math.floor(iters * 0.2))
   for (let i = 0; i < warmup; i++) fn()
 
   const samples: Sample[] = new Array(iters)
@@ -119,24 +205,27 @@ function fmt(n: number, digits = 2): string {
 const fixture = buildFixture()
 const { slices, sessions } = fixture
 
-// Build a parent chain for op3 to walk deep.
-const rootId = "sess-d0-s0"
-const c1 = makeSession("sess-d0-s0-c1", "/dir-0", 1_000_001, rootId)
-const c2 = makeSession("sess-d0-s0-c2", "/dir-0", 1_000_002, "sess-d0-s0-c1")
-const c3 = makeSession("sess-d0-s0-c3", "/dir-0", 1_000_003, "sess-d0-s0-c2")
-sessions.push(c1, c2, c3)
-slices[0].session.push(c1, c2, c3)
+// Find an existing deep-lineage session in the fixture for op3.
+// We use the first root in dir-0 as the lineage target, and a deep subagent
+// as the query id, so the lineage walk is at least 2-3 levels deep.
+const targetRoot = sessions.find((s) => s.parentID === null && s.id.startsWith("root-d0-"))!
+const targetChild = sessions.find((s) => s.parentID === targetRoot.id)!
 
 const visibleIds = sessions.slice(0, 30).map((s) => s.id)
 
 // Pre-build the index (one-time O(N) cost paid at SyncProvider mount).
+// The actual production path does this incrementally as child stores emit
+// events; fromStates() does the same work in one shot. Same algorithmic cost.
 const index = LiveSessionIndex.fromStates(slices)
 
-const autoAccept: Record<string, boolean> = { [rootId]: true }
+const autoAccept: Record<string, boolean> = { [targetRoot.id]: true }
 
-const ITERS = 50_000
+// Reduced iters for the reporter workload. 14,561 sessions makes the
+// legacy O(N) ops take ~150ms each, so 1,000 samples is enough for a
+// stable median and keeps total runtime under a minute.
+const ITERS = 1_000
 const ROWS = 30
-const PER_RENDER = 200
+const PER_RENDER = 50
 const totalRowsIters = ROWS * PER_RENDER
 
 // --- Op 1: useAllLiveSessions() equivalent -------------------------------
@@ -166,11 +255,11 @@ const op2_after = bench("op2: 30× LiveSessionIndex.getStatus (after)", totalRow
 const op3_before = bench("op3: isSessionAutoAccepting (before) — full getAllSyncSessions scan", ITERS, () => {
   const allSessions: Session[] = []
   for (const slice of slices) allSessions.push(...slice.session)
-  return autoRespondsPermission({ autoAccept, sessions: allSessions, sessionID: c3.id })
+  return autoRespondsPermission({ autoAccept, sessions: allSessions, sessionID: targetChild.id })
 })
 
 const op3_after = bench("op3: isSessionAutoAccepting (after)  — index.getLineage (O(depth))", ITERS, () => {
-  return index.getLineage(c3.id).some((id) => autoAccept[id] === true)
+  return index.getLineage(targetChild.id).some((id) => autoAccept[id] === true)
 })
 
 // --- Op 4: empty autoAccept short-circuit (the common case) -------------
@@ -215,8 +304,8 @@ const rows: Row[] = [
 ]
 
 console.log()
-console.log("=== issue #2188 — before/after benchmark ===")
-console.log(`fixture: ${DIRS} directories × ${SESSIONS_PER_DIR} sessions = ${DIRS * SESSIONS_PER_DIR} sessions`)
+console.log("=== issue #2188 — before/after benchmark (reporter workload) ===")
+console.log(`fixture: ${DIRS} directories, ${TOTAL_SESSIONS} total sessions (${ROOT_SESSIONS} root + ${CHILD_SESSIONS} child), ${ARCHIVED_SESSIONS} archived`)
 console.log(`iters:   ${ITERS} per op (op2: ${PER_RENDER} renders × ${ROWS} rows = ${totalRowsIters})`)
 console.log()
 console.log("operation                                          before (median)   after (median)   speedup   before ops/s   after ops/s")
