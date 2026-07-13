@@ -25,7 +25,12 @@ type PromptNavigatorRailProps = {
 const PREVIEW_MAX_CHARS = 160;
 // The whole gutter is one hover/click target: the cursor's vertical position
 // maps to the nearest tick, so tick density never demands pointer precision.
+// When the centered message column extends under the full-width gutter (narrow
+// windows), the hit zone shrinks so it can't swallow clicks on the right edge
+// of user bubbles (expand/collapse).
 const GUTTER_WIDTH_PX = 28;
+const GUTTER_NARROW_WIDTH_PX = 12;
+const GUTTER_RIGHT_OFFSET_PX = 6;
 // The rail shows at most a window of ticks; hovering the gutter edges
 // carousels the window through the rest of the prompts.
 const MAX_VISIBLE_TICKS = 30;
@@ -81,8 +86,34 @@ export function PromptNavigatorRail({
     const isKeyboardNavOpen = useUIStore((state) => state.isPromptNavigatorPanelOpen);
     const setPromptNavigatorPanelOpen = useUIStore((state) => state.setPromptNavigatorPanelOpen);
     const gutterRef = React.useRef<HTMLDivElement | null>(null);
+    const navRef = React.useRef<HTMLElement | null>(null);
     const [highlightedIndex, setHighlightedIndex] = React.useState<number | null>(null);
     const [windowStart, setWindowStart] = React.useState(0);
+    const [isNarrowGutter, setIsNarrowGutter] = React.useState(false);
+
+    // Shrink the hit zone whenever the message column reaches under the
+    // full-width gutter, so bubble clicks (expand/collapse) stay clickable.
+    React.useEffect(() => {
+        const container = navRef.current?.parentElement;
+        if (!container || typeof ResizeObserver === 'undefined') {
+            return;
+        }
+        const measure = () => {
+            const column = container.querySelector('.chat-message-column');
+            if (!column) {
+                setIsNarrowGutter(false);
+                return;
+            }
+            const containerRect = container.getBoundingClientRect();
+            const columnRect = column.getBoundingClientRect();
+            const fullGutterLeft = containerRect.right - GUTTER_RIGHT_OFFSET_PX - GUTTER_WIDTH_PX;
+            setIsNarrowGutter(columnRect.right > fullGutterLeft);
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(container);
+        return () => observer.disconnect();
+    }, []);
 
     const prompts = React.useMemo(
         () => buildPromptEntries(turnIds, previewsByTurnId),
@@ -371,6 +402,7 @@ export function PromptNavigatorRail({
 
     return (
         <nav
+            ref={navRef}
             aria-label={t('chat.promptNavigator.aria')}
             className="pointer-events-none absolute right-1.5 top-1/2 z-20 -translate-y-1/2"
         >
@@ -413,7 +445,7 @@ export function PromptNavigatorRail({
                     }
                     className="relative cursor-pointer outline-none"
                     style={{
-                        width: `${GUTTER_WIDTH_PX}px`,
+                        width: `${isNarrowGutter ? GUTTER_NARROW_WIDTH_PX : GUTTER_WIDTH_PX}px`,
                         height: `${visibleCount * TICK_PITCH_PX}px`,
                     }}
                     onMouseMove={handlePointerMove}
