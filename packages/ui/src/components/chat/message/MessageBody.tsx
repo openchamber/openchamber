@@ -19,6 +19,7 @@ import { ForkSessionDialog, type ForkSessionExecution } from '@/components/sessi
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
+import { getSourcePartIndex } from '../hooks/chatSearchPartIdentity';
 
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -709,6 +710,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                                 messageId={messageId}
                                 isMobile={isMobile}
                                 agentMention={mentionForPart}
+                                partIndex={getSourcePartIndex(parts, part, index)}
                             />
                         </React.Fragment>
                     );
@@ -1758,6 +1760,7 @@ const AssistantMessageBody = React.memo(({
                             part={part}
                             sessionId={sessionId}
                             messageId={messageId}
+                            partIndex={getSourcePartIndex(parts, part, i)}
                             streamPhase={effectiveStreamPhase}
                             chatRenderMode={chatRenderMode}
                             onContentChange={onContentChange}
@@ -1793,6 +1796,7 @@ const AssistantMessageBody = React.memo(({
                                 part={part}
                                 sessionId={sessionId}
                                 messageId={messageId}
+                                partIndex={getSourcePartIndex(parts, part, i)}
                                 streamPhase={effectiveStreamPhase}
                                 chatRenderMode={chatRenderMode}
                                 onContentChange={onContentChange}
@@ -1806,6 +1810,7 @@ const AssistantMessageBody = React.memo(({
                                 key={`reasoning-${messageId}-${i}`}
                                 part={part}
                                 messageId={messageId}
+                                partIndex={getSourcePartIndex(parts, part, i)}
                                 streamPhase={effectiveStreamPhase}
                                 onContentChange={onContentChange}
                             />
@@ -1909,6 +1914,7 @@ const AssistantMessageBody = React.memo(({
         onContentChange,
         onShowPopup,
         onToggleTool,
+        parts,
         shouldRenderActivityGroup,
         shouldShowStandaloneMessageActions,
         shouldShowTool,

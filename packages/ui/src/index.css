@@ -1657,6 +1657,19 @@ input[aria-label="Terminal input"] {
   display: none;
 }
 
+/* ── Chat search highlight ──────────────────────────────────────────────── */
+mark[data-search-match] {
+  background-color: var(--status-warning-background);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+mark[data-search-match].active {
+  background-color: var(--status-warning);
+  color: var(--status-warning-foreground);
+}
+
 /* Desktop app shell (Electron/native window): native apps use the arrow cursor
    for clickable controls, not the web's hand/pointer. Neutralize pointer
    cursors under the desktop runtime only — web in a browser keeps them.

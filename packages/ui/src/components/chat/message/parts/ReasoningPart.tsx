@@ -11,14 +11,22 @@ import { useUIStore } from '@/stores/useUIStore';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import type { StreamPhase } from '../types';
+import { useChatSearchStore, type SearchContext } from '@/stores/useChatSearchStore';
+import {
+    getNextReasoningExpansionForSearch,
+    getReasoningSearchContext,
+    shouldExpandReasoningForSearch,
+    type ReasoningExpansionState,
+} from './reasoningSearch';
+import { useChatSearchContext } from '../../hooks/useChatSearchContext';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
-type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
+type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
-type ReasoningVariant = 'thinking' | 'justification';
+export type ReasoningVariant = 'thinking' | 'justification';
 
 const cleanReasoningText = (text: string): string => {
     if (typeof text !== 'string' || text.trim().length === 0) {
@@ -89,12 +97,15 @@ type ReasoningTimelineBlockProps = {
     actions?: React.ReactNode;
     /** Override the initial expanded state. Defaults to `isStreaming`. */
     defaultExpanded?: boolean;
+    messageId?: string;
+    searchContext?: SearchContext;
 };
 
-type ExpansionState = {
-    expanded: boolean;
-    source: 'auto' | 'user';
-};
+type ExpansionState = ReasoningExpansionState;
+
+const sameExpansionState = (a: ExpansionState, b: ExpansionState): boolean => (
+    a.expanded === b.expanded && a.source === b.source
+);
 
 export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     text,
@@ -105,10 +116,32 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     isStreaming = false,
     actions,
     defaultExpanded,
+    messageId,
+    searchContext: searchContextOverride,
 }) => {
     const { t } = useI18n();
     const hasEnded = typeof time?.end === 'number';
     const canAutoExpand = isStreaming && !hasEnded;
+    const searchMessageId = messageId ?? blockId;
+    const activeSearchMatch = useChatSearchStore((state) => state.matches[state.activeIndex] ?? null);
+    const searchIsOpen = useChatSearchStore((state) => state.isOpen);
+    const searchQuery = useChatSearchStore((state) => state.query);
+    const searchCaseSensitive = useChatSearchStore((state) => state.flags.caseSensitive);
+    const searchWholeWord = useChatSearchStore((state) => state.flags.wholeWord);
+    const searchIsRegex = useChatSearchStore((state) => state.flags.regex);
+    const includeThinkingInSearch = useChatSearchStore((state) => state.flags.includeThinking ?? false);
+    const searchPartId = searchContextOverride?.partId ?? blockId;
+    const searchPartType = variant === 'thinking' ? 'reasoning' : 'text';
+    const shouldExpandForActiveThinkingSearch = variant === 'thinking' && shouldExpandReasoningForSearch({
+        searchIsOpen,
+        query: searchQuery,
+        includeThinking: includeThinkingInSearch,
+        activeMessageId: activeSearchMatch?.messageId ?? null,
+        activePartId: activeSearchMatch?.partId ?? null,
+        activePartType: activeSearchMatch?.partType ?? null,
+        messageId: searchMessageId,
+        partId: searchPartId,
+    });
     const [expansion, setExpansion] = React.useState<ExpansionState>(() => {
         if (defaultExpanded === true) {
             return { expanded: true, source: 'user' };
@@ -130,6 +163,18 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     onContentChangeRef.current = onContentChange;
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
+    const storeSearchContext = React.useMemo<SearchContext | undefined>(() => getReasoningSearchContext({
+        searchIsOpen,
+        query: searchQuery,
+        includeThinking: includeThinkingInSearch,
+        caseSensitive: searchCaseSensitive,
+        wholeWord: searchWholeWord,
+        isRegex: searchIsRegex,
+        messageId: searchMessageId,
+        partId: searchPartId,
+        partType: searchPartType,
+    }), [includeThinkingInSearch, searchCaseSensitive, searchIsOpen, searchIsRegex, searchMessageId, searchPartId, searchQuery, searchWholeWord, searchPartType]);
+    const searchContext = searchContextOverride ?? storeSearchContext;
     const toggleAriaLabel = isExpanded
         ? t('chat.reasoningTrace.collapseAria')
         : t('chat.reasoningTrace.expandAria');
@@ -149,7 +194,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
     React.useLayoutEffect(() => {
         setExpansion((prev) => {
-            if (prev.source === 'user') {
+            if (prev.source === 'user' || prev.source === 'search') {
                 return prev;
             }
             if (prev.expanded === canAutoExpand) {
@@ -158,6 +203,21 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
             return { expanded: canAutoExpand, source: 'auto' };
         });
     }, [canAutoExpand]);
+
+    React.useEffect(() => {
+        const next = getNextReasoningExpansionForSearch({
+            current: expansion,
+            shouldExpandForSearch: shouldExpandForActiveThinkingSearch,
+            canAutoExpand,
+        });
+        if (!sameExpansionState(expansion, next)) {
+            if (next.expanded) {
+                setShouldRenderExpandedContent(true);
+            }
+            setExpansion(next);
+            onContentChange?.('structural');
+        }
+    }, [canAutoExpand, expansion, onContentChange, shouldExpandForActiveThinkingSearch]);
 
     React.useEffect(() => {
         if (text.trim().length === 0) {
@@ -290,10 +350,11 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
             <div data-message-text-export-source="true">
                 <MarkdownRenderer
                     content={text}
-                    messageId={blockId}
+                    messageId={searchMessageId}
                     isAnimated={false}
                     isStreaming={isStreaming}
                     variant="reasoning"
+                    searchContext={searchContext}
                 />
             </div>
             {actions ? (
@@ -439,6 +500,7 @@ type ReasoningPartProps = {
     onContentChange?: (reason?: ContentChangeReason) => void;
     messageId: string;
     streamPhase?: StreamPhase;
+    partIndex: number;
 };
 
 const ReasoningPart = React.memo(({
@@ -446,10 +508,14 @@ const ReasoningPart = React.memo(({
     onContentChange,
     messageId,
     streamPhase,
+    partIndex,
 }: ReasoningPartProps) => {
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const partWithText = part as PartWithText;
-    const rawText = partWithText.text || partWithText.content || '';
+    const rawText = [partWithText.text, partWithText.content, partWithText.value].reduce<string>(
+        (best, candidate) => typeof candidate === 'string' && candidate.length > best.length ? candidate : best,
+        '',
+    );
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
     const time = partWithText.time;
     const canBeStreaming = streamPhase === undefined || streamPhase !== 'completed';
@@ -459,6 +525,7 @@ const ReasoningPart = React.memo(({
         isStreaming,
         identityKey: `${messageId}:${part.id ?? 'reasoning'}`,
     });
+    const searchContext = useChatSearchContext(messageId, part, partIndex);
 
     // Show reasoning even if time.end isn't set yet (during streaming)
     // Only hide if there's no text content
@@ -472,6 +539,8 @@ const ReasoningPart = React.memo(({
             variant="thinking"
             onContentChange={onContentChange}
             blockId={part.id || `${messageId}-reasoning`}
+            messageId={messageId}
+            searchContext={searchContext}
             time={time}
             isStreaming={isStreaming}
         />

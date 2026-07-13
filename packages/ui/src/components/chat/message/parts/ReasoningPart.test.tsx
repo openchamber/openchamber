@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { I18nProvider } from '@/lib/i18n';
 import { ReasoningTimelineBlock } from './ReasoningPart';
+import { getNextReasoningExpansionForSearch, getReasoningSearchContext, shouldExpandReasoningForSearch } from './reasoningSearch';
 
 // A reasoning text whose summary (first 120 chars) fits in the header but
 // whose expanded body content should only appear when the disclosure is open.
@@ -19,6 +20,92 @@ const LONG_JUSTIFICATION =
   'when multiple sessions have the same activity state.';
 
 describe('ReasoningTimelineBlock', () => {
+  test('detects active thinking search matches that should open collapsed reasoning', () => {
+    expect(shouldExpandReasoningForSearch({
+      searchIsOpen: true,
+      query: 'needle',
+      includeThinking: true,
+      activeMessageId: 'message-1',
+      activePartType: 'reasoning',
+      messageId: 'message-1',
+    })).toBe(true);
+
+    expect(shouldExpandReasoningForSearch({
+      searchIsOpen: true,
+      query: 'needle',
+      includeThinking: false,
+      activeMessageId: 'message-1',
+      activePartType: 'reasoning',
+      messageId: 'message-1',
+    })).toBe(false);
+
+    expect(shouldExpandReasoningForSearch({
+      searchIsOpen: true,
+      query: 'needle',
+      includeThinking: true,
+      activeMessageId: 'message-2',
+      activePartType: 'reasoning',
+      messageId: 'message-1',
+    })).toBe(false);
+
+    expect(shouldExpandReasoningForSearch({
+      searchIsOpen: true,
+      query: 'needle',
+      includeThinking: true,
+      activeMessageId: 'message-1',
+      activePartType: 'text',
+      messageId: 'message-1',
+    })).toBe(false);
+  });
+
+  test('creates reasoning search context only when thinking search is enabled', () => {
+    expect(getReasoningSearchContext({
+      searchIsOpen: true,
+      query: 'needle',
+      includeThinking: true,
+      caseSensitive: false,
+      wholeWord: false,
+      isRegex: false,
+      messageId: 'message-1',
+    })).toEqual({
+      query: 'needle',
+      caseSensitive: false,
+      wholeWord: false,
+      isRegex: false,
+      messageId: 'message-1',
+    });
+
+    expect(getReasoningSearchContext({
+      searchIsOpen: true,
+      query: 'needle',
+      includeThinking: false,
+      caseSensitive: false,
+      wholeWord: false,
+      isRegex: false,
+      messageId: 'message-1',
+    })).toBe(undefined);
+  });
+
+  test('closes search-opened reasoning when the active thinking match moves away', () => {
+    expect(getNextReasoningExpansionForSearch({
+      current: { expanded: true, source: 'search' },
+      shouldExpandForSearch: false,
+      canAutoExpand: false,
+    })).toEqual({ expanded: false, source: 'auto' });
+
+    expect(getNextReasoningExpansionForSearch({
+      current: { expanded: true, source: 'user' },
+      shouldExpandForSearch: false,
+      canAutoExpand: false,
+    })).toEqual({ expanded: true, source: 'user' });
+
+    expect(getNextReasoningExpansionForSearch({
+      current: { expanded: false, source: 'auto' },
+      shouldExpandForSearch: true,
+      canAutoExpand: false,
+    })).toEqual({ expanded: true, source: 'search' });
+  });
+
   test('renders reasoning traces behind an accessible collapsed disclosure by default', () => {
     const markup = renderToStaticMarkup(
       <I18nProvider>

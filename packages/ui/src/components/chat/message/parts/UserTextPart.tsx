@@ -14,6 +14,9 @@ import {
     parseSkillHref,
 } from '@/lib/messages/inlineMessageLinks';
 import { prepareUserMarkdownContent, SKILL_TOKEN_PATTERN } from './userTextPartContent';
+import type { SearchContext } from '@/stores/useChatSearchStore';
+import { useChatSearchContext } from '../../hooks/useChatSearchContext';
+import { applySearchHighlights } from '@/lib/rehypeMarkSearchMatches';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -22,16 +25,20 @@ type UserTextPartProps = {
     messageId: string;
     isMobile: boolean;
     agentMention?: AgentMentionInfo;
+    partIndex: number;
+    searchContext?: SearchContext;
 };
 
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention }) => {
+const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention, partIndex, searchContext: searchContextOverride }) => {
     const partWithText = part as PartWithText;
-    const rawText = partWithText.text;
-    const textContent = typeof rawText === 'string' ? rawText : partWithText.content || partWithText.value || '';
+    const textContent = [partWithText.text, partWithText.content, partWithText.value].reduce<string>(
+        (best, candidate) => typeof candidate === 'string' && candidate.length > best.length ? candidate : best,
+        '',
+    );
 
     const [isExpanded, setIsExpanded] = React.useState(false);
     const [isTruncated, setIsTruncated] = React.useState(false);
@@ -44,6 +51,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
     const isCollapsed = collapsibleUserMessages && !isExpanded;
     const textRef = React.useRef<HTMLDivElement>(null);
+    const searchContext = useChatSearchContext(messageId, part, partIndex, searchContextOverride);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
 
     const openSkill = React.useCallback((name: string) => {
@@ -190,6 +198,17 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         });
     }, [agentMention, openSkill, skillByName, textContent]);
 
+    React.useLayoutEffect(() => {
+        if (normalizedRenderingMode !== 'plain') {
+            return;
+        }
+        const element = textRef.current;
+        if (!element) {
+            return;
+        }
+        applySearchHighlights(element, searchContext);
+    }, [normalizedRenderingMode, plainTextContent, searchContext]);
+
     if (!textContent || textContent.trim().length === 0) {
         return null;
     }
@@ -238,6 +257,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                         )}
                         disableLinkSafety
                         enableFileReferences={false}
+                        searchContext={searchContext}
                     />
                 ) : (
                     plainTextContent

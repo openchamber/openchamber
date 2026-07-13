@@ -21,6 +21,8 @@ import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
 import { ensureMarkdownShikiTheme, getMarkdownSyntaxVars } from './markdown/markdownTheme';
+import { applySearchHighlights } from '@/lib/rehypeMarkSearchMatches';
+import type { SearchContext } from '@/stores/useChatSearchStore';
 import {
   attachMarkdownInteractions,
   applyMarkdownCodeBlockWrapState,
@@ -138,6 +140,7 @@ interface MarkdownRendererProps {
   variant?: MarkdownVariant;
   onShowPopup?: (content: ToolPopupContent) => void;
   enableFileReferences?: boolean;
+  searchContext?: SearchContext;
 }
 
 const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
@@ -906,6 +909,7 @@ const useMorphdomMarkdown = ({
   cacheKey,
   syntaxVars,
   ctx,
+  searchContext,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   text: string;
@@ -913,6 +917,7 @@ const useMorphdomMarkdown = ({
   cacheKey: string;
   syntaxVars: Record<string, string>;
   ctx: DecorateContext;
+  searchContext?: SearchContext;
 }) => {
   React.useEffect(() => {
     ensureMarkdownShikiTheme();
@@ -956,12 +961,13 @@ const useMorphdomMarkdown = ({
       // <pre>/tables that "snap" into their decorated form a tick later. Matching
       // the structure here keeps the async morph to syntax colors only.
       decorateMarkdown(block, ctx);
+      applySearchHighlights(block, searchContext);
       target.appendChild(block);
       if (shouldRefreshMermaidViewers(block)) {
         refreshMermaidViewers();
       }
     }
-  }, [containerRef, text, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, ctx, refreshMermaidViewers, searchContext]);
 
   React.useEffect(() => () => {
     mermaidViewerRef.current?.cleanup();
@@ -989,11 +995,14 @@ const useMorphdomMarkdown = ({
           el.style.display = 'contents';
           target.appendChild(el);
         }
-        if (el.getAttribute('data-md-id') === block.id) return;
+        if (el.getAttribute('data-md-id') === block.id) {
+          return;
+        }
 
         const temp = document.createElement('div');
         temp.innerHTML = block.html;
         decorateMarkdown(temp, ctx);
+        applySearchHighlights(el, undefined);
         const hadMermaidBlock = shouldRefreshMermaidViewers(el);
         const tempHasMermaidBlock = shouldRefreshMermaidViewers(temp);
         morphdom(el, temp, {
@@ -1023,12 +1032,23 @@ const useMorphdomMarkdown = ({
       if (!ctx.deferCodeLineNumberSync) {
         scheduleMarkdownCodeLineNumberSync(target);
       }
+      applySearchHighlights(target, searchContext);
     });
 
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, streaming, cacheKey, ctx, refreshMermaidViewers, searchContext]);
+
+  // Search state can change without markdown text changing. Re-apply at the
+  // DOM boundary synchronously so old marks cannot remain visible until the
+  // next markdown render.
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+    if (!target) return;
+    applySearchHighlights(target, searchContext);
+  }, [containerRef, searchContext]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1093,6 +1113,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   variant = 'assistant',
   onShowPopup,
   enableFileReferences = true,
+  searchContext,
 }) => {
   const currentTheme = useCurrentMermaidTheme();
   const { editor, runtime } = useRuntimeAPIs();
@@ -1127,7 +1148,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
   const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
-  useMorphdomMarkdown({ containerRef, text: pacedText, streaming: live, cacheKey, syntaxVars, ctx });
+  useMorphdomMarkdown({ containerRef, text: pacedText, streaming: live, cacheKey, syntaxVars, ctx, searchContext });
 
   const markdownContent = (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
@@ -1157,6 +1178,13 @@ export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) =>
     && prev.messageId === next.messageId
     && prev.onShowPopup === next.onShowPopup
     && prev.enableFileReferences === next.enableFileReferences
+    && prev.searchContext?.query === next.searchContext?.query
+    && prev.searchContext?.caseSensitive === next.searchContext?.caseSensitive
+    && prev.searchContext?.wholeWord === next.searchContext?.wholeWord
+    && prev.searchContext?.isRegex === next.searchContext?.isRegex
+    && prev.searchContext?.messageId === next.searchContext?.messageId
+    && prev.searchContext?.partId === next.searchContext?.partId
+    && prev.searchContext?.partType === next.searchContext?.partType
     && prev.part?.id === next.part?.id;
 });
 
@@ -1170,6 +1198,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   mermaidControls?: MermaidControlOptions;
   allowMermaidWheelEvents?: boolean;
   enableFileReferences?: boolean;
+  searchContext?: SearchContext;
 }> = ({
   content,
   className,
@@ -1180,6 +1209,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   mermaidControls = DEFAULT_MERMAID_CONTROLS,
   allowMermaidWheelEvents = false,
   enableFileReferences = true,
+  searchContext,
 }) => {
   const { editor, runtime } = useRuntimeAPIs();
   const currentTheme = useCurrentMermaidTheme();
@@ -1217,6 +1247,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     cacheKey: `simple:${variant}`,
     syntaxVars,
     ctx,
+    searchContext,
   });
 
   return (
@@ -1240,5 +1271,12 @@ export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (pr
     && prevMermaidControls.copy === nextMermaidControls.copy
     && prevMermaidControls.showPanZoomControls === nextMermaidControls.showPanZoomControls
     && prev.allowMermaidWheelEvents === next.allowMermaidWheelEvents
-    && prev.enableFileReferences === next.enableFileReferences;
+    && prev.enableFileReferences === next.enableFileReferences
+    && prev.searchContext?.query === next.searchContext?.query
+    && prev.searchContext?.caseSensitive === next.searchContext?.caseSensitive
+    && prev.searchContext?.wholeWord === next.searchContext?.wholeWord
+    && prev.searchContext?.isRegex === next.searchContext?.isRegex
+    && prev.searchContext?.messageId === next.searchContext?.messageId
+    && prev.searchContext?.partId === next.searchContext?.partId
+    && prev.searchContext?.partType === next.searchContext?.partType;
 });

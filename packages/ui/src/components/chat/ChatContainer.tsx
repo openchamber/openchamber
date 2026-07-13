@@ -9,6 +9,7 @@ import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
+import { ChatSearchWidget } from './ChatSearchWidget';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
@@ -51,6 +52,10 @@ import { useI18n } from '@/lib/i18n';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
+import { useChatSearchMatcher } from './hooks/useChatSearchMatcher';
+import { useChatSearchStore } from '@/stores/useChatSearchStore';
+import { buildSearchRegex } from '@/lib/splitByHighlight';
+import { getSearchPaginationDecision } from './hooks/searchPagination';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -734,6 +739,63 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         isPinned,
         showScrollButton,
     });
+
+    // Search always scans the full loaded session, not the virtualized/rendered
+    // subset, so pagination can add older matches without losing newer ones.
+    useChatSearchMatcher(sessionMessages);
+
+    const isSearchOpen = useChatSearchStore((state) => state.isOpen);
+    const searchQuery = useChatSearchStore((state) => state.query);
+    const searchFlags = useChatSearchStore((state) => state.flags);
+    const searchPaginationInFlightRef = React.useRef<string | null>(null);
+    const searchPaginationRetryVersionRef = React.useRef(0);
+    const [searchPaginationSettledVersion, setSearchPaginationSettledVersion] = React.useState(0);
+    React.useEffect(() => {
+        const requestKey = JSON.stringify({
+            sessionId: currentSessionId,
+            query: searchQuery,
+            flags: searchFlags,
+        });
+        const validQuery = isSearchOpen
+            && Boolean(searchQuery)
+            && Boolean(currentSessionId)
+            && buildSearchRegex(searchQuery, searchFlags) !== null;
+
+        if (!validQuery || !historyMeta || historyMeta.complete) {
+            if (searchPaginationInFlightRef.current === null) {
+                useChatSearchStore.getState().setIsLoadingForSearch(false);
+            }
+            return;
+        }
+        if (!currentSessionId) {
+            return;
+        }
+
+        const decision = getSearchPaginationDecision({
+            inFlightKey: searchPaginationInFlightRef.current,
+            retryVersion: searchPaginationRetryVersionRef.current,
+            settledVersion: searchPaginationSettledVersion,
+            historyLoading: Boolean(historyMeta.loading),
+        });
+        if (decision === 'wait') {
+            return;
+        }
+
+        searchPaginationInFlightRef.current = requestKey;
+        useChatSearchStore.getState().setIsLoadingForSearch(true);
+        void loadMoreMessages(currentSessionId, 'up')
+            .catch(() => undefined)
+            .finally(() => {
+                if (searchPaginationInFlightRef.current !== requestKey) {
+                    return;
+                }
+                searchPaginationInFlightRef.current = null;
+                searchPaginationRetryVersionRef.current += 1;
+                setSearchPaginationSettledVersion((version) => version + 1);
+                useChatSearchStore.getState().setIsLoadingForSearch(false);
+            });
+    }, [currentSessionId, historyMeta, isSearchOpen, loadMoreMessages, searchFlags, searchPaginationSettledVersion, searchQuery]);
+
     const resumeToLatestInstant = React.useCallback(() => {
         goToBottom('instant');
     }, [goToBottom]);
@@ -1061,6 +1123,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 	return (
 		<div className="relative flex flex-col h-full bg-background">
 			{returnToParentButton}
+			<ChatSearchWidget scrollRef={scrollRef} scrollToMessage={timelineController.scrollToMessage} />
 			<ChatViewport
 				key={currentSessionId}
 				currentSessionId={currentSessionId}

@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Chat search:** restored PR #1434 search integration with part-scoped match identities, cross-inline markdown highlighting, reliable virtualized scrolling, reasoning-only auto-expansion, and serialized history pagination.
 - **Desktop/Linux:** official AppImage releases for x86_64 and arm64, with in-app window controls (position follows OS defaults or Settings → Sessions), writable-AppImage auto-update, and clearer updater errors when the AppImage is missing or read-only. Linux does not yet include system tray or launch-at-login.
 
 ## [1.16.0] - 2026-07-13

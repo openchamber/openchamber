@@ -11,6 +11,7 @@ import type { TurnHistorySignals } from '../lib/turns/historySignals';
 import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { decidePendingScrollFailure } from './pendingScrollRequest';
 
 type ViewportAnchor = { messageId: string; offsetTop: number };
 
@@ -20,6 +21,8 @@ type PendingScrollRequest = {
     id: string;
     behavior: ScrollBehavior;
     turnId: string | null;
+    visibleFailureCount: number;
+    retryFrame: number | null;
     resolve: (value: boolean) => void;
 };
 
@@ -244,6 +247,7 @@ export const useChatTimelineController = ({
     const initializedSessionRef = React.useRef<string | null>(null);
     const pendingRenderResolversRef = React.useRef<Array<() => void>>([]);
     const pendingScrollRequestRef = React.useRef<PendingScrollRequest | null>(null);
+    const retryPendingScrollRequestRef = React.useRef<() => void>(() => {});
     const scrollPinRef = React.useRef<{ turnId: string; expiresAt: number } | null>(null);
     const historyInteractionRef = React.useRef(false);
     const historyInteractionTimerRef = React.useRef<number | null>(null);
@@ -346,6 +350,9 @@ export const useChatTimelineController = ({
         if (!pending) {
             return;
         }
+        if (pending.retryFrame !== null && typeof window !== 'undefined') {
+            window.cancelAnimationFrame(pending.retryFrame);
+        }
         pendingScrollRequestRef.current = null;
         pending.resolve(value);
     }, []);
@@ -383,11 +390,37 @@ export const useChatTimelineController = ({
         const targetIndex = pending.kind === 'turn'
             ? turnModelRef.current.turnIndexById.get(pending.id)
             : turnModelRef.current.messageToTurnIndex.get(pending.id);
+        const failureDecision = decidePendingScrollFailure({
+            targetIndex,
+            turnStart: 0,
+            visibleFailureCount: pending.visibleFailureCount,
+        });
 
-        if (typeof targetIndex === 'number') {
-            resolvePendingScrollRequest(false);
+        if (failureDecision === 'retry-visible') {
+            if (pending.retryFrame !== null) {
+                return;
+            }
+            if (typeof window !== 'undefined') {
+                pending.visibleFailureCount += 1;
+                pending.retryFrame = window.requestAnimationFrame(() => {
+                    if (pendingScrollRequestRef.current !== pending) {
+                        return;
+                    }
+                    pending.retryFrame = null;
+                    retryPendingScrollRequestRef.current();
+                });
+                return;
+            }
         }
+
+        resolvePendingScrollRequest(false);
     }, [messageListRef, resolvePendingScrollRequest]);
+
+    // The retry frame must use the latest callback after a commit so it never
+    // reads stale message-list maps while virtualized rows are mounting.
+    React.useLayoutEffect(() => {
+        retryPendingScrollRequestRef.current = attemptPendingScrollRequest;
+    }, [attemptPendingScrollRequest]);
 
     React.useEffect(() => {
         return () => {
@@ -823,12 +856,15 @@ export const useChatTimelineController = ({
             }
 
             const result = await new Promise<boolean>((resolve) => {
+                resolvePendingScrollRequest(false);
                 pendingScrollRequestRef.current = {
                     sessionId: sessionIdRef.current ?? sessionId ?? '',
                     kind: 'turn',
                     id: turnId,
                     behavior: options?.behavior ?? 'auto',
                     turnId,
+                    visibleFailureCount: 0,
+                    retryFrame: null,
                     resolve,
                 };
                 attemptPendingScrollRequest();
@@ -842,7 +878,7 @@ export const useChatTimelineController = ({
         } finally {
             setPendingRevealWork(false);
         }
-    }, [attemptPendingScrollRequest, releaseAutoFollow, sessionId]);
+    }, [attemptPendingScrollRequest, releaseAutoFollow, resolvePendingScrollRequest, sessionId]);
 
     const scrollToMessage = React.useCallback(async (
         messageId: string,
@@ -868,12 +904,15 @@ export const useChatTimelineController = ({
             }
 
             const result = await new Promise<boolean>((resolve) => {
+                resolvePendingScrollRequest(false);
                 pendingScrollRequestRef.current = {
                     sessionId: sessionIdRef.current ?? sessionId ?? '',
                     kind: 'message',
                     id: messageId,
                     behavior: options?.behavior ?? 'auto',
                     turnId: turnId ?? null,
+                    visibleFailureCount: 0,
+                    retryFrame: null,
                     resolve,
                 };
                 attemptPendingScrollRequest();
@@ -887,7 +926,7 @@ export const useChatTimelineController = ({
         } finally {
             setPendingRevealWork(false);
         }
-    }, [attemptPendingScrollRequest, releaseAutoFollow, sessionId]);
+    }, [attemptPendingScrollRequest, releaseAutoFollow, resolvePendingScrollRequest, sessionId]);
 
     const resumeToBottom = React.useCallback(async () => {
         setPendingRevealWork(false);

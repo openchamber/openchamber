@@ -792,6 +792,7 @@ const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhas
         <ReasoningPart
             part={activity.part}
             messageId={activity.messageId}
+            partIndex={activity.partIndex}
             streamPhase={streamPhase}
             onContentChange={onContentChange}
         />
@@ -810,6 +811,7 @@ const InlineJustificationBlock = React.memo(({ activity, onContentChange, action
         <JustificationBlock
             part={activity.part}
             messageId={activity.messageId}
+            partIndex={activity.partIndex}
             onContentChange={onContentChange}
             actions={actions}
         />

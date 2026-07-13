@@ -14,6 +14,7 @@ import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstr
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
+import { useChatSearchStore } from '@/stores/useChatSearchStore';
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -131,6 +132,19 @@ export const useKeyboardShortcuts = () => {
       const isChatInputTarget = (target: EventTarget | null) => {
         return target instanceof HTMLTextAreaElement && target.getAttribute('data-chat-input') === 'true';
       };
+
+      if (eventMatchesShortcut(e, combo('open_chat_search'))) {
+        if (useUIStore.getState().activeMainTab === 'chat') {
+          e.preventDefault();
+          const store = useChatSearchStore.getState();
+          const selectedText = window.getSelection()?.toString().trim() ?? '';
+          store.open();
+          if (selectedText) {
+            store.setQuery(selectedText);
+          }
+          return;
+        }
+      }
 
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
         e.preventDefault();

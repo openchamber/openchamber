@@ -8,6 +8,8 @@ import { resolveAssistantDisplayText, shouldRenderAssistantText } from './assist
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { GeneratedJsonResultCard } from './GeneratedJsonResultCard';
 import { parseGeneratedJsonResult } from './generatedJsonResult';
+import type { SearchContext } from '@/stores/useChatSearchStore';
+import { useChatSearchContext } from '../../hooks/useChatSearchContext';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
@@ -19,6 +21,8 @@ interface AssistantTextPartProps {
     chatRenderMode?: 'sorted' | 'live';
     onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
     onShowPopup?: (content: ToolPopupContent) => void;
+    partIndex: number;
+    searchContext?: SearchContext;
 }
 
 const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
@@ -27,6 +31,8 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     streamPhase,
     chatRenderMode = 'live',
     onShowPopup,
+    partIndex,
+    searchContext: searchContextOverride,
 }) => {
     // Use part directly from props — parent provides the latest version from the store.
     // No store subscription here to avoid re-render cascade from unrelated delta events.
@@ -57,6 +63,8 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
         throttledTextContent,
         isStreaming,
     });
+
+    const searchContext = useChatSearchContext(messageId, part, partIndex, searchContextOverride);
 
     streamPerfObserve('ui.assistant_text_part.display_len', displayTextContent.length);
 
@@ -102,6 +110,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 variant={part.type === 'reasoning' ? 'reasoning' : 'assistant'}
                 enableFileReferences={isFinalized}
                 onShowPopup={onShowPopup}
+                searchContext={searchContext}
             />
         </div>
     );
