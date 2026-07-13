@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
-import { isDesktopLocalOriginActive, isElectronShell, isDesktopShell } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopTrustedLocalPage, isElectronShell, isDesktopShell } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -30,6 +30,8 @@ import {
   probeDesktopHostTransportsForActivation,
   redactSensitiveUrl,
   resolveDesktopHostUrl,
+  runtimeKeyForHost,
+  resolveActiveDesktopHost,
   shouldDelegateDesktopHostActivation,
   type DesktopHost,
   type HostProbeResult,
@@ -37,6 +39,7 @@ import {
 import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
 import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { hostTransportLabelKey } from '@/lib/hostTransportLabel';
 import {
   desktopSshConnect,
   desktopSshDisconnect,
@@ -48,11 +51,6 @@ import {
 const LOCAL_HOST_ID = 'local';
 const SSH_CONNECT_TIMEOUT_MS = 90_000;
 const SSH_CONNECT_CANCELLED_ERROR = 'SSH connection cancelled';
-
-const runtimeKeyForHost = (host: DesktopHost): string => {
-  if (host.id === LOCAL_HOST_ID) return 'local';
-  return `host:${host.id}`;
-};
 
 type HostStatus = {
   status: HostProbeResult['status'];
@@ -251,28 +249,17 @@ const resolveCurrentHost = (hosts: DesktopHost[]) => {
   const normalizedLocal = normalizeHostUrl(localOrigin) || localOrigin;
   const normalizedCurrent = normalizeHostUrl(currentHref) || currentHref;
 
-  // Relay hosts share the window origin as their (virtual) API base, so URL
-  // matching can't distinguish them — identify the active relay host by its
-  // stable runtime key instead.
   const activeRuntimeKey = getRuntimeKey();
-  const relayMatch = hosts.find((h) => (h.relay || h.directE2ee) && runtimeKeyForHost(h) === activeRuntimeKey);
-  if (relayMatch) {
-    return { id: relayMatch.id, label: relayMatch.label, url: relayMatch.url };
-  }
+  const activeHost = resolveActiveDesktopHost(hosts, localOrigin, runtimeApiBaseUrl, activeRuntimeKey);
 
-  if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
-    return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
-  }
-
-  const runtimeMatch = hosts.find((h) => {
-    return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(h)) : false;
-  });
-
-  if (runtimeMatch) {
+  if (activeHost) {
+    if (activeHost.id === LOCAL_HOST_ID) {
+      return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
+    }
     return {
-      id: runtimeMatch.id,
-      label: runtimeMatch.label,
-      url: normalizeHostUrl(getDesktopHostApiUrl(runtimeMatch)) || getDesktopHostApiUrl(runtimeMatch),
+      id: activeHost.id,
+      label: activeHost.label,
+      url: normalizeHostUrl(activeHost.url) || activeHost.url,
     };
   }
 
@@ -431,7 +418,7 @@ export function DesktopHostSwitcherDialog({
 
   const probeAll = React.useCallback(async (hosts: DesktopHost[]) => {
     if (!isDesktopShell()) return;
-    if (isElectronShell() && !isDesktopLocalOriginActive()) return;
+    if (isElectronShell() && !isDesktopTrustedLocalPage()) return;
     setIsProbing(true);
     try {
       const localClientToken = await getLocalClientToken();
@@ -507,9 +494,8 @@ export function DesktopHostSwitcherDialog({
       }
       return;
     }
-    // Relay legs ride the E2EE tunnel activated in-renderer via
-    // switchRuntimeEndpoint({ relay }); the runtime fetch/socket layers route
-    // through the tunnel from the singleton registry.
+    // Encrypted transports are activated in-renderer; managed direct E2EE and
+    // explicit Relay remain structurally separate runtime descriptors.
     const activateTransport = (
       transport: NonNullable<Awaited<ReturnType<typeof probeDesktopHostTransports>>['transport']>,
       clientToken: string,
@@ -537,8 +523,8 @@ export function DesktopHostSwitcherDialog({
     };
     const origin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(host.url) || '');
     const apiOrigin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(getDesktopHostApiUrl(host)) || '');
-    const relayOnly = Boolean(host.relay || host.directE2ee) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
-    if (!origin && !relayOnly) return;
+    const encryptedOnly = Boolean(host.relay || host.directE2ee) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
+    if (!origin && !encryptedOnly) return;
 
     if (isElectronShell()) {
       if (!apiOrigin && !host.relay && !host.directE2ee) return;
@@ -560,9 +546,9 @@ export function DesktopHostSwitcherDialog({
         return;
       }
 
-      // No usable probe result — probe now: direct first, relay fallback.
-      // Statuses are written once, with the final outcome, so the row never
-      // flashes intermediate failures while the fallback is still running.
+      // No usable probe result — resolve only the transports explicitly stored
+      // for this host. Managed direct E2EE never enters the Relay probe branch;
+      // Relay activation retains the probe tunnel for no-second-handshake adoption.
       const selection = await probeDesktopHostTransportsForActivation({ ...host, ...(clientToken ? { clientToken } : {}) });
       const finalStatus: HostStatus = { ...selection.probe, ...(selection.transport ? { via: selection.transport.kind } : {}) };
       setStatusById((prev) => ({ ...prev, [host.id]: finalStatus }));
@@ -940,10 +926,10 @@ export function DesktopHostSwitcherDialog({
                 const displayLabel = host.id === LOCAL_HOST_ID
                   ? t('desktopHostSwitcher.instance.local')
                   : redactSensitiveUrl(host.label);
-                // Relay-only hosts have a relay:// pseudo-URL that means nothing
-                // to a person — say how the connection works instead. Hosts with
-                // a direct leg show their address.
-                 const displayUrl = (host.relay || host.directE2ee) && !host.apiUrl ? t('mobile.connect.relay.badge') : redactSensitiveUrl(effectiveUrl);
+                const transportLabelKey = hostTransportLabelKey(host);
+                const displayUrl = transportLabelKey && !host.apiUrl
+                  ? t(transportLabelKey)
+                  : redactSensitiveUrl(effectiveUrl);
 
                 return (
                   <div
@@ -992,7 +978,7 @@ export function DesktopHostSwitcherDialog({
                           {!isSsh && statusKind === 'ok' && typeof status?.latencyMs === 'number'
                             ? t('desktopHostSwitcher.status.ping', { ms: Math.max(0, Math.round(status.latencyMs)) })
                             : ''}
-                          {!isSsh && status?.via === 'relay' ? ` · ${t('settings.remoteInstances.clientAuth.state.viaRelay')}` : ''}
+                          {!isSsh && statusKind === 'ok' && transportLabelKey ? ` · ${t(transportLabelKey)}` : ''}
                         </div>
                         <div className="typography-micro text-muted-foreground/70 truncate font-mono">
                           {displayUrl}
