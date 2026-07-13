@@ -658,7 +658,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const promptReadOnly = parentSession ? !allowPromptingSubagentSessions : readOnly;
 
     React.useEffect(() => {
-        if (typeof window === 'undefined' || window.parent === window) {
+        if (typeof window === 'undefined' || window.parent == null || window.parent === window) {
             return;
         }
 
