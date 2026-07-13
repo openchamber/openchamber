@@ -53,6 +53,8 @@ const envRelayUrlOverride = () => {
  *   readSettingsStrict?: () => Promise<object>,
  *   identityRuntime?: { getRelayIdentity: () => Promise<object> },
  *   getLocalPort: () => number,
+ *   getUiAuthController?: () => object | null,
+ *   startRelayHostRuntime?: typeof startRelayHost,
  *   logger?: Pick<Console, 'warn'>,
  * }} deps
  */
@@ -64,6 +66,8 @@ export const createRelayService = ({
   // regeneration — see identity.js/signing-key.js.
   readSettingsStrict,
   getLocalPort,
+  getUiAuthController,
+  startRelayHostRuntime = startRelayHost,
   // Returns true when any paired device or pending pairing session uses the
   // relay transport. The relay lifecycle is driven purely by this demand.
   hasRelayDemand = async () => false,
@@ -170,7 +174,7 @@ export const createRelayService = ({
       }
     }
     const identity = await identityRuntime.getRelayIdentity();
-    hostClient = startRelayHost({
+    hostClient = startRelayHostRuntime({
       relayUrl,
       identity,
       getLocalPort,
@@ -249,6 +253,38 @@ export const createRelayService = ({
     };
   };
 
+  const resolveHostAccess = async (req, res) => {
+    const uiAuthController = getUiAuthController?.();
+    if (typeof uiAuthController?.resolveAuthContext !== 'function') {
+      return false;
+    }
+    const context = await uiAuthController.resolveAuthContext(req, res, {
+      allowClientAuth: true,
+      allowUrlToken: false,
+    });
+    return context?.type === 'session'
+      || (context?.type === 'client' && context.client?.clientKind === 'desktop-local');
+  };
+
+  const getReadOnlyStatus = async () => {
+    const config = await readConfig();
+    const live = hostClient ? hostClient.getStatus() : status;
+    return {
+      enabled: config.enabled,
+      state: hostClient ? live.state : 'disabled',
+      connectedClients: live.connectedClients,
+      canAdminister: false,
+    };
+  };
+
+  const denyMutationWithoutHostAccess = async (req, res) => {
+    if (await resolveHostAccess(req, res)) {
+      return false;
+    }
+    res.status(403).json({ error: 'Tunnel administration requires host access.' });
+    return true;
+  };
+
   // Pairing candidate for the unified connection payload (pairing v2). Relay is
   // just another transport: it carries the relay route + E2EE trust anchor, no
   // embedded token — the client redeems the one-time pairing secret over the
@@ -294,9 +330,10 @@ export const createRelayService = ({
   };
 
   const registerRoutes = (app) => {
-    app.get('/api/openchamber/relay/status', async (_req, res) => {
+    app.get('/api/openchamber/relay/status', async (req, res) => {
       try {
-        res.json(await getStatus());
+        const canAdminister = await resolveHostAccess(req, res);
+        res.json(canAdminister ? { ...await getStatus(), canAdminister: true } : await getReadOnlyStatus());
       } catch (error) {
         res.status(500).json({ error: error?.message ?? 'Failed to read relay status' });
       }
@@ -304,6 +341,7 @@ export const createRelayService = ({
 
     app.post('/api/openchamber/relay/enable', express.json({ limit: '16kb' }), async (req, res) => {
       try {
+        if (await denyMutationWithoutHostAccess(req, res)) return;
         const current = await readConfig();
         const relayUrl = typeof req.body?.relayUrl === 'string' ? normalizeRelayUrl(req.body.relayUrl) : current.relayUrl;
         await writeConfig({ enabled: true, relayUrl });
@@ -316,8 +354,9 @@ export const createRelayService = ({
       }
     });
 
-    app.post('/api/openchamber/relay/disable', async (_req, res) => {
+    app.post('/api/openchamber/relay/disable', async (req, res) => {
       try {
+        if (await denyMutationWithoutHostAccess(req, res)) return;
         const current = await readConfig();
         await writeConfig({ enabled: false, relayUrl: current.relayUrl });
         stop();
