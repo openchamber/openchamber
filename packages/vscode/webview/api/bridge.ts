@@ -12,10 +12,22 @@ let vscodeApi: VSCodeAPI | null = null;
 
 function getVSCodeAPI(): VSCodeAPI {
   if (!vscodeApi) {
-    vscodeApi = acquireVsCodeApi();
+    vscodeApi = acquireVsCodeApi() ?? noopVSCodeApi;
   }
   return vscodeApi;
 }
+
+let noopWarned = false;
+const noopVSCodeApi: VSCodeAPI = {
+  postMessage: (message) => {
+    // VSCode API unavailable (e.g., VSCodium, headless webview). Drop the message.
+    // Warn once so unexpected fallback activation is diagnosable without flooding the console.
+    if (!noopWarned) {
+      noopWarned = true;
+      console.warn('[openchamber] VSCode API unavailable; dropping postMessage', message);
+    }
+  },
+};
 
 interface BridgeRequest {
   id: string;
