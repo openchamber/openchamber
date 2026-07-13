@@ -41,6 +41,7 @@ export interface TunnelStatusResponse {
   directE2eeConfigured?: boolean;
   directE2eeSupported?: boolean;
   directE2eeAvailable?: boolean;
+  canAdminister?: boolean;
 }
 
 const unsafeManagedPresetIds = new Set([
