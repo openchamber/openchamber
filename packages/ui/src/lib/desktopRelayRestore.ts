@@ -106,11 +106,10 @@ export const scheduleDesktopHostCandidateRefresh = (hostId: string): void => {
 };
 
 /**
- * On desktop startup, reconnect a relay-capable default host. The Electron
- * shell boots the LOCAL UI for any host that carries a relay leg and defers
- * transport selection to the renderer: here we probe the direct address first
- * (cheap, preferred on the home network) and fall back to the E2EE tunnel via
- * switchRuntimeEndpoint({ relay }) — the multi-transport model mobile uses.
+ * On desktop startup, reconnect an encrypted-transport default host. The Electron
+ * shell boots the LOCAL UI for hosts that use managed direct E2EE or explicit
+ * Relay and defers transport selection to the renderer. Managed direct E2EE is
+ * direct-E2EE-only; explicit Relay hosts activate Relay through their descriptor.
  * Direct-only hosts never reach this path (the shell injects their
  * apiBaseUrl/token as window globals before render).
  *

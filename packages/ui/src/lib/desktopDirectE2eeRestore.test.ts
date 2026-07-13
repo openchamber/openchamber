@@ -43,6 +43,7 @@ describe('desktop encrypted runtime restore', () => {
   });
 
   test('restores hosted relay after direct and direct E2EE fallback', async () => {
+    config = { hosts: [{ ...host, directE2ee: undefined }], defaultHostId: host.id, initialHostChoiceCompleted: true };
     selection = { probe: { status: 'ok', latencyMs: 3 }, transport: { kind: 'relay', descriptor: relay } };
     await restore();
     expect(switchCalls[0]?.relay).toEqual(relay);
