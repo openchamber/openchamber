@@ -70,12 +70,12 @@ requests, frames beyond either bound, unknown IDs, and reuse of a tombstoned str
 ID are fatal protocol errors. These bounds tolerate only expected in-flight late
 frames and do not permit a completed stream to be reopened or used indefinitely.
 
-## Authentication model
+## Authentication and Administrative Controls
 
 - The tunnel is **transport only**. The OpenChamber server still authenticates every tunneled request exactly as it authenticates a direct remote client. The relay path grants reachability, not authorization.
-- Clients carry their normal credential. HTTP and SSE requests authenticate with the client's bearer token (a header). **WebSocket upgrades cannot send headers**, so they authenticate with a short-lived URL-scoped token minted beforehand and passed as a query parameter. This asymmetry is important when adding new WebSocket features (see the skill).
-- The host authenticates itself to the relay with a signed handshake using its long-lived signing key.
-- Enabling the relay is explicit opt-in and disabled by default; disabling it severs all relay reachability immediately.
+- Clients carry their normal credential. HTTP and SSE requests authenticate with the client's bearer token (a header). **WebSocket upgrades cannot send headers**, so they authenticate with a short-lived URL-scoped token minted beforehand and passed as a query parameter.
+- **Administrative Controls**: Mutation routes (`/enable`, `/disable`) are restricted to the host desktop or an authenticated browser UI session. Paired clients (e.g., mobile apps) receive a sanitized status including `canAdminister: false` and cannot change relay state.
+- **Managed E2EE Separation**: Managed direct E2EE (pairing v2) is strictly direct-only. It advertises only the exact direct-E2EE candidate over the user's managed Cloudflare tunnel: no plaintext LAN/tunnel candidate, no `apiUrl`, and no OpenChamber Relay candidate/fallback. Relay remains a separate, explicitly user-selected transport.
 
 ## End-to-end flow (overview)
 

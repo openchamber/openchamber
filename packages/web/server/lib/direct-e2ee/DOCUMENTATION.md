@@ -96,3 +96,9 @@ Pairing emits the canonical `wss://<hostname>/api/openchamber/direct-e2ee/ws` ca
 The authoritative runtime publishes the same-origin suppression authority separately from identity construction,
 so an unavailable identity cannot expose the plaintext managed-tunnel candidate for an active E2EE profile.
 Stopping, switching, or disabling closes affected direct outer sessions without revoking paired-device tokens.
+
+## Fail-Closed Privacy
+
+- **Strictly Direct**: Managed direct E2EE is strictly direct-only. It advertises only the exact direct-E2EE candidate over the user's managed Cloudflare tunnel: no plaintext LAN/tunnel candidate, no `apiUrl`, and no OpenChamber Relay candidate/fallback. The direct E2EE endpoint remains on the exact active managed Cloudflare tunnel and fails closed when unavailable.
+- **Fail-Closed**: If direct reachability is lost, the connection fails rather than falling back to an unmanaged or third-party transport. This ensures that managed E2EE privacy guarantees are never silently degraded.
+- **Administrative Controls**: Mutation routes and configuration changes are restricted to the host desktop or authenticated browser UI sessions. Paired clients see a sanitized read-only status.

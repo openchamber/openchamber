@@ -353,6 +353,12 @@ This module provides OpenCode server integration utilities for the web server ru
   - Reuses event-stream parsing, `Last-Event-ID`, stall timeout, and reconnect behavior.
   - Forwards unwrapped global event payloads into notification/session side effects.
 
+## Pairing and Client Access
+
+- **Pairing v2 (Managed E2EE)**: Supports secure, direct end-to-end encrypted connections between clients and the host.
+- **Fail-Closed Privacy**: Managed direct E2EE is strictly direct-only. It advertises only the exact direct-E2EE candidate over the user's managed Cloudflare tunnel: no plaintext LAN/tunnel candidate, no `apiUrl`, and no OpenChamber Relay candidate/fallback. The direct E2EE endpoint remains on the exact active managed Cloudflare tunnel and fails closed when unavailable. If direct reachability is lost, the connection fails rather than falling back to an unmanaged or third-party transport.
+- **Read-Only Paired Clients**: Clients connected via pairing (e.g., mobile apps) are granted a narrow capability set. They see sanitized, read-only status for system-level transports (Relay, Tunnels) and cannot perform administrative mutations. Full administrative control is reserved for the host desktop or authenticated browser UI sessions.
+
 ## Storage and configuration
 - Provider auth: `~/.local/share/opencode/auth.json`.
 - User config: `~/.config/opencode/opencode.json`.

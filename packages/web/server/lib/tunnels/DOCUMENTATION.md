@@ -20,6 +20,11 @@ This module contains tunnel provider orchestration for OpenChamber, including pr
   - `registerRoutes(app)`
   - `startTunnelWithNormalizedRequest(request)`
 
+## Administrative Controls and Privacy
+
+- **Administrative Controls**: Tunnel mutation routes (start/stop/profile management) require the host desktop or an authenticated browser UI session. Paired clients see a sanitized read-only status and cannot modify tunnel configurations.
+- **Managed E2EE Separation**: Managed direct E2EE (pairing v2) is strictly direct-only and fail-closed. It uses the exact active managed Cloudflare tunnel but never substitutes OpenChamber Relay. Tunnels remain a separate, explicitly configured transport for public URL access.
+
 ## Managed remote profile contract
 - Saved profiles normalize `directE2eeEnabled` strictly: only boolean `true` enables it; legacy or invalid values become `false`.
 - Token upserts preserve the current flag when the field is omitted. The config file remains mode `0o600`.
