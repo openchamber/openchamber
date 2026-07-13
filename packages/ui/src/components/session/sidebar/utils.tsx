@@ -3,6 +3,9 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 
+import { normalizePath } from '@/lib/pathNormalization';
+export { normalizePath };
+
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
 
@@ -75,14 +78,6 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
     return `${Math.floor(diff / month)}mo`;
   }
   return t('common.relative.yearsAgoCompact', { count: Math.floor(diff / year) });
-};
-
-export const normalizePath = (value?: string | null) => {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
-  return normalized.length === 0 ? '/' : normalized;
 };
 
 export const isPathWithinProject = (directory?: string | null, projectPath?: string | null): boolean => {

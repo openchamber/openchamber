@@ -145,7 +145,7 @@ const VisualSectionContent: React.FC = () => {
 
 // Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Follow-up behavior, Persist draft
 const ChatSectionContent: React.FC = () => {
-    return <OpenChamberVisualSettings visibleSettings={['sessionGoal', 'sessionAssist', 'chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'showTurnChangedFiles', 'expandedTools', 'collapsibleUserMessages', 'stickyUserHeader', 'wideChatLayout', 'codeBlockLineWrap', 'splitAssistantMessageActions', 'diffLayout', 'dotfiles', 'fileViewerPreview', 'followUpBehavior', 'persistDraft', 'inputSpellcheck']} />;
+    return <OpenChamberVisualSettings visibleSettings={['sessionGoal', 'sessionAssist', 'chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'showTurnChangedFiles', 'expandedTools', 'collapsibleUserMessages', 'stickyUserHeader', 'wideChatLayout', 'codeBlockLineWrap', 'splitAssistantMessageActions', 'subagentReadOnlyBanner', 'diffLayout', 'dotfiles', 'fileViewerPreview', 'followUpBehavior', 'persistDraft', 'inputSpellcheck']} />;
 };
 
 // Sessions section: Default model & agent, Session retention

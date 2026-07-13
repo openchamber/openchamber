@@ -487,16 +487,18 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
 
     const windows: Record<string, UsageWindow> = {};
     if (primary) {
-      windows['5h'] = toUsageWindow({
+      const windowSeconds = toNumber(primary.limit_window_seconds);
+      windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
         usedPercent: toNumber(primary.used_percent),
-        windowSeconds: toNumber(primary.limit_window_seconds),
+        windowSeconds,
         resetAt: toTimestamp(primary.reset_at),
       });
     }
     if (secondary) {
-      windows['weekly'] = toUsageWindow({
+      const windowSeconds = toNumber(secondary.limit_window_seconds);
+      windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
         usedPercent: toNumber(secondary.used_percent),
-        windowSeconds: toNumber(secondary.limit_window_seconds),
+        windowSeconds,
         resetAt: toTimestamp(secondary.reset_at),
       });
     }

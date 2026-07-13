@@ -657,6 +657,7 @@ interface UIStore {
   stickyUserHeader: boolean;
   expandedEditorToolbar: boolean;
   showSplitAssistantMessageActions: boolean;
+  allowPromptingSubagentSessions: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
   mobileSessionPanelOpen: boolean;
   mobileSessionFilterProjectId: string | null;
@@ -811,6 +812,7 @@ interface UIStore {
   setStickyUserHeader: (value: boolean) => void;
   setExpandedEditorToolbar: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
+  setAllowPromptingSubagentSessions: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
   setMobileSessionPanelOpen: (value: boolean) => void;
   setMobileSessionFilterProjectId: (value: string | null) => void;
@@ -958,6 +960,7 @@ export const useUIStore = create<UIStore>()(
         stickyUserHeader: false,
         expandedEditorToolbar: false,
         showSplitAssistantMessageActions: false,
+        allowPromptingSubagentSessions: false,
         isMobileSessionStatusBarCollapsed: false,
         mobileSessionPanelOpen: false,
         mobileSessionFilterProjectId: null,
@@ -2122,6 +2125,9 @@ export const useUIStore = create<UIStore>()(
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
         },
+        setAllowPromptingSubagentSessions: (value) => {
+          set({ allowPromptingSubagentSessions: value });
+        },
         setIsMobileSessionStatusBarCollapsed: (value) => {
           set({ isMobileSessionStatusBarCollapsed: value });
         },
@@ -2365,6 +2371,7 @@ export const useUIStore = create<UIStore>()(
           stickyUserHeader: state.stickyUserHeader,
           expandedEditorToolbar: state.expandedEditorToolbar,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
+          allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,

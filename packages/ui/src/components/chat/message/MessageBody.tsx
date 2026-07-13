@@ -53,6 +53,7 @@ import {
     sendImplementationResponseToReviewer,
     sendReviewFeedbackToOriginal,
 } from '@/lib/reviewFlow';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -252,7 +253,11 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                         className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
                         onClick={() => {
                             if (!effectiveDirectory) return;
-                            if (isMobile || isVSCodeRuntime()) {
+                            // In contexts with no ContextPanel (embedded
+                            // session-chat iframe) or single-surface layouts
+                            // (mobile, VS Code), navigate in place. Otherwise
+                            // open a new side-panel tab.
+                            if (isEmbeddedSessionChat() || isMobile || isVSCodeRuntime()) {
                                 setCurrentSession(taskSessionID, effectiveDirectory);
                                 return;
                             }
@@ -436,9 +441,10 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
     revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
-const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
+const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
     messageId: string;
     parts: Part[];
+    messageCreatedAt?: number | null;
     isMobile: boolean;
     alwaysShowActions?: boolean;
     hasTouchInput?: boolean;
@@ -452,8 +458,9 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
 }) => {
-    const { t } = useI18n();
+    const { locale, t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
+    const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
 
@@ -528,6 +535,12 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
     );
 
     const effectiveOnFork = chatSurfaceMode === 'mini-chat' ? undefined : onFork;
+    const timestamp = React.useMemo(() => {
+        void locale;
+        if (typeof messageCreatedAt !== 'number' || messageCreatedAt <= 0) return null;
+        const formatted = formatTimestampForDisplay(messageCreatedAt, timeFormatPreference);
+        return formatted.length > 0 ? formatted : null;
+    }, [locale, messageCreatedAt, timeFormatPreference]);
     const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
@@ -556,6 +569,20 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                         : 'pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100'
                 )}
             >
+                {timestamp ? (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <span
+                                className="mr-1 flex items-center gap-1 text-sm tabular-nums text-muted-foreground/60"
+                                aria-label={`Message time: ${timestamp}`}
+                            >
+                                <Icon name="time" className="h-3.5 w-3.5" />
+                                <span className="message-footer__label">{timestamp}</span>
+                            </span>
+                        </TooltipTrigger>
+                        <TooltipContent>{timestamp}</TooltipContent>
+                    </Tooltip>
+                ) : null}
                 {onRevert && (
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -2125,6 +2152,7 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
             <UserMessageBody
                 messageId={props.messageId}
                 parts={props.parts}
+                messageCreatedAt={props.messageCreatedAt}
                 isMobile={props.isMobile}
                 alwaysShowActions={props.alwaysShowActions}
                 hasTouchInput={props.hasTouchInput}
