@@ -1354,6 +1354,7 @@ const fetchOllamaCloudQuota = async (): Promise<ProviderResult> => {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
       },
       redirect: 'follow',
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (response.status === 401 || response.status === 403) {

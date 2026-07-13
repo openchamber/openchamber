@@ -56,10 +56,11 @@ export const importCursorCredential = () => {
 
 export const validateCredential = async (provider: ManagedProvider, credential: ManagedCredential) => {
   if (provider === 'ollama-cloud') {
-    const response = await fetch('https://ollama.com/settings', { headers: { Cookie: credential.cookie }, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
-    if (!response.ok || (response.status >= 300 && response.status < 400)) throw new Error('Ollama Cloud authentication failed');
-    const html = await response.text();
-    if (!/Session\s+usage|Weekly\s+usage|Premium[^0-9]*[0-9]+\s*\/\s*[0-9]+/i.test(html)) throw new Error('Ollama Cloud usage data could not be parsed');
+    const response = await fetch('https://ollama.com/settings', { headers: { Cookie: credential.cookie }, redirect: 'follow', signal: AbortSignal.timeout(15_000) });
+    if (response.status === 401 || response.status === 403) throw new Error('Ollama Cloud authentication failed');
+    if (!response.ok) throw new Error(`Ollama Cloud returned HTTP ${response.status}`);
+    // With redirect: 'follow', an invalid cookie redirects to /signin (200 OK).
+    if (response.url && response.url.includes('/signin')) throw new Error('Ollama Cloud authentication failed');
   }
   if (provider === 'cursor') {
     if (!credential.accessToken && credential.refreshToken) {

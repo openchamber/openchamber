@@ -58,6 +58,12 @@ export const fetchOllamaCloudUsage = async (credential, fetchImpl = fetch) => {
   if (response.url && response.url.includes('/signin')) {
     throw new Error('Ollama Cloud authentication failed');
   }
+  // NOTE: empty windows ({}) is a valid state (configured cookie, no usage data).
+  // If ollama.com changes its settings page markup, the parser may silently return {}
+  // instead of throwing — the user sees zero usage rather than a parse error.
+  // This tradeoff is intentional: a valid cookie + no usage is more common than
+  // a silently broken parser, and the old empty-windows check blocked legitimate
+  // credential saves when ollama.com returned 303 -> /signin.
   const windows = parseOllamaSettingsHtml(await response.text());
   return windows;
 };
