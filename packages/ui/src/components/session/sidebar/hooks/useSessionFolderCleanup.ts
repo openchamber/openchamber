@@ -1,97 +1,54 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import {
-  collectKnownProjectDirectories,
-  dedupeSessionsById,
   getArchivedScopeKey,
-  isSessionRelatedToProject,
-  normalizePath,
 } from '../utils';
+import type { SessionOwnershipIndex } from '../sessionOwnership';
 
 type NormalizedProject = {
   id: string;
   normalizedPath: string;
 };
 
-type WorktreeMeta = { path: string };
-
 type Args = {
   isSessionsLoading: boolean;
-  hasLoadedGlobalSessions: boolean;
-  sessions: Session[];
-  archivedSessions: Session[];
+  hasAuthoritativeGlobalSessions: boolean;
+  isWorktreeTopologyLoading: boolean;
   normalizedProjects: NormalizedProject[];
-  isVSCode: boolean;
-  availableWorktreesByProject: Map<string, WorktreeMeta[]>;
+  ownership: SessionOwnershipIndex;
   cleanupSessions: (scopeKey: string, validSessionIds: Set<string>) => void;
 };
 
 export const useSessionFolderCleanup = (args: Args): void => {
   const {
     isSessionsLoading,
-    hasLoadedGlobalSessions,
-    sessions,
-    archivedSessions,
+    hasAuthoritativeGlobalSessions,
+    isWorktreeTopologyLoading,
     normalizedProjects,
-    isVSCode,
-    availableWorktreesByProject,
+    ownership,
     cleanupSessions,
   } = args;
 
-  const knownProjectDirectories = React.useMemo(
-    () => collectKnownProjectDirectories(normalizedProjects, availableWorktreesByProject, isVSCode),
-    [normalizedProjects, availableWorktreesByProject, isVSCode],
-  );
-
   React.useEffect(() => {
-    if (isSessionsLoading || !hasLoadedGlobalSessions) {
+    if (isSessionsLoading || !hasAuthoritativeGlobalSessions || isWorktreeTopologyLoading) {
       return;
     }
 
-    if (sessions.length === 0 && archivedSessions.length === 0) {
+    if (ownership.bySessionId.size === 0) {
       return;
     }
 
     const idsByScope = new Map<string, Set<string>>();
-    sessions.forEach((session) => {
-      const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-      if (!directory) {
-        return;
-      }
-      const existing = idsByScope.get(directory);
-      if (existing) {
-        existing.add(session.id);
-        return;
-      }
-      idsByScope.set(directory, new Set([session.id]));
+    ownership.sessionsByScope.forEach((sessionIds, scopeDirectory) => {
+      idsByScope.set(scopeDirectory, new Set(sessionIds));
     });
 
     normalizedProjects.forEach((project) => {
       const scopeKey = getArchivedScopeKey(project.normalizedPath);
-      const worktreesForProject = isVSCode ? [] : (availableWorktreesByProject.get(project.normalizedPath) ?? []);
-      const validDirectories = new Set<string>([
-        project.normalizedPath,
-        ...worktreesForProject
-          .map((meta) => normalizePath(meta.path) ?? meta.path)
-          .filter((value): value is string => Boolean(value)),
+      const archivedIds = new Set([
+        ...(ownership.archivedSessionsByProject.get(project.id) ?? []).map((session) => session.id),
       ]);
-
-      const archivedForProject = dedupeSessionsById([
-        ...archivedSessions,
-        ...sessions.filter((session) => {
-          if (session.time?.archived) {
-            return false;
-          }
-          const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-          if (sessionDirectory) {
-            return false;
-          }
-          return isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories);
-        }),
-      ]).filter((session) => isSessionRelatedToProject(session, project.normalizedPath, validDirectories, knownProjectDirectories));
-
-      idsByScope.set(scopeKey, new Set(archivedForProject.map((session) => session.id)));
+      idsByScope.set(scopeKey, archivedIds);
     });
 
     const currentFoldersMap = useSessionFoldersStore.getState().foldersMap;
@@ -100,14 +57,11 @@ export const useSessionFolderCleanup = (args: Args): void => {
       cleanupSessions(scopeKey, idsByScope.get(scopeKey) ?? new Set<string>());
     });
   }, [
-    archivedSessions,
-    availableWorktreesByProject,
     cleanupSessions,
-    hasLoadedGlobalSessions,
+    hasAuthoritativeGlobalSessions,
+    isWorktreeTopologyLoading,
     isSessionsLoading,
-    isVSCode,
-    knownProjectDirectories,
     normalizedProjects,
-    sessions,
+    ownership,
   ]);
 };

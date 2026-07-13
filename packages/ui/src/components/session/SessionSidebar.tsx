@@ -31,6 +31,7 @@ import { useSidebarPersistence } from './sidebar/hooks/useSidebarPersistence';
 import { useProjectRepoStatus } from './sidebar/hooks/useProjectRepoStatus';
 import { useProjectSessionLists } from './sidebar/hooks/useProjectSessionLists';
 import { useSessionFolderCleanup } from './sidebar/hooks/useSessionFolderCleanup';
+import { createSessionOwnershipIndex } from './sidebar/sessionOwnership';
 import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders';
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
@@ -319,7 +320,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const sync = useSync();
   const liveSessions = useAllLiveSessions();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
@@ -330,7 +330,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const shareSession = useSessionUIStore((state) => state.shareSession);
   const unshareSession = useSessionUIStore((state) => state.unshareSession);
   // sessionAttentionStates removed — now using notification-store directly in SessionNodeItem
-  const worktreeMetadata = useSessionUIStore((state) => state.worktreeMetadata);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   // The sidebar tree's +-buttons (project / group / folder) open a draft but,
@@ -418,6 +417,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       .join('|'),
     [projects],
   );
+  const [isWorktreeTopologyLoading, setIsWorktreeTopologyLoading] = React.useState(true);
 
   const initialGlobalSessionsRefreshStartedRef = React.useRef(false);
   React.useEffect(() => {
@@ -437,10 +437,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
     const discoverWorktrees = async () => {
       const projectEntries = useProjectsStore.getState().projects;
-      if (projectEntries.length === 0) return;
+      if (projectEntries.length === 0) {
+        setIsWorktreeTopologyLoading(false);
+        return;
+      }
 
       const worktreesByProject = new Map<string, WorktreeMetadata[]>();
       const allWorktrees: WorktreeMetadata[] = [];
+      let discoveryFailed = false;
 
       // Constrain fanout: previously `Promise.all(projects.map(...))` could
       // spawn dozens of concurrent `git worktree list` and
@@ -470,7 +474,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
             worktreesByProject.set(projectPath, worktrees);
             allWorktrees.push(...worktrees);
           } catch {
-            // ignore discovery errors
+            discoveryFailed = true;
           }
         }
       });
@@ -486,12 +490,17 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           availableWorktreesByProject: worktreesByProject,
         });
       }
+      setIsWorktreeTopologyLoading(discoveryFailed);
     };
 
     // Skip if we already discovered worktrees for this exact project set.
     if (discoveredProjectsRef.current === projectWorktreeDiscoveryKey) {
+      if (!projectWorktreeDiscoveryKey) {
+        setIsWorktreeTopologyLoading(false);
+      }
       return;
     }
+    setIsWorktreeTopologyLoading(true);
     discoveredProjectsRef.current = projectWorktreeDiscoveryKey;
     void discoverWorktrees();
 
@@ -525,18 +534,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const { isTablet } = useDeviceInfo();
   const alwaysShowSidebarActions = mobileVariant || isTablet;
-
-  const {
-    buildGroupSearchText,
-    filterSessionNodesForSearch,
-    buildGroupedSessions,
-  } = useSessionGrouping({
-    homeDirectory,
-    worktreeMetadata,
-    pinnedSessionIds,
-    gitBranches,
-    isVSCode,
-  });
 
   const { scheduleCollapsedProjectsPersist } = useSidebarPersistence({
     isVSCode,
@@ -994,32 +991,40 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
 
   const isSessionsLoading = useSessionUIStore((state) => state.isLoading);
+  const sessionOwnership = React.useMemo(
+    () => createSessionOwnershipIndex(sessions, normalizedProjects, availableWorktreesByProject, isVSCode, archivedSessions),
+    [archivedSessions, availableWorktreesByProject, isVSCode, normalizedProjects, sessions],
+  );
+  const {
+    buildGroupSearchText,
+    filterSessionNodesForSearch,
+    buildGroupedSessions,
+  } = useSessionGrouping({
+    homeDirectory,
+    pinnedSessionIds,
+    gitBranches,
+    isVSCode,
+    ownership: sessionOwnership,
+  });
   useSessionFolderCleanup({
     isSessionsLoading,
-    hasLoadedGlobalSessions,
-    sessions,
-    archivedSessions,
+    hasAuthoritativeGlobalSessions,
+    isWorktreeTopologyLoading,
     normalizedProjects,
-    isVSCode,
-    availableWorktreesByProject,
+    ownership: sessionOwnership,
     cleanupSessions,
   });
 
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({
-    isVSCode,
-    sessions,
-    archivedSessions,
-    availableWorktreesByProject,
-    normalizedProjects,
+    ownership: sessionOwnership,
   });
 
   useArchivedAutoFolders({
     normalizedProjects,
-    sessions,
-    archivedSessions,
-    availableWorktreesByProject,
-    isVSCode,
+    ownership: sessionOwnership,
     isSessionsLoading,
+    hasAuthoritativeGlobalSessions,
+    isWorktreeTopologyLoading,
     foldersMap,
     createFolder,
     addSessionToFolder,

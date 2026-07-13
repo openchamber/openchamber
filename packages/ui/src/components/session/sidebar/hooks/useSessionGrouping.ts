@@ -11,14 +11,14 @@ import {
 } from '../utils';
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import type { SessionOwnershipIndex } from '../sessionOwnership';
 
 type Args = {
   homeDirectory: string | null;
-  worktreeMetadata: Map<string, WorktreeMetadata>;
   pinnedSessionIds: Set<string>;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
+  ownership: SessionOwnershipIndex;
 };
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
@@ -94,16 +94,11 @@ export const useSessionGrouping = (args: Args) => {
       });
 
       const getSessionWorktree = (session: Session): WorktreeMetadata | null => {
-        const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-        const sessionWorktreeMeta = args.worktreeMetadata.get(session.id) ?? null;
-        if (sessionWorktreeMeta) return sessionWorktreeMeta;
-        if (sessionDirectory) {
-          const worktree = worktreeByPath.get(sessionDirectory) ?? null;
-          if (worktree && sessionDirectory !== normalizedProjectRoot) {
-            return worktree;
-          }
+        const scopeDirectory = args.ownership.bySessionId.get(session.id)?.scopeDirectory;
+        if (!scopeDirectory || scopeDirectory === normalizedProjectRoot) {
+          return null;
         }
-        return null;
+        return worktreeByPath.get(scopeDirectory) ?? null;
       };
 
       const buildProjectNode = (session: Session): SessionNode => {
@@ -129,11 +124,9 @@ export const useSessionGrouping = (args: Args) => {
         // Worktrees aren't registered in VS Code, so the desktop directory-match
         // below would otherwise dump these sessions into the archived bucket.
         if (args.isVSCode) return normalizedProjectRoot ?? '__project_root__';
-        const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
-        const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
-        if (!normalizedDir) return archivedKey;
-        if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
-        if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
+        const scopeDirectory = args.ownership.bySessionId.get(session.id)?.scopeDirectory;
+        if (scopeDirectory && scopeDirectory !== normalizedProjectRoot && worktreeByPath.has(scopeDirectory)) return scopeDirectory;
+        if (scopeDirectory === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
         return archivedKey;
       };
 
@@ -246,7 +239,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode, t],
+    [args.homeDirectory, args.ownership, args.pinnedSessionIds, args.gitBranches, args.isVSCode, t],
   );
 
   return {

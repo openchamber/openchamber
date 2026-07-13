@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroup, SessionNode, GroupSearchData } from '../types';
-import { dedupeSessionsById, normalizePath } from '../utils';
+import { normalizePath } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 
@@ -23,8 +23,8 @@ type ProjectSection = {
 
 type Args = {
   normalizedProjects: ProjectItem[];
-  getSessionsForProject: (project: { normalizedPath: string }) => Session[];
-  getArchivedSessionsForProject: (project: { normalizedPath: string }) => Session[];
+  getSessionsForProject: (projectId: string) => Session[];
+  getArchivedSessionsForProject: (projectId: string) => Session[];
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
   projectRepoStatus: Map<string, boolean | null>;
   projectRootBranches: Map<string, string | null>;
@@ -62,10 +62,10 @@ export const useSessionSidebarSections = (args: Args) => {
 
   const projectSections = React.useMemo<ProjectSection[]>(() => {
     return normalizedProjects.map((project) => {
-      const projectSessions = dedupeSessionsById([
-        ...getSessionsForProject(project),
-        ...getArchivedSessionsForProject(project),
-      ]);
+      const projectSessions = [
+        ...getSessionsForProject(project.id),
+        ...getArchivedSessionsForProject(project.id),
+      ];
       const worktreesForProject = availableWorktreesByProject.get(project.normalizedPath) ?? [];
       const isRepo = projectRepoStatus.has(project.id)
         ? Boolean(projectRepoStatus.get(project.id))
