@@ -967,6 +967,7 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
   URL,
   tunnelProviderRegistry,
   tunnelAuthController,
+  getUiAuthController: () => uiAuthController,
   readSettingsFromDiskMigrated,
   readManagedRemoteTunnelConfigFromDisk,
   normalizeTunnelProvider,
@@ -1515,6 +1516,7 @@ async function main(options = {}) {
     readSettingsStrict: readSettingsFromDiskStrict,
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
+    getUiAuthController: () => uiAuthController,
     // One relay host per machine: every instance sharing this data dir shares
     // the relay identity (serverId), so concurrent hosts evict each other at
     // the relay worker and devices land on a random local instance.
@@ -1563,6 +1565,7 @@ async function main(options = {}) {
     isUnsafeSkillRelativePath,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    getUiAuthController: () => uiAuthController,
     getOpenCodePort: () => openCodePort,
     buildAugmentedPath,
     projectConfigRuntime,

@@ -10,7 +10,7 @@ const profile = { id: 'profile-a', name: 'A', hostname: 'a.example.com', token: 
 const waitFor = async (predicate) => {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (predicate()) return;
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 1));
   }
   throw new Error('observable lifecycle outcome not reached');
 };
@@ -18,6 +18,7 @@ const waitFor = async (predicate) => {
 const createApp = (overrides = {}) => {
   const app = express();
   app.use(express.json());
+  const resolveAuthContext = vi.fn(async () => ({ type: 'session' }));
   const dependencies = {
     crypto: { randomUUID: () => 'tunnel-id' },
     URL,
@@ -42,6 +43,7 @@ const createApp = (overrides = {}) => {
     getRuntimeManagedRemoteTunnelHostname: () => '', setRuntimeManagedRemoteTunnelHostname: () => {},
     getRuntimeManagedRemoteTunnelToken: () => '', setRuntimeManagedRemoteTunnelToken: () => {},
     getActiveTunnelController: () => null, setActiveTunnelController: () => {},
+    getUiAuthController: () => ({ resolveAuthContext }),
     getDirectE2eeActiveSessionCount: () => 3,
     directE2eeSupported: true,
     isDirectE2eeAvailable: ({ profile: activeProfile }) => activeProfile?.id === 'profile-a' && activeProfile.directE2eeEnabled === true,
@@ -52,6 +54,112 @@ const createApp = (overrides = {}) => {
 };
 
 describe('tunnel routes direct E2EE configuration', () => {
+  it('rejects every tunnel mutation for ordinary paired clients before side effects', async () => {
+    const upsertManagedRemoteTunnelToken = vi.fn(async () => {});
+    const setManagedRemoteTunnelDirectE2eeEnabled = vi.fn(async () => profile);
+    const start = vi.fn(async () => ({
+      publicUrl: 'https://a.example.com',
+      activeMode: 'managed-remote',
+      provider: 'cloudflare',
+      providerMetadata: { managedRemoteTunnelPresetId: 'profile-a' },
+    }));
+    const stop = vi.fn();
+    const onTunnelChanged = vi.fn(async () => {});
+    const onTunnelStopped = vi.fn(async () => {});
+    const readSettingsFromDiskMigrated = vi.fn(async () => ({ tunnelMode: 'managed-remote', tunnelProvider: 'cloudflare' }));
+    const readManagedRemoteTunnelConfigFromDisk = vi.fn(async () => ({ version: 1, tunnels: [profile] }));
+    const { app } = createApp({
+      getUiAuthController: () => ({
+        resolveAuthContext: async () => ({ type: 'client', client: { id: 'phone', clientKind: null } }),
+      }),
+      tunnelService: {
+        resolveActiveMode: () => 'managed-remote', resolveActiveProvider: () => 'cloudflare',
+        getPublicUrl: () => 'https://a.example.com', getProviderMetadata: () => ({ managedRemoteTunnelPresetId: 'profile-a' }),
+        start, stop,
+      },
+      upsertManagedRemoteTunnelToken,
+      setManagedRemoteTunnelDirectE2eeEnabled,
+      onTunnelChanged,
+      onTunnelStopped,
+      readSettingsFromDiskMigrated,
+      readManagedRemoteTunnelConfigFromDisk,
+      getActiveTunnelController: () => ({ stop: vi.fn() }),
+    });
+    const denial = { error: 'Tunnel administration requires host access.' };
+
+    await request(app).put('/api/openchamber/tunnel/managed-remote-token').send({
+      presetId: 'profile-a', presetName: 'A', managedRemoteTunnelHostname: 'a.example.com', managedRemoteTunnelToken: 'new-secret',
+    }).expect(403, denial);
+    await request(app).patch('/api/openchamber/tunnel/managed-remote-profile/profile-a')
+      .send({ directE2eeEnabled: false }).expect(403, denial);
+    await request(app).post('/api/openchamber/tunnel/start').send({ provider: 'cloudflare', mode: 'quick' }).expect(403, denial);
+    await request(app).post('/api/openchamber/tunnel/stop').expect(403, denial);
+
+    expect(upsertManagedRemoteTunnelToken).not.toHaveBeenCalled();
+    expect(setManagedRemoteTunnelDirectE2eeEnabled).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+    expect(onTunnelChanged).not.toHaveBeenCalled();
+    expect(onTunnelStopped).not.toHaveBeenCalled();
+    expect(readSettingsFromDiskMigrated).not.toHaveBeenCalled();
+    expect(readManagedRemoteTunnelConfigFromDisk).not.toHaveBeenCalled();
+  });
+
+  it('allows browser sessions and desktop-local clients to administer tunnels', async () => {
+    let authContext = { type: 'session' };
+    const { app, dependencies } = createApp({
+      getUiAuthController: () => ({ resolveAuthContext: async () => authContext }),
+    });
+
+    await request(app).put('/api/openchamber/tunnel/managed-remote-token').send({
+      presetId: 'profile-a', presetName: 'A', managedRemoteTunnelHostname: 'a.example.com', managedRemoteTunnelToken: 'new-secret',
+    }).expect(200);
+    authContext = { type: 'client', client: { id: 'desktop', clientKind: 'desktop-local' } };
+    await request(app).patch('/api/openchamber/tunnel/managed-remote-profile/profile-a')
+      .send({ directE2eeEnabled: false }).expect(200);
+
+    expect(dependencies.upsertManagedRemoteTunnelToken).toHaveBeenCalledTimes(1);
+    expect(dependencies.setManagedRemoteTunnelDirectE2eeEnabled).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns an allowlisted tunnel status to ordinary paired clients', async () => {
+    const { app } = createApp({
+      getUiAuthController: () => ({
+        resolveAuthContext: async () => ({ type: 'client', client: { id: 'phone', clientKind: null } }),
+      }),
+      readSettingsFromDiskMigrated: async () => ({
+        tunnelMode: 'managed-remote',
+        tunnelProvider: 'cloudflare',
+        managedRemoteTunnelToken: 'settings-secret',
+        managedLocalTunnelConfigPath: '/private/cloudflared/config.yml',
+      }),
+      tunnelService: {
+        resolveActiveMode: () => 'managed-remote', resolveActiveProvider: () => 'cloudflare',
+        getPublicUrl: () => 'https://a.example.com',
+        getProviderMetadata: () => ({ managedRemoteTunnelPresetId: 'profile-a', configPath: '/private/cloudflared/config.yml' }),
+      },
+      tunnelAuthController: {
+        listTunnelSessions: () => [{ sessionId: 'other-client', credential: 'session-secret' }],
+        getActiveTunnelMode: () => 'managed-remote', getActiveTunnelId: () => 'tunnel-id',
+        getActiveTunnelHost: () => 'a.example.com', getBootstrapStatus: () => ({ hasBootstrapToken: true, bootstrapExpiresAt: 123 }),
+      },
+    });
+
+    const response = await request(app).get('/api/openchamber/tunnel/status').expect(200);
+    expect(response.body).toEqual({
+      active: true,
+      url: 'https://a.example.com',
+      mode: 'managed-remote',
+      provider: 'cloudflare',
+      directE2eeActiveSessions: 3,
+      directE2eeConfigured: true,
+      directE2eeSupported: true,
+      directE2eeAvailable: true,
+      canAdminister: false,
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(/secret|token|credential|configPath|other-client|localPort/i);
+  });
+
   it('patches only the selected flag and never returns the token', async () => {
     const { app, dependencies } = createApp();
     const response = await request(app).patch('/api/openchamber/tunnel/managed-remote-profile/profile-a').send({ directE2eeEnabled: false }).expect(200);
@@ -108,6 +216,7 @@ describe('tunnel routes direct E2EE configuration', () => {
     expect(response.body).toMatchObject({
       activeManagedRemoteProfileId: 'profile-a', directE2eeActiveSessions: 3,
       directE2eeConfigured: true, directE2eeSupported: true, directE2eeAvailable: true,
+      canAdminister: true,
     });
     expect(response.body.managedRemoteTunnelPresets[0].directE2eeEnabled).toBe(true);
     expect(JSON.stringify(response.body)).not.toContain('connector-secret');

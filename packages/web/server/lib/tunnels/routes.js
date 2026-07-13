@@ -24,6 +24,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     tunnelService,
     tunnelProviderRegistry,
     tunnelAuthController,
+    getUiAuthController,
     readSettingsFromDiskMigrated,
     readManagedRemoteTunnelConfigFromDisk,
     normalizeTunnelProvider,
@@ -58,6 +59,39 @@ export const createTunnelRoutesRuntime = (dependencies) => {
   const isDirectE2eeSupported = () => typeof directE2eeSupported === 'function'
     ? directE2eeSupported() === true
     : directE2eeSupported === true;
+  const resolveTunnelHostAccess = async (req, res) => {
+    const uiAuthController = getUiAuthController?.();
+    if (typeof uiAuthController?.resolveAuthContext !== 'function') {
+      return false;
+    }
+    const context = await uiAuthController.resolveAuthContext(req, res, {
+      allowClientAuth: true,
+      allowUrlToken: false,
+    });
+    return context?.type === 'session'
+      || (context?.type === 'client' && context.client?.clientKind === 'desktop-local');
+  };
+  const projectPairedClientTunnelStatus = (status) => ({
+    active: status.active,
+    url: status.url,
+    mode: status.mode,
+    provider: status.provider,
+    directE2eeActiveSessions: status.directE2eeActiveSessions,
+    directE2eeConfigured: status.directE2eeConfigured,
+    directE2eeSupported: status.directE2eeSupported,
+    directE2eeAvailable: status.directE2eeAvailable,
+    canAdminister: false,
+  });
+  const respondWithTunnelStatus = (res, status, canAdminister) => res.json(
+    canAdminister ? { ...status, canAdminister: true } : projectPairedClientTunnelStatus(status),
+  );
+  const denyTunnelMutationWithoutHostAccess = async (req, res) => {
+    if (await resolveTunnelHostAccess(req, res)) {
+      return false;
+    }
+    res.status(403).json({ error: 'Tunnel administration requires host access.' });
+    return true;
+  };
 
   const settleLifecycleCallback = async ({ category, callback, args, includeMetadata }) => {
     try {
@@ -429,8 +463,9 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       return res.json({ providers });
     });
 
-    app.get('/api/openchamber/tunnel/status', async (_req, res) => {
+    app.get('/api/openchamber/tunnel/status', async (req, res) => {
       try {
+        const canAdminister = await resolveTunnelHostAccess(req, res);
         const settings = await readSettingsFromDiskMigrated();
         const normalizedMode = normalizeTunnelMode(settings?.tunnelMode);
         const managedRemoteHostname = normalizeManagedRemoteTunnelHostname(settings?.managedRemoteTunnelHostname);
@@ -448,7 +483,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
         const publicUrl = tunnelService.getPublicUrl();
         if (!publicUrl) {
-          return res.json({
+          return respondWithTunnelStatus(res, {
             active: false,
             url: null,
             mode: normalizedMode,
@@ -473,7 +508,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
               bootstrapTtlMs,
               sessionTtlMs,
             },
-          });
+          }, canAdminister);
         }
 
         const activeNormalizedMode = resolveActiveNormalizedTunnelMode();
@@ -512,7 +547,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           activeMode: activeNormalizedMode,
         });
 
-        return res.json({
+        return respondWithTunnelStatus(res, {
           active: true,
           url: publicUrl,
           mode: activeNormalizedMode,
@@ -537,7 +572,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
             bootstrapTtlMs,
             sessionTtlMs,
           },
-        });
+        }, canAdminister);
       } catch (error) {
         return res.status(500).json({ error: 'Failed to get tunnel status' });
       }
@@ -545,6 +580,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
     app.put('/api/openchamber/tunnel/managed-remote-token', async (req, res) => {
       try {
+        if (await denyTunnelMutationWithoutHostAccess(req, res)) return;
         const presetId = typeof req?.body?.presetId === 'string' ? req.body.presetId.trim() : '';
         const presetName = typeof req?.body?.presetName === 'string' ? req.body.presetName.trim() : '';
         const managedRemoteTunnelHostname = normalizeManagedRemoteTunnelHostname(req?.body?.managedRemoteTunnelHostname);
@@ -570,6 +606,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     });
 
     app.patch('/api/openchamber/tunnel/managed-remote-profile/:id', async (req, res) => {
+      if (await denyTunnelMutationWithoutHostAccess(req, res)) return;
       if (typeof req?.body?.directE2eeEnabled !== 'boolean') {
         return res.status(400).json({ ok: false, error: 'directE2eeEnabled must be a boolean' });
       }
@@ -610,6 +647,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
     app.post('/api/openchamber/tunnel/start', async (_req, res) => {
       try {
+        if (await denyTunnelMutationWithoutHostAccess(_req, res)) return;
         const settings = await readSettingsFromDiskMigrated();
         if (typeof _req?.body?.provider === 'string' && _req.body.provider.trim().length > 0) {
           const rawProvider = _req.body.provider.trim().toLowerCase();
@@ -755,6 +793,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     });
 
     app.post('/api/openchamber/tunnel/stop', async (_req, res) => {
+      if (await denyTunnelMutationWithoutHostAccess(_req, res)) return;
       let revokedBootstrapCount = 0;
       let invalidatedSessionCount = 0;
       const activeTunnelId = tunnelAuthController.getActiveTunnelId();
