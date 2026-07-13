@@ -2437,7 +2437,20 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const isImage = isImageFile(filePath);
   const mimeType = isImage ? getImageMimeType(filePath) : null;
-  const { absolutePath, repoPath } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+
+  let absolutePath;
+  let repoPath;
+  try {
+    ({ absolutePath, repoPath } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot));
+  } catch (error) {
+    // A directory / non-file path (e.g. a nested tree `git status` surfaced at
+    // the repo root) has no file diff to show. Degrade only this specific
+    // signal to an empty diff; genuine failures must still propagate as 500.
+    if (error instanceof Error && error.message === 'Invalid file path') {
+      return { original: '', modified: '', path: filePath, isBinary: false };
+    }
+    throw error;
+  }
 
   if (!isImage) {
     const isBinaryBySniff = await looksBinaryBySniff(absolutePath);
