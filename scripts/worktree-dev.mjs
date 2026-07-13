@@ -10,6 +10,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const UI_BASE_PORT = Number(process.env.OPENCHAMBER_WORKTREE_UI_BASE_PORT || 5180);
 const API_BASE_PORT = Number(process.env.OPENCHAMBER_WORKTREE_API_BASE_PORT || 3902);
 const PORT_STEP = Number(process.env.OPENCHAMBER_WORKTREE_PORT_STEP || 20);
+const SLOT_COUNT = Number(process.env.OPENCHAMBER_WORKTREE_SLOT_COUNT || 200);
 
 function runGit(args) {
   const result = spawnSync('git', args, {
@@ -45,37 +46,72 @@ function parseWorktrees(raw) {
 
 function getWorktrees() {
   const raw = runGit(['worktree', 'list', '--porcelain']);
-  return parseWorktrees(raw);
+  return parseWorktrees(raw).sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function findCurrentWorktree(worktrees) {
-  const cwd = path.resolve(process.cwd());
-  let best = null;
+function getCurrentWorktreePath() {
+  return path.resolve(runGit(['rev-parse', '--show-toplevel']));
+}
 
-  for (const worktree of worktrees) {
-    const prefix = `${worktree.path}${path.sep}`;
-    if (cwd === worktree.path || cwd.startsWith(prefix)) {
-      if (!best || worktree.path.length > best.path.length) {
-        best = worktree;
-      }
-    }
+function fnv1a32(value) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
   }
+  return hash >>> 0;
+}
 
-  return best;
+function deriveSlot(worktreePath) {
+  if (!Number.isInteger(SLOT_COUNT) || SLOT_COUNT <= 0) {
+    throw new Error('OPENCHAMBER_WORKTREE_SLOT_COUNT must be a positive integer.');
+  }
+  return fnv1a32(worktreePath) % SLOT_COUNT;
+}
+
+function derivePortsFromSlot(slot) {
+  const uiPort = UI_BASE_PORT + (slot * PORT_STEP);
+  const apiPort = API_BASE_PORT + (slot * PORT_STEP);
+  if (uiPort > 65535 || apiPort > 65535) {
+    throw new Error('Derived ports exceed 65535. Adjust base/step/slot-count overrides.');
+  }
+  return { uiPort, apiPort };
 }
 
 function withPorts(worktrees) {
-  return worktrees.map((worktree, index) => ({
+  return worktrees.map((worktree) => {
+    const slot = deriveSlot(worktree.path);
+    const ports = derivePortsFromSlot(slot);
+    return {
+      ...worktree,
+      slot,
+      ...ports,
+    };
+  });
+}
+
+function buildCollisionMap(worktrees) {
+  const bySlot = new Map();
+  for (const worktree of worktrees) {
+    const records = bySlot.get(worktree.slot) || [];
+    records.push(worktree);
+    bySlot.set(worktree.slot, records);
+  }
+  return bySlot;
+}
+
+function applyCollisionFlags(worktrees) {
+  const bySlot = buildCollisionMap(worktrees);
+  return worktrees.map((worktree) => ({
     ...worktree,
-    index,
-    uiPort: UI_BASE_PORT + (index * PORT_STEP),
-    apiPort: API_BASE_PORT + (index * PORT_STEP),
+    hasCollision: (bySlot.get(worktree.slot)?.length || 0) > 1,
+    conflictingWorktrees: (bySlot.get(worktree.slot) || []).map((entry) => entry.path),
   }));
 }
 
-function getCurrentPortConfig() {
-  const worktrees = withPorts(getWorktrees());
-  const current = findCurrentWorktree(worktrees);
+function getCurrentPortConfig(worktrees) {
+  const currentPath = getCurrentWorktreePath();
+  const current = worktrees.find((worktree) => worktree.path === currentPath);
 
   if (!current) {
     throw new Error('Current directory is not inside a git worktree for this repository.');
@@ -84,13 +120,43 @@ function getCurrentPortConfig() {
   return current;
 }
 
+function resolveAllWorktrees() {
+  return applyCollisionFlags(withPorts(getWorktrees()));
+}
+
+function validateExplicitPorts() {
+  const explicitUi = process.env.OPENCHAMBER_HMR_UI_PORT;
+  const explicitApi = process.env.OPENCHAMBER_HMR_API_PORT;
+  if (!explicitUi && !explicitApi) return null;
+  if (!explicitUi || !explicitApi) {
+    throw new Error('Set both OPENCHAMBER_HMR_UI_PORT and OPENCHAMBER_HMR_API_PORT together.');
+  }
+
+  const uiPort = Number(explicitUi);
+  const apiPort = Number(explicitApi);
+  if (!Number.isInteger(uiPort) || !Number.isInteger(apiPort)) {
+    throw new Error('Explicit OPENCHAMBER_HMR_* ports must be integers.');
+  }
+  return { uiPort, apiPort };
+}
+
 function printInfo(config) {
   console.log(`[worktree-dev] worktree: ${config.path}`);
   console.log(`[worktree-dev] branch: ${config.branch || '(detached)'}`);
+  console.log(`[worktree-dev] slot: ${config.slot}/${SLOT_COUNT}`);
   console.log(`[worktree-dev] OPENCHAMBER_HMR_UI_PORT=${config.uiPort}`);
   console.log(`[worktree-dev] OPENCHAMBER_HMR_API_PORT=${config.apiPort}`);
   console.log(`[worktree-dev] UI URL: http://127.0.0.1:${config.uiPort}`);
   console.log(`[worktree-dev] API URL: http://127.0.0.1:${config.apiPort}`);
+  if (config.hasCollision) {
+    console.warn('[worktree-dev] WARNING: slot collision detected with:');
+    for (const worktreePath of config.conflictingWorktrees) {
+      if (worktreePath !== config.path) {
+        console.warn(`  - ${worktreePath}`);
+      }
+    }
+    console.warn('[worktree-dev] Set explicit OPENCHAMBER_HMR_UI_PORT and OPENCHAMBER_HMR_API_PORT to override.');
+  }
 }
 
 function printEnv(config) {
@@ -99,14 +165,24 @@ function printEnv(config) {
 }
 
 function runDev(config) {
+  const explicitPorts = validateExplicitPorts();
+  if (config.hasCollision && !explicitPorts) {
+    throw new Error('Port collision detected for this worktree. Set explicit OPENCHAMBER_HMR_UI_PORT and OPENCHAMBER_HMR_API_PORT.');
+  }
+  const uiPort = explicitPorts?.uiPort ?? config.uiPort;
+  const apiPort = explicitPorts?.apiPort ?? config.apiPort;
+
+  if (explicitPorts) {
+    console.log('[worktree-dev] using explicit OPENCHAMBER_HMR_* port overrides');
+  }
   printInfo(config);
   const child = spawnSync('bun', ['run', 'dev:web:hmr'], {
     cwd: repoRoot,
     stdio: 'inherit',
     env: {
       ...process.env,
-      OPENCHAMBER_HMR_UI_PORT: String(config.uiPort),
-      OPENCHAMBER_HMR_API_PORT: String(config.apiPort),
+      OPENCHAMBER_HMR_UI_PORT: String(uiPort),
+      OPENCHAMBER_HMR_API_PORT: String(apiPort),
     },
   });
 
@@ -114,10 +190,11 @@ function runDev(config) {
 }
 
 function printList() {
-  const worktrees = withPorts(getWorktrees());
+  const worktrees = resolveAllWorktrees();
   for (const entry of worktrees) {
     const branch = entry.branch || '(detached)';
-    console.log(`${entry.uiPort}/${entry.apiPort}  ${branch}  ${entry.path}`);
+    const collisionFlag = entry.hasCollision ? ' !collision' : '';
+    console.log(`${entry.uiPort}/${entry.apiPort}  slot=${entry.slot}  ${branch}  ${entry.path}${collisionFlag}`);
   }
 }
 
@@ -135,6 +212,11 @@ Optional env overrides:
   OPENCHAMBER_WORKTREE_UI_BASE_PORT   (default: 5180)
   OPENCHAMBER_WORKTREE_API_BASE_PORT  (default: 3902)
   OPENCHAMBER_WORKTREE_PORT_STEP      (default: 20)
+  OPENCHAMBER_WORKTREE_SLOT_COUNT     (default: 200)
+
+Optional runtime overrides (for collision/manual assignment):
+  OPENCHAMBER_HMR_UI_PORT
+  OPENCHAMBER_HMR_API_PORT
 `);
 }
 
@@ -151,7 +233,7 @@ function main() {
       return;
     }
 
-    const config = getCurrentPortConfig();
+    const config = getCurrentPortConfig(resolveAllWorktrees());
     if (command === 'info') {
       printInfo(config);
       return;

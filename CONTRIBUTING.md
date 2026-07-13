@@ -8,9 +8,9 @@ cd openchamber
 bun install
 ```
 
-## Fork + Multi-Worktree Local Development
+## Fork + Auto-Managed Worktree Local Development
 
-Use one clone plus multiple `git worktree`s so each branch runs independently with its own OpenChamber HMR ports.
+OpenChamber / Copilot App already creates and switches repository worktrees for you. This workflow assumes a worktree already exists and your shell is inside it.
 
 ### 1) Configure fork + upstream remotes
 
@@ -21,33 +21,9 @@ git remote add origin git@github.com:<your-github-user>/openchamber.git
 git remote -v
 ```
 
-### 2) Create/list/remove worktrees
+### 2) Pick unique `OPENCHAMBER_HMR_*` ports per worktree
 
-```bash
-# Sync local main from upstream
-git fetch --all --prune
-git checkout main
-git pull --ff-only upstream main
-
-# Create a worktree for a feature branch
-git worktree add ../openchamber-feature-a -b feature/a main
-
-# Create another worktree from main
-git worktree add ../openchamber-feature-b -b feature/b main
-
-# List worktrees
-git worktree list
-
-# Remove a worktree (when fully done with it)
-git worktree remove ../openchamber-feature-a
-
-# Delete its branch if you no longer need it
-git branch -d feature/a
-```
-
-### 3) Pick unique `OPENCHAMBER_HMR_*` ports per worktree
-
-OpenChamber now includes a helper that deterministically assigns per-worktree ports from `git worktree list` order.
+OpenChamber now includes a helper that derives per-worktree ports from detected git worktrees and the current worktree path.
 
 ```bash
 # Show all worktrees + assigned UI/API port pairs
@@ -61,16 +37,16 @@ bun run dev:worktree:ports
 # export OPENCHAMBER_HMR_API_PORT=3922
 ```
 
-Manual option (if you prefer no helper): choose non-overlapping pairs, for example:
-- worktree A: `OPENCHAMBER_HMR_UI_PORT=5180`, `OPENCHAMBER_HMR_API_PORT=3902`
-- worktree B: `OPENCHAMBER_HMR_UI_PORT=5200`, `OPENCHAMBER_HMR_API_PORT=3922`
-- worktree C: `OPENCHAMBER_HMR_UI_PORT=5220`, `OPENCHAMBER_HMR_API_PORT=3942`
+The helper uses a stable hash of each worktree path (not list ordering), and warns if a rare slot collision occurs.
 
-### 4) Install deps once per worktree (reusing Bun cache) + run
+### 3) Install deps once per worktree (reusing Bun cache) + run
 
 ```bash
 # In each worktree directory (first run there)
 bun install --frozen-lockfile
+
+# Optional: inspect the current worktree assignment
+bun run dev:worktree:ports
 
 # Start this worktree with its assigned ports
 bun run dev:worktree
@@ -79,6 +55,14 @@ bun run dev:worktree
 Open the printed **UI URL** (for HMR), not the API URL.
 
 `bun` reuses its global package cache (`~/.bun/install/cache`), so additional worktrees reuse downloaded dependencies instead of re-downloading them from scratch.
+
+If the helper reports a collision, set explicit ports just for that shell/session:
+
+```bash
+export OPENCHAMBER_HMR_UI_PORT=5300
+export OPENCHAMBER_HMR_API_PORT=4022
+bun run dev:worktree
+```
 
 ## Dev Scripts
 
