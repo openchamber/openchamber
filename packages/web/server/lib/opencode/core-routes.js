@@ -563,6 +563,8 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   //   false → direct only, never relay;
   //   undefined → legacy: advertise relay only if it is already enabled.
   // `includeDirect === false` produces a relay-only link (no direct candidate).
+  // `includeDirectE2ee === true` is exclusive and suppresses every plaintext
+  // direct and Relay candidate regardless of caller-supplied mixed flags.
   const pairingServerCandidates = async (req, { preferredServerUrl, includeRelay, includeDirect = true, includeDirectE2ee = false } = {}) => {
     const candidates = [];
     const directE2eeState = includeDirectE2ee === true ? getDirectE2eePairingState() : null;
@@ -574,7 +576,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         directE2eeCandidate = null;
       }
     }
-    if (includeDirect) {
+    if (includeDirectE2ee !== true && includeDirect) {
       const direct = normalizeCandidateUrl(preferredServerUrl) || requestOrigin(req);
       if (direct) {
         let type = 'lan';
@@ -602,7 +604,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     if (directE2eeCandidate) candidates.push(directE2eeCandidate);
     // The client races candidates and falls back to relay only if the direct URL
     // is unreachable (relay carries a higher priority number).
-    if (includeRelay !== false) {
+    if (includeDirectE2ee !== true && includeRelay !== false) {
       try {
         const relayCandidate = await getRelayPairingCandidate({ ensureEnabled: includeRelay === true });
         if (relayCandidate) candidates.push(relayCandidate);
@@ -831,12 +833,16 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
 
   app.post('/api/client-auth/pairing/sessions', express.json({ limit: '64kb' }), async (req, res, next) => {
     await runWithClientCreateAuth(req, res, next, async (authContext) => {
+      const includeDirectE2ee = req.body?.includeDirectE2ee === true;
       const candidates = await pairingServerCandidates(req, {
         preferredServerUrl: req.body?.serverUrl,
         includeRelay: typeof req.body?.includeRelay === 'boolean' ? req.body.includeRelay : undefined,
         includeDirect: req.body?.includeDirect !== false,
-        includeDirectE2ee: req.body?.includeDirectE2ee === true,
+        includeDirectE2ee,
       });
+      if (includeDirectE2ee && !candidates.some((candidate) => candidate.type === 'direct-e2ee')) {
+        return res.status(422).json({ error: 'Managed direct E2EE is unavailable' });
+      }
       const usesRelay = candidates.some((candidate) => candidate.type === 'relay');
       const result = await clientPairingRuntime.createPairingSession({
         label: req.body?.label,

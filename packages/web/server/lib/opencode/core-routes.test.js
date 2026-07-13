@@ -329,7 +329,7 @@ describe('core-routes', () => {
     expect(getDirectE2eePairingCandidate).toHaveBeenCalledTimes(1);
   });
 
-  it('retains LAN and requested relay candidates alongside direct E2EE', async () => {
+  it('keeps managed direct E2EE pairing exclusive even when direct and relay are requested and available', async () => {
     const directCandidate = {
       type: 'direct-e2ee', wssUrl: 'wss://runtime.example/api/openchamber/direct-e2ee/ws',
       hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'aaa', y: 'bbb' }, priority: 20,
@@ -338,20 +338,21 @@ describe('core-routes', () => {
       type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'srv',
       hostEncPubJwk: directCandidate.hostEncPubJwk, priority: 30,
     };
-    const { app } = createPairingRouteApp({
+    const getRelayPairingCandidate = vi.fn(async () => relayCandidate);
+    const { app, dependencies } = createPairingRouteApp({
       getDirectE2eePairingCandidate: vi.fn(async () => directCandidate),
-      getRelayPairingCandidate: vi.fn(async () => relayCandidate),
+      getRelayPairingCandidate,
     });
     const response = await request(app)
       .post('/api/client-auth/pairing/sessions')
       .set('Host', 'localhost')
-      .send({ serverUrl: 'http://192.168.1.20:3000', includeDirectE2ee: true, includeRelay: true })
+      .send({ serverUrl: 'http://192.168.1.20:3000', includeDirect: true, includeDirectE2ee: true, includeRelay: true })
       .expect(201);
-    expect(response.body.server.candidates).toEqual([
-      { type: 'lan', url: 'http://192.168.1.20:3000', priority: 10 },
-      directCandidate,
-      relayCandidate,
-    ]);
+    expect(response.body.server.candidates).toEqual([directCandidate]);
+    expect(getRelayPairingCandidate).not.toHaveBeenCalled();
+    expect(dependencies.clientPairingRuntime.createPairingSession).toHaveBeenCalledWith(expect.objectContaining({
+      usesRelay: false,
+    }));
   });
 
   it('keeps relay-only toggle-off payload shape equivalent to baseline', async () => {
@@ -372,20 +373,25 @@ describe('core-routes', () => {
     expect(getDirectE2eePairingCandidate).not.toHaveBeenCalled();
   });
 
-  it('returns no plaintext candidate when managed E2EE is exclusively requested but unavailable', async () => {
+  it('rejects managed E2EE pairing without a direct E2EE candidate and creates no session', async () => {
     for (const directCandidate of [null, undefined]) {
       const getDirectE2eePairingCandidate = vi.fn(async () => directCandidate);
-      const { app } = createPairingRouteApp({ getDirectE2eePairingCandidate });
-      const response = await request(app)
+      const getRelayPairingCandidate = vi.fn(async () => ({
+        type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'srv',
+        hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'aaa', y: 'bbb' }, priority: 30,
+      }));
+      const { app, dependencies } = createPairingRouteApp({ getDirectE2eePairingCandidate, getRelayPairingCandidate });
+      await request(app)
         .post('/api/client-auth/pairing/sessions')
-        .send({ includeDirect: false, includeRelay: false, includeDirectE2ee: true })
-        .expect(201);
-      expect(response.body.server.candidates).toEqual([]);
+        .send({ includeDirect: false, includeRelay: true, includeDirectE2ee: true })
+        .expect(422, { error: 'Managed direct E2EE is unavailable' });
       expect(getDirectE2eePairingCandidate).toHaveBeenCalledTimes(1);
+      expect(getRelayPairingCandidate).not.toHaveBeenCalled();
+      expect(dependencies.clientPairingRuntime.createPairingSession).not.toHaveBeenCalled();
     }
   });
 
-  it('suppresses same-origin plaintext when direct identity construction throws or returns null', async () => {
+  it('rejects managed E2EE pairing when direct identity construction throws or returns null', async () => {
     for (const getDirectE2eePairingCandidate of [
       vi.fn(async () => null),
       vi.fn(async () => { throw new Error('identity unavailable'); }),
@@ -394,50 +400,51 @@ describe('core-routes', () => {
         getDirectE2eePairingState: () => ({ suppressOrigin: 'https://runtime.example' }),
         getDirectE2eePairingCandidate,
       });
-      const response = await request(app)
+      await request(app)
         .post('/api/client-auth/pairing/sessions')
         .send({ serverUrl: 'https://runtime.example/path', includeDirectE2ee: true, includeRelay: false })
-        .expect(201);
-      expect(response.body.server.candidates).toEqual([]);
+        .expect(422, { error: 'Managed direct E2EE is unavailable' });
     }
   });
 
-  it('does not suppress a wrong-origin tunnel or any tunnel when direct state is unavailable', async () => {
+  it('suppresses independently requested tunnels for managed direct E2EE regardless of origin', async () => {
+    const directCandidate = {
+      type: 'direct-e2ee', wssUrl: 'wss://runtime.example/api/openchamber/direct-e2ee/ws',
+      hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'aaa', y: 'bbb' }, priority: 20,
+    };
     for (const getDirectE2eePairingState of [
       () => ({ suppressOrigin: 'https://other.example' }),
       () => null,
     ]) {
       const { app } = createPairingRouteApp({
         getDirectE2eePairingState,
-        getDirectE2eePairingCandidate: vi.fn(async () => null),
+        getDirectE2eePairingCandidate: vi.fn(async () => directCandidate),
       });
       const response = await request(app)
         .post('/api/client-auth/pairing/sessions')
         .send({ serverUrl: 'https://runtime.example', includeDirectE2ee: true, includeRelay: false })
         .expect(201);
-      expect(response.body.server.candidates).toEqual([
-        { type: 'tunnel', url: 'https://runtime.example', priority: 10 },
-      ]);
+      expect(response.body.server.candidates).toEqual([directCandidate]);
     }
   });
 
-  it('retains independently requested LAN and relay when direct identity construction fails', async () => {
+  it('does not fall back to independently requested LAN or relay when managed direct E2EE construction fails', async () => {
     const relayCandidate = {
       type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'srv',
       hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'aaa', y: 'bbb' }, priority: 30,
     };
-    const { app } = createPairingRouteApp({
+    const getRelayPairingCandidate = vi.fn(async () => relayCandidate);
+    const { app, dependencies } = createPairingRouteApp({
       getDirectE2eePairingState: () => ({ suppressOrigin: 'https://runtime.example' }),
       getDirectE2eePairingCandidate: vi.fn(async () => { throw new Error('identity unavailable'); }),
-      getRelayPairingCandidate: vi.fn(async () => relayCandidate),
+      getRelayPairingCandidate,
     });
-    const response = await request(app)
+    await request(app)
       .post('/api/client-auth/pairing/sessions')
       .send({ serverUrl: 'http://192.168.1.20:3000', includeDirectE2ee: true, includeRelay: true })
-      .expect(201);
-    expect(response.body.server.candidates).toEqual([
-      { type: 'lan', url: 'http://192.168.1.20:3000', priority: 10 }, relayCandidate,
-    ]);
+      .expect(422, { error: 'Managed direct E2EE is unavailable' });
+    expect(getRelayPairingCandidate).not.toHaveBeenCalled();
+    expect(dependencies.clientPairingRuntime.createPairingSession).not.toHaveBeenCalled();
   });
 
   it('reports authoritative live direct E2EE transport availability and awaits async resolvers', async () => {
