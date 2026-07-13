@@ -2,29 +2,29 @@ import { describe, test, expect } from 'bun:test';
 import { resolvePairingTransportRequest, setAddDeviceIntent, consumeAddDeviceIntent, selectPairingTransport } from './pairingTransportOptions';
 
 describe('Pairing Transport Options', () => {
-  test('resolves managed-e2ee with LAN and relay checked', () => {
+  test('resolves managed-e2ee exclusively even when LAN and relay are available', () => {
     const result = resolvePairingTransportRequest('managed-e2ee', { lanUrl: 'http://192.168.1.10:4096', addDeviceFallback: true, relayAvailable: true });
 
-    expect(result.serverUrl).toBe('http://192.168.1.10:4096');
-    expect(result.includeRelay).toBe(true);
-    expect(result.includeDirect).toBe(true);
+    expect(result.serverUrl).toBe(undefined);
+    expect(result.includeRelay).toBe(false);
+    expect(result.includeDirect).toBe(false);
     expect(result.includeDirectE2ee).toBe(true);
   });
 
   test('resolves managed-e2ee with LAN and relay unchecked', () => {
     const result = resolvePairingTransportRequest('managed-e2ee', { lanUrl: 'http://192.168.1.10:4096', addDeviceFallback: false, relayAvailable: true });
 
-    expect(result.serverUrl).toBe('http://192.168.1.10:4096');
+    expect(result.serverUrl).toBe(undefined);
     expect(result.includeRelay).toBe(false);
-    expect(result.includeDirect).toBe(true);
+    expect(result.includeDirect).toBe(false);
     expect(result.includeDirectE2ee).toBe(true);
   });
 
-  test('resolves managed-e2ee with no LAN and relay checked', () => {
+  test('resolves managed-e2ee without relay when no LAN and fallback is checked', () => {
     const result = resolvePairingTransportRequest('managed-e2ee', { addDeviceFallback: true, relayAvailable: true });
 
     expect(result.serverUrl).toBe(undefined);
-    expect(result.includeRelay).toBe(true);
+    expect(result.includeRelay).toBe(false);
     expect(result.includeDirect).toBe(false);
     expect(result.includeDirectE2ee).toBe(true);
   });
@@ -111,16 +111,12 @@ describe('Pairing Transport Options', () => {
       expect(selectPairingTransport('managed-e2ee', { directE2eeAvailable: true, relayAvailable: true })).toBe('managed-e2ee');
     });
 
-    test('falls back to relay when managed-e2ee preferred but unavailable', () => {
-      expect(selectPairingTransport('managed-e2ee', { directE2eeAvailable: false, relayAvailable: true })).toBe('relay');
+    test('falls back to lan when managed-e2ee preferred but unavailable', () => {
+      expect(selectPairingTransport('managed-e2ee', { directE2eeAvailable: false, relayAvailable: true, lanUrl: 'http://lan' })).toBe('lan');
     });
 
-    test('falls back to lan when relay unavailable', () => {
-      expect(selectPairingTransport('managed-e2ee', { directE2eeAvailable: false, relayAvailable: false, lanUrl: 'http://lan' })).toBe('lan');
-    });
-
-    test('falls back to local when lan unavailable', () => {
-      expect(selectPairingTransport('managed-e2ee', { directE2eeAvailable: false, relayAvailable: false, localUrl: 'http://local' })).toBe('local');
+    test('falls back to local when managed-e2ee preferred but unavailable and no lan', () => {
+      expect(selectPairingTransport('managed-e2ee', { directE2eeAvailable: false, relayAvailable: true, localUrl: 'http://local' })).toBe('local');
     });
 
     test('returns relay when no preference', () => {

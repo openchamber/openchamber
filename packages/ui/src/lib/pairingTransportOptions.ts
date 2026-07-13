@@ -22,10 +22,10 @@ export function resolvePairingTransportRequest(
   let includeDirectE2ee = false;
 
   if (transport === 'managed-e2ee') {
-    serverUrl = options.lanUrl ?? undefined;
-    includeDirect = !!options.lanUrl;
+    serverUrl = undefined;
+    includeDirect = false;
     includeDirectE2ee = true;
-    includeRelay = !!(options.relayAvailable && options.addDeviceFallback);
+    includeRelay = false;
   } else if (transport === 'local') {
     serverUrl = options.localUrl ?? undefined;
     includeRelay = false;
@@ -52,8 +52,14 @@ export function selectPairingTransport(
     localUrl?: string | null;
   }
 ): AddDeviceTransportType {
-  if (preferred === 'managed-e2ee' && options.directE2eeAvailable) {
-    return 'managed-e2ee';
+  if (preferred === 'managed-e2ee') {
+    if (options.directE2eeAvailable) {
+      return 'managed-e2ee';
+    }
+    if (options.lanUrl) {
+      return 'lan';
+    }
+    return 'local';
   }
   if (options.relayAvailable) {
     return 'relay';
