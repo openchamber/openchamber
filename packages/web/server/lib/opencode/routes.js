@@ -3,6 +3,23 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+const TUNNEL_OWNED_SETTINGS = [
+  'tunnelBootstrapTtlMs',
+  'tunnelSessionTtlMs',
+  'tunnelProvider',
+  'tunnelMode',
+  'managedLocalTunnelConfigPath',
+  'managedRemoteTunnelHostname',
+  'managedRemoteTunnelToken',
+  'managedRemoteTunnelPresets',
+  'managedRemoteTunnelPresetTokens',
+  'managedRemoteTunnelSelectedPresetId',
+];
+
+const containsTunnelOwnedSetting = (payload) => payload !== null
+  && typeof payload === 'object'
+  && TUNNEL_OWNED_SETTINGS.some((key) => Object.prototype.hasOwnProperty.call(payload, key));
+
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
     crypto,
@@ -20,7 +37,21 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    getUiAuthController,
   } = dependencies;
+
+  const resolveTunnelHostAccess = async (req, res) => {
+    const uiAuthController = getUiAuthController?.();
+    if (typeof uiAuthController?.resolveAuthContext !== 'function') {
+      return false;
+    }
+    const context = await uiAuthController.resolveAuthContext(req, res, {
+      allowClientAuth: true,
+      allowUrlToken: false,
+    });
+    return context?.type === 'session'
+      || (context?.type === 'client' && context.client?.clientKind === 'desktop-local');
+  };
 
   let authLibrary = null;
   const pendingMcpAuthContextByState = new Map();
@@ -295,7 +326,11 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.put('/api/config/settings', async (req, res) => {
     try {
-      const updated = await persistSettings(req.body ?? {});
+      const changes = req.body ?? {};
+      if (containsTunnelOwnedSetting(changes) && !(await resolveTunnelHostAccess(req, res))) {
+        return res.status(403).json({ error: 'Tunnel administration requires host access.' });
+      }
+      const updated = await persistSettings(changes);
       res.json(updated);
     } catch (error) {
       console.error('[API:PUT /api/config/settings] Failed to save settings:', error);
