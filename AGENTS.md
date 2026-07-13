@@ -474,3 +474,11 @@ A single store with N properties means every subscriber re-evaluates on every st
 
 - Releases + high-level changes: `CHANGELOG.md`
 - Recent commits: `git log --oneline` (latest tags: `v1.11.7`, `v1.11.6`)
+
+## Cursor Cloud specific instructions
+
+- Toolchain (`bun` at `~/.bun/bin`, `opencode` CLI at `~/.opencode/bin`) is preinstalled in the VM snapshot and added to PATH via `~/.bashrc`. The startup update script only runs `bun install`. If you launch a process from a non-login shell where PATH isn't picked up, prepend both dirs (e.g. `export PATH="$HOME/.opencode/bin:$HOME/.bun/bin:$PATH"`).
+- Run the web app in dev mode with `bun run dev` (alias of `dev:web:hmr`). It serves the **HMR UI on http://127.0.0.1:5180** and the **Express API on http://127.0.0.1:3902** — open the 5180 URL for the UI, not the API port. Ports are overridable via `OPENCHAMBER_HMR_UI_PORT` / `OPENCHAMBER_HMR_API_PORT`.
+- The web server auto-starts a *managed* `opencode serve` instance on a random port and proxies it; you do NOT need to start OpenCode yourself. This requires the `opencode` binary to be resolvable (PATH or `~/.opencode/bin`). Confirm readiness via `curl -s http://127.0.0.1:3902/health` (`openCodeRunning` / `isOpenCodeReady` should be `true`). To attach to an external OpenCode instead, set `OPENCODE_HOST`/`OPENCODE_PORT` + `OPENCODE_SKIP_START=true`.
+- Chat can be tested with no API key: select an "OpenCode Zen" free model (e.g. "Big Pickle") in the model selector. The `/workspace` repo auto-loads as the default project, so no onboarding step is needed.
+- Electron desktop packaging targets macOS/Windows only; on this Linux VM use the web runtime (`bun run dev`) for end-to-end testing.
