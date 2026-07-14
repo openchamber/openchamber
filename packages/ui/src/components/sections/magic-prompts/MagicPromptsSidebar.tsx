@@ -49,6 +49,7 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
           { id: 'session.summary', titleKey: 'settings.magicPrompts.sidebar.item.sessionSummary' },
           { id: 'session.review', titleKey: 'settings.magicPrompts.sidebar.item.sessionWorkspaceReview' },
           { id: 'session.plan', titleKey: 'settings.magicPrompts.sidebar.item.sessionFeaturePlan' },
+          { id: 'session.craftGoal', titleKey: 'settings.magicPrompts.sidebar.item.sessionCraftGoal' },
           { id: 'session.catchup', titleKey: 'settings.magicPrompts.sidebar.item.sessionCatchUp' },
           { id: 'session.debug', titleKey: 'settings.magicPrompts.sidebar.item.sessionDebug' },
           { id: 'session.weigh', titleKey: 'settings.magicPrompts.sidebar.item.sessionWeigh' },

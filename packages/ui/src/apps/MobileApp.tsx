@@ -46,7 +46,7 @@ import { useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { listProjectWorktrees, worktreeMapsEqual } from '@/lib/worktrees/worktreeManager';
 import type { QuotaProviderId, UsageWindow } from '@/types';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
@@ -57,10 +57,11 @@ import { SyncProvider, useSession, useSessionMessages } from '@/sync/sync-contex
 import { SyncAppEffects } from './AppEffects';
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
+import { BusyDots } from '@/components/chat/message/parts/BusyDots';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
-import { autoConnectLastInstance, connectionDisplayUrl, isActiveRuntimeConnection, reprobeActiveConnection, useMobileConnection } from './mobileConnections';
+import { autoConnectLastInstance, connectionDisplayUrl, getAutoConnectTargetLabel, isActiveRuntimeConnection, reprobeActiveConnection, useMobileConnection } from './mobileConnections';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
@@ -981,10 +982,13 @@ const MobileInstancesSurface: React.FC<{
 
   const saveInstance = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
-    void saveConnection({ url, label, clientToken }).then((saved) => {
+    // The id is what makes this an EDIT: saveConnection uses it to preserve the
+    // existing relay/https candidates (and the Keychain token they key) instead
+    // of rebuilding the instance from the single URL field.
+    void saveConnection({ id: editingId ?? undefined, url, label, clientToken }).then((saved) => {
       if (saved) resetForm();
     });
-  }, [clientToken, label, resetForm, saveConnection, url]);
+  }, [clientToken, editingId, label, resetForm, saveConnection, url]);
 
   // Scan a pairing QR into the add/edit form fields (does not change edit mode, so
   // the form-reset effect doesn't wipe the scanned values). The user reviews + saves.
@@ -2688,6 +2692,9 @@ export function MobileApp({ apis }: MobileAppProps) {
   // splash so we don't flash the connect screen; 'done' means we either connected or
   // exhausted the attempt (then the connect screen shows).
   const [autoConnectPhase, setAutoConnectPhase] = React.useState<'pending' | 'attempting' | 'done'>('pending');
+  // The instance the splash says we are connecting to. Read once on mount —
+  // auto-connect targets the most-recent saved connection from the same list.
+  const autoConnectLabel = React.useMemo(() => getAutoConnectTargetLabel(), []);
   // Bumped to force a re-render (and thus a fresh `sdk` prop for SyncProvider)
   // after a same-device transport swap — reconnects the sync layer in place with
   // no remount. The value itself is unused; only the re-render matters.
@@ -2918,11 +2925,17 @@ export function MobileApp({ apis }: MobileAppProps) {
       );
 
       if (cancelled) return;
+
       const allWorktrees = Array.from(worktreesByProject.values()).flat();
-      useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
-      });
+
+      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      if (!worktreeMapsEqual(worktreesByProject, currentByProject)) {
+        useSessionUIStore.setState({
+          availableWorktrees: allWorktrees,
+          availableWorktreesByProject: worktreesByProject,
+        });
+      }
     };
 
     void run();
@@ -3046,8 +3059,19 @@ export function MobileApp({ apis }: MobileAppProps) {
     // (no saved instance, unreachable, or needs re-login).
     if (autoConnectPhase !== 'done') {
       return (
-        <main className="flex min-h-dvh items-center justify-center bg-background text-foreground">
+        <main className="relative flex min-h-dvh items-center justify-center bg-background text-foreground">
           <OpenChamberLogo width={120} height={120} isAnimated />
+          {/* Absolutely positioned below the (still perfectly centered) logo so
+              the text never pushes it up. 50% + half the 120px logo + a gap. */}
+          {autoConnectLabel ? (
+            <div className="absolute inset-x-0 top-[calc(50%+84px)] flex flex-col items-center gap-0.5 px-6 text-center">
+              <p className="typography-small text-muted-foreground">{t('mobile.connect.splash.connectingTo')}</p>
+              <p className="typography-small text-foreground">
+                {autoConnectLabel}
+                <BusyDots />
+              </p>
+            </div>
+          ) : null}
         </main>
       );
     }

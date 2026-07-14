@@ -148,6 +148,14 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'session.plan.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
     ],
   },
+  'session.craftGoal': {
+    titleKey: 'settings.magicPrompts.page.group.sessionCraftGoal.title',
+    descriptionKey: 'settings.magicPrompts.page.group.sessionCraftGoal.description',
+    blocks: [
+      { id: 'session.craftGoal.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'session.craftGoal.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
   'session.catchup': {
     titleKey: 'settings.magicPrompts.page.group.sessionCatchUp.title',
     descriptionKey: 'settings.magicPrompts.page.group.sessionCatchUp.description',

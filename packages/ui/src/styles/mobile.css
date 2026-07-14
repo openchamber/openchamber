@@ -615,6 +615,20 @@
   transition: opacity 0.2s ease-out;
 }
 
+/* Bottom-sheet overlays live inside a keyboard-inset surface whose bottom is
+   lifted by the keyboard height, but their max-height is expressed in 100dvh —
+   which does NOT shrink in the Capacitor app (native keyboard resize is off).
+   Without this cap a sheet with the keyboard raised (typing inside it) can
+   grow past the top safe area and slide under the notch/status bar. Subtract
+   both the keyboard inset and the top safe area from the available height. */
+:root.oc-capacitor-app .pwa-overlay-panel {
+  max-height: calc(
+    100dvh
+    - var(--oc-keyboard-inset, 0px)
+    - max(0.75rem, env(safe-area-inset-top))
+  );
+}
+
 /* Full-screen scroll views (e.g. the connect/login screen) live outside the app
    shell, so shrink them by the keyboard height the same way the shell does. Capping
    the height (instead of min-height: 100dvh) is what makes overflow-y-auto actually

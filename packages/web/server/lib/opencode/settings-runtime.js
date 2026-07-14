@@ -438,6 +438,30 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  // Strict variant for callers that REGENERATE persisted identity when a key is
+  // absent (relay signing/encryption keys). The lenient reader above maps every
+  // failure — corrupt JSON, EACCES, transient I/O — to `{}`, which such callers
+  // cannot distinguish from "first run": they would mint a NEW identity, orphan
+  // every paired device and push binding, and overwrite the settings file with
+  // the empty spread. Here only a genuinely missing file means "no settings";
+  // any other failure (including a non-object payload) throws.
+  const readSettingsFromDiskStrict = async () => {
+    let raw;
+    try {
+      raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
+    } catch (error) {
+      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+        return {};
+      }
+      throw error;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Settings file is malformed (non-object payload)');
+    }
+    return parsed;
+  };
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const isTransientWindowsReplaceError = (error) => {
@@ -870,6 +894,7 @@ export const createSettingsRuntime = (deps) => {
 
   return {
     readSettingsFromDisk,
+    readSettingsFromDiskStrict,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,

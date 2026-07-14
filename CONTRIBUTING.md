@@ -3,7 +3,7 @@
 ## Getting Started
 
 ```bash
-git clone https://github.com/btriapitsyn/openchamber.git
+git clone https://github.com/openchamber/openchamber.git
 cd openchamber
 bun install
 ```
@@ -31,11 +31,13 @@ bun run electron:dev:bundled  # Electron shell using built web assets
 bun run electron:build        # Package desktop app for the current platform
 ```
 
-Desktop supports macOS and Windows. The build output is written to `packages/electron/dist`.
+Desktop supports macOS, Windows, and Linux. The build output is written to `packages/electron/dist`.
 
 macOS builds create `dmg` and `zip` files. You need Xcode/build tools for notarized packaging and icon asset work.
 
 Windows builds create an NSIS installer. If signing env vars are not set, the build script makes an unsigned installer.
+
+Linux builds produce an AppImage for the native x64 or arm64 host.
 
 For desktop-specific details, see [`packages/electron/README.md`](./packages/electron/README.md).
 
@@ -94,7 +96,17 @@ Windows:
 bun run electron:build
 ```
 
-Linux is supported for web/CLI development. A Linux desktop app is still planned, so Electron packaging is mainly macOS and Windows right now.
+Linux x64 and arm64 AppImages are packaged natively on the matching host architecture. Use Bun for dependency installation and packaging orchestration:
+
+```bash
+OPENCHAMBER_TARGET_ARCH=x64 bun run electron:build
+# On an arm64 host:
+OPENCHAMBER_TARGET_ARCH=arm64 bun run electron:build
+
+bun run --cwd packages/electron verify:linux-appimage
+```
+
+The final AppImage verifier checks desktop identity and the architecture of Electron, the bundled OpenCode CLI, and packaged native modules.
 
 ## Before Submitting
 
@@ -149,4 +161,4 @@ You can still help:
 
 ## Questions?
 
-Open an [issue](https://github.com/btriapitsyn/openchamber/issues) or ask in [Discord](https://discord.gg/ZYRSdnwwKA).
+Open an [issue](https://github.com/openchamber/openchamber/issues) or ask in [Discord](https://discord.gg/ZYRSdnwwKA).

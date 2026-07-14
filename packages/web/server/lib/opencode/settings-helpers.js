@@ -184,6 +184,24 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
       result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
     }
+    if (typeof candidate.desktopWindowControlsPosition === 'string') {
+      const mode = candidate.desktopWindowControlsPosition.trim();
+      if (mode === 'auto' || mode === 'left' || mode === 'right') {
+        result.desktopWindowControlsPosition = mode;
+      }
+    }
+    if (candidate.permissionAutoAccept && typeof candidate.permissionAutoAccept === 'object' && !Array.isArray(candidate.permissionAutoAccept)) {
+      const sessions = {};
+      const sourceSessions = candidate.permissionAutoAccept.sessions;
+      if (sourceSessions && typeof sourceSessions === 'object' && !Array.isArray(sourceSessions)) {
+        for (const [sessionId, enabled] of Object.entries(sourceSessions)) {
+          if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
+        }
+      }
+      result.permissionAutoAccept = {
+        sessions,
+      };
+    }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
     }
@@ -253,6 +271,15 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
       result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
+    }
+    if (typeof candidate.sessionGoalEnabled === 'boolean') {
+      result.sessionGoalEnabled = candidate.sessionGoalEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
+      result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget) && candidate.sessionGoalDefaultBudget > 0) {
+      result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
     }
     if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
       result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
@@ -504,6 +531,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
+    }
+    if (typeof candidate.promptNavigatorEnabled === 'boolean') {
+      result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
     }
     if (typeof candidate.expandedEditorToolbar === 'boolean') {
       result.expandedEditorToolbar = candidate.expandedEditorToolbar;

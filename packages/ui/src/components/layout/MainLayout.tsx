@@ -457,13 +457,30 @@ export const MainLayout: React.FC = () => {
                                     </ErrorBoundary>
                                 </div>
                             )}
-                            {mobileLeftDrawerVisible && (
-                                <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: leftDrawerX }} aria-hidden={!mobileLeftDrawerOpen}>
-                                    <ErrorBoundary>
-                                        <SessionSidebar mobileVariant />
-                                    </ErrorBoundary>
-                                </motion.div>
-                            )}
+                            {/* Always mount SessionSidebar on mobile to match desktop behavior.
+                                Conditional mount (mobileLeftDrawerVisible && ...) caused a
+                                data-loading cascade on every drawer open: paginated sessions
+                                fetch, worktree discovery, repo status, PR status, and 10+ memo
+                                recomputations. On Android PWA this manifested as a >10s delay
+                                before the drawer became interactive (issue #1695). Visibility is
+                                controlled by the leftDrawerX transform (off-screen when closed).
+                                The invisible class matters when fully hidden: leftDrawerWidth is
+                                not recomputed on resize/rotation, so a closed drawer translated by
+                                the old width could otherwise peek into the viewport; it also keeps
+                                the off-screen sidebar out of the tab order and skips painting it. */}
+                            <motion.div
+                                className={cn(
+                                    'absolute inset-0 z-20 bg-sidebar',
+                                    !mobileLeftDrawerVisible && 'pointer-events-none invisible',
+                                )}
+                                data-page-scroll-lock="true"
+                                style={{ x: leftDrawerX }}
+                                aria-hidden={!mobileLeftDrawerOpen}
+                            >
+                                <ErrorBoundary>
+                                    <SessionSidebar mobileVariant />
+                                </ErrorBoundary>
+                            </motion.div>
                             {mobileRightDrawerVisible && (
                                 <motion.div className="absolute inset-0 z-20 bg-sidebar" data-page-scroll-lock="true" style={{ x: rightDrawerX }} aria-hidden={!mobileRightSidebarOpen}>
                                     <ErrorBoundary>

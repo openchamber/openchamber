@@ -40,6 +40,19 @@ export const activateRelayTunnel = (descriptor: RelayRuntimeDescriptor): RelayTu
   return activeTunnel;
 };
 
+/**
+ * Adopts an ALREADY-OPEN tunnel client (e.g. the connect flow's probe tunnel)
+ * as the active runtime tunnel, so the immediately following
+ * `activateRelayTunnel` with an equal descriptor reuses it instead of paying a
+ * second WebSocket connect + E2EE handshake. Replaces any previous tunnel.
+ */
+export const adoptRelayTunnel = (descriptor: RelayRuntimeDescriptor, client: RelayTunnelClient): void => {
+  if (activeTunnel === client) return;
+  activeTunnel?.close();
+  activeDescriptor = descriptor;
+  activeTunnel = client;
+};
+
 export const deactivateRelayTunnel = (): void => {
   activeTunnel?.close();
   activeTunnel = null;

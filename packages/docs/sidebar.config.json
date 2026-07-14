@@ -155,6 +155,20 @@
           }
         },
         {
+          "label": "Session Goals",
+          "link": "/session-goals/",
+          "translations": {
+            "uk": "Цілі сесії",
+            "zh-CN": "会话目标",
+            "es": "Objetivos de sesión",
+            "pt-BR": "Objetivos de sessão",
+            "ko": "세션 목표",
+            "pl": "Cele sesji",
+            "fr": "Objectifs de session",
+            "ja": "セッションゴール"
+          }
+        },
+        {
           "label": "Project Actions",
           "link": "/project-actions/",
           "translations": {
