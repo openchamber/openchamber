@@ -543,11 +543,11 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
 
     // The captured draft owns its folder target as well, even though the live
     // draft was closed before sendMessage materialized the new session.
-    expect(folderAssignmentCalls).toContainEqual({
-      directory: "/projects/alpha",
-      folderId: "folder-alpha",
-      sessionId: "ses_materialized_2222",
-    });
+    expect(folderAssignmentCalls.some((call) => (
+      call.directory === "/projects/alpha"
+      && call.folderId === "folder-alpha"
+      && call.sessionId === "ses_materialized_2222"
+    ))).toBe(true);
 
     // Assert: currentSessionId was updated to the materialized session
     expect(useSessionUIStore.getState().currentSessionId).toBe(
