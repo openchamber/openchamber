@@ -466,11 +466,20 @@ export function materializeOpenDraftSession(selection: {
       ? selection.agent.trim()
       : undefined
     let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
+    let pendingWorktreeRequestId = draft.pendingWorktreeRequestId
     const draftProjectId = draft.selectedProjectId ?? null
 
-    if (draft.pendingWorktreeRequestId) {
-      draftDirectoryOverride = await waitForPendingDraftWorktreeRequest(draft.pendingWorktreeRequestId)
-      store.resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
+    const liveDraft = useSessionUIStore.getState().newSessionDraft
+    if (liveDraft.open
+      && (liveDraft.materializationKey ?? liveDraft) === materializationKey
+      && liveDraft.pendingWorktreeRequestId !== pendingWorktreeRequestId) {
+      pendingWorktreeRequestId = liveDraft.pendingWorktreeRequestId
+      draftDirectoryOverride = liveDraft.bootstrapPendingDirectory ?? liveDraft.directoryOverride ?? draftDirectoryOverride
+    }
+
+    if (pendingWorktreeRequestId) {
+      draftDirectoryOverride = await waitForPendingDraftWorktreeRequest(pendingWorktreeRequestId)
+      store.resolvePendingDraftWorktreeTarget(pendingWorktreeRequestId, draftDirectoryOverride)
     }
 
     await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)

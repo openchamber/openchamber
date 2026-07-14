@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { togglePermissionAutoAccept } from "../../components/chat/permissionAutoAccept"
+import {
+  createPendingDraftWorktreeRequest,
+  resolvePendingDraftWorktreeRequest,
+} from "../../lib/worktrees/pendingDraftWorktree"
 
 const storage = new Map<string, string>()
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown; options?: unknown }> = []
@@ -451,5 +455,25 @@ describe("issue 2039 draft auto-accept", () => {
     await materialization
 
     expect(useSessionUIStore.getState().currentSessionId).toBeNull()
+  })
+
+  test("uses the resolved worktree target from the live draft", async () => {
+    const requestId = createPendingDraftWorktreeRequest()
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: "/project",
+      pendingWorktreeRequestId: requestId,
+    })
+    const capturedDraft = useSessionUIStore.getState().newSessionDraft
+
+    resolvePendingDraftWorktreeRequest(requestId, "/project/.worktrees/feature")
+    useSessionUIStore.getState().resolvePendingDraftWorktreeTarget(requestId, "/project/.worktrees/feature")
+
+    const result = await materializeOpenDraftSession(
+      { providerID: "provider", modelID: "model" },
+      capturedDraft,
+    )
+
+    expect(result?.directory).toBe("/project/.worktrees/feature")
+    expect(createSessionCalls[0]?.directory).toBe("/project/.worktrees/feature")
   })
 })
