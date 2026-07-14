@@ -1299,6 +1299,7 @@ export const settingsDict = {
   'settings.providers.page.auth.title': 'Uwierzytelnianie',
   'settings.providers.page.auth.useReconnectHint': '· Użyj Połącz ponownie, aby zaktualizować dane logowania',
   'settings.providers.copilotGhe.title': 'GitHub Enterprise Server',
+  'settings.providers.copilotGhe.toggle': 'Połącz GitHub Enterprise Server',
   'settings.providers.copilotGhe.serverUrlLabel': 'URL serwera',
   'settings.providers.copilotGhe.serverUrlPlaceholder': 'ghe.example.com',
   'settings.providers.copilotGhe.clientIdLabel': 'Client ID (opcjonalnie)',

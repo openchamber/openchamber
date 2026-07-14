@@ -1248,6 +1248,7 @@ export const settingsDict = {
   "settings.providers.page.auth.connected": "Підключено",
   "settings.providers.page.auth.useReconnectHint": "· Скористайтеся повторним підключенням, щоб оновити облікові дані",
   "settings.providers.copilotGhe.title": "GitHub Enterprise Server",
+  "settings.providers.copilotGhe.toggle": "Підключити GitHub Enterprise Server",
   "settings.providers.copilotGhe.serverUrlLabel": "URL сервера",
   "settings.providers.copilotGhe.serverUrlPlaceholder": "ghe.example.com",
   "settings.providers.copilotGhe.clientIdLabel": "Client ID (необов’язково)",

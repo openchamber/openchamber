@@ -1248,6 +1248,7 @@ export const settingsDict = {
   'settings.providers.page.auth.connected': '연결됨',
   'settings.providers.page.auth.useReconnectHint': '· 인증 정보를 업데이트하려면 Reconnect를 사용하세요',
   'settings.providers.copilotGhe.title': 'GitHub Enterprise Server',
+  'settings.providers.copilotGhe.toggle': 'GitHub Enterprise Server 연결',
   'settings.providers.copilotGhe.serverUrlLabel': '서버 URL',
   'settings.providers.copilotGhe.serverUrlPlaceholder': 'ghe.example.com',
   'settings.providers.copilotGhe.clientIdLabel': 'Client ID(선택 사항)',

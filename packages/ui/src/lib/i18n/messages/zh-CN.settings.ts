@@ -1248,6 +1248,7 @@ export const settingsDict = {
   'settings.providers.page.auth.connected': '已连接',
   'settings.providers.page.auth.useReconnectHint': '· 使用“重新连接”以更新凭据',
   'settings.providers.copilotGhe.title': 'GitHub Enterprise Server',
+  'settings.providers.copilotGhe.toggle': '连接 GitHub Enterprise Server',
   'settings.providers.copilotGhe.serverUrlLabel': '服务器 URL',
   'settings.providers.copilotGhe.serverUrlPlaceholder': 'ghe.example.com',
   'settings.providers.copilotGhe.clientIdLabel': 'Client ID（可选）',

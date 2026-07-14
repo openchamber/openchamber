@@ -1281,6 +1281,7 @@ export const settingsDict = {
   'settings.providers.page.auth.connected': '接続済み',
   'settings.providers.page.auth.useReconnectHint': '· 認証情報を更新するには再接続を使用',
   'settings.providers.copilotGhe.title': 'GitHub Enterprise Server',
+  'settings.providers.copilotGhe.toggle': 'GitHub Enterprise Serverに接続',
   'settings.providers.copilotGhe.serverUrlLabel': 'サーバー URL',
   'settings.providers.copilotGhe.serverUrlPlaceholder': 'ghe.example.com',
   'settings.providers.copilotGhe.clientIdLabel': 'Client ID（任意）',

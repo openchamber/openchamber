@@ -1159,6 +1159,7 @@
   'settings.providers.page.auth.connected': '已連線',
   'settings.providers.page.auth.useReconnectHint': '· 使用「重新連線」以更新憑證',
   'settings.providers.copilotGhe.title': 'GitHub Enterprise Server',
+  'settings.providers.copilotGhe.toggle': '連接 GitHub Enterprise Server',
   'settings.providers.copilotGhe.serverUrlLabel': '伺服器 URL',
   'settings.providers.copilotGhe.serverUrlPlaceholder': 'ghe.example.com',
   'settings.providers.copilotGhe.clientIdLabel': 'Client ID（選填）',

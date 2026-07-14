@@ -1248,6 +1248,7 @@ export const settingsDict = {
   "settings.providers.page.auth.connected": "Conectado",
   "settings.providers.page.auth.useReconnectHint": "· Usar Reconnect para atualizar credenciais",
   "settings.providers.copilotGhe.title": "GitHub Enterprise Server",
+  "settings.providers.copilotGhe.toggle": "Conectar GitHub Enterprise Server",
   "settings.providers.copilotGhe.serverUrlLabel": "URL do servidor",
   "settings.providers.copilotGhe.serverUrlPlaceholder": "ghe.example.com",
   "settings.providers.copilotGhe.clientIdLabel": "Client ID (opcional)",
