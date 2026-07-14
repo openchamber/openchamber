@@ -31,6 +31,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
@@ -789,12 +790,7 @@ export const Header: React.FC<HeaderProps> = ({
     return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
   }, []);
 
-  const isWindowsElectronDesktop = React.useMemo(() => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    return Boolean(window.__OPENCHAMBER_ELECTRON__) && window.__OPENCHAMBER_PLATFORM__ === 'win32';
-  }, []);
+  const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const macosMajorVersion = React.useMemo(() => {
     if (typeof window === 'undefined') {
@@ -1598,11 +1594,11 @@ export const Header: React.FC<HeaderProps> = ({
     if (isTabletStandalonePwa) {
       return 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)';
     }
-    if ((!isDesktopApp || isWindowsElectronDesktop) && !isVSCode) {
+    if ((!isDesktopApp || usesFramelessChrome) && !isVSCode) {
       return 'calc(0.75rem + var(--oc-wco-left-inset, 0px))';
     }
     return '0.75rem';
-  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, isVSCode, isWindowsElectronDesktop]);
+  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, isVSCode, usesFramelessChrome]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -1671,7 +1667,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isDesktopApp, isMacPlatform, macosMajorVersion]);
 
   const webWindowControlsOverlayStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-    if ((isDesktopApp && !isWindowsElectronDesktop) || isVSCode) {
+    if ((isDesktopApp && !usesFramelessChrome) || isVSCode) {
       return undefined;
     }
 
@@ -1682,7 +1678,7 @@ export const Header: React.FC<HeaderProps> = ({
       minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
       height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
     };
-  }, [isDesktopApp, isVSCode, isWindowsElectronDesktop]);
+  }, [isDesktopApp, isVSCode, usesFramelessChrome]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -2217,7 +2213,7 @@ export const Header: React.FC<HeaderProps> = ({
             Icon={'picture-in-picture-2'}
           />
           {desktopSidebarActions}
-          <WindowsWindowControls visible={isWindowsElectronDesktop} />
+          <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>
       </div>
     </div>

@@ -78,6 +78,13 @@ before touching the filesystem). Rationale: metadata rides every
    a goal on an idle session emits no status transition.
 3. On fire (`tick`), gated by the `sessionGoalEnabled` setting:
    - fetch session (skip sub-agent sessions), require an `active` goal;
+   - authoritative live-activity check after the quiet window: re-read the
+     session status map, bail if the parent resumed, then list direct child
+     sessions and bail while any child is `busy`/`retry`. A background
+     subagent leaves its parent idle, then injects its result into the parent
+     when done; that parent `busy` → `idle` cycle re-arms the loop without
+     polling. Status/children fetch failure is unknown, not empty, so it skips
+     the audit and retries after another quiet window;
    - quiescence check via the message tail (trailing user message or
      unfinished assistant reply → bail; the next idle transition re-arms);
    - token accounting as a SNAPSHOT of the latest completed assistant turn:

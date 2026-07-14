@@ -1041,6 +1041,19 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  const quotaCredentialMatch = pathname.match(/^\/api\/quota\/credentials\/(opencode-go|ollama-cloud|cursor)(?:\/(validate|import))?$/);
+  if (quotaCredentialMatch) {
+    try {
+      const body = method === 'PUT' ? await extractJsonBody(input, init, method) : undefined;
+      const bridgeMethod = quotaCredentialMatch[2]?.toUpperCase() || method;
+      const data = await sendBridgeMessage('api:quota:credentials', { providerId: quotaCredentialMatch[1], method: bridgeMethod, credential: body });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   const quotaMatch = pathname.match(/^\/api\/quota\/([^/]+)$/);
   if (quotaMatch && method === 'GET') {
     const providerId = decodeURIComponent(quotaMatch[1]);
@@ -1474,6 +1487,7 @@ onCommand('windowFocusChanged', (payload) => {
 });
 
 const readyNotificationCooldowns = new Map<string, number>();
+const errorNotificationCooldowns = new Map<string, number>();
 const READY_NOTIFICATION_COOLDOWN_MS = 5000;
 const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
 let notificationSettingsSyncPromise: Promise<void> | null = null;
@@ -1507,6 +1521,7 @@ const ensureNotificationSettingsSynced = async () => {
     notificationSettingsSyncPromise = import('@/lib/persistence')
       .then(({ syncDesktopSettings }) => syncDesktopSettings())
       .catch((error) => {
+        notificationSettingsSyncPromise = null;
         console.warn('[OpenChamber] Failed to sync notification settings:', error);
       });
   }
@@ -1601,7 +1616,7 @@ const fetchLastAssistantMessageText = async (sessionId: string, messageId?: stri
 
 const getNotificationTemplate = (
   settings: { notificationTemplates?: Record<string, { title?: string; message?: string }> },
-  key: 'completion' | 'error' | 'question',
+  key: 'completion' | 'subtask' | 'error' | 'question',
   fallback: { title: string; message: string },
 ) => {
   const candidate = settings.notificationTemplates?.[key];
@@ -1635,6 +1650,12 @@ const getNotificationSessionId = (payload: Record<string, unknown>): string => {
   return getPayloadString(info?.sessionID ?? info?.sessionId ?? properties.sessionID ?? properties.sessionId ?? properties.session);
 };
 
+const getNotificationDirectory = (payload: Record<string, unknown>): string | null => {
+  const properties = (payload.properties ?? payload) as Record<string, unknown>;
+  const info = properties.info as Record<string, unknown> | undefined;
+  return getPayloadString(properties.directory ?? info?.directory) || null;
+};
+
 window.addEventListener('openchamber:vscode-notification-event', (event) => {
   const detail = (event as CustomEvent<{ payload?: unknown }>).detail;
   const payload = detail?.payload;
@@ -1655,66 +1676,70 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
     import('@/stores/useUIStore'),
     import('@/stores/permissionStore'),
   ]).then(async ([{ useUIStore }, { usePermissionStore }]) => {
-    const localSettings = useUIStore.getState();
     await ensureNotificationSettingsSynced();
-    const syncedSettings = useUIStore.getState();
-    const settings = {
-      ...syncedSettings,
-      nativeNotificationsEnabled: localSettings.nativeNotificationsEnabled,
-      notificationMode: localSettings.notificationMode,
-      notifyOnCompletion: localSettings.notifyOnCompletion,
-      notifyOnError: localSettings.notifyOnError,
-      notifyOnQuestion: localSettings.notifyOnQuestion,
-      notificationTemplates: localSettings.notificationTemplates,
-      summarizeLastMessage: localSettings.summarizeLastMessage,
-      summaryThreshold: localSettings.summaryThreshold,
-      summaryLength: localSettings.summaryLength,
-      maxLastMessageLength: localSettings.maxLastMessageLength,
-    };
+    const settings = useUIStore.getState();
     if (!settings.nativeNotificationsEnabled) {
       return;
     }
     const requireHidden = settings.notificationMode !== 'always';
     const messageId = getPayloadString(info?.id);
-    const rawLastMessage = extractNotificationLastMessage(record) || await fetchLastAssistantMessageText(sessionId, messageId);
+    const error = properties.error;
+    const errorMessage = getPayloadString(
+      typeof error === 'object' && error
+        ? (error as { message?: unknown }).message
+        : error,
+    );
+    const rawLastMessage = extractNotificationLastMessage(record)
+      || errorMessage
+      || await fetchLastAssistantMessageText(sessionId, messageId);
     const lastMessage = prepareNotificationLastMessage(
       rawLastMessage,
       settings,
     );
     const variables = buildNotificationVariables(record, sessionId, lastMessage);
 
-    if (type === 'message.updated' && getPayloadString(info?.role) === 'assistant') {
-      const finish = getPayloadString(info?.finish);
-      if (finish === 'stop') {
-        if (!settings.notifyOnCompletion) return;
-        const now = Date.now();
-        const lastAt = readyNotificationCooldowns.get(sessionId) ?? 0;
-        if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
-        readyNotificationCooldowns.set(sessionId, now);
-        const template = getNotificationTemplate(settings, 'completion', { title: '{agent_name} is ready', message: '{model_name} completed the task' });
-        const title = resolveTemplate(template.title, variables) || 'Agent is ready';
-        const body = resolveTemplate(template.message, variables);
-        showOpenChamberNotification({
-          title,
-          body: shouldApplyTemplateMessage(template.message, body, variables) ? body : `${variables.model_name} completed the task`,
-          sessionId,
-          requireHidden,
-        });
-        return;
-      }
+    const isAssistantMessage = type === 'message.updated' && getPayloadString(info?.role) === 'assistant';
+    const finish = isAssistantMessage ? getPayloadString(info?.finish) : '';
+    const isCompletion = type === 'session.idle' || finish === 'stop';
+    const isError = type === 'session.error' || finish === 'error';
 
-      if (finish === 'error') {
-        if (!settings.notifyOnError) return;
-        const template = getNotificationTemplate(settings, 'error', { title: 'Tool error', message: '{last_message}' });
-        const title = resolveTemplate(template.title, variables) || 'Tool error';
-        const body = resolveTemplate(template.message, variables);
-        showOpenChamberNotification({
-          title,
-          body: shouldApplyTemplateMessage(template.message, body, variables) ? body : 'An error occurred',
-          sessionId,
-          requireHidden,
-        });
-      }
+    if (isCompletion) {
+      const session = await opencodeClient.getSession(sessionId, getNotificationDirectory(record)).catch(() => undefined);
+      if (!session) return;
+      const isSubtask = Boolean(session?.parentID);
+      if (isSubtask ? !settings.notifyOnSubtasks : !settings.notifyOnCompletion) return;
+      const now = Date.now();
+      const lastAt = readyNotificationCooldowns.get(sessionId) ?? 0;
+      if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
+      readyNotificationCooldowns.set(sessionId, now);
+      const template = getNotificationTemplate(settings, isSubtask ? 'subtask' : 'completion', { title: '{agent_name} is ready', message: '{model_name} completed the task' });
+      const title = resolveTemplate(template.title, variables) || 'Agent is ready';
+      const body = resolveTemplate(template.message, variables);
+      showOpenChamberNotification({
+        title,
+        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : `${variables.model_name} completed the task`,
+        sessionId,
+        requireHidden,
+      });
+      return;
+    }
+
+    if (isError) {
+      if (!settings.notifyOnError) return;
+      const now = Date.now();
+      const lastAt = errorNotificationCooldowns.get(sessionId) ?? 0;
+      if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
+      errorNotificationCooldowns.set(sessionId, now);
+      const template = getNotificationTemplate(settings, 'error', { title: 'Tool error', message: '{last_message}' });
+      const title = resolveTemplate(template.title, variables) || 'Tool error';
+      const body = resolveTemplate(template.message, variables);
+      showOpenChamberNotification({
+        title,
+        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : 'An error occurred',
+        sessionId,
+        requireHidden,
+      });
+      return;
     }
 
     if (type === 'question.asked') {

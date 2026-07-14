@@ -1,4 +1,7 @@
 import { abortCurrentOperation, patchSessionMetadata } from '@/sync/session-actions';
+import { distillGoalObjective } from '@/lib/smallModel';
+import { formatMessage, useI18nStore } from '@/lib/i18n';
+import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
   SESSION_GOAL_OBJECTIVE_CHAR_LIMIT,
@@ -74,16 +77,39 @@ export interface SetSessionGoalInput {
  * Create a new goal (fresh id resets accounting) or edit the existing one
  * (id and usage counters preserved).
  */
+// Any goal source can exceed the objective limit (huge plans, pasted specs,
+// long composer prompts). The working agent received the full text in chat;
+// only the AUDITOR is bound by the limit — so oversized objectives are
+// distilled into completion criteria by the small model, and on a transient
+// distillation failure a head+tail excerpt keeps the intent (top) and the
+// acceptance criteria (bottom), sacrificing the middle.
+const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full text was delivered in the chat message …]\n\n';
+
+const fitObjective = async (raw: string): Promise<string> => {
+  if (raw.length <= SESSION_GOAL_OBJECTIVE_CHAR_LIMIT) {
+    return raw;
+  }
+  const distilled = await distillGoalObjective(raw);
+  if (distilled) {
+    return distilled.slice(0, SESSION_GOAL_OBJECTIVE_CHAR_LIMIT);
+  }
+  const half = Math.max(0, Math.floor((SESSION_GOAL_OBJECTIVE_CHAR_LIMIT - TRIM_MARKER.length) / 2));
+  const dictionary = useI18nStore.getState().dictionary;
+  toast.error(formatMessage(dictionary, 'chat.goal.toast.distillFallback'));
+  return `${raw.slice(0, half)}${TRIM_MARKER}${raw.slice(-half)}`;
+};
+
 export async function setSessionGoal(
   sessionId: string,
   directory: string | undefined,
   input: SetSessionGoalInput,
   existing: SessionGoalPayload | null,
 ): Promise<void> {
-  const objective = input.objective.trim().slice(0, SESSION_GOAL_OBJECTIVE_CHAR_LIMIT);
-  if (!objective) {
+  const rawObjective = input.objective.trim();
+  if (!rawObjective) {
     throw new Error('Goal objective must not be empty');
   }
+  const objective = await fitObjective(rawObjective);
   const tokenBudget = typeof input.tokenBudget === 'number' && Number.isFinite(input.tokenBudget) && input.tokenBudget > 0
     ? Math.floor(input.tokenBudget)
     : null;

@@ -181,6 +181,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['recap', 'assist', 'small model', 'summary'],
   },
   {
+    id: 'chat.session-assistance',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.section.sessionAssistance',
+    keywords: ['recap', 'suggestion', 'subagent'],
+  },
+  {
     id: 'chat.session-suggestion',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.sessionSuggestion',
@@ -207,10 +213,23 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['thinking', 'reasoning'],
   },
   {
+    id: 'chat.reasoning',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.section.reasoning',
+    keywords: ['thinking', 'traces'],
+  },
+  {
     id: 'chat.sticky-user-header',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.stickyUserHeader',
     keywords: ['messages', 'header'],
+  },
+  {
+    id: 'chat.prompt-navigator',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.promptNavigatorEnabled',
+    keywords: ['prompt', 'navigator', 'navigation', 'timeline', 'scroll'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'chat.collapsible-user-messages',
@@ -223,6 +242,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.chatMessageWidth',
     keywords: ['layout', 'wide', 'fluid', 'full width', 'messages'],
+  },
+  {
+    id: 'chat.message-appearance',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.section.messageAppearance',
+    keywords: ['layout', 'messages', 'appearance'],
   },
   {
     id: 'chat.code-block-line-wrap',
@@ -238,10 +263,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['copy', 'save image', 'read aloud'],
   },
   {
+    id: 'chat.subagent-read-only-banner',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.allowPromptingSubagentSessions',
+    keywords: ['subagent', 'read only', 'prompt', 'banner'],
+  },
+  {
     id: 'chat.tool-file-icons',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showToolFileIcons',
     keywords: ['tools', 'files', 'icons'],
+  },
+  {
+    id: 'chat.tools-and-files',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.section.toolsAndFiles',
+    keywords: ['tools', 'files', 'dotfiles'],
   },
   {
     id: 'chat.changed-files',
@@ -268,6 +305,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.persistDraftMessages',
     keywords: ['draft', 'message'],
+  },
+  {
+    id: 'chat.composer',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.section.composer',
+    keywords: ['input', 'draft', 'spellcheck'],
   },
   {
     id: 'chat.spellcheck',
@@ -333,6 +376,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
     keywords: ['desktop', 'startup', 'login'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+  {
+    id: 'sessions.desktop-window-controls-position',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.desktopNetwork.field.windowControlsPosition',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.windowControlsPositionDescription',
+    keywords: ['desktop', 'window', 'controls', 'minimize', 'maximize', 'close', 'titlebar', 'linux', 'windows'],
+    isAvailable: (ctx) => ctx.isDesktop && (ctx.isWindows || !ctx.isMac),
   },
   {
     id: 'sessions.desktop-minimize-to-tray',

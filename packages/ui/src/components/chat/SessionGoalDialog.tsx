@@ -18,6 +18,8 @@ import {
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import { clearSessionGoal, setSessionGoal } from '@/lib/sessionGoalActions';
 import { useI18n } from '@/lib/i18n';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { useUIStore } from '@/stores/useUIStore';
 
 interface SessionGoalDialogProps {
   open: boolean;
@@ -31,6 +33,7 @@ interface SessionGoalDialogProps {
 // (pause/resume/complete/clear) once a goal exists.
 export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: SessionGoalDialogProps) {
   const { t } = useI18n();
+  const isMobile = useUIStore((state) => state.isMobile);
   const { goal } = useSessionGoal(sessionId, directory);
   const objectiveContent = useGoalObjectiveContent(sessionId, goal);
 
@@ -86,13 +89,9 @@ export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: 
     true,
   );
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{goal ? t('chat.goal.dialog.titleManage') : t('chat.goal.dialog.titleCreate')}</DialogTitle>
-        </DialogHeader>
+  const title = goal ? t('chat.goal.dialog.titleManage') : t('chat.goal.dialog.titleCreate');
 
+  const body = (
         <div className="space-y-3">
           {goal && (
             <div className="space-y-1 p-2 rounded-lg" style={{ backgroundColor: 'var(--surface-elevated)' }}>
@@ -193,6 +192,25 @@ export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: 
             </div>
           </div>
         </div>
+  );
+
+  // Mobile renders the shared bottom-sheet overlay instead of a centered
+  // dialog — same pattern as model controls and the session status panel.
+  if (isMobile) {
+    return (
+      <MobileOverlayPanel open={open} title={title} onClose={() => onOpenChange(false)}>
+        {body}
+      </MobileOverlayPanel>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        {body}
       </DialogContent>
     </Dialog>
   );

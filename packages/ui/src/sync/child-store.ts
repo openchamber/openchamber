@@ -238,4 +238,41 @@ export class ChildStoreManager {
       storeUnsubscribers.clear()
     }
   }
+
+  subscribeAllSelected<T>(selector: (state: DirectoryStore) => T, listener: () => void): () => void {
+    const storeUnsubscribers = new Map<string, () => void>()
+
+    const syncStoreSubscriptions = () => {
+      const activeDirectories = new Set(this.children.keys())
+
+      for (const [directory, unsubscribe] of storeUnsubscribers.entries()) {
+        if (activeDirectories.has(directory)) continue
+        unsubscribe()
+        storeUnsubscribers.delete(directory)
+      }
+
+      for (const [directory, store] of this.children.entries()) {
+        if (storeUnsubscribers.has(directory)) continue
+        storeUnsubscribers.set(directory, store.subscribe((state, previous) => {
+          if (!Object.is(selector(state), selector(previous))) {
+            listener()
+          }
+        }))
+      }
+    }
+
+    syncStoreSubscriptions()
+    const unsubscribeRegistry = this.subscribeRegistry(() => {
+      syncStoreSubscriptions()
+      listener()
+    })
+
+    return () => {
+      unsubscribeRegistry()
+      for (const unsubscribe of storeUnsubscribers.values()) {
+        unsubscribe()
+      }
+      storeUnsubscribers.clear()
+    }
+  }
 }

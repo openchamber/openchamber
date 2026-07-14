@@ -39,6 +39,9 @@ export type SkillCatalogConfig = {
   gitIdentityId?: string;
 };
 
+export type DesktopWindowControlsPosition = 'auto' | 'left' | 'right';
+export type DesktopWindowControlsSide = 'left' | 'right';
+
 export type DesktopSettings = {
   themeId?: string;
   useSystemTheme?: boolean;
@@ -137,6 +140,7 @@ export type DesktopSettings = {
   pwaAppName?: string;
   pwaOrientation?: 'system' | 'portrait' | 'landscape';
   mobileKeyboardMode?: MobileKeyboardMode;
+  desktopWindowControlsPosition?: DesktopWindowControlsPosition;
   inputSpellcheckEnabled?: boolean;
   showOpenCodeUpdateNotifications?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
@@ -154,6 +158,7 @@ export type DesktopSettings = {
   userMessageRenderingMode?: 'markdown' | 'plain';
   collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;
+  promptNavigatorEnabled?: boolean;
   expandedEditorToolbar?: boolean;
   chatMessageWidthMode?: ChatMessageWidthMode;
   showSplitAssistantMessageActions?: boolean;
@@ -231,6 +236,39 @@ const getDesktopBridge = (): DesktopBridgeGlobal | null => {
 };
 
 export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
+
+export const getElectronPlatform = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
+  return typeof platform === 'string' ? platform : null;
+};
+
+/** Width of the three in-app window control buttons (3 × w-11). */
+export const DESKTOP_WINDOW_CONTROLS_WIDTH_PX = 132;
+
+/** Windows and Linux use frameless windows with in-app minimize/maximize/close controls. */
+export const usesFramelessElectronChrome = (): boolean => {
+  if (!isElectronShell()) return false;
+  const platform = getElectronPlatform();
+  return platform === 'win32' || platform === 'linux';
+};
+
+export const getDefaultDesktopWindowControlsSide = (platform: string | null = getElectronPlatform()): DesktopWindowControlsSide => {
+  if (platform === 'linux') {
+    return 'left';
+  }
+  return 'right';
+};
+
+export const resolveDesktopWindowControlsSide = (
+  preference: DesktopWindowControlsPosition | undefined,
+  platform: string | null = getElectronPlatform(),
+): DesktopWindowControlsSide => {
+  if (preference === 'left' || preference === 'right') {
+    return preference;
+  }
+  return getDefaultDesktopWindowControlsSide(platform);
+};
 
 export const hasDesktopInvoke = (): boolean => {
   return typeof getDesktopBridge()?.invoke === 'function';
@@ -620,13 +658,8 @@ export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
     return null;
   }
 
-  try {
-    const info = await invokeDesktop<UpdateInfo>('desktop_check_for_updates');
-    return info as UpdateInfo;
-  } catch (error) {
-    console.warn('Failed to check for updates', error);
-    return null;
-  }
+  const info = await invokeDesktop<UpdateInfo>('desktop_check_for_updates');
+  return info as UpdateInfo;
 };
 
 export const downloadDesktopUpdate = async (
@@ -675,8 +708,8 @@ export const downloadDesktopUpdate = async (
     await invokeDesktop('desktop_download_and_install_update');
     return true;
   } catch (error) {
-    console.warn('Failed to download update', error);
-    return false;
+    // Propagate actionable updater capability / install errors to the UI store.
+    throw error instanceof Error ? error : new Error(String(error));
   } finally {
     if (unlisten) {
       try {
@@ -874,6 +907,11 @@ export const fetchDesktopInstalledApps = async (
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 
+  // Linux desktop does not resolve installed GUI apps; skip the IPC round-trip.
+  if (getElectronPlatform() === 'linux') {
+    return { apps: [], success: true, hasCache: false, isCacheStale: false };
+  }
+
   const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
   if (candidate.length === 0) {
     return { apps: [], success: true, hasCache: false, isCacheStale: false };
@@ -887,7 +925,10 @@ export const fetchDesktopInstalledApps = async (
     if (!result || typeof result !== 'object') {
       return { apps: [], success: false, hasCache: false, isCacheStale: false };
     }
-    const payload = result as { apps?: unknown; hasCache?: unknown; isCacheStale?: unknown };
+    const payload = result as { apps?: unknown; hasCache?: unknown; isCacheStale?: unknown; supported?: unknown };
+    if (payload.supported === false) {
+      return { apps: [], success: true, hasCache: false, isCacheStale: false };
+    }
     if (!Array.isArray(payload.apps)) {
       return { apps: [], success: false, hasCache: false, isCacheStale: false };
     }

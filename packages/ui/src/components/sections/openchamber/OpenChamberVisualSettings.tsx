@@ -260,7 +260,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'chatMessageWidth' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'chatMessageWidth' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -295,7 +295,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const collapsibleUserMessages = useUIStore(state => state.collapsibleUserMessages);
     const setCollapsibleUserMessages = useUIStore(state => state.setCollapsibleUserMessages);
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
+    const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
     const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
+    const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const expandedEditorToolbar = useUIStore(state => state.expandedEditorToolbar);
     const setExpandedEditorToolbar = useUIStore(state => state.setExpandedEditorToolbar);
     const chatMessageWidthMode = useUIStore(state => state.chatMessageWidthMode);
@@ -348,6 +350,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const showSplitAssistantMessageActions = useUIStore(state => state.showSplitAssistantMessageActions);
     const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
+    const allowPromptingSubagentSessions = useUIStore(state => state.allowPromptingSubagentSessions);
+    const setAllowPromptingSubagentSessions = useUIStore(state => state.setAllowPromptingSubagentSessions);
     const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
     const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
     const effectiveMessageStreamTransport = messageStreamTransport;
@@ -453,6 +457,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setStickyUserHeader(enabled);
         void updateDesktopSettings({ stickyUserHeader: enabled });
     }, [setStickyUserHeader]);
+
+    const handlePromptNavigatorEnabledChange = React.useCallback((enabled: boolean) => {
+        setPromptNavigatorEnabled(enabled);
+        void updateDesktopSettings({ promptNavigatorEnabled: enabled });
+    }, [setPromptNavigatorEnabled]);
 
     const handleExpandedEditorToolbarChange = React.useCallback((enabled: boolean) => {
         setExpandedEditorToolbar(enabled);
@@ -586,8 +595,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
         || shouldShow('chatMessageWidth')
+        || (shouldShow('promptNavigatorEnabled') && !isVSCode)
         || shouldShow('codeBlockLineWrap')
         || shouldShow('splitAssistantMessageActions')
+        || shouldShow('subagentReadOnlyBanner')
         || shouldShow('diffLayout')
         || shouldShow('dotfiles')
         || shouldShow('fileViewerPreview')
@@ -1873,11 +1884,18 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             {/* The goal loop runs in the web server — VS Code only renders
                                 goal state, so the settings section is hidden there too. */}
                             {shouldShow('sessionGoal') && !isVSCode && (
-                                <div className="mb-8">
-                                    <div className="mb-1 px-1">
+                                <section className="p-2 mb-6 space-y-0.5">
+                                    <div className="flex items-center gap-1.5 py-1.5">
                                         <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.goal.sectionTitle')}</h3>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Icon name="information" className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
+                                            </TooltipTrigger>
+                                            <TooltipContent sideOffset={8} className="max-w-sm">
+                                                {t('settings.openchamber.visual.goal.description')}
+                                            </TooltipContent>
+                                        </Tooltip>
                                     </div>
-                                    <section className="p-2 space-y-0.5">
                                         <div
                                             data-settings-item="chat.session-goal"
                                             className="group flex cursor-pointer items-center gap-2 py-0.5"
@@ -1940,14 +1958,15 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 />
                                             ) : null}
                                         </div>
-                                        <p className="typography-meta text-muted-foreground/70 px-0.5 pt-0.5">{t('settings.openchamber.visual.goal.description')}</p>
-                                    </section>
-                                </div>
+                                </section>
                             )}
 
-                            {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('codeBlockLineWrap') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
-                                <section className="p-2 space-y-0.5">
-                                    {shouldShow('sessionAssist') && (
+                            {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('codeBlockLineWrap') || shouldShow('splitAssistantMessageActions') || shouldShow('subagentReadOnlyBanner') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
+                                <div className="space-y-6">
+                                    {(shouldShow('sessionAssist') || shouldShow('subagentReadOnlyBanner')) && (
+                                        <section className="p-2 space-y-0.5">
+                                            <h3 data-settings-item="chat.session-assistance" className="typography-ui-header font-medium text-foreground py-1.5">{t('settings.openchamber.visual.section.sessionAssistance')}</h3>
+                                            {shouldShow('sessionAssist') && (
                                         <>
                                         <div
                                             data-settings-item="chat.session-recap"
@@ -1992,7 +2011,35 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionSuggestion')}</span>
                                         </div>
                                         </>
+                                            )}
+                                            {shouldShow('subagentReadOnlyBanner') && (
+                                                <div
+                                                    data-settings-item="chat.subagent-read-only-banner"
+                                                    className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-pressed={allowPromptingSubagentSessions}
+                                                    onClick={() => setAllowPromptingSubagentSessions(!allowPromptingSubagentSessions)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === ' ' || event.key === 'Enter') {
+                                                            event.preventDefault();
+                                                            setAllowPromptingSubagentSessions(!allowPromptingSubagentSessions);
+                                                        }
+                                                    }}
+                                                >
+                                                    <Checkbox
+                                                        checked={allowPromptingSubagentSessions}
+                                                        onChange={setAllowPromptingSubagentSessions}
+                                                        ariaLabel={t('settings.openchamber.visual.field.allowPromptingSubagentSessionsAria')}
+                                                    />
+                                                    <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.allowPromptingSubagentSessions')}</span>
+                                                </div>
+                                            )}
+                                        </section>
                                     )}
+                                    {shouldShow('reasoning') && (
+                                        <section className="p-2 space-y-0.5">
+                                            <h3 data-settings-item="chat.reasoning" className="typography-ui-header font-medium text-foreground py-1.5">{t('settings.openchamber.visual.section.reasoning')}</h3>
                                     {shouldShow('reasoning') && (
                                         <div
                                             data-settings-item="chat.reasoning-traces"
@@ -2039,7 +2086,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}</span>
                                         </div>
                                     )}
+                                        </section>
+                                    )}
 
+                                    {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
+                                        <section className="p-2 space-y-0.5">
+                                            <h3 data-settings-item="chat.message-appearance" className="typography-ui-header font-medium text-foreground py-1.5">{t('settings.openchamber.visual.section.messageAppearance')}</h3>
                                     {shouldShow('collapsibleUserMessages') && (
                                         <div
                                             data-settings-item="chat.collapsible-user-messages"
@@ -2085,6 +2137,30 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
                                             />
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.stickyUserHeader')}</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('promptNavigatorEnabled') && !isVSCode && (
+                                        <div
+                                            data-settings-item="chat.prompt-navigator"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={promptNavigatorEnabled}
+                                            onClick={() => handlePromptNavigatorEnabledChange(!promptNavigatorEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handlePromptNavigatorEnabledChange(!promptNavigatorEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={promptNavigatorEnabled}
+                                                onChange={handlePromptNavigatorEnabledChange}
+                                                ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.promptNavigatorEnabled')}</span>
                                         </div>
                                     )}
 
@@ -2145,7 +2221,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.codeBlockLineWrap')}</span>
                                         </div>
                                     )}
+                                        </section>
+                                    )}
 
+                                    {(shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || shouldShow('dotfiles') || shouldShow('fileViewerPreview')) && (
+                                        <section className="p-2 space-y-0.5">
+                                            <h3 data-settings-item="chat.tools-and-files" className="typography-ui-header font-medium text-foreground py-1.5">{t('settings.openchamber.visual.section.toolsAndFiles')}</h3>
                                     {shouldShow('showToolFileIcons') && (
                                         <div
                                             data-settings-item="chat.tool-file-icons"
@@ -2242,7 +2323,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.openFilesPreview')}</span>
                                         </div>
                                     )}
+                                        </section>
+                                    )}
 
+                                    {(shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck'))) && (
+                                        <section className="p-2 space-y-0.5">
+                                            <h3 data-settings-item="chat.composer" className="typography-ui-header font-medium text-foreground py-1.5">{t('settings.openchamber.visual.section.composer')}</h3>
                                     {shouldShow('persistDraft') && (
                                         <div
                                             data-settings-item="chat.persist-drafts"
@@ -2270,7 +2356,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     {!isMobile && shouldShow('inputSpellcheck') && (
                                         <div
                                             data-settings-item="chat.spellcheck"
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"
                                             tabIndex={0}
                                             aria-pressed={inputSpellcheckEnabled}
@@ -2290,8 +2376,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.enableSpellcheckInTextInputs')}</span>
                                         </div>
                                     )}
+                                        </section>
+                                    )}
 
-                                </section>
+                                </div>
                             )}
 
                     </div>

@@ -293,6 +293,19 @@ export const createSessionGoalRuntime = ({
     return Array.isArray(messages) ? messages : null;
   };
 
+  const fetchSessionStatuses = async (directory) => {
+    const statuses = await openCodeFetch('/session/status', { directory }).catch(() => null);
+    return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : null;
+  };
+
+  const fetchSessionChildren = async (sessionId, directory) => {
+    const children = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/children`, { directory })
+      .catch(() => null);
+    return Array.isArray(children) ? children : null;
+  };
+
+  const isWorkingStatus = (status) => status?.type === 'busy' || status?.type === 'retry';
+
   // Merge-write the goal payload from a FRESH session read so concurrent
   // metadata writes (assist payloads, dismissals, UI goal edits) survive.
   // Returns the written goal, or null when the stored goal no longer matches
@@ -436,6 +449,26 @@ export const createSessionGoalRuntime = ({
         console.warn(`[session-goal] ${sessionId} objective file unreadable, using inline fallback`);
       }
     }
+
+    // Parent idle does not imply the whole task is quiescent: a background
+    // subagent runs in a child session while its parent stays idle. Re-read
+    // authoritative live status after the quiet window. If the parent resumed,
+    // its next idle event will arm a fresh tick. If a child is still working,
+    // OpenCode will inject its result into the parent and produce the same
+    // busy→idle cycle, so do not poll or audit the interim parent reply.
+    const statuses = await fetchSessionStatuses(directory);
+    if (!statuses) {
+      armTimer(sessionId, directory, idleQuietMs);
+      return;
+    }
+    if (isWorkingStatus(statuses[sessionId])) return;
+
+    const children = await fetchSessionChildren(sessionId, directory);
+    if (!children) {
+      armTimer(sessionId, directory, idleQuietMs);
+      return;
+    }
+    if (children.some((child) => typeof child?.id === 'string' && isWorkingStatus(statuses[child.id]))) return;
 
     const messages = await fetchRecentMessages(sessionId, directory);
     if (!messages) return;

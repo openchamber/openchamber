@@ -76,6 +76,20 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
       type="button"
       className={cn(footerIconButtonClass, colorClass)}
       onClick={handleClick}
+      // Same guard as PermissionAutoAcceptButton, but only for the ARM
+      // toggle: arming happens mid-typing (the next message IS the
+      // objective), so that tap must not dismiss the soft keyboard or
+      // trigger the Android keyboard-close relayout that moves the button
+      // before the click lands. Opening the manage sheet (goal exists) is a
+      // context switch — there the keyboard should close as usual.
+      onMouseDown={(event) => {
+        if (!goal) event.preventDefault();
+      }}
+      onPointerDownCapture={(event) => {
+        if (!goal && event.pointerType === 'touch') {
+          event.preventDefault();
+        }
+      }}
       aria-label={label}
       aria-pressed={isEngaged}
       {...(withTooltip ? {} : { title: label })}
