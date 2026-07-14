@@ -170,9 +170,10 @@ export function routeMessage(params: {
   })
 }
 
-type SendMessageOptions = {
+export type SendMessageOptions = {
   sessionId?: string
   delivery?: 'steer'
+  draftSnapshot?: NewSessionDraftState
 }
 
 type AssistantMessageSessionExecution = {
@@ -288,7 +289,13 @@ export type SessionUIState = {
     options?: SendMessageOptions,
   ) => Promise<void>
 
-  createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null, metadata?: Record<string, unknown>) => Promise<Session | null>
+  createSession: (
+    title?: string,
+    directoryOverride?: string | null,
+    parentID?: string | null,
+    metadata?: Record<string, unknown>,
+    targetFolderId?: string,
+  ) => Promise<Session | null>
   deleteSession: (id: string, options?: Record<string, unknown>) => Promise<boolean>
   deleteSessions: (ids: string[], options?: Record<string, unknown>) => Promise<{ deletedIds: string[]; failedIds: string[] }>
   archiveSession: (id: string) => Promise<boolean>
@@ -437,14 +444,17 @@ const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, pr
   }
 }
 
-export async function materializeOpenDraftSession(selection: {
-  providerID: string
-  modelID: string
-  agent?: string
-  variant?: string
-}): Promise<MaterializedDraftSession | null> {
+export async function materializeOpenDraftSession(
+  selection: {
+    providerID: string
+    modelID: string
+    agent?: string
+    variant?: string
+  },
+  draftOverride?: NewSessionDraftState,
+): Promise<MaterializedDraftSession | null> {
   const store = useSessionUIStore.getState()
-  const draft = store.newSessionDraft
+  const draft = draftOverride ?? store.newSessionDraft
   if (!draft?.open) return null
   const draftPermissionAutoAcceptEnabled = draft.permissionAutoAcceptEnabled === true
 
@@ -461,7 +471,13 @@ export async function materializeOpenDraftSession(selection: {
 
   await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
 
-  const created = await store.createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
+  const created = await store.createSession(
+    draft.title,
+    draftDirectoryOverride,
+    draft.parentID ?? null,
+    undefined,
+    draft.targetFolderId,
+  )
   if (!created?.id) throw new Error("Failed to create session")
 
   persistDraftTarget({
@@ -1024,7 +1040,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       set({ pendingChangesBarDismissed: map });
     }
 
-    const draft = get().newSessionDraft
+    const draft = options?.draftSnapshot ?? get().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
     const goalArm = inputMode !== "shell" && content.trim().length > 0
@@ -1064,7 +1080,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         modelID,
         agent: trimmedAgent,
         variant,
-      })
+      }, options?.draftSnapshot)
       if (!createdDraftSession) throw new Error("Failed to create session")
 
       const mergedAdditionalParts = createdDraftSession.syntheticParts?.length
@@ -1193,9 +1209,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // createSession
   // ---------------------------------------------------------------------------
-  createSession: async (title, directoryOverride, parentID, metadata) => {
-    const draft = get().newSessionDraft
-    const targetFolderId = draft.targetFolderId
+  createSession: async (title, directoryOverride, parentID, metadata, targetFolderIdOverride) => {
+    const targetFolderId = targetFolderIdOverride
     get().closeNewSessionDraft()
 
     try {
@@ -1204,7 +1219,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (!session) return null
 
       if (targetFolderId) {
-        const scopeKey = directoryOverride || get().lastLoadedDirectory || session.directory
+        const scopeKey = directoryOverride || session.directory || get().lastLoadedDirectory
         if (scopeKey) {
           useSessionFoldersStore.getState().addSessionToFolder(scopeKey, targetFolderId, session.id)
         }

@@ -8,7 +8,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionUIStore, type SendMessageOptions } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -1864,6 +1864,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
+        // Capture session target and full draft state before any async gap —
+        // sidebar selection may change during the async preparation below, and
+        // sendMessage reads currentSessionId / newSessionDraft live from the store.
+        const capturedSessionId = currentSessionId;
+        const capturedDraft = newSessionDraft;
+
         const capturedSendConfig = queuedOnly ? queuedMessagesToSend[0]?.sendConfig : undefined;
         const providerIdToSend = capturedSendConfig?.providerID ?? currentProviderId;
         const modelIdToSend = capturedSendConfig?.modelID ?? currentModelId;
@@ -1897,7 +1903,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const sendMessageOptions = delivery ? { delivery } : undefined;
+        const sendMessageOptions: SendMessageOptions = delivery ? { delivery } : {};
+        if (capturedSessionId) {
+            sendMessageOptions.sessionId = capturedSessionId;
+        } else if (capturedDraft?.open) {
+            sendMessageOptions.draftSnapshot = { ...capturedDraft };
+        }
 
         // Build the primary message (first part) and additional parts
         let primaryText = '';
