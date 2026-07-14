@@ -6,6 +6,8 @@ import { createBrowserGlobalStubScope } from './browser-global-stubs';
 const browserGlobals = createBrowserGlobalStubScope();
 
 function installDomStubs() {
+  // WS tests refresh URL auth before connecting; seed the cache so they don't
+  // issue a real /auth/url-token request.
   setRuntimeUrlAuthToken('event-pipeline-test-token', Date.now() + 60_000);
   browserGlobals.install('document', {
     visibilityState: 'visible',
