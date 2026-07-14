@@ -280,6 +280,101 @@ describe('getStatus', () => {
 
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
   });
+
+  it('serializes concurrent getStatus calls to a single git execution', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.writeFileSync(path.join(repo, 'new.md'), 'new file\n');
+
+    const [r1, r2, r3] = await Promise.all([
+      getStatus(repo),
+      getStatus(repo),
+      getStatus(repo),
+    ]);
+
+    expect(r1).toMatchObject({ current: 'main' });
+    expect(r1.files).toEqual(r2.files);
+    expect(r2.files).toEqual(r3.files);
+  });
+
+  it('queues getStatus behind a mutating stage operation', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n');
+    runGit(repo, ['add', 'a.txt']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.writeFileSync(path.join(repo, 'b.txt'), 'b\n');
+
+    // getStatus should complete without error even when a stage is in-flight
+    await Promise.all([
+      stageFiles(repo, ['b.txt']),
+      getStatus(repo),
+    ]);
+  });
+
+  it('shares serialization between a primary repo and its linked worktree', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.rmSync(worktree, { recursive: true, force: true });
+    runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
+    fs.writeFileSync(path.join(worktree, 'wt.md'), 'worktree file\n');
+
+    const [r1, r2] = await Promise.all([
+      getStatus(repo),
+      getStatus(worktree),
+    ]);
+
+    expect(r1).toMatchObject({ current: 'main' });
+    expect(r2).toMatchObject({ current: 'feature/test' });
+  });
+
+  it('allows concurrent getStatus across unrelated repositories', async () => {
+    if (!canRunGit()) return;
+
+    const repoA = createTempDir();
+    const repoB = createTempDir();
+
+    runGit(repoA, ['init', '-b', 'main']);
+    runGit(repoA, ['config', 'user.email', 'test@example.com']);
+    runGit(repoA, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repoA, 'a.md'), '# A\n');
+    runGit(repoA, ['add', 'a.md']);
+    runGit(repoA, ['commit', '-m', 'Init A']);
+
+    runGit(repoB, ['init', '-b', 'main']);
+    runGit(repoB, ['config', 'user.email', 'test@example.com']);
+    runGit(repoB, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repoB, 'b.md'), '# B\n');
+    runGit(repoB, ['add', 'b.md']);
+    runGit(repoB, ['commit', '-m', 'Init B']);
+
+    const [rA, rB] = await Promise.all([
+      getStatus(repoA),
+      getStatus(repoB),
+    ]);
+
+    expect(rA).toMatchObject({ current: 'main' });
+    expect(rB).toMatchObject({ current: 'main' });
+  });
 });
 
 // ---------------------------------------------------------------------------

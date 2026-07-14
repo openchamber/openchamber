@@ -17,6 +17,7 @@ const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
 const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
 const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
 const gitIndexMutationQueues = new Map();
+const getStatusInFlight = new Map();
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
@@ -364,16 +365,25 @@ const getGitIndexMutationQueueKey = (directory) => {
   return path.resolve(normalized);
 };
 
+const resolveGitCommonDir = async (directoryPath, git) => {
+  const commonDirRaw = await git.raw(['rev-parse', '--git-common-dir']);
+  const commonDir = commonDirRaw.trim();
+  if (path.isAbsolute(commonDir)) {
+    return path.resolve(commonDir);
+  }
+  return path.resolve(directoryPath, commonDir);
+};
+
 const withGitIndexMutationQueue = async (directory, task) => {
   let key = getGitIndexMutationQueueKey(directory);
   try {
     const directoryPath = normalizeDirectoryPath(directory);
     if (directoryPath) {
       const git = await createGit(directoryPath);
-      key = await resolveGitRepositoryRoot(directoryPath, git);
+      key = await resolveGitCommonDir(directoryPath, git);
     }
   } catch {
-    // Fall back to the normalized directory key when the repo root is unavailable.
+    // Fall back to the normalized directory key when the common dir is unavailable.
   }
   if (!key) {
     return task();
@@ -1940,268 +1950,290 @@ export async function setLocalIdentity(directory, profile) {
 }
 
 export async function getStatus(directory, options = {}) {
-  const lightMode = options.mode === 'light';
+  return withGitIndexMutationQueue(directory, async () => {
+    const lightMode = options.mode === 'light';
 
-  try {
-    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(directory);
+    try {
+      const { directoryPath, repoRoot, git } = await createRepositoryGitContext(directory);
+      const commonDirKey = await resolveGitCommonDir(directoryPath, git);
 
-    // Use -uall to show all untracked files individually, not just directories
-    const status = await git.status(['-uall']);
+      if (getStatusInFlight.has(commonDirKey)) {
+        return getStatusInFlight.get(commonDirKey);
+      }
 
-    // Light mode: skip numstat + new-file line counting for faster response
-    const [stagedStatsRaw, workingStatsRaw] = lightMode
-      ? ['', '']
-      : await Promise.all([
-          git.raw(['diff', '--cached', '--numstat']).catch(() => ''),
-          git.raw(['diff', '--numstat']).catch(() => ''),
-        ]);
-
-    const diffStatsMap = new Map();
-
-    const accumulateStats = (raw) => {
-      if (!raw) return;
-      raw
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .forEach((line) => {
-          const parts = line.split('\t');
-          if (parts.length < 3) {
-            return;
-          }
-          const [insertionsRaw, deletionsRaw, ...pathParts] = parts;
-          const path = pathParts.join('\t');
-          if (!path) {
-            return;
-          }
-          const insertions = insertionsRaw === '-' ? 0 : parseInt(insertionsRaw, 10) || 0;
-          const deletions = deletionsRaw === '-' ? 0 : parseInt(deletionsRaw, 10) || 0;
-
-          const existing = diffStatsMap.get(path) || { insertions: 0, deletions: 0 };
-          diffStatsMap.set(path, {
-            insertions: existing.insertions + insertions,
-            deletions: existing.deletions + deletions,
-          });
-        });
-    };
-
-    accumulateStats(stagedStatsRaw);
-    accumulateStats(workingStatsRaw);
-
-    const diffStats = Object.fromEntries(diffStatsMap.entries());
-
-    const MAX_NEW_FILE_STATS = 200;
-    const MAX_NEW_FILE_STAT_SIZE = 1024 * 1024;
-    const newFileStats = [];
-
-    if (!lightMode) {
-      for (const file of status.files) {
-        if (newFileStats.length >= MAX_NEW_FILE_STATS) {
-          break;
-        }
-
-        const working = (file.working_dir || '').trim();
-        const indexStatus = (file.index || '').trim();
-        const statusCode = working || indexStatus;
-
-        if (statusCode !== '?' && statusCode !== 'A') {
-          continue;
-        }
-
-        const existing = diffStats[file.path];
-        if (existing && existing.insertions > 0) {
-          continue;
-        }
-
-        const absolutePath = path.join(repoRoot, file.path);
-
+      const promise = (async () => {
         try {
-          const stat = await fsp.stat(absolutePath);
-          if (!stat.isFile() || stat.size > MAX_NEW_FILE_STAT_SIZE) {
-            continue;
+          // Use -uall to show all untracked files individually, not just directories
+          const status = await git.status(['-uall']);
+
+          // Light mode: skip numstat + new-file line counting for faster response
+          // Sequential execution to avoid concurrent git subprocesses
+          let stagedStatsRaw = '';
+          let workingStatsRaw = '';
+          if (!lightMode) {
+            stagedStatsRaw = await git.raw(['diff', '--cached', '--numstat']).catch(() => '');
+            workingStatsRaw = await git.raw(['diff', '--numstat']).catch(() => '');
           }
 
-          const buffer = await fsp.readFile(absolutePath);
-          if (buffer.indexOf(0) !== -1) {
-            newFileStats.push({
-              path: file.path,
-              insertions: existing?.insertions ?? 0,
-              deletions: existing?.deletions ?? 0,
-            });
-            continue;
+          const diffStatsMap = new Map();
+
+          const accumulateStats = (raw) => {
+            if (!raw) return;
+            raw
+              .split('\n')
+              .map((line) => line.trim())
+              .filter(Boolean)
+              .forEach((line) => {
+                const parts = line.split('\t');
+                if (parts.length < 3) {
+                  return;
+                }
+                const [insertionsRaw, deletionsRaw, ...pathParts] = parts;
+                const path = pathParts.join('\t');
+                if (!path) {
+                  return;
+                }
+                const insertions = insertionsRaw === '-' ? 0 : parseInt(insertionsRaw, 10) || 0;
+                const deletions = deletionsRaw === '-' ? 0 : parseInt(deletionsRaw, 10) || 0;
+
+                const existing = diffStatsMap.get(path) || { insertions: 0, deletions: 0 };
+                diffStatsMap.set(path, {
+                  insertions: existing.insertions + insertions,
+                  deletions: existing.deletions + deletions,
+                });
+              });
+          };
+
+          accumulateStats(stagedStatsRaw);
+          accumulateStats(workingStatsRaw);
+
+          const diffStats = Object.fromEntries(diffStatsMap.entries());
+
+          const MAX_NEW_FILE_STATS = 200;
+          const MAX_NEW_FILE_STAT_SIZE = 1024 * 1024;
+          const newFileStats = [];
+
+          if (!lightMode) {
+            for (const file of status.files) {
+              if (newFileStats.length >= MAX_NEW_FILE_STATS) {
+                break;
+              }
+
+              const working = (file.working_dir || '').trim();
+              const indexStatus = (file.index || '').trim();
+              const statusCode = working || indexStatus;
+
+              if (statusCode !== '?' && statusCode !== 'A') {
+                continue;
+              }
+
+              const existing = diffStats[file.path];
+              if (existing && existing.insertions > 0) {
+                continue;
+              }
+
+              const absolutePath = path.join(repoRoot, file.path);
+
+              try {
+                const stat = await fsp.stat(absolutePath);
+                if (!stat.isFile() || stat.size > MAX_NEW_FILE_STAT_SIZE) {
+                  continue;
+                }
+
+                const buffer = await fsp.readFile(absolutePath);
+                if (buffer.indexOf(0) !== -1) {
+                  newFileStats.push({
+                    path: file.path,
+                    insertions: existing?.insertions ?? 0,
+                    deletions: existing?.deletions ?? 0,
+                  });
+                  continue;
+                }
+
+                const normalized = buffer.toString('utf8').replace(/\r\n/g, '\n');
+                if (!normalized.length) {
+                  newFileStats.push({
+                    path: file.path,
+                    insertions: 0,
+                    deletions: 0,
+                  });
+                  continue;
+                }
+
+                const segments = normalized.split('\n');
+                if (normalized.endsWith('\n')) {
+                  segments.pop();
+                }
+
+                const lineCount = segments.length;
+                newFileStats.push({
+                  path: file.path,
+                  insertions: lineCount,
+                  deletions: 0,
+                });
+              } catch (error) {
+                if (error?.code !== 'ENOENT') {
+                  console.warn('Failed to estimate diff stats for new file', file.path, error);
+                }
+              }
+            }
           }
 
-          const normalized = buffer.toString('utf8').replace(/\r\n/g, '\n');
-          if (!normalized.length) {
-            newFileStats.push({
-              path: file.path,
-              insertions: 0,
-              deletions: 0,
-            });
-            continue;
+          for (const entry of newFileStats) {
+            diffStats[entry.path] = {
+              insertions: entry.insertions,
+              deletions: entry.deletions,
+            };
           }
 
-          const segments = normalized.split('\n');
-          if (normalized.endsWith('\n')) {
-            segments.pop();
+          const selectBaseRefForUnpublished = async () => {
+            const candidates = [];
+
+            const originHead = await git
+              .raw(['symbolic-ref', '-q', 'refs/remotes/origin/HEAD'])
+              .then((value) => String(value || '').trim())
+              .catch(() => '');
+
+            if (originHead) {
+              // "refs/remotes/origin/main" -> "origin/main"
+              candidates.push(originHead.replace(/^refs\/remotes\//, ''));
+            }
+
+            candidates.push('origin/main', 'origin/master', 'main', 'master');
+
+            for (const ref of candidates) {
+              const exists = await git
+                .raw(['rev-parse', '--verify', ref])
+                .then((value) => String(value || '').trim())
+                .catch(() => '');
+              if (exists) return ref;
+            }
+
+            return null;
+          };
+
+          let tracking = status.tracking || null;
+          let ahead = status.ahead;
+          let behind = status.behind;
+          let upstreamComparison;
+
+          // When no upstream is configured (common for new worktree branches), Git doesn't report ahead/behind.
+          // We still want to show the number of unpublished commits to the user.
+          // Light mode skips this — the basic ahead/behind from git status is sufficient for polling.
+          if (!lightMode && !tracking && status.current) {
+            const baseRef = await selectBaseRefForUnpublished();
+            if (baseRef) {
+              const countRaw = await git
+                .raw(['rev-list', '--count', `${baseRef}..HEAD`])
+                .then((value) => String(value || '').trim())
+                .catch(() => '');
+              const count = parseInt(countRaw, 10);
+              if (Number.isFinite(count)) {
+                ahead = count;
+                behind = 0;
+              }
+            }
           }
 
-          const lineCount = segments.length;
-          newFileStats.push({
-            path: file.path,
-            insertions: lineCount,
-            deletions: 0,
-          });
+          if (
+            !lightMode
+            && status.current
+            && (!tracking || !tracking.startsWith('upstream/'))
+            && await hasRemote(git, directoryPath, 'upstream')
+          ) {
+            upstreamComparison = await getRemoteBranchComparison(git, 'upstream', status.current);
+          }
+
+          // Check for in-progress operations
+          let mergeInProgress = null;
+          let rebaseInProgress = null;
+
+          try {
+            // Check MERGE_HEAD for merge in progress
+            const mergeHeadExists = await git
+              .raw(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'])
+              .then(() => true)
+              .catch(() => false);
+
+            if (mergeHeadExists) {
+              const mergeHead = await git.raw(['rev-parse', 'MERGE_HEAD']).catch(() => '');
+              const headSha = mergeHead.trim().slice(0, 7);
+              // Only set mergeInProgress if we actually have a valid head SHA
+              if (headSha) {
+                const mergeMsgPath = await resolveGitInternalPath(repoRoot, git, 'MERGE_MSG').catch(() => '');
+                const mergeMsg = mergeMsgPath ? await fsp.readFile(mergeMsgPath, 'utf8').catch(() => '') : '';
+                mergeInProgress = {
+                  head: headSha,
+                  message: mergeMsg.split('\n')[0] || '',
+                };
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          try {
+            // Check for rebase in progress (.git/rebase-merge or .git/rebase-apply)
+            const rebaseMergePath = await resolveGitInternalPath(repoRoot, git, 'rebase-merge').catch(() => '');
+            const rebaseApplyPath = await resolveGitInternalPath(repoRoot, git, 'rebase-apply').catch(() => '');
+            const rebaseMergeExists = rebaseMergePath ? await fsp.stat(rebaseMergePath).then(() => true).catch(() => false) : false;
+            const rebaseApplyExists = rebaseApplyPath ? await fsp.stat(rebaseApplyPath).then(() => true).catch(() => false) : false;
+
+            if (rebaseMergeExists || rebaseApplyExists) {
+              const rebasePath = rebaseMergeExists ? rebaseMergePath : rebaseApplyPath;
+              const headName = await fsp.readFile(path.join(rebasePath, 'head-name'), 'utf8').catch(() => '');
+              const onto = await fsp.readFile(path.join(rebasePath, 'onto'), 'utf8').catch(() => '');
+
+              const headNameTrimmed = headName.trim().replace('refs/heads/', '');
+              const ontoTrimmed = onto.trim().slice(0, 7);
+
+              // Only set rebaseInProgress if we have valid data
+              if (headNameTrimmed || ontoTrimmed) {
+                rebaseInProgress = {
+                  headName: headNameTrimmed,
+                  onto: ontoTrimmed,
+                };
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          return {
+            current: status.current,
+            tracking,
+            ahead,
+            behind,
+            upstreamComparison,
+            files: status.files.map((f) => ({
+              path: f.path,
+              index: f.index,
+              working_dir: f.working_dir,
+            })),
+            isClean: status.isClean(),
+            diffStats: lightMode ? undefined : diffStats,
+            mergeInProgress,
+            rebaseInProgress,
+          };
         } catch (error) {
-          if (error?.code !== 'ENOENT') {
-            console.warn('Failed to estimate diff stats for new file', file.path, error);
+          if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
+            console.error('Failed to get Git status:', error);
           }
+          throw error;
+        } finally {
+          getStatusInFlight.delete(commonDirKey);
         }
+      })();
+
+      getStatusInFlight.set(commonDirKey, promise);
+      return promise;
+    } catch (error) {
+      if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
+        console.error('Failed to get Git status:', error);
       }
+      throw error;
     }
-
-    for (const entry of newFileStats) {
-      diffStats[entry.path] = {
-        insertions: entry.insertions,
-        deletions: entry.deletions,
-      };
-    }
-
-    const selectBaseRefForUnpublished = async () => {
-      const candidates = [];
-
-      const originHead = await git
-        .raw(['symbolic-ref', '-q', 'refs/remotes/origin/HEAD'])
-        .then((value) => String(value || '').trim())
-        .catch(() => '');
-
-      if (originHead) {
-        // "refs/remotes/origin/main" -> "origin/main"
-        candidates.push(originHead.replace(/^refs\/remotes\//, ''));
-      }
-
-      candidates.push('origin/main', 'origin/master', 'main', 'master');
-
-      for (const ref of candidates) {
-        const exists = await git
-          .raw(['rev-parse', '--verify', ref])
-          .then((value) => String(value || '').trim())
-          .catch(() => '');
-        if (exists) return ref;
-      }
-
-      return null;
-    };
-
-    let tracking = status.tracking || null;
-    let ahead = status.ahead;
-    let behind = status.behind;
-    let upstreamComparison;
-
-    // When no upstream is configured (common for new worktree branches), Git doesn't report ahead/behind.
-    // We still want to show the number of unpublished commits to the user.
-    // Light mode skips this — the basic ahead/behind from git status is sufficient for polling.
-    if (!lightMode && !tracking && status.current) {
-      const baseRef = await selectBaseRefForUnpublished();
-      if (baseRef) {
-        const countRaw = await git
-          .raw(['rev-list', '--count', `${baseRef}..HEAD`])
-          .then((value) => String(value || '').trim())
-          .catch(() => '');
-        const count = parseInt(countRaw, 10);
-        if (Number.isFinite(count)) {
-          ahead = count;
-          behind = 0;
-        }
-      }
-    }
-
-    if (
-      !lightMode
-      && status.current
-      && (!tracking || !tracking.startsWith('upstream/'))
-      && await hasRemote(git, directoryPath, 'upstream')
-    ) {
-      upstreamComparison = await getRemoteBranchComparison(git, 'upstream', status.current);
-    }
-
-    // Check for in-progress operations
-    let mergeInProgress = null;
-    let rebaseInProgress = null;
-
-    try {
-      // Check MERGE_HEAD for merge in progress
-      const mergeHeadExists = await git
-        .raw(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'])
-        .then(() => true)
-        .catch(() => false);
-      
-      if (mergeHeadExists) {
-        const mergeHead = await git.raw(['rev-parse', 'MERGE_HEAD']).catch(() => '');
-        const headSha = mergeHead.trim().slice(0, 7);
-        // Only set mergeInProgress if we actually have a valid head SHA
-        if (headSha) {
-          const mergeMsgPath = await resolveGitInternalPath(repoRoot, git, 'MERGE_MSG').catch(() => '');
-          const mergeMsg = mergeMsgPath ? await fsp.readFile(mergeMsgPath, 'utf8').catch(() => '') : '';
-          mergeInProgress = {
-            head: headSha,
-            message: mergeMsg.split('\n')[0] || '',
-          };
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    try {
-      // Check for rebase in progress (.git/rebase-merge or .git/rebase-apply)
-      const rebaseMergePath = await resolveGitInternalPath(repoRoot, git, 'rebase-merge').catch(() => '');
-      const rebaseApplyPath = await resolveGitInternalPath(repoRoot, git, 'rebase-apply').catch(() => '');
-      const rebaseMergeExists = rebaseMergePath ? await fsp.stat(rebaseMergePath).then(() => true).catch(() => false) : false;
-      const rebaseApplyExists = rebaseApplyPath ? await fsp.stat(rebaseApplyPath).then(() => true).catch(() => false) : false;
-      
-      if (rebaseMergeExists || rebaseApplyExists) {
-        const rebasePath = rebaseMergeExists ? rebaseMergePath : rebaseApplyPath;
-        const headName = await fsp.readFile(path.join(rebasePath, 'head-name'), 'utf8').catch(() => '');
-        const onto = await fsp.readFile(path.join(rebasePath, 'onto'), 'utf8').catch(() => '');
-        
-        const headNameTrimmed = headName.trim().replace('refs/heads/', '');
-        const ontoTrimmed = onto.trim().slice(0, 7);
-        
-        // Only set rebaseInProgress if we have valid data
-        if (headNameTrimmed || ontoTrimmed) {
-          rebaseInProgress = {
-            headName: headNameTrimmed,
-            onto: ontoTrimmed,
-          };
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    return {
-      current: status.current,
-      tracking,
-      ahead,
-      behind,
-      upstreamComparison,
-      files: status.files.map((f) => ({
-        path: f.path,
-        index: f.index,
-        working_dir: f.working_dir,
-      })),
-      isClean: status.isClean(),
-      diffStats: lightMode ? undefined : diffStats,
-      mergeInProgress,
-      rebaseInProgress,
-    };
-  } catch (error) {
-    if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
-      console.error('Failed to get Git status:', error);
-    }
-    throw error;
-  }
+  });
 }
 
 export async function getDiff(directory, { path: filePath, staged = false, contextLines = 3 } = {}) {
