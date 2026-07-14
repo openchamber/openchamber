@@ -493,7 +493,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   React.useEffect(() => {
     if (editingId !== session.id) return;
     const handleDocMouseDown = (e: MouseEvent) => {
-      if (formRef.current && !formRef.current.contains(e.target as Node)) {
+      if (formRef.current && !e.composedPath().includes(formRef.current)) {
         handleSaveEditRef.current(renameDraftRef.current);
       }
     };
