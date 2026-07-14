@@ -1,8 +1,8 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import { deleteMobileConnection, loadMobileConnections, mobilePairingFailureKey, probeConnectionCandidates, upsertMobileConnection, validateMobileConnectionSession, type MobileDirectE2eeConfig, type MobileRelayConfig } from './mobileConnections';
+import { deleteMobileConnection, loadMobileConnections, probeConnectionCandidates, upsertMobileConnection, validateMobileConnectionSession, type MobileDirectE2eeConfig, type MobileRelayConfig } from './mobileConnections';
 import type { RelayTunnelClient, RelayTunnelFailureClassification } from '@/lib/relay/tunnel-client';
-import { PairingRedemptionError } from '@/lib/pairingCandidateRedemption';
+import { PairingRedemptionError, pairingFailureMessageKey } from '@/lib/pairingCandidateRedemption';
 import { dict as englishMessages } from '@/lib/i18n/messages/en';
 
 const originalFetch = globalThis.fetch;
@@ -299,9 +299,9 @@ describe('mobile pairing failure messages', () => {
     ] as const;
 
     for (const [classification, expected] of cases) {
-      expect(mobilePairingFailureKey(new PairingRedemptionError(classification, 'sensitive detail'))).toBe(expected);
+      expect(pairingFailureMessageKey(new PairingRedemptionError(classification, 'sensitive detail'))).toBe(expected);
     }
-    expect(mobilePairingFailureKey(new Error('unknown sensitive detail'))).toBe('mobile.connect.error.pairingUncertain');
+    expect(pairingFailureMessageKey(new Error('unknown sensitive detail'))).toBe('mobile.connect.error.pairingUncertain');
   });
 
   test('mobile pairing errors render safe copy without raw failure details or classification tokens', () => {
@@ -313,7 +313,7 @@ describe('mobile pairing failure messages', () => {
     ];
 
     for (const error of errors) {
-      const message = englishMessages[mobilePairingFailureKey(error)];
+      const message = englishMessages[pairingFailureMessageKey(error)];
       expect(message).toBeTruthy();
       expect(message).not.toContain('private.example');
       expect(message).not.toContain('crypto');

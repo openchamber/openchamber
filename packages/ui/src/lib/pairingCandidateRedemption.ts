@@ -17,6 +17,27 @@ export class PairingRedemptionError extends Error {
   }
 }
 
+export type PairingFailureMessageKey =
+  | 'mobile.connect.error.unreachable'
+  | 'mobile.connect.error.authRequired'
+  | 'mobile.connect.error.pairingSecurity'
+  | 'mobile.connect.error.pairingUncertain';
+
+export const pairingFailureMessageKey = (error: unknown): PairingFailureMessageKey => {
+  if (!(error instanceof PairingRedemptionError)) return 'mobile.connect.error.pairingUncertain';
+  switch (error.classification) {
+    case 'unreachable':
+      return 'mobile.connect.error.unreachable';
+    case 'credential':
+    case 'authorization':
+      return 'mobile.connect.error.authRequired';
+    case 'security':
+      return 'mobile.connect.error.pairingSecurity';
+    case 'ambiguous':
+      return 'mobile.connect.error.pairingUncertain';
+  }
+};
+
 export interface PairingRedemptionOptions {
   redeemBody: Record<string, unknown>;
   directFetch?: typeof fetch;

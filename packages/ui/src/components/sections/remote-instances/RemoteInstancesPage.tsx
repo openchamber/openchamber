@@ -35,7 +35,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { PendingPairingRecord, RemoteClientRecord } from '@/lib/api/types';
 import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, normalizePairingCandidate, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 import { resolvePairingTransportRequest, consumeAddDeviceIntent, selectPairingTransport } from '@/lib/pairingTransportOptions';
-import { redeemPairingCandidate } from '@/lib/pairingCandidateRedemption';
+import { redeemRemoteInstancePairing } from '@/lib/remoteInstancePairing';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
@@ -549,11 +549,12 @@ export const RemoteInstancesPage: React.FC = () => {
       devicePlatform: desktopPlatformName(),
       ...(installId ? { dedupeKey: `desktop:${installId}` } : {}),
     };
-    const redeemed = await redeemPairingCandidate(payload, { redeemBody }).catch(() => null);
-    if (!redeemed) {
-      setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
+    const redemption = await redeemRemoteInstancePairing(payload, { redeemBody });
+    if (!redemption.ok) {
+      setDirectError(t(redemption.errorKey));
       return;
     }
+    const redeemed = redemption;
 
     const makeId = (): string => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
