@@ -113,6 +113,7 @@
       ],
       "category": "Development",
       "icon": "resources/icons/icon.png",
+      "maintainer": "Bohdan Triapitsyn <artmore@protonmail.com>",
       "executableName": "openchamber",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "desktop": {
