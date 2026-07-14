@@ -173,6 +173,12 @@ export function routeMessage(params: {
 type SendMessageOptions = {
   sessionId?: string
   delivery?: 'steer'
+  draft?: NewSessionDraftState
+}
+
+type CreateSessionOptions = {
+  select?: boolean
+  targetFolderId?: string
 }
 
 type AssistantMessageSessionExecution = {
@@ -199,6 +205,7 @@ export type { SessionMemoryState } from "./viewport-store"
 
 export type NewSessionDraftState = {
   open: boolean
+  materializationKey?: object
   selectedProjectId?: string | null
   directoryOverride: string | null
   permissionAutoAcceptEnabled?: boolean
@@ -288,7 +295,7 @@ export type SessionUIState = {
     options?: SendMessageOptions,
   ) => Promise<void>
 
-  createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null, metadata?: Record<string, unknown>) => Promise<Session | null>
+  createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null, metadata?: Record<string, unknown>, options?: CreateSessionOptions) => Promise<Session | null>
   deleteSession: (id: string, options?: Record<string, unknown>) => Promise<boolean>
   deleteSessions: (ids: string[], options?: Record<string, unknown>) => Promise<{ deletedIds: string[]; failedIds: string[] }>
   archiveSession: (id: string) => Promise<boolean>
@@ -437,73 +444,91 @@ const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, pr
   }
 }
 
-export async function materializeOpenDraftSession(selection: {
+const draftMaterializations = new WeakMap<object, Promise<MaterializedDraftSession | null>>()
+
+export function materializeOpenDraftSession(selection: {
   providerID: string
   modelID: string
   agent?: string
   variant?: string
-}): Promise<MaterializedDraftSession | null> {
+}, draftOverride?: NewSessionDraftState): Promise<MaterializedDraftSession | null> {
   const store = useSessionUIStore.getState()
-  const draft = store.newSessionDraft
-  if (!draft?.open) return null
-  const draftPermissionAutoAcceptEnabled = draft.permissionAutoAcceptEnabled === true
+  const draft = draftOverride ?? store.newSessionDraft
+  if (!draft?.open) return Promise.resolve(null)
+  const materializationKey = draft.materializationKey ?? draft
 
-  const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
-    ? selection.agent.trim()
-    : undefined
-  let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
-  const draftProjectId = draft.selectedProjectId ?? null
+  const pending = draftMaterializations.get(materializationKey)
+  if (pending) return pending
 
-  if (draft.pendingWorktreeRequestId) {
-    draftDirectoryOverride = await waitForPendingDraftWorktreeRequest(draft.pendingWorktreeRequestId)
-    store.resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
-  }
+  const materialization = (async () => {
+    const draftPermissionAutoAcceptEnabled = draft.permissionAutoAcceptEnabled === true
+    const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
+      ? selection.agent.trim()
+      : undefined
+    let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
+    const draftProjectId = draft.selectedProjectId ?? null
 
-  await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
+    if (draft.pendingWorktreeRequestId) {
+      draftDirectoryOverride = await waitForPendingDraftWorktreeRequest(draft.pendingWorktreeRequestId)
+      store.resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
+    }
 
-  const created = await store.createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
-  if (!created?.id) throw new Error("Failed to create session")
+    await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
 
-  persistDraftTarget({
-    projectId: draftProjectId,
-    directory: normalizePath(draftDirectoryOverride ?? created.directory ?? null),
-  })
+    const created = await store.createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null, undefined, {
+      select: false,
+      targetFolderId: draft.targetFolderId,
+    })
+    if (!created?.id) throw new Error("Failed to create session")
 
-  const draftSyntheticParts = draft.syntheticParts
-  const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
-  const configState = useConfigStore.getState()
-  void activateConfigForDirectory(createdDirectory).catch((error) => {
-    console.warn("Failed to activate directory after creating session:", error)
-  })
+    persistDraftTarget({
+      projectId: draftProjectId,
+      directory: normalizePath(draftDirectoryOverride ?? created.directory ?? null),
+    })
 
-  const effectiveDraftAgent = trimmedAgent ?? configState.currentAgentName
+    const draftSyntheticParts = draft.syntheticParts
+    const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
+    const configState = useConfigStore.getState()
+    void activateConfigForDirectory(createdDirectory).catch((error) => {
+      console.warn("Failed to activate directory after creating session:", error)
+    })
 
-  useSelectionStore.getState().saveSessionModelSelection(created.id, selection.providerID, selection.modelID)
+    const effectiveDraftAgent = trimmedAgent ?? configState.currentAgentName
 
-  if (effectiveDraftAgent) {
-    useSelectionStore.getState().saveSessionAgentSelection(created.id, effectiveDraftAgent)
-    useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID)
-    useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID, selection.variant)
-  }
+    useSelectionStore.getState().saveSessionModelSelection(created.id, selection.providerID, selection.modelID)
 
-  store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
+    if (effectiveDraftAgent) {
+      useSelectionStore.getState().saveSessionAgentSelection(created.id, effectiveDraftAgent)
+      useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID)
+      useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, selection.providerID, selection.modelID, selection.variant)
+    }
 
-  store.setCurrentSession(created.id, createdDirectory)
+    store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
 
-  if (draftPermissionAutoAcceptEnabled) {
-    void import("@/stores/permissionStore")
-      .then(({ usePermissionStore }) => usePermissionStore.getState().setSessionAutoAccept(created.id, true))
-      .catch((error) => {
-        console.warn("Failed to apply draft permission auto-accept to new session:", error)
-      })
-  }
+    const currentDraft = useSessionUIStore.getState().newSessionDraft
+    if (currentDraft.open && (currentDraft.materializationKey ?? currentDraft) === materializationKey) {
+      store.setCurrentSession(created.id, createdDirectory)
+    }
 
-  return {
-    sessionId: created.id,
-    directory: createdDirectory,
-    agent: effectiveDraftAgent,
-    syntheticParts: draftSyntheticParts,
-  }
+    if (draftPermissionAutoAcceptEnabled) {
+      void import("@/stores/permissionStore")
+        .then(({ usePermissionStore }) => usePermissionStore.getState().setSessionAutoAccept(created.id, true))
+        .catch((error) => {
+          console.warn("Failed to apply draft permission auto-accept to new session:", error)
+        })
+    }
+
+    return {
+      sessionId: created.id,
+      directory: createdDirectory,
+      agent: effectiveDraftAgent,
+      syntheticParts: draftSyntheticParts,
+    }
+  })()
+
+  draftMaterializations.set(materializationKey, materialization)
+  void materialization.catch(() => draftMaterializations.delete(materializationKey))
+  return materialization
 }
 
 // ---------------------------------------------------------------------------
@@ -739,6 +764,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const nextDraft: NewSessionDraftState = {
       open: true,
+      materializationKey: {},
       selectedProjectId: selectedProject?.id ?? null,
       directoryOverride: directory,
       permissionAutoAcceptEnabled: options?.permissionAutoAcceptEnabled === true,
@@ -1058,13 +1084,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     // ---- New session from draft ----
-    if (!options?.sessionId && draft?.open) {
+    if (!options?.sessionId && (options?.draft?.open || draft?.open)) {
       const createdDraftSession = await materializeOpenDraftSession({
         providerID,
         modelID,
         agent: trimmedAgent,
         variant,
-      })
+      }, options?.draft)
       if (!createdDraftSession) throw new Error("Failed to create session")
 
       const mergedAdditionalParts = createdDraftSession.syntheticParts?.length
@@ -1193,14 +1219,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // createSession
   // ---------------------------------------------------------------------------
-  createSession: async (title, directoryOverride, parentID, metadata) => {
+  createSession: async (title, directoryOverride, parentID, metadata, options) => {
     const draft = get().newSessionDraft
-    const targetFolderId = draft.targetFolderId
-    get().closeNewSessionDraft()
+    const targetFolderId = options ? options.targetFolderId : draft.targetFolderId
 
     try {
       const dir = directoryOverride ?? opencodeClient.getDirectory()
-      const session = await createSessionAction(title, dir, parentID ?? null, metadata)
+      const session = await createSessionAction(title, dir, parentID ?? null, metadata, { select: options?.select })
       if (!session) return null
 
       if (targetFolderId) {

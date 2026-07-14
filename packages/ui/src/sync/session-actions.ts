@@ -433,6 +433,7 @@ export async function createSession(
   directoryOverride?: string | null,
   parentID?: string | null,
   metadata?: Record<string, unknown>,
+  options?: { select?: boolean },
 ): Promise<Session | null> {
   try {
     const session = await opencodeClient.createSession({
@@ -447,7 +448,9 @@ export async function createSession(
     if (sessionDirectory) {
       registerSessionDirectory(session.id, sessionDirectory)
     }
-    useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+    if (options?.select !== false) {
+      useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+    }
     useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
     useGlobalSessionsStore.getState().upsertSession(session)
     return session

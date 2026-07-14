@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { togglePermissionAutoAccept } from "../../components/chat/permissionAutoAccept"
 
 const storage = new Map<string, string>()
-const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
+const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown; options?: unknown }> = []
 const permissionAutoAcceptCalls: Array<[string, boolean]> = []
+const optimisticSendSessionIds: string[] = []
+const addSessionToFolderCalls: Array<[string, string, string]> = []
 
 const getMockCalls = (fn: unknown): unknown[][] => ((fn as { mock?: { calls: unknown[][] } }).mock?.calls ?? [])
 
@@ -53,6 +55,16 @@ const deferredStorage: Storage = {
 
 mock.module("@/stores/utils/safeStorage", () => ({
   getDeferredSafeStorage: () => deferredStorage,
+  getSafeStorage: () => deferredStorage,
+  getSafeSessionStorage: () => deferredStorage,
+  createDeferredSafeJSONStorage: () => ({
+    getItem: (key: string) => {
+      const value = deferredStorage.getItem(key)
+      return value ? JSON.parse(value) : null
+    },
+    setItem: (key: string, value: unknown) => deferredStorage.setItem(key, JSON.stringify(value)),
+    removeItem: (key: string) => deferredStorage.removeItem(key),
+  }),
 }))
 
 mock.module("@/lib/opencode/client", () => ({
@@ -81,6 +93,27 @@ mock.module("@/stores/useConfigStore", () => ({
       applyDefaultModelAgentSelection: mock(() => undefined),
     }),
   },
+}))
+
+mock.module("@/stores/useUIStore", () => ({
+  useUIStore: {
+    getState: () => ({
+      sessionGoalDefaultBudgetEnabled: false,
+      sessionGoalDefaultBudget: 0,
+    }),
+  },
+}))
+
+mock.module("@/stores/useSessionGoalArmStore", () => ({
+  useSessionGoalArmStore: {
+    getState: () => ({
+      consume: () => ({ armed: false, objectiveOverride: null }),
+    }),
+  },
+}))
+
+mock.module("@/lib/sessionGoalActions", () => ({
+  setSessionGoal: mock(async () => undefined),
 }))
 
 mock.module("@/stores/useProjectsStore", () => ({
@@ -115,7 +148,9 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
 mock.module("@/stores/useSessionFoldersStore", () => ({
   useSessionFoldersStore: {
     getState: () => ({
-      addSessionToFolder: mock(() => undefined),
+      addSessionToFolder: mock((scopeKey: string, folderId: string, sessionId: string) => {
+        addSessionToFolderCalls.push([scopeKey, folderId, sessionId])
+      }),
     }),
   },
 }))
@@ -227,8 +262,8 @@ mock.module("../sync-refs", () => ({
 }))
 
 mock.module("../session-actions", () => ({
-  createSession: mock(async (title: string | undefined, directory: string | null, parentID: string | null, metadata?: unknown) => {
-    createSessionCalls.push({ title, directory, parentID, metadata })
+  createSession: mock(async (title: string | undefined, directory: string | null, parentID: string | null, metadata?: unknown, options?: unknown) => {
+    createSessionCalls.push({ title, directory, parentID, metadata, options })
     return { id: "ses_issue_2039", directory }
   }),
   deleteSession: mock(async () => true),
@@ -236,12 +271,17 @@ mock.module("../session-actions", () => ({
   updateSessionTitle: mock(async () => undefined),
   shareSession: mock(async () => undefined),
   unshareSession: mock(async () => undefined),
-  optimisticSend: mock(async () => undefined),
+  optimisticSend: mock(async (params: { sessionId: string }) => {
+    optimisticSendSessionIds.push(params.sessionId)
+  }),
   refetchSessionMessages: mock(async () => undefined),
   revertToMessage: mock(async () => undefined),
   unrevertSession: mock(async () => undefined),
   forkFromMessage: mock(async () => undefined),
   fetchMessagesForSession: mock(async () => undefined),
+  getSessionLastAssistantModel: () => null,
+  patchSessionMetadata: mock(async () => undefined),
+  abortCurrentOperation: mock(async () => undefined),
 }))
 
 const { materializeOpenDraftSession, useSessionUIStore } = await import("../session-ui-store")
@@ -298,6 +338,8 @@ describe("issue 2039 draft auto-accept", () => {
     storage.clear()
     createSessionCalls.length = 0
     permissionAutoAcceptCalls.length = 0
+    optimisticSendSessionIds.length = 0
+    addSessionToFolderCalls.length = 0
 
     useSessionUIStore.setState({
       currentSessionId: null,
@@ -347,5 +389,67 @@ describe("issue 2039 draft auto-accept", () => {
     expect(result).toBeNull()
     expect(createSessionCalls).toHaveLength(0)
     expect(permissionAutoAcceptCalls).toHaveLength(0)
+  })
+
+  test("keeps the first draft message pinned to the materialized session", async () => {
+    useSessionUIStore.getState().openNewSessionDraft()
+    const draft = useSessionUIStore.getState().newSessionDraft
+
+    useSessionUIStore.getState().setCurrentSession("ses_old")
+    await useSessionUIStore.getState().sendMessage(
+      "hello",
+      "provider",
+      "model",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "normal",
+      { draft },
+    )
+
+    expect(optimisticSendSessionIds).toEqual(["ses_issue_2039"])
+  })
+
+  test("materializes the same draft only once", async () => {
+    useSessionUIStore.getState().openNewSessionDraft()
+    const draft = useSessionUIStore.getState().newSessionDraft
+    const selection = { providerID: "provider", modelID: "model" }
+
+    const first = materializeOpenDraftSession(selection, draft)
+    useSessionUIStore.getState().setDraftPermissionAutoAcceptEnabled(true)
+    const updatedDraft = useSessionUIStore.getState().newSessionDraft
+    const second = materializeOpenDraftSession(selection, updatedDraft)
+
+    expect(second).toBe(first)
+    await Promise.all([first, second])
+    expect(createSessionCalls).toHaveLength(1)
+  })
+
+  test("does not close a newer draft when an older draft materializes", async () => {
+    useSessionUIStore.getState().openNewSessionDraft({ title: "first" })
+    const firstDraft = useSessionUIStore.getState().newSessionDraft
+    const materialization = materializeOpenDraftSession({ providerID: "provider", modelID: "model" }, firstDraft)
+
+    useSessionUIStore.getState().openNewSessionDraft({ title: "second", targetFolderId: "folder-b" })
+    await materialization
+
+    expect(createSessionCalls[0]?.options).toEqual({ select: false })
+    expect(addSessionToFolderCalls).toHaveLength(0)
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true)
+    expect(useSessionUIStore.getState().newSessionDraft.title).toBe("second")
+    expect(useSessionUIStore.getState().currentSessionId).toBeNull()
+  })
+
+  test("does not reclaim selection after its draft was closed", async () => {
+    useSessionUIStore.getState().openNewSessionDraft()
+    const draft = useSessionUIStore.getState().newSessionDraft
+    const materialization = materializeOpenDraftSession({ providerID: "provider", modelID: "model" }, draft)
+
+    useSessionUIStore.getState().closeNewSessionDraft()
+    await materialization
+
+    expect(useSessionUIStore.getState().currentSessionId).toBeNull()
   })
 })

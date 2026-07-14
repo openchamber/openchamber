@@ -1897,8 +1897,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const sendMessageOptions = delivery ? { delivery } : undefined;
-
         // Build the primary message (first part) and additional parts
         let primaryText = '';
         let primaryAttachments: AttachedFile[] = [];
@@ -2025,6 +2023,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
+
+        const draft = newSessionDraftOpen ? newSessionDraft : undefined;
+        const sendMessageOptions = delivery || draft || currentSessionId
+            ? { delivery, draft, sessionId: currentSessionId ?? undefined }
+            : undefined;
 
         // Clear queue and input
         if (currentSessionId && queuedMessageId) {
