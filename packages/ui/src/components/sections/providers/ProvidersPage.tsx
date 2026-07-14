@@ -18,6 +18,15 @@ import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
 import { shouldLoadAvailableProviders } from './providerAvailability';
+import {
+  filterUnconnectedProviders,
+  getProviderOptionLabel,
+  groupProviderOptions,
+  startProviderOAuth,
+  type AuthMethod,
+  type ProviderOAuthDetails,
+  type ProviderOption,
+} from './providerConnect';
 import { QuotaCredentials } from './QuotaCredentials';
 
 const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
@@ -39,34 +48,6 @@ const formatTokens = (value?: number | null) => {
 };
 
 const ADD_PROVIDER_ID = '__add_provider__';
-
-interface AuthMethod {
-  type?: string;
-  name?: string;
-  label?: string;
-  description?: string;
-  help?: string;
-  method?: number;
-  [key: string]: unknown;
-}
-
-interface ProviderOption {
-  id: string;
-  name?: string;
-}
-
-const getProviderOptionLabel = (provider: ProviderOption) => provider.name || provider.id;
-
-const getProviderGroupKey = (provider: ProviderOption) => {
-  const firstCharacter = getProviderOptionLabel(provider).trim().charAt(0).toUpperCase();
-  if (firstCharacter >= 'A' && firstCharacter <= 'Z') {
-    return firstCharacter;
-  }
-  if (firstCharacter >= '0' && firstCharacter <= '9') {
-    return '0-9';
-  }
-  return '#';
-};
 
 interface ProviderSourceInfo {
   exists: boolean;
@@ -169,7 +150,7 @@ export const ProvidersPage: React.FC = () => {
   const [modelQuery, setModelQuery] = React.useState('');
   const [pendingOAuth, setPendingOAuth] = React.useState<{ providerId: string; methodIndex: number } | null>(null);
   const [oauthCodes, setOauthCodes] = React.useState<Record<string, string>>({});
-  const [oauthDetails, setOauthDetails] = React.useState<Record<string, { url?: string; instructions?: string; userCode?: string }>>({});
+  const [oauthDetails, setOauthDetails] = React.useState<Record<string, ProviderOAuthDetails>>({});
   const [availableProviders, setAvailableProviders] = React.useState<ProviderOption[]>([]);
   const [availableLoading, setAvailableLoading] = React.useState(false);
   const [availableError, setAvailableError] = React.useState<string | null>(null);
@@ -273,37 +254,15 @@ export const ProvidersPage: React.FC = () => {
     [availableProviders, connectedProviderIds]
   );
 
-  const filteredUnconnectedProviders = React.useMemo(() => {
-    const query = providerSearchQuery.trim().toLowerCase();
-    if (!query) {
-      return unconnectedProviders;
-    }
+  const filteredUnconnectedProviders = React.useMemo(
+    () => filterUnconnectedProviders(unconnectedProviders, providerSearchQuery),
+    [providerSearchQuery, unconnectedProviders]
+  );
 
-    return unconnectedProviders.filter((provider) => {
-      const label = getProviderOptionLabel(provider).toLowerCase();
-      return label.includes(query) || provider.id.toLowerCase().includes(query);
-    });
-  }, [providerSearchQuery, unconnectedProviders]);
-
-  const groupedUnconnectedProviders = React.useMemo(() => {
-    const groups = new Map<string, ProviderOption[]>();
-
-    for (const provider of filteredUnconnectedProviders) {
-      const groupKey = getProviderGroupKey(provider);
-      const existing = groups.get(groupKey);
-      if (existing) {
-        existing.push(provider);
-      } else {
-        groups.set(groupKey, [provider]);
-      }
-    }
-
-    return Array.from(groups.entries()).sort(([groupA], [groupB]) => {
-      if (groupA === '#') return 1;
-      if (groupB === '#') return -1;
-      return groupA.localeCompare(groupB);
-    });
-  }, [filteredUnconnectedProviders]);
+  const groupedUnconnectedProviders = React.useMemo(
+    () => groupProviderOptions(filteredUnconnectedProviders),
+    [filteredUnconnectedProviders]
+  );
 
   React.useEffect(() => {
     if (selectedProviderId !== ADD_PROVIDER_ID) {
@@ -401,66 +360,21 @@ export const ProvidersPage: React.FC = () => {
   };
 
   const handleOAuthStart = async (providerId: string, methodIndex: number) => {
-    const busyKey = `oauth:${providerId}:${methodIndex}`;
-    if (authBusyKeyRef.current === busyKey) {
-      return;
-    }
-
-    authBusyKeyRef.current = busyKey;
-    setAuthBusyKey(busyKey);
-
-    try {
-      const result = await opencodeClient.getSdkClient().provider.oauth.authorize({
-        providerID: providerId,
-        method: methodIndex,
-      });
-      if (result.error) {
-        throw new Error(t('settings.providers.page.toast.oauthStartFailed'));
-      }
-
-      const payloadRecord: Record<string, unknown> = isRecord(result.data) ? result.data : {};
-      const nestedData = payloadRecord.data;
-      const dataRecord: Record<string, unknown> = isRecord(nestedData) ? nestedData : payloadRecord;
-      const urlCandidate =
-        (typeof dataRecord.url === 'string' && dataRecord.url) ||
-        (typeof dataRecord.verification_uri_complete === 'string' && dataRecord.verification_uri_complete) ||
-        (typeof dataRecord.verification_uri === 'string' && dataRecord.verification_uri) ||
-        undefined;
-      const instructions =
-        (typeof dataRecord.instructions === 'string' && dataRecord.instructions) ||
-        (typeof dataRecord.message === 'string' && dataRecord.message) ||
-        undefined;
-      const userCode =
-        (typeof dataRecord.user_code === 'string' && dataRecord.user_code) ||
-        (typeof dataRecord.code === 'string' && dataRecord.code) ||
-        (typeof dataRecord.userCode === 'string' && dataRecord.userCode) ||
-        undefined;
-
-      if (!urlCandidate && !instructions && !userCode) {
-        throw new Error(t('settings.providers.page.toast.oauthDetailsMissing'));
-      }
-
-      const detailsKey = `${providerId}:${methodIndex}`;
-      setOauthDetails((prev) => ({
-        ...prev,
-        [detailsKey]: {
-          url: urlCandidate,
-          instructions,
-          userCode,
-        },
-      }));
-
-      setPendingOAuth({ providerId, methodIndex });
-      toast.message(t('settings.providers.page.toast.completeOAuthInBrowser'));
-    } catch (error) {
-      console.error('Failed to start OAuth flow:', error);
-      toast.error(t('settings.providers.page.toast.oauthStartFailed'));
-    } finally {
-      if (authBusyKeyRef.current === busyKey) {
-        authBusyKeyRef.current = null;
-      }
-      setAuthBusyKey((current) => (current === busyKey ? null : current));
-    }
+    await startProviderOAuth({
+      providerId,
+      methodIndex,
+      authorize: (input) => opencodeClient.getSdkClient().provider.oauth.authorize(input),
+      authBusyKeyRef,
+      setAuthBusyKey,
+      setOauthDetails,
+      setPendingOAuth,
+      toastMessage: (message) => toast.message(message),
+      toastError: (message) => toast.error(message),
+      t,
+      onError: (error) => {
+        console.error('Failed to start OAuth flow:', error);
+      },
+    });
   };
 
   const handleOAuthComplete = async (providerId: string, methodIndex: number) => {
