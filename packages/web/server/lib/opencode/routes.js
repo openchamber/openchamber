@@ -381,13 +381,20 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.post('/api/provider/github-copilot/ghe/auth/start', async (req, res) => {
     try {
+      const queryServerUrl = Array.isArray(req.query?.serverUrl) ? req.query.serverUrl[0] : req.query?.serverUrl;
+      const queryEnterpriseUrl = Array.isArray(req.query?.enterpriseUrl) ? req.query.enterpriseUrl[0] : req.query?.enterpriseUrl;
+      const queryClientId = Array.isArray(req.query?.clientId) ? req.query.clientId[0] : req.query?.clientId;
       const serverUrl = typeof req.body?.serverUrl === 'string'
         ? req.body.serverUrl
-        : (typeof req.body?.enterpriseUrl === 'string' ? req.body.enterpriseUrl : '');
+        : (typeof req.body?.enterpriseUrl === 'string'
+          ? req.body.enterpriseUrl
+          : (typeof queryServerUrl === 'string'
+            ? queryServerUrl
+            : (typeof queryEnterpriseUrl === 'string' ? queryEnterpriseUrl : '')));
 
       const clientId = typeof req.body?.clientId === 'string'
         ? req.body.clientId
-        : undefined;
+        : (typeof queryClientId === 'string' ? queryClientId : undefined);
 
       const { enterpriseHost, payload, clientId: resolvedClientId } = await startCopilotGheAuthFlow({
         serverUrl,
@@ -409,6 +416,14 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       if (message === 'serverUrl is required' || message === 'serverUrl is invalid') {
         return res.status(400).json({ error: message });
       }
+      if (error?.status === 404) {
+        const missingClientId = typeof clientId !== 'string' || !clientId.trim();
+        return res.status(400).json({
+          error: missingClientId
+            ? 'GitHub Enterprise rejected device flow because no GHE OAuth Client ID was provided. Create or use an OAuth app on that GHE instance, enable Device Flow for it, and enter its Client ID.'
+            : 'GitHub Enterprise device-flow endpoint was not found. Use your base GHE web URL (not an API URL), ensure the OAuth app exists on that GHE instance, and verify Device Flow is enabled.',
+        });
+      }
       console.error('Failed to start GitHub Copilot GHE auth flow:', error);
       return res.status(500).json({ error: message });
     }
@@ -416,15 +431,28 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.post('/api/provider/github-copilot/ghe/auth/complete', async (req, res) => {
     try {
+      const queryServerUrl = Array.isArray(req.query?.serverUrl) ? req.query.serverUrl[0] : req.query?.serverUrl;
+      const queryEnterpriseUrl = Array.isArray(req.query?.enterpriseUrl) ? req.query.enterpriseUrl[0] : req.query?.enterpriseUrl;
+      const queryClientId = Array.isArray(req.query?.clientId) ? req.query.clientId[0] : req.query?.clientId;
+      const queryDeviceCode = Array.isArray(req.query?.deviceCode) ? req.query.deviceCode[0] : req.query?.deviceCode;
+      const queryDeviceCodeLegacy = Array.isArray(req.query?.device_code) ? req.query.device_code[0] : req.query?.device_code;
       const serverUrl = typeof req.body?.serverUrl === 'string'
         ? req.body.serverUrl
-        : (typeof req.body?.enterpriseUrl === 'string' ? req.body.enterpriseUrl : '');
+        : (typeof req.body?.enterpriseUrl === 'string'
+          ? req.body.enterpriseUrl
+          : (typeof queryServerUrl === 'string'
+            ? queryServerUrl
+            : (typeof queryEnterpriseUrl === 'string' ? queryEnterpriseUrl : '')));
       const clientId = typeof req.body?.clientId === 'string'
         ? req.body.clientId
-        : undefined;
+        : (typeof queryClientId === 'string' ? queryClientId : undefined);
       const deviceCode = typeof req.body?.deviceCode === 'string'
         ? req.body.deviceCode
-        : (typeof req.body?.device_code === 'string' ? req.body.device_code : '');
+        : (typeof req.body?.device_code === 'string'
+          ? req.body.device_code
+          : (typeof queryDeviceCode === 'string'
+            ? queryDeviceCode
+            : (typeof queryDeviceCodeLegacy === 'string' ? queryDeviceCodeLegacy : '')));
 
       if (!deviceCode) {
         return res.status(400).json({ error: 'deviceCode is required' });
@@ -457,6 +485,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         accessToken,
       });
 
+      await refreshOpenCodeAfterConfigChange(`github-copilot GHE connected (${enterpriseHost})`);
+
       return res.json({
         connected: true,
         enterpriseUrl: enterpriseHost,
@@ -467,6 +497,14 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const message = error instanceof Error ? error.message : 'Failed to complete GitHub Copilot GHE auth flow';
       if (message === 'serverUrl is required' || message === 'serverUrl is invalid') {
         return res.status(400).json({ error: message });
+      }
+      if (error?.status === 404) {
+        const missingClientId = typeof clientId !== 'string' || !clientId.trim();
+        return res.status(400).json({
+          error: missingClientId
+            ? 'GitHub Enterprise rejected device flow because no GHE OAuth Client ID was provided. Create or use an OAuth app on that GHE instance, enable Device Flow for it, and enter its Client ID.'
+            : 'GitHub Enterprise device-flow endpoint was not found. Use your base GHE web URL (not an API URL), ensure the OAuth app exists on that GHE instance, and verify Device Flow is enabled.',
+        });
       }
       console.error('Failed to complete GitHub Copilot GHE auth flow:', error);
       return res.status(500).json({ error: message });

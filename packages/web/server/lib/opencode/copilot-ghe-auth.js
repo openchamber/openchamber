@@ -72,6 +72,11 @@ export const writeCopilotGheAuthToken = ({ enterpriseHost, accessToken }) => {
   auth[COPILOT_PROVIDER_ID] = {
     type: 'oauth',
     access: accessToken,
+    refresh: '',
+    // Far-future expiry: the GHE OAuth token does not expire on its own.
+    // OpenCode requires this field; a value of 0 would immediately trigger
+    // a (failing) refresh attempt.
+    expires: 9999999999999,
     enterpriseUrl: enterpriseHost,
   };
   writeAuthFile(auth);

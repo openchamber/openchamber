@@ -8,7 +8,7 @@ vi.mock('../../opencode/auth.js', () => ({
 import { fetchQuota, fetchQuotaAddon } from './copilot.js';
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const mockQuotaResponse = () => ({
@@ -27,15 +27,14 @@ describe('copilot quota provider', () => {
       },
     };
 
-    const fetchMock = vi.fn().mockResolvedValue({
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
       json: async () => mockQuotaResponse(),
     });
-    vi.stubGlobal('fetch', fetchMock);
 
     const result = await fetchQuota();
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(globalThis.fetch).toHaveBeenCalledWith(
       'https://ghe.example.com/api/v3/copilot_internal/user',
       expect.objectContaining({ method: 'GET' }),
     );
@@ -50,15 +49,14 @@ describe('copilot quota provider', () => {
       },
     };
 
-    const fetchMock = vi.fn().mockResolvedValue({
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
       json: async () => mockQuotaResponse(),
     });
-    vi.stubGlobal('fetch', fetchMock);
 
     const result = await fetchQuotaAddon();
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(globalThis.fetch).toHaveBeenCalledWith(
       'https://api.github.com/copilot_internal/user',
       expect.objectContaining({ method: 'GET' }),
     );
