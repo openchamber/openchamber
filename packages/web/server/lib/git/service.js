@@ -17,7 +17,6 @@ const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
 const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
 const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
 const gitIndexMutationQueues = new Map();
-const getStatusInFlight = new Map();
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
@@ -1954,15 +1953,8 @@ export async function getStatus(directory, options = {}) {
     const lightMode = options.mode === 'light';
 
     try {
-      const { directoryPath, repoRoot, git } = await createRepositoryGitContext(directory);
-      const commonDirKey = await resolveGitCommonDir(directoryPath, git);
+      const { repoRoot, git } = await createRepositoryGitContext(directory);
 
-      if (getStatusInFlight.has(commonDirKey)) {
-        return getStatusInFlight.get(commonDirKey);
-      }
-
-      const promise = (async () => {
-        try {
           // Use -uall to show all untracked files individually, not just directories
           const status = await git.status(['-uall']);
 
@@ -2139,7 +2131,7 @@ export async function getStatus(directory, options = {}) {
             !lightMode
             && status.current
             && (!tracking || !tracking.startsWith('upstream/'))
-            && await hasRemote(git, directoryPath, 'upstream')
+            && await hasRemote(git, repoRoot, 'upstream')
           ) {
             upstreamComparison = await getRemoteBranchComparison(git, 'upstream', status.current);
           }
@@ -2215,18 +2207,6 @@ export async function getStatus(directory, options = {}) {
             mergeInProgress,
             rebaseInProgress,
           };
-        } catch (error) {
-          if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
-            console.error('Failed to get Git status:', error);
-          }
-          throw error;
-        } finally {
-          getStatusInFlight.delete(commonDirKey);
-        }
-      })();
-
-      getStatusInFlight.set(commonDirKey, promise);
-      return promise;
     } catch (error) {
       if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
         console.error('Failed to get Git status:', error);

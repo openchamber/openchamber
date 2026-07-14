@@ -281,7 +281,7 @@ describe('getStatus', () => {
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
   });
 
-  it('serializes concurrent getStatus calls to a single git execution', async () => {
+  it('returns consistent status for concurrent getStatus calls', async () => {
     if (!canRunGit()) return;
 
     const repo = createTempDir();
@@ -345,6 +345,29 @@ describe('getStatus', () => {
 
     expect(r1).toMatchObject({ current: 'main' });
     expect(r2).toMatchObject({ current: 'feature/test' });
+  });
+
+  it('handles a repository subdirectory in a monorepo', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const subdirectory = path.join(repo, 'packages', 'app');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.mkdirSync(subdirectory, { recursive: true });
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.writeFileSync(path.join(subdirectory, 'app.md'), 'app file\n');
+
+    const [rootStatus, subStatus] = await Promise.all([
+      getStatus(repo),
+      getStatus(subdirectory),
+    ]);
+
+    expect(rootStatus).toMatchObject({ current: 'main' });
+    expect(subStatus).toMatchObject({ current: 'main' });
   });
 
   it('allows concurrent getStatus across unrelated repositories', async () => {
