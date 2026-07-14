@@ -27,6 +27,7 @@ import {
   normalizeHostUrl,
   getDesktopHostRuntimeSwitchOptions,
   probeDesktopHostTransports,
+  probeDesktopHostTransportsForActivation,
   redactSensitiveUrl,
   resolveDesktopHostUrl,
   shouldDelegateDesktopHostActivation,
@@ -548,14 +549,8 @@ export function DesktopHostSwitcherDialog({
       // result instead of re-probing (re-probes doubled the switch latency and
       // flashed transient Unreachable states over a known-good host).
       const cached = statusById[host.id];
-      if (cached?.status === 'ok') {
-        const transport = cached.via === 'direct-e2ee' && host.directE2ee
-          ? { kind: 'direct-e2ee' as const, descriptor: host.directE2ee }
-          : cached.via === 'relay' && host.relay
-            ? { kind: 'relay' as const, descriptor: host.relay }
-            : cached.via === 'direct' && apiOrigin
-              ? { kind: 'direct' as const, url: apiOrigin }
-              : null;
+      if (cached?.status === 'ok' && cached.via === 'direct') {
+        const transport = apiOrigin ? { kind: 'direct' as const, url: apiOrigin } : null;
         if (!transport || !activateTransport(transport, clientToken)) {
           setSwitchingHostId(null);
           return;
@@ -568,7 +563,7 @@ export function DesktopHostSwitcherDialog({
       // No usable probe result — probe now: direct first, relay fallback.
       // Statuses are written once, with the final outcome, so the row never
       // flashes intermediate failures while the fallback is still running.
-      const selection = await probeDesktopHostTransports({ ...host, ...(clientToken ? { clientToken } : {}) });
+      const selection = await probeDesktopHostTransportsForActivation({ ...host, ...(clientToken ? { clientToken } : {}) });
       const finalStatus: HostStatus = { ...selection.probe, ...(selection.transport ? { via: selection.transport.kind } : {}) };
       setStatusById((prev) => ({ ...prev, [host.id]: finalStatus }));
 

@@ -145,7 +145,11 @@ export const getDesktopHostRuntimeSwitchOptions = (
 export type DesktopHostProbeDependencies = {
   probeDirect: (url: string, options: { clientToken: string | null; requestHeaders: Record<string, string> | null; expectedServerId?: string | null }) => Promise<HostProbeResult>;
   probeDirectE2ee: (descriptor: DesktopHostDirectE2ee, clientToken: string | null) => Promise<HostProbeResult>;
-  probeRelay: (descriptor: DesktopHostRelay, clientToken: string | null) => Promise<HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> }>;
+  probeRelay: (descriptor: DesktopHostRelay, clientToken: string | null, options: { keepTunnel: boolean }) => Promise<HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> }>;
+};
+
+export type DesktopHostTransportProbeOptions = {
+  retainRelayTunnel?: boolean;
 };
 
 export type DesktopHostUrlResolution = {
@@ -458,9 +462,11 @@ export const probeDesktopHostTransports = async (
   dependencies: DesktopHostProbeDependencies = {
     probeDirect: desktopHostProbe,
     probeDirectE2ee: probeDirectE2eeDesktopHost,
-    probeRelay: (descriptor, clientToken) => probeRelayDesktopHost(descriptor, { clientToken, keepTunnel: true }),
+    probeRelay: (descriptor, clientToken, options) => probeRelayDesktopHost(descriptor, { clientToken, keepTunnel: options.keepTunnel }),
   },
+  options: DesktopHostTransportProbeOptions = {},
 ): Promise<DesktopHostSelection> => {
+  const retainRelayTunnel = options.retainRelayTunnel === true;
   let finalProbe = unreachableProbe();
   const directUrl = normalizeHostUrl(host.apiUrl || host.url);
   const probeDirect = async (): Promise<HostProbeResult> => {
@@ -474,11 +480,18 @@ export const probeDesktopHostTransports = async (
   const probeRelay = async (): Promise<DesktopHostSelection> => {
     if (!host.relay) return { probe: unreachableProbe(), transport: null };
     const probe: HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> } = await dependencies
-      .probeRelay(host.relay, host.clientToken || null)
+      .probeRelay(host.relay, host.clientToken || null, { keepTunnel: retainRelayTunnel })
       .catch(unreachableProbe);
+    const tunnel = probe.tunnel;
+    if (tunnel && !retainRelayTunnel) tunnel.close();
+    const statusProbe: HostProbeResult = {
+      status: probe.status,
+      latencyMs: probe.latencyMs,
+      ...(probe.failureClassification ? { failureClassification: probe.failureClassification } : {}),
+    };
     return !failedEncryptedStatus(probe.status)
-      ? { probe, transport: { kind: 'relay', descriptor: host.relay, tunnel: probe.tunnel } }
-      : { probe, transport: null };
+      ? { probe: statusProbe, transport: { kind: 'relay', descriptor: host.relay, ...(retainRelayTunnel && tunnel ? { tunnel } : {}) } }
+      : { probe: statusProbe, transport: null };
   };
 
   // A managed direct-E2EE leg has terminal security semantics, so keep explicit
@@ -548,6 +561,15 @@ export const probeDesktopHostTransports = async (
     ? { probe: lateDirect, transport: { kind: 'direct', url: directUrl } }
     : first.selection;
 };
+
+export const probeDesktopHostTransportsForActivation = (
+  host: DesktopHost,
+  dependencies?: DesktopHostProbeDependencies,
+): Promise<DesktopHostSelection> => probeDesktopHostTransports(
+  host,
+  dependencies,
+  { retainRelayTunnel: true },
+);
 
 export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null; expectedServerId?: string | null }): Promise<HostProbeResult> => {
   const invoke = getInvoke();

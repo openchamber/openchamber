@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { desktopHostProbe, desktopHostsGet, desktopHostsSet, directE2eeHostFingerprint, getDesktopHostRuntimeSwitchOptions, probeDesktopHostTransports, redactSensitiveUrl, resolveDesktopHostUrl, shouldDelegateDesktopHostActivation } from './desktopHosts';
+import { desktopHostProbe, desktopHostsGet, desktopHostsSet, directE2eeHostFingerprint, getDesktopHostRuntimeSwitchOptions, probeDesktopHostTransports, probeDesktopHostTransportsForActivation, redactSensitiveUrl, resolveDesktopHostUrl, shouldDelegateDesktopHostActivation } from './desktopHosts';
 import type { DesktopHost, HostProbeResult } from './desktopHosts';
 
 const withDesktopBridge = async <T>(handler: (cmd: string, args: Record<string, unknown>) => unknown | Promise<unknown>, run: () => Promise<T>): Promise<T> => {
@@ -236,6 +236,35 @@ describe('probeDesktopHostTransports', () => {
 
   test('runtime options refuse tokenless direct E2EE activation', () => {
     expect(getDesktopHostRuntimeSwitchOptions({ id: 'host', label: 'Host', url: 'direct-e2ee://host.example', directE2ee }, { kind: 'direct-e2ee', descriptor: directE2ee }, 'openchamber-ui://app', 'host:host')).toBeNull();
+  });
+
+  test('status probes close and omit relay tunnels by default', async () => {
+    let closeCalls = 0;
+    const close = () => { closeCalls += 1; };
+    const tunnel = { close } as never;
+    const selected = await probeDesktopHostTransports({ id: 'host', label: 'Host', url: 'relay://server', relay }, {
+      probeDirect: async () => result('unreachable'),
+      probeDirectE2ee: async () => result('unreachable'),
+      probeRelay: async () => ({ ...result('ok'), tunnel }),
+    });
+
+    expect(selected.transport).toEqual({ kind: 'relay', descriptor: relay });
+    expect('tunnel' in selected.probe).toBe(false);
+    expect(closeCalls).toBe(1);
+  });
+
+  test('activation probes retain and return the live relay tunnel', async () => {
+    let closeCalls = 0;
+    const close = () => { closeCalls += 1; };
+    const tunnel = { close } as never;
+    const selected = await probeDesktopHostTransportsForActivation({ id: 'host', label: 'Host', url: 'relay://server', relay }, {
+      probeDirect: async () => result('unreachable'),
+      probeDirectE2ee: async () => result('unreachable'),
+      probeRelay: async (_descriptor, _token, options) => ({ ...result('ok'), tunnel: options.keepTunnel ? tunnel : undefined }),
+    });
+
+    expect(selected.transport).toEqual({ kind: 'relay', descriptor: relay, tunnel });
+    expect(closeCalls).toBe(0);
   });
 });
 

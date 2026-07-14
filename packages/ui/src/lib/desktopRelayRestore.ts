@@ -1,5 +1,5 @@
 import { isElectronShell } from '@/lib/desktop';
-import { desktopHostProbe, desktopHostsGet, desktopHostsSet, getDesktopHostRuntimeSwitchOptions, normalizeHostUrl, probeDesktopHostTransports } from '@/lib/desktopHosts';
+import { desktopHostProbe, desktopHostsGet, desktopHostsSet, getDesktopHostRuntimeSwitchOptions, normalizeHostUrl, probeDesktopHostTransportsForActivation } from '@/lib/desktopHosts';
 import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
@@ -172,7 +172,7 @@ export const restoreDesktopRelayRuntime = async (targetHostId?: string): Promise
   restoreDesktopRuntimeWithDependencies({
     isElectronShell,
     getHosts: desktopHostsGet,
-    selectTransport: probeDesktopHostTransports,
+    selectTransport: probeDesktopHostTransportsForActivation,
     getRuntimeKey,
     switchRuntime: switchRuntimeEndpoint,
     windowOrigin: () => typeof window !== 'undefined' ? window.location.origin : '',
