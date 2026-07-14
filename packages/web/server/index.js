@@ -93,6 +93,7 @@ import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
+import { createRelayIdentityRuntime } from './lib/relay/identity.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createDirectE2eeRuntime } from './lib/direct-e2ee/runtime.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
@@ -1377,11 +1378,19 @@ async function main(options = {}) {
   // runtime's active port). The pairing routes registered here only read the
   // relay candidate lazily at request time, so a late-bound holder is enough.
   let relayServiceInstance = null;
+  const relayIdentityRuntime = createRelayIdentityRuntime({
+    crypto,
+    readSettingsFromDiskMigrated,
+    writeSettingsToDisk,
+    readSettingsStrict: readSettingsFromDiskStrict,
+  });
   const directE2eeRuntime = createDirectE2eeRuntime({
     crypto,
     httpServer: server,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
+    readSettingsStrict: readSettingsFromDiskStrict,
+    identityRuntime: relayIdentityRuntime,
     readManagedRemoteTunnelConfigFromDisk,
     getActiveTunnelController: () => activeTunnelController,
     getLocalPort: () => tunnelRuntimeContext?.getActivePort() || port,
@@ -1514,6 +1523,7 @@ async function main(options = {}) {
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     readSettingsStrict: readSettingsFromDiskStrict,
+    identityRuntime: relayIdentityRuntime,
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
     getUiAuthController: () => uiAuthController,
