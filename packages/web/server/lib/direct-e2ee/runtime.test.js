@@ -47,6 +47,32 @@ const fixture = async (overrides = {}) => {
 };
 
 describe('direct E2EE production runtime', () => {
+  it('uses an injected relay identity runtime without reading or generating local identity settings', async () => {
+    const identityRuntime = {
+      getRelayIdentity: vi.fn(async () => ({
+        hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+      })),
+    };
+    const readSettingsFromDiskMigrated = vi.fn(async () => { throw new Error('local identity read should not run'); });
+    const readSettingsStrict = vi.fn(async () => { throw new Error('strict identity read should not run'); });
+    const writeSettingsToDisk = vi.fn(async () => { throw new Error('local identity write should not run'); });
+    const fx = await fixture({
+      identityRuntime,
+      readSettingsFromDiskMigrated,
+      readSettingsStrict,
+      writeSettingsToDisk,
+    });
+
+    await fx.runtime.initialize();
+    const candidate = await fx.runtime.getPairingCandidate();
+
+    expect(candidate?.hostEncPubJwk).toEqual({ kty: 'EC', crv: 'P-256', x: 'x', y: 'y' });
+    expect(identityRuntime.getRelayIdentity).toHaveBeenCalledTimes(1);
+    expect(readSettingsFromDiskMigrated).not.toHaveBeenCalled();
+    expect(readSettingsStrict).not.toHaveBeenCalled();
+    expect(writeSettingsToDisk).not.toHaveBeenCalled();
+  });
+
   it('reports support only after initialization and owns one removable upgrade listener', async () => {
     const fx = await fixture();
     expect(fx.runtime.initialized).toBe(false);

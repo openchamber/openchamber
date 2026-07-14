@@ -23,6 +23,7 @@ export const createDirectE2eeRuntime = ({
   crypto,
   httpServer,
   readSettingsFromDiskMigrated,
+  readSettingsStrict,
   writeSettingsToDisk,
   readManagedRemoteTunnelConfigFromDisk,
   getActiveTunnelController,
@@ -31,8 +32,14 @@ export const createDirectE2eeRuntime = ({
   authenticateBearerToken,
   logger = console,
   createService = createDirectE2eeService,
+  identityRuntime: injectedIdentityRuntime,
 }) => {
-  const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk });
+  const identityRuntime = injectedIdentityRuntime ?? createRelayIdentityRuntime({
+    crypto,
+    readSettingsFromDiskMigrated,
+    writeSettingsToDisk,
+    readSettingsStrict,
+  });
   let activeProfile = null;
   let lastPublishedProfile = null;
   let initialized = false;
