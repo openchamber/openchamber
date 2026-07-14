@@ -24,7 +24,7 @@ const resolveProjectFromWorktreeDirectory = (
   projects: ProjectEntry[],
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
   directory: string | null,
-): ProjectEntry | null => {
+): { project: ProjectEntry; path: string } | null => {
   const nd = normalizeProjectPath(directory);
   if (!nd) return null;
   let matchedWorktree: WorktreeMetadata | null = null;
@@ -47,9 +47,9 @@ const resolveProjectFromWorktreeDirectory = (
     .filter((v): v is string => Boolean(v));
   for (const c of candidates) {
     const exact = projects.find((p) => normalizeProjectPath(p.path) === c) ?? null;
-    if (exact) return exact;
+    if (exact) return { project: exact, path: normalizeProjectPath(matchedWorktree.path) ?? nd };
     const nested = resolveProjectForDirectory(projects, c);
-    if (nested) return nested;
+    if (nested) return { project: nested, path: normalizeProjectPath(matchedWorktree.path) ?? nd };
   }
   return null;
 };
@@ -58,6 +58,13 @@ export const resolveProjectForSessionDirectory = (
   projects: ProjectEntry[],
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
   directory: string | null,
-): ProjectEntry | null =>
-  resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory) ??
-  resolveProjectForDirectory(projects, directory);
+): ProjectEntry | null => {
+  const worktreeProject = resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory);
+  const directoryProject = resolveProjectForDirectory(projects, directory);
+  if (!worktreeProject) return directoryProject;
+  if (!directoryProject) return worktreeProject.project;
+
+  const directoryPath = normalizeProjectPath(directoryProject.path);
+  if (directoryPath === worktreeProject.path || directoryPath?.startsWith(`${worktreeProject.path}/`)) return directoryProject;
+  return worktreeProject.project;
+};
