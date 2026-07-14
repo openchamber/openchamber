@@ -17,6 +17,58 @@ const makeSettingsStore = (initial = {}) => {
 };
 
 describe('relay identity', () => {
+  it('shares one cold initialization across concurrent callers', async () => {
+    let writes = 0;
+    const store = makeSettingsStore();
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      writeSettingsToDisk: async (next) => {
+        writes += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await store.writeSettingsToDisk(next);
+      },
+    });
+
+    const identities = await Promise.all(Array.from({ length: 8 }, () => runtime.getRelayIdentity()));
+
+    expect(identities.every((identity) => identity === identities[0])).toBe(true);
+    expect(writes).toBe(2);
+  });
+
+  it('clears a rejected initialization so a later call can retry', async () => {
+    const store = makeSettingsStore();
+    let reads = 0;
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      readSettingsFromDiskMigrated: async () => {
+        reads += 1;
+        if (reads === 1) throw new Error('temporary read failure');
+        return { ...store.peek() };
+      },
+    });
+
+    await expect(runtime.getRelayIdentity()).rejects.toThrow('temporary read failure');
+    const identity = await runtime.getRelayIdentity();
+
+    expect(identity.serverId).toBeTruthy();
+    expect(reads).toBeGreaterThan(1);
+  });
+
+  it('does not regenerate or write when the strict settings read fails', async () => {
+    let writes = 0;
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      readSettingsFromDiskMigrated: async () => ({}),
+      readSettingsStrict: async () => { throw new Error('strict read failed'); },
+      writeSettingsToDisk: async () => { writes += 1; },
+    });
+
+    await expect(runtime.getRelayIdentity()).rejects.toThrow('strict read failed');
+    expect(writes).toBe(0);
+  });
+
   it('derives a stable serverId from the signing key and persists both keypairs', async () => {
     const store = makeSettingsStore();
     const runtime = createRelayIdentityRuntime({ crypto, ...store });

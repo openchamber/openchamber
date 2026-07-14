@@ -36,6 +36,7 @@ export const createRelayIdentityRuntime = (deps) => {
   const { crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict } = deps;
 
   let cachedIdentity = null;
+  let pendingIdentity = null;
 
   const importPersistedEncryptionKeypair = async (settings) => {
     const existing = settings?.relayEncryptionKey;
@@ -88,7 +89,7 @@ export const createRelayIdentityRuntime = (deps) => {
    *   signRelayAuth: (role: string, connectionId?: string | null) => { ts: number, sig: string, pk: string },
    * }>}
    */
-  const getRelayIdentity = async () => {
+  const initializeRelayIdentity = async () => {
     if (cachedIdentity) return cachedIdentity;
     const signing = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
     const serverId = deriveServerId({ crypto }, signing.publicJwk);
@@ -111,6 +112,16 @@ export const createRelayIdentityRuntime = (deps) => {
       signRelayAuth,
     };
     return cachedIdentity;
+  };
+
+  const getRelayIdentity = () => {
+    if (cachedIdentity) return Promise.resolve(cachedIdentity);
+    if (pendingIdentity) return pendingIdentity;
+
+    pendingIdentity = initializeRelayIdentity().finally(() => {
+      pendingIdentity = null;
+    });
+    return pendingIdentity;
   };
 
   return { getRelayIdentity };
