@@ -60,6 +60,8 @@ export const dict: Record<I18nKey, string> = {
   "mobile.connect.error.invalidUrl": "Ця адреса сервера некоректна.",
   "mobile.connect.error.unreachable": "Не вдалося достукатись до цього OpenChamber сервера.",
   "mobile.connect.error.authRequired": "Цьому серверу потрібен пароль або client token.",
+  "mobile.connect.error.pairingSecurity": "Не вдалося перевірити захищене з’єднання з цим сервером. Перевірте код сполучення та повторіть спробу.",
+  "mobile.connect.error.pairingUncertain": "Сполучення могло завершитися, але підтвердження було втрачено. Перевірте збережені з’єднання, перш ніж повторювати спробу.",
   "mobile.connect.error.passwordFailed": "Не вдалося розблокувати сервер. Перевір пароль.",
   "mobile.instances.addTitle": "Додати інстанс",
   "mobile.instances.addManual": "Додати за адресою",

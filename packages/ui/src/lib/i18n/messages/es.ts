@@ -60,6 +60,8 @@ export const dict: Record<I18nKey, string> = {
   "mobile.connect.error.invalidUrl": "Esa URL de servidor no es válida.",
   "mobile.connect.error.unreachable": "No se pudo conectar con ese servidor de OpenChamber.",
   "mobile.connect.error.authRequired": "Este servidor requiere una contraseña o un token de cliente.",
+  "mobile.connect.error.pairingSecurity": "No se pudo verificar la conexión segura de este servidor. Comprueba el código de emparejamiento e inténtalo de nuevo.",
+  "mobile.connect.error.pairingUncertain": "Es posible que el emparejamiento se haya completado, pero se perdió la confirmación. Comprueba las conexiones guardadas antes de volver a intentarlo.",
   "mobile.connect.error.passwordFailed": "No se pudo desbloquear ese servidor. Revisa la contraseña.",
   "mobile.instances.addTitle": "Agregar instancia",
   "mobile.instances.addManual": "Añadir por dirección",

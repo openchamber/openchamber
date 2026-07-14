@@ -59,6 +59,8 @@ export const dict: Record<I18nKey, string> = {
   'mobile.connect.error.invalidUrl': 'そのサーバー URL は無効です。',
   'mobile.connect.error.unreachable': 'その OpenChamber サーバーに接続できませんでした。',
   'mobile.connect.error.authRequired': 'このサーバーにはパスワードまたはクライアントトークンが必要です。',
+  'mobile.connect.error.pairingSecurity': 'このサーバーの安全な接続を確認できませんでした。ペアリングコードを確認して、もう一度お試しください。',
+  'mobile.connect.error.pairingUncertain': 'ペアリングが完了した可能性がありますが、確認結果を受信できませんでした。再試行する前に保存済みの接続を確認してください。',
   'mobile.connect.error.passwordFailed': 'サーバーのロックを解除できませんでした。パスワードを確認してください。',
   'mobile.connect.scan.unsupported': 'QR スキャンはインストール済みのモバイルアプリでのみ利用できます。',
   'mobile.connect.scan.permissionDenied': 'カメラへのアクセスがオフになっています。QR コードを読み取るには設定で有効にしてください。',

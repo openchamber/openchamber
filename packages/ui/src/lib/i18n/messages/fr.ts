@@ -2568,6 +2568,8 @@ export const dict = {
   'mobile.connect.error.invalidUrl': 'Cette URL de serveur n\'est pas valide.',
   'mobile.connect.error.unreachable': 'Impossible de joindre ce serveur OpenChamber.',
   'mobile.connect.error.authRequired': 'Ce serveur nécessite un mot de passe ou un jeton client.',
+  'mobile.connect.error.pairingSecurity': 'Impossible de vérifier la connexion sécurisée de ce serveur. Vérifiez le code d’appairage et réessayez.',
+  'mobile.connect.error.pairingUncertain': 'L’appairage a peut-être réussi, mais la confirmation a été perdue. Vérifiez les connexions enregistrées avant de réessayer.',
   'mobile.connect.error.passwordFailed': 'Impossible de déverrouiller ce serveur. Vérifiez le mot de passe.',
   'mobile.instances.addTitle': 'Ajouter une instance',
   'mobile.instances.addManual': 'Ajouter par adresse',

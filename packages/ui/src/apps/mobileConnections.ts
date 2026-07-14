@@ -20,7 +20,7 @@ import React from 'react';
 
 import { useI18n } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
-import { redeemPairingCandidate } from '@/lib/pairingCandidateRedemption';
+import { PairingRedemptionError, redeemPairingCandidate } from '@/lib/pairingCandidateRedemption';
 import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createDirectE2eeTunnelClient } from '@/lib/relay/direct-e2ee-tunnel-client';
@@ -130,6 +130,27 @@ export type MobileConnectInput = {
   label?: string;
   relay?: MobileRelayConfig;
   relayGrant?: string;
+};
+
+export type MobilePairingFailureKey =
+  | 'mobile.connect.error.unreachable'
+  | 'mobile.connect.error.authRequired'
+  | 'mobile.connect.error.pairingSecurity'
+  | 'mobile.connect.error.pairingUncertain';
+
+export const mobilePairingFailureKey = (error: unknown): MobilePairingFailureKey => {
+  if (!(error instanceof PairingRedemptionError)) return 'mobile.connect.error.pairingUncertain';
+  switch (error.classification) {
+    case 'unreachable':
+      return 'mobile.connect.error.unreachable';
+    case 'credential':
+    case 'authorization':
+      return 'mobile.connect.error.authRequired';
+    case 'security':
+      return 'mobile.connect.error.pairingSecurity';
+    case 'ambiguous':
+      return 'mobile.connect.error.pairingUncertain';
+  }
 };
 
 type MobileFetchResponse = {
@@ -1523,9 +1544,9 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         { runtimeKey: secureTokenKeyOf({ candidates: deviceCandidates }) },
       );
       onConnected();
-    } catch {
+    } catch (error) {
       console.warn('[mobile-connect]', 'pairing:failed');
-      setError(t('mobile.connect.error.authRequired'));
+      setError(t(mobilePairingFailureKey(error)));
     } finally {
       endBusy('pairing');
     }

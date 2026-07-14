@@ -1,7 +1,9 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import { deleteMobileConnection, loadMobileConnections, probeConnectionCandidates, upsertMobileConnection, validateMobileConnectionSession, type MobileDirectE2eeConfig, type MobileRelayConfig } from './mobileConnections';
+import { deleteMobileConnection, loadMobileConnections, mobilePairingFailureKey, probeConnectionCandidates, upsertMobileConnection, validateMobileConnectionSession, type MobileDirectE2eeConfig, type MobileRelayConfig } from './mobileConnections';
 import type { RelayTunnelClient, RelayTunnelFailureClassification } from '@/lib/relay/tunnel-client';
+import { PairingRedemptionError } from '@/lib/pairingCandidateRedemption';
+import { dict as englishMessages } from '@/lib/i18n/messages/en';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -283,5 +285,41 @@ describe('mobile encrypted candidate fallback policy', () => {
     });
     expect(result.status).toBe('ok');
     expect(relayCalls).toBe(1);
+  });
+});
+
+describe('mobile pairing failure messages', () => {
+  test('maps every pairing classification and unknown errors to fixed localized keys', () => {
+    const cases = [
+      ['unreachable', 'mobile.connect.error.unreachable'],
+      ['security', 'mobile.connect.error.pairingSecurity'],
+      ['credential', 'mobile.connect.error.authRequired'],
+      ['ambiguous', 'mobile.connect.error.pairingUncertain'],
+      ['authorization', 'mobile.connect.error.authRequired'],
+    ] as const;
+
+    for (const [classification, expected] of cases) {
+      expect(mobilePairingFailureKey(new PairingRedemptionError(classification, 'sensitive detail'))).toBe(expected);
+    }
+    expect(mobilePairingFailureKey(new Error('unknown sensitive detail'))).toBe('mobile.connect.error.pairingUncertain');
+  });
+
+  test('mobile pairing errors render safe copy without raw failure details or classification tokens', () => {
+    const sensitive = 'wss://private.example crypto protocol credential authorization';
+    const errors = [
+      new PairingRedemptionError('security', sensitive),
+      new PairingRedemptionError('ambiguous', sensitive),
+      new Error(sensitive),
+    ];
+
+    for (const error of errors) {
+      const message = englishMessages[mobilePairingFailureKey(error)];
+      expect(message).toBeTruthy();
+      expect(message).not.toContain('private.example');
+      expect(message).not.toContain('crypto');
+      expect(message).not.toContain('protocol');
+      expect(message).not.toContain('credential');
+      expect(message).not.toContain('authorization');
+    }
   });
 });
