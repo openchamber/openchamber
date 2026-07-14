@@ -964,7 +964,7 @@ export const useUIStore = create<UIStore>()(
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
         stickyUserHeader: false,
-        promptNavigatorEnabled: false,
+        promptNavigatorEnabled: true,
         expandedEditorToolbar: false,
         showSplitAssistantMessageActions: false,
         allowPromptingSubagentSessions: false,
