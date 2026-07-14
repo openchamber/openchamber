@@ -15,6 +15,10 @@ const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
 const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
 const OPENCODE_HEALTH_PATH = '/global/health';
+const MANAGED_OPENCODE_START_TIMEOUT_MS = parsePositiveInt(
+  process.env.OPENCHAMBER_OPENCODE_START_TIMEOUT_MS,
+  30000
+);
 
 export const createOpenCodeLifecycleRuntime = (deps) => {
   const {
@@ -282,61 +286,67 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    const url = await new Promise((resolve, reject) => {
-      let stdout = '';
-      let stderr = '';
-      let done = false;
-      const finish = (handler, value) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        child.stdout?.off('data', onStdout);
-        child.stderr?.off('data', onStderr);
-        child.off('exit', onExit);
-        child.off('error', onError);
-        handler(value);
-      };
+    let url;
+    try {
+      url = await new Promise((resolve, reject) => {
+        let stdout = '';
+        let stderr = '';
+        let done = false;
+        const finish = (handler, value) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          child.stdout?.off('data', onStdout);
+          child.stderr?.off('data', onStderr);
+          child.off('exit', onExit);
+          child.off('error', onError);
+          handler(value);
+        };
 
-      const onStdout = (chunk) => {
-        stdout += chunk.toString();
-        const lines = stdout.split('\n');
-        for (const line of lines) {
-          if (!line.startsWith('opencode server listening')) continue;
-          const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
-          if (!match) {
-            finish(reject, new Error(`Failed to parse server url from output: ${line}`));
+        const onStdout = (chunk) => {
+          stdout += chunk.toString();
+          const lines = stdout.split('\n');
+          for (const line of lines) {
+            if (!line.startsWith('opencode server listening')) continue;
+            const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
+            if (!match) {
+              finish(reject, new Error(`Failed to parse server url from output: ${line}`));
+              return;
+            }
+            finish(resolve, match[1]);
             return;
           }
-          finish(resolve, match[1]);
-          return;
-        }
-      };
+        };
 
-      const onStderr = (chunk) => {
-        stderr += chunk.toString();
-      };
+        const onStderr = (chunk) => {
+          stderr += chunk.toString();
+        };
 
-      const onExit = (code, signal) => {
-        const reason = signal ? `signal ${signal}` : `code ${code}`;
-        const appBundleHint = process.platform === 'darwin' && /\/OpenCode\.app\/Contents\/MacOS\/(?:OpenCode|opencode-cli)$/i.test(binary)
-          ? ' The configured binary appears to point at the macOS desktop app bundle; OpenChamber needs the standalone opencode CLI.'
-          : '';
-        finish(reject, new Error(`OpenCode process exited before serving with ${reason}. Binary used: ${binary}.${appBundleHint} ${formatCapturedOutput({ stdout, stderr })}`));
-      };
+        const onExit = (code, signal) => {
+          const reason = signal ? `signal ${signal}` : `code ${code}`;
+          const appBundleHint = process.platform === 'darwin' && /\/OpenCode\.app\/Contents\/MacOS\/(?:OpenCode|opencode-cli)$/i.test(binary)
+            ? ' The configured binary appears to point at the macOS desktop app bundle; OpenChamber needs the standalone opencode CLI.'
+            : '';
+          finish(reject, new Error(`OpenCode process exited before serving with ${reason}. Binary used: ${binary}.${appBundleHint} ${formatCapturedOutput({ stdout, stderr })}`));
+        };
 
-      const onError = (error) => {
-        finish(reject, error);
-      };
+        const onError = (error) => {
+          finish(reject, error);
+        };
 
-      const timer = setTimeout(() => {
-        finish(reject, new Error(`Timeout waiting for OpenCode to start after ${timeout}ms`));
-      }, timeout);
+        const timer = setTimeout(() => {
+          finish(reject, new Error(`Timeout waiting for OpenCode to start after ${timeout}ms`));
+        }, timeout);
 
-      child.stdout?.on('data', onStdout);
-      child.stderr?.on('data', onStderr);
-      child.on('exit', onExit);
-      child.on('error', onError);
-    });
+        child.stdout?.on('data', onStdout);
+        child.stderr?.on('data', onStderr);
+        child.on('exit', onExit);
+        child.on('error', onError);
+      });
+    } catch (error) {
+      await closeManagedOpenCodeChild(child);
+      throw error;
+    }
 
     // Record this child so a future run can reap it if we crash before teardown.
     // The web-server lifecycle runs in-process inside multiple hosts, so tag the
@@ -487,7 +497,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       const serverInstance = await createManagedOpenCodeServerProcess({
         hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
         port: spawnPort,
-        timeout: 30000,
+        timeout: MANAGED_OPENCODE_START_TIMEOUT_MS,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
         env: {
