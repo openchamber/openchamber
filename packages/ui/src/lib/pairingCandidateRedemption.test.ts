@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { PairingConnectionPayload } from './connectionPayload';
-import { firstHttpPairingCandidateUrl, PairingRedemptionError, redeemPairingCandidate } from './pairingCandidateRedemption';
+import { PairingRedemptionError, redeemPairingCandidate } from './pairingCandidateRedemption';
 import type { RelayTunnelClient, RelayTunnelStatus } from './relay/tunnel-client';
 
 const jwk = { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' };
@@ -203,13 +203,5 @@ describe('pairing candidate redemption', () => {
       createDirectE2eeClient: () => wrongHealth,
     }).catch((value: unknown) => value);
     expect((error as PairingRedemptionError).classification).toBe('security');
-  });
-
-  test('selects only LAN or tunnel candidates as HTTP URLs', () => {
-    expect(firstHttpPairingCandidateUrl(payload.candidates)).toBe(undefined);
-    expect(firstHttpPairingCandidateUrl([
-      payload.candidates[0]!,
-      { type: 'lan', url: 'https://lan.example' },
-    ])).toBe('https://lan.example');
   });
 });

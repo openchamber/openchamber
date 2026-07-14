@@ -80,10 +80,6 @@ const requestWithTimeout = async (
   }
 };
 
-export const firstHttpPairingCandidateUrl = (candidates: PairingEndpointCandidate[]): string | undefined =>
-  candidates.find((candidate): candidate is Extract<PairingEndpointCandidate, { type: 'lan' | 'tunnel' }> =>
-    candidate.type === 'lan' || candidate.type === 'tunnel')?.url;
-
 export const redeemPairingCandidate = async (
   payload: PairingConnectionPayload,
   options: PairingRedemptionOptions,
