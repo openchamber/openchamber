@@ -1,12 +1,10 @@
 import React from 'react';
-import { toast } from '@/components/ui';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { getSyncSessionStatus } from '@/sync/sync-refs';
 import { useDirectorySync } from '@/sync/sync-context';
