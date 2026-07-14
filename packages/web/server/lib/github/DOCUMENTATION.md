@@ -32,8 +32,8 @@
 
 ### Device flow
 
-- `startDeviceFlow({ clientId, scope })`: request device code.
-- `exchangeDeviceCode({ clientId, deviceCode })`: poll for access token.
+- `startDeviceFlow({ clientId, scope, baseUrl? })`: request device code (`baseUrl` defaults to `https://github.com`).
+- `exchangeDeviceCode({ clientId, deviceCode, baseUrl? })`: poll for access token (`baseUrl` defaults to `https://github.com`).
 
 ### Octokit
 

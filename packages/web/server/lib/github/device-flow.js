@@ -1,5 +1,4 @@
-const DEVICE_CODE_URL = 'https://github.com/login/device/code';
-const ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token';
+const DEFAULT_GITHUB_BASE_URL = 'https://github.com';
 const DEVICE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
 
 const encodeForm = (params) => {
@@ -32,16 +31,30 @@ async function postForm(url, params) {
   return payload;
 }
 
-export async function startDeviceFlow({ clientId, scope }) {
-  return postForm(DEVICE_CODE_URL, {
+const normalizeBaseUrl = (baseUrl) => {
+  const candidate = typeof baseUrl === 'string' && baseUrl.trim()
+    ? baseUrl.trim()
+    : DEFAULT_GITHUB_BASE_URL;
+  const parsed = new URL(candidate);
+  parsed.pathname = '';
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString().replace(/\/$/, '');
+};
+
+const resolveDeviceCodeUrl = (baseUrl) => `${normalizeBaseUrl(baseUrl)}/login/device/code`;
+const resolveAccessTokenUrl = (baseUrl) => `${normalizeBaseUrl(baseUrl)}/login/oauth/access_token`;
+
+export async function startDeviceFlow({ clientId, scope, baseUrl }) {
+  return postForm(resolveDeviceCodeUrl(baseUrl), {
     client_id: clientId,
     scope,
   });
 }
 
-export async function exchangeDeviceCode({ clientId, deviceCode }) {
+export async function exchangeDeviceCode({ clientId, deviceCode, baseUrl }) {
   // GitHub returns 200 with {error: 'authorization_pending'|...} for non-success states.
-  const payload = await postForm(ACCESS_TOKEN_URL, {
+  const payload = await postForm(resolveAccessTokenUrl(baseUrl), {
     client_id: clientId,
     device_code: deviceCode,
     grant_type: DEVICE_GRANT_TYPE,

@@ -1,4 +1,9 @@
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import {
+  completeCopilotGheAuthFlow,
+  startCopilotGheAuthFlow,
+  writeCopilotGheAuthToken,
+} from './copilot-ghe-auth.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -371,6 +376,100 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to clear pending MCP auth context:', error);
       return res.status(500).json({ error: error.message || 'Failed to clear pending MCP auth context' });
+    }
+  });
+
+  app.post('/api/provider/github-copilot/ghe/auth/start', async (req, res) => {
+    try {
+      const serverUrl = typeof req.body?.serverUrl === 'string'
+        ? req.body.serverUrl
+        : (typeof req.body?.enterpriseUrl === 'string' ? req.body.enterpriseUrl : '');
+
+      const clientId = typeof req.body?.clientId === 'string'
+        ? req.body.clientId
+        : undefined;
+
+      const { enterpriseHost, payload, clientId: resolvedClientId } = await startCopilotGheAuthFlow({
+        serverUrl,
+        clientId,
+      });
+
+      return res.json({
+        enterpriseUrl: enterpriseHost,
+        clientId: resolvedClientId,
+        deviceCode: payload.device_code,
+        userCode: payload.user_code,
+        verificationUri: payload.verification_uri,
+        verificationUriComplete: payload.verification_uri_complete,
+        expiresIn: payload.expires_in,
+        interval: payload.interval,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start GitHub Copilot GHE auth flow';
+      if (message === 'serverUrl is required' || message === 'serverUrl is invalid') {
+        return res.status(400).json({ error: message });
+      }
+      console.error('Failed to start GitHub Copilot GHE auth flow:', error);
+      return res.status(500).json({ error: message });
+    }
+  });
+
+  app.post('/api/provider/github-copilot/ghe/auth/complete', async (req, res) => {
+    try {
+      const serverUrl = typeof req.body?.serverUrl === 'string'
+        ? req.body.serverUrl
+        : (typeof req.body?.enterpriseUrl === 'string' ? req.body.enterpriseUrl : '');
+      const clientId = typeof req.body?.clientId === 'string'
+        ? req.body.clientId
+        : undefined;
+      const deviceCode = typeof req.body?.deviceCode === 'string'
+        ? req.body.deviceCode
+        : (typeof req.body?.device_code === 'string' ? req.body.device_code : '');
+
+      if (!deviceCode) {
+        return res.status(400).json({ error: 'deviceCode is required' });
+      }
+
+      const { enterpriseHost, payload, clientId: resolvedClientId } = await completeCopilotGheAuthFlow({
+        serverUrl,
+        clientId,
+        deviceCode,
+      });
+
+      if (payload?.error) {
+        const status = String(payload.error);
+        const retryable = status === 'authorization_pending' || status === 'slow_down';
+        return res.json({
+          connected: false,
+          status,
+          retryable,
+          error: payload.error_description || payload.error,
+        });
+      }
+
+      const accessToken = payload?.access_token;
+      if (!accessToken) {
+        return res.status(500).json({ error: 'Missing access_token from GitHub Enterprise Server' });
+      }
+
+      writeCopilotGheAuthToken({
+        enterpriseHost,
+        accessToken,
+      });
+
+      return res.json({
+        connected: true,
+        enterpriseUrl: enterpriseHost,
+        clientId: resolvedClientId,
+        scope: typeof payload.scope === 'string' ? payload.scope : '',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to complete GitHub Copilot GHE auth flow';
+      if (message === 'serverUrl is required' || message === 'serverUrl is invalid') {
+        return res.status(400).json({ error: message });
+      }
+      console.error('Failed to complete GitHub Copilot GHE auth flow:', error);
+      return res.status(500).json({ error: message });
     }
   });
 
