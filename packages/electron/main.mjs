@@ -14,7 +14,7 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
-import { assertUpdaterCapability } from './updater-capability.mjs';
+import { assertUpdaterCapability, resolveLinuxUpdatePackageType } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import { buildLinuxDesktopExecSpec, parseLinuxDesktopExecProgram } from './open-in-app-launcher.mjs';
@@ -4210,13 +4210,15 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_check_for_updates': {
-      assertUpdaterCapability({ packaged: app.isPackaged });
+      const linuxPackageType = resolveLinuxUpdatePackageType({ packaged: app.isPackaged });
+      assertUpdaterCapability({ packaged: app.isPackaged, packageType: linuxPackageType });
       const currentVersion = APP_VERSION;
       const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
         pendingUpdate: state.pendingUpdate,
         compareVersions: compareSemver,
+        artifactExtension: linuxPackageType,
       });
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
@@ -4234,7 +4236,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_download_and_install_update':
-      assertUpdaterCapability({ packaged: app.isPackaged });
+      assertUpdaterCapability({
+        packaged: app.isPackaged,
+        packageType: resolveLinuxUpdatePackageType({ packaged: app.isPackaged }),
+      });
       if (!state.pendingUpdate) {
         throw new Error('No pending update');
       }
@@ -4280,7 +4285,12 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
-      if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged });
+      if (applyUpdate) {
+        assertUpdaterCapability({
+          packaged: app.isPackaged,
+          packageType: resolveLinuxUpdatePackageType({ packaged: app.isPackaged }),
+        });
+      }
       log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {

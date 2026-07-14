@@ -1,14 +1,34 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+export const resolveLinuxUpdatePackageType = ({
+  platform = process.platform,
+  packaged,
+  appImagePath = process.env.APPIMAGE,
+  resourcesPath = process.resourcesPath,
+  readFile = fs.readFileSync,
+} = {}) => {
+  if (platform !== 'linux' || !packaged) return null;
+  if (appImagePath) return 'AppImage';
+
+  try {
+    const packageType = String(readFile(path.join(resourcesPath, 'package-type'), 'utf8')).trim();
+    return packageType === 'deb' ? 'deb' : null;
+  } catch {
+    return null;
+  }
+};
+
 export const assertUpdaterCapability = ({
   platform = process.platform,
   packaged,
   appImagePath = process.env.APPIMAGE,
   access = fs.accessSync,
   stat = fs.statSync,
+  packageType = resolveLinuxUpdatePackageType({ platform, packaged, appImagePath }),
 } = {}) => {
   if (platform !== 'linux' || !packaged) return;
+  if (packageType === 'deb') return;
 
   if (!appImagePath) {
     throw new Error(

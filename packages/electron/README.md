@@ -80,7 +80,7 @@ After packaging, run `bun run --cwd packages/electron verify:linux-appimage`. Th
 
 Running a packaged Linux AppImage requires FUSE (`libfuse.so.2`, typically `libfuse2` / `libfuse2t64` on Debian/Ubuntu). Without FUSE, start with `APPIMAGE_EXTRACT_AND_RUN=1`. Keep the AppImage on a writable path so in-app updates can replace it.
 
-Linux updates are supported only when the packaged app is running from a writable AppImage. Update checks, downloads, and installation report an actionable error when `APPIMAGE` is missing, invalid, or read-only; a missing release feed (`latest-linux.yml` 404 before the first Linux publish) is treated as “no update available”. macOS and Windows updater behavior is unchanged. Release builds keep `latest-linux.yml` (x64) and `latest-linux-arm64.yml` separate and validate each manifest against its AppImage before upload. Linux AppImages download full updates (no `.blockmap` differential channel yet).
+Linux updates require a release artifact that matches the installed package type. AppImage updates require a writable `APPIMAGE` path; missing, invalid, or read-only paths report an actionable error. Deb updates require a matching `.deb` in the release manifest and use the system package installer with an elevation prompt. A missing release feed (`latest-linux.yml` 404 before the first Linux publish) or a manifest without the installed package type is treated as “no update available”. macOS and Windows updater behavior is unchanged. Release builds keep `latest-linux.yml` (x64) and `latest-linux-arm64.yml` separate. Linux AppImages download full updates (no `.blockmap` differential channel yet).
 
 ### Updater End-to-End Fixture
 
