@@ -196,7 +196,7 @@ const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
   }
 
   if (!isVSCodeRuntime()) {
-    const response = await quotaRuntimeFetch('/api/config/settings', {
+    const response = await runtimeFetch('/api/config/settings', {
       method: 'GET',
       headers: { Accept: 'application/json' }
     });
