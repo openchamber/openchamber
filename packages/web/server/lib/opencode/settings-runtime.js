@@ -1,4 +1,5 @@
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import { withFileWriteLock } from '../fs/settings-file-lock.js';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
@@ -500,13 +501,17 @@ export const createSettingsRuntime = (deps) => {
     await fsPromises.rm(tmp, { force: true });
   };
 
-  const writeSettingsToDisk = async (settings) => {
+  const writeSettingsToDisk = async (settings) => withFileWriteLock(SETTINGS_FILE_PATH, async () => {
     try {
       await fsPromises.mkdir(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
       // Atomic write: Electron main and ssh-manager read this file via plain
       // readFile + JSON.parse and silently coerce parse errors to {}. A
       // partial read during a non-atomic writeFile would make their next
-      // read-modify-write wipe the settings file.
+      // read-modify-write wipe the settings file. withFileWriteLock further
+      // serializes against every other writer of this same path in this
+      // process (Electron's own settings writer included), so two
+      // read-modify-write cycles can't interleave and drop each other's
+      // changes.
       const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), 'utf8');
       await replaceFile(tmp, SETTINGS_FILE_PATH);
@@ -514,7 +519,7 @@ export const createSettingsRuntime = (deps) => {
       console.warn('Failed to write settings file:', error);
       throw error;
     }
-  };
+  });
 
   const validateProjectEntries = async (projects) => {
     if (!Array.isArray(projects)) {

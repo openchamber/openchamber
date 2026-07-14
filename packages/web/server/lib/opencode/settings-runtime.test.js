@@ -121,4 +121,28 @@ describe('settings runtime', () => {
       await fsPromises.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it('serializes concurrent writeSettingsToDisk calls so one does not clobber the other mid-write', async () => {
+    // Electron's desktop shell writes settings.json independently of this
+    // runtime but into the same file, in the same process. Simulate that by
+    // firing two writeSettingsToDisk calls back to back without awaiting the
+    // first — the write lock must stop the second write's temp-file rename
+    // from landing between the first write's own temp-file write and rename.
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      const first = runtime.writeSettingsToDisk({ theme: 'dark', writer: 'a' });
+      const second = runtime.writeSettingsToDisk({ theme: 'light', writer: 'b' });
+      await Promise.all([first, second]);
+
+      const onDisk = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      // Whichever call went last should fully win; a race would risk landing
+      // a mix, or leaving an orphaned .tmp-* file next to settings.json.
+      expect(onDisk).toEqual({ theme: 'light', writer: 'b' });
+
+      const siblingFiles = await fsPromises.readdir(path.dirname(settingsFilePath));
+      expect(siblingFiles.some((name) => name.includes('.tmp-'))).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
 });
