@@ -50,6 +50,8 @@ const envRelayUrlOverride = () => {
  *   crypto: typeof import('node:crypto'),
  *   readSettingsFromDiskMigrated: () => Promise<object>,
  *   writeSettingsToDisk: (settings: object) => Promise<void>,
+ *   readSettingsStrict?: () => Promise<object>,
+ *   identityRuntime?: { getRelayIdentity: () => Promise<object> },
  *   getLocalPort: () => number,
  *   logger?: Pick<Console, 'warn'>,
  * }} deps
@@ -71,8 +73,14 @@ export const createRelayService = ({
   // on a random instance. Optional: without it, behavior is pre-lock.
   hostLock = null,
   logger = console,
+  identityRuntime: injectedIdentityRuntime,
 }) => {
-  const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
+  const identityRuntime = injectedIdentityRuntime ?? createRelayIdentityRuntime({
+    crypto,
+    readSettingsFromDiskMigrated,
+    writeSettingsToDisk,
+    readSettingsStrict,
+  });
 
   let hostClient = null;
   let status = { state: 'disabled', lastError: null, connectedClients: 0 };
