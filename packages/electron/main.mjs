@@ -22,7 +22,7 @@ import { writeSecureAtomicJson } from './secure-json-file.mjs';
 import { buildDesktopAdditionalArguments, buildRuntimeBootMetadataScript, isRuntimeBootstrapSenderAllowed, resolveRuntimeBootstrap } from './runtime-bootstrap.mjs';
 import { resolveDesktopHostsForSender } from './host-public-config.mjs';
 import { decidePairingV2DeepLink } from './pairing-deep-link.mjs';
-import { planInitialRuntime } from './initial-runtime-plan.mjs';
+import { planInitialRuntime, planRuntimeForHost } from './initial-runtime-plan.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -1866,35 +1866,29 @@ const switchToHostById = async (rawId) => {
   const id = typeof rawId === 'string' ? rawId.trim() : '';
   if (!id) return;
   const config = readDesktopHostsConfig();
-  let targetUrl = null;
-  let apiBaseUrl = null;
-  let clientToken = '';
-  let requestHeaders = {};
-  if (id === LOCAL_HOST_ID) {
-    targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-    apiBaseUrl = state.sidecarUrl;
-    clientToken = readDesktopLocalClientToken();
-    requestHeaders = {};
-  } else {
-    const host = config.hosts.find((entry) => entry.id === id);
-    if (!host) {
-      log.warn('[electron] deep-link host not found:', id);
-      return;
-    }
-    targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
-    apiBaseUrl = host.apiUrl || host.url;
-    clientToken = host.clientToken || '';
-    requestHeaders = sanitizeRuntimeRequestHeaders(host.requestHeaders || {});
-  }
-  if (!targetUrl || !apiBaseUrl) {
+  const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
+  const plan = planRuntimeForHost({
+    hostId: id,
+    hosts: config.hosts,
+    localUiUrl,
+    localUrl: state.sidecarUrl || state.localOrigin,
+    localClientToken: readDesktopLocalClientToken(),
+    useRemoteUi: !shouldUsePackagedUi(),
+  });
+  if (!plan?.initialUrl || !plan.apiBaseUrl) {
     log.warn('[electron] deep-link host has no target URL:', id);
     return;
   }
   const bootOutcome = id === LOCAL_HOST_ID
     ? { target: 'local', status: 'ok' }
-    : { target: 'remote', status: 'ok', hostId: id, url: apiBaseUrl };
+    : { target: 'remote', status: 'ok', hostId: id, url: plan.apiBaseUrl };
   log.info('[electron] switching to host', { id, bootOutcome });
-  await activateMainWindow(targetUrl, state.localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  await activateMainWindow(plan.initialUrl, state.localOrigin, bootOutcome, {
+    apiBaseUrl: plan.apiBaseUrl,
+    clientToken: plan.clientToken,
+    requestHeaders: plan.requestHeaders,
+    relayHostId: plan.relayHostId,
+  });
 };
 
 const confirmConnectDeepLink = async (payload) => {
@@ -3948,36 +3942,22 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // tunnel fallback) via the injected relay host id — a fixed apiBaseUrl
       // would strand the window when the direct leg is unreachable.
       const hostId = typeof args.hostId === 'string' ? args.hostId.trim() : '';
-      if (hostId === LOCAL_HOST_ID) {
-        const localUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-        if (!localUrl) throw new Error('Local UI is not available');
-        await createAdditionalWindow(localUrl, {
-          apiBaseUrl: state.sidecarUrl || state.localOrigin || '',
-          clientToken: readDesktopLocalClientToken(),
-          requestHeaders: {},
-        });
-        return null;
-      }
       const config = readDesktopHostsConfig();
-      const host = config.hosts.find((entry) => entry.id === hostId);
-      if (!host) throw new Error('Host not found');
-       if (host.relay || host.directE2ee) {
-        const windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-        await createAdditionalWindow(windowUrl, {
-          apiBaseUrl: '',
-          clientToken: host.clientToken || '',
-          requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders || {}),
-          relayHostId: host.id,
-        });
-        return null;
-      }
-      const targetUrl = normalizeHostUrl(host.apiUrl || host.url);
-      if (!targetUrl) throw new Error('Invalid URL');
-      const windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : targetUrl;
-      await createAdditionalWindow(windowUrl, {
-        apiBaseUrl: targetUrl,
-        clientToken: host.clientToken || '',
-        requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders || {}),
+      const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
+      const plan = planRuntimeForHost({
+        hostId,
+        hosts: config.hosts,
+        localUiUrl,
+        localUrl: state.sidecarUrl || state.localOrigin,
+        localClientToken: readDesktopLocalClientToken(),
+        useRemoteUi: !shouldUsePackagedUi(),
+      });
+      if (!plan?.initialUrl || !plan.apiBaseUrl) throw new Error(hostId === LOCAL_HOST_ID ? 'Local UI is not available' : 'Host not found');
+      await createAdditionalWindow(plan.initialUrl, {
+        apiBaseUrl: plan.apiBaseUrl,
+        clientToken: plan.clientToken,
+        requestHeaders: plan.requestHeaders,
+        relayHostId: plan.relayHostId,
       });
       return null;
     }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { planInitialRuntime } from './initial-runtime-plan.mjs';
+import { planInitialRuntime, planRuntimeForHost } from './initial-runtime-plan.mjs';
 
 const local = {
   localUiUrl: 'openchamber-ui://app/index.html',
@@ -72,5 +72,65 @@ describe('initial runtime plan', () => {
       relayHostId: '',
       probeRemote: false,
     });
+  });
+
+  test('keeps mixed direct and relay host data in one runtime plan', () => {
+    expect(planRuntimeForHost({
+      ...local,
+      hostId: 'mixed',
+      hosts: [{
+        id: 'mixed',
+        url: 'https://ui.example',
+        apiUrl: 'https://api.example',
+        clientToken: 'remote-token',
+        requestHeaders: { 'CF-Access-Client-Id': 'client-id' },
+        relay: { serverId: 'server' },
+      }],
+    })).toEqual({
+      initialUrl: local.localUiUrl,
+      apiBaseUrl: 'https://api.example',
+      clientToken: 'remote-token',
+      requestHeaders: { 'CF-Access-Client-Id': 'client-id' },
+      relayHostId: 'mixed',
+      probeRemote: true,
+    });
+  });
+
+  test('uses remote UI for direct hosts only when requested by development mode', () => {
+    const host = { id: 'direct', url: 'https://ui.example', apiUrl: 'https://api.example' };
+    expect(planRuntimeForHost({ ...local, hostId: host.id, hosts: [host], useRemoteUi: true })?.initialUrl).toBe('https://ui.example');
+    expect(planRuntimeForHost({ ...local, hostId: host.id, hosts: [host], useRemoteUi: false })?.initialUrl).toBe(local.localUiUrl);
+  });
+
+  test('plans local, relay-only, and direct-E2EE-only hosts without remote UI navigation', () => {
+    const relay = { id: 'relay', url: 'relay://server', relay: { serverId: 'server' } };
+    const directE2ee = { id: 'e2ee', url: 'direct-e2ee://server', directE2ee: { wssUrl: 'wss://server/ws' } };
+    expect(planRuntimeForHost({ ...local, hostId: 'local', hosts: [] })).toEqual({
+      initialUrl: local.localUiUrl,
+      apiBaseUrl: local.localUrl,
+      clientToken: local.localClientToken,
+      requestHeaders: {},
+      relayHostId: '',
+      probeRemote: false,
+    });
+    expect(planRuntimeForHost({ ...local, hostId: relay.id, hosts: [relay], useRemoteUi: true })).toMatchObject({
+      initialUrl: local.localUiUrl,
+      apiBaseUrl: local.localUrl,
+      clientToken: local.localClientToken,
+      relayHostId: relay.id,
+      probeRemote: false,
+    });
+    expect(planRuntimeForHost({ ...local, hostId: directE2ee.id, hosts: [directE2ee], useRemoteUi: true })).toMatchObject({
+      initialUrl: local.localUiUrl,
+      apiBaseUrl: local.localUrl,
+      clientToken: local.localClientToken,
+      relayHostId: directE2ee.id,
+      probeRemote: false,
+    });
+  });
+
+  test('returns null for missing or invalid hosts', () => {
+    expect(planRuntimeForHost({ ...local, hostId: 'missing', hosts: [] })).toBeNull();
+    expect(planRuntimeForHost({ ...local, hostId: 'invalid', hosts: [{ id: 'invalid', url: 'relay://missing-descriptor' }] })).toBeNull();
   });
 });
