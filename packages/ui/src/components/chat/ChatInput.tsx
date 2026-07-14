@@ -1907,7 +1907,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (capturedSessionId) {
             sendMessageOptions.sessionId = capturedSessionId;
         } else if (capturedDraft?.open) {
-            sendMessageOptions.draftSnapshot = { ...capturedDraft };
+            sendMessageOptions.draftSnapshot = capturedDraft;
         }
 
         // Build the primary message (first part) and additional parts

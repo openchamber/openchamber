@@ -472,12 +472,21 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
     useSessionUIStore.getState().openNewSessionDraft({
       directoryOverride: "/projects/alpha",
     });
+    const draftSnapshot = useSessionUIStore.getState().newSessionDraft;
 
-    // Act: sendMessage is called without any intervening selection change
+    // Act: sendMessage receives the captured snapshot without any intervening
+    // selection change, as ChatInput does in production.
     await useSessionUIStore.getState().sendMessage(
       "hello world",
       "provider-x",
       "model-y",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "normal",
+      { draftSnapshot },
     );
 
     // Assert: draft was materialized
@@ -549,10 +558,42 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
       && call.sessionId === "ses_materialized_2222"
     ))).toBe(true);
 
-    // Assert: currentSessionId was updated to the materialized session
+    // Assert: the newer session selection remains untouched.
     expect(useSessionUIStore.getState().currentSessionId).toBe(
-      "ses_materialized_2222",
+      "session-old",
     );
+  });
+
+  test("draftSnapshot materialization preserves an unrelated newer draft", async () => {
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: "/projects/alpha",
+      targetFolderId: "folder-alpha",
+    });
+    const draftSnapshot = useSessionUIStore.getState().newSessionDraft;
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: "/projects/beta",
+      targetFolderId: "folder-beta",
+    });
+
+    await useSessionUIStore.getState().sendMessage(
+      "hello from captured draft",
+      "provider-x",
+      "model-y",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "normal",
+      { draftSnapshot },
+    );
+
+    const liveDraft = useSessionUIStore.getState().newSessionDraft;
+    expect(liveDraft.open).toBe(true);
+    expect(liveDraft.directoryOverride).toBe("/projects/beta");
+    expect(liveDraft.targetFolderId).toBe("folder-beta");
+    expect(useSessionUIStore.getState().currentSessionId).toBeNull();
   });
 
   test("createSession does not inherit a folder from an unrelated live draft", async () => {

@@ -295,6 +295,7 @@ export type SessionUIState = {
     parentID?: string | null,
     metadata?: Record<string, unknown>,
     targetFolderId?: string,
+    options?: { activateSession?: boolean },
   ) => Promise<Session | null>
   deleteSession: (id: string, options?: Record<string, unknown>) => Promise<boolean>
   deleteSessions: (ids: string[], options?: Record<string, unknown>) => Promise<{ deletedIds: string[]; failedIds: string[] }>
@@ -477,6 +478,7 @@ export async function materializeOpenDraftSession(
     draft.parentID ?? null,
     undefined,
     draft.targetFolderId,
+    { activateSession: false },
   )
   if (!created?.id) throw new Error("Failed to create session")
 
@@ -504,7 +506,12 @@ export async function materializeOpenDraftSession(
 
   store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
 
-  store.setCurrentSession(created.id, createdDirectory)
+  // A snapshot send must not replace a newer draft or session selection made
+  // while the original send was awaiting preparation or session creation.
+  if (useSessionUIStore.getState().newSessionDraft === draft) {
+    store.closeNewSessionDraft()
+    store.setCurrentSession(created.id, createdDirectory)
+  }
 
   if (draftPermissionAutoAcceptEnabled) {
     void import("@/stores/permissionStore")
@@ -1209,13 +1216,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // createSession
   // ---------------------------------------------------------------------------
-  createSession: async (title, directoryOverride, parentID, metadata, targetFolderIdOverride) => {
+  createSession: async (title, directoryOverride, parentID, metadata, targetFolderIdOverride, options) => {
     const targetFolderId = targetFolderIdOverride
-    get().closeNewSessionDraft()
+    if (options?.activateSession !== false) {
+      get().closeNewSessionDraft()
+    }
 
     try {
       const dir = directoryOverride ?? opencodeClient.getDirectory()
-      const session = await createSessionAction(title, dir, parentID ?? null, metadata)
+      const session = await createSessionAction(title, dir, parentID ?? null, metadata, options)
       if (!session) return null
 
       if (targetFolderId) {
