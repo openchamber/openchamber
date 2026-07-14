@@ -80,6 +80,10 @@ Current consumers:
 - `Header.tsx`
 - agent/session activity surfaces using `useGlobalSessionStatus()` / `useAllSessionStatuses()`
 
+Cross-directory selectors subscribe to the narrow child-store field they aggregate. Session aggregation listens to `state.session`; per-session status listens only to that session's `state.session_status` entry. Unrelated streaming events such as `message.part.delta` must not trigger global session/status scans.
+
+Imperative cross-directory session lookups use the cached ID index from `getAllSyncSessionMap()`. The index is rebuilt only when a child store's `state.session` reference changes; permission lineage checks must reuse it instead of rebuilding a full session map per call.
+
 ### Mutation responsibility
 
 `useGlobalSessionsStore` is not maintained by SSE directly. It is kept correct by:

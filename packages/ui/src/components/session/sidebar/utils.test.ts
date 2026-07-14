@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-
 import { isPathWithinProject } from './utils';
 
 describe('isPathWithinProject', () => {

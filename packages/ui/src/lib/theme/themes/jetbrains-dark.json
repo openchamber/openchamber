@@ -169,9 +169,9 @@
   },
   "config": {
     "fonts": {
-      "sans": "\"JetBrains Mono\", \"IBM Plex Mono\", monospace",
-      "mono": "\"JetBrains Mono\", \"IBM Plex Mono\", monospace",
-      "heading": "\"JetBrains Mono\", \"IBM Plex Mono\", monospace"
+      "sans": "\"JetBrains Mono\", ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
+      "mono": "\"JetBrains Mono\", ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
+      "heading": "\"JetBrains Mono\", ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace"
     },
     "transitions": {
       "fast": "150ms ease",

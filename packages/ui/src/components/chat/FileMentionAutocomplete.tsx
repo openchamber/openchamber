@@ -12,6 +12,8 @@ import { Icon } from "@/components/icon/Icon";
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
+import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 
 type FileInfo = ProjectFileSearchHit;
 type AgentInfo = {
@@ -77,6 +79,8 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   const labelRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
   const measureRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const isMobile = useUIStore((state) => state.isMobile);
+  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, isMobile);
   const normalizedSearchQuery = (searchQuery ?? '').trim();
   const recentFiles = React.useMemo(() => {
     if (!projectRoot || !projectTabs) {
@@ -442,9 +446,9 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       <div
         ref={containerRef}
         className="absolute z-[100] min-w-0 w-full max-w-[640px] max-h-64 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
-        style={style}
+        style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
       >
-        <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-0">
+        <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0">
         {loading ? (
           <div className="flex items-center justify-center py-4">
             <Icon name="refresh" className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -466,7 +470,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                 >
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold truncate">@{agent.name}</div>
-                    {agent.description ? (
+                    {agent.description && !isMobile ? (
                       <div className="typography-meta text-muted-foreground truncate">{agent.description}</div>
                     ) : null}
                   </div>
@@ -622,9 +626,11 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
           </div>
         )}
         </ScrollableOverlay>
-        <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
-        {t('chat.autocomplete.keyboardHint')}
-      </div>
+        {!isMobile && (
+          <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
+            {t('chat.autocomplete.keyboardHint')}
+          </div>
+        )}
     </div>
   );
 });

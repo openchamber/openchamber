@@ -337,6 +337,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return isDesktopShell() && typeof window !== 'undefined'
       && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin';
   }, []);
+  const isWindows = React.useMemo(() => {
+    return isDesktopShell() && typeof window !== 'undefined'
+      && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'win32';
+  }, []);
 
   // keep platform check available for future window chrome tweaks
 
@@ -542,12 +546,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
       query: settingsSearchQuery,
-      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac },
+      runtimeCtx: { ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows },
       visiblePageSlugs,
       t,
       getPageTitle,
     });
-  }, [getPageTitle, isDesktopLocalOrigin, isMac, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
+  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
     if (result.id.startsWith('agents.')) {
@@ -1037,7 +1041,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                         : <Icon name={iconName!} className="h-4 w-4 shrink-0" />}
                       <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
                         <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
-                        {(page.slug === 'voice' || page.slug === 'tunnel') && (
+                        {page.slug === 'tunnel' && (
                           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
                             {t('settings.view.badge.beta')}
                           </span>

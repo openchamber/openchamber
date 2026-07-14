@@ -4,6 +4,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
+import { normalizePath } from '@/lib/pathNormalization';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -25,26 +26,17 @@ type GlobalSessionsState = {
   upsertSession: (session: Session) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
+  /** Drop every session from the previous runtime instance and go back to the
+      unloaded state, so a fresh load runs against the new endpoint. */
+  resetForRuntimeSwitch: () => void;
 };
 
 const PAGE_SIZE = 500;
 
 let inflightLoad: Promise<LoadResult> | null = null;
-
-const normalizePath = (value?: string | null): string | null => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const replaced = trimmed.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
+// Bumped on runtime switch: an in-flight load from the previous instance must
+// not apply its (stale) snapshot after the reset.
+let loadGeneration = 0;
 
 export const resolveGlobalSessionDirectory = (session: Session): string | null => {
   const record = session as Session & {
@@ -363,6 +355,19 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     set((state) => applySnapshot(state, activeSessions, archivedSessions, status));
   },
 
+  resetForRuntimeSwitch: () => {
+    loadGeneration += 1;
+    inflightLoad = null;
+    set({
+      activeSessions: [],
+      archivedSessions: [],
+      sessionsByDirectory: new Map(),
+      reviewTransferBySessionId: new Map(),
+      hasLoaded: false,
+      status: 'idle',
+    });
+  },
+
   loadSessions: async (fallbackActive) => {
     if (inflightLoad) {
       return inflightLoad;
@@ -370,6 +375,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
 
+    const generation = loadGeneration;
     inflightLoad = (async () => {
       const current = get();
 
@@ -395,9 +401,20 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           console.warn('[GlobalSessions] Failed to load archived sessions, preserving current snapshot:', archivedResult.reason);
         }
 
-        set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'ready'));
+        if (generation !== loadGeneration) {
+          // Runtime switched mid-load: this snapshot belongs to the previous
+          // instance — drop it.
+          return { activeSessions: [], archivedSessions: [] };
+        }
+        const status = activeResult.status === 'fulfilled' && archivedResult.status === 'fulfilled'
+          ? 'ready'
+          : 'error';
+        set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, status));
         return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
       } catch (error) {
+        if (generation !== loadGeneration) {
+          return { activeSessions: [], archivedSessions: [] };
+        }
         const nextActiveSessions = mergeSessionLists(current.activeSessions, fallbackActive);
         const nextArchivedSessions = current.archivedSessions;
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);

@@ -8,7 +8,6 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
-import { isCapacitorApp } from "@/lib/platform"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent, type SessionMaterializationReason } from "./event-reducer"
 import { useGlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
@@ -26,6 +25,7 @@ import { updateStreamingState } from "./streaming"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
+import { applySessionEventToGlobalSessions } from "./session-event-router"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
@@ -42,14 +42,15 @@ import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { openSessionFromToast } from "./session-navigation"
+import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { setSessionPrefetch } from "./session-prefetch-cache"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
+import { runtimeFetch } from "@/lib/runtime-fetch"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -108,7 +109,11 @@ function getLiveStates(childStores: ChildStoreManager): State[] {
   return Array.from(childStores.children.values(), (store) => store.getState())
 }
 
-function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left: T, right: T) => boolean = Object.is): T {
+function useLiveSyncSelector<T>(
+  selector: (states: State[]) => T,
+  isEqual: (left: T, right: T) => boolean = Object.is,
+  subscribe?: (childStores: ChildStoreManager, notify: () => void) => () => void,
+): T {
   const { childStores } = useSyncSystem()
   const cacheRef = useRef<T | undefined>(undefined)
   const initializedRef = useRef(false)
@@ -125,7 +130,10 @@ function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left
   }, [childStores, isEqual, selector])
 
   return React.useSyncExternalStore(
-    useCallback((notify) => childStores.subscribeAll(notify), [childStores]),
+    useCallback(
+      (notify) => subscribe ? subscribe(childStores, notify) : childStores.subscribeAll(notify),
+      [childStores, subscribe],
+    ),
     getSnapshot,
     getSnapshot,
   )
@@ -141,6 +149,14 @@ function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left
 export function useGlobalSessionStatus(sessionId: string): SessionStatus | undefined {
   return useLiveSyncSelector(
     useCallback((states) => findLiveSessionStatus(states, sessionId), [sessionId]),
+    Object.is,
+    useCallback(
+      (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
+        (state: State) => state.session_status?.[sessionId],
+        notify,
+      ),
+      [sessionId],
+    ),
   )
 }
 
@@ -149,6 +165,13 @@ export function useAllSessionStatuses(): Record<string, SessionStatus> {
   return useLiveSyncSelector(
     useCallback((states) => aggregateLiveSessionStatuses(states), []),
     areStatusMapsEquivalent,
+    useCallback(
+      (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
+        (state: State) => state.session_status,
+        notify,
+      ),
+      [],
+    ),
   )
 }
 
@@ -156,6 +179,13 @@ export function useAllLiveSessions(): Session[] {
   return useLiveSyncSelector(
     useCallback((states) => aggregateLiveSessions(states), []),
     areSessionListsEquivalent,
+    useCallback(
+      (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
+        (state: State) => state.session,
+        notify,
+      ),
+      [],
+    ),
   )
 }
 
@@ -248,6 +278,7 @@ async function materializeSessionFromServer(
   store: StoreApi<DirectoryStore>,
   options?: SessionMaterializationRequest & { isStale?: () => boolean },
 ) {
+  const statusBeforeMaterialization = store.getState().session_status?.[sessionID]
   syncDebug.recovery.materializing({
     reason: options?.reason ?? "ensure-session-messages",
     directory,
@@ -284,8 +315,15 @@ async function materializeSessionFromServer(
       })),
       { skipPartTypes: RECONNECT_SKIP_PARTS },
     )
+    if (!materialized.messagesChanged && !materialized.partsChanged) {
+      return state
+    }
     return { message: materialized.message, part: materialized.part }
   })
+
+  if (statusBeforeMaterialization && statusBeforeMaterialization.type !== "idle" && !options?.isStale?.()) {
+    await resyncDirectorySessionStatuses(directory, store, [sessionID], "authoritative")
+  }
 }
 
 // Module-level refs for notification viewed check.
@@ -308,11 +346,6 @@ const pendingQuestionToastIds = new Set<string>()
 const pendingPermissionToastIds = new Set<string>()
 
 const getQuestionToastKey = (sessionID?: string, requestID?: string) => {
-  if (!sessionID || !requestID) return null
-  return `${sessionID}:${requestID}`
-}
-
-const getPermissionToastKey = (sessionID?: string, requestID?: string) => {
   if (!sessionID || !requestID) return null
   return `${sessionID}:${requestID}`
 }
@@ -649,46 +682,6 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   }
 
   return null
-}
-
-const getSessionInfoFromPayload = (event: Event): Session | null => {
-  if (event.type !== "session.created" && event.type !== "session.updated" && event.type !== "session.deleted") {
-    return null
-  }
-
-  const properties = (event as { properties?: unknown }).properties
-  if (!properties || typeof properties !== "object") {
-    return null
-  }
-
-  const info = (properties as { info?: unknown }).info
-  if (!info || typeof info !== "object") {
-    return null
-  }
-
-  const session = info as Partial<Session>
-  if (typeof session.id !== "string" || !session.time) {
-    return null
-  }
-
-  return stripSessionDiffSnapshots(session as Session)
-}
-
-const applySessionEventToGlobalSessions = (payload: Event) => {
-  if (payload.type === "session.created" || payload.type === "session.updated") {
-    const session = getSessionInfoFromPayload(payload)
-    if (session) {
-      useGlobalSessionsStore.getState().upsertSession(session)
-    }
-    return
-  }
-
-  if (payload.type === "session.deleted") {
-    const sessionID = getSessionIdFromPayload(payload) ?? getSessionInfoFromPayload(payload)?.id
-    if (sessionID) {
-      useGlobalSessionsStore.getState().removeSessions([sessionID])
-    }
-  }
 }
 
 const getMessageIdFromPayload = (event: Event): string | null => {
@@ -1167,17 +1160,47 @@ export async function resyncBlockingRequestsForDirectory(
     }
 
     const permissionStore = usePermissionStore.getState()
-    const autoAcceptingSessionIds = Object.keys(grouped).filter((sessionId) => permissionStore.isSessionAutoAccepting(sessionId))
+    const autoAcceptingSessionIds = isVSCodeRuntime()
+      ? Object.keys(grouped).filter((sessionId) => permissionStore.isSessionAutoAccepting(sessionId))
+      : []
 
     if (autoAcceptingSessionIds.length > 0) {
       const acceptedIdsBySession = new Map<string, Set<string>>()
+      // Track server-confirmed resolved permissions separately so we can
+      // remove them from `grouped` below — the V1 listPendingPermissions
+      // snapshot can still contain entries the server has already answered,
+      // and leaving them in place produces a spurious "Permission needed"
+      // toast for a permission the user has already resolved.
+      const resolvedIdsBySession = new Map<string, Set<string>>()
       await Promise.all(autoAcceptingSessionIds.flatMap((sessionId) =>
         (grouped[sessionId] ?? []).map(async (permission) => {
           try {
-            await sessionActions.respondToPermission(permission.sessionID, permission.id, "once")
-            const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
-            accepted.add(permission.id)
-            acceptedIdsBySession.set(sessionId, accepted)
+            // Verify the permission is still pending before auto-accepting.
+            // - state: "ok"        → still pending, safe to auto-accept
+            // - state: "resolved"  → server returned 404, drop from grouped
+            // - state: "unknown"   → network error / pre-1.17.12 server,
+            //                        keep in grouped for the user to act on
+            //
+            // On a pre-v1.17.12 server without the V2 endpoint, every call
+            // returns "unknown". This permanently disables auto-accept
+            // (acknowledged scope tradeoff — project requires SDK 1.17.12)
+            // but does not falsely report permissions as resolved.
+            const outcome = await opencodeClient.fetchPermission(
+              permission.sessionID,
+              permission.id,
+            )
+            if (outcome.state === "ok") {
+              await sessionActions.respondToPermission(permission.sessionID, permission.id, "once")
+              const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
+              accepted.add(permission.id)
+              acceptedIdsBySession.set(sessionId, accepted)
+            } else if (outcome.state === "resolved") {
+              const resolved = resolvedIdsBySession.get(sessionId) ?? new Set<string>()
+              resolved.add(permission.id)
+              resolvedIdsBySession.set(sessionId, resolved)
+            }
+            // state: "unknown" → keep the permission in grouped; user can
+            // answer manually.
           } catch {
             // Keep failed auto-accept permissions in UI state so the user can act.
           }
@@ -1186,8 +1209,11 @@ export async function resyncBlockingRequestsForDirectory(
 
       for (const sessionId of autoAcceptingSessionIds) {
         const acceptedIds = acceptedIdsBySession.get(sessionId)
-        if (!acceptedIds) continue
-        const remaining = (grouped[sessionId] ?? []).filter((permission) => !acceptedIds.has(permission.id))
+        const resolvedIds = resolvedIdsBySession.get(sessionId)
+        if (!acceptedIds && !resolvedIds) continue
+        const drop = (id: string) =>
+          acceptedIds?.has(id) || resolvedIds?.has(id) || false
+        const remaining = (grouped[sessionId] ?? []).filter((permission) => !drop(permission.id))
         if (remaining.length > 0) grouped[sessionId] = remaining
         else delete grouped[sessionId]
       }
@@ -1199,19 +1225,13 @@ export async function resyncBlockingRequestsForDirectory(
       if (isViewed) continue
       for (const permission of permissions) {
         if (knownIds.has(permission.id)) continue
-        const toastKey = getPermissionToastKey(sessionId, permission.id)
-        if (!toastKey || pendingPermissionToastIds.has(toastKey)) continue
-        pendingPermissionToastIds.add(toastKey)
-        const description = typeof permission.permission === "string" && permission.permission.trim().length > 0
-          ? permission.permission
-          : "Agent needs your approval"
-        toast.info("Permission needed", {
-          id: `permission-${toastKey}`,
-          description,
-          action: {
-            label: "Open session",
-            onClick: () => openSessionFromToast(sessionId, directory),
-          },
+        showPermissionNeededToast({
+          permission,
+          directory,
+          isViewed,
+          pendingIds: pendingPermissionToastIds,
+          show: (title, options) => toast.info(title, options),
+          openSession: openSessionFromToast,
         })
       }
     }
@@ -1337,6 +1357,19 @@ function handleEvent(
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
 ) {
+  if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
+    const properties = (payload as unknown as { properties?: unknown }).properties
+    if (properties && typeof properties === "object") {
+      const snapshot = properties as { sessions?: unknown }
+      if (snapshot.sessions && typeof snapshot.sessions === "object") {
+        usePermissionStore.getState().applySnapshot({
+          sessions: snapshot.sessions as Record<string, boolean>,
+        })
+      }
+    }
+    return
+  }
+
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
 
   if (handleUiNotificationEvent(payload, directory)) {
@@ -1422,26 +1455,21 @@ function handleEvent(
     const permissionStore = usePermissionStore.getState()
     if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
-      void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
+      if (isVSCodeRuntime()) {
+        void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
+      }
       return
     }
 
-    const toastKey = getPermissionToastKey(permission.sessionID, permission.id)
     const isViewed = isViewedInCurrentSession(resolvedDirectory, permission.sessionID)
-    if (!isViewed && toastKey && !pendingPermissionToastIds.has(toastKey)) {
-      pendingPermissionToastIds.add(toastKey)
-      const description = typeof permission.permission === "string" && permission.permission.trim().length > 0
-        ? permission.permission
-        : "Agent needs your approval"
-      toast.info("Permission needed", {
-        id: `permission-${toastKey}`,
-        description,
-        action: {
-          label: "Open session",
-          onClick: () => openSessionFromToast(permission.sessionID, resolvedDirectory),
-        },
-      })
-    }
+    showPermissionNeededToast({
+      permission,
+      directory: resolvedDirectory,
+      isViewed,
+      pendingIds: pendingPermissionToastIds,
+      show: (title, options) => toast.info(title, options),
+      openSession: openSessionFromToast,
+    })
   }
 
   if (payload.type === "permission.replied") {
@@ -1644,17 +1672,52 @@ const dispatchOpenCodeUpdateAvailable = (payload: { version: string }) => {
   window.dispatchEvent(new CustomEvent("openchamber:opencode-update-available", { detail: payload }))
 }
 
+let bundledOpenCodeRuntimeCache: { runtimeKey: string; promise: Promise<boolean> } | null = null
+
+const isBundledOpenCodeRuntime = async () => {
+  const runtimeKey = getRuntimeKey()
+  if (!bundledOpenCodeRuntimeCache || bundledOpenCodeRuntimeCache.runtimeKey !== runtimeKey) {
+    bundledOpenCodeRuntimeCache = {
+      runtimeKey,
+      promise: runtimeFetch("/api/config/opencode-resolution", { signal: AbortSignal.timeout(4000) })
+        .then(async (response) => {
+          if (response.ok) {
+            const resolution = await response.json() as { source?: unknown; detectedSourceNow?: unknown }
+            return resolution.source === "bundled" || resolution.detectedSourceNow === "bundled"
+          }
+
+          const healthResponse = await runtimeFetch("/health", { signal: AbortSignal.timeout(4000) })
+          if (!healthResponse.ok) return false
+          const health = await healthResponse.json() as { opencodeBinarySource?: unknown }
+          return health.opencodeBinarySource === "bundled"
+        })
+        .catch(() => false),
+    }
+  }
+  return bundledOpenCodeRuntimeCache.promise
+}
+
+const dispatchOpenCodeUpdateAvailableUnlessBundled = (payload: { version: string }) => {
+  if (typeof window === "undefined") return
+  void isBundledOpenCodeRuntime().then((isBundled) => {
+    if (!isBundled) {
+      dispatchOpenCodeUpdateAvailable(payload)
+    }
+  })
+}
+
 export function SyncProvider(props: {
   sdk: OpencodeClient
   directory: string
   children: React.ReactNode
 }) {
-  const storedMessageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
-  // Capacitor apps are locked to SSE: native WebSocket streaming is unreliable there (on
-  // Android events only arrive once the run finishes), while SSE streams correctly. The Chat
-  // settings UI disables the other options on mobile, but force it here too so the effective
-  // transport can't drift. Remove this override (and the UI lock) to re-enable WS on mobile.
-  const messageStreamTransport: 'auto' | 'ws' | 'sse' = isCapacitorApp() ? 'sse' : storedMessageStreamTransport
+  // Capacitor apps were previously locked to SSE because Android WebSocket
+  // upgrades appeared broken. Root cause was server-side: the Android WebView
+  // origin (https://localhost, androidScheme 'https') was missing from the
+  // packaged-client origin allowlist, so every WS upgrade was rejected with
+  // 403. With the origin allowlisted, mobile uses the same transport
+  // selection as everywhere else ('auto' falls back to SSE on WS failure).
+  const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
@@ -1668,6 +1731,8 @@ export function SyncProvider(props: {
   const resyncingDirectoriesRef = useRef(new Set<string>())
   const statusPollingDirectoriesRef = useRef(new Set<string>())
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
+  const pipelineHasConnectedRef = useRef(false)
+  const pipelineDisconnectedBeforeFirstConnectRef = useRef(false)
 
   const system = useMemo<SyncSystem>(
     () => ({
@@ -1696,6 +1761,11 @@ export function SyncProvider(props: {
   }, [childStores, routingIndex])
 
   // Configure child store manager
+  useEffect(() => {
+    if (isVSCodeRuntime()) return
+    void usePermissionStore.getState().hydrate().catch(() => undefined)
+  }, [props.sdk])
+
   useEffect(() => {
     const bootingDirs = new Set<string>()
 
@@ -1733,21 +1803,18 @@ export function SyncProvider(props: {
                 .filter((s) => !!s?.id)
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
-              // Also load child sessions (sub-agent delegations) so they
-              // appear in the sidebar immediately instead of relying on
-              // the async global session store.
+              // Also load child sessions (sub-agent delegations) with pagination
+              // so pending questions can scope to them immediately after restart.
               let allSessions: typeof rootSessions = []
               try {
-                const allResult = await props.sdk.session.list({
+                allSessions = await listGlobalSessionPages(props.sdk, {
                   directory: dir,
-                  limit: 200,
+                  archived: false,
+                  roots: false,
+                  pageSize: 500,
                 })
-                const allError = (allResult as { error?: unknown }).error
-                if (!allError) {
-                  allSessions = ((allResult as { data?: unknown }).data ?? []) as typeof rootSessions
-                }
               } catch {
-                // Child load is best-effort; fall back to roots only
+                // Child load is best-effort; fall back to roots only.
               }
 
               // Merge: keep root sessions from the first query (for accurate
@@ -1858,7 +1925,7 @@ export function SyncProvider(props: {
             ? (payload.properties as { version: string }).version
             : ""
           if (version) {
-            dispatchOpenCodeUpdateAvailable({ version })
+            dispatchOpenCodeUpdateAvailableUnlessBundled({ version })
           }
         }
         handleEvent(directory, payload, childStores, routingIndex)
@@ -1869,6 +1936,11 @@ export function SyncProvider(props: {
           hasEverConnected: true,
           connectionPhase: "connected",
         })
+        const isFirstConnect = !pipelineHasConnectedRef.current
+        pipelineHasConnectedRef.current = true
+        if (isFirstConnect && !pipelineDisconnectedBeforeFirstConnectRef.current) {
+          return
+        }
         if (isRecentBoot()) {
           return
         }
@@ -1877,6 +1949,9 @@ export function SyncProvider(props: {
         }
       },
       onDisconnect: (reason) => {
+        if (!pipelineHasConnectedRef.current) {
+          pipelineDisconnectedBeforeFirstConnectRef.current = true
+        }
         const { hasEverConnected } = useConfigStore.getState()
         useConfigStore.setState({
           isConnected: false,
@@ -2437,11 +2512,37 @@ export function dropCachedSessionMessageRecordsSnapshots(
   }
 }
 
+// Shell-mode bridge messages (single bash tool part parented to a synthetic
+// shell-marker user message) are hidden from the timeline and rendered inside
+// the user row, so they never go through the live streaming-tail path. Their
+// part updates (output chunks, running→completed) must not be suspended, or
+// the shell card freezes until the next full snapshot rebuild.
+const USER_SHELL_MARKER = "The following tool was executed by the user"
+
+const isSuspendExemptShellBridge = (state: State, info: Message, parts: Part[] | undefined): boolean => {
+  if (!parts || parts.length !== 1) return false
+  const part = parts[0] as { type?: unknown; tool?: unknown }
+  if (part?.type !== "tool" || typeof part.tool !== "string" || part.tool.toLowerCase() !== "bash") return false
+  const parentID = (info as { parentID?: unknown }).parentID
+  if (typeof parentID !== "string" || parentID.length === 0) return false
+  const parentParts = state.part[parentID]
+  if (!parentParts) return false
+  return parentParts.some((parentPart) => {
+    if (parentPart?.type !== "text") return false
+    if ((parentPart as { synthetic?: boolean }).synthetic !== true) return false
+    const text = (parentPart as { text?: unknown }).text
+    return typeof text === "string" && text.trim().startsWith(USER_SHELL_MARKER)
+  })
+}
+
 const snapshotPartsMatchState = (snapshot: SessionMessageRecordsSnapshot, state: State): boolean => {
   for (const record of snapshot.list) {
     if (snapshot.suspendPartUpdates) {
       const suspendedID = snapshot.suspendedPartUpdatesMessageID
-      if (!suspendedID || record.info.id === suspendedID) {
+      if (
+        (!suspendedID || record.info.id === suspendedID)
+        && !isSuspendExemptShellBridge(state, record.info, state.part[record.info.id])
+      ) {
         continue
       }
     }
@@ -2519,6 +2620,7 @@ export function buildSessionMessageRecordsSnapshot(
     const shouldSuspendParts = suspendPartUpdates
       && previousRecord
       && (!suspendedPartUpdatesMessageID || message.id === suspendedPartUpdatesMessageID)
+      && !isSuspendExemptShellBridge(state, message, state.part[message.id])
     const parts = shouldSuspendParts
       ? previousRecord.parts
       : (state.part[message.id] ?? EMPTY_PARTS)

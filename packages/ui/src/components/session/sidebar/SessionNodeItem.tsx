@@ -34,6 +34,8 @@ import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
+import { getSessionGoal } from '@/lib/sessionGoalMetadata';
+import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
@@ -355,6 +357,16 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
   const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
+  const sessionGoal = getSessionGoal(resolvedSession);
+  const sessionGoalGlyph = sessionGoal ? (
+    <span
+      className="inline-flex flex-shrink-0 items-center"
+      title={t(sessionGoalStatusLabelKey[sessionGoal.status] as never)}
+      aria-label={t(sessionGoalStatusLabelKey[sessionGoal.status] as never)}
+    >
+      <Icon name="target" className="h-3 w-3" style={{ color: sessionGoalStatusColor[sessionGoal.status] }} />
+    </span>
+  ) : null;
   const isActive = currentSessionId === session.id;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   const hasChildren = node.children.length > 0;
@@ -756,6 +768,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     handleSessionSelect(session.id, sessionDirectory, projectId);
   };
 
+  // The selection/active highlight covers the WHOLE row box (gutter, edge
+  // paddings), while the primary click target is the inner title button.
+  // Make the rest of the highlighted box clickable too — but only for clicks
+  // that did not originate from an interactive child (title button, chevron,
+  // action menu), so nothing double-fires.
+  const handleRowBackgroundClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, a, input, [role="menuitem"], [role="menu"]')) return;
+    handleRowSelect(event as unknown as React.MouseEvent<HTMLButtonElement>);
+  };
+
   const handleRowMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (event.button === 2 || (event.button === 0 && event.ctrlKey && !selectionModeEnabled)) {
       suppressNextSelectRef.current = true;
@@ -983,8 +1007,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 data-session-row={session.id}
                 data-session-scope={sessionDirectory ?? ''}
                 data-session-archived={archivedBucket ? '1' : '0'}
+                onClick={handleRowBackgroundClick}
                 className={cn(
-                  'group relative my-0.5 flex items-center rounded-md py-1 pr-1.5',
+                  'group relative my-0.5 flex cursor-pointer items-center rounded-md py-1 pr-1.5',
                   // Pull the row box left into the container gutter so the
                   // selection highlight covers the chevron/status markers
                   // (which sit in that gutter), then re-pad so the title text
@@ -1041,15 +1066,21 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
                       <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
-                      {alwaysShowActions ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
+                      {alwaysShowActions ? (
+                        <span className="ml-2 inline-flex flex-shrink-0 items-center gap-1 text-[0.72rem] text-muted-foreground/75">
+                          {sessionGoalGlyph}
+                          {sessionCompactUpdatedLabel}
+                        </span>
+                      ) : null}
                       {!alwaysShowActions ? (
                         <div className="relative ml-1 flex h-4 min-w-4 flex-shrink-0 items-center justify-end">
                           <span className={cn(
-                            'whitespace-nowrap text-right text-[0.72rem] text-muted-foreground/75 transition-opacity duration-150',
+                            'inline-flex items-center gap-1 whitespace-nowrap text-right text-[0.72rem] text-muted-foreground/75 transition-opacity duration-150',
                             isSessionMenuOpen
                               ? 'opacity-0'
                               : hideOnHoverClass,
                           )}>
+                            {sessionGoalGlyph}
                             {sessionCompactUpdatedLabel}
                           </span>
                         </div>
@@ -1116,6 +1147,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 {!isMinimalMode ? (
                   <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>
                     <div className={cn('flex min-w-0 items-center gap-1.5 overflow-hidden', metadataSubsessionChevron && hasChildren ? 'pl-4' : '')}>
+                      {sessionGoalGlyph}
                       <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
                       {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}
                       {hasSecondaryBranchLabel ? <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" /><span className="truncate">{secondaryMeta?.branchLabel}</span></span> : null}

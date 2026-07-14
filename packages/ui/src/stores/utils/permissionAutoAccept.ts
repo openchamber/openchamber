@@ -10,8 +10,12 @@ const buildSessionMap = (sessions: Session[]): Map<string, Session> => {
   return map;
 };
 
-const resolveLineage = (sessionID: string, sessions: Session[]): string[] => {
-  const map = buildSessionMap(sessions);
+const resolveLineage = (
+  sessionID: string,
+  sessions: Session[],
+  sessionById?: ReadonlyMap<string, Session>,
+): string[] => {
+  const map = sessionById ?? buildSessionMap(sessions);
   const result: string[] = [];
   const seen = new Set<string>();
   let current: string | undefined = sessionID;
@@ -28,10 +32,12 @@ const resolveLineage = (sessionID: string, sessions: Session[]): string[] => {
 export const autoRespondsPermission = (input: {
   autoAccept: PermissionAutoAcceptMap;
   sessions: Session[];
+  sessionById?: ReadonlyMap<string, Session>;
   sessionID: string;
 }): boolean => {
-  const { autoAccept, sessions, sessionID } = input;
-  const lineage = resolveLineage(sessionID, sessions);
+  const { autoAccept, sessions, sessionById, sessionID } = input;
+  if (Object.keys(autoAccept).length === 0) return false;
+  const lineage = resolveLineage(sessionID, sessions, sessionById);
 
   for (const id of lineage) {
     if (!Object.prototype.hasOwnProperty.call(autoAccept, id)) {

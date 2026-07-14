@@ -31,10 +31,12 @@ import { useSidebarPersistence } from './sidebar/hooks/useSidebarPersistence';
 import { useProjectRepoStatus } from './sidebar/hooks/useProjectRepoStatus';
 import { useProjectSessionLists } from './sidebar/hooks/useProjectSessionLists';
 import { useSessionFolderCleanup } from './sidebar/hooks/useSessionFolderCleanup';
+import { createSessionOwnershipIndex } from './sidebar/sessionOwnership';
 import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders';
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
+import { ShareOpinionDialog } from '@/components/feedback/ShareOpinionDialog';
 import { SessionGroupSection } from './sidebar/SessionGroupSection';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarActivitySections } from './sidebar/SidebarActivitySections';
@@ -44,7 +46,7 @@ import { SessionNodeItem } from './sidebar/SessionNodeItem';
 import type { SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { listProjectWorktrees, worktreeMapsEqual } from '@/lib/worktrees/worktreeManager';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SortableDragHandleProps } from './sidebar/sortableItems';
@@ -80,6 +82,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 
+const SHARE_OPINION_TOAST_STORAGE_KEY = 'openchamber.shareOpinionToast.dismissed.v2';
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
@@ -196,6 +199,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const newWorktreeDialogOpen = useUIStore((state) => state.isNewWorktreeDialogOpen);
   const setNewWorktreeDialogOpen = useUIStore((state) => state.setNewWorktreeDialogOpen);
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
+  const [shareOpinionDialogOpen, setShareOpinionDialogOpen] = React.useState(false);
   const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = React.useState<string | null>(null);
   const [renameFolderDraft, setRenameFolderDraft] = React.useState('');
@@ -316,7 +320,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const sync = useSync();
   const liveSessions = useAllLiveSessions();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
+  const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -378,6 +382,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }));
   }, [globalActiveSessions, isVSCode, knownSessionDirectories, liveSessions]);
 
+  const persistenceSessions = React.useMemo(
+    () => [...globalActiveSessions, ...archivedSessions],
+    [archivedSessions, globalActiveSessions],
+  );
+
   const syncSessionStructureSignature = React.useMemo(
     () => liveSessions
       .map((session) => {
@@ -409,6 +418,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       .join('|'),
     [projects],
   );
+  const [resolvedWorktreeTopologyKey, setResolvedWorktreeTopologyKey] = React.useState<string | null>(
+    isVSCode ? projectWorktreeDiscoveryKey : null,
+  );
+  const isWorktreeTopologyLoading = !isVSCode && resolvedWorktreeTopologyKey !== projectWorktreeDiscoveryKey;
+  const [unresolvedWorktreeProjectPaths, setUnresolvedWorktreeProjectPaths] = React.useState<ReadonlySet<string>>(new Set());
 
   const initialGlobalSessionsRefreshStartedRef = React.useRef(false);
   React.useEffect(() => {
@@ -419,19 +433,22 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     void refreshGlobalSessions(syncSessionsSnapshotRef.current);
   }, []);
 
-  // Tracks the last project list we already kicked off discovery for.
-  // A re-mount with the same project set shouldn't fan out another
-  // burst of `checkIsGitRepository` / `listProjectWorktrees` calls.
-  const discoveredProjectsRef = React.useRef<string>('');
   React.useEffect(() => {
     let cancelled = false;
 
     const discoverWorktrees = async () => {
       const projectEntries = useProjectsStore.getState().projects;
-      if (projectEntries.length === 0) return;
+      if (projectEntries.length === 0 || isVSCode) {
+        if (!cancelled) {
+          setUnresolvedWorktreeProjectPaths(new Set());
+          setResolvedWorktreeTopologyKey(projectWorktreeDiscoveryKey);
+        }
+        return;
+      }
 
-      const worktreesByProject = new Map<string, WorktreeMetadata[]>();
-      const allWorktrees: WorktreeMetadata[] = [];
+      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+      const worktreesByProject = new Map(currentByProject);
+      const unresolvedProjectPaths = new Set<string>();
 
       // Constrain fanout: previously `Promise.all(projects.map(...))` could
       // spawn dozens of concurrent `git worktree list` and
@@ -455,13 +472,20 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
             // PR/render paths downstream can read isGitRepo for free.
             const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
             const isGitRepo = cachedIsGitRepo ?? await checkIsGitRepository(projectPath);
-            if (!isGitRepo) continue;
+            if (!isGitRepo) {
+              worktreesByProject.delete(projectPath);
+              continue;
+            }
             const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
-            if (cancelled || worktrees.length === 0) continue;
-            worktreesByProject.set(projectPath, worktrees);
-            allWorktrees.push(...worktrees);
+            if (cancelled) return;
+            if (worktrees.length === 0) {
+              worktreesByProject.delete(projectPath);
+            } else {
+              worktreesByProject.set(projectPath, worktrees);
+            }
           } catch {
-            // ignore discovery errors
+            // Keep last-known worktrees when a project is temporarily unavailable.
+            unresolvedProjectPaths.add(projectPath);
           }
         }
       });
@@ -469,23 +493,31 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       if (cancelled) return;
 
-      useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
-      });
+      const activeProjectPaths = new Set(projectEntries.map((project) => normalizePath(project.path)).filter(Boolean));
+      for (const projectPath of worktreesByProject.keys()) {
+        if (!activeProjectPaths.has(projectPath)) {
+          worktreesByProject.delete(projectPath);
+        }
+      }
+      const allWorktrees = [...worktreesByProject.values()].flat();
+
+      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
+      if (!worktreeMapsEqual(worktreesByProject, currentByProject)) {
+        useSessionUIStore.setState({
+          availableWorktrees: allWorktrees,
+          availableWorktreesByProject: worktreesByProject,
+        });
+      }
+      setUnresolvedWorktreeProjectPaths(unresolvedProjectPaths);
+      setResolvedWorktreeTopologyKey(projectWorktreeDiscoveryKey);
     };
 
-    // Skip if we already discovered worktrees for this exact project set.
-    if (discoveredProjectsRef.current === projectWorktreeDiscoveryKey) {
-      return;
-    }
-    discoveredProjectsRef.current = projectWorktreeDiscoveryKey;
     void discoverWorktrees();
 
     return () => {
       cancelled = true;
     };
-  }, [projectWorktreeDiscoveryKey]);
+  }, [isVSCode, projectWorktreeDiscoveryKey]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -527,7 +559,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const { scheduleCollapsedProjectsPersist } = useSidebarPersistence({
     isVSCode,
-    hasLoadedGlobalSessions,
+    hasAuthoritativeGlobalSessions,
     safeStorage,
     keys: {
       sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,
@@ -538,7 +570,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       projectActiveSession: PROJECT_ACTIVE_SESSION_STORAGE_KEY,
       groupCollapse: GROUP_COLLAPSE_STORAGE_KEY,
     },
-    sessions,
+    sessions: persistenceSessions,
     pinnedSessionIds,
     setPinnedSessionIds,
     groupOrderByProject,
@@ -602,12 +634,23 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     [projects, editingProjectDialogId],
   );
 
-  const handleSaveProjectEdit = React.useCallback((data: { label: string; icon: string | null; color: string | null; iconBackground: string | null }) => {
+  const handleSaveProjectEdit = React.useCallback((data: {
+    label: string;
+    icon: string | null;
+    color: string | null;
+    iconBackground: string | null;
+    defaultModel: string | null;
+  }) => {
     if (!editingProjectDialogId) {
       return;
     }
-    updateProjectMeta(editingProjectDialogId, data);
-    setEditingProjectDialogId(null);
+    updateProjectMeta(editingProjectDialogId, {
+      label: data.label,
+      icon: data.icon,
+      color: data.color,
+      iconBackground: data.iconBackground,
+      defaultModel: data.defaultModel ?? null,
+    });
   }, [editingProjectDialogId, updateProjectMeta]);
 
   const openNewWorktreeDialog = React.useCallback(() => {
@@ -634,6 +677,36 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       setUpdateDialogOpen(true);
     });
   }, [t, updateStore]);
+
+  const handleOpenShareOpinionDialog = React.useCallback(() => {
+    setShareOpinionDialogOpen(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      if (window.localStorage.getItem(SHARE_OPINION_TOAST_STORAGE_KEY) === 'true') {
+        return;
+      }
+      window.localStorage.setItem(SHARE_OPINION_TOAST_STORAGE_KEY, 'true');
+    } catch {
+      // If storage is unavailable, still show once for this sidebar mount.
+    }
+    const timeoutId = window.setTimeout(() => {
+      toast.info(t('shareOpinion.toast.title'), {
+        description: t('shareOpinion.toast.description'),
+        action: {
+          label: t('shareOpinion.actions.shareOpinion'),
+          onClick: () => setShareOpinionDialogOpen(true),
+        },
+        duration: 12_000,
+      });
+    }, 1_000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [t]);
 
   const handleOpenSettings = React.useCallback(() => {
     if (mobileVariant) {
@@ -877,6 +950,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         color?: string;
         iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
         iconBackground?: string;
+        addedAt?: number;
+        lastOpenedAt?: number;
+        sidebarCollapsed?: boolean;
       }>;
   }, [projects]);
 
@@ -886,18 +962,15 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   );
 
   const projectSessionDirectories = React.useMemo(() => {
-    const directories = new Set<string>();
-    normalizedProjects.forEach((project) => {
-      if (project.normalizedPath) directories.add(project.normalizedPath);
-      if (isVSCode) {
-        return;
+    const directories = new Set(normalizedProjects.map((project) => project.normalizedPath));
+    if (!isVSCode) {
+      for (const worktrees of availableWorktreesByProject.values()) {
+        for (const worktree of worktrees) {
+          const directory = normalizePath(worktree.path);
+          if (directory) directories.add(directory);
+        }
       }
-      const worktrees = availableWorktreesByProject.get(project.normalizedPath) ?? [];
-      worktrees.forEach((worktree) => {
-        const directory = normalizePath(worktree.path);
-        if (directory) directories.add(directory);
-      });
-    });
+    }
     return [...directories].sort();
   }, [availableWorktreesByProject, isVSCode, normalizedProjects]);
 
@@ -937,32 +1010,32 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
 
   const isSessionsLoading = useSessionUIStore((state) => state.isLoading);
+  const sessionOwnership = React.useMemo(
+    () => createSessionOwnershipIndex(sessions, normalizedProjects, availableWorktreesByProject, isVSCode, archivedSessions),
+    [archivedSessions, availableWorktreesByProject, isVSCode, normalizedProjects, sessions],
+  );
   useSessionFolderCleanup({
     isSessionsLoading,
-    hasLoadedGlobalSessions,
-    sessions,
-    archivedSessions,
+    hasAuthoritativeGlobalSessions,
+    isWorktreeTopologyLoading,
     normalizedProjects,
-    isVSCode,
+    ownership: sessionOwnership,
     availableWorktreesByProject,
+    unresolvedWorktreeProjectPaths,
     cleanupSessions,
   });
 
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({
-    isVSCode,
-    sessions,
-    archivedSessions,
-    availableWorktreesByProject,
-    normalizedProjects,
+    ownership: sessionOwnership,
   });
 
   useArchivedAutoFolders({
     normalizedProjects,
-    sessions,
-    archivedSessions,
-    availableWorktreesByProject,
-    isVSCode,
+    ownership: sessionOwnership,
     isSessionsLoading,
+    hasAuthoritativeGlobalSessions,
+    isWorktreeTopologyLoading,
+    unresolvedWorktreeProjectPaths,
     foldersMap,
     createFolder,
     addSessionToFolder,
@@ -975,13 +1048,56 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     lastRepoStatusRef.current = Boolean(projectRepoStatus.get(activeProjectId));
   }
 
+  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
+  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
+  const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
+  const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
+
+  const sortedProjects = React.useMemo(() => {
+    const list = [...normalizedProjects];
+
+    switch (projectSortOrder) {
+      case 'a-z':
+        list.sort((a, b) => {
+          const aLabel = (a.label || a.path).toLowerCase();
+          const bLabel = (b.label || b.path).toLowerCase();
+          return aLabel.localeCompare(bLabel);
+        });
+        break;
+      case 'z-a':
+        list.sort((a, b) => {
+          const aLabel = (a.label || a.path).toLowerCase();
+          const bLabel = (b.label || b.path).toLowerCase();
+          return bLabel.localeCompare(aLabel);
+        });
+        break;
+      case 'date-added':
+        list.sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
+        break;
+      case 'recent':
+        list.sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
+        break;
+      case 'manual': {
+        const orderMap = new Map(manualProjectOrder.map((id, i) => [id, i]));
+        list.sort((a, b) => {
+          const ai = orderMap.get(a.id) ?? Infinity;
+          const bi = orderMap.get(b.id) ?? Infinity;
+          return ai - bi;
+        });
+        break;
+      }
+    }
+
+    return list;
+  }, [normalizedProjects, projectSortOrder, manualProjectOrder]);
+
   const {
     projectSections,
     groupSearchDataByGroup,
     sectionsForRender,
     searchMatchCount,
   } = useSessionSidebarSections({
-    normalizedProjects,
+    normalizedProjects: sortedProjects,
     getSessionsForProject,
     getArchivedSessionsForProject,
     availableWorktreesByProject,
@@ -1086,9 +1202,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
     return meta;
   }, [projectSections, homeDirectory]);
-
-  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
-  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
 
   const activeNowSessions = React.useMemo(() => {
     if (!showRecentSection || isVSCode) {
@@ -1592,6 +1705,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         removeProject={removeProject}
         projectHeaderSentinelRefs={projectHeaderSentinelRefs}
         reorderProjects={reorderProjects}
+        projectSortOrder={projectSortOrder}
         getOrderedGroups={getOrderedGroups}
         setGroupOrderByProject={setGroupOrderByProject}
         openSidebarMenuKey={openSidebarMenuKey}
@@ -1619,8 +1733,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}
+        onOpenShareOpinion={handleOpenShareOpinionDialog}
         showRuntimeButtons={!isVSCode}
         showUpdateButton={showSidebarUpdateButton}
+      />
+
+      <ShareOpinionDialog
+        open={shareOpinionDialogOpen}
+        onOpenChange={setShareOpinionDialogOpen}
       />
 
       <UpdateDialog
@@ -1636,23 +1756,16 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         runtimeType={updateStore.runtimeType}
       />
 
-      {editingProject ? (
-        <ProjectEditDialog
-          open={Boolean(editingProject)}
-          onOpenChange={(open) => {
-            if (!open) {
-              setEditingProjectDialogId(null);
-            }
-          }}
-          projectId={editingProject.id}
-          projectName={editingProject.label || formatDirectoryName(editingProject.path, homeDirectory)}
-          projectPath={editingProject.path}
-          initialIcon={editingProject.icon}
-          initialColor={editingProject.color}
-          initialIconBackground={editingProject.iconBackground}
-          onSave={handleSaveProjectEdit}
-        />
-      ) : null}
+      <ProjectEditDialog
+        open={Boolean(editingProject)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingProjectDialogId(null);
+          }
+        }}
+        project={editingProject}
+        onSave={handleSaveProjectEdit}
+      />
 
       <NewWorktreeDialog
         open={newWorktreeDialogOpen}

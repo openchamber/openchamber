@@ -1,4 +1,5 @@
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
 import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
@@ -13,6 +14,17 @@ import type {
 } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
+
+/**
+ * Tagged result of `OpencodeService.fetchPermission()`. The caller can
+ * distinguish a server-confirmed "no longer pending" permission (HTTP
+ * 404) from a fetch failure (network error, malformed response, or a
+ * pre-v1.17.12 server without the V2 endpoint).
+ */
+export type FetchPermissionResult =
+  | { state: "ok"; permission: PermissionV2Request }
+  | { state: "resolved" }
+  | { state: "unknown" };
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { getRuntimeKey } from "@/lib/runtime-switch";
@@ -22,8 +34,6 @@ import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
   recordProviderError,
-  shouldRetry,
-  getRetryDelayMs,
 } from "./provider-tracker";
 
 // Use relative path by default (works with both dev and nginx proxy server)
@@ -118,12 +128,6 @@ const ascendingId = (prefix: "msg"): string => {
   }
   const hex = Array.from(timeBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `${prefix}_${hex}${randomBase62(ID_RANDOM_LENGTH)}`;
-};
-
-const isRetryableFetchError = (error: unknown): boolean => {
-  if (error instanceof DOMException && error.name === 'AbortError') return true;
-  if (error instanceof TypeError) return true;
-  return false;
 };
 
 const ensureAbsoluteBaseUrl = (candidate: string): string => {
@@ -764,8 +768,8 @@ class OpencodeService {
     };
     directory?: string | null;
   }): Promise<string> {
-    // Reuse one client-side message ID across retries. The server accepts this
-    // as the real user message ID, making ambiguous network retries idempotent.
+    // Use the optimistic/client-generated ID as the real user message ID so SSE
+    // can reconcile the echoed server message in-place.
     const messageId = params.messageId ?? ascendingId("msg");
 
     // Build parts array using SDK types (TextPartInput | FilePartInput) plus lightweight agent parts
@@ -848,74 +852,62 @@ class OpencodeService {
 
     assertProviderCircuitClosed(params.providerID);
 
-    let response!: Response;
+    let response: Response;
 
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const result = await this.client.session.promptAsync({
-          sessionID: params.id,
-          ...(requestDirectory ? { directory: requestDirectory } : {}),
-          model: {
-            providerID: params.providerID,
-            modelID: params.modelID,
-          },
-          agent: params.agent,
-          variant: params.variant,
-          messageID: messageId,
-          ...(params.delivery ? { delivery: params.delivery } : {}),
-          ...(params.format ? { format: params.format } : {}),
-          parts,
-        });
-        if (result.response instanceof Response) {
-          response = result.response;
-        } else if (result.error) {
-          const status = (result as SdkResult<unknown>).response?.status || 500;
-          response = new Response(JSON.stringify(result.error), { status });
-        } else {
-          response = new Response(JSON.stringify(result.data ?? true), { status: 200 });
+    try {
+      const result = await this.client.session.promptAsync({
+        sessionID: params.id,
+        ...(requestDirectory ? { directory: requestDirectory } : {}),
+        model: {
+          providerID: params.providerID,
+          modelID: params.modelID,
+        },
+        agent: params.agent,
+        variant: params.variant,
+        messageID: messageId,
+        ...(params.delivery ? { delivery: params.delivery } : {}),
+        ...(params.format ? { format: params.format } : {}),
+        parts,
+      });
+      if (result.response instanceof Response) {
+        response = result.response;
+      } else if (result.error) {
+        const status = (result as SdkResult<unknown>).response?.status;
+        if (!status) {
+          // The SDK caught a thrown fetch error (network/tunnel transport
+          // failure) — there is no HTTP response to report. Never fabricate a
+          // status: surface it as a transport error so callers treat it like
+          // any other network failure instead of a server 500.
+          throw new Error(`Message send transport failure: ${formatSdkError(result.error)}`);
         }
-      } catch (error) {
-        if (attempt < 2 && isRetryableFetchError(error)) {
-          const delay = getRetryDelayMs(attempt);
-          console.warn(
-            `[prompt] fetch failed for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`,
-            (error as Error)?.message
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-        recordProviderError(params.providerID);
-        throw error;
+        response = new Response(JSON.stringify(result.error), { status });
+      } else {
+        response = new Response(JSON.stringify(result.data ?? true), { status: 200 });
       }
-
-      if (response.ok) {
-        recordProviderSuccess(params.providerID);
-        return messageId;
-      }
-
-      if (shouldRetry(params.providerID, response.status, attempt)) {
-        const delay = getRetryDelayMs(attempt);
-        console.warn(
-          `[prompt] ${response.status} for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        continue;
-      }
-
-      let detail = '';
-      try {
-        detail = await response.text();
-      } catch {
-        // ignore
-      }
-      const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
-      const error = new Error(`Failed to send message (${response.status})${suffix}`);
-      recordProviderError(params.providerID, response.status);
+    } catch (error) {
+      // Do not retry prompt_async after a transport failure: through a remote
+      // tunnel the POST may already be running server-side even though the
+      // client lost the response.
+      recordProviderError(params.providerID);
       throw error;
     }
-    // Defensive fallback — all loop paths return/throw, but TypeScript
-    // control flow analysis cannot prove exhaustiveness without this.
-    throw new Error('Failed to send message after retries');
+
+    if (response.ok) {
+      recordProviderSuccess(params.providerID);
+      return messageId;
+    }
+
+    let detail = '';
+    try {
+      detail = await response.text();
+    } catch {
+      // ignore
+    }
+    const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
+    const error = new Error(`Failed to send message (${response.status})${suffix}`) as Error & { status?: number };
+    error.status = response.status;
+    recordProviderError(params.providerID, response.status);
+    throw error;
   }
 
   async sendCommand(params: {
@@ -1126,6 +1118,106 @@ class OpencodeService {
       ...(options?.message ? { message: options.message } : {}),
     });
     return unwrapSdkOptional(response, 'permission.reply') === true;
+  }
+
+  /**
+   * Programmatically evaluate and (when approval is required) create a
+   * permission request for a session via the V2 endpoint introduced in
+   * OpenCode SDK v1.17.12. Wraps `session.permission.create`.
+   *
+   * Returns `{ id, effect }` on success, or `null` on any failure
+   * (network error, 4xx/5xx response, malformed payload, or pre-v1.17.12
+   * server without the V2 endpoint). Callers driving authoritative state
+   * must treat `null` as "unknown — do not act" rather than "permission
+   * allowed."
+   *
+   * Thin wrapper for future programmatic permission creation. The V1
+   * `permission.list` / `permission.reply` flow used by the auto-accept
+   * path is unchanged.
+   */
+  async createPermission(
+    sessionID: string,
+    action: string,
+    resources: string[],
+    options?: {
+      id?: string;
+      save?: string[];
+      metadata?: Record<string, unknown>;
+      source?: PermissionV2Source;
+      agent?: string;
+    }
+  ): Promise<{ id: string; effect: PermissionV2Effect } | null> {
+    try {
+      const response = await this.client.v2.session.permission.create({
+        sessionID,
+        action,
+        resources,
+        ...(options?.id ? { id: options.id } : {}),
+        ...(options?.save ? { save: options.save } : {}),
+        ...(options?.metadata ? { metadata: options.metadata } : {}),
+        ...(options?.source ? { source: options.source } : {}),
+        ...(options?.agent ? { agent: options.agent } : {}),
+      });
+      // Discriminated union narrowing on `error` (see fetchPermission).
+      if (response.error !== undefined) return null;
+      const payload = response.data?.data;
+      if (payload === undefined) return null;
+      return { id: payload.id, effect: payload.effect };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch a pending permission request owned by a session via the V2
+   * endpoint introduced in OpenCode SDK v1.17.12. Wraps
+   * `session.permission.get`.
+   *
+   * Returns a tagged `FetchPermissionResult` so the caller can distinguish
+   * a confirmed-resolved permission (HTTP 404) from a fetch failure
+   * (network error, malformed response, or pre-v1.17.12 server without
+   * the V2 endpoint). The auto-accept flow uses this distinction to drop
+   * resolved permissions from the resync output, preventing stale
+   * `permission.list` entries from sticking around in the UI.
+   */
+  async fetchPermission(
+    sessionID: string,
+    requestID: string,
+  ): Promise<FetchPermissionResult> {
+    try {
+      // The V2 path is session-scoped and does not require a `directory`
+      // parameter. The client-scoped directory (set via setDirectory) is
+      // honored by the underlying SDK client when the call is routed.
+      const response = await this.client.v2.session.permission.get({
+        sessionID,
+        requestID,
+      });
+      // The SDK returns a discriminated union on `error`/`data` (HeyApi
+      // `RequestResult` with `ThrowOnError = false`). The error branch
+      // collapses `data` to `undefined`; the data branch returns the
+      // 200-response payload as `{ data: PermissionV2Request }`. Narrow
+      // via `error` first, then unwrap the inner `data` field.
+      if (response.error === undefined) {
+        const payload = response.data?.data;
+        if (payload !== undefined) {
+          return { state: "ok", permission: payload };
+        }
+      }
+      // On the error branch the server has answered but the request was
+      // not found. V2SessionPermissionGetErrors maps 404 to
+      // `PermissionNotFoundError`, so the only server-confirmed
+      // "no longer pending" signal we have is HTTP 404.
+      if (response.response?.status === 404) {
+        return { state: "resolved" };
+      }
+      return { state: "unknown" };
+    } catch {
+      // Network failure, pre-v1.17.12 server, or runtimeFetch throwing.
+      // Treat as "unknown" — caller must decide what to do (auto-accept
+      // fails closed, but the permission stays in the resync output so
+      // the user can still act on it).
+      return { state: "unknown" };
+    }
   }
 
   /**
