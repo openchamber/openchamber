@@ -32,7 +32,7 @@ type TtlOption = { value: string; label: string; ms: number | null };
 type TunnelMode = 'quick' | 'managed-remote' | 'managed-local';
 type ApiTunnelMode = TunnelMode;
 
-import type { ManagedRemoteTunnelPreset, TunnelStatusResponse } from './tunnelSettingsState';
+import { sanitizeManagedRemoteTunnelPresets, type ManagedRemoteTunnelPreset, type TunnelStatusResponse } from './tunnelSettingsState';
 import { toggleDirectE2ee } from './tunnelSettingsState';
 
 const BOOTSTRAP_TTL_OPTIONS: TtlOption[] = [
@@ -284,37 +284,6 @@ const normalizePresetHostname = (value: string): string => {
   }
 };
 
-const sanitizePresets = (value: unknown): ManagedRemoteTunnelPreset[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const seenIds = new Set<string>();
-  const seenHosts = new Set<string>();
-  const result: ManagedRemoteTunnelPreset[] = [];
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-    const candidate = entry as Record<string, unknown>;
-    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
-    const hostname = normalizePresetHostname(typeof candidate.hostname === 'string' ? candidate.hostname : '');
-    if (!id || !name || !hostname) {
-      continue;
-    }
-    if (seenIds.has(id) || seenHosts.has(hostname)) {
-      continue;
-    }
-    seenIds.add(id);
-    seenHosts.add(hostname);
-    result.push({ id, name, hostname });
-  }
-
-  return result;
-};
-
 const createPresetId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -537,19 +506,10 @@ export const TunnelSettings: React.FC = () => {
         : null;
       const dependencyAvailable = applyDependencyCheck(checkData, loadedProvider);
 
-      const loadedPresetsFromStatus = sanitizePresets(statusData?.managedRemoteTunnelPresets);
       const loadedHostname = typeof statusData.managedRemoteTunnelHostname === 'string'
         ? statusData.managedRemoteTunnelHostname
         : '';
-      const presets = loadedPresetsFromStatus.length > 0
-        ? loadedPresetsFromStatus
-        : (loadedHostname
-          ? [{
-            id: `legacy-${normalizePresetHostname(loadedHostname)}`,
-            name: loadedHostname,
-            hostname: normalizePresetHostname(loadedHostname),
-          }]
-          : []);
+      const presets = sanitizeManagedRemoteTunnelPresets(statusData?.managedRemoteTunnelPresets, loadedHostname);
 
       const selectedId = presets[0]?.id || '';
 
@@ -568,9 +528,6 @@ export const TunnelSettings: React.FC = () => {
           : (statusData.active && statusData.mode ? toUiTunnelMode(statusData.mode) : null)
       );
       setSavedTokenPresetIds(new Set(Array.isArray(statusData.managedRemoteTunnelTokenPresetIds) ? statusData.managedRemoteTunnelTokenPresetIds : []));
-        if (statusData.managedRemoteTunnelPresets) {
-          setManagedRemoteTunnelPresets(statusData.managedRemoteTunnelPresets);
-        }
         setDirectE2eeSupported(!!statusData.directE2eeSupported);
         setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
         setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
@@ -738,9 +695,10 @@ export const TunnelSettings: React.FC = () => {
         }
         setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
         setSavedTokenPresetIds(new Set(Array.isArray(statusData.managedRemoteTunnelTokenPresetIds) ? statusData.managedRemoteTunnelTokenPresetIds : []));
-        if (statusData.managedRemoteTunnelPresets) {
-          setManagedRemoteTunnelPresets(statusData.managedRemoteTunnelPresets);
-        }
+        setManagedRemoteTunnelPresets(sanitizeManagedRemoteTunnelPresets(
+          statusData.managedRemoteTunnelPresets,
+          statusData.managedRemoteTunnelHostname,
+        ));
         setDirectE2eeSupported(!!statusData.directE2eeSupported);
         setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
         setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
@@ -1040,9 +998,10 @@ export const TunnelSettings: React.FC = () => {
         const statusData = (await statusRes.json()) as TunnelStatusResponse;
         setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
         setSavedTokenPresetIds(new Set(Array.isArray(statusData.managedRemoteTunnelTokenPresetIds) ? statusData.managedRemoteTunnelTokenPresetIds : []));
-        if (statusData.managedRemoteTunnelPresets) {
-          setManagedRemoteTunnelPresets(statusData.managedRemoteTunnelPresets);
-        }
+        setManagedRemoteTunnelPresets(sanitizeManagedRemoteTunnelPresets(
+          statusData.managedRemoteTunnelPresets,
+          statusData.managedRemoteTunnelHostname,
+        ));
         setDirectE2eeSupported(!!statusData.directE2eeSupported);
         setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
         setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
@@ -1570,8 +1529,10 @@ export const TunnelSettings: React.FC = () => {
                                     if (isTogglingProfile[preset.id]) return;
                                     setIsTogglingProfile((prev) => ({ ...prev, [preset.id]: true }));
                                     try {
-                                      const res = await toggleDirectE2ee(preset.id, checked, runtimeFetch);
-                                      const updatedProfile = res.profile;
+                                       const res = await toggleDirectE2ee(preset.id, checked, runtimeFetch);
+                                       const updatedProfile = sanitizeManagedRemoteTunnelPresets(
+                                         res.profile ? [res.profile] : [],
+                                       )[0];
                                       if (res.ok && updatedProfile) {
                                         setManagedRemoteTunnelPresets((prev) =>
                                           prev.map((p) => (p.id === preset.id ? updatedProfile : p))
