@@ -43,6 +43,53 @@ export interface TunnelStatusResponse {
   directE2eeAvailable?: boolean;
 }
 
+const normalizeManagedRemotePresetHostname = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = trimmed.includes('://') ? new URL(trimmed) : new URL(`https://${trimmed}`);
+    return parsed.hostname.trim().toLowerCase();
+  } catch {
+    return '';
+  }
+};
+
+export const sanitizeManagedRemoteTunnelPresets = (
+  value: unknown,
+  legacyHostname?: unknown,
+): ManagedRemoteTunnelPreset[] => {
+  const presets: ManagedRemoteTunnelPreset[] = [];
+  const seenIds = new Set<string>();
+  const seenHostnames = new Set<string>();
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      const candidate = entry as Record<string, unknown>;
+      const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+      const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+      const hostname = normalizeManagedRemotePresetHostname(candidate.hostname);
+      if (!id || !name || !hostname || seenIds.has(id) || seenHostnames.has(hostname)) continue;
+      seenIds.add(id);
+      seenHostnames.add(hostname);
+      presets.push({
+        id,
+        name,
+        hostname,
+        ...(typeof candidate.directE2eeEnabled === 'boolean'
+          ? { directE2eeEnabled: candidate.directE2eeEnabled }
+          : {}),
+      });
+    }
+  }
+
+  if (presets.length > 0) return presets;
+  const hostname = normalizeManagedRemotePresetHostname(legacyHostname);
+  if (!hostname || typeof legacyHostname !== 'string') return [];
+  return [{ id: `legacy-${hostname}`, name: legacyHostname.trim(), hostname }];
+};
+
 export async function toggleDirectE2ee(
   presetId: string,
   enabled: boolean,

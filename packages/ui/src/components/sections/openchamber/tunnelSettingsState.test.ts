@@ -1,7 +1,51 @@
 import { describe, test, expect } from 'bun:test';
-import { toggleDirectE2ee } from './tunnelSettingsState';
+import { sanitizeManagedRemoteTunnelPresets, toggleDirectE2ee } from './tunnelSettingsState';
 
 describe('tunnelSettingsState', () => {
+  describe('sanitizeManagedRemoteTunnelPresets', () => {
+    test('returns no presets for missing or non-array server data', () => {
+      expect(sanitizeManagedRemoteTunnelPresets(undefined)).toEqual([]);
+      expect(sanitizeManagedRemoteTunnelPresets({ presets: [] })).toEqual([]);
+    });
+
+    test('normalizes valid fields and preserves boolean direct E2EE state', () => {
+      expect(sanitizeManagedRemoteTunnelPresets([
+        { id: ' first ', name: ' First ', hostname: 'HTTPS://One.Example/path', directE2eeEnabled: true },
+        { id: 'second', name: 'Second', hostname: 'two.example', directE2eeEnabled: false },
+      ])).toEqual([
+        { id: 'first', name: 'First', hostname: 'one.example', directE2eeEnabled: true },
+        { id: 'second', name: 'Second', hostname: 'two.example', directE2eeEnabled: false },
+      ]);
+    });
+
+    test('drops malformed and duplicate ID or normalized hostname entries deterministically', () => {
+      expect(sanitizeManagedRemoteTunnelPresets([
+        null,
+        { id: '', name: 'Missing ID', hostname: 'missing-id.example' },
+        { id: 'missing-name', name: '', hostname: 'missing-name.example' },
+        { id: 'bad-host', name: 'Bad host', hostname: 'not a host' },
+        { id: 'first', name: 'First', hostname: 'ONE.example' },
+        { id: 'first', name: 'Duplicate ID', hostname: 'two.example' },
+        { id: 'third', name: 'Duplicate host', hostname: 'https://one.example/path' },
+      ])).toEqual([{ id: 'first', name: 'First', hostname: 'one.example' }]);
+    });
+
+    test('uses the existing legacy fallback convention only when no valid preset remains', () => {
+      expect(sanitizeManagedRemoteTunnelPresets([], ' Legacy.Example ')).toEqual([{
+        id: 'legacy-legacy.example',
+        name: 'Legacy.Example',
+        hostname: 'legacy.example',
+      }]);
+      expect(sanitizeManagedRemoteTunnelPresets([
+        { id: 'valid', name: 'Valid', hostname: 'valid.example' },
+      ], 'legacy.example')).toEqual([{ id: 'valid', name: 'Valid', hostname: 'valid.example' }]);
+    });
+
+    test('does not create a fallback for an invalid legacy hostname', () => {
+      expect(sanitizeManagedRemoteTunnelPresets([], 'not a host')).toEqual([]);
+    });
+  });
+
   describe('toggleDirectE2ee', () => {
     test('sends PATCH request and returns profile on success, sanitizing token', async () => {
       let calledUrl: RequestInfo | URL = '';
