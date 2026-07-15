@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Issue #2257 — Add to Chat button positioning bug reproduction</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; overflow: hidden; }
+  
+  .app { display: flex; height: 100vh; }
+  
+  /* Chat sidebar */
+  .sidebar { width: 260px; background: #16213e; padding: 12px; border-right: 1px solid #2a2a4a; flex-shrink: 0; }
+  .sidebar h3 { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: .05em; margin: 0 0 8px; }
+  .sidebar-item { padding: 8px 10px; border-radius: 6px; font-size: 13px; color: #aaa; margin-bottom: 2px; }
+  .sidebar-item.active { background: #2a2a4a; color: #fff; }
+  
+  /* Main chat area */
+  .chat-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  
+  /* Top bar */
+  .top-bar { padding: 12px 16px; border-bottom: 1px solid #2a2a4a; display: flex; align-items: center; gap: 8px; font-size: 14px; flex-shrink: 0; }
+  .top-bar .dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; }
+  
+  /* Scrollable messages */
+  .messages-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    position: relative;
+    scroll-behavior: smooth;
+  }
+  
+  .message { margin-bottom: 16px; max-width: 80%; }
+  .message.user { margin-left: auto; }
+  .message.assistant { margin-right: auto; }
+  
+  .bubble {
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .message.user .bubble { background: #3b82f6; color: #fff; border-bottom-right-radius: 4px; }
+  .message.assistant .bubble { background: #2a2a4a; color: #e0e0e0; border-bottom-left-radius: 4px; }
+  
+  /* The long message — key to the bug */
+  .long-message .bubble { background: #2a2a4a; }
+  .long-message pre { 
+    background: #111; padding: 12px; border-radius: 8px; overflow-x: auto; 
+    font-size: 13px; line-height: 1.6; margin: 8px 0; white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .long-message code { font-family: 'JetBrains Mono', monospace; }
+  
+  /* Input area */
+  .input-area { padding: 12px 16px; border-top: 1px solid #2a2a4a; flex-shrink: 0; }
+  .input-box { background: #16213e; border: 1px solid #2a2a4a; border-radius: 10px; padding: 10px 14px; color: #fff; font-size: 14px; outline: none; width: 100%; box-sizing: border-box; }
+  
+  /* ============================================
+     BUG DEMONSTRATION — Add to Chat floating menu
+     This simulates the exact CSS/positioning
+     used in TextSelectionMenu.tsx
+     ============================================ */
+  
+  #add-to-chat-menu {
+    position: fixed;
+    z-index: 9999;
+    /* Uses the same transform as the real component:
+       translate(-50%, -100%) — menu appears ABOVE the anchor point */
+    transform: translate(-50%, -100%);
+    pointer-events: auto;
+    /* Hidden by default; shown when selection is active */
+    display: none;
+  }
+  
+  #add-to-chat-menu.visible {
+    display: block;
+  }
+  
+  .menu-inner {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    border-radius: 8px;
+    border: 1px solid #3a3a5a;
+    background: #1e1e3a;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  
+  .menu-inner button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .menu-inner button:hover { background: #2a2a4a; }
+  .menu-inner .divider { width: 1px; height: 16px; background: #3a3a5a; }
+  
+  /* Floating labels showing the computed positions */
+  .debug-info {
+    position: fixed;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(0,0,0,0.8);
+    border: 1px solid #3a3a5a;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: monospace;
+    font-size: 12px;
+    z-index: 99999;
+    min-width: 300px;
+    line-height: 1.6;
+  }
+  .debug-info .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; margin-right: 4px; }
+  .badge.ok { background: #166534; color: #86efac; }
+  .badge.err { background: #7f1d1d; color: #fca5a5; }
+  
+  /* Highlight box showing where the computed position is */
+  .position-marker {
+    position: fixed;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(255,200,0,0.6);
+    border: 2px solid #ffcc00;
+    z-index: 9998;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+  }
+  
+  .position-marker.yes { background: rgba(74,222,128,0.5); border-color: #4ade80; }
+  .position-marker.no { background: rgba(255,80,80,0.5); border-color: #ff5050; animation: pulse 1s infinite; }
+  
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  
+  .instructions {
+    padding: 12px 16px;
+    background: #1e1e3a;
+    border-bottom: 1px solid #2a2a4a;
+    font-size: 13px;
+    color: #aaa;
+    flex-shrink: 0;
+  }
+  .instructions strong { color: #fbbf24; }
+  
+  .selection-hint {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 4px 10px;
+    background: #7c3aed33;
+    border: 1px solid #7c3aed55;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #c4b5fd;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="sidebar">
+    <h3>Sessions</h3>
+    <div class="sidebar-item active">Current chat</div>
+    <div class="sidebar-item">Previous session</div>
+    <div class="sidebar-item" style="margin-top:16px;color:#666;font-size:11px;font-style:italic">↑ Click sidebar only for context</div>
+  </div>
+  <div class="chat-area">
+    <div class="top-bar">
+      <div class="dot"></div>
+      <span>Current chat</span>
+    </div>
+    <div class="instructions">
+      <strong>Reproduce the bug:</strong>
+      <ol style="margin:4px 0 0 16px;padding:0">
+        <li>Click in the <strong>long code block below</strong> and drag downward past the visible area</li>
+        <li>Keep dragging — the page will auto-scroll</li>
+        <li>Release the mouse</li>
+        <li>The floating "Add to Chat" menu should appear <strong>near your cursor</strong></li>
+      </ol>
+      <div class="selection-hint">✓ Menu position shows in yellow dot — if it's off-screen or at the very top edge, that's the bug!</div>
+    </div>
+    <div id="messages" class="messages-container">
+      <div class="message assistant">
+        <div class="bubble">Sure! Let me help you with that.</div>
+      </div>
+      
+      <div class="message user">
+        <div class="bubble">Can you show me the full configuration?</div>
+      </div>
+      
+      <div class="message assistant long-message" id="long-message">
+        <div class="bubble">
+          <p>Here's the complete configuration file:</p>
+          <pre id="selectable-code"><code># This is a very long configuration file
+# Select from here and drag down to reproduce the bug
+# The "Add to Chat" button should follow your cursor
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  ssl:
+    enabled: true
+    cert_path: "/etc/certs/server.crt"
+    key_path: "/etc/certs/server.key"
+  
+database:
+  host: "db.internal"
+  port: 5432
+  name: "opencode_production"
+  user: "opencode"
+  pool:
+    min: 5
+    max: 20
+    timeout: 30000
+  
+cache:
+  engine: "redis"
+  host: "redis.internal"
+  port: 6379
+  ttl: 3600
+  
+logging:
+  level: "info"
+  format: "json"
+  outputs:
+    - type: "file"
+      path: "/var/log/app/server.log"
+      rotation: "daily"
+    - type: "stdout"
+      enabled: true
+  
+rate_limiting:
+  enabled: true
+  requests_per_minute: 100
+  burst_size: 20
+  strategy: "token_bucket"
+
+authentication:
+  providers:
+    - type: "oauth2"
+      issuer: "https://auth.example.com"
+      client_id: "abc123"
+      scopes: ["openid", "profile", "email"]
+    - type: "saml"
+      metadata_url: "https://saml.example.com/metadata"
+  
+features:
+  dark_mode: true
+  experimental:
+    - "new_dashboard"
+    - "realtime_collaboration"
+    - "ai_assistant_v2"
+  flags:
+    enable_webhooks: true
+    enable_web_sockets: true
+    maintenance_mode: false
+  
+notifications:
+  email:
+    smtp_host: "smtp.example.com"
+    smtp_port: 587
+    from: "noreply@example.com"
+    templates_dir: "/etc/app/templates/email"
+  push:
+    enabled: true
+    providers: ["firebase", "apns"]
+  
+monitoring:
+  metrics:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+  tracing:
+    enabled: true
+    exporter: "jaeger"
+    endpoint: "http://jaeger:14268/api/traces"
+  alerts:
+    - metric: "cpu_usage"
+      threshold: 90
+      duration: "5m"
+      channels: ["slack", "pagerduty"]
+    - metric: "memory_usage"
+      threshold: 85
+      duration: "10m"
+      channels: ["slack"]
+  
+plugins:
+  - name: "analytics"
+    version: "2.1.0"
+    enabled: true
+    config:
+      api_key: "${ANALYTICS_API_KEY}"
+      endpoint: "https://analytics.example.com/v1"
+  - name: "search"
+    version: "1.3.0"
+    enabled: true
+    config:
+      engine: "elasticsearch"
+      hosts: ["es1.internal:9200", "es2.internal:9200"]
+      index_prefix: "app_"
+  
+# End of configuration — now scroll down and select text above!</code></pre>
+          <p style="margin-top: 12px;">That covers all the main sections. Let me know if you need any changes or have questions about specific settings!</p>
+        </div>
+      </div>
+    </div>
+    <div class="input-area">
+      <input class="input-box" type="text" placeholder="Type a message..." disabled>
+    </div>
+  </div>
+</div>
+
+<!-- Floating "Add to Chat" menu (BUG REPRODUCTION) -->
+<div id="add-to-chat-menu">
+  <div class="menu-inner">
+    <button>➕ Add to chat</button>
+    <div class="divider"></div>
+    <button>💬 New session</button>
+    <div class="divider"></div>
+    <button>📋 Copy</button>
+  </div>
+</div>
+
+<!-- Position marker showing computed anchor point -->
+<div id="position-marker" class="position-marker"></div>
+
+<!-- Debug info panel -->
+<div class="debug-info" id="debug-info">
+  <div><span class="badge ok">✓</span> X-clamping: <strong>enabled</strong> (getDesktopClampedX exists)</div>
+  <div><span class="badge err">✗</span> Y-clamping: <strong>MISSING</strong> (no getDesktopClampedY — <em>the bug</em>)</div>
+  <hr style="border-color:#3a3a5a;margin:6px 0">
+  <div>Menu position: <span id="pos-display">(none)</span></div>
+  <div>Rect top: <span id="rect-top-display">—</span></div>
+  <div>Menu Y: <span id="menu-y-display">—</span></div>
+  <div style="margin-top:4px;font-size:11px;color:#888">
+    If Menu Y &lt; 0 → menu is <strong style="color:#fca5a5">OFF-SCREEN</strong>
+  </div>
+</div>
+
+<script>
+(function() {
+  const menu = document.getElementById('add-to-chat-menu');
+  const marker = document.getElementById('position-marker');
+  const messagesContainer = document.getElementById('messages');
+  const posDisplay = document.getElementById('pos-display');
+  const rectTopDisplay = document.getElementById('rect-top-display');
+  const menuYDisplay = document.getElementById('menu-y-display');
+  
+  // Same constants as TextSelectionMenu.tsx
+  const DESKTOP_MENU_SIDE_MARGIN_PX = 8;
+  
+  // Same X-clamping as the real component
+  function getDesktopClampedX(anchorX, menuWidth) {
+    const viewportWidth = window.innerWidth;
+    const halfWidth = menuWidth / 2;
+    const minX = DESKTOP_MENU_SIDE_MARGIN_PX + halfWidth;
+    const maxX = viewportWidth - DESKTOP_MENU_SIDE_MARGIN_PX - halfWidth;
+    if (minX > maxX) return viewportWidth / 2;
+    return Math.min(Math.max(anchorX, minX), maxX);
+  }
+  
+  // This is the BUG: Y is NOT clamped, just rect.top - 10
+  function getDesktopUnclampedY(rectTop) {
+    return rectTop - 10;
+  }
+  
+  function updateMenuPosition() {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+      menu.classList.remove('visible');
+      marker.classList.remove('visible');
+      return;
+    }
+    
+    try {
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      
+      // Width measured from the actual menu element
+      const menuWidth = menu.offsetWidth || 200;
+      
+      // --- X position (correctly clamped) ---
+      const menuX = getDesktopClampedX(rect.left + rect.width / 2, menuWidth);
+      
+      // --- Y position (NOT clamped — THE BUG) ---
+      const menuY = getDesktopUnclampedY(rect.top);
+      
+      // Apply positions
+      menu.style.left = menuX + 'px';
+      menu.style.top = menuY + 'px';
+      
+      // Show the menu
+      menu.classList.add('visible');
+      
+      // Show position marker at the anchor point
+      marker.style.left = (rect.left + rect.width / 2) + 'px';
+      marker.style.top = rect.top + 'px';
+      marker.classList.add('visible');
+      
+      // Mark if position is off-screen
+      if (menuY < 0) {
+        marker.className = 'position-marker no';
+      } else {
+        marker.className = 'position-marker yes';
+      }
+      
+      // Update debug display
+      posDisplay.textContent = `(${Math.round(menuX)}, ${Math.round(menuY)})`;
+      rectTopDisplay.textContent = Math.round(rect.top);
+      menuYDisplay.textContent = Math.round(menuY);
+      
+    } catch(e) {
+      // Range might be invalid
+      menu.classList.remove('visible');
+    }
+  }
+  
+  // Track selection changes
+  document.addEventListener('selectionchange', updateMenuPosition);
+  
+  // Also update on scroll
+  messagesContainer.addEventListener('scroll', updateMenuPosition);
+  window.addEventListener('scroll', updateMenuPosition);
+  
+  // Click outside to dismiss
+  document.addEventListener('mousedown', function(e) {
+    if (!menu.contains(e.target)) {
+      // Don't hide if there's an active selection — let selectionchange handle it
+    }
+  });
+  
+  // Initial measurement
+  setTimeout(updateMenuPosition, 100);
+  
+  // Minor: prevent the disabled input from interfering
+  console.log('🍀 Issue #2257 reproduction loaded');
+  console.log('Select text from the long code block and drag down to reproduce the bug.');
+})();
+</script>
+</body>
+</html>
