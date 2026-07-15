@@ -17,21 +17,40 @@ const sanitizePublicUrl = (value, protocols) => {
   }
 };
 
-const sanitizePublicLabel = (value) => {
-  const label = typeof value === 'string' ? value.trim() : '';
-  if (!label) return '';
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
+const SYNTHETIC_LABEL = /^(?:relay|direct-e2ee):\/\/[a-zA-Z0-9._-]+$/;
+const SYNTHETIC_LABEL_PREFIX = /^(?:relay|direct-e2ee):/i;
+const URL_SCHEME_PREFIX = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
+
+const sanitizePublicLabel = (value, fallback) => {
+  if (typeof value !== 'string' || CONTROL_CHARACTERS.test(value)) return fallback;
+  const label = value.trim();
+  if (!label) return fallback;
+  if (SYNTHETIC_LABEL.test(label)) return label;
+  if (SYNTHETIC_LABEL_PREFIX.test(label)) return fallback;
+
+  if (label.startsWith('//')) {
+    try {
+      const url = new URL(label, 'https://public-label.invalid');
+      return url.host ? `//${url.host}` : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  if (!URL_SCHEME_PREFIX.test(label)) return label;
   try {
     const url = new URL(label);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : label;
+    return url.host ? `${url.protocol}//${url.host}` : fallback;
   } catch {
-    return label;
+    return fallback;
   }
 };
 
 const redactHost = (host) => {
   if (!host || typeof host !== 'object' || Array.isArray(host)) return null;
   const id = typeof host.id === 'string' ? host.id.trim() : '';
-  const label = sanitizePublicLabel(host.label);
+  const label = sanitizePublicLabel(host.label, id);
   if (!id || !label) return null;
   const url = sanitizePublicUrl(host.url, new Set(['http:', 'https:'])) || (typeof host.url === 'string' && /^(?:relay|direct-e2ee):\/\/[a-zA-Z0-9._-]+$/.test(host.url) ? host.url : null);
   const apiUrl = sanitizePublicUrl(host.apiUrl, new Set(['http:', 'https:']));

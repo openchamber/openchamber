@@ -75,6 +75,46 @@ describe('desktop host public config', () => {
     expect(JSON.stringify(result)).not.toMatch(/password|path-token|query-secret|fragment-secret/i);
   });
 
+  test('redacts hierarchical and unsafe URL-shaped labels without changing transport paths', () => {
+    const publicUrl = 'https://runtime.example/custom/base?token=url-secret#url-fragment';
+    const publicApiUrl = 'https://runtime.example/custom/base/api?token=api-secret#api-fragment';
+    const labels = [
+      ['wss-label', 'wss://user:wss-secret@socket.example:9443/private?token=wss-query#wss-fragment', 'wss://socket.example:9443'],
+      ['ws-label', 'ws://user:ws-secret@socket.example:8080/private?token=ws-query#ws-fragment', 'ws://socket.example:8080'],
+      ['ssh-label', 'ssh://user:ssh-secret@ssh.example:2222/home?token=ssh-query#ssh-fragment', 'ssh://ssh.example:2222'],
+      ['ftp-label', 'ftp://user:ftp-secret@ftp.example:2121/files?token=ftp-query#ftp-fragment', 'ftp://ftp.example:2121'],
+      ['custom-label', 'custom+transport://user:custom-secret@custom.example:4321/private?token=custom-query#custom-fragment', 'custom+transport://custom.example:4321'],
+      ['relative-label', '//user:relative-secret@relative.example:8443/private?token=relative-query#relative-fragment', '//relative.example:8443'],
+      ['javascript-label', 'javascript:alert("javascript-secret")', 'javascript-label'],
+      ['data-label', 'data:text/plain,data-secret', 'data-label'],
+      ['file-label', 'file:///Users/private/file-secret', 'file-label'],
+      ['file-host-label', 'file://fileserver/private/file-secret', 'file://fileserver'],
+      ['malformed-label', 'https://user:malformed-secret@[invalid/path?token=secret', 'malformed-label'],
+      ['relay-label', 'relay://server-one', 'relay://server-one'],
+      ['direct-label', 'direct-e2ee://device_1.test-safe', 'direct-e2ee://device_1.test-safe'],
+      ['relay-userinfo', 'relay://user:secret@server-one', 'relay-userinfo'],
+      ['relay-path', 'relay://server-one/private', 'relay-path'],
+      ['direct-query', 'direct-e2ee://device-one?token=secret', 'direct-query'],
+      ['direct-fragment', 'direct-e2ee://device-one#secret', 'direct-fragment'],
+      ['synthetic-control', 'relay://server\n-one', 'synthetic-control'],
+      ['friendly-label', 'Friendly workstation', 'Friendly workstation'],
+    ];
+    const result = resolveDesktopHostsForSender('https://evil.example/path', {
+      hosts: labels.map(([id, label]) => ({ id, label, url: publicUrl, apiUrl: publicApiUrl })),
+      defaultHostId: 'javascript-label',
+    }, allowed);
+
+    expect(Object.fromEntries(result.hosts.map((host) => [host.id, host.label]))).toEqual(
+      Object.fromEntries(labels.map(([id, , expected]) => [id, expected])),
+    );
+    expect(result.hosts.find((host) => host.id === 'javascript-label')).toMatchObject({
+      url: 'https://runtime.example/custom/base',
+      apiUrl: 'https://runtime.example/custom/base/api',
+    });
+    expect(result.defaultHostId).toBe('javascript-label');
+    expect(JSON.stringify(result)).not.toMatch(/wss-secret|ws-secret|ssh-secret|ftp-secret|relative-secret|javascript-secret|data-secret|file-secret|malformed-secret/i);
+  });
+
   test('preserves a normalized default only when its redacted host survives', () => {
     const result = resolveDesktopHostsForSender('https://evil.example/path', {
       ...fullConfig,
