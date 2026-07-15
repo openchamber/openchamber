@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  isPathWithinProject,
   selectExpandedParentKeysForContext,
   toggleExpandedParentKey,
 } from './utils';
+import { formatProjectLabel, isPathWithinProject } from './utils';
 
 describe('isPathWithinProject', () => {
   test('matches child directories for root projects', () => {
@@ -73,5 +73,11 @@ describe('parent expansion state', () => {
 
     expect(selectExpandedParentKeysForContext(new Set(), bothExpanded, 'recent')).toEqual(new Set([recentKey]));
     expect(selectExpandedParentKeysForContext(new Set(), projectCollapsed, 'recent')).toEqual(new Set([recentKey]));
+  });
+});
+
+describe('formatProjectLabel', () => {
+  test('keeps stored project labels unchanged', () => {
+    expect(formatProjectLabel('my_PROJECT')).toBe('my_PROJECT');
   });
 });

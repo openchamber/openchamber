@@ -286,6 +286,7 @@ mock.module("../session-actions", () => ({
   archiveSessions: mock(async () => ({ archivedIds: [], failedIds: [] })),
   unarchiveSession: mock(async () => true),
   unarchiveSessions: mock(async () => ({ restoredIds: [], failedIds: [] })),
+  closeProjectsWithoutActiveSessionsForDirectories: mock(async () => undefined),
   updateSessionTitle: mock(async () => undefined),
   shareSession: mock(async () => undefined),
   unshareSession: mock(async () => undefined),

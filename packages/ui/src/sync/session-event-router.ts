@@ -2,6 +2,7 @@ import type { Event, Session } from "@opencode-ai/sdk/v2/client"
 import {
   isGlobalSessionRecencyOnlyUpdate,
   mergeSessionDirectoryMetadata,
+  resolveGlobalSessionDirectory,
   useGlobalSessionsStore,
   type GlobalSessionMutation,
 } from "@/stores/useGlobalSessionsStore"
@@ -9,6 +10,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime
 import { streamPerfCount, streamPerfMark } from "@/stores/utils/streamDebug"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
+import { closeProjectsWithoutActiveSessionsForDirectories } from "./session-actions"
 
 const pendingGlobalSessionUpdates = new Map<string, { runtimeKey: string; session: Session }>()
 
@@ -52,6 +54,7 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly Event[]): 
   const store = useGlobalSessionsStore.getState()
   const overlay = new Map(store.entityById)
   const mutations: GlobalSessionMutation[] = []
+  const autoCloseDirectories = new Set<string | null>()
   let flushedRecency = false
 
   const appendUpsert = (session: Session): void => {
@@ -83,7 +86,15 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly Event[]): 
       const session = getSessionInfoFromPayload(payload)
       if (session) {
         const currentSession = overlay.get(session.id) ?? null
-        if (!shouldSkipStaleSessionEvent(currentSession, session)) appendUpsert(session)
+        if (!shouldSkipStaleSessionEvent(currentSession, session)) {
+          if (session.time.archived && !currentSession?.time.archived) {
+            autoCloseDirectories.add(
+              resolveGlobalSessionDirectory(session)
+              ?? (currentSession ? resolveGlobalSessionDirectory(currentSession) : null),
+            )
+          }
+          appendUpsert(session)
+        }
       }
       continue
     }
@@ -97,6 +108,12 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly Event[]): 
             scheduleGlobalSessionUpdate(session)
           } else {
             pendingGlobalSessionUpdates.delete(session.id)
+            if (session.time.archived && !currentSession?.time.archived) {
+              autoCloseDirectories.add(
+                resolveGlobalSessionDirectory(session)
+                ?? (currentSession ? resolveGlobalSessionDirectory(currentSession) : null),
+              )
+            }
             appendUpsert(session)
             streamPerfCount("ui.global_sessions.event_update_immediate")
           }
@@ -106,10 +123,16 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly Event[]): 
     }
 
     if (payload.type === "session.deleted") {
+      const eventSession = getSessionInfoFromPayload(payload)
       const sessionID = (payload as { properties?: { sessionID?: string } }).properties?.sessionID
-        ?? getSessionInfoFromPayload(payload)?.id
+        ?? eventSession?.id
       if (sessionID) {
         pendingGlobalSessionUpdates.delete(sessionID)
+        const currentSession = overlay.get(sessionID) ?? null
+        const sessionForDirectory = currentSession ?? eventSession
+        if (sessionForDirectory) {
+          autoCloseDirectories.add(resolveGlobalSessionDirectory(sessionForDirectory))
+        }
         overlay.delete(sessionID)
         mutations.push({ type: "remove", sessionId: sessionID })
       }
@@ -120,6 +143,9 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly Event[]): 
   if (flushedRecency) streamPerfMark("global_sessions.event_update_flush")
   store.applySessionMutations(mutations)
   streamPerfCount("ui.global_sessions.event_update_publication")
+  if (autoCloseDirectories.size > 0) {
+    void closeProjectsWithoutActiveSessionsForDirectories(autoCloseDirectories)
+  }
 }
 
 export const applySessionEventToGlobalSessions = (payload: Event): void => {

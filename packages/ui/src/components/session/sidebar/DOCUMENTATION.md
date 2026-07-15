@@ -35,3 +35,13 @@ Directory demand always includes known project roots and worktrees. Visibility
 only changes priority. Row mounts must not start bootstrap work. Selection and
 activity subscriptions stay session-scoped so a structural list update does not
 make every row observe unrelated streaming updates.
+
+## Project preferences
+
+Sidebar display preferences are local and persisted by `useSessionDisplayStore`.
+The header exposes project grouping and display preferences, generated-name
+casing, automatic empty-project closure, and collapse or expand actions.
+Preserving folder-name casing affects labels generated for newly added projects;
+existing and manually edited labels remain unchanged. Automatic project closure
+runs only after a confirmed archive or deletion and a complete global active
+session refresh. Archived sessions do not keep a project open.

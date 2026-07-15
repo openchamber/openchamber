@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { useI18n } from '@/lib/i18n';
-import { formatDirectoryName } from '@/lib/utils';
+import { deriveProjectLabelFromPath } from '@/lib/projectResolution';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { SidebarActivitySections } from './SidebarActivitySections';
 import { deriveRecentActivitySections, type RecentSessionLocation } from './activitySections';
@@ -56,7 +56,6 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
     projects,
     availableWorktreesByProject,
     gitBranches,
-    homeDirectory,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     isDesktopShellRuntime,
@@ -84,7 +83,7 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
       }
       if (!owner) continue;
       const worktree = availableWorktreesByProject.get(owner.normalizedPath)?.find((entry) => normalizePath(entry.path) === directory);
-      const projectLabel = formatProjectLabel(owner.label?.trim() || formatDirectoryName(owner.normalizedPath, homeDirectory) || owner.normalizedPath);
+      const projectLabel = formatProjectLabel(owner.label?.trim() || deriveProjectLabelFromPath(owner.normalizedPath));
       const branch = worktree?.branch?.trim() || gitBranches.get(directory)?.trim() || null;
       locations.set(session.id, {
         projectId: owner.id,
@@ -94,7 +93,7 @@ export const RecentSessionSection: React.FC<Props> = (props) => {
       });
     }
     return locations;
-  }, [availableWorktreesByProject, sessions, gitBranches, homeDirectory, projects]);
+  }, [availableWorktreesByProject, sessions, gitBranches, projects]);
   const getSessionLocation = React.useCallback(
     (sessionId: string) => sessionLocationById.get(sessionId) ?? null,
     [sessionLocationById],
