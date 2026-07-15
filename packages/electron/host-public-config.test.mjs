@@ -41,4 +41,43 @@ describe('desktop host public config', () => {
       { id: 'host-two', label: 'Two', url: 'https://two.example' },
     ]);
   });
+
+  test('preserves a normalized default only when its redacted host survives', () => {
+    const result = resolveDesktopHostsForSender('https://evil.example/path', {
+      ...fullConfig,
+      defaultHostId: ' host-one ',
+    }, allowed);
+    expect(result.defaultHostId).toBe('host-one');
+  });
+
+  test('clears defaults for filtered or missing hosts and preserves null', () => {
+    const cases = [
+      {
+        config: { hosts: [{ id: 'filtered', label: 'Filtered' }], defaultHostId: 'filtered' },
+        expectedHosts: [],
+      },
+      {
+        config: { hosts: fullConfig.hosts, defaultHostId: 'missing' },
+        expectedHosts: [{
+          id: 'host-one', label: 'Remote', url: 'https://remote.example/path', apiUrl: 'https://remote.example/api',
+          relay: { relayUrl: 'wss://relay.example/ws', serverId: 'server-one', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'rx', y: 'ry' } },
+          directE2ee: { wssUrl: 'wss://direct.example/api/openchamber/direct-e2ee/ws', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'dx', y: 'dy' } },
+        }],
+      },
+      {
+        config: { hosts: fullConfig.hosts, defaultHostId: null },
+        expectedHosts: [{
+          id: 'host-one', label: 'Remote', url: 'https://remote.example/path', apiUrl: 'https://remote.example/api',
+          relay: { relayUrl: 'wss://relay.example/ws', serverId: 'server-one', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'rx', y: 'ry' } },
+          directE2ee: { wssUrl: 'wss://direct.example/api/openchamber/direct-e2ee/ws', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'dx', y: 'dy' } },
+        }],
+      },
+    ];
+
+    for (const { config, expectedHosts } of cases) {
+      const result = resolveDesktopHostsForSender('https://evil.example/path', config, allowed);
+      expect(result.hosts).toEqual(expectedHosts);
+      expect(result.defaultHostId).toBeNull();
+    }
+  });
 });

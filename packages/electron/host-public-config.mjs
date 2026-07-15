@@ -41,12 +41,16 @@ const redactHost = (host) => {
   };
 };
 
-export const redactDesktopHostsConfig = (config) => ({
-  hosts: Array.isArray(config?.hosts) ? config.hosts.map(redactHost).filter(Boolean) : [],
-  defaultHostId: typeof config?.defaultHostId === 'string' ? config.defaultHostId : null,
-  initialHostChoiceCompleted: config?.initialHostChoiceCompleted === true,
-  localOrigin: sanitizePublicUrl(config?.localOrigin, new Set(['http:', 'https:'])),
-});
+export const redactDesktopHostsConfig = (config) => {
+  const hosts = Array.isArray(config?.hosts) ? config.hosts.map(redactHost).filter(Boolean) : [];
+  const defaultHostId = typeof config?.defaultHostId === 'string' ? config.defaultHostId.trim() : '';
+  return {
+    hosts,
+    defaultHostId: defaultHostId && hosts.some((host) => host.id === defaultHostId) ? defaultHostId : null,
+    initialHostChoiceCompleted: config?.initialHostChoiceCompleted === true,
+    localOrigin: sanitizePublicUrl(config?.localOrigin, new Set(['http:', 'https:'])),
+  };
+};
 
 export const resolveDesktopHostsForSender = (senderUrl, fullConfig, allowed) => (
   isRuntimeBootstrapSenderAllowed(senderUrl, allowed) ? fullConfig : redactDesktopHostsConfig(fullConfig)
