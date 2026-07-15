@@ -18,6 +18,8 @@ const DIRECT_E2EE_LIMITS = Object.freeze({
   maxPreauthenticated: 16,
   reconnectReserve: 4,
   maxAuthenticated: 64,
+  identityDeadlineMs: 10_000,
+  identityRetryCooldownMs: 1_000,
   handshakeTimeoutMs: 15_000,
   authenticationDeadlineMs: 20_000,
   reconnectDeadlineMs: 2_000,
@@ -121,6 +123,9 @@ export const createDirectE2eeService = ({
   const byClient = new Map();
   let server = null;
   let detached = false;
+  let cachedIdentity = null;
+  let identityAttempt = null;
+  let identityRetryAfter = 0;
 
   const counts = () => {
     const result = { pending: 0, preauthenticated: 0, authenticated: 0, reserved: 0, total: sessions.size };
@@ -148,11 +153,21 @@ export const createDirectE2eeService = ({
   const closeEntry = (entry, reason, code = 1008) => {
     if (!entry || entry.released) return;
     entry.released = true;
+    entry.identityAttempt?.waiters.delete(entry);
+    entry.identityAttempt = null;
+    entry.pendingFrames.length = 0;
+    entry.socket.off?.('message', entry.onMessage);
+    entry.socket.off?.('close', entry.onClose);
+    entry.socket.off?.('error', entry.onError);
     sessions.delete(entry.id);
     clearTimeout(entry.handshakeTimer);
     clearTimeout(entry.authTimer);
     clearInterval(entry.idleTimer);
-    entry.encrypted?.close();
+    try {
+      entry.encrypted?.close();
+    } catch {
+      // Continue releasing every owned resource and session.
+    }
     entry.authChecks.clear();
     entry.pairingChecks.clear();
     entry.requestPurposes.clear();
@@ -260,12 +275,156 @@ export const createDirectE2eeService = ({
     entry.authTimer.unref?.();
   };
 
-  const acceptConnection = async (socket, profile) => {
+  const initializeEncryptedEntry = (entry, identity) => {
+    if (entry.released) return;
+    entry.identityAttempt?.waiters.delete(entry);
+    entry.identityAttempt = null;
+    try {
+      entry.encrypted = createEncryptedSession({
+        socket: entry.socket,
+        connectionId: entry.id,
+        hostEncPrivateKey: identity.hostEncPrivateKey,
+        getLocalPort,
+        isActive: () => sessions.get(entry.id) === entry && !entry.released,
+        onActivity: () => { entry.lastActivityAt = Date.now(); },
+        onEstablished: () => establish(entry),
+        onFailure: (code) => closeEntry(entry, 'channel-failure', code),
+        logger: { warn: () => logReason('encrypted-session-failure', entry.id) },
+        failOnIgnoredHandshake: true,
+        batchWindowMs,
+        tunnelOptions: {
+          transportContext: {
+            metadataHeader: null,
+            stripOrigin: true,
+            requestHeaders: { [DIRECT_E2EE_TRANSPORT_HEADER]: internalTransportMarker },
+            wsHeaders: { [DIRECT_E2EE_TRANSPORT_HEADER]: internalTransportMarker },
+          },
+          requestPolicy: requestPolicy(entry),
+          onResponse: ({ generation, status }) => {
+            const purpose = entry.requestPurposes.get(generation);
+            entry.requestPurposes.delete(generation);
+            if (entry.reserved && purpose === 'health' && status === 200 && entry.state === 'preauthenticated') entry.healthSeen = true;
+            if (entry.pairingChecks.delete(generation) && status >= 400) logReason('pairing-rejected', entry.id);
+            const clientId = entry.authChecks.get(generation);
+            entry.authChecks.delete(generation);
+            if (status === 200 && clientId) promote(entry, clientId);
+          },
+          onLimitExceeded: (reason) => closeEntry(entry, reason, RelayCloseCode.ChannelFailure),
+          onStreamClosed: (event) => {
+            entry.authChecks.delete(event.generation);
+            entry.pairingChecks.delete(event.generation);
+            entry.requestPurposes.delete(event.generation);
+            onInnerStreamClosed?.(event);
+          },
+          limits: {
+            maxStreams: limits.maxStreams,
+            maxWebSockets: limits.maxWebSockets,
+            maxIncompleteFragments: limits.maxIncompleteFragments,
+            getMaxIncompleteFragmentBytes: () => entry.state === 'authenticated' ? limits.maxAuthenticatedFragmentBytes : limits.maxPreauthFragmentBytes,
+            maxStreamOpens: limits.maxStreamOpens,
+            streamOpenWindowMs: limits.streamOpenWindowMs,
+          },
+          failClosedPolicy: true,
+        },
+      });
+      for (const [data, isBinary] of entry.pendingFrames.splice(0)) entry.encrypted.receive(data, isBinary);
+    } catch {
+      closeEntry(entry, 'identity-unavailable', 1011);
+      logReason('identity-unavailable', 'upgrade');
+    }
+  };
+
+  const closeIdentityWaiters = (attempt, reason) => {
+    const waiters = [...attempt.waiters];
+    attempt.waiters.clear();
+    for (const entry of waiters) {
+      closeEntry(entry, reason, 1011);
+      logReason(reason, 'upgrade');
+    }
+  };
+
+  const settleIdentitySuccess = (attempt, identity) => {
+    if (!identity?.hostEncPrivateKey) {
+      settleIdentityRejection(attempt);
+      return;
+    }
+    clearTimeout(attempt.deadlineTimer);
+    attempt.deadlineTimer = null;
+    cachedIdentity = identity;
+    if (identityAttempt === attempt) identityAttempt = null;
+    const waiters = [...attempt.waiters];
+    attempt.waiters.clear();
+    for (const entry of waiters) initializeEncryptedEntry(entry, identity);
+  };
+
+  const settleIdentityRejection = (attempt) => {
+    clearTimeout(attempt.deadlineTimer);
+    attempt.deadlineTimer = null;
+    closeIdentityWaiters(attempt, 'identity-unavailable');
+    if (identityAttempt === attempt) identityAttempt = null;
+    identityRetryAfter = Date.now() + limits.identityRetryCooldownMs;
+  };
+
+  const startIdentityAttempt = (attempt) => {
+    attempt.deadlineTimer = setTimeout(() => {
+      if (identityAttempt !== attempt || attempt.state !== 'pending') return;
+      attempt.state = 'timed-out';
+      attempt.deadlineTimer = null;
+      closeIdentityWaiters(attempt, 'identity-timeout');
+    }, limits.identityDeadlineMs);
+    attempt.deadlineTimer.unref?.();
+
+    let pendingIdentity;
+    try {
+      pendingIdentity = getRelayIdentity();
+    } catch {
+      settleIdentityRejection(attempt);
+      return;
+    }
+    Promise.resolve(pendingIdentity).then(
+      (identity) => settleIdentitySuccess(attempt, identity),
+      () => settleIdentityRejection(attempt),
+    );
+  };
+
+  const waitForIdentity = (entry) => {
+    if (cachedIdentity) {
+      initializeEncryptedEntry(entry, cachedIdentity);
+      return;
+    }
+    if (identityAttempt?.state === 'timed-out') {
+      closeEntry(entry, 'identity-timeout', 1011);
+      return;
+    }
+    if (Date.now() < identityRetryAfter) {
+      closeEntry(entry, 'identity-cooldown', 1011);
+      return;
+    }
+
+    let attempt = identityAttempt;
+    if (!attempt) {
+      attempt = { state: 'pending', waiters: new Set(), deadlineTimer: null, started: false };
+      identityAttempt = attempt;
+    }
+    if (attempt.waiters.size >= limits.maxPending) {
+      closeEntry(entry, 'identity-capacity', 1011);
+      return;
+    }
+    attempt.waiters.add(entry);
+    entry.identityAttempt = attempt;
+    if (!attempt.started) {
+      attempt.started = true;
+      startIdentityAttempt(attempt);
+    }
+  };
+
+  const acceptConnection = (socket, profile) => {
     const id = crypto.randomUUID();
     const entry = {
       id, socket, profileId: profile.id, state: 'pending', reserved: false, released: false,
       clientId: null, encrypted: null, handshakeMessages: 0, authChecks: new Map(), pairingChecks: new Set(), requestPurposes: new Map(), healthSeen: false, source: profile.source, createdAt: Date.now(), lastActivityAt: Date.now(),
-      handshakeTimer: null, authTimer: null, idleTimer: null, pendingFrames: [],
+      handshakeTimer: null, authTimer: null, idleTimer: null, pendingFrames: [], identityAttempt: null,
+      onMessage: null, onClose: null, onError: null,
     };
     sessions.set(id, entry);
     entry.handshakeTimer = setTimeout(() => closeEntry(entry, 'handshake-timeout', 1008), limits.handshakeTimeoutMs);
@@ -274,7 +433,8 @@ export const createDirectE2eeService = ({
       if (Date.now() - entry.lastActivityAt > limits.idleTimeoutMs) closeEntry(entry, 'idle-timeout', 1001);
     }, Math.min(30_000, limits.idleTimeoutMs));
     entry.idleTimer.unref?.();
-    socket.on('message', (data, isBinary) => {
+    entry.onMessage = (data, isBinary) => {
+      if (entry.released) return;
       if (entry.state === 'pending') {
         entry.handshakeMessages += 1;
         const size = typeof data === 'string' ? Buffer.byteLength(data) : data.length;
@@ -288,66 +448,13 @@ export const createDirectE2eeService = ({
         return;
       }
       entry.encrypted.receive(data, isBinary);
-    });
-    socket.once('close', () => closeEntry(entry, 'disconnect', 1000));
-    socket.once('error', () => closeEntry(entry, 'socket-error', 1011));
-
-    let identity;
-    try {
-      identity = await getRelayIdentity();
-    } catch (error) {
-      closeEntry(entry, 'identity-unavailable', 1011);
-      throw error;
-    }
-    if (entry.released) return;
-    entry.encrypted = createEncryptedSession({
-      socket,
-      connectionId: id,
-      hostEncPrivateKey: identity.hostEncPrivateKey,
-      getLocalPort,
-      isActive: () => sessions.get(id) === entry && !entry.released,
-      onActivity: () => { entry.lastActivityAt = Date.now(); },
-      onEstablished: () => establish(entry),
-      onFailure: (code) => closeEntry(entry, 'channel-failure', code),
-      logger: { warn: () => logReason('encrypted-session-failure', id) },
-      failOnIgnoredHandshake: true,
-      batchWindowMs,
-      tunnelOptions: {
-        transportContext: {
-          metadataHeader: null,
-          stripOrigin: true,
-          requestHeaders: { [DIRECT_E2EE_TRANSPORT_HEADER]: internalTransportMarker },
-          wsHeaders: { [DIRECT_E2EE_TRANSPORT_HEADER]: internalTransportMarker },
-        },
-        requestPolicy: requestPolicy(entry),
-        onResponse: ({ generation, status }) => {
-          const purpose = entry.requestPurposes.get(generation);
-          entry.requestPurposes.delete(generation);
-          if (entry.reserved && purpose === 'health' && status === 200 && entry.state === 'preauthenticated') entry.healthSeen = true;
-          if (entry.pairingChecks.delete(generation) && status >= 400) logReason('pairing-rejected', entry.id);
-          const clientId = entry.authChecks.get(generation);
-          entry.authChecks.delete(generation);
-          if (status === 200 && clientId) promote(entry, clientId);
-        },
-        onLimitExceeded: (reason) => closeEntry(entry, reason, RelayCloseCode.ChannelFailure),
-        onStreamClosed: (event) => {
-          entry.authChecks.delete(event.generation);
-          entry.pairingChecks.delete(event.generation);
-          entry.requestPurposes.delete(event.generation);
-          onInnerStreamClosed?.(event);
-        },
-        limits: {
-          maxStreams: limits.maxStreams,
-          maxWebSockets: limits.maxWebSockets,
-          maxIncompleteFragments: limits.maxIncompleteFragments,
-          getMaxIncompleteFragmentBytes: () => entry.state === 'authenticated' ? limits.maxAuthenticatedFragmentBytes : limits.maxPreauthFragmentBytes,
-          maxStreamOpens: limits.maxStreamOpens,
-          streamOpenWindowMs: limits.streamOpenWindowMs,
-        },
-        failClosedPolicy: true,
-      },
-    });
-    for (const [data, isBinary] of entry.pendingFrames.splice(0)) entry.encrypted.receive(data, isBinary);
+    };
+    entry.onClose = () => closeEntry(entry, 'disconnect', 1000);
+    entry.onError = () => closeEntry(entry, 'socket-error', 1011);
+    socket.on('message', entry.onMessage);
+    socket.once('close', entry.onClose);
+    socket.once('error', entry.onError);
+    waitForIdentity(entry);
   };
 
   const upgradeHandler = (req, socket, head) => {
@@ -385,13 +492,7 @@ export const createDirectE2eeService = ({
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req);
-      void acceptConnection(ws, { ...profile, source }).catch(() => {
-        try {
-          if (ws.readyState === WebSocket.OPEN) ws.close(1011, 'direct session unavailable');
-          else if (ws.readyState === WebSocket.CONNECTING) ws.terminate();
-        } catch { ws.terminate(); }
-        logReason('identity-unavailable', 'upgrade');
-      });
+      acceptConnection(ws, { ...profile, source });
     });
   };
 
@@ -426,6 +527,8 @@ export const createDirectE2eeService = ({
       return count;
     },
     getCounts: counts,
+    _getPendingFrameCount: () => [...sessions.values()]
+      .reduce((total, entry) => total + entry.pendingFrames.length, 0),
     _webSocketServer: wss,
   };
 };

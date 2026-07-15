@@ -12,6 +12,12 @@ afterEach(async () => {
 });
 
 const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((onResolve, onReject) => { resolve = onResolve; reject = onReject; });
+  return { promise, resolve, reject };
+};
 
 const fixture = async ({ profile, limits, logs = [], getRelayIdentity } = {}) => {
   const keys = await generateEcdhKeyPair();
@@ -52,6 +58,15 @@ const connect = async (fx, headers = {}) => {
   const ws = new WebSocket(`ws://127.0.0.1:${fx.outer.address().port}${DIRECT_E2EE_PATH}`, { headers: { Host: 'direct.example.test', ...headers }, perMessageDeflate: false });
   await new Promise((resolve) => ws.once('open', resolve));
   return ws;
+};
+
+const connectTracked = (fx, headers = {}) => {
+  const ws = new WebSocket(`ws://127.0.0.1:${fx.outer.address().port}${DIRECT_E2EE_PATH}`, { headers: { Host: 'direct.example.test', ...headers }, perMessageDeflate: false });
+  return {
+    ws,
+    opened: new Promise((resolve) => ws.once('open', resolve)),
+    closed: new Promise((resolve) => ws.once('close', resolve)),
+  };
 };
 
 describe('direct E2EE upgrade and lifecycle', () => {
@@ -203,6 +218,83 @@ describe('direct E2EE upgrade and lifecycle', () => {
       clearTimeoutSpy.mockRestore();
       clearIntervalSpy.mockRestore();
     }
+  });
+
+  it('shares one bounded identity attempt, clears timed-out waiters, and caches late success without revival', async () => {
+    const identity = deferred();
+    let identityCalls = 0;
+    const fx = await fixture({
+      getRelayIdentity: () => {
+        identityCalls += 1;
+        return identity.promise;
+      },
+      limits: { identityDeadlineMs: 60, identityRetryCooldownMs: 40, handshakeTimeoutMs: 1_000 },
+    });
+    const first = connectTracked(fx);
+    const second = connectTracked(fx);
+    await Promise.all([first.opened, second.opened]);
+    first.ws.send('first-pending-frame');
+    second.ws.send('second-pending-frame');
+    await Promise.all([first.closed, second.closed]);
+
+    expect(identityCalls).toBe(1);
+    expect(fx.service.getCounts()).toEqual({ pending: 0, preauthenticated: 0, authenticated: 0, reserved: 0, total: 0 });
+    expect(fx.service._getPendingFrameCount()).toBe(0);
+
+    const fastFailure = connectTracked(fx);
+    await fastFailure.opened;
+    await fastFailure.closed;
+    expect(identityCalls).toBe(1);
+
+    identity.resolve({ hostEncPrivateKey: fx.keys.privateKey });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fx.service.getCounts().total).toBe(0);
+
+    const client = await createClientHandshake(await exportPublicKeyJwk(fx.keys.publicKey), { batch: false });
+    const live = await connect(fx);
+    const ready = new Promise((resolve) => live.once('message', (data) => resolve(data.toString())));
+    live.send(client.helloText);
+    expect(JSON.parse(await ready)).toMatchObject({ t: 'ready', v: 1 });
+    expect(identityCalls).toBe(1);
+    live.terminate();
+  });
+
+  it('fails fast during identity rejection cooldown and permits exactly one shared retry', async () => {
+    const firstIdentity = deferred();
+    const retryIdentity = deferred();
+    let identityCalls = 0;
+    const fx = await fixture({
+      getRelayIdentity: () => {
+        identityCalls += 1;
+        return identityCalls === 1 ? firstIdentity.promise : retryIdentity.promise;
+      },
+      limits: { identityDeadlineMs: 1_000, identityRetryCooldownMs: 40, handshakeTimeoutMs: 1_000 },
+    });
+
+    const rejected = connectTracked(fx);
+    await rejected.opened;
+    firstIdentity.reject(new Error('identity backend unavailable'));
+    await rejected.closed;
+    expect(fx.service.getCounts().total).toBe(0);
+
+    const cooldown = connectTracked(fx);
+    await cooldown.opened;
+    await cooldown.closed;
+    expect(identityCalls).toBe(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const retryOne = connectTracked(fx);
+    const retryTwo = connectTracked(fx);
+    await Promise.all([retryOne.opened, retryTwo.opened]);
+    const client = await createClientHandshake(await exportPublicKeyJwk(fx.keys.publicKey), { batch: false });
+    const ready = new Promise((resolve) => retryOne.ws.once('message', (data) => resolve(data.toString())));
+    retryOne.ws.send(client.helloText);
+    expect(identityCalls).toBe(2);
+    retryIdentity.resolve({ hostEncPrivateKey: fx.keys.privateKey });
+    expect(JSON.parse(await ready)).toMatchObject({ t: 'ready', v: 1 });
+    expect(identityCalls).toBe(2);
+    retryOne.ws.terminate();
+    retryTwo.ws.terminate();
   });
 
   it('enforces the per-source pending cap by evicting the oldest probation', async () => {
