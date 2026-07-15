@@ -142,7 +142,17 @@ export const createDirectE2eeService = ({
     return result;
   };
 
-  const logReason = (reason, connectionId) => logger.warn?.('[DirectE2EE]', { reason, connectionId });
+  const logReason = (reason, connectionId) => {
+    const safeReason = typeof reason === 'string' && /^[a-z0-9-]+$/.test(reason) ? reason : 'internal-failure';
+    const safeConnectionId = typeof connectionId === 'string' && /^[a-zA-Z0-9-]{1,128}$/.test(connectionId)
+      ? connectionId
+      : 'unknown';
+    try {
+      logger.warn?.('[DirectE2EE]', { reason: safeReason, connectionId: safeConnectionId });
+    } catch {
+      // Logging is never allowed to interrupt security cleanup.
+    }
+  };
 
   const sourceKey = (req) => {
     const remote = req.socket?.remoteAddress;
@@ -155,28 +165,40 @@ export const createDirectE2eeService = ({
   const closeEntry = (entry, reason, code = 1008) => {
     if (!entry || entry.released) return;
     entry.released = true;
-    entry.identityAttempt?.waiters.delete(entry);
+    sessions.delete(entry.id);
+    try {
+      entry.identityAttempt?.waiters.delete(entry);
+    } catch {
+      // Continue releasing the remaining entry state.
+    }
     entry.identityAttempt = null;
     entry.pendingFrames.length = 0;
-    entry.socket.off?.('message', entry.onMessage);
-    entry.socket.off?.('close', entry.onClose);
-    entry.socket.off?.('error', entry.onError);
-    sessions.delete(entry.id);
-    clearTimeout(entry.handshakeTimer);
-    clearTimeout(entry.authTimer);
-    clearInterval(entry.idleTimer);
+    for (const [event, handler] of [['message', entry.onMessage], ['close', entry.onClose], ['error', entry.onError]]) {
+      try {
+        entry.socket.off?.(event, handler);
+      } catch {
+        // Socket listener cleanup is isolated per event.
+      }
+    }
+    try { clearTimeout(entry.handshakeTimer); } catch {}
+    try { clearTimeout(entry.authTimer); } catch {}
+    try { clearInterval(entry.idleTimer); } catch {}
     try {
       entry.encrypted?.close();
     } catch {
       // Continue releasing every owned resource and session.
     }
-    entry.authChecks.clear();
-    entry.pairingChecks.clear();
-    entry.requestPurposes.clear();
+    try { entry.authChecks.clear(); } catch {}
+    try { entry.pairingChecks.clear(); } catch {}
+    try { entry.requestPurposes.clear(); } catch {}
     if (entry.clientId) {
-      const set = byClient.get(entry.clientId);
-      set?.delete(entry);
-      if (set?.size === 0) byClient.delete(entry.clientId);
+      try {
+        const set = byClient.get(entry.clientId);
+        set?.delete(entry);
+        if (set?.size === 0) byClient.delete(entry.clientId);
+      } catch {
+        // Client index cleanup must not block session release.
+      }
     }
     if (reason) logReason(reason, entry.id);
     try {
@@ -184,6 +206,17 @@ export const createDirectE2eeService = ({
       else if (entry.socket.readyState === WebSocket.CONNECTING) entry.socket.terminate();
     } catch {
       // Best-effort close; accounting is already released exactly once.
+    }
+  };
+
+  const closeEntries = (entries, reason, code) => {
+    for (const entry of entries) {
+      try {
+        closeEntry(entry, reason, code);
+      } catch {
+        sessions.delete(entry?.id);
+        logReason('session-cleanup-failed', entry?.id);
+      }
     }
   };
 
@@ -532,17 +565,17 @@ export const createDirectE2eeService = ({
       detached = true;
       server.off('upgrade', upgradeHandler);
       server = null;
-      for (const entry of [...sessions.values()]) closeEntry(entry, 'service-detached', 1001);
+      closeEntries([...sessions.values()], 'service-detached', 1001);
       for (const socket of wss.clients) socket.terminate();
     },
     closeProfile(profileId, reason = 'profile-disabled') {
-      for (const entry of [...sessions.values()]) if (entry.profileId === profileId) closeEntry(entry, reason, 1001);
+      closeEntries([...sessions.values()].filter((entry) => entry.profileId === profileId), reason, 1001);
     },
     closeAll(reason = 'tunnel-stopped') {
-      for (const entry of [...sessions.values()]) closeEntry(entry, reason, 1001);
+      closeEntries([...sessions.values()], reason, 1001);
     },
     revokeClient(clientId) {
-      for (const entry of [...(byClient.get(clientId) ?? [])]) closeEntry(entry, 'client-revoked', 1008);
+      closeEntries([...(byClient.get(clientId) ?? [])], 'client-revoked', 1008);
     },
     getActiveSessionCount(profileId) {
       let count = 0;

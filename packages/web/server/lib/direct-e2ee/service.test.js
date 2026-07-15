@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, describe, expect, it, vi } from 'bun:test';
 import http from 'node:http';
 import { WebSocket } from 'ws';
 
@@ -19,7 +19,7 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 
-const fixture = async ({ profile, limits, logs = [], getRelayIdentity, abandonPendingRelayIdentity } = {}) => {
+const fixture = async ({ profile, limits, logs = [], logger, getRelayIdentity, abandonPendingRelayIdentity } = {}) => {
   const keys = await generateEcdhKeyPair();
   let activeProfile = profile ?? { id: 'profile-1', mode: 'managed-remote', hostname: 'direct.example.test', directE2eeEnabled: true };
   const origin = http.createServer((_req, res) => res.end('{}'));
@@ -33,7 +33,7 @@ const fixture = async ({ profile, limits, logs = [], getRelayIdentity, abandonPe
     internalTransportMarker: 'test-process-marker',
     authenticateBearerToken: async () => null,
     limits,
-    logger: { warn: (...args) => logs.push(args) },
+    logger: logger ?? { warn: (...args) => logs.push(args) },
   });
   service.attach(outer);
   await listen(outer);
@@ -67,6 +67,30 @@ const connectTracked = (fx, headers = {}) => {
     ws,
     opened: new Promise((resolve) => ws.once('open', resolve)),
     closed: new Promise((resolve) => ws.once('close', resolve)),
+  };
+};
+
+const createCleanupSocket = ({ throws = false } = {}) => {
+  const handlers = new Map();
+  return {
+    readyState: WebSocket.OPEN,
+    closed: false,
+    on(event, handler) { handlers.set(event, handler); return this; },
+    once(event, handler) { handlers.set(event, handler); return this; },
+    off(event) {
+      handlers.delete(event);
+      if (throws) throw new Error('socket cleanup detail');
+      return this;
+    },
+    close() {
+      this.closed = true;
+      if (throws) throw new Error('socket close detail');
+      this.readyState = WebSocket.CLOSED;
+    },
+    terminate() {
+      this.closed = true;
+      this.readyState = WebSocket.CLOSED;
+    },
   };
 };
 
@@ -193,8 +217,8 @@ describe('direct E2EE upgrade and lifecycle', () => {
       terminate: () => { socket.readyState = WebSocket.CLOSED; },
     };
     fx.service._webSocketServer.handleUpgrade = (_req, _rawSocket, _head, accept) => accept(socket);
-    const clearTimeoutSpy = spyOn(globalThis, 'clearTimeout');
-    const clearIntervalSpy = spyOn(globalThis, 'clearInterval');
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 
     try {
       mockUpgrade(fx.outer);
@@ -386,6 +410,30 @@ describe('direct E2EE upgrade and lifecycle', () => {
     }
     lifecycle.revoke('unbound-client');
     expect(fx.service.getCounts().total).toBe(0);
+  });
+
+  it('isolates logger and socket cleanup failures while releasing every matching session', async () => {
+    for (const action of ['profile', 'all']) {
+      const pendingIdentity = deferred();
+      const fx = await fixture({
+        getRelayIdentity: () => pendingIdentity.promise,
+        logger: { warn: () => { throw new Error('logger cleanup detail'); } },
+      });
+      const throwingSocket = createCleanupSocket({ throws: true });
+      const healthySocket = createCleanupSocket();
+      const sockets = [throwingSocket, healthySocket];
+      fx.service._webSocketServer.handleUpgrade = (_req, _rawSocket, _head, accept) => accept(sockets.shift());
+
+      mockUpgrade(fx.outer);
+      mockUpgrade(fx.outer);
+      expect(fx.service.getCounts().total).toBe(2);
+      expect(() => {
+        if (action === 'profile') fx.service.closeProfile('profile-1', 'profile-disabled');
+        else fx.service.closeAll('tunnel-stopped');
+      }).not.toThrow();
+      expect(fx.service.getCounts().total).toBe(0);
+      expect(healthySocket.closed).toBe(true);
+    }
   });
 
   it('never logs attacker-controlled handshake, header, cookie, payload, key-like, or line-injection values', async () => {
