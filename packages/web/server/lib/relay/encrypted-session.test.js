@@ -5,10 +5,12 @@ import { createEncryptedSession } from './encrypted-session.js';
 import { exportPublicKeyJwk, generateEcdhKeyPair, RelayCloseCode } from './e2ee.js';
 
 const waitFor = async (predicate) => {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
     if (predicate()) return;
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
+  if (predicate()) return;
   throw new Error('observable encrypted session outcome not reached');
 };
 
