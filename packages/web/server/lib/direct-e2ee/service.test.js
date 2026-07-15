@@ -19,7 +19,7 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 
-const fixture = async ({ profile, limits, logs = [], getRelayIdentity } = {}) => {
+const fixture = async ({ profile, limits, logs = [], getRelayIdentity, abandonPendingRelayIdentity } = {}) => {
   const keys = await generateEcdhKeyPair();
   let activeProfile = profile ?? { id: 'profile-1', mode: 'managed-remote', hostname: 'direct.example.test', directE2eeEnabled: true };
   const origin = http.createServer((_req, res) => res.end('{}'));
@@ -28,6 +28,7 @@ const fixture = async ({ profile, limits, logs = [], getRelayIdentity } = {}) =>
   const service = createDirectE2eeService({
     getActiveProfile: () => activeProfile,
     getRelayIdentity: getRelayIdentity ?? (async () => ({ hostEncPrivateKey: keys.privateKey })),
+    abandonPendingRelayIdentity,
     getLocalPort: () => origin.address().port,
     internalTransportMarker: 'test-process-marker',
     authenticateBearerToken: async () => null,
@@ -220,15 +221,19 @@ describe('direct E2EE upgrade and lifecycle', () => {
     }
   });
 
-  it('shares one bounded identity attempt, clears timed-out waiters, and caches late success without revival', async () => {
-    const identity = deferred();
+  it('retires a timed-out identity generation after cooldown and ignores its late success', async () => {
+    const firstIdentity = deferred();
+    const retryIdentity = deferred();
+    const staleKeys = await generateEcdhKeyPair();
     let identityCalls = 0;
+    let resetCalls = 0;
     const fx = await fixture({
       getRelayIdentity: () => {
         identityCalls += 1;
-        return identity.promise;
+        return identityCalls === 1 ? firstIdentity.promise : retryIdentity.promise;
       },
-      limits: { identityDeadlineMs: 60, identityRetryCooldownMs: 40, handshakeTimeoutMs: 1_000 },
+      abandonPendingRelayIdentity: () => { resetCalls += 1; return true; },
+      limits: { identityDeadlineMs: 30, identityRetryCooldownMs: 20, handshakeTimeoutMs: 1_000 },
     });
     const first = connectTracked(fx);
     const second = connectTracked(fx);
@@ -245,18 +250,60 @@ describe('direct E2EE upgrade and lifecycle', () => {
     await fastFailure.opened;
     await fastFailure.closed;
     expect(identityCalls).toBe(1);
+    expect(resetCalls).toBe(0);
 
-    identity.resolve({ hostEncPrivateKey: fx.keys.privateKey });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(fx.service.getCounts().total).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const retryOne = connectTracked(fx);
+    const retryTwo = connectTracked(fx);
+    await Promise.all([retryOne.opened, retryTwo.opened]);
+    expect(identityCalls).toBe(2);
+    expect(resetCalls).toBe(1);
 
     const client = await createClientHandshake(await exportPublicKeyJwk(fx.keys.publicKey), { batch: false });
-    const live = await connect(fx);
-    const ready = new Promise((resolve) => live.once('message', (data) => resolve(data.toString())));
-    live.send(client.helloText);
+    const ready = new Promise((resolve) => retryOne.ws.once('message', (data) => resolve(data.toString())));
+    retryOne.ws.send(client.helloText);
+    retryIdentity.resolve({ hostEncPrivateKey: fx.keys.privateKey });
     expect(JSON.parse(await ready)).toMatchObject({ t: 'ready', v: 1 });
-    expect(identityCalls).toBe(1);
+    firstIdentity.resolve({ hostEncPrivateKey: staleKeys.privateKey });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    retryOne.ws.terminate();
+    retryTwo.ws.terminate();
+    const cachedClient = await createClientHandshake(await exportPublicKeyJwk(fx.keys.publicKey), { batch: false });
+    const live = await connect(fx);
+    const cachedReady = new Promise((resolve) => live.once('message', (data) => resolve(data.toString())));
+    live.send(cachedClient.helloText);
+    expect(JSON.parse(await cachedReady)).toMatchObject({ t: 'ready', v: 1 });
+    expect(identityCalls).toBe(2);
+    expect(resetCalls).toBe(1);
     live.terminate();
+  });
+
+  it('bounds repeated identity timeouts to one getter and reset per generation', async () => {
+    const identities = Array.from({ length: 4 }, deferred);
+    let identityCalls = 0;
+    let resetCalls = 0;
+    const fx = await fixture({
+      getRelayIdentity: () => identities[identityCalls++].promise,
+      abandonPendingRelayIdentity: () => { resetCalls += 1; return true; },
+      limits: { identityDeadlineMs: 15, identityRetryCooldownMs: 10, handshakeTimeoutMs: 1_000 },
+    });
+
+    for (let generation = 0; generation < 3; generation += 1) {
+      const first = connectTracked(fx);
+      const second = connectTracked(fx);
+      await Promise.all([first.opened, second.opened]);
+      await Promise.all([first.closed, second.closed]);
+      expect(identityCalls).toBe(generation + 1);
+      expect(resetCalls).toBe(generation);
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
+
+    const fourth = connectTracked(fx);
+    await fourth.opened;
+    expect(identityCalls).toBe(4);
+    expect(resetCalls).toBe(3);
+    await fourth.closed;
   });
 
   it('fails fast during identity rejection cooldown and permits exactly one shared retry', async () => {

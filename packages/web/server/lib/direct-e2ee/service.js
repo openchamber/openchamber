@@ -108,6 +108,7 @@ const bearerToken = (headers) => {
 export const createDirectE2eeService = ({
   getActiveProfile,
   getRelayIdentity,
+  abandonPendingRelayIdentity = () => false,
   getLocalPort,
   internalTransportMarker,
   authenticateBearerToken,
@@ -126,6 +127,7 @@ export const createDirectE2eeService = ({
   let cachedIdentity = null;
   let identityAttempt = null;
   let identityRetryAfter = 0;
+  let nextIdentityGeneration = 1;
 
   const counts = () => {
     const result = { pending: 0, preauthenticated: 0, authenticated: 0, reserved: 0, total: sessions.size };
@@ -344,6 +346,7 @@ export const createDirectE2eeService = ({
   };
 
   const settleIdentitySuccess = (attempt, identity) => {
+    if (identityAttempt !== attempt || attempt.state !== 'pending') return;
     if (!identity?.hostEncPrivateKey) {
       settleIdentityRejection(attempt);
       return;
@@ -358,6 +361,7 @@ export const createDirectE2eeService = ({
   };
 
   const settleIdentityRejection = (attempt) => {
+    if (identityAttempt !== attempt || attempt.state !== 'pending') return;
     clearTimeout(attempt.deadlineTimer);
     attempt.deadlineTimer = null;
     closeIdentityWaiters(attempt, 'identity-unavailable');
@@ -371,6 +375,7 @@ export const createDirectE2eeService = ({
       attempt.state = 'timed-out';
       attempt.deadlineTimer = null;
       closeIdentityWaiters(attempt, 'identity-timeout');
+      identityRetryAfter = Date.now() + limits.identityRetryCooldownMs;
     }, limits.identityDeadlineMs);
     attempt.deadlineTimer.unref?.();
 
@@ -392,18 +397,36 @@ export const createDirectE2eeService = ({
       initializeEncryptedEntry(entry, cachedIdentity);
       return;
     }
-    if (identityAttempt?.state === 'timed-out') {
-      closeEntry(entry, 'identity-timeout', 1011);
-      return;
-    }
     if (Date.now() < identityRetryAfter) {
       closeEntry(entry, 'identity-cooldown', 1011);
       return;
     }
 
+    if (identityAttempt?.state === 'timed-out') {
+      const timedOutAttempt = identityAttempt;
+      if (!timedOutAttempt.resetInvoked) {
+        timedOutAttempt.resetInvoked = true;
+        try {
+          abandonPendingRelayIdentity();
+        } catch {
+          identityRetryAfter = Date.now() + limits.identityRetryCooldownMs;
+          closeEntry(entry, 'identity-cooldown', 1011);
+          return;
+        }
+      }
+      if (identityAttempt === timedOutAttempt) identityAttempt = null;
+    }
+
     let attempt = identityAttempt;
     if (!attempt) {
-      attempt = { state: 'pending', waiters: new Set(), deadlineTimer: null, started: false };
+      attempt = {
+        generation: nextIdentityGeneration++,
+        state: 'pending',
+        waiters: new Set(),
+        deadlineTimer: null,
+        started: false,
+        resetInvoked: false,
+      };
       identityAttempt = attempt;
     }
     if (attempt.waiters.size >= limits.maxPending) {
