@@ -17,10 +17,21 @@ const sanitizePublicUrl = (value, protocols) => {
   }
 };
 
+const sanitizePublicLabel = (value) => {
+  const label = typeof value === 'string' ? value.trim() : '';
+  if (!label) return '';
+  try {
+    const url = new URL(label);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : label;
+  } catch {
+    return label;
+  }
+};
+
 const redactHost = (host) => {
   if (!host || typeof host !== 'object' || Array.isArray(host)) return null;
   const id = typeof host.id === 'string' ? host.id.trim() : '';
-  const label = typeof host.label === 'string' ? host.label.trim() : '';
+  const label = sanitizePublicLabel(host.label);
   if (!id || !label) return null;
   const url = sanitizePublicUrl(host.url, new Set(['http:', 'https:'])) || (typeof host.url === 'string' && /^(?:relay|direct-e2ee):\/\/[a-zA-Z0-9._-]+$/.test(host.url) ? host.url : null);
   const apiUrl = sanitizePublicUrl(host.apiUrl, new Set(['http:', 'https:']));

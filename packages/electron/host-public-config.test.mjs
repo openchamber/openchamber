@@ -42,6 +42,39 @@ describe('desktop host public config', () => {
     ]);
   });
 
+  test('reduces URL-shaped labels to origins while preserving safe labels and transport paths', () => {
+    const result = resolveDesktopHostsForSender('https://evil.example/path', {
+      hosts: [
+        {
+          id: 'url-label',
+          label: 'https://user:password@remote.example:8443/custom/path-token?token=query-secret#fragment-secret',
+          url: 'https://user:password@remote.example:8443/custom/base?token=query-secret#fragment-secret',
+          apiUrl: 'https://api-user:api-password@remote.example:8443/custom/base/api?key=query-secret#fragment-secret',
+        },
+        { id: 'friendly', label: 'Friendly workstation', url: 'https://friendly.example/custom/base' },
+        { id: 'relay', label: 'relay://server-one', relay: fullConfig.hosts[0].relay },
+      ],
+      defaultHostId: 'url-label',
+    }, allowed);
+
+    expect(result.hosts).toEqual([
+      {
+        id: 'url-label',
+        label: 'https://remote.example:8443',
+        url: 'https://remote.example:8443/custom/base',
+        apiUrl: 'https://remote.example:8443/custom/base/api',
+      },
+      { id: 'friendly', label: 'Friendly workstation', url: 'https://friendly.example/custom/base' },
+      {
+        id: 'relay',
+        label: 'relay://server-one',
+        relay: { relayUrl: 'wss://relay.example/ws', serverId: 'server-one', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'rx', y: 'ry' } },
+      },
+    ]);
+    expect(result.defaultHostId).toBe('url-label');
+    expect(JSON.stringify(result)).not.toMatch(/password|path-token|query-secret|fragment-secret/i);
+  });
+
   test('preserves a normalized default only when its redacted host survives', () => {
     const result = resolveDesktopHostsForSender('https://evil.example/path', {
       ...fullConfig,
