@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import http from 'node:http';
 import { WebSocket } from 'ws';
 
@@ -13,7 +13,7 @@ afterEach(async () => {
 
 const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
-const fixture = async ({ profile, limits, logs = [] } = {}) => {
+const fixture = async ({ profile, limits, logs = [], getRelayIdentity } = {}) => {
   const keys = await generateEcdhKeyPair();
   let activeProfile = profile ?? { id: 'profile-1', mode: 'managed-remote', hostname: 'direct.example.test', directE2eeEnabled: true };
   const origin = http.createServer((_req, res) => res.end('{}'));
@@ -21,7 +21,7 @@ const fixture = async ({ profile, limits, logs = [] } = {}) => {
   const outer = http.createServer((_req, res) => res.end('outer'));
   const service = createDirectE2eeService({
     getActiveProfile: () => activeProfile,
-    getRelayIdentity: async () => ({ hostEncPrivateKey: keys.privateKey }),
+    getRelayIdentity: getRelayIdentity ?? (async () => ({ hostEncPrivateKey: keys.privateKey })),
     getLocalPort: () => origin.address().port,
     internalTransportMarker: 'test-process-marker',
     authenticateBearerToken: async () => null,
@@ -155,6 +155,54 @@ describe('direct E2EE upgrade and lifecycle', () => {
     expect(fx.service.getCounts()).toEqual({ pending: 0, preauthenticated: 0, authenticated: 0, reserved: 0, total: 0 });
     fx.service.closeProfile('profile-1');
     expect(fx.service.getActiveSessionCount()).toBe(0);
+  });
+
+  it('releases admission immediately when relay identity initialization fails', async () => {
+    const identityError = new Error('sensitive identity backend detail');
+    const logs = [];
+    const fx = await fixture({
+      logs,
+      getRelayIdentity: async () => { throw identityError; },
+      limits: { handshakeTimeoutMs: 25, idleTimeoutMs: 25 },
+    });
+    const closes = [];
+    const socket = {
+      readyState: WebSocket.OPEN,
+      on: () => socket,
+      once: () => socket,
+      close: (code, reason) => {
+        closes.push({ code, reason });
+        socket.readyState = WebSocket.CLOSING;
+      },
+      terminate: () => { socket.readyState = WebSocket.CLOSED; },
+    };
+    fx.service._webSocketServer.handleUpgrade = (_req, _rawSocket, _head, accept) => accept(socket);
+    const clearTimeoutSpy = spyOn(globalThis, 'clearTimeout');
+    const clearIntervalSpy = spyOn(globalThis, 'clearInterval');
+
+    try {
+      mockUpgrade(fx.outer);
+      for (let attempt = 0; attempt < 10 && logs.length < 2; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      expect(fx.service.getCounts()).toEqual({ pending: 0, preauthenticated: 0, authenticated: 0, reserved: 0, total: 0 });
+      expect(closes).toEqual([{ code: 1011, reason: 'direct session closed' }]);
+      expect(clearTimeoutSpy).toHaveBeenCalled();
+      expect(clearIntervalSpy).toHaveBeenCalled();
+      expect(logs).toEqual([
+        ['[DirectE2EE]', { reason: 'identity-unavailable', connectionId: expect.any(String) }],
+        ['[DirectE2EE]', { reason: 'identity-unavailable', connectionId: 'upgrade' }],
+      ]);
+      expect(JSON.stringify(logs)).not.toContain(identityError.message);
+
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(closes).toHaveLength(1);
+      expect(logs).toHaveLength(2);
+    } finally {
+      clearTimeoutSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    }
   });
 
   it('enforces the per-source pending cap by evicting the oldest probation', async () => {

@@ -292,7 +292,13 @@ export const createDirectE2eeService = ({
     socket.once('close', () => closeEntry(entry, 'disconnect', 1000));
     socket.once('error', () => closeEntry(entry, 'socket-error', 1011));
 
-    const identity = await getRelayIdentity();
+    let identity;
+    try {
+      identity = await getRelayIdentity();
+    } catch (error) {
+      closeEntry(entry, 'identity-unavailable', 1011);
+      throw error;
+    }
     if (entry.released) return;
     entry.encrypted = createEncryptedSession({
       socket,
@@ -380,7 +386,10 @@ export const createDirectE2eeService = ({
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req);
       void acceptConnection(ws, { ...profile, source }).catch(() => {
-        try { ws.close(1011, 'direct session unavailable'); } catch { ws.terminate(); }
+        try {
+          if (ws.readyState === WebSocket.OPEN) ws.close(1011, 'direct session unavailable');
+          else if (ws.readyState === WebSocket.CONNECTING) ws.terminate();
+        } catch { ws.terminate(); }
         logReason('identity-unavailable', 'upgrade');
       });
     });
