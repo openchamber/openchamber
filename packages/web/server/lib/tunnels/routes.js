@@ -1,3 +1,22 @@
+const allowedLifecycleErrorNames = new Set(['Error', 'TypeError', 'RangeError', 'AbortError']);
+const allowedLifecycleErrorCodes = new Set([
+  'EACCES',
+  'EBUSY',
+  'ECONNRESET',
+  'EIO',
+  'ENOENT',
+  'EPERM',
+  'ETIMEDOUT',
+  'ERR_ABORTED',
+]);
+
+const lifecycleErrorMetadata = (error) => {
+  const metadata = {};
+  if (allowedLifecycleErrorNames.has(error?.name)) metadata.name = error.name;
+  if (allowedLifecycleErrorCodes.has(error?.code)) metadata.code = error.code;
+  return metadata;
+};
+
 export const createTunnelRoutesRuntime = (dependencies) => {
   const {
     crypto,
@@ -40,13 +59,51 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     ? directE2eeSupported() === true
     : directE2eeSupported === true;
 
-  const awaitLifecycleCallback = async (category, callback, ...args) => {
+  const settleLifecycleCallback = async ({ category, callback, args, includeMetadata }) => {
     try {
       await callback(...args);
+      return true;
     } catch (error) {
-      console.error(`Tunnel lifecycle callback failed (${category})`, error);
+      const message = `Tunnel lifecycle callback failed (${category})`;
+      const metadata = includeMetadata ? lifecycleErrorMetadata(error) : {};
+      if (Object.keys(metadata).length > 0) {
+        console.error(message, metadata);
+      } else {
+        console.error(message);
+      }
+      return false;
     }
   };
+
+  // Production refresh clears direct-E2EE admission state before fallible reads,
+  // so notification failure remains fail-closed while the primary mutation succeeds.
+  const awaitBestEffortNotification = (category, callback, ...args) => settleLifecycleCallback({
+    category,
+    callback,
+    args,
+    includeMetadata: true,
+  });
+
+  const awaitCriticalCleanup = (category, callback, ...args) => settleLifecycleCallback({
+    category,
+    callback,
+    args,
+    includeMetadata: true,
+  });
+
+  const awaitStartFailureCleanup = (category, callback, ...args) => settleLifecycleCallback({
+    category,
+    callback,
+    args,
+    includeMetadata: false,
+  });
+
+  const sendLifecycleCleanupFailure = (res, fields = {}) => res.status(500).json({
+    ok: false,
+    error: 'Tunnel lifecycle cleanup failed',
+    code: 'lifecycle_callback_failed',
+    ...fields,
+  });
 
   const resolveActiveNormalizedTunnelMode = () => {
     const mode = tunnelService.resolveActiveMode();
@@ -104,7 +161,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           hostname,
           token,
         });
-        await awaitLifecycleCallback('tunnel-changed:profile-upserted', onTunnelChanged, { reason: 'profile-upserted', profileId });
+        await awaitBestEffortNotification('tunnel-changed:profile-upserted', onTunnelChanged, { reason: 'profile-upserted', profileId });
       }
     }
 
@@ -117,7 +174,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       hostname,
       managedRemoteTunnelPresetId: selectedPresetId,
     });
-    await awaitLifecycleCallback('tunnel-changed:profile-switched', onTunnelChanged, { reason: 'profile-switched' });
+    await awaitBestEffortNotification('tunnel-changed:profile-switched', onTunnelChanged, { reason: 'profile-switched' });
 
     console.log(`Tunnel active (${result.provider}): ${result.publicUrl}`);
     return {
@@ -503,7 +560,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           hostname: managedRemoteTunnelHostname,
           token: managedRemoteTunnelToken,
         });
-        await awaitLifecycleCallback('tunnel-changed:profile-upserted', onTunnelChanged, { reason: 'profile-upserted', profileId: presetId });
+        await awaitBestEffortNotification('tunnel-changed:profile-upserted', onTunnelChanged, { reason: 'profile-upserted', profileId: presetId });
 
         const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
         return res.json({ ok: true, managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id) });
@@ -536,10 +593,12 @@ export const createTunnelRoutesRuntime = (dependencies) => {
             directE2eeEnabled: req.body.directE2eeEnabled,
           });
         }
-        if (!req.body.directE2eeEnabled) {
-          await awaitLifecycleCallback('direct-e2ee-disabled', onManagedRemoteDirectE2eeDisabled, profile.id);
+        const cleanupSucceeded = req.body.directE2eeEnabled
+          || await awaitCriticalCleanup('direct-e2ee-disabled', onManagedRemoteDirectE2eeDisabled, profile.id);
+        await awaitBestEffortNotification('tunnel-changed:profile-direct-e2ee-updated', onTunnelChanged, { reason: 'profile-direct-e2ee-updated', profileId: profile.id });
+        if (!cleanupSucceeded) {
+          return sendLifecycleCleanupFailure(res);
         }
-        await awaitLifecycleCallback('tunnel-changed:profile-direct-e2ee-updated', onTunnelChanged, { reason: 'profile-direct-e2ee-updated', profileId: profile.id });
         return res.json({
           ok: true,
           profile: summarizeManagedRemoteProfile({ ...profile, directE2eeEnabled: req.body.directE2eeEnabled }),
@@ -682,7 +741,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         console.error('Failed to start tunnel:', error);
         setActiveTunnelController(null);
         tunnelAuthController.clearActiveTunnel();
-        await awaitLifecycleCallback('tunnel-stopped:start-failed', onTunnelStopped, 'tunnel-start-failed');
+        await awaitStartFailureCleanup('tunnel-stopped:start-failed', onTunnelStopped, 'tunnel-start-failed');
         if (error instanceof TunnelServiceError) {
           const status = error.code === 'missing_dependency'
             ? 400
@@ -712,8 +771,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
 
       tunnelAuthController.clearActiveTunnel();
-      await awaitLifecycleCallback('tunnel-stopped:stop', onTunnelStopped, 'tunnel-stopped');
-      res.json({ ok: true, revokedBootstrapCount, invalidatedSessionCount });
+      const cleanupSucceeded = await awaitCriticalCleanup('tunnel-stopped:stop', onTunnelStopped, 'tunnel-stopped');
+      if (!cleanupSucceeded) {
+        return sendLifecycleCleanupFailure(res, { revokedBootstrapCount, invalidatedSessionCount });
+      }
+      return res.json({ ok: true, revokedBootstrapCount, invalidatedSessionCount });
     });
   };
 

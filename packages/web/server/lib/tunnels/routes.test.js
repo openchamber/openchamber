@@ -232,7 +232,7 @@ describe('tunnel routes direct E2EE configuration', () => {
   });
 
   it('preserves structured start failures when the stopped callback rejects', async () => {
-    const callbackError = new Error('callback failed');
+    const callbackError = new Error('callback-secret=https://private.example/?token=secret');
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { app } = createApp({
       onTunnelStopped: async () => { throw callbackError; },
@@ -253,14 +253,15 @@ describe('tunnel routes direct E2EE configuration', () => {
       await request(app).post('/api/openchamber/tunnel/start').send({
         provider: 'cloudflare', mode: 'managed-remote', managedRemoteTunnelPresetId: 'profile-a', hostname: 'a.example.com',
       }).expect(500, { ok: false, error: 'provider failed', code: 'startup_failed' });
-      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-stopped:start-failed)', callbackError);
+      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-stopped:start-failed)');
+      expect(consoleError.mock.calls.flat().map(String).join(' ')).not.toContain('callback-secret');
     } finally {
       consoleError.mockRestore();
     }
   });
 
-  it('preserves stop responses when the stopped callback rejects', async () => {
-    const callbackError = new Error('callback failed');
+  it('returns a structured lifecycle failure with revocation counts when stop cleanup rejects', async () => {
+    const callbackError = Object.assign(new Error('stop-secret=https://private.example/?token=secret'), { code: 'ETIMEDOUT' });
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { app } = createApp({
       onTunnelStopped: async () => { throw callbackError; },
@@ -278,17 +279,25 @@ describe('tunnel routes direct E2EE configuration', () => {
     });
 
     try {
-      await request(app).post('/api/openchamber/tunnel/stop').expect(200, {
-        ok: true, revokedBootstrapCount: 0, invalidatedSessionCount: 0,
+      await request(app).post('/api/openchamber/tunnel/stop').expect(500, {
+        ok: false,
+        error: 'Tunnel lifecycle cleanup failed',
+        code: 'lifecycle_callback_failed',
+        revokedBootstrapCount: 0,
+        invalidatedSessionCount: 0,
       });
-      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-stopped:stop)', callbackError);
+      expect(consoleError).toHaveBeenCalledWith(
+        'Tunnel lifecycle callback failed (tunnel-stopped:stop)',
+        { name: 'Error', code: 'ETIMEDOUT' },
+      );
+      expect(consoleError.mock.calls.flat().map(String).join(' ')).not.toContain('stop-secret');
     } finally {
       consoleError.mockRestore();
     }
   });
 
   it('preserves token upsert responses when the changed callback rejects', async () => {
-    const callbackError = new Error('callback failed');
+    const callbackError = Object.assign(new Error('token-secret=https://private.example/?token=secret'), { code: 'ETIMEDOUT' });
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { app } = createApp({ onTunnelChanged: async () => { throw callbackError; } });
 
@@ -296,35 +305,70 @@ describe('tunnel routes direct E2EE configuration', () => {
       await request(app).put('/api/openchamber/tunnel/managed-remote-token').send({
         presetId: 'profile-a', presetName: 'A', managedRemoteTunnelHostname: 'a.example.com', managedRemoteTunnelToken: 'new-secret',
       }).expect(200, { ok: true, managedRemoteTunnelTokenPresetIds: ['profile-a'] });
-      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-changed:profile-upserted)', callbackError);
+      expect(consoleError).toHaveBeenCalledWith(
+        'Tunnel lifecycle callback failed (tunnel-changed:profile-upserted)',
+        { name: 'Error', code: 'ETIMEDOUT' },
+      );
+      expect(consoleError.mock.calls.flat().map(String).join(' ')).not.toContain('token-secret');
     } finally {
       consoleError.mockRestore();
     }
   });
 
-  it('preserves profile responses when notification callbacks reject', async () => {
-    const disabledError = new Error('disable callback failed');
-    const changedError = new Error('changed callback failed');
+  it('keeps a disabled profile persisted but returns a lifecycle failure when revocation rejects', async () => {
+    const disabledError = Object.assign(new Error('disable-secret=https://private.example/?token=secret'), { code: 'EIO' });
+    const onTunnelChanged = vi.fn(async () => {});
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { app } = createApp({
+    const { app, dependencies } = createApp({
       onManagedRemoteDirectE2eeDisabled: async () => { throw disabledError; },
-      onTunnelChanged: async () => { throw changedError; },
+      onTunnelChanged,
     });
 
     try {
       await request(app)
         .patch('/api/openchamber/tunnel/managed-remote-profile/profile-a')
         .send({ directE2eeEnabled: false })
+        .expect(500, {
+          ok: false,
+          error: 'Tunnel lifecycle cleanup failed',
+          code: 'lifecycle_callback_failed',
+        });
+      expect(dependencies.setManagedRemoteTunnelDirectE2eeEnabled).toHaveBeenCalledWith({
+        id: 'profile-a', directE2eeEnabled: false,
+      });
+      expect(onTunnelChanged).toHaveBeenCalledWith({ reason: 'profile-direct-e2ee-updated', profileId: 'profile-a' });
+      expect(consoleError).toHaveBeenCalledWith(
+        'Tunnel lifecycle callback failed (direct-e2ee-disabled)',
+        { name: 'Error', code: 'EIO' },
+      );
+      expect(consoleError.mock.calls.flat().map(String).join(' ')).not.toContain('disable-secret');
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('preserves profile responses when the changed notification rejects', async () => {
+    const changedError = new TypeError('changed-secret=https://private.example/?token=secret');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { app } = createApp({ onTunnelChanged: async () => { throw changedError; } });
+
+    try {
+      await request(app)
+        .patch('/api/openchamber/tunnel/managed-remote-profile/profile-a')
+        .send({ directE2eeEnabled: true })
         .expect(200);
-      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (direct-e2ee-disabled)', disabledError);
-      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-changed:profile-direct-e2ee-updated)', changedError);
+      expect(consoleError).toHaveBeenCalledWith(
+        'Tunnel lifecycle callback failed (tunnel-changed:profile-direct-e2ee-updated)',
+        { name: 'TypeError' },
+      );
+      expect(consoleError.mock.calls.flat().map(String).join(' ')).not.toContain('changed-secret');
     } finally {
       consoleError.mockRestore();
     }
   });
 
   it('preserves successful start responses when the changed callback rejects', async () => {
-    const callbackError = new Error('callback failed');
+    const callbackError = new Error('start-secret=https://private.example/?token=secret');
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { app } = createApp({
       onTunnelChanged: async () => { throw callbackError; },
@@ -348,7 +392,43 @@ describe('tunnel routes direct E2EE configuration', () => {
       await request(app).post('/api/openchamber/tunnel/start').send({
         provider: 'cloudflare', mode: 'managed-remote', managedRemoteTunnelPresetId: 'profile-a', hostname: 'a.example.com',
       }).expect(200);
-      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-changed:profile-switched)', callbackError);
+      expect(consoleError).toHaveBeenCalledWith(
+        'Tunnel lifecycle callback failed (tunnel-changed:profile-switched)',
+        { name: 'Error' },
+      );
+      expect(consoleError.mock.calls.flat().map(String).join(' ')).not.toContain('start-secret');
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('awaits best-effort notification settlement before sending the response', async () => {
+    let rejectCallback;
+    let responseSettled = false;
+    const callbackError = new Error('settlement-secret');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const onTunnelChanged = vi.fn(() => new Promise((_resolve, reject) => {
+      rejectCallback = reject;
+    }));
+    const { app } = createApp({ onTunnelChanged });
+
+    try {
+      const responsePromise = request(app)
+        .put('/api/openchamber/tunnel/managed-remote-token')
+        .send({
+          presetId: 'profile-a', presetName: 'A', managedRemoteTunnelHostname: 'a.example.com', managedRemoteTunnelToken: 'new-secret',
+        })
+        .then((response) => {
+          responseSettled = true;
+          return response;
+        });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(onTunnelChanged).toHaveBeenCalled();
+      expect(responseSettled).toBe(false);
+      rejectCallback(callbackError);
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+      expect(consoleError.mock.calls.flat().map(String).join(' ')).not.toContain('settlement-secret');
     } finally {
       consoleError.mockRestore();
     }
