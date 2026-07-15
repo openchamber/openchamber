@@ -25,9 +25,9 @@
 
 ### Components
 
-- `SidebarHeader.tsx`: Top header UI for add-project, session search, selection mode, project sort, and the display menu (recent toggle, collapse/expand all).
+- `SidebarHeader.tsx`: Top header UI for add-project, session search, selection mode, project sort, grouping/display preferences, project-name casing, automatic empty-project closure, and collapse/expand all.
 - `SidebarNav.tsx`: Text navigation rows above the tree (New session, Scheduled, Multi-run, Archive); hidden in VS Code.
-- `SidebarActivitySections.tsx`: Global top section renderer; currently used for the `recent` section only, styled as a zone header.
+- `SidebarActivitySections.tsx`: Global top section renderer; currently used for the `recent` section only.
 - `SidebarFooter.tsx`: Static footer with icon-only settings, shortcuts, and about actions.
 - `SidebarProjectsList.tsx`: Main scrollable renderer for project zones and their flat/archived groups plus empty/search states; owns project drag-to-reorder.
 - `SessionGroupSection.tsx`: Renders one flat (or archived) group: sessions first, then flat folder entries with path labels, show-more batching, and explicit loading/error/retry state for empty groups. Archived buckets (VS Code) virtualize past 50 rows.
@@ -77,3 +77,10 @@
 - Structural updates rebuild grouped nodes only for projects whose local sessions, worktrees, repository state, or branch changed; unchanged project sections preserve references so memoized group/session descendants skip the update wave.
 - Empty successful lists, unresolved loads, and failed loads are separate UI states. Failed groups expose Retry and retain prior data.
 - Pins and folder assignments are not pruned from the first startup snapshot or from optimistic mutations. Confirmed local deletion and routed external deletion clean immediately; a later authoritative omission after an established baseline covers missed external delete events.
+- `utils.tsx`: Shared sidebar utilities (path normalization, sorting, dedupe, archived scope keys, project relation checks, text highlight, labels, compact/default date formatting).
+
+## Project preferences
+
+- Sidebar display preferences are local and persisted by `useSessionDisplayStore`.
+- Preserving folder-name casing affects labels generated for newly added projects; existing and manually edited labels remain unchanged.
+- Automatic project closure runs only after a confirmed archive/delete and only when the global active-session snapshot is complete. Archived sessions do not keep a project open.

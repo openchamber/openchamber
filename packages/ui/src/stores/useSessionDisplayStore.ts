@@ -18,11 +18,15 @@ type SessionDisplayStore = {
   // has no room for the full Archive page. Web/desktop ignore this flag and
   // always route archived sessions to the Archive page instead.
   showArchivedSessions: boolean;
+  preserveProjectNameCasing: boolean;
+  autoCloseEmptyProjects: boolean;
   projectSortOrder: ProjectSortOrder;
   setShowRecentSection: (show: boolean) => void;
   setShowArchivedSessions: (show: boolean) => void;
   toggleRecentSection: () => void;
   toggleArchivedSessions: () => void;
+  togglePreserveProjectNameCasing: () => void;
+  toggleAutoCloseEmptyProjects: () => void;
   setProjectSortOrder: (order: ProjectSortOrder) => void;
 };
 
@@ -60,10 +64,18 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // disappear once the persisted preference rehydrates.
       showArchivedSessions: false,
       projectSortOrder: 'manual',
+      preserveProjectNameCasing: false,
+      autoCloseEmptyProjects: false,
       setShowRecentSection: (show) => set({ showRecentSection: show }),
       setShowArchivedSessions: (show) => set({ showArchivedSessions: show }),
       toggleRecentSection: () => set((state) => ({ showRecentSection: !state.showRecentSection })),
       toggleArchivedSessions: () => set((state) => ({ showArchivedSessions: !state.showArchivedSessions })),
+      togglePreserveProjectNameCasing: () => set((state) => ({
+        preserveProjectNameCasing: !state.preserveProjectNameCasing,
+      })),
+      toggleAutoCloseEmptyProjects: () => set((state) => ({
+        autoCloseEmptyProjects: !state.autoCloseEmptyProjects,
+      })),
       setProjectSortOrder: (order) => set({ projectSortOrder: order }),
     }),
     {

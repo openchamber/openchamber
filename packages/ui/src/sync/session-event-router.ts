@@ -1,9 +1,10 @@
 import type { Event, Session } from "@opencode-ai/sdk/v2/client"
-import { isGlobalSessionRecencyOnlyUpdate, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
 import { streamPerfCount, streamPerfMark } from "@/stores/utils/streamDebug"
+import { resolveGlobalSessionDirectory, isGlobalSessionRecencyOnlyUpdate, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
+import { closeProjectsWithoutActiveSessionsForDirectories } from "./session-actions"
 
 const pendingGlobalSessionUpdates = new Map<string, { runtimeKey: string; session: Session }>()
 
@@ -76,6 +77,12 @@ export const applySessionEventToGlobalSessions = (payload: Event): void => {
       const currentSession = getGlobalSessionSnapshot(session.id)
       if (!shouldSkipStaleSessionEvent(currentSession, session)) {
         useGlobalSessionsStore.getState().upsertSession(session)
+        if (session.time.archived && !currentSession?.time.archived) {
+          const directory = resolveGlobalSessionDirectory(session) ?? (
+            currentSession ? resolveGlobalSessionDirectory(currentSession) : null
+          )
+          void closeProjectsWithoutActiveSessionsForDirectories([directory])
+        }
       }
     }
     return
@@ -92,6 +99,11 @@ export const applySessionEventToGlobalSessions = (payload: Event): void => {
           pendingGlobalSessionUpdates.delete(session.id)
           useGlobalSessionsStore.getState().upsertSession(session)
           streamPerfCount("ui.global_sessions.event_update_immediate")
+          if (session.time.archived && !currentSession?.time.archived) {
+            void closeProjectsWithoutActiveSessionsForDirectories([
+              resolveGlobalSessionDirectory(session) ?? (currentSession ? resolveGlobalSessionDirectory(currentSession) : null),
+            ])
+          }
         }
       }
     }
@@ -99,10 +111,17 @@ export const applySessionEventToGlobalSessions = (payload: Event): void => {
   }
 
   if (payload.type === "session.deleted") {
-    const sessionID = (payload as { properties?: { sessionID?: string } }).properties?.sessionID ?? getSessionInfoFromPayload(payload)?.id
+    const eventSession = getSessionInfoFromPayload(payload)
+    const sessionID = (payload as { properties?: { sessionID?: string } }).properties?.sessionID ?? eventSession?.id
     if (sessionID) {
       pendingGlobalSessionUpdates.delete(sessionID)
+      const currentSession = getGlobalSessionSnapshot(sessionID)
       useGlobalSessionsStore.getState().removeSessions([sessionID])
+      const sessionForDirectory = currentSession ?? eventSession
+      const directory = sessionForDirectory ? resolveGlobalSessionDirectory(sessionForDirectory) : null
+      if (directory) {
+        void closeProjectsWithoutActiveSessionsForDirectories([directory])
+      }
     }
   }
 }

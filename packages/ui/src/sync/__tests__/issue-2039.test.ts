@@ -233,6 +233,7 @@ mock.module("../session-actions", () => ({
   }),
   deleteSession: mock(async () => true),
   archiveSession: mock(async () => true),
+  closeProjectsWithoutActiveSessionsForDirectories: mock(async () => undefined),
   updateSessionTitle: mock(async () => undefined),
   shareSession: mock(async () => undefined),
   unshareSession: mock(async () => undefined),
