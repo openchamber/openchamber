@@ -116,3 +116,20 @@ export function persistProjectMeta(directory: string, meta: ProjectMeta | undefi
 export function persistIcon(directory: string, icon: string | undefined): void {
   writeCache(directory, "icon", icon)
 }
+
+/**
+ * Remove a specific session id from the cached session list for a directory.
+ *
+ * Used by the delete/archive action path to clean up cached sessions when the
+ * owning child store may have been evicted (idle timeout). {@link persistSessions}
+ * only fires from a live store's subscription, so an evicted store leaves the
+ * deleted session in localStorage, which re-seeds the sidebar on next restart
+ * and causes a "Session not found" render error (issue #2105).
+ */
+export function removeSessionFromCache(directory: string, sessionId: string): void {
+  const cached = readCache<Session[]>(directory, "sessions")
+  if (!cached || cached.length === 0) return
+  const filtered = cached.filter((s) => s.id !== sessionId)
+  if (filtered.length === cached.length) return // no change
+  writeCache(directory, "sessions", filtered.length > 0 ? filtered : undefined)
+}

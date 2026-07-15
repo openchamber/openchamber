@@ -215,6 +215,7 @@ export function applyDirectoryEvent(
     onRefresh?: (directory: string) => void
     onLoadLsp?: () => void
     onSetSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
+    onSessionRemoved?: (sessionID: string) => void
   },
 ): DirectoryEventResult {
   switch (event.type) {
@@ -237,6 +238,8 @@ export function applyDirectoryEvent(
         trimSessions(draft)
         if (!info.parentID) draft.sessionTotal += 1
       }
+      // Live SSE data has arrived — the session list is no longer just the cache seed.
+      draft.sessionListFromCache = false
       return true
     }
 
@@ -256,6 +259,14 @@ export function applyDirectoryEvent(
         if (result.found) sessions.splice(result.index, 1)
         cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
         if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
+        // Live SSE data has arrived — the session list is no longer just the cache seed.
+        draft.sessionListFromCache = false
+        // Notify the caller so it can clear currentSessionId if the archived
+        // session was active. The synchronous archiveSession() action clears it
+        // directly, but the SSE event can arrive independently (another client
+        // archived it) — without this the UI keeps pointing at a session no
+        // longer in the active list (issue #2105).
+        callbacks?.onSessionRemoved?.(info.id)
         return true
       }
 
@@ -265,6 +276,8 @@ export function applyDirectoryEvent(
         sessions.splice(result.index, 0, info)
         trimSessions(draft)
       }
+      // Live SSE data has arrived — the session list is no longer just the cache seed.
+      draft.sessionListFromCache = false
       return true
     }
 
@@ -275,6 +288,14 @@ export function applyDirectoryEvent(
       if (result.found) sessions.splice(result.index, 1)
       cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
       if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
+      // Live SSE data has arrived — the session list is no longer just the cache seed.
+      draft.sessionListFromCache = false
+      // Notify the caller so it can clear currentSessionId if the deleted
+      // session was active. The synchronous deleteSession() action clears it
+      // directly, but the SSE event can arrive independently (another client
+      // deleted it, or the server cascade-deleted a child) — without this the
+      // UI keeps pointing at a non-existent session (issue #2105).
+      callbacks?.onSessionRemoved?.(info.id)
       return true
     }
 

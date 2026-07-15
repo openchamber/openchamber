@@ -62,6 +62,15 @@ export type State = {
   limit: number
   message: Record<string, Message[]>
   part: Record<string, Part[]>
+  /**
+   * True while the `session` list still reflects the localStorage cache seed
+   * from {@link createDirectoryStore} (before phase-3 `loadSessions` overwrites
+   * it or an SSE session event mutates the list). The bootstrap empty-list race
+   * guard uses this to distinguish "SSE already delivered sessions" (preserve)
+   * from "only the cache seed exists" (clear stale entries on empty server
+   * response). See issue #2105.
+   */
+  sessionListFromCache: boolean
 }
 
 /** Global store state */
@@ -132,6 +141,7 @@ export const INITIAL_STATE: State = {
   limit: 5,
   message: {},
   part: {},
+  sessionListFromCache: false,
 }
 
 export const INITIAL_GLOBAL_STATE: GlobalState = {

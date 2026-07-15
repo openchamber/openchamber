@@ -27,8 +27,61 @@ import {
   withoutReviewSessionLink,
   type SessionMetadataRecord,
 } from "@/lib/sessionReviewMetadata"
+import { removeSessionFromCache } from "./persist-cache"
+import { PROJECT_ACTIVE_SESSION_STORAGE_KEY } from "@/lib/sessionStorageKeys"
 
 const MESSAGE_REFETCH_LIMIT = 100
+
+/**
+ * Remove a deleted/archived session id from the `activeSessionByProject` map in
+ * localStorage. Without this, the map keeps `projectId → deletedSessionId` and
+ * `useSidebarPersistence` rewrites it back on every render, so the next app
+ * restart restores a pointer to a session that no longer exists (issue #2105
+ * "Session not found: ses_xxx" render error).
+ */
+export function cleanupActiveSessionByProject(sessionId: string): void {
+  try {
+    const raw = localStorage.getItem(PROJECT_ACTIVE_SESSION_STORAGE_KEY)
+    if (!raw) return
+    const parsed: unknown = JSON.parse(raw)
+    if (!isStringMap(parsed)) return
+    let changed = false
+    // Filter out invalid entries (non-string values) AND any mapping to the
+    // deleted session id. Matches SessionSidebar.tsx's lenient reader — a
+    // single corrupt value should not block the rest of the cleanup.
+    for (const [projectId, sid] of Object.entries(parsed)) {
+      if (typeof sid !== "string" || sid === sessionId) {
+        delete parsed[projectId]
+        changed = true
+      }
+    }
+    if (changed) {
+      try {
+        localStorage.setItem(PROJECT_ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(parsed))
+      } catch (error) {
+        // Write failure (e.g. QuotaExceededError) — the dangling reference
+        // persists and the #2105 fix is silently ineffective. Warn so it's
+        // diagnosable rather than swallowed.
+        console.warn("[session-actions] cleanupActiveSessionByProject: failed to write localStorage", error)
+      }
+    }
+  } catch (error) {
+    // localStorage unavailable or JSON malformed — warn so it's diagnosable
+    console.warn("[session-actions] cleanupActiveSessionByProject: failed to read/parse localStorage", error)
+  }
+}
+
+/**
+ * Type guard: verify that a JSON-parsed value is a plain object (Record-like).
+ * Does NOT validate individual value types — the cleanup loop filters those
+ * out per-entry so a single corrupt value doesn't block the whole cleanup.
+ */
+function isStringMap(value: unknown): value is Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  return true
+}
+
+
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
 const SEND_CONFIRMATION_REFETCH_ATTEMPTS = 2
 const SEND_CONFIRMATION_REFETCH_RETRY_MS = 150
@@ -539,6 +592,47 @@ function cleanupSessionWorktreeMetadata(sessionId: string): void {
   useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
 }
 
+/**
+ * Remove a deleted/archived session from the persist-cache session list for
+ * every directory that might still hold it. {@link optimisticRemoveSession}
+ * only updates *live* child stores; if the owning store was evicted (idle
+ * timeout), its `persistSessions` subscription never fires and the cached list
+ * in localStorage retains the deleted session — which then re-seeds the sidebar
+ * on next restart and triggers the "Session not found" render error (#2105).
+ *
+ * Runs synchronously. Although each iteration does sync localStorage
+ * read-modify-write, the directory count is bounded by MAX_DIR_STORES=30 and
+ * the total cost (~10ms) is negligible vs. the network round-trip of the
+ * delete/archive SDK call that precedes it. Deferring (requestIdleCallback /
+ * setTimeout) was rejected because if the user closes the tab before the
+ * deferred cleanup fires, the stale cache entry survives to next cold start —
+ * where the user can click the stale session in the sidebar, `loadSessions`
+ * removes it from the store, but `currentSessionId` still points at it,
+ * reproducing the exact "Session not found" render error this fix prevents.
+ */
+function cleanupPersistCacheForSession(sessionId: string, sessionDirectory?: string): void {
+  if (!_childStores) return
+  // Deduplicate: the session's own directory may already be a live child store.
+  const directories = new Set(_childStores.children.keys())
+  if (sessionDirectory) directories.add(sessionDirectory)
+  for (const directory of directories) {
+    removeSessionFromCache(directory, sessionId)
+  }
+}
+
+/**
+ * Single entry point for all post-delete/archive reference cleanup. Both
+ * cleanup steps run synchronously: `cleanupActiveSessionByProject` races with
+ * `useSidebarPersistence`'s React effect, and `cleanupPersistCacheForSession`
+ * must complete before the user can close the tab (a deferred cleanup that
+ * never fires leaves stale cache entries that cause the #2105 render error on
+ * next cold start).
+ */
+function cleanupSessionReferences(sessionId: string, sessionDirectory?: string): void {
+  cleanupActiveSessionByProject(sessionId)
+  cleanupPersistCacheForSession(sessionId, sessionDirectory)
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
@@ -558,6 +652,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     cleanupSessionWorktreeMetadata(sessionId)
+    cleanupSessionReferences(sessionId, sessionDirectory)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
@@ -566,6 +661,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     // success since the session was already deleted by the cascade.
     if ((error as { status?: number })?.status === 404) {
       cleanupSessionWorktreeMetadata(sessionId)
+      cleanupSessionReferences(sessionId, sessionDirectory)
       return true
     }
     restoreSessionListSnapshots(snapshots)
@@ -590,11 +686,13 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
     }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     cleanupSessionWorktreeMetadata(sessionId)
+    cleanupSessionReferences(sessionId, directory)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
     if ((error as { status?: number })?.status === 404) {
       cleanupSessionWorktreeMetadata(sessionId)
+      cleanupSessionReferences(sessionId, directory)
       return true
     }
     restoreSessionListSnapshots(snapshots)
@@ -620,6 +718,10 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
       throw new Error("session.update failed: server did not return the archived session")
     }
     useGlobalSessionsStore.getState().upsertSession(archived)
+    // Archived sessions leave the active list; clear any active-session pointer
+    // and persist-cache entry pointing at the now-archived id so a restart
+    // doesn't restore a pointer to a session no longer in the active list.
+    cleanupSessionReferences(sessionId, sessionDirectory)
     return true
   } catch (error) {
     console.error("[session-actions] archiveSession failed", error)
