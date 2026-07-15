@@ -32,8 +32,13 @@ type TtlOption = { value: string; label: string; ms: number | null };
 type TunnelMode = 'quick' | 'managed-remote' | 'managed-local';
 type ApiTunnelMode = TunnelMode;
 
-import { sanitizeManagedRemoteTunnelPresets, type ManagedRemoteTunnelPreset, type TunnelStatusResponse } from './tunnelSettingsState';
-import { toggleDirectE2ee } from './tunnelSettingsState';
+import {
+  reconcileSelectedPresetId,
+  sanitizeManagedRemoteTunnelPresets,
+  toggleDirectE2ee,
+  type ManagedRemoteTunnelPreset,
+  type TunnelStatusResponse,
+} from './tunnelSettingsState';
 
 const BOOTSTRAP_TTL_OPTIONS: TtlOption[] = [
   { value: '1800000', label: '30m', ms: 30 * 60 * 1000 },
@@ -331,6 +336,11 @@ export const TunnelSettings: React.FC = () => {
   const [localPort, setLocalPort] = React.useState<number | null>(null);
   const managedLocalConfigExtensionError = t(MANAGED_LOCAL_CONFIG_EXTENSION_ERROR_KEY);
   const managedLocalConfigFileInputRef = React.useRef<HTMLInputElement>(null);
+  const applyServerPresetRefresh = React.useCallback((value: unknown, legacyHostname?: unknown) => {
+    const nextPresets = sanitizeManagedRemoteTunnelPresets(value, legacyHostname);
+    setManagedRemoteTunnelPresets(nextPresets);
+    setSelectedPresetId((previous) => reconcileSelectedPresetId(previous, nextPresets));
+  }, []);
   const isManagedLocalConfigPathInvalid = React.useMemo(() => {
     if (!managedLocalConfigPath) {
       return false;
@@ -509,18 +519,13 @@ export const TunnelSettings: React.FC = () => {
       const loadedHostname = typeof statusData.managedRemoteTunnelHostname === 'string'
         ? statusData.managedRemoteTunnelHostname
         : '';
-      const presets = sanitizeManagedRemoteTunnelPresets(statusData?.managedRemoteTunnelPresets, loadedHostname);
-
-      const selectedId = presets[0]?.id || '';
-
       setBootstrapTtlMs(loadedBootstrapTtl);
       setSessionTtlMs(loadedSessionTtl);
       setTunnelProvider(loadedProvider);
       setProviderCapabilities(Array.isArray(providersData?.providers) ? providersData.providers : []);
       setTunnelMode(loadedMode);
       setManagedLocalConfigPath(loadedManagedLocalConfigPath);
-      setManagedRemoteTunnelPresets(presets);
-      setSelectedPresetId(selectedId);
+      applyServerPresetRefresh(statusData?.managedRemoteTunnelPresets, loadedHostname);
       setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
       setActiveTunnelMode(
         statusData.activeTunnelMode
@@ -550,7 +555,7 @@ export const TunnelSettings: React.FC = () => {
         setErrorMessage(t('settings.openchamber.tunnel.toast.checkAvailabilityFailed'));
       }
     }
-  }, [applyDependencyCheck, t]);
+  }, [applyDependencyCheck, applyServerPresetRefresh, t]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -695,10 +700,10 @@ export const TunnelSettings: React.FC = () => {
         }
         setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
         setSavedTokenPresetIds(new Set(Array.isArray(statusData.managedRemoteTunnelTokenPresetIds) ? statusData.managedRemoteTunnelTokenPresetIds : []));
-        setManagedRemoteTunnelPresets(sanitizeManagedRemoteTunnelPresets(
+        applyServerPresetRefresh(
           statusData.managedRemoteTunnelPresets,
           statusData.managedRemoteTunnelHostname,
-        ));
+        );
         setDirectE2eeSupported(!!statusData.directE2eeSupported);
         setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
         setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
@@ -720,7 +725,7 @@ export const TunnelSettings: React.FC = () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [state]);
+  }, [applyServerPresetRefresh, state]);
 
   const saveTunnelSettings = React.useCallback(async (payload: {
     tunnelProvider?: string;
@@ -742,9 +747,6 @@ export const TunnelSettings: React.FC = () => {
       }
       if (Object.prototype.hasOwnProperty.call(payload, 'managedLocalTunnelConfigPath')) {
         setManagedLocalConfigPath(payload.managedLocalTunnelConfigPath ?? null);
-      }
-      if (Object.prototype.hasOwnProperty.call(payload, 'managedRemoteTunnelPresets') && payload.managedRemoteTunnelPresets) {
-        setManagedRemoteTunnelPresets(payload.managedRemoteTunnelPresets);
       }
     } catch {
       toast.error(t('settings.openchamber.tunnel.toast.saveSettingsFailed'));
@@ -998,10 +1000,10 @@ export const TunnelSettings: React.FC = () => {
         const statusData = (await statusRes.json()) as TunnelStatusResponse;
         setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
         setSavedTokenPresetIds(new Set(Array.isArray(statusData.managedRemoteTunnelTokenPresetIds) ? statusData.managedRemoteTunnelTokenPresetIds : []));
-        setManagedRemoteTunnelPresets(sanitizeManagedRemoteTunnelPresets(
+        applyServerPresetRefresh(
           statusData.managedRemoteTunnelPresets,
           statusData.managedRemoteTunnelHostname,
-        ));
+        );
         setDirectE2eeSupported(!!statusData.directE2eeSupported);
         setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
         setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
@@ -1017,7 +1019,7 @@ export const TunnelSettings: React.FC = () => {
       setErrorMessage(t('settings.openchamber.tunnel.toast.stopFailed'));
       toast.error(t('settings.openchamber.tunnel.toast.stopFailed'));
     }
-  }, [t]);
+  }, [applyServerPresetRefresh, t]);
 
   const handleCopyUrl = React.useCallback(async () => {
     if (!tunnelInfo?.connectUrl) {
@@ -1530,13 +1532,11 @@ export const TunnelSettings: React.FC = () => {
                                     setIsTogglingProfile((prev) => ({ ...prev, [preset.id]: true }));
                                     try {
                                        const res = await toggleDirectE2ee(preset.id, checked, runtimeFetch);
-                                       const updatedProfile = sanitizeManagedRemoteTunnelPresets(
-                                         res.profile ? [res.profile] : [],
-                                       )[0];
-                                      if (res.ok && updatedProfile) {
-                                        setManagedRemoteTunnelPresets((prev) =>
-                                          prev.map((p) => (p.id === preset.id ? updatedProfile : p))
-                                        );
+                                       const updatedProfile = res.profile;
+                                       if (res.ok && updatedProfile) {
+                                         applyServerPresetRefresh(managedRemoteTunnelPresets.map((current) => (
+                                           current.id === preset.id ? updatedProfile : current
+                                         )));
                                         toast.success(t('settings.openchamber.tunnel.toast.directE2eeSaved'));
                                       } else {
                                         toast.error(t('settings.openchamber.tunnel.toast.directE2eeSaveFailed'));
