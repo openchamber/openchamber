@@ -22,6 +22,22 @@ const startOrigin = async () => {
   return { port: server.address().port, received };
 };
 
+const startBodyOrigin = async () => {
+  const received = [];
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      received.push({ body: Buffer.concat(chunks), headers: req.headers, url: req.url });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{}');
+    });
+  });
+  servers.push(server);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return { port: server.address().port, received };
+};
+
 const startWsOrigin = async (onConnection = () => {}) => {
   const server = http.createServer();
   const wss = new WebSocketServer({ noServer: true });
@@ -52,6 +68,10 @@ const openHttpAndWaitCompleted = async (host, sent, streamId, method) => {
   await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload({
     method, path: '/health', query: '', headers: {},
   })));
+  if (method !== 'GET' && method !== 'HEAD') {
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, new Uint8Array([0])));
+  }
+  await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array()));
   await waitFor(() => sent.some((raw) => {
     const frame = decodeTunnelFrame(raw);
     return frame.streamId === streamId && frame.frameType === TunnelFrameType.StreamEnd;
@@ -59,6 +79,32 @@ const openHttpAndWaitCompleted = async (host, sent, streamId, method) => {
 };
 
 describe('tunnel host policy seams', () => {
+  it('retains an immediate request body frame while policy approval is pending', async () => {
+    const origin = await startBodyOrigin();
+    const sent = [];
+    let approvePolicy;
+    const policyResult = new Promise((resolve) => { approvePolicy = resolve; });
+    const host = createTunnelHost({
+      connectionId: 'early-body',
+      getLocalPort: () => origin.port,
+      getBufferedAmount: () => 0,
+      sendFrame: (frame) => sent.push(frame),
+      requestPolicy: () => policyResult,
+    });
+
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
+      method: 'DELETE', path: '/health', query: '', headers: {},
+    })));
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, 1, new Uint8Array([1, 2, 3])));
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, 1, new Uint8Array()));
+
+    expect(origin.received).toHaveLength(0);
+    approvePolicy(true);
+    await waitFor(() => origin.received.length === 1);
+    expect([...origin.received[0].body]).toEqual([1, 2, 3]);
+    host.close();
+  });
+
   it('strips untrusted forwarding and internal headers before trusted context injection', async () => {
     const origin = await startOrigin();
     const sent = [];

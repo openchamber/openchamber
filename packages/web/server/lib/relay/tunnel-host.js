@@ -133,7 +133,7 @@ export const createTunnelHost = ({
   failClosedPolicy = false,
   onProtocolFailure,
 }) => {
-  /** @type {Map<number, { kind: 'http', abort: AbortController, body: ReadableStreamDefaultController | null, responseBody: ReadableStream | null, noBody: boolean } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
+  /** @type {Map<number, { kind: 'http', abort: AbortController, body: ReadableStreamDefaultController | null, requestBody: ReadableStream | undefined, responseBody: ReadableStream | null, noBody: boolean } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
   const streams = new Map();
   const assembler = createFragmentAssembler();
   const incompleteFragments = new Set();
@@ -311,17 +311,7 @@ export const createTunnelHost = ({
       return;
     }
 
-    const hasBody = method !== 'GET' && method !== 'HEAD';
-    let requestBody;
-    if (hasBody) {
-      requestBody = new ReadableStream({
-        start(controller) {
-          stream.body = controller;
-        },
-      });
-    } else {
-      stream.body = null;
-    }
+    const hasBody = !stream.noBody;
 
     const url = `http://127.0.0.1:${getLocalPort()}${request.path}${request.query ? `?${request.query}` : ''}`;
     let response;
@@ -329,7 +319,7 @@ export const createTunnelHost = ({
       response = await fetch(url, {
         method,
         headers: buildRequestHeaders(request.headers),
-        body: requestBody,
+        body: stream.requestBody,
         duplex: hasBody ? 'half' : undefined,
         signal: stream.abort.signal,
       });
@@ -390,7 +380,22 @@ export const createTunnelHost = ({
       return;
     }
     const method = request.method.toUpperCase();
-    const stream = { kind: 'http', generation: nextGeneration++, abort: new AbortController(), body: null, responseBody: null, noBody: method === 'GET' || method === 'HEAD' };
+    const stream = {
+      kind: 'http',
+      generation: nextGeneration++,
+      abort: new AbortController(),
+      body: null,
+      requestBody: undefined,
+      responseBody: null,
+      noBody: method === 'GET' || method === 'HEAD',
+    };
+    if (!stream.noBody) {
+      stream.requestBody = new ReadableStream({
+        start(controller) {
+          stream.body = controller;
+        },
+      });
+    }
     if (atStreamLimit('http')) {
       onLimitExceeded?.('stream-limit');
       void sendAbort(streamId, 'stream limit exceeded');
@@ -420,9 +425,8 @@ export const createTunnelHost = ({
       return;
     }
     if (stream.kind !== 'http' || stream.noBody) throw new Error('unsolicited http body');
-    // The body controller attaches synchronously in runHttpStream before any
-    // await, so by the time body frames arrive it is set for body-carrying
-    // methods; drop stray body bytes otherwise.
+    // The body controller attaches synchronously when the stream opens, before
+    // policy evaluation or loopback dispatch can await.
     try {
       stream.body?.enqueue(payload);
     } catch {
