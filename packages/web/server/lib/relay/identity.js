@@ -36,9 +36,29 @@ export const createRelayIdentityRuntime = (deps) => {
   const { crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict } = deps;
 
   let cachedIdentity = null;
+  let cachedIdentityGeneration = null;
   let pendingIdentity = null;
+  let identityGeneration = 0;
 
-  const importPersistedEncryptionKeypair = async (settings) => {
+  const generationSupersededError = () => Object.assign(
+    new Error('Relay identity initialization superseded'),
+    {
+      name: 'RelayIdentityGenerationSupersededError',
+      code: 'relay_identity_generation_superseded',
+    },
+  );
+
+  const assertCurrentGeneration = (generation) => {
+    if (generation !== identityGeneration) throw generationSupersededError();
+  };
+
+  const writeSettingsForGeneration = async (generation, settings) => {
+    assertCurrentGeneration(generation);
+    await writeSettingsToDisk(settings);
+    assertCurrentGeneration(generation);
+  };
+
+  const importPersistedEncryptionKeypair = async (generation, settings) => {
     const existing = settings?.relayEncryptionKey;
     if (!existing?.privateJwk) return null;
     try {
@@ -46,7 +66,7 @@ export const createRelayIdentityRuntime = (deps) => {
       const publicJwk = publicJwkFromPrivate(existing.privateJwk);
       await importEcdhPublicKey(publicJwk);
       if (!samePublicJwk(existing.publicJwk, publicJwk)) {
-        await writeSettingsToDisk({ ...settings, relayEncryptionKey: { privateJwk: existing.privateJwk, publicJwk } });
+        await writeSettingsForGeneration(generation, { ...settings, relayEncryptionKey: { privateJwk: existing.privateJwk, publicJwk } });
       }
       return { privateJwk: existing.privateJwk, publicJwk, privateKey };
     } catch {
@@ -56,9 +76,10 @@ export const createRelayIdentityRuntime = (deps) => {
     }
   };
 
-  const getOrCreateEncryptionKeypair = async () => {
+  const getOrCreateEncryptionKeypair = async (generation) => {
     const settings = await readSettingsFromDiskMigrated();
-    const existing = await importPersistedEncryptionKeypair(settings);
+    assertCurrentGeneration(generation);
+    const existing = await importPersistedEncryptionKeypair(generation, settings);
     if (existing) return existing;
 
     // Same regeneration gate as the signing key: never mint a replacement
@@ -68,7 +89,8 @@ export const createRelayIdentityRuntime = (deps) => {
     let verifiedSettings = settings;
     if (readSettingsStrict) {
       verifiedSettings = await readSettingsStrict();
-      const verified = await importPersistedEncryptionKeypair(verifiedSettings);
+      assertCurrentGeneration(generation);
+      const verified = await importPersistedEncryptionKeypair(generation, verifiedSettings);
       if (verified) return verified;
     }
     // Loud on purpose: a new encryption key invalidates the E2EE trust anchor of
@@ -77,7 +99,7 @@ export const createRelayIdentityRuntime = (deps) => {
     const keyPair = await generateEcdhKeyPair();
     const privateJwk = await globalThis.crypto.subtle.exportKey('jwk', keyPair.privateKey);
     const publicJwk = await exportPublicKeyJwk(keyPair.publicKey);
-    await writeSettingsToDisk({ ...settings, ...(verifiedSettings || {}), relayEncryptionKey: { privateJwk, publicJwk } });
+    await writeSettingsForGeneration(generation, { ...settings, ...(verifiedSettings || {}), relayEncryptionKey: { privateJwk, publicJwk } });
     return { privateJwk, publicJwk, privateKey: keyPair.privateKey };
   };
 
@@ -89,11 +111,17 @@ export const createRelayIdentityRuntime = (deps) => {
    *   signRelayAuth: (role: string, connectionId?: string | null) => { ts: number, sig: string, pk: string },
    * }>}
    */
-  const initializeRelayIdentity = async () => {
-    if (cachedIdentity) return cachedIdentity;
-    const signing = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
+  const initializeRelayIdentity = async (generation) => {
+    if (cachedIdentity && cachedIdentityGeneration === generation) return cachedIdentity;
+    const signing = await getOrCreateRelaySigningKeypair({
+      crypto,
+      readSettingsFromDiskMigrated,
+      writeSettingsToDisk: (settings) => writeSettingsForGeneration(generation, settings),
+      readSettingsStrict,
+    });
+    assertCurrentGeneration(generation);
     const serverId = deriveServerId({ crypto }, signing.publicJwk);
-    const encryption = await getOrCreateEncryptionKeypair();
+    const encryption = await getOrCreateEncryptionKeypair(generation);
     const hostEncPrivateKey = encryption.privateKey || await importEcdhPrivateKey(encryption.privateJwk);
     const pk = Buffer.from(canonicalPublicJwkString(signing.publicJwk), 'utf8').toString('base64url');
 
@@ -105,24 +133,39 @@ export const createRelayIdentityRuntime = (deps) => {
       return { ts, sig, pk };
     };
 
+    assertCurrentGeneration(generation);
     cachedIdentity = {
       serverId,
       hostEncPubJwk: encryption.publicJwk,
       hostEncPrivateKey,
       signRelayAuth,
     };
+    cachedIdentityGeneration = generation;
     return cachedIdentity;
   };
 
   const getRelayIdentity = () => {
-    if (cachedIdentity) return Promise.resolve(cachedIdentity);
-    if (pendingIdentity) return pendingIdentity;
+    if (cachedIdentity && cachedIdentityGeneration === identityGeneration) return Promise.resolve(cachedIdentity);
+    if (pendingIdentity?.generation === identityGeneration) return pendingIdentity.promise;
 
-    pendingIdentity = initializeRelayIdentity().finally(() => {
-      pendingIdentity = null;
+    const generation = identityGeneration;
+    const promise = initializeRelayIdentity(generation).catch((error) => {
+      if (generation !== identityGeneration) throw generationSupersededError();
+      throw error;
+    }).finally(() => {
+      if (pendingIdentity?.generation === generation) pendingIdentity = null;
     });
-    return pendingIdentity;
+    pendingIdentity = { generation, promise };
+    return promise;
   };
 
-  return { getRelayIdentity };
+  const abandonPendingRelayIdentity = () => {
+    if (cachedIdentity && cachedIdentityGeneration === identityGeneration) return false;
+    if (pendingIdentity?.generation !== identityGeneration) return false;
+    identityGeneration += 1;
+    pendingIdentity = null;
+    return true;
+  };
+
+  return { abandonPendingRelayIdentity, getRelayIdentity };
 };

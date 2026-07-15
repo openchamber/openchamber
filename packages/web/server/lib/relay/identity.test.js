@@ -16,7 +16,82 @@ const makeSettingsStore = (initial = {}) => {
   };
 };
 
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+};
+
 describe('relay identity', () => {
+  it('abandons a pending generation without allowing its late success to write or replace fresh identity', async () => {
+    const store = makeSettingsStore();
+    const firstRead = deferred();
+    let reads = 0;
+    let writes = 0;
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      readSettingsFromDiskMigrated: async () => {
+        reads += 1;
+        if (reads === 1) return firstRead.promise;
+        return { ...store.peek() };
+      },
+      writeSettingsToDisk: async (settings) => {
+        writes += 1;
+        await store.writeSettingsToDisk(settings);
+      },
+    });
+
+    const staleResult = runtime.getRelayIdentity().catch((error) => error);
+    expect(runtime.abandonPendingRelayIdentity()).toBe(true);
+    const freshIdentity = await runtime.getRelayIdentity();
+    const writesAfterFreshIdentity = writes;
+
+    firstRead.resolve({});
+    const staleError = await staleResult;
+
+    expect(staleError).toMatchObject({
+      name: 'RelayIdentityGenerationSupersededError',
+      code: 'relay_identity_generation_superseded',
+    });
+    expect(writes).toBe(writesAfterFreshIdentity);
+    expect(await runtime.getRelayIdentity()).toBe(freshIdentity);
+    expect(runtime.abandonPendingRelayIdentity()).toBe(false);
+  });
+
+  it('normalizes a late rejection from an abandoned generation without clearing the fresh cache', async () => {
+    const store = makeSettingsStore();
+    const firstRead = deferred();
+    let reads = 0;
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      readSettingsFromDiskMigrated: async () => {
+        reads += 1;
+        if (reads === 1) return firstRead.promise;
+        return { ...store.peek() };
+      },
+    });
+
+    const staleResult = runtime.getRelayIdentity().catch((error) => error);
+    expect(runtime.abandonPendingRelayIdentity()).toBe(true);
+    const freshIdentity = await runtime.getRelayIdentity();
+    firstRead.reject(new Error('private-key-detail'));
+    const staleError = await staleResult;
+
+    expect(staleError).toMatchObject({
+      name: 'RelayIdentityGenerationSupersededError',
+      code: 'relay_identity_generation_superseded',
+      message: 'Relay identity initialization superseded',
+    });
+    expect(staleError.message).not.toContain('private-key-detail');
+    expect(await runtime.getRelayIdentity()).toBe(freshIdentity);
+  });
+
   it('shares one cold initialization across concurrent callers', async () => {
     let writes = 0;
     const store = makeSettingsStore();
