@@ -39,6 +39,7 @@ export const createRelayIdentityRuntime = (deps) => {
   let cachedIdentityGeneration = null;
   let pendingIdentity = null;
   let identityGeneration = 0;
+  let settingsWriteTail = Promise.resolve();
 
   const generationSupersededError = () => Object.assign(
     new Error('Relay identity initialization superseded'),
@@ -52,10 +53,18 @@ export const createRelayIdentityRuntime = (deps) => {
     if (generation !== identityGeneration) throw generationSupersededError();
   };
 
-  const writeSettingsForGeneration = async (generation, settings) => {
+  const writeSettingsForGeneration = (generation, settings) => {
     assertCurrentGeneration(generation);
-    await writeSettingsToDisk(settings);
-    assertCurrentGeneration(generation);
+    const operation = settingsWriteTail.then(async () => {
+      assertCurrentGeneration(generation);
+      await writeSettingsToDisk(settings);
+      assertCurrentGeneration(generation);
+    });
+    settingsWriteTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
   };
 
   const importPersistedEncryptionKeypair = async (generation, settings) => {

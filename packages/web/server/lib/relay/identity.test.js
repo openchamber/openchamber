@@ -27,6 +27,85 @@ const deferred = () => {
 };
 
 describe('relay identity', () => {
+  it('serializes a fresh generation behind an already-started abandoned write', async () => {
+    const store = makeSettingsStore();
+    const staleWriteStarted = deferred();
+    const releaseStaleWrite = deferred();
+    const writes = [];
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      writeSettingsToDisk: async (settings) => {
+        writes.push(settings);
+        if (writes.length === 1) {
+          staleWriteStarted.resolve();
+          await releaseStaleWrite.promise;
+        }
+        await store.writeSettingsToDisk(settings);
+      },
+    });
+
+    const staleResult = runtime.getRelayIdentity().catch((error) => error);
+    await staleWriteStarted.promise;
+    expect(runtime.abandonPendingRelayIdentity()).toBe(true);
+    const freshResult = runtime.getRelayIdentity();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(writes).toHaveLength(1);
+    releaseStaleWrite.resolve();
+
+    const staleError = await staleResult;
+    const freshIdentity = await freshResult;
+    const stored = store.peek();
+    const storedServerId = crypto
+      .createHash('sha256')
+      .update(canonicalPublicJwkString(stored.relaySigningKey.publicJwk))
+      .digest('base64url');
+
+    expect(staleError).toMatchObject({ code: 'relay_identity_generation_superseded' });
+    expect(storedServerId).toBe(freshIdentity.serverId);
+    expect(stored.relayEncryptionKey.publicJwk).toEqual(freshIdentity.hostEncPubJwk);
+  });
+
+  it('continues fresh generation writes after an abandoned queued write rejects', async () => {
+    const store = makeSettingsStore();
+    const staleWriteStarted = deferred();
+    const rejectStaleWrite = deferred();
+    const writes = [];
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      writeSettingsToDisk: async (settings) => {
+        writes.push(settings);
+        if (writes.length === 1) {
+          staleWriteStarted.resolve();
+          await rejectStaleWrite.promise;
+        }
+        await store.writeSettingsToDisk(settings);
+      },
+    });
+
+    const staleResult = runtime.getRelayIdentity().catch((error) => error);
+    await staleWriteStarted.promise;
+    expect(runtime.abandonPendingRelayIdentity()).toBe(true);
+    const freshResult = runtime.getRelayIdentity();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(writes).toHaveLength(1);
+    rejectStaleWrite.reject(new Error('stale deferred write failed'));
+
+    const staleError = await staleResult;
+    const freshIdentity = await freshResult;
+    const stored = store.peek();
+
+    expect(staleError).toMatchObject({ code: 'relay_identity_generation_superseded' });
+    expect(freshIdentity.serverId).toBeTruthy();
+    expect(stored.relaySigningKey).toBeDefined();
+    expect(stored.relayEncryptionKey.publicJwk).toEqual(freshIdentity.hostEncPubJwk);
+  });
+
   it('abandons a pending generation without allowing its late success to write or replace fresh identity', async () => {
     const store = makeSettingsStore();
     const firstRead = deferred();
