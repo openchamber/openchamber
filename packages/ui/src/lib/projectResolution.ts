@@ -1,8 +1,19 @@
+import type { Session } from "@opencode-ai/sdk/v2";
 import type { ProjectEntry } from "@/lib/api/types";
 import type { WorktreeMetadata } from "@/types/worktree";
 
 import { normalizePath } from "@/lib/pathNormalization";
 export const normalizeProjectPath = normalizePath;
+
+export const deriveProjectLabelFromPath = (path: string, preserveCasing = false): string => {
+  const normalized = normalizeProjectPath(path);
+  if (!normalized || normalized === '/') return 'Root';
+  const segments = normalized.split('/').filter(Boolean);
+  const raw = segments[segments.length - 1] || normalized;
+  return preserveCasing
+    ? raw
+    : raw.replace(/[-_]/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+};
 
 export const resolveProjectForDirectory = (
   projects: ProjectEntry[],
@@ -14,7 +25,10 @@ export const resolveProjectForDirectory = (
   for (const p of projects) {
     const pp = normalizeProjectPath(p.path);
     if (!pp) continue;
-    if (nd !== pp && !nd.startsWith(`${pp}/`)) continue;
+    const isWithinProject = pp === '/'
+      ? nd.startsWith('/')
+      : nd === pp || nd.startsWith(`${pp}/`);
+    if (!isWithinProject) continue;
     if (!best || pp.length > (normalizeProjectPath(best.path)?.length ?? 0)) best = p;
   }
   return best;
@@ -61,3 +75,37 @@ export const resolveProjectForSessionDirectory = (
 ): ProjectEntry | null =>
   resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory) ??
   resolveProjectForDirectory(projects, directory);
+
+const resolveSessionDirectory = (session: Session): string | null => {
+  const record = session as Session & {
+    directory?: string | null;
+    project?: { worktree?: string | null } | null;
+  };
+  return normalizeProjectPath(record.directory ?? record.project?.worktree ?? null);
+};
+
+export const resolveProjectsWithNoActiveSessions = (
+  projects: ProjectEntry[],
+  availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
+  activeSessions: Session[],
+  changedDirectories: Iterable<string | null | undefined>,
+): ProjectEntry[] => {
+  const candidates = new Map<string, ProjectEntry>();
+  for (const directory of changedDirectories) {
+    const project = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory ?? null);
+    if (project) candidates.set(project.id, project);
+  }
+  if (candidates.size === 0) return [];
+
+  for (const session of activeSessions) {
+    const project = resolveProjectForSessionDirectory(
+      projects,
+      availableWorktreesByProject,
+      resolveSessionDirectory(session),
+    );
+    if (project) candidates.delete(project.id);
+    if (candidates.size === 0) return [];
+  }
+
+  return [...candidates.values()];
+};

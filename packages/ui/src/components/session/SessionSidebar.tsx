@@ -5,7 +5,8 @@ import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { formatDirectoryName, cn } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { deriveProjectLabelFromPath } from '@/lib/projectResolution';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -1133,8 +1134,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     projectSections.forEach((section) => {
       const projectLabel = formatProjectLabel(
         section.project.label?.trim()
-        || formatDirectoryName(section.project.normalizedPath, homeDirectory)
-        || section.project.normalizedPath,
+        || deriveProjectLabelFromPath(section.project.normalizedPath),
       );
       section.groups.forEach((group) => {
         const branchCandidate = group.branch && group.branch !== 'HEAD' && group.branch !== projectLabel
@@ -1168,7 +1168,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     });
 
     return meta;
-  }, [projectSections, homeDirectory]);
+  }, [projectSections]);
 
   const activeNowSessions = React.useMemo(() => {
     if (!showRecentSection || isVSCode) {

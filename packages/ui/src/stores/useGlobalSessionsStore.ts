@@ -600,6 +600,12 @@ export const refreshGlobalSessions = async (fallbackActive?: Session[]): Promise
   return useGlobalSessionsStore.getState().loadSessions(fallbackActive);
 };
 
+export const refreshGlobalSessionsAfterPending = async (fallbackActive?: Session[]): Promise<LoadResult> => {
+  const pending = inflightLoad;
+  if (pending) await pending;
+  return useGlobalSessionsStore.getState().loadSessions(fallbackActive);
+};
+
 export const refreshGlobalSessionsForDirectories = async (
   directories: Iterable<string>,
   fallbackActive?: Session[],

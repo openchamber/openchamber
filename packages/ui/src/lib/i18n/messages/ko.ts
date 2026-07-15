@@ -388,6 +388,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': '최소',
   'sessions.sidebar.header.displayMode.showRecent': '최근 섹션 표시',
   'sessions.sidebar.header.displayMode.showArchived': '보관된 세션 표시',
+  'sessions.sidebar.header.displayMode.preserveProjectNameCasing': '폴더 이름의 대소문자 유지',
+  'sessions.sidebar.header.displayMode.autoCloseEmptyProjects': '활성 세션이 없는 프로젝트 닫기',
   'sessions.sidebar.header.displayMode.collapseAll': '모두 접기',
   'sessions.sidebar.header.displayMode.expandAll': '모두 펼치기',
   'sessions.sidebar.header.projectSort.manual': '수동',

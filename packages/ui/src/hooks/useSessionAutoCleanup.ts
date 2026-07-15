@@ -5,6 +5,7 @@ import { ensureGlobalSessionsLoaded, useGlobalSessionsStore, resolveGlobalSessio
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
+import { closeProjectsWithoutActiveSessionsForDirectories } from '@/sync/session-actions';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const AUTO_DELETE_KEEP_RECENT = 5;
@@ -169,6 +170,12 @@ export const useSessionAutoCleanup = (enabledOrOptions?: boolean | CleanupOption
         } else {
           useGlobalSessionsStore.getState().removeSessions(completedIds);
         }
+        await closeProjectsWithoutActiveSessionsForDirectories(
+          completedIds.map((id) => {
+            const session = sessionMap.get(id);
+            return session ? resolveGlobalSessionDirectory(session) : null;
+          }),
+        );
         return { completedIds, failedIds, action: sessionRetentionAction };
       } finally {
         runningRef.current = false;

@@ -388,6 +388,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': 'ミニマル',
   'sessions.sidebar.header.displayMode.showRecent': '最近のセクションを表示',
   'sessions.sidebar.header.displayMode.showArchived': 'アーカイブ済みセッションを表示',
+  'sessions.sidebar.header.displayMode.preserveProjectNameCasing': 'フォルダー名の大文字と小文字を保持',
+  'sessions.sidebar.header.displayMode.autoCloseEmptyProjects': 'アクティブなセッションがないプロジェクトを閉じる',
   'sessions.sidebar.header.displayMode.collapseAll': 'すべて折りたたむ',
   'sessions.sidebar.header.displayMode.expandAll': 'すべて展開',
   'sessions.sidebar.header.projectSort.manual': '手動',

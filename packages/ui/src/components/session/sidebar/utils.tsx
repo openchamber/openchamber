@@ -173,9 +173,7 @@ export const resolveArchivedFolderName = (session: Session, projectRoot: string 
 };
 
 export const formatProjectLabel = (label: string): string => {
-  return label
-    .replace(/[-_]/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+  return label;
 };
 
 export const renderHighlightedText = (text: string, query: string): React.ReactNode => {

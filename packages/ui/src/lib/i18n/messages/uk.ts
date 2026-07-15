@@ -388,6 +388,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.minimal": "Мінімальний",
   "sessions.sidebar.header.displayMode.showRecent": "Показувати нещодавні",
   "sessions.sidebar.header.displayMode.showArchived": "Показувати архівовані сесії",
+  "sessions.sidebar.header.displayMode.preserveProjectNameCasing": "Зберігати регістр назв папок",
+  "sessions.sidebar.header.displayMode.autoCloseEmptyProjects": "Закривати проєкти без активних сесій",
   "sessions.sidebar.header.displayMode.collapseAll": "Згорнути все",
   "sessions.sidebar.header.displayMode.expandAll": "Розгорнути все",
   "sessions.sidebar.header.projectSort.manual": "Вручну",

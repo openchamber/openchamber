@@ -10,7 +10,8 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { formatDirectoryName, formatPathForDisplay, cn } from '@/lib/utils';
+import { formatPathForDisplay, cn } from '@/lib/utils';
+import { deriveProjectLabelFromPath } from '@/lib/projectResolution';
 import type { SessionGroup } from './types';
 import type { SortableDragHandleProps } from './sortableItems';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
@@ -206,8 +207,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                 const projectKey = project.id;
                 const projectLabel = formatProjectLabel(
                   project.label?.trim()
-                  || formatDirectoryName(project.normalizedPath, props.homeDirectory)
-                  || project.normalizedPath,
+                  || deriveProjectLabelFromPath(project.normalizedPath),
                 );
                 const projectDescription = formatPathForDisplay(project.normalizedPath, props.homeDirectory);
                 const isCollapsed = props.collapsedProjects.has(projectKey);
