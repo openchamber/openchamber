@@ -4,7 +4,13 @@ import { createClientHandshake } from '../../../../ui/src/lib/relay/handshake.ts
 import { createEncryptedSession } from './encrypted-session.js';
 import { exportPublicKeyJwk, generateEcdhKeyPair, RelayCloseCode } from './e2ee.js';
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+const waitFor = async (predicate) => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error('observable encrypted session outcome not reached');
+};
 
 const createSocket = () => ({
   readyState: 1,
@@ -25,7 +31,7 @@ describe('encrypted session', () => {
       logger: { warn() {} },
     });
     session.receive(client.helloText, false);
-    await settle();
+    await waitFor(() => socket.sent.length > 0);
     const action = await client.handleText(socket.sent[0]);
     return { session, channel: action.channel, failures };
   };
@@ -35,7 +41,7 @@ describe('encrypted session', () => {
     const malformed = await channel.encryptor.encrypt(new Uint8Array([1]));
     session.receive(malformed, true);
     session.receive(malformed, true);
-    await settle();
+    await waitFor(() => failures.length > 0);
     expect(failures).toEqual([{ code: RelayCloseCode.ChannelFailure, reason: 'protocol failure' }]);
   });
 
@@ -43,7 +49,7 @@ describe('encrypted session', () => {
     const { session, channel, failures } = await establishedFixture(false);
     const malformed = await channel.encryptor.encrypt(new Uint8Array([1]));
     session.receive(malformed, true);
-    await settle();
+    await waitFor(() => failures.length > 0);
     expect(failures).toEqual([{ code: RelayCloseCode.ChannelFailure, reason: 'protocol failure' }]);
   });
 
@@ -56,7 +62,7 @@ describe('encrypted session', () => {
       logger: { warn() {} },
     });
     session.receive(new Uint8Array([1]), true);
-    await settle();
+    await waitFor(() => failures.length > 0);
     expect(failures).toEqual([{ code: RelayCloseCode.ChannelFailure, reason: 'binary frame before handshake' }]);
     session.close();
   });
@@ -72,11 +78,11 @@ describe('encrypted session', () => {
       logger: { warn() {} },
     });
     session.receive(client.helloText, false);
-    await settle();
+    await waitFor(() => socket.sent.length > 0);
     expect(typeof socket.sent[0]).toBe('string');
     expect((await client.handleText(socket.sent[0])).type).toBe('established');
     session.receive('{"t":"unexpected"}', false);
-    await settle();
+    await waitFor(() => failures.length > 0);
     expect(failures[0]?.code).toBe(RelayCloseCode.ChannelFailure);
     session.close();
   });
