@@ -7,6 +7,14 @@ import { TunnelServiceError } from './types.js';
 
 const profile = { id: 'profile-a', name: 'A', hostname: 'a.example.com', token: 'connector-secret', directE2eeEnabled: true };
 
+const waitFor = async (predicate) => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error('observable lifecycle outcome not reached');
+};
+
 const createApp = (overrides = {}) => {
   const app = express();
   app.use(express.json());
@@ -422,10 +430,11 @@ describe('tunnel routes direct E2EE configuration', () => {
           responseSettled = true;
           return response;
         });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(onTunnelChanged).toHaveBeenCalled();
+      await waitFor(() => onTunnelChanged.mock.calls.length === 1);
+      expect(onTunnelChanged).toHaveBeenCalledTimes(1);
       expect(responseSettled).toBe(false);
       rejectCallback(callbackError);
+      await waitFor(() => responseSettled);
       const response = await responsePromise;
       expect(response.status).toBe(200);
       expect(consoleError.mock.calls.flat().map(String).join(' ')).not.toContain('settlement-secret');
