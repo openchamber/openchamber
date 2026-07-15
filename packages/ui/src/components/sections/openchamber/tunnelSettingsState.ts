@@ -43,6 +43,22 @@ export interface TunnelStatusResponse {
   directE2eeAvailable?: boolean;
 }
 
+const unsafeManagedPresetIds = new Set([
+  'prototype',
+  'constructor',
+  '__defineGetter__',
+  '__defineSetter__',
+  'hasOwnProperty',
+  '__lookupGetter__',
+  '__lookupSetter__',
+  'isPrototypeOf',
+  'propertyIsEnumerable',
+  'toString',
+  'valueOf',
+  '__proto__',
+  'toLocaleString',
+]);
+
 const normalizeManagedRemotePresetHostname = (value: unknown): string => {
   if (typeof value !== 'string') return '';
   const trimmed = value.trim();
@@ -70,7 +86,7 @@ export const sanitizeManagedRemoteTunnelPresets = (
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
       const hostname = normalizeManagedRemotePresetHostname(candidate.hostname);
-      if (!id || !name || !hostname || seenIds.has(id) || seenHostnames.has(hostname)) continue;
+      if (!id || unsafeManagedPresetIds.has(id) || !name || !hostname || seenIds.has(id) || seenHostnames.has(hostname)) continue;
       seenIds.add(id);
       seenHostnames.add(hostname);
       presets.push({
@@ -102,19 +118,23 @@ export async function toggleDirectE2ee(
       body: JSON.stringify({ directE2eeEnabled: enabled }),
     });
     if (!res.ok) return { ok: false };
-    const data = await res.json();
-    if (!data || !data.ok || !data.profile) {
+    const data: unknown = await res.json();
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return { ok: false };
+    const response = data as Record<string, unknown>;
+    if (response.ok !== true || !response.profile || typeof response.profile !== 'object' || Array.isArray(response.profile)) {
       return { ok: false };
     }
-    return {
-      ok: true,
-      profile: {
-        id: String(data.profile.id),
-        name: String(data.profile.name),
-        hostname: String(data.profile.hostname),
-        directE2eeEnabled: Boolean(data.profile.directE2eeEnabled)
-      }
-    };
+    const profile = response.profile as Record<string, unknown>;
+    if (typeof profile.id !== 'string'
+      || profile.id !== presetId
+      || typeof profile.name !== 'string'
+      || typeof profile.hostname !== 'string'
+      || typeof profile.directE2eeEnabled !== 'boolean') {
+      return { ok: false };
+    }
+    const sanitized = sanitizeManagedRemoteTunnelPresets([profile]);
+    if (sanitized.length !== 1 || sanitized[0]?.id !== presetId) return { ok: false };
+    return { ok: true, profile: sanitized[0] };
   } catch {
     return { ok: false };
   }

@@ -44,6 +44,21 @@ describe('tunnelSettingsState', () => {
     test('does not create a fallback for an invalid legacy hostname', () => {
       expect(sanitizeManagedRemoteTunnelPresets([], 'not a host')).toEqual([]);
     });
+
+    test('rejects Object prototype IDs while preserving normal UUID and legacy IDs', () => {
+      const reservedIds = [
+        'prototype', 'constructor', '__defineGetter__', '__defineSetter__', 'hasOwnProperty',
+        '__lookupGetter__', '__lookupSetter__', 'isPrototypeOf', 'propertyIsEnumerable',
+        'toString', 'valueOf', '__proto__', 'toLocaleString',
+      ];
+      for (const id of reservedIds) {
+        expect(sanitizeManagedRemoteTunnelPresets([{ id, name: 'Unsafe', hostname: `${id.replaceAll('_', 'x')}.example` }])).toEqual([]);
+      }
+      expect(sanitizeManagedRemoteTunnelPresets([
+        { id: '550e8400-e29b-41d4-a716-446655440000', name: 'UUID', hostname: 'uuid.example' },
+      ])).toEqual([{ id: '550e8400-e29b-41d4-a716-446655440000', name: 'UUID', hostname: 'uuid.example' }]);
+      expect(sanitizeManagedRemoteTunnelPresets([], 'legacy.example')[0]?.id).toBe('legacy-legacy.example');
+    });
   });
 
   describe('toggleDirectE2ee', () => {
@@ -95,6 +110,28 @@ describe('tunnelSettingsState', () => {
       const result = await toggleDirectE2ee('p1', true, mockFetch);
 
       expect(result.ok).toBe(false);
+    });
+
+    test('rejects malformed, coerced, mismatched, and reserved response profiles', async () => {
+      const valid = { id: 'p1', name: 'Test', hostname: 'test.com', directE2eeEnabled: false };
+      const invalidPayloads = [
+        { ok: 1, profile: valid },
+        { ok: true, profile: [valid] },
+        { ok: true, profile: { ...valid, id: 1 } },
+        { ok: true, profile: { ...valid, name: null } },
+        { ok: true, profile: { ...valid, hostname: 42 } },
+        { ok: true, profile: { ...valid, directE2eeEnabled: 'false' } },
+        { ok: true, profile: { ...valid, id: 'other' } },
+        { ok: true, profile: { ...valid, hostname: 'not a host' } },
+        { ok: true, profile: { ...valid, id: 'constructor' } },
+      ];
+      for (const payload of invalidPayloads) {
+        const result = await toggleDirectE2ee('p1', false, async () => new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }));
+        expect(result).toEqual({ ok: false });
+      }
     });
 
     test('returns error on network failure', async () => {
