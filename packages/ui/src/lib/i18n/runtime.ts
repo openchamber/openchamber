@@ -60,6 +60,9 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   if (normalized === 'ja' || normalized.startsWith('ja-')) {
     return 'ja';
   }
+  if (normalized === 'de' || normalized.startsWith('de-')) {
+    return 'de';
+  }
   if (normalized === 'pl' || normalized.startsWith('pl-')) {
     return 'pl';
   }

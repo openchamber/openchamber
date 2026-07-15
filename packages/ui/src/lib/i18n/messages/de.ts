@@ -1,7 +1,6 @@
 import { settingsDict } from './de.settings';
-import type { I18nDictionary } from '../types';
 
-export const dict: Partial<I18nDictionary> = {
+export const dict = {
   ...settingsDict,
   'common.language.german': 'Deutsch',
   'chat.message.userText.collapseAria': 'Benutzer-Nachricht einklappen',

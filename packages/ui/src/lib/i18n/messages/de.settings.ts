@@ -1,6 +1,4 @@
-import type { I18nDictionary } from '../types';
-
-export const settingsDict: Partial<I18nDictionary> = {
+export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'OpenCode Go Nutzungsverfolgung',
   'settings.providers.page.openCodeGo.description': 'Verbinden Sie das OpenCode Go Dashboard, um rollierenden, wöchentlichen und monatlichen Verbrauch anzuzeigen.',
   'settings.providers.page.openCodeGo.workspaceId': 'Workspace-ID',
