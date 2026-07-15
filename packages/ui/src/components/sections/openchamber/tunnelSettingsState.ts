@@ -141,7 +141,11 @@ export async function toggleDirectE2ee(
       return { ok: false };
     }
     const sanitized = sanitizeManagedRemoteTunnelPresets([profile]);
-    if (sanitized.length !== 1 || sanitized[0]?.id !== presetId) return { ok: false };
+    if (sanitized.length !== 1
+      || sanitized[0]?.id !== presetId
+      || sanitized[0]?.directE2eeEnabled !== enabled) {
+      return { ok: false };
+    }
     return { ok: true, profile: sanitized[0] };
   } catch {
     return { ok: false };

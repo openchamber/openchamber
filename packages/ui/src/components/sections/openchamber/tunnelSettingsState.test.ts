@@ -134,6 +134,24 @@ describe('tunnelSettingsState', () => {
       }
     });
 
+    test('requires the returned direct E2EE state to exactly match the requested toggle', async () => {
+      const fetchProfile = (directE2eeEnabled: boolean) => async () => new Response(JSON.stringify({
+        ok: true,
+        profile: { id: 'p1', name: 'Test', hostname: 'test.com', directE2eeEnabled },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+      expect(await toggleDirectE2ee('p1', true, fetchProfile(false))).toEqual({ ok: false });
+      expect(await toggleDirectE2ee('p1', false, fetchProfile(true))).toEqual({ ok: false });
+      expect(await toggleDirectE2ee('p1', true, fetchProfile(true))).toEqual({
+        ok: true,
+        profile: { id: 'p1', name: 'Test', hostname: 'test.com', directE2eeEnabled: true },
+      });
+      expect(await toggleDirectE2ee('p1', false, fetchProfile(false))).toEqual({
+        ok: true,
+        profile: { id: 'p1', name: 'Test', hostname: 'test.com', directE2eeEnabled: false },
+      });
+    });
+
     test('returns error on network failure', async () => {
       const mockFetch = async () => {
         throw new Error('Network error');
