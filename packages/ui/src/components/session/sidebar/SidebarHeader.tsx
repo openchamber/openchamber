@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { Icon } from "@/components/icon/Icon";
+import { Icon } from '@/components/icon/Icon';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useI18n } from '@/lib/i18n';
@@ -66,7 +66,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
   } = props;
 
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
+  const preserveProjectNameCasing = useSessionDisplayStore((state) => state.preserveProjectNameCasing);
+  const autoCloseEmptyProjects = useSessionDisplayStore((state) => state.autoCloseEmptyProjects);
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
+  const togglePreserveProjectNameCasing = useSessionDisplayStore((state) => state.togglePreserveProjectNameCasing);
+  const toggleAutoCloseEmptyProjects = useSessionDisplayStore((state) => state.toggleAutoCloseEmptyProjects);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
@@ -280,6 +284,21 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 >
                   <span>{t('sessions.sidebar.header.displayMode.stickyHeaders')}</span>
                   {stickyZoneHeaders ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={togglePreserveProjectNameCasing}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.displayMode.preserveProjectNameCasing')}</span>
+                  {preserveProjectNameCasing ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={toggleAutoCloseEmptyProjects}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.displayMode.autoCloseEmptyProjects')}</span>
+                  {autoCloseEmptyProjects ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                 </DropdownMenuItem>
                 {!isSingleProjectMode ? (
                   <>

@@ -14,6 +14,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { getVSCodeBootstrapConfig, isVSCodeRuntime } from './utils/vscodeRuntime';
+import { useSessionDisplayStore } from './useSessionDisplayStore';
+import { deriveProjectLabelFromPath } from '@/lib/projectResolution';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -183,7 +185,6 @@ const legacyAutoProjectLabel = (path: string): string => {
   const derived = deriveProjectLabel(path);
   return derived.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 };
-
 const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | undefined => {
   if (!value || typeof value !== 'object') {
     return undefined;
@@ -421,7 +422,7 @@ const createVSCodeWorkspaceProject = (
     ...existing,
     id,
     path: normalizedPath,
-    label: deriveProjectLabel(normalizedPath),
+    label: deriveProjectLabelFromPath(normalizedPath),
     addedAt: existing?.addedAt ?? now,
     lastOpenedAt: isActive ? now : existing?.lastOpenedAt ?? now,
   };
@@ -593,7 +594,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const now = Date.now();
-      const label = options?.label?.trim() || deriveProjectLabel(normalizedPath);
+      const label = options?.label?.trim()
+        || deriveProjectLabelFromPath(normalizedPath, useSessionDisplayStore.getState().preserveProjectNameCasing);
       const id = createProjectIdFromPath(normalizedPath);
       const entry: ProjectEntry = {
         id,

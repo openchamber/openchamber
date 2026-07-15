@@ -10,14 +10,22 @@ import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { opencodeClient } from "@/lib/opencode/client"
-import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import {
+  mergeSessionDirectoryMetadata,
+  resolveGlobalSessionDirectory,
+  refreshGlobalSessionsAfterPending,
+  useGlobalSessionsStore,
+} from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
-import { registerSessionDirectory } from "./sync-refs"
+import { getAllSyncSessions, registerSessionDirectory } from "./sync-refs"
 import { recordSendFailure } from "./send-failure-log"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { materializeSessionSnapshots } from "./materialization"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
+import { resolveProjectsWithNoActiveSessions } from "@/lib/projectResolution"
+import { useProjectsStore } from "@/stores/useProjectsStore"
+import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
 import {
   getOriginalSessionID,
   getSessionMetadata,
@@ -937,6 +945,7 @@ export type DeleteSessionOptions = {
    * confirmation spans a runtime switch.
    */
   expectedRuntimeKey?: string
+  deferProjectAutoClose?: boolean
 }
 
 /**
@@ -965,24 +974,48 @@ export async function deleteSession(sessionId: string, options?: DeleteSessionOp
     if (isStaleRuntime(expectedRuntimeKey)) return false
     const deleted = await opencodeClient.deleteSession(sessionId, sessionDirectory)
     if (isStaleRuntime(expectedRuntimeKey)) return false
-    if (deleted !== true) {
-      throw new Error("session.delete failed: server did not confirm deletion")
-    }
+    if (deleted !== true) throw new Error("session.delete failed: server did not confirm deletion")
     finalizeConfirmedSessionDeletion(sessionId, sessionDirectory, expectedRuntimeKey)
     await cleanupDeletedChatDirectory(sessionDirectory, deleteManagedDirectory)
+    if (!options?.deferProjectAutoClose) {
+      await closeProjectsWithoutActiveSessionsForDirectories([sessionDirectory])
+    }
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
-    // The server cascade-deletes child sessions when the parent is removed.
-    // Subsequent delete attempts for those children return 404; treat as
-    // success since the session was already deleted by the cascade.
     if ((error as { status?: number })?.status === 404) {
       if (isStaleRuntime(expectedRuntimeKey)) return false
       finalizeConfirmedSessionDeletion(sessionId, sessionDirectory, expectedRuntimeKey)
       await cleanupDeletedChatDirectory(sessionDirectory, deleteManagedDirectory)
+      if (!options?.deferProjectAutoClose) {
+        await closeProjectsWithoutActiveSessionsForDirectories([sessionDirectory])
+      }
       return true
     }
     return false
+  }
+}
+
+export async function closeProjectsWithoutActiveSessionsForDirectories(
+  directories: Iterable<string | null | undefined>,
+): Promise<void> {
+  if (!useSessionDisplayStore.getState().autoCloseEmptyProjects) return
+  const changedDirectories = [...directories].filter((directory): directory is string => Boolean(directory))
+  if (changedDirectories.length === 0) return
+
+  await refreshGlobalSessionsAfterPending(getAllSyncSessions())
+  const globalSessions = useGlobalSessionsStore.getState()
+  if (!globalSessions.hasLoaded || globalSessions.status !== "ready") return
+
+  const projectsState = useProjectsStore.getState()
+  const emptyProjects = resolveProjectsWithNoActiveSessions(
+    projectsState.projects,
+    useSessionUIStore.getState().availableWorktreesByProject,
+    globalSessions.activeSessions,
+    changedDirectories,
+  )
+  for (const project of emptyProjects) {
+    projectsState.removeProject(project.id)
   }
 }
 
@@ -1005,6 +1038,7 @@ export async function deleteSessionInDirectory(
     }
     finalizeConfirmedSessionDeletion(sessionId, directory, expectedRuntimeKey)
     await cleanupDeletedChatDirectory(directory, deleteManagedDirectory)
+    await closeProjectsWithoutActiveSessionsForDirectories([directory])
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
@@ -1012,6 +1046,7 @@ export async function deleteSessionInDirectory(
       if (isStaleRuntime(expectedRuntimeKey)) return false
       finalizeConfirmedSessionDeletion(sessionId, directory, expectedRuntimeKey)
       await cleanupDeletedChatDirectory(directory, deleteManagedDirectory)
+      await closeProjectsWithoutActiveSessionsForDirectories([directory])
       return true
     }
     return false
@@ -1048,7 +1083,7 @@ export async function deleteSessions(
       failedIds.push(...ids.slice(index))
       break
     }
-    if (await deleteSession(id, { expectedRuntimeKey })) deletedIds.push(id)
+    if (await deleteSession(id, { expectedRuntimeKey, deferProjectAutoClose: true })) deletedIds.push(id)
     else failedIds.push(id)
   }
 
@@ -1067,7 +1102,13 @@ export async function deleteSessions(
  * stays archived on that runtime and is re-read from the server the next time
  * the runtime is loaded.
  */
-export async function archiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey()): Promise<boolean> {
+export type ArchiveSessionOptions = {
+  expectedRuntimeKey?: string
+  deferProjectAutoClose?: boolean
+}
+
+export async function archiveSession(sessionId: string, options?: ArchiveSessionOptions): Promise<boolean> {
+  const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
   if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = getSessionDirectory(sessionId)
   const archivedAt = Date.now()
@@ -1084,6 +1125,9 @@ export async function archiveSession(sessionId: string, expectedRuntimeKey = get
     useGlobalSessionsStore.getState().upsertSession(archived)
     const ui = useSessionUIStore.getState()
     if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
+    if (!options?.deferProjectAutoClose) {
+      await closeProjectsWithoutActiveSessionsForDirectories([sessionDirectory])
+    }
     return true
   } catch (error) {
     console.error("[session-actions] archiveSession failed", error)
@@ -1123,7 +1167,7 @@ export async function archiveSessions(
       failedIds.push(...ids.slice(index))
       break
     }
-    if (await archiveSession(id, expectedRuntimeKey)) archivedIds.push(id)
+    if (await archiveSession(id, { expectedRuntimeKey, deferProjectAutoClose: true })) archivedIds.push(id)
     else failedIds.push(id)
   }
 

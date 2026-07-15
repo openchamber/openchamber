@@ -174,6 +174,21 @@ mock.module("@/stores/useConfigStore", () => ({
   },
 }))
 
+mock.module("@/stores/useProjectsStore", () => ({
+  useProjectsStore: {
+    getState: () => ({
+      projects: [],
+      removeProject: () => undefined,
+    }),
+  },
+}))
+
+mock.module("@/stores/useSessionDisplayStore", () => ({
+  useSessionDisplayStore: {
+    getState: () => ({ autoCloseEmptyProjects: false }),
+  },
+}))
+
 // Mock useSessionUIStore
 mock.module("./session-ui-store", () => ({
   useSessionUIStore: {
@@ -215,6 +230,7 @@ mock.module("./input-store", () => ({
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
   resolveGlobalSessionDirectory: (session: SessionWithDirectory) => session.directory ?? session.project?.worktree ?? null,
+  refreshGlobalSessionsAfterPending: async () => ({ activeSessions: [], archivedSessions: [] }),
   mergeSessionDirectoryMetadata: (incoming: Session, existing?: SessionWithDirectory | null): SessionWithDirectory => {
     if (!existing) return incoming as SessionWithDirectory
     const next = { ...(incoming as SessionWithDirectory) }
@@ -247,6 +263,7 @@ mock.module("./session-deletion-cleanup", () => ({
 
 mock.module("./sync-refs", () => ({
   getSyncSessionDirectory: () => null,
+  getAllSyncSessions: () => [],
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
   },

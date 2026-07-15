@@ -4,16 +4,9 @@ import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { deriveProjectLabelFromPath } from '@/lib/projectResolution';
 
 const APP_TITLE = 'OpenChamber';
-
-const formatProjectLabel = (label: string): string => label.trim();
-
-const getProjectNameFromPath = (path: string): string => {
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  const segments = normalized.split('/').filter(Boolean);
-  return segments[segments.length - 1] ?? '';
-};
 
 const buildWindowTitle = (projectLabel: string | null, instanceLabel: string | null): string => {
   const parts = [projectLabel, instanceLabel, APP_TITLE].filter((part): part is string => typeof part === 'string' && part.trim().length > 0);
@@ -35,15 +28,10 @@ export const useWindowTitle = () => {
 
     const label = activeProject.label?.trim();
     if (label) {
-      return formatProjectLabel(label);
+      return label;
     }
 
-    const pathName = getProjectNameFromPath(activeProject.path);
-    if (pathName) {
-      return formatProjectLabel(pathName);
-    }
-
-    return null;
+    return deriveProjectLabelFromPath(activeProject.path, true) || null;
   }, [activeProject]);
 
   const [instanceLabel, setInstanceLabel] = React.useState<string | null>(null);
