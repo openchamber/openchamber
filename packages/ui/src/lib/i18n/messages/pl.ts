@@ -472,6 +472,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.unread': 'Nieprzeczytane aktualizacje',
   'sessions.sidebar.session.status.pinned': 'Przypięta sesja',
   'sessions.sidebar.session.status.permissionRequired': 'Wymagane uprawnienie',
+  'sessions.sidebar.session.status.questionPending': 'Wymagana odpowiedź',
   'sessions.sidebar.session.subsessions.collapse': 'Zwiń pod-sesje',
   'sessions.sidebar.session.subsessions.expand': 'Rozwiń pod-sesje',
   'sessions.sidebar.dialogs.deleteSession.title': 'Usunąć sesję?',

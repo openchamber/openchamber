@@ -314,6 +314,7 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'Mises à jour non lues',
   'sessions.sidebar.session.status.pinned': 'Session épinglée',
   'sessions.sidebar.session.status.permissionRequired': 'Autorisation requise',
+  'sessions.sidebar.session.status.questionPending': 'Réponse requise',
   'sessions.sidebar.session.subsessions.collapse': 'Réduire les sous-sessions',
   'sessions.sidebar.session.subsessions.expand': 'Développer les sous-sessions',
   'sessions.sidebar.dialogs.deleteSession.title': 'Supprimer la session ?',
