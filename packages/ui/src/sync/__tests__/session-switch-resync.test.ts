@@ -1,9 +1,10 @@
 import { describe, expect, test, beforeEach, mock } from "bun:test"
 import { create, type StoreApi } from "zustand"
-import type { PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { Event, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
 
 const listPendingQuestionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
 const listPendingPermissionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
+const todoPersistWrites: Array<{ sessionID: string; todos: unknown }> = []
 let pendingQuestionsResponse: QuestionRequest[] = []
 let pendingPermissionsResponse: PermissionRequest[] = []
 let pendingQuestionsShouldThrow = false
@@ -41,7 +42,22 @@ mock.module("@/stores/useConfigStore", () => ({
 }))
 
 mock.module("@/stores/useTodosPersistStore", () => ({
-  useTodosPersistStore: { getState: () => ({}) },
+  useTodosPersistStore: {
+    getState: () => ({
+      setSessionTodos: (sessionID: string, todos: unknown) => {
+        todoPersistWrites.push({ sessionID, todos })
+      },
+    }),
+  },
+}))
+
+mock.module("sonner", () => ({
+  toast: {
+    dismiss: () => undefined,
+    error: () => undefined,
+    info: () => undefined,
+    success: () => undefined,
+  },
 }))
 
 mock.module("@/components/ui", () => ({
@@ -49,8 +65,13 @@ mock.module("@/components/ui", () => ({
 }))
 
 import { INITIAL_STATE, type State } from "../types"
-import type { DirectoryStore } from "../child-store"
-import { resyncBlockingRequestsForDirectory } from "../sync-context"
+import { ChildStoreManager, type DirectoryStore } from "../child-store"
+const {
+  createEventRoutingIndex,
+  handleEvent,
+  resyncBlockingRequestsForDirectory,
+  setActiveSession,
+} = await import("../sync-context")
 
 function buildQuestion(overrides: Partial<QuestionRequest> = {}): QuestionRequest {
   return {
@@ -91,6 +112,8 @@ describe("resyncBlockingRequestsForDirectory", () => {
     pendingPermissionsResponse = []
     pendingQuestionsShouldThrow = false
     pendingPermissionsShouldThrow = false
+    todoPersistWrites.length = 0
+    setActiveSession("", "")
   })
 
   test("calls listPendingQuestions and listPendingPermissions exactly once for the directory", async () => {
@@ -204,5 +227,57 @@ describe("resyncBlockingRequestsForDirectory", () => {
     expect(store.getState().question["ses_a"]).toHaveLength(1)
     expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_1")
     expect(listPendingPermissionsCalls).toHaveLength(1)
+  })
+
+  test("routes a directory-less todo snapshot to its active session during a multi-store routing-index gap", () => {
+    const childStores = new ChildStoreManager()
+    const store = childStores.ensureChild("/target", { bootstrap: false })
+    childStores.ensureChild("/other", { bootstrap: false })
+    const todos = [
+      { content: "Finish plan", status: "completed", priority: "high" },
+      { content: "Implement changes", status: "in_progress", priority: "high" },
+    ]
+    const event = {
+      type: "todo.updated",
+      properties: { sessionID: "ses_a", todos },
+    } as Event
+    const routingIndex = createEventRoutingIndex()
+
+    expect(childStores.children.size).toBe(2)
+    expect(routingIndex.sessionDirectoryById.size).toBe(0)
+    for (const candidate of childStores.children.values()) {
+      const state = candidate.getState()
+      expect(state.session).toEqual([])
+      expect(state.message.ses_a).toBe(undefined)
+      expect(state.session_status.ses_a).toBe(undefined)
+    }
+
+    let storeWrites = 0
+    const unsubscribe = store.subscribe(() => {
+      storeWrites += 1
+    })
+    setActiveSession("/target", "ses_a")
+    handleEvent("global", event, childStores, routingIndex)
+
+    expect(store.getState().todo.ses_a).toEqual(todos)
+    expect(todoPersistWrites).toEqual([{ sessionID: "ses_a", todos }])
+    expect(storeWrites).toBe(1)
+
+    const stateAfterFirstSnapshot = store.getState()
+    const duplicateTodos = todos.map((todo) => ({ ...todo }))
+    const duplicateEvent = {
+      type: "todo.updated",
+      properties: { sessionID: "ses_a", todos: duplicateTodos },
+    } as Event
+    expect(duplicateTodos).not.toBe(todos)
+    expect(duplicateTodos).toEqual(todos)
+
+    handleEvent("global", duplicateEvent, childStores, routingIndex)
+
+    expect(store.getState()).toBe(stateAfterFirstSnapshot)
+    expect(todoPersistWrites).toEqual([{ sessionID: "ses_a", todos }])
+    expect(storeWrites).toBe(1)
+    unsubscribe()
+    childStores.disposeAll()
   })
 })
