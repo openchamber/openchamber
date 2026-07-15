@@ -1,5 +1,10 @@
 import { describe, test, expect } from 'bun:test';
-import { reconcileSelectedPresetId, sanitizeManagedRemoteTunnelPresets, toggleDirectE2ee } from './tunnelSettingsState';
+import {
+  createManagedPresetRequestFence,
+  reconcileSelectedPresetId,
+  sanitizeManagedRemoteTunnelPresets,
+  toggleDirectE2ee,
+} from './tunnelSettingsState';
 
 describe('tunnelSettingsState', () => {
   describe('sanitizeManagedRemoteTunnelPresets', () => {
@@ -186,6 +191,110 @@ describe('tunnelSettingsState', () => {
     test('uses the first preset for an empty current ID and returns empty for no presets', () => {
       expect(reconcileSelectedPresetId('', presets)).toBe('first');
       expect(reconcileSelectedPresetId('first', [])).toBe('');
+    });
+  });
+
+  describe('createManagedPresetRequestFence', () => {
+    test('accepts only the latest refresh generation', () => {
+      const fence = createManagedPresetRequestFence();
+      const first = fence.beginRefresh();
+      const second = fence.beginRefresh();
+
+      expect(fence.canApplyRefresh(first)).toBe(false);
+      expect(fence.canApplyRefresh(second)).toBe(true);
+    });
+
+    test('invalidates refreshes started before a mutation and blocks refresh completion during mutations', () => {
+      const fence = createManagedPresetRequestFence();
+      const beforeMutation = fence.beginRefresh();
+      const mutation = fence.beginMutation('first');
+      const duringMutation = fence.beginRefresh();
+
+      expect(fence.canApplyRefresh(beforeMutation)).toBe(false);
+      expect(fence.canApplyRefresh(duringMutation)).toBe(false);
+      expect(fence.completeMutation(mutation)).toEqual({
+        accepted: true,
+        authoritativeRefreshNeeded: true,
+      });
+      expect(fence.canApplyRefresh(beforeMutation)).toBe(false);
+      expect(fence.canApplyRefresh(duringMutation)).toBe(true);
+    });
+
+    test('allows concurrent mutations for different profiles to merge independently', () => {
+      const fence = createManagedPresetRequestFence();
+      const first = fence.beginMutation('first');
+      const second = fence.beginMutation('second');
+
+      expect(fence.canApplyMutation(first)).toBe(true);
+      expect(fence.canApplyMutation(second)).toBe(true);
+      expect(fence.completeMutation(first)).toEqual({
+        accepted: true,
+        authoritativeRefreshNeeded: false,
+      });
+      expect(fence.completeMutation(second)).toEqual({
+        accepted: true,
+        authoritativeRefreshNeeded: true,
+      });
+    });
+
+    test('ignores older same-profile mutations regardless of completion order', () => {
+      const fence = createManagedPresetRequestFence();
+      const older = fence.beginMutation('first');
+      const newer = fence.beginMutation('first');
+
+      expect(fence.canApplyMutation(older)).toBe(false);
+      expect(fence.canApplyMutation(newer)).toBe(true);
+      expect(fence.completeMutation(newer)).toEqual({
+        accepted: true,
+        authoritativeRefreshNeeded: false,
+      });
+      expect(fence.canApplyMutation(older)).toBe(false);
+      expect(fence.completeMutation(older)).toEqual({
+        accepted: false,
+        authoritativeRefreshNeeded: true,
+      });
+
+      const reverseFence = createManagedPresetRequestFence();
+      const reverseOlder = reverseFence.beginMutation('first');
+      const reverseNewer = reverseFence.beginMutation('first');
+      expect(reverseFence.completeMutation(reverseOlder)).toEqual({
+        accepted: false,
+        authoritativeRefreshNeeded: false,
+      });
+      expect(reverseFence.completeMutation(reverseNewer)).toEqual({
+        accepted: true,
+        authoritativeRefreshNeeded: true,
+      });
+    });
+
+    test('bounds completion bookkeeping and requests only one refresh after the final mutation', () => {
+      const fence = createManagedPresetRequestFence();
+      const mutation = fence.beginMutation('first');
+
+      expect(fence.getActiveMutationCount()).toBe(1);
+      expect(fence.completeMutation(mutation).authoritativeRefreshNeeded).toBe(true);
+      expect(fence.getActiveMutationCount()).toBe(0);
+      expect(fence.completeMutation(mutation)).toEqual({
+        accepted: false,
+        authoritativeRefreshNeeded: false,
+      });
+
+      const next = fence.beginMutation('first');
+      expect(next.generation).toBeGreaterThan(mutation.generation);
+      expect(fence.canApplyMutation(next)).toBe(true);
+    });
+
+    test('rejects skipped refreshes after intervening refresh and mutation generations', () => {
+      const fence = createManagedPresetRequestFence();
+      const skipped = fence.beginRefresh();
+      const stale = fence.beginRefresh();
+      const mutation = fence.beginMutation('first');
+      fence.completeMutation(mutation);
+      const current = fence.beginRefresh();
+
+      expect(fence.canApplyRefresh(skipped)).toBe(false);
+      expect(fence.canApplyRefresh(stale)).toBe(false);
+      expect(fence.canApplyRefresh(current)).toBe(true);
     });
   });
 });

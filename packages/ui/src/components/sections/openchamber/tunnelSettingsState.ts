@@ -114,6 +114,86 @@ export const reconcileSelectedPresetId = (
   return presets[0]?.id ?? '';
 };
 
+export interface ManagedPresetRefreshToken {
+  generation: number;
+  mutationEpoch: number;
+}
+
+export interface ManagedPresetMutationToken {
+  profileId: string;
+  generation: number;
+}
+
+export interface ManagedPresetMutationCompletion {
+  accepted: boolean;
+  authoritativeRefreshNeeded: boolean;
+}
+
+export interface ManagedPresetRequestFence {
+  beginRefresh: () => ManagedPresetRefreshToken;
+  canApplyRefresh: (token: ManagedPresetRefreshToken) => boolean;
+  beginMutation: (profileId: string) => ManagedPresetMutationToken;
+  canApplyMutation: (token: ManagedPresetMutationToken) => boolean;
+  completeMutation: (token: ManagedPresetMutationToken) => ManagedPresetMutationCompletion;
+  getActiveMutationCount: () => number;
+}
+
+export const createManagedPresetRequestFence = (): ManagedPresetRequestFence => {
+  let refreshGeneration = 0;
+  let mutationEpoch = 0;
+  let mutationGeneration = 0;
+  const activeMutations = new Map<number, string>();
+  const latestMutationByProfile = new Map<string, number>();
+
+  const beginRefresh = (): ManagedPresetRefreshToken => ({
+    generation: ++refreshGeneration,
+    mutationEpoch,
+  });
+
+  const canApplyRefresh = (token: ManagedPresetRefreshToken): boolean => (
+    token.generation === refreshGeneration
+    && token.mutationEpoch === mutationEpoch
+    && activeMutations.size === 0
+  );
+
+  const beginMutation = (profileId: string): ManagedPresetMutationToken => {
+    mutationEpoch += 1;
+    const generation = ++mutationGeneration;
+    activeMutations.set(generation, profileId);
+    latestMutationByProfile.set(profileId, generation);
+    return { profileId, generation };
+  };
+
+  const canApplyMutation = (token: ManagedPresetMutationToken): boolean => (
+    activeMutations.get(token.generation) === token.profileId
+    && latestMutationByProfile.get(token.profileId) === token.generation
+  );
+
+  const completeMutation = (token: ManagedPresetMutationToken): ManagedPresetMutationCompletion => {
+    if (activeMutations.get(token.generation) !== token.profileId) {
+      return { accepted: false, authoritativeRefreshNeeded: false };
+    }
+    const accepted = canApplyMutation(token);
+    activeMutations.delete(token.generation);
+    if (![...activeMutations.values()].includes(token.profileId)) {
+      latestMutationByProfile.delete(token.profileId);
+    }
+    return {
+      accepted,
+      authoritativeRefreshNeeded: activeMutations.size === 0,
+    };
+  };
+
+  return {
+    beginRefresh,
+    canApplyRefresh,
+    beginMutation,
+    canApplyMutation,
+    completeMutation,
+    getActiveMutationCount: () => activeMutations.size,
+  };
+};
+
 export async function toggleDirectE2ee(
   presetId: string,
   enabled: boolean,
