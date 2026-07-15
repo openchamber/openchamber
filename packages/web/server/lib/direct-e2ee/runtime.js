@@ -19,6 +19,14 @@ const canonicalPublicUrl = (value) => {
   }
 };
 
+const authorityDriftError = () => Object.assign(
+  new Error('Direct E2EE authority changed during refresh'),
+  {
+    name: 'DirectE2eeAuthorityDriftError',
+    code: 'direct_e2ee_authority_drift',
+  },
+);
+
 export const createDirectE2eeRuntime = ({
   crypto,
   httpServer,
@@ -108,8 +116,13 @@ export const createDirectE2eeRuntime = ({
       clearAuthorityAfterRefreshFailure(generation);
       throw error;
     }
-    if (generation !== refreshGeneration || snapshotKey(snapshot) !== snapshotKey(controllerSnapshot())) {
+    if (generation !== refreshGeneration) {
       return activeProfile;
+    }
+    const currentSnapshot = controllerSnapshot();
+    if (snapshot.controller !== currentSnapshot.controller || snapshotKey(snapshot) !== snapshotKey(currentSnapshot)) {
+      clearAuthorityAfterRefreshFailure(generation);
+      throw authorityDriftError();
     }
     let nextProfile;
     try {
@@ -130,6 +143,7 @@ export const createDirectE2eeRuntime = ({
   const service = createService({
     getActiveProfile: () => activeProfile,
     getRelayIdentity: () => identityRuntime.getRelayIdentity(),
+    abandonPendingRelayIdentity: () => identityRuntime.abandonPendingRelayIdentity?.() ?? false,
     getLocalPort,
     internalTransportMarker,
     authenticateBearerToken: async (token) => {

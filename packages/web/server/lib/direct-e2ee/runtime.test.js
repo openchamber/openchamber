@@ -52,7 +52,9 @@ describe('direct E2EE production runtime', () => {
       getRelayIdentity: vi.fn(async () => ({
         hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
       })),
+      abandonPendingRelayIdentity: vi.fn(() => true),
     };
+    let serviceOptions;
     const readSettingsFromDiskMigrated = vi.fn(async () => { throw new Error('local identity read should not run'); });
     const readSettingsStrict = vi.fn(async () => { throw new Error('strict identity read should not run'); });
     const writeSettingsToDisk = vi.fn(async () => { throw new Error('local identity write should not run'); });
@@ -61,6 +63,13 @@ describe('direct E2EE production runtime', () => {
       readSettingsFromDiskMigrated,
       readSettingsStrict,
       writeSettingsToDisk,
+      createService: (options) => {
+        serviceOptions = options;
+        return {
+          attach: vi.fn(), detach: vi.fn(), closeProfile: vi.fn(), closeAll: vi.fn(), revokeClient: vi.fn(),
+          getActiveSessionCount: vi.fn(() => 0),
+        };
+      },
     });
 
     await fx.runtime.initialize();
@@ -68,6 +77,8 @@ describe('direct E2EE production runtime', () => {
 
     expect(candidate?.hostEncPubJwk).toEqual({ kty: 'EC', crv: 'P-256', x: 'x', y: 'y' });
     expect(identityRuntime.getRelayIdentity).toHaveBeenCalledTimes(1);
+    expect(serviceOptions.abandonPendingRelayIdentity()).toBe(true);
+    expect(identityRuntime.abandonPendingRelayIdentity).toHaveBeenCalledTimes(1);
     expect(readSettingsFromDiskMigrated).not.toHaveBeenCalled();
     expect(readSettingsStrict).not.toHaveBeenCalled();
     expect(writeSettingsToDisk).not.toHaveBeenCalled();
@@ -217,13 +228,14 @@ describe('direct E2EE production runtime', () => {
     const second = deferred();
     let reads = 0;
     const closeProfile = vi.fn();
+    const closeAll = vi.fn();
     const fx = await fixture({
       readManagedRemoteTunnelConfigFromDisk: () => {
         reads += 1;
         return reads === 1 ? first.promise : second.promise;
       },
       createService: () => ({
-        attach: vi.fn(), detach: vi.fn(), closeProfile, closeAll: vi.fn(), revokeClient: vi.fn(),
+        attach: vi.fn(), detach: vi.fn(), closeProfile, closeAll, revokeClient: vi.fn(),
         getActiveSessionCount: vi.fn(() => 0),
       }),
     });
@@ -236,6 +248,7 @@ describe('direct E2EE production runtime', () => {
     await initializing;
     expect(fx.runtime.getPairingState()?.suppressOrigin).toBe('https://b.example.com');
     expect(closeProfile).not.toHaveBeenCalled();
+    expect(closeAll).not.toHaveBeenCalled();
 
     const pending = deferred();
     fx.runtime.stop();
@@ -245,6 +258,48 @@ describe('direct E2EE production runtime', () => {
     pending.resolve({ tunnels: [{ id: 'profile-a', name: 'A', hostname: 'a.example.com', directE2eeEnabled: true }] });
     await refresh;
     expect(stoppedFx.runtime.isAvailable()).toBe(false);
+  });
+
+  it('revokes sessions when the captured controller authority drifts without a newer refresh', async () => {
+    const pending = deferred();
+    let deferRead = false;
+    const closeAll = vi.fn();
+    let serviceOptions;
+    const controller = {
+      mode: 'managed-remote', managedRemoteTunnelPresetId: 'profile-a', getPublicUrl: () => 'https://a.example.com',
+    };
+    const fx = await fixture({
+      readManagedRemoteTunnelConfigFromDisk: () => deferRead
+        ? pending.promise
+        : Promise.resolve({ tunnels: [{ id: 'profile-a', name: 'A', hostname: 'a.example.com', directE2eeEnabled: true }] }),
+      createService: (options) => {
+        serviceOptions = options;
+        return {
+          attach: vi.fn(), detach: vi.fn(), closeProfile: vi.fn(), closeAll, revokeClient: vi.fn(),
+          getActiveSessionCount: vi.fn(() => 2),
+        };
+      },
+    });
+    fx.setController(controller);
+    await fx.runtime.initialize();
+    expect(serviceOptions.getActiveProfile()?.id).toBe('profile-a');
+
+    deferRead = true;
+    const refreshing = fx.runtime.refresh();
+    controller.managedRemoteTunnelPresetId = 'profile-b';
+    controller.getPublicUrl = () => 'https://b.example.com';
+    pending.resolve({ tunnels: [{ id: 'profile-b', name: 'B', hostname: 'b.example.com', directE2eeEnabled: true }] });
+
+    await expect(refreshing).rejects.toMatchObject({
+      name: 'DirectE2eeAuthorityDriftError',
+      code: 'direct_e2ee_authority_drift',
+      message: 'Direct E2EE authority changed during refresh',
+    });
+    expect(closeAll).toHaveBeenCalledWith('authority-refresh-failed');
+    expect(serviceOptions.getActiveProfile()).toBeNull();
+    expect(fx.runtime.isAvailable()).toBe(false);
+    expect(fx.runtime.getPairingState()).toBeNull();
+    expect(await fx.runtime.getPairingCandidate()).toBeNull();
   });
 
   it('publishes safe unavailable state when the latest refresh fails', async () => {
