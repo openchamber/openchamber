@@ -649,12 +649,19 @@ export function useSync() {
 
   // Optimistic add (for prompt submission)
   const optimisticAdd = useCallback(
-    (input: { sessionID: string; directory?: string | null; message: Message; parts: Part[] }) => {
+    (input: {
+      sessionID: string
+      directory?: string | null
+      message: Message
+      parts: Part[]
+      clearRevert?: { sessionID: string; previousRevert: unknown }
+    }) => {
       setOptimistic(input.sessionID, { message: input.message, parts: input.parts }, input.directory)
       const targetStore = getOptimisticStore(input.directory)
       const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
+      let session = current.session
 
       // Insert message
       const messages = message[input.sessionID] ? [...message[input.sessionID]] : []
@@ -665,7 +672,19 @@ export function useSync() {
       // Insert parts
       part[input.message.id] = sortParts(input.parts)
 
-      targetStore.setState({ message, part })
+      if (input.clearRevert) {
+        const sessionIndex = session.findIndex((item) => item.id === input.clearRevert?.sessionID)
+        if (sessionIndex >= 0 && (session[sessionIndex] as { revert?: unknown }).revert === input.clearRevert.previousRevert) {
+          session = [...session]
+          session[sessionIndex] = { ...session[sessionIndex], revert: undefined } as typeof session[number]
+        }
+      }
+
+      targetStore.setState({
+        message,
+        part,
+        ...(session !== current.session ? { session } : {}),
+      })
     },
     [getOptimisticStore, setOptimistic],
   )

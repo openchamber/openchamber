@@ -2759,7 +2759,16 @@ export function useSessionMessageRecords(
 
   const subscribe = useCallback((notify: () => void) => {
     if (!sessionID) return () => undefined
-    return store.subscribe(notify)
+    return store.subscribe((state, previous) => {
+      if (
+        state.message === previous.message
+        && state.part === previous.part
+        && state.session === previous.session
+      ) {
+        return
+      }
+      notify()
+    })
   }, [sessionID, store])
 
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)

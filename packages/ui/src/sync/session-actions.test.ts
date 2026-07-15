@@ -192,9 +192,24 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
 }))
 
 mock.module("./sync-refs", () => ({
+  emitSyncConfigChanged: () => {},
+  getAllSyncSessionMap: () => new Map(),
+  getAllSyncSessions: () => [],
+  getDirectoryState: () => undefined,
+  getSyncChildStores: () => {
+    throw new Error("ChildStoreManager not initialized")
+  },
+  getSyncConfig: () => undefined,
+  getSyncMessages: () => [],
+  getSyncParts: () => [],
+  getSyncSessionMaterializationStatus: () => ({ hasMessages: false, renderable: false, missingPartMessageIDs: [] }),
+  getSyncSessions: () => [],
+  getSyncSessionStatus: () => undefined,
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
   },
+  setSyncRefs: () => {},
+  subscribeToSyncConfigChanges: () => () => {},
 }))
 
 import { create, type StoreApi } from "zustand"
@@ -202,7 +217,13 @@ import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/v2/client"
 
-type OptimisticAddCall = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
+type OptimisticAddCall = {
+  sessionID: string
+  directory?: string | null
+  message: Message
+  parts: Part[]
+  clearRevert?: { sessionID: string; previousRevert: unknown }
+}
 type OptimisticRemoveCall = { sessionID: string; directory?: string | null; messageID: string }
 type SessionWithDirectory = Session & {
   directory?: string | null
@@ -429,6 +450,131 @@ describe("optimisticSend target directory", () => {
     expect(optimisticRemove).toBe(null)
     expect(targetStore.getState().session_status["session-new"]?.type).toBe("busy")
     expect(currentStore.getState().session_status["session-new"]).toBe(undefined)
+  })
+
+  test("clears and restores only the target session's revert marker around a failed send", async () => {
+    const targetSession = { id: "session-a", time: { created: 1 }, revert: { messageID: "msg_2" } } as Session
+    const otherSession = { id: "session-b", time: { created: 1 }, revert: { messageID: "msg_9" } } as Session
+    const targetStore = createStore({}, { session: [targetSession] })
+    const otherStore = createStore({}, { session: [otherSession] })
+    const childStores = createChildStores([
+      ["/target/project", targetStore],
+      ["/other/project", otherStore],
+    ])
+    let clearRevert: { sessionID: string; previousRevert: unknown } | undefined
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/current/project")
+    setOptimisticRefs(
+      (input) => {
+        clearRevert = input.clearRevert
+        const current = targetStore.getState()
+        const session = [...current.session]
+        const index = session.findIndex((item) => item.id === input.clearRevert?.sessionID)
+        if (index >= 0 && (session[index] as { revert?: unknown }).revert === input.clearRevert?.previousRevert) {
+          session[index] = { ...session[index], revert: undefined } as Session
+        }
+        targetStore.setState({ session })
+      },
+      () => {},
+    )
+
+    await expect(optimisticSend({
+      sessionId: "session-a",
+      directory: "/target/project",
+      content: "replacement",
+      providerID: "provider",
+      modelID: "model",
+      send: async () => {
+        throw new Error("validation rejected")
+      },
+    })).rejects.toThrow("validation rejected")
+
+    expect(clearRevert?.sessionID).toBe("session-a")
+    expect((targetStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_2")
+    expect((otherStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_9")
+  })
+
+  test("keeps the cleared revert marker when an ambiguous send is confirmed", async () => {
+    const targetSession = { id: "session-a", time: { created: 1 }, revert: { messageID: "msg_2" } } as Session
+    const targetStore = createStore({}, { session: [targetSession] })
+    const childStores = createChildStores([["/target/project", targetStore]])
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        const current = targetStore.getState()
+        const session = [...current.session]
+        const index = session.findIndex((item) => item.id === input.clearRevert?.sessionID)
+        if (index >= 0 && (session[index] as { revert?: unknown }).revert === input.clearRevert?.previousRevert) {
+          session[index] = { ...session[index], revert: undefined } as Session
+        }
+        targetStore.setState({ session })
+      },
+      () => {},
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-a",
+      directory: "/target/project",
+      content: "replacement",
+      providerID: "provider",
+      modelID: "model",
+      send: async (messageID) => {
+        sessionMessagesResult = {
+          data: [{
+            info: { id: messageID, role: "user", sessionID: "session-a", time: { created: 1 } } as Message,
+            parts: [],
+          }],
+        }
+        const error = new Error("Failed to send message (504): gateway timeout") as Error & { status?: number }
+        error.status = 504
+        throw error
+      },
+    })
+
+    expect((targetStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert).toBe(undefined)
+  })
+
+  test("does not restore a revert marker after an authoritative session update", async () => {
+    const targetSession = { id: "session-a", title: "local", time: { created: 1 }, revert: { messageID: "msg_2" } } as Session
+    const targetStore = createStore({}, { session: [targetSession] })
+    const childStores = createChildStores([["/target/project", targetStore]])
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        const current = targetStore.getState()
+        targetStore.setState({
+          session: current.session.map((session) => session.id === input.clearRevert?.sessionID
+            ? { ...session, revert: undefined } as Session
+            : session),
+        })
+      },
+      () => {},
+    )
+
+    await expect(optimisticSend({
+      sessionId: "session-a",
+      directory: "/target/project",
+      content: "replacement",
+      providerID: "provider",
+      modelID: "model",
+      send: async () => {
+        const current = targetStore.getState()
+        targetStore.setState({
+          session: [{ ...current.session[0], title: "server", revert: undefined } as Session],
+        })
+        throw new Error("validation rejected")
+      },
+    })).rejects.toThrow("validation rejected")
+
+    const session = targetStore.getState().session[0] as Session & { revert?: { messageID?: string } }
+    expect(session.title).toBe("server")
+    expect(session.revert).toBe(undefined)
   })
 
   test("allows callers to block final send when runtime changes after optimistic insert", async () => {

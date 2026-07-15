@@ -40,7 +40,13 @@ const UNREVERT_REFETCH_RETRY_MS = 150
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
-type OptimisticAddInput = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
+type OptimisticAddInput = {
+  sessionID: string
+  directory?: string | null
+  message: Message
+  parts: Part[]
+  clearRevert?: { sessionID: string; previousRevert: unknown }
+}
 type OptimisticRemoveInput = { sessionID: string; directory?: string | null; messageID: string }
 type OptimisticConfirmInput = OptimisticRemoveInput
 
@@ -748,13 +754,28 @@ export async function optimisticSend(input: {
     time: { created: Date.now(), completed: 0 },
   } as unknown as Message
 
+  // A revert marker filters every message at and after its target. Clear the
+  // marker in the same store update as the optimistic insertion so the newly
+  // sent message is visible immediately. Keep the exact cleared session
+  // record: an expected send failure restores the marker only if an
+  // authoritative session update has not superseded this local change.
+  const revertedSession = store.getState().session.find((session) => session.id === input.sessionId) as (Session & { revert?: unknown }) | undefined
+  const clearRevert = revertedSession?.revert && typeof revertedSession.revert === "object"
+    && typeof (revertedSession.revert as { messageID?: unknown }).messageID === "string"
+    ? { sessionID: input.sessionId, previousRevert: revertedSession.revert }
+    : undefined
+
   // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)
   _optimisticAdd({
     sessionID: input.sessionId,
     directory: targetDirectory,
     message: optimisticMessage,
     parts: optimisticParts,
+    clearRevert,
   })
+  const clearedRevertSession = clearRevert
+    ? store.getState().session.find((session) => session.id === input.sessionId)
+    : undefined
   input.onOptimisticInsert?.()
 
   // Set busy status
@@ -789,6 +810,19 @@ export async function optimisticSend(input: {
       directory: targetDirectory,
       messageID,
     })
+    if (clearRevert && clearedRevertSession) {
+      store.setState((current) => {
+        const sessionIndex = current.session.findIndex((session) => session.id === input.sessionId)
+        if (sessionIndex === -1 || current.session[sessionIndex] !== clearedRevertSession) return current
+
+        const session = [...current.session]
+        session[sessionIndex] = {
+          ...session[sessionIndex],
+          revert: clearRevert.previousRevert,
+        } as Session
+        return { session }
+      })
+    }
     const s = store.getState()
     store.setState({
       session_status: {
