@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { sanitizeManagedRemoteTunnelPresets, toggleDirectE2ee } from './tunnelSettingsState';
+import { reconcileSelectedPresetId, sanitizeManagedRemoteTunnelPresets, toggleDirectE2ee } from './tunnelSettingsState';
 
 describe('tunnelSettingsState', () => {
   describe('sanitizeManagedRemoteTunnelPresets', () => {
@@ -142,6 +142,32 @@ describe('tunnelSettingsState', () => {
       const result = await toggleDirectE2ee('p1', true, mockFetch);
 
       expect(result.ok).toBe(false);
+    });
+  });
+
+  describe('reconcileSelectedPresetId', () => {
+    const presets = [
+      { id: 'first', name: 'First', hostname: 'first.example' },
+      { id: 'second', name: 'Second', hostname: 'second.example' },
+    ];
+
+    test('retains the current selection when it is still present', () => {
+      expect(reconcileSelectedPresetId('second', presets)).toBe('second');
+    });
+
+    test('falls back deterministically to the first surviving preset after removal or deduplication', () => {
+      const deduped = sanitizeManagedRemoteTunnelPresets([
+        presets[0],
+        { id: 'removed', name: 'Duplicate', hostname: 'first.example' },
+        presets[1],
+      ]);
+      expect(reconcileSelectedPresetId('removed', deduped)).toBe('first');
+      expect(reconcileSelectedPresetId('missing', [...presets].reverse())).toBe('second');
+    });
+
+    test('uses the first preset for an empty current ID and returns empty for no presets', () => {
+      expect(reconcileSelectedPresetId('', presets)).toBe('first');
+      expect(reconcileSelectedPresetId('first', [])).toBe('');
     });
   });
 });

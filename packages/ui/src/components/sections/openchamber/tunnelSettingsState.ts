@@ -106,6 +106,14 @@ export const sanitizeManagedRemoteTunnelPresets = (
   return [{ id: `legacy-${hostname}`, name: legacyHostname.trim(), hostname }];
 };
 
+export const reconcileSelectedPresetId = (
+  currentId: string,
+  presets: readonly ManagedRemoteTunnelPreset[],
+): string => {
+  if (currentId && presets.some((preset) => preset.id === currentId)) return currentId;
+  return presets[0]?.id ?? '';
+};
+
 export async function toggleDirectE2ee(
   presetId: string,
   enabled: boolean,
