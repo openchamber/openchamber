@@ -67,7 +67,7 @@ const createRuntime = (overrides = {}) => {
     resolvedWslDistro: null,
   };
 
-  return createOpenCodeLifecycleRuntime({
+  const runtime = createOpenCodeLifecycleRuntime({
     state,
     env: {
       ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -102,6 +102,8 @@ const createRuntime = (overrides = {}) => {
     })),
     ...overrides,
   });
+
+  return { runtime, state };
 };
 
 describe('OpenCode lifecycle', () => {
@@ -115,7 +117,7 @@ describe('OpenCode lifecycle', () => {
       return child;
     });
 
-    const runtime = createRuntime();
+    const { runtime } = createRuntime();
     const server = await runtime.startOpenCode();
     const [binary, args, options] = spawnMock.mock.calls[0];
 
@@ -138,7 +140,7 @@ describe('OpenCode lifecycle', () => {
       return child;
     });
 
-    const runtime = createRuntime({
+    const { runtime } = createRuntime({
       buildManagedOpenCodePath: undefined,
       buildAugmentedPath: vi.fn(() => '/home/user/.cargo/bin:/usr/local/bin'),
     });
@@ -161,7 +163,7 @@ describe('OpenCode lifecycle', () => {
       return child;
     });
 
-    const runtime = createRuntime({
+    const { runtime } = createRuntime({
       buildManagedOpenCodePath: undefined,
       buildAugmentedPath: undefined,
     });
@@ -190,7 +192,7 @@ describe('OpenCode lifecycle', () => {
       return secondChild;
     });
 
-    const runtime = createRuntime();
+    const { runtime } = createRuntime();
 
     await expect(runtime.startOpenCode()).rejects.toThrow('OpenCode process exited before serving with signal SIGTERM. Binary used: opencode. No stdout/stderr captured');
     expect(spawnMock).toHaveBeenCalledTimes(2);
@@ -204,7 +206,7 @@ describe('OpenCode lifecycle', () => {
       throw error;
     });
 
-    const runtime = createRuntime({ applyOpencodeBinaryFromSettings });
+    const { runtime } = createRuntime({ applyOpencodeBinaryFromSettings });
 
     await expect(runtime.startOpenCode()).rejects.toThrow('Configured OpenCode binary not found: /missing/opencode');
     expect(applyOpencodeBinaryFromSettings).toHaveBeenCalledTimes(1);
@@ -229,10 +231,108 @@ describe('OpenCode lifecycle', () => {
       return secondChild;
     });
 
-    const runtime = createRuntime();
+    const { runtime } = createRuntime();
     const server = await runtime.startOpenCode();
 
     expect(spawnMock).toHaveBeenCalledTimes(2);
     await server.close();
+  });
+
+  it('hasChildProcessExited returns false for wrapper object', async () => {
+    const { runtime, state } = createRuntime();
+    const wrapper = { url: 'http://127.0.0.1:45678', pid: 12345, close: vi.fn() };
+    state.openCodeProcess = wrapper;
+    state.openCodePort = 45678;
+
+    // Mock fetch to return unhealthy
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ healthy: false }),
+    });
+
+    // Mock process.kill to succeed (process is alive)
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (signal === 0) return true;
+    });
+
+    await runtime.triggerHealthCheck();
+
+    // Process should NOT be restarted — wrapper was correctly identified as alive
+    expect(state.openCodeProcess).toBe(wrapper);
+    expect(wrapper.close).not.toHaveBeenCalled();
+
+    killSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  it('does not restart when process.kill throws EPERM (Windows)', async () => {
+    const { runtime, state } = createRuntime();
+    const wrapperPid = 12345;
+    const wrapper = {
+      url: 'http://127.0.0.1:45678',
+      pid: wrapperPid,
+      close: vi.fn(),
+    };
+    state.openCodeProcess = wrapper;
+    state.openCodePort = 45678;
+
+    // Mock fetch to return unhealthy
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ healthy: false }),
+    });
+
+    // Mock process.kill to throw EPERM (Windows behavior: process alive but un-signalable)
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (signal === 0) {
+        const err = new Error('EPERM');
+        err.code = 'EPERM';
+        throw err;
+      }
+    });
+
+    await runtime.triggerHealthCheck();
+
+    // Process should still be considered alive — no restart triggered
+    expect(state.openCodeProcess).toBe(wrapper);
+    expect(wrapper.close).not.toHaveBeenCalled();
+
+    killSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  it('restarts when process.kill throws ESRCH (process actually dead)', async () => {
+    const { runtime, state } = createRuntime();
+    const wrapperPid = 12345;
+    const wrapper = {
+      url: 'http://127.0.0.1:45678',
+      pid: wrapperPid,
+      close: vi.fn(),
+    };
+    state.openCodeProcess = wrapper;
+    state.openCodePort = 45678;
+
+    // Mock fetch to return unhealthy
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ healthy: false }),
+    });
+
+    // Mock process.kill to throw ESRCH (process does not exist)
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (signal === 0) {
+        const err = new Error('ESRCH');
+        err.code = 'ESRCH';
+        throw err;
+      }
+    });
+
+    await runtime.triggerHealthCheck();
+
+    // Process should be considered dead — restart should be triggered (state.openCodeProcess set to null)
+    expect(state.openCodeProcess).toBeNull();
+
+    killSpy.mockRestore();
+    fetchSpy.mockRestore();
   });
 });
