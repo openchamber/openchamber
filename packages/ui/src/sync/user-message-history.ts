@@ -1,5 +1,6 @@
 import type { Message, Part } from '@opencode-ai/sdk/v2/client';
-import type { State } from './types';
+import type { PostRevertBranchOverlay, State } from './types';
+import { getEffectiveVisibleMessages, getSessionRevertMessageID } from './message-visibility';
 
 type UserMessageHistoryRecord = {
   message: Message;
@@ -9,6 +10,7 @@ type UserMessageHistoryRecord = {
 export type UserMessageHistorySnapshot = {
   sessionID: string;
   revertMessageID?: string;
+  postRevertBranch?: PostRevertBranchOverlay;
   records: UserMessageHistoryRecord[];
   history: string[];
 };
@@ -20,6 +22,7 @@ const EMPTY_HISTORY: string[] = [];
 export const EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT: UserMessageHistorySnapshot = {
   sessionID: '',
   revertMessageID: undefined,
+  postRevertBranch: undefined,
   records: EMPTY_RECORDS,
   history: EMPTY_HISTORY,
 };
@@ -50,7 +53,7 @@ const areRecordsEqual = (left: UserMessageHistoryRecord[], right: UserMessageHis
 };
 
 export const buildUserMessageHistorySnapshot = (
-  state: Pick<State, 'session' | 'message' | 'part'>,
+  state: Pick<State, 'session' | 'message' | 'part' | 'postRevertBranch'>,
   sessionID: string,
   previous: UserMessageHistorySnapshot = EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT,
 ): UserMessageHistorySnapshot => {
@@ -60,14 +63,13 @@ export const buildUserMessageHistorySnapshot = (
 
   const messages = state.message[sessionID] ?? [];
   const session = state.session.find((candidate) => candidate.id === sessionID);
-  const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+  const revertMessageID = getSessionRevertMessageID(session);
+  const postRevertBranch = state.postRevertBranch[sessionID];
+  const visibleMessages = getEffectiveVisibleMessages(messages, session, postRevertBranch);
   const records: UserMessageHistoryRecord[] = [];
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
+  for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+    const message = visibleMessages[index];
     if (message.role !== 'user') {
-      continue;
-    }
-    if (revertMessageID && message.id >= revertMessageID) {
       continue;
     }
     records.push({
@@ -77,12 +79,20 @@ export const buildUserMessageHistorySnapshot = (
   }
 
   if (records.length === 0) {
-    return previous.sessionID === sessionID && previous.revertMessageID === revertMessageID && previous.records.length === 0
+    return previous.sessionID === sessionID
+      && previous.revertMessageID === revertMessageID
+      && previous.postRevertBranch === postRevertBranch
+      && previous.records.length === 0
       ? previous
-      : { sessionID, revertMessageID, records: EMPTY_RECORDS, history: EMPTY_HISTORY };
+      : { sessionID, revertMessageID, postRevertBranch, records: EMPTY_RECORDS, history: EMPTY_HISTORY };
   }
 
-  if (previous.sessionID === sessionID && previous.revertMessageID === revertMessageID && areRecordsEqual(previous.records, records)) {
+  if (
+    previous.sessionID === sessionID
+    && previous.revertMessageID === revertMessageID
+    && previous.postRevertBranch === postRevertBranch
+    && areRecordsEqual(previous.records, records)
+  ) {
     return previous;
   }
 
@@ -94,5 +104,5 @@ export const buildUserMessageHistorySnapshot = (
     }
   }
 
-  return { sessionID, revertMessageID, records, history };
+  return { sessionID, revertMessageID, postRevertBranch, records, history };
 };

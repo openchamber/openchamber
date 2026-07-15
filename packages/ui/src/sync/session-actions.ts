@@ -21,6 +21,11 @@ import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
 import {
+  clearPostRevertBranchOverlay,
+  reconcilePostRevertBranchOverlay,
+  setPostRevertBranchOverlay,
+} from "./message-visibility"
+import {
   getOriginalSessionID,
   getSessionMetadata,
   isReviewSession,
@@ -45,7 +50,6 @@ type OptimisticAddInput = {
   directory?: string | null
   message: Message
   parts: Part[]
-  clearRevert?: { sessionID: string; previousRevert: unknown }
 }
 type OptimisticRemoveInput = { sessionID: string; directory?: string | null; messageID: string }
 type OptimisticConfirmInput = OptimisticRemoveInput
@@ -177,13 +181,24 @@ function updateLiveSession(session: Session, directory?: string): boolean {
 
   for (const [, store] of candidates) {
     if (!store) continue
-    const current = store.getState().session
+    const state = store.getState()
+    const current = state.session
     const index = current.findIndex((item) => item.id === session.id)
     if (index === -1) continue
 
     const next = [...current]
-    next[index] = mergeSessionDirectoryMetadata(session, current[index])
-    store.setState({ session: next })
+    const nextSession = mergeSessionDirectoryMetadata(session, current[index])
+    next[index] = nextSession
+    const postRevertBranch = reconcilePostRevertBranchOverlay(
+      state.postRevertBranch,
+      session.id,
+      current[index],
+      nextSession,
+    )
+    store.setState({
+      session: next,
+      ...(postRevertBranch !== state.postRevertBranch ? { postRevertBranch } : {}),
+    })
     return true
   }
 
@@ -754,28 +769,14 @@ export async function optimisticSend(input: {
     time: { created: Date.now(), completed: 0 },
   } as unknown as Message
 
-  // A revert marker filters every message at and after its target. Clear the
-  // marker in the same store update as the optimistic insertion so the newly
-  // sent message is visible immediately. Keep the exact cleared session
-  // record: an expected send failure restores the marker only if an
-  // authoritative session update has not superseded this local change.
-  const revertedSession = store.getState().session.find((session) => session.id === input.sessionId) as (Session & { revert?: unknown }) | undefined
-  const clearRevert = revertedSession?.revert && typeof revertedSession.revert === "object"
-    && typeof (revertedSession.revert as { messageID?: unknown }).messageID === "string"
-    ? { sessionID: input.sessionId, previousRevert: revertedSession.revert }
-    : undefined
-
-  // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)
+  // Keep session.revert authoritative. useSync records replacement visibility
+  // in its directory-scoped overlay while inserting this optimistic message.
   _optimisticAdd({
     sessionID: input.sessionId,
     directory: targetDirectory,
     message: optimisticMessage,
     parts: optimisticParts,
-    clearRevert,
   })
-  const clearedRevertSession = clearRevert
-    ? store.getState().session.find((session) => session.id === input.sessionId)
-    : undefined
   input.onOptimisticInsert?.()
 
   // Set busy status
@@ -810,19 +811,6 @@ export async function optimisticSend(input: {
       directory: targetDirectory,
       messageID,
     })
-    if (clearRevert && clearedRevertSession) {
-      store.setState((current) => {
-        const sessionIndex = current.session.findIndex((session) => session.id === input.sessionId)
-        if (sessionIndex === -1 || current.session[sessionIndex] !== clearedRevertSession) return current
-
-        const session = [...current.session]
-        session[sessionIndex] = {
-          ...session[sessionIndex],
-          revert: clearRevert.previousRevert,
-        } as Session
-        return { session }
-      })
-    }
     const s = store.getState()
     store.setState({
       session_status: {
@@ -1118,25 +1106,24 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     submittedFileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
   }
 
-  // Optimistically set only the revert marker. Keep messages and parts in the
-  // local store; visible-message selectors derive the displayed timeline from
-  // session.revert. This matches the server model and preserves reverted
-  // messages for the restore dock without maintaining a separate shadow copy.
+  // Optimistically set only the revert marker. Keep messages, parts, and a
+  // prior replacement overlay in the local store; visible-message selectors
+  // ignore that overlay while its captured marker does not match this one.
+  const stateBeforeOptimisticRevert = store.getState()
   const prevRevert = (() => {
-    const s = state.session.find((s) => s.id === sessionId)
+    const s = stateBeforeOptimisticRevert.session.find((s) => s.id === sessionId)
     return (s as Session & { revert?: unknown })?.revert
   })()
-  const sessions = [...state.session]
+  const previousPostRevertBranch = stateBeforeOptimisticRevert.postRevertBranch[sessionId]
+  const sessions = [...stateBeforeOptimisticRevert.session]
   const sessionIdx = sessions.findIndex((s) => s.id === sessionId)
-
-  const patch: Record<string, unknown> = {}
 
   if (sessionIdx >= 0) {
     sessions[sessionIdx] = { ...sessions[sessionIdx], revert: { messageID: messageId } } as Session
-    patch.session = sessions
   }
-
-  store.setState(patch)
+  store.setState({
+    ...(sessionIdx >= 0 ? { session: sessions } : {}),
+  })
 
   // Save input store state before mutations — if the API fails we need to
   // roll back both text and attachments to their previous values.
@@ -1165,21 +1152,33 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     const idx = updated.findIndex((s) => s.id === sessionId)
     if (idx >= 0) {
       updated[idx] = revertedSession
-      store.setState({ session: updated })
     }
+    // The authoritative marker changed, so the prior replacement branch is stale.
+    const postRevertBranch = clearPostRevertBranchOverlay(current.postRevertBranch, sessionId)
+    store.setState({
+      ...(idx >= 0 ? { session: updated } : {}),
+      ...(postRevertBranch !== current.postRevertBranch ? { postRevertBranch } : {}),
+    })
     if (directory) {
       sessionEvents.requestGitRefresh({ directory })
     }
   } catch (err) {
-    // Rollback: restore removed messages + revert marker
+    // Reconciliation may have retired the prior overlay while Y was active.
+    // Restore only this session's captured overlay with the prior marker.
     const current = store.getState()
     const rollback = [...current.session]
     const idx = rollback.findIndex((s) => s.id === sessionId)
     if (idx >= 0) {
       rollback[idx] = { ...rollback[idx], revert: prevRevert } as Session
     }
+    const postRevertBranch = setPostRevertBranchOverlay(
+      current.postRevertBranch,
+      sessionId,
+      previousPostRevertBranch,
+    )
     store.setState({
-      session: rollback,
+      ...(idx >= 0 ? { session: rollback } : {}),
+      ...(postRevertBranch !== current.postRevertBranch ? { postRevertBranch } : {}),
     })
     // Rollback input store: restore previous text and attachments
     useInputStore.setState({
@@ -1238,8 +1237,12 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   const idx = sessions.findIndex((s) => s.id === sessionId)
   if (idx >= 0) {
     sessions[idx] = unrevertedSession
-    store.setState({ session: sessions })
   }
+  const postRevertBranch = clearPostRevertBranchOverlay(current.postRevertBranch, sessionId)
+  store.setState({
+    ...(idx >= 0 ? { session: sessions } : {}),
+    ...(postRevertBranch !== current.postRevertBranch ? { postRevertBranch } : {}),
+  })
   for (let attempt = 0; attempt < UNREVERT_REFETCH_ATTEMPTS; attempt += 1) {
     if (attempt > 0) await wait(UNREVERT_REFETCH_RETRY_MS)
     await refetchSessionMessages(sessionId)

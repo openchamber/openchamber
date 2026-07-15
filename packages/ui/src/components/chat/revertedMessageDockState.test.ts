@@ -3,6 +3,7 @@ import type { Message, Part } from '@opencode-ai/sdk/v2/client';
 import type { State } from '@/sync/types';
 
 import { EMPTY_REVERTED_MESSAGE_DOCK_STATE, buildRevertedMessageDockState } from './revertedMessageDockState';
+import { addPostRevertBranchReplacement } from '@/sync/message-visibility';
 
 const message = (id: string, role: 'user' | 'assistant'): Message => ({
     id,
@@ -17,10 +18,11 @@ const textPart = (id: string, text: string): Part => ({
     text,
 } as Part);
 
-const state = (partial: Partial<State>): Pick<State, 'session' | 'message' | 'part'> => ({
+const state = (partial: Partial<State>): Pick<State, 'session' | 'message' | 'part' | 'postRevertBranch'> => ({
     session: [],
     message: {},
     part: {},
+    postRevertBranch: {},
     ...partial,
 });
 
@@ -85,5 +87,25 @@ describe('buildRevertedMessageDockState', () => {
 
         expect(second).not.toBe(first);
         expect(second.records).toHaveLength(1);
+    });
+
+    test('does not list a visible replacement branch as reverted history', () => {
+        const result = buildRevertedMessageDockState(
+            state({
+                session: [{ id: 'ses_1', revert: { messageID: 'msg_002' } } as State['session'][number]],
+                message: {
+                    ses_1: [
+                        message('msg_001', 'user'),
+                        message('msg_002', 'user'),
+                        message('msg_003', 'user'),
+                        message('msg_004', 'user'),
+                    ],
+                },
+                postRevertBranch: addPostRevertBranchReplacement({}, 'ses_1', 'msg_002', 'msg_004'),
+            }),
+            'ses_1',
+        );
+
+        expect(result.records.map((record) => record.message.id)).toEqual(['msg_002', 'msg_003']);
     });
 });

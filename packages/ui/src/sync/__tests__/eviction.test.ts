@@ -181,11 +181,15 @@ describe("session cache eviction", () => {
       part: {
         msg_1: [{ id: "prt_1", messageID: "msg_1" } as Part],
       },
+      postRevertBranch: {
+        ses_old: { revertMessageID: "msg_0", replacementMessageIDs: ["msg_1"] },
+      },
     })
 
     dropSessionCaches(store, ["ses_old"])
 
     expect(store.message.ses_old).toBe(undefined)
     expect(store.part.msg_1).toBe(undefined)
+    expect(store.postRevertBranch.ses_old).toBe(undefined)
   })
 })

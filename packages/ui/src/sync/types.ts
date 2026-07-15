@@ -38,6 +38,17 @@ export type ProjectMeta = {
   }
 }
 
+/**
+ * Local visibility continuity for a replacement branch sent after a server
+ * revert. It is intentionally directory-store scoped and never persisted.
+ */
+export type PostRevertBranchOverlay = {
+  revertMessageID: string
+  replacementMessageIDs: string[]
+}
+
+export type PostRevertBranchOverlays = Record<string, PostRevertBranchOverlay>
+
 /** Per-directory store state */
 export type State = {
   status: "loading" | "partial" | "complete"
@@ -50,6 +61,7 @@ export type State = {
   config: Config
   path: Path
   session: Session[]
+  postRevertBranch: PostRevertBranchOverlays
   sessionTotal: number
   session_status: Record<string, SessionStatus>
   session_diff: Record<string, FileDiff[]>
@@ -120,6 +132,7 @@ export const INITIAL_STATE: State = {
   agent: [],
   command: [],
   session: [],
+  postRevertBranch: {},
   sessionTotal: 0,
   session_status: {},
   session_diff: {},
