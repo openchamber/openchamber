@@ -262,4 +262,65 @@ describe('direct E2EE production runtime', () => {
     expect(fx.runtime.isAvailable()).toBe(false);
     expect(fx.runtime.getPairingState()).toBeNull();
   });
+
+  it('closes established sessions and clears authority before rethrowing a refresh read failure', async () => {
+    const refreshFailure = new Error('fixed authority refresh failure');
+    let fail = false;
+    let establishedSessions = 2;
+    let serviceOptions;
+    const closeAll = vi.fn(() => { establishedSessions = 0; });
+    const fx = await fixture({
+      readManagedRemoteTunnelConfigFromDisk: async () => {
+        if (fail) throw refreshFailure;
+        return { tunnels: [{ id: 'profile-a', name: 'A', hostname: 'a.example.com', directE2eeEnabled: true }] };
+      },
+      createService: (options) => {
+        serviceOptions = options;
+        return {
+          attach: vi.fn(), detach: vi.fn(), closeProfile: vi.fn(), closeAll, revokeClient: vi.fn(),
+          getActiveSessionCount: vi.fn(() => establishedSessions),
+        };
+      },
+    });
+    await fx.runtime.initialize();
+    await fx.runtime.refresh();
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(serviceOptions.getActiveProfile()?.id).toBe('profile-a');
+
+    fail = true;
+    await expect(fx.runtime.refresh()).rejects.toBe(refreshFailure);
+    expect(closeAll).toHaveBeenCalledWith('authority-refresh-failed');
+    expect(establishedSessions).toBe(0);
+    expect(serviceOptions.getActiveProfile()).toBeNull();
+    expect(fx.runtime.isAvailable()).toBe(false);
+    expect(fx.runtime.getPairingState()).toBeNull();
+    expect(await fx.runtime.getPairingCandidate()).toBeNull();
+    expect(fx.runtime.initialized).toBe(true);
+  });
+
+  it('fails closed and preserves the validation failure when refreshed profile data is malformed', async () => {
+    const validationFailure = new Error('fixed profile validation failure');
+    let malformed = false;
+    let serviceOptions;
+    const closeAll = vi.fn();
+    const fx = await fixture({
+      readManagedRemoteTunnelConfigFromDisk: async () => malformed
+        ? { get tunnels() { throw validationFailure; } }
+        : { tunnels: [{ id: 'profile-a', name: 'A', hostname: 'a.example.com', directE2eeEnabled: true }] },
+      createService: (options) => {
+        serviceOptions = options;
+        return {
+          attach: vi.fn(), detach: vi.fn(), closeProfile: vi.fn(), closeAll, revokeClient: vi.fn(),
+          getActiveSessionCount: vi.fn(() => 1),
+        };
+      },
+    });
+    await fx.runtime.initialize();
+    malformed = true;
+
+    await expect(fx.runtime.refresh()).rejects.toBe(validationFailure);
+    expect(closeAll).toHaveBeenCalledWith('authority-refresh-failed');
+    expect(serviceOptions.getActiveProfile()).toBeNull();
+    expect(fx.runtime.getPairingState()).toBeNull();
+  });
 });

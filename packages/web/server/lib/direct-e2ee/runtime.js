@@ -85,6 +85,17 @@ export const createDirectE2eeRuntime = ({
     ? `${profile.id}\n${profile.mode}\n${profile.hostname}\n${profile.publicUrl}`
     : null;
 
+  const clearAuthorityAfterRefreshFailure = (generation) => {
+    if (generation !== refreshGeneration) return;
+    activeProfile = null;
+    lastPublishedProfile = null;
+    try {
+      service.closeAll('authority-refresh-failed');
+    } catch {
+      // The service performs per-session best-effort cleanup; authority stays revoked.
+    }
+  };
+
   const refresh = async ({ closePreviousReason = null, reason = null } = {}) => {
     const effectiveCloseReason = closePreviousReason || reason;
     const generation = ++refreshGeneration;
@@ -94,13 +105,19 @@ export const createDirectE2eeRuntime = ({
     try {
       config = await readManagedRemoteTunnelConfigFromDisk();
     } catch (error) {
-      if (generation === refreshGeneration) activeProfile = null;
+      clearAuthorityAfterRefreshFailure(generation);
       throw error;
     }
     if (generation !== refreshGeneration || snapshotKey(snapshot) !== snapshotKey(controllerSnapshot())) {
       return activeProfile;
     }
-    const nextProfile = resolveActiveProfile(snapshot, config);
+    let nextProfile;
+    try {
+      nextProfile = resolveActiveProfile(snapshot, config);
+    } catch (error) {
+      clearAuthorityAfterRefreshFailure(generation);
+      throw error;
+    }
     if (effectiveCloseReason && lastPublishedProfile
       && activeProfileKey(lastPublishedProfile) !== activeProfileKey(nextProfile)) {
       service.closeProfile(lastPublishedProfile.id, effectiveCloseReason);
