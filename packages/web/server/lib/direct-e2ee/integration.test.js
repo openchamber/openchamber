@@ -365,9 +365,12 @@ describe('direct E2EE encrypted integration', () => {
 
     expect((await open(3, '')).frameType).toBe(TunnelFrameType.StreamAbort);
     const originalNow = Date.now;
-    Date.now = () => originalNow() + 61_000;
-    expect((await open(5, `oc_url_token=${encodeURIComponent(token)}`)).frameType).toBe(TunnelFrameType.StreamAbort);
-    Date.now = originalNow;
+    try {
+      Date.now = () => originalNow() + 61_000;
+      expect((await open(5, `oc_url_token=${encodeURIComponent(token)}`)).frameType).toBe(TunnelFrameType.StreamAbort);
+    } finally {
+      Date.now = originalNow;
+    }
 
     const fresh = await fx.mintUrlToken();
     expect((await open(7, `oc_url_token=${encodeURIComponent(fresh)}`)).frameType).toBe(TunnelFrameType.WsOpened);
