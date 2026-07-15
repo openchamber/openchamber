@@ -29,6 +29,15 @@ export const sanitizeHostDirectE2eeForStorage = (value) => {
   }
 };
 
+const directHostFallbackLabel = (value) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : null;
+  } catch {
+    return null;
+  }
+};
+
 export const buildStoredHostEntry = (entry, dependencies) => {
   const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
   if (!id || id === dependencies.localHostId) return null;
@@ -45,9 +54,10 @@ export const buildStoredHostEntry = (entry, dependencies) => {
     || (directE2ee ? `direct-e2ee://${new URL(directE2ee.wssUrl).hostname}` : null)
     || (relay ? `relay://${relay.serverId}` : null);
   if (!displayUrl) return null;
+  const fallbackLabel = directUrl ? directHostFallbackLabel(directUrl) : displayUrl;
   return {
     id,
-    label: labelRaw || displayUrl,
+    label: labelRaw || fallbackLabel || displayUrl,
     url: displayUrl,
     ...(apiUrl ? { apiUrl } : {}),
     ...tokenField,

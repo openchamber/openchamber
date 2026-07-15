@@ -104,6 +104,23 @@ describe('Electron host storage sanitization', () => {
     expect(stored?.relay).toBeDefined();
   });
 
+  test('uses only the direct URL origin for fallback labels without changing stored transport URLs', () => {
+    const urls = [
+      'https://user:password@host.example:8443/custom/path-token?token=query-secret#fragment-secret',
+      'https://host.example/path-secret',
+      'https://host.example?query-secret=yes',
+      'https://host.example/#fragment-secret',
+    ];
+    for (const url of urls) {
+      const stored = buildStoredHostEntry({ id: `host-${urls.indexOf(url)}`, url, apiUrl: `${url}/api` }, dependencies);
+      expect(stored?.label).toBe(new URL(url).origin);
+      expect(stored?.url).toBe(url);
+      expect(stored?.apiUrl).toBe(`${url}/api`);
+      expect(stored?.label).not.toMatch(/user|password|token|secret|query|fragment|\/custom|\/path/i);
+    }
+    expect(buildStoredHostEntry({ id: 'friendly', label: 'Friendly workstation', url: urls[0] }, dependencies)?.label).toBe('Friendly workstation');
+  });
+
   test('drops only a malformed leg and keeps the other valid descriptors', () => {
     const stored = buildStoredHostEntry({
       id: 'host',
