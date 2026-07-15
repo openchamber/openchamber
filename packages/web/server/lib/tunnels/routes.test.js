@@ -231,6 +231,129 @@ describe('tunnel routes direct E2EE configuration', () => {
     expect((await request(app).get('/api/openchamber/tunnel/status').expect(200)).body.directE2eeAvailable).toBe(false);
   });
 
+  it('preserves structured start failures when the stopped callback rejects', async () => {
+    const callbackError = new Error('callback failed');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { app } = createApp({
+      onTunnelStopped: async () => { throw callbackError; },
+      tunnelProviderRegistry: { get: () => ({}), listCapabilities: () => [] },
+      tunnelService: {
+        resolveActiveMode: () => 'managed-remote', resolveActiveProvider: () => 'cloudflare',
+        getPublicUrl: () => 'https://a.example.com', getProviderMetadata: () => ({ managedRemoteTunnelPresetId: 'profile-a' }),
+        start: async () => { throw new TunnelServiceError('startup_failed', 'provider failed'); },
+      },
+      tunnelAuthController: {
+        listTunnelSessions: () => [], getActiveTunnelMode: () => 'managed-remote', getActiveTunnelId: () => 'old',
+        getActiveTunnelHost: () => 'a.example.com', getBootstrapStatus: () => ({ hasBootstrapToken: false, bootstrapExpiresAt: null }),
+        clearActiveTunnel: vi.fn(),
+      },
+    });
+
+    try {
+      await request(app).post('/api/openchamber/tunnel/start').send({
+        provider: 'cloudflare', mode: 'managed-remote', managedRemoteTunnelPresetId: 'profile-a', hostname: 'a.example.com',
+      }).expect(500, { ok: false, error: 'provider failed', code: 'startup_failed' });
+      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-stopped:start-failed)', callbackError);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('preserves stop responses when the stopped callback rejects', async () => {
+    const callbackError = new Error('callback failed');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { app } = createApp({
+      onTunnelStopped: async () => { throw callbackError; },
+      tunnelService: {
+        resolveActiveMode: () => 'managed-remote', resolveActiveProvider: () => 'cloudflare',
+        getPublicUrl: () => 'https://a.example.com', getProviderMetadata: () => ({ managedRemoteTunnelPresetId: 'profile-a' }),
+        stop: vi.fn(),
+      },
+      getActiveTunnelController: () => ({ stop: vi.fn() }),
+      tunnelAuthController: {
+        listTunnelSessions: () => [], getActiveTunnelMode: () => 'managed-remote', getActiveTunnelId: () => null,
+        getActiveTunnelHost: () => 'a.example.com', getBootstrapStatus: () => ({ hasBootstrapToken: false, bootstrapExpiresAt: null }),
+        clearActiveTunnel: vi.fn(),
+      },
+    });
+
+    try {
+      await request(app).post('/api/openchamber/tunnel/stop').expect(200, {
+        ok: true, revokedBootstrapCount: 0, invalidatedSessionCount: 0,
+      });
+      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-stopped:stop)', callbackError);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('preserves token upsert responses when the changed callback rejects', async () => {
+    const callbackError = new Error('callback failed');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { app } = createApp({ onTunnelChanged: async () => { throw callbackError; } });
+
+    try {
+      await request(app).put('/api/openchamber/tunnel/managed-remote-token').send({
+        presetId: 'profile-a', presetName: 'A', managedRemoteTunnelHostname: 'a.example.com', managedRemoteTunnelToken: 'new-secret',
+      }).expect(200, { ok: true, managedRemoteTunnelTokenPresetIds: ['profile-a'] });
+      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-changed:profile-upserted)', callbackError);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('preserves profile responses when notification callbacks reject', async () => {
+    const disabledError = new Error('disable callback failed');
+    const changedError = new Error('changed callback failed');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { app } = createApp({
+      onManagedRemoteDirectE2eeDisabled: async () => { throw disabledError; },
+      onTunnelChanged: async () => { throw changedError; },
+    });
+
+    try {
+      await request(app)
+        .patch('/api/openchamber/tunnel/managed-remote-profile/profile-a')
+        .send({ directE2eeEnabled: false })
+        .expect(200);
+      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (direct-e2ee-disabled)', disabledError);
+      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-changed:profile-direct-e2ee-updated)', changedError);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('preserves successful start responses when the changed callback rejects', async () => {
+    const callbackError = new Error('callback failed');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { app } = createApp({
+      onTunnelChanged: async () => { throw callbackError; },
+      tunnelProviderRegistry: { get: () => ({}), listCapabilities: () => [] },
+      tunnelService: {
+        resolveActiveMode: () => 'managed-remote', resolveActiveProvider: () => 'cloudflare',
+        getPublicUrl: () => 'https://a.example.com', getProviderMetadata: () => ({ managedRemoteTunnelPresetId: 'profile-a' }),
+        start: async () => ({
+          publicUrl: 'https://a.example.com', activeMode: 'managed-remote', provider: 'cloudflare',
+          providerMetadata: { managedRemoteTunnelPresetId: 'profile-a' },
+        }),
+      },
+      tunnelAuthController: {
+        listTunnelSessions: () => [], getActiveTunnelMode: () => 'managed-remote', getActiveTunnelId: () => null,
+        getActiveTunnelHost: () => 'a.example.com', getBootstrapStatus: () => ({ hasBootstrapToken: false, bootstrapExpiresAt: null }),
+        setActiveTunnel: vi.fn(), issueBootstrapToken: () => ({ token: 'bootstrap', expiresAt: 123 }),
+      },
+    });
+
+    try {
+      await request(app).post('/api/openchamber/tunnel/start').send({
+        provider: 'cloudflare', mode: 'managed-remote', managedRemoteTunnelPresetId: 'profile-a', hostname: 'a.example.com',
+      }).expect(200);
+      expect(consoleError).toHaveBeenCalledWith('Tunnel lifecycle callback failed (tunnel-changed:profile-switched)', callbackError);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('uses only a unique enabled hostname fallback for legacy active metadata', async () => {
     const { app } = createApp({
       tunnelService: {

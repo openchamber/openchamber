@@ -40,6 +40,14 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     ? directE2eeSupported() === true
     : directE2eeSupported === true;
 
+  const awaitLifecycleCallback = async (category, callback, ...args) => {
+    try {
+      await callback(...args);
+    } catch (error) {
+      console.error(`Tunnel lifecycle callback failed (${category})`, error);
+    }
+  };
+
   const resolveActiveNormalizedTunnelMode = () => {
     const mode = tunnelService.resolveActiveMode();
     if (mode === TUNNEL_MODE_MANAGED_LOCAL) {
@@ -96,7 +104,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           hostname,
           token,
         });
-        await onTunnelChanged({ reason: 'profile-upserted', profileId });
+        await awaitLifecycleCallback('tunnel-changed:profile-upserted', onTunnelChanged, { reason: 'profile-upserted', profileId });
       }
     }
 
@@ -109,7 +117,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       hostname,
       managedRemoteTunnelPresetId: selectedPresetId,
     });
-    await onTunnelChanged({ reason: 'profile-switched' });
+    await awaitLifecycleCallback('tunnel-changed:profile-switched', onTunnelChanged, { reason: 'profile-switched' });
 
     console.log(`Tunnel active (${result.provider}): ${result.publicUrl}`);
     return {
@@ -495,7 +503,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           hostname: managedRemoteTunnelHostname,
           token: managedRemoteTunnelToken,
         });
-        await onTunnelChanged({ reason: 'profile-upserted', profileId: presetId });
+        await awaitLifecycleCallback('tunnel-changed:profile-upserted', onTunnelChanged, { reason: 'profile-upserted', profileId: presetId });
 
         const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
         return res.json({ ok: true, managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id) });
@@ -529,9 +537,9 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           });
         }
         if (!req.body.directE2eeEnabled) {
-          await onManagedRemoteDirectE2eeDisabled(profile.id);
+          await awaitLifecycleCallback('direct-e2ee-disabled', onManagedRemoteDirectE2eeDisabled, profile.id);
         }
-        await onTunnelChanged({ reason: 'profile-direct-e2ee-updated', profileId: profile.id });
+        await awaitLifecycleCallback('tunnel-changed:profile-direct-e2ee-updated', onTunnelChanged, { reason: 'profile-direct-e2ee-updated', profileId: profile.id });
         return res.json({
           ok: true,
           profile: summarizeManagedRemoteProfile({ ...profile, directE2eeEnabled: req.body.directE2eeEnabled }),
@@ -674,7 +682,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         console.error('Failed to start tunnel:', error);
         setActiveTunnelController(null);
         tunnelAuthController.clearActiveTunnel();
-        await onTunnelStopped('tunnel-start-failed');
+        await awaitLifecycleCallback('tunnel-stopped:start-failed', onTunnelStopped, 'tunnel-start-failed');
         if (error instanceof TunnelServiceError) {
           const status = error.code === 'missing_dependency'
             ? 400
@@ -704,7 +712,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
 
       tunnelAuthController.clearActiveTunnel();
-      await onTunnelStopped('tunnel-stopped');
+      await awaitLifecycleCallback('tunnel-stopped:stop', onTunnelStopped, 'tunnel-stopped');
       res.json({ ok: true, revokedBootstrapCount, invalidatedSessionCount });
     });
   };
