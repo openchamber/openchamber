@@ -60,7 +60,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  const hasChildProcessExited = (child) => !child || child.exitCode !== null || child.signalCode !== null;
+  const hasChildProcessExited = (child) => {
+    if (!child) return true;
+    // Wrapper object from createManagedOpenCodeServerProcess — no exitCode/signalCode.
+    // Fall through to process.kill probe instead.
+    if (!('exitCode' in child) && !('signalCode' in child)) return false;
+    return child.exitCode !== null || child.signalCode !== null;
+  };
 
   const isManagedOpenCodeProcessAlive = () => {
     const child = state.openCodeProcess;
@@ -69,8 +75,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     try {
       process.kill(child.pid, 0);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      // EPERM = process exists but we lack permission to signal it → still alive.
+      return error?.code === 'EPERM';
     }
   };
 
