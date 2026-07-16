@@ -14,6 +14,9 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import { assertUpdaterCapability } from './updater-capability.mjs';
+import { checkForDesktopUpdate } from './updater-check.mjs';
+import { resolveUpdaterFeed } from './updater-feed.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -29,10 +32,21 @@ const DEV_APP_USER_MODEL_ID = 'dev.openchamber.desktop.dev';
 const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 const BACKGROUND_START_ARG = '--background';
 
+const getLoginItemOptions = () => {
+  if (process.platform === 'win32') {
+    return {
+      path: process.execPath,
+      args: [BACKGROUND_START_ARG],
+      name: APP_USER_MODEL_ID,
+    };
+  }
+  return {};
+};
+
 const readLoginItemSettings = () => {
-  if (process.platform !== 'darwin') return null;
+  if (process.platform !== 'darwin' && process.platform !== 'win32') return null;
   try {
-    return app.getLoginItemSettings();
+    return app.getLoginItemSettings(getLoginItemOptions());
   } catch {
     return null;
   }
@@ -49,6 +63,9 @@ const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) =>
 // Set the product name early so electron-log derives its log directory as
 // ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
 app.setName('OpenChamber');
+if (process.platform === 'linux') {
+  app.setDesktopName('openchamber.desktop');
+}
 if (isDev) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
 }
@@ -223,6 +240,22 @@ const readDesktopKeepAwakeStatus = () => {
   const currentId = state.keepAwakeBlockerId;
   const active = Number.isInteger(currentId) && powerSaveBlocker.isStarted(currentId);
   return { supported: true, enabled, active };
+};
+
+const readDesktopMinimizeToTrayStatus = () => {
+  const supported = process.platform === 'win32';
+  return {
+    supported,
+    enabled: supported && readSettingsRoot().desktopMinimizeToTrayEnabled === true,
+  };
+};
+
+const shouldHideMainWindowToTray = (browserWindow) => {
+  if (process.platform !== 'win32') return false;
+  if (!state.trayController) return false;
+  if (!browserWindow || browserWindow.isDestroyed()) return false;
+  if (browserWindow.__ocMiniChat === true) return false;
+  return readSettingsRoot().desktopMinimizeToTrayEnabled === true;
 };
 
 const quitRisk = {
@@ -566,10 +599,13 @@ const buildRendererRuntimeConfig = (uiUrl, runtimeConfig = {}) => {
   const apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
   const clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
   const requestHeaders = sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || state.requestHeaders || {});
+  // Relay-capable hosts have no injectable HTTP base: the renderer reads this
+  // host id, probes the direct leg, and falls back to the E2EE tunnel itself.
+  const relayHostId = typeof runtimeConfig.relayHostId === 'string' ? runtimeConfig.relayHostId : '';
   if (shouldUseSameOriginDevProxy(uiUrl, apiBaseUrl)) {
-    return { apiBaseUrl: '', clientToken: '', requestHeaders: {} };
+    return { apiBaseUrl: '', clientToken: '', requestHeaders: {}, relayHostId };
   }
-  return { apiBaseUrl, clientToken, requestHeaders };
+  return { apiBaseUrl, clientToken, requestHeaders, relayHostId };
 };
 
 const readDesktopLocalClientToken = () => {
@@ -630,9 +666,11 @@ const sanitizeHostRelayForStorage = (value) => {
   return { relayUrl, serverId, hostEncPubJwk: jwk };
 };
 
-// Shared storage shape for a persisted host (direct or relay). Returns null for
-// entries that can't be stored (missing id, reserved 'local', or no usable
-// transport).
+// Shared storage shape for a persisted host. A host may carry a direct HTTP
+// transport, a relay transport, or BOTH (a multi-transport device: direct on
+// the home network, relay away — mirrors the mobile connection model). Returns
+// null for entries that can't be stored (missing id, reserved 'local', or no
+// usable transport at all).
 const buildStoredHostEntry = (entry) => {
   const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
   if (!id || id === LOCAL_HOST_ID) return null;
@@ -643,15 +681,18 @@ const buildStoredHostEntry = (entry) => {
   const labelRaw = typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : '';
 
   const relay = sanitizeHostRelayForStorage(entry?.relay);
+  const relayField = relay ? { relay } : {};
+  const directUrl = sanitizeHostUrlForStorage(entry?.url);
+  const apiUrl = directUrl ? (sanitizeHostUrlForStorage(entry?.apiUrl) || directUrl) : null;
+
+  if (directUrl) {
+    return { id, label: labelRaw || directUrl, url: directUrl, apiUrl, ...tokenField, ...headerFields, ...relayField };
+  }
   if (relay) {
     const url = `relay://${relay.serverId}`;
     return { id, label: labelRaw || url, url, ...tokenField, ...headerFields, relay };
   }
-
-  const url = sanitizeHostUrlForStorage(entry?.url);
-  if (!url) return null;
-  const apiUrl = sanitizeHostUrlForStorage(entry?.apiUrl) || url;
-  return { id, label: labelRaw || url, url, apiUrl, ...tokenField, ...headerFields };
+  return null;
 };
 
 const readDesktopHostsConfig = () => {
@@ -827,13 +868,37 @@ const fetchVersionPayload = async (versionUrl, { headers, timeoutMs }) => {
   }
 };
 
-const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}) => {
+const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}, expectedServerId = '') => {
   const versionUrl = buildVersionUrl(url);
   if (!versionUrl) {
     throw new Error('Invalid URL');
   }
 
   const started = Date.now();
+
+  // Identity gate for learned/untrusted addresses: verify the UNAUTHENTICATED
+  // /health identity before the token-carrying version fetch, so the bearer
+  // token is never sent to a re-assigned address that now belongs to a
+  // different machine. Older servers omit serverId from /health; only an
+  // explicit mismatch rejects.
+  if (typeof expectedServerId === 'string' && expectedServerId.trim()) {
+    const healthUrl = buildHealthUrl(url);
+    if (healthUrl) {
+      try {
+        const response = await fetch(healthUrl, { signal: AbortSignal.timeout(timeoutMs), headers: { Accept: 'application/json' } });
+        if (response.ok) {
+          const payload = await response.json().catch(() => null);
+          const reported = typeof payload?.serverId === 'string' ? payload.serverId.trim() : '';
+          if (reported && reported !== expectedServerId.trim()) {
+            return { status: 'wrong-service', latencyMs: Date.now() - started };
+          }
+        }
+      } catch {
+        // Unreachable/timeout surfaces in the version fetch below.
+      }
+    }
+  }
+
   try {
     const headers = { ...sanitizeRuntimeRequestHeaders(requestHeaders), Accept: 'application/json' };
     const token = typeof clientToken === 'string' ? clientToken.trim() : '';
@@ -2009,10 +2074,6 @@ const dispatchDeepLink = (link) => {
     emitToAllWindows('openchamber:open-session', { sessionId: link.value });
     return;
   }
-  if (link.type === 'project' && link.value) {
-    emitToAllWindows('openchamber:open-project', { projectPath: link.value });
-    return;
-  }
   if (link.type === 'host' && link.value) {
     void switchToHostById(link.value);
     return;
@@ -2123,12 +2184,11 @@ const readThemeSource = () => {
 };
 
 const getWindowIconPath = () => {
-  if (process.platform !== 'win32' && process.platform !== 'linux') {
-    return undefined;
-  }
+  if (process.platform !== 'win32' && process.platform !== 'linux') return undefined;
+  const iconFileName = process.platform === 'linux' ? 'icon.png' : 'icon.ico';
   const iconPath = isDev
-    ? path.join(__dirname, 'resources', 'icons', 'icon.ico')
-    : path.join(process.resourcesPath, 'icons', 'icon.ico');
+    ? path.join(__dirname, 'resources', 'icons', iconFileName)
+    : path.join(process.resourcesPath, 'icons', iconFileName);
   return fs.existsSync(iconPath) ? iconPath : undefined;
 };
 
@@ -2150,7 +2210,8 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   const desktopRequestHeaders = rendererRuntimeConfig.requestHeaders || {};
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
-  const usesCustomTitleBar = process.platform === 'darwin' || process.platform === 'win32';
+  const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
+  const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome;
   // macOS vibrancy, on by default; users can disable it (Appearance settings).
   const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const titleBarOverlayEnabled = false;
@@ -2172,7 +2233,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     // here: setting it in the constructor leaves the material uncomposited on a
     // cold launch until a window event. No `transparent: true` either — vibrancy
     // alone is enough and composites reliably once applied to a live window.
-    frame: process.platform === 'win32' ? false : undefined,
+    frame: usesFramelessChrome ? false : undefined,
     autoHideMenuBar: autoHidesNativeMenuBar,
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.
@@ -2189,6 +2250,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
         `--openchamber-macos-major=${desktopMacosMajor}`,
         `--openchamber-mac-vibrancy=${useVibrancy ? '1' : '0'}`,
         `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
+        `--openchamber-relay-host-id=${rendererRuntimeConfig.relayHostId || ''}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
       backgroundThrottling: false,
@@ -2269,7 +2331,20 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.on('move', () => {
     debounceWindowStatePersist(browserWindow, false);
   });
+  browserWindow.on('minimize', (event) => {
+    if (!shouldHideMainWindowToTray(browserWindow)) return;
+    debounceWindowStatePersist(browserWindow, true);
+    event.preventDefault();
+    browserWindow.hide();
+  });
   browserWindow.on('close', (event) => {
+    if (!state.quitRequested && shouldHideMainWindowToTray(browserWindow)) {
+      debounceWindowStatePersist(browserWindow, true);
+      event.preventDefault();
+      browserWindow.hide();
+      return;
+    }
+
     if (process.platform === 'darwin' && !state.quitRequested) {
       const remainingVisible = BrowserWindow.getAllWindows().filter(
         (window) => !window.isDestroyed() && window.isVisible(),
@@ -2531,6 +2606,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const desktopRequestHeaders = effectiveRuntimeConfig.requestHeaders || {};
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
+  const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
   // macOS vibrancy, on by default; users can disable it (Appearance settings).
   const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const browserWindow = new BrowserWindow({
@@ -2546,9 +2622,9 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     // here: setting it in the constructor leaves the material uncomposited on a
     // cold launch until a window event. No `transparent: true` either — vibrancy
     // alone is enough and composites reliably once applied to a live window.
-    frame: process.platform === 'win32' ? false : undefined,
+    frame: usesFramelessChrome ? false : undefined,
     autoHideMenuBar: process.platform !== 'darwin',
-    titleBarStyle: process.platform === 'darwin' || process.platform === 'win32' ? 'hidden' : 'default',
+    titleBarStyle: process.platform === 'darwin' || usesFramelessChrome ? 'hidden' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
       additionalArguments: [
@@ -2746,10 +2822,6 @@ const compareSemver = (left, right) => {
   return 0;
 };
 
-const parseGithubRepo = () => {
-  return { owner: 'openchamber', repo: 'openchamber' };
-};
-
 const setupAutoUpdater = () => {
   if (!app.isPackaged) {
     return;
@@ -2761,11 +2833,13 @@ const setupAutoUpdater = () => {
   autoUpdater.disableWebInstaller = false;
   autoUpdater.logger = log;
 
-  const { owner, repo } = parseGithubRepo();
-  autoUpdater.setFeedURL({
-    provider: 'github',
-    owner,
-    repo,
+  const testBuild = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
+    && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
+  const feed = resolveUpdaterFeed({ testBuild });
+  autoUpdater.setFeedURL(feed);
+  log.info('[electron] updater feed configured', {
+    provider: feed.provider,
+    target: feed.provider === 'github' ? `${feed.owner}/${feed.repo}` : feed.url,
   });
 
   autoUpdater.on('download-progress', (progress) => {
@@ -3380,21 +3454,37 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return APP_VERSION;
 
     case 'desktop_get_launch_at_login': {
-      if (process.platform !== 'darwin') return { supported: false, enabled: false };
-      const settings = app.getLoginItemSettings();
+      if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
+      const settings = app.getLoginItemSettings(getLoginItemOptions());
       return { supported: true, enabled: settings.openAtLogin === true };
     }
 
     case 'desktop_set_launch_at_login': {
-      if (process.platform !== 'darwin') return { supported: false, enabled: false };
+      if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
       const enabled = args.enabled === true;
-      app.setLoginItemSettings({
+      const settingsArgs = {
         openAtLogin: enabled,
-        openAsHidden: enabled,
-        args: enabled ? [BACKGROUND_START_ARG] : [],
-      });
-      const settings = app.getLoginItemSettings();
+        ...(process.platform === 'darwin' ? { openAsHidden: enabled } : {}),
+        ...(process.platform === 'win32' ? getLoginItemOptions() : { args: enabled ? [BACKGROUND_START_ARG] : [] }),
+        ...(process.platform === 'win32' ? { enabled } : {}),
+      };
+      app.setLoginItemSettings(settingsArgs);
+      const settings = app.getLoginItemSettings(getLoginItemOptions());
       return { supported: true, enabled: settings.openAtLogin === true };
+    }
+
+    case 'desktop_get_minimize_to_tray': {
+      return readDesktopMinimizeToTrayStatus();
+    }
+
+    case 'desktop_set_minimize_to_tray': {
+      if (process.platform !== 'win32') return { supported: false, enabled: false };
+      const enabled = args.enabled === true;
+      await mutateSettingsRoot((root) => {
+        root.desktopMinimizeToTrayEnabled = enabled;
+      });
+      setupTray();
+      return readDesktopMinimizeToTrayStatus();
     }
 
     case 'desktop_get_keep_awake': {
@@ -3709,7 +3799,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         emitToAllWindows('openchamber:installed-apps-updated', apps);
       };
       if (process.platform !== 'darwin' && process.platform !== 'win32') {
-        throw new Error('desktop_get_installed_apps is only supported on macOS and Windows');
+        return { apps: [], hasCache: false, isCacheStale: false, supported: false };
       }
       if (!hasCache || isCacheStale || args.force === true) {
         void refresh();
@@ -3749,7 +3839,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return getOrCreateDesktopInstallId();
 
     case 'desktop_host_probe':
-      return probeHostWithTimeout(String(args.url || ''), 2_000, String(args.clientToken || ''), args.requestHeaders || {});
+      return probeHostWithTimeout(String(args.url || ''), 2_000, String(args.clientToken || ''), args.requestHeaders || {}, String(args.expectedServerId || ''));
 
     case 'desktop_remote_password_login':
       return loginRemoteAndIssueClientToken({
@@ -3812,22 +3902,18 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_check_for_updates': {
+      assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
-      let updateResult = null;
-      try {
-        updateResult = await autoUpdater.checkForUpdates();
-      } catch {
-      }
-
-      const updateInfo = updateResult?.updateInfo;
-      const nextVersion =
-        (typeof updateInfo?.version === 'string' && updateInfo.version) ||
-        currentVersion;
-      const available = compareSemver(nextVersion, currentVersion) > 0;
+      const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
+        autoUpdater,
+        currentVersion,
+        pendingUpdate: state.pendingUpdate,
+        compareVersions: compareSemver,
+      });
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         await parseRelevantChangelogNotes(currentVersion, nextVersion);
-      state.pendingUpdate = available ? { version: nextVersion, electronUpdate: updateResult } : null;
+      state.pendingUpdate = pendingUpdate;
       return {
         available,
         currentVersion,
@@ -3840,6 +3926,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_download_and_install_update':
+      assertUpdaterCapability({ packaged: app.isPackaged });
       if (!state.pendingUpdate) {
         throw new Error('No pending update');
       }
@@ -3885,6 +3972,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
+      if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged });
       log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {
@@ -3955,6 +4043,36 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         }
       }
       await createAdditionalWindow(targetUrl, runtimeConfig);
+      return null;
+    }
+
+    case 'desktop_new_window_for_host': {
+      // Open a saved host in a new window. Hosts with a relay leg boot the
+      // LOCAL UI and let the renderer pick the transport (direct first, E2EE
+      // tunnel fallback) via the injected relay host id — a fixed apiBaseUrl
+      // would strand the window when the direct leg is unreachable.
+      const hostId = typeof args.hostId === 'string' ? args.hostId.trim() : '';
+      const config = readDesktopHostsConfig();
+      const host = config.hosts.find((entry) => entry.id === hostId);
+      if (!host) throw new Error('Host not found');
+      if (host.relay) {
+        const windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
+        await createAdditionalWindow(windowUrl, {
+          apiBaseUrl: '',
+          clientToken: host.clientToken || '',
+          requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders || {}),
+          relayHostId: host.id,
+        });
+        return null;
+      }
+      const targetUrl = normalizeHostUrl(host.apiUrl || host.url);
+      if (!targetUrl) throw new Error('Invalid URL');
+      const windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : targetUrl;
+      await createAdditionalWindow(windowUrl, {
+        apiBaseUrl: targetUrl,
+        clientToken: host.clientToken || '',
+        requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders || {}),
+      });
       return null;
     }
 
@@ -4394,6 +4512,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_host_probe',
   'desktop_new_window',
   'desktop_new_window_at_url',
+  'desktop_new_window_for_host',
   'desktop_set_window_title',
   'desktop_set_window_theme',
   'desktop_is_window_fullscreen',
@@ -4485,8 +4604,8 @@ ipcMain.handle('openchamber:file:grant-existing', async (event, filePath) => {
   };
 });
 
-// --- macOS menu bar (status bar) ---------------------------------------------
-// Tray lives only on macOS; the renderer streams a compact state snapshot via
+// --- Native tray / menu bar ---------------------------------------------------
+// Tray lives on macOS and Windows; the renderer streams a compact state snapshot via
 // the `desktop_tray_update` IPC command (see the command switch). Tray clicks
 // flow back through dispatchTrayAction → renderer (focus/respond) or native
 // handlers (show window / quit).
@@ -4518,6 +4637,21 @@ const resolveTraySurface = () => {
 const trayIconAssets = () => {
   const dir = path.join(resourceRoot(), 'icons', 'tray');
   const statusDir = path.join(dir, 'status');
+  if (process.platform === 'win32') {
+    const iconPath = getWindowIconPath() || path.join(resourceRoot(), 'icons', 'icon.ico');
+    return {
+      idleIconPath: iconPath,
+      unseenIconPath: iconPath,
+      breathIconPaths: [iconPath],
+      statusIconPaths: {
+        busy: path.join(statusDir, 'busy.png'),
+        retry: path.join(statusDir, 'retry.png'),
+        error: path.join(statusDir, 'error.png'),
+        unseen: path.join(statusDir, 'unseen.png'),
+        blank: path.join(statusDir, 'blank.png'),
+      },
+    };
+  }
   return {
     idleIconPath: path.join(dir, 'trayTemplate-idle.png'),
     unseenIconPath: path.join(dir, 'trayTemplate-unseen.png'),
@@ -4536,7 +4670,7 @@ const trayIconAssets = () => {
 };
 
 const setupTray = () => {
-  if (process.platform !== 'darwin' || state.trayController) return;
+  if (!['darwin', 'win32'].includes(process.platform) || state.trayController) return;
   const assets = trayIconAssets();
   if (!fs.existsSync(assets.idleIconPath)) {
     log.warn('[electron] tray icon missing, skipping tray setup', { iconPath: assets.idleIconPath });
@@ -4738,17 +4872,17 @@ app.whenReady().then(async () => {
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());
-    setupTray();
   } else {
     Menu.setApplicationMenu(buildAutoHiddenMenu());
   }
+  setupTray();
 
-  if (process.platform === 'darwin' && app.isPackaged) {
+  if ((process.platform === 'darwin' || process.platform === 'win32') && app.isPackaged) {
     const openAtLogin = loginItemSettings?.openAtLogin === true;
     app.setLoginItemSettings({
       openAtLogin,
-      openAsHidden: openAtLogin,
-      args: openAtLogin ? [BACKGROUND_START_ARG] : [],
+      ...(process.platform === 'darwin' ? { openAsHidden: openAtLogin, args: openAtLogin ? [BACKGROUND_START_ARG] : [] } : {}),
+      ...(process.platform === 'win32' ? { ...getLoginItemOptions(), enabled: openAtLogin } : {}),
     });
   }
 

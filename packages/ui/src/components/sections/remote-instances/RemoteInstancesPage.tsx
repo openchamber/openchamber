@@ -48,15 +48,19 @@ import {
   type DesktopSshPortForwardType,
 } from '@/lib/desktopSsh';
 import {
+  desktopHostProbe,
   desktopHostsGet,
   desktopHostsSet,
   desktopInstallIdGet,
+  getDesktopHostApiUrl,
   normalizeHostUrl,
+  probeRelayDesktopHost,
   redactSensitiveUrl,
   resolveDesktopHostUrl,
   relayHostDisplayUrl,
   type DesktopHost,
   type DesktopHostRelay,
+  type HostProbeResult,
 } from '@/lib/desktopHosts';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
@@ -422,6 +426,9 @@ export const RemoteInstancesPage: React.FC = () => {
   const [isRetryPending, setIsRetryPending] = React.useState(false);
   const [clockMs, setClockMs] = React.useState(() => Date.now());
   const [directHosts, setDirectHosts] = React.useState<DesktopHost[]>([]);
+  // Live reachability per saved host (undefined = probe in flight), mirroring
+  // the host switcher's status line so this list is not just dead text.
+  const [directHostStatus, setDirectHostStatus] = React.useState<Record<string, HostProbeResult>>({});
   const [directDefaultHostId, setDirectDefaultHostId] = React.useState<string | null>('local');
   const [directLoading, setDirectLoading] = React.useState(false);
   const [directSaving, setDirectSaving] = React.useState(false);
@@ -624,33 +631,49 @@ export const RemoteInstancesPage: React.FC = () => {
       ? crypto.randomUUID()
       : `host-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
-    if (redeemed.kind === 'relay') {
-      const { relay, token } = redeemed;
-      // Relay hosts are keyed by serverId (one host per server, regardless of
-      // which relay routes it), so re-importing updates the existing record.
-      const existing = directHosts.find((host) => host.relay?.serverId === relay.serverId);
-      const displayUrl = relayHostDisplayUrl(relay.serverId);
-      if (existing) {
-        const nextHosts = directHosts.map((host) => host.id === existing.id
-          ? { ...host, label: payload.label || host.label, url: displayUrl, apiUrl: undefined, clientToken: token, relay }
-          : host);
-        await persistDirectHosts(nextHosts, directDefaultHostId);
-      } else {
-        // payload.label is normally the issuing server's hostname; the pseudo-URL
-        // is only a last-resort display name.
-        await persistDirectHosts([{ id: makeId(), label: payload.label || displayUrl, url: displayUrl, clientToken: token, relay }, ...directHosts], directDefaultHostId);
-      }
+    // Persist EVERY transport the link carried, not just the one that answered
+    // the redeem — a multi-transport host connects directly on the home network
+    // and falls back to the relay away from it (same model as mobile devices).
+    // The single token works over both transports.
+    const linkRelayCandidate = payload.candidates.find(
+      (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'relay' }> => candidate.type === 'relay',
+    );
+    const relay: DesktopHostRelay | undefined = redeemed.kind === 'relay'
+      ? redeemed.relay
+      : linkRelayCandidate
+        ? { relayUrl: linkRelayCandidate.relayUrl, serverId: linkRelayCandidate.serverId, hostEncPubJwk: linkRelayCandidate.hostEncPubJwk }
+        : undefined;
+    const firstDirectUrl = payload.candidates
+      .filter((candidate): candidate is Extract<PairingEndpointCandidate, { type: 'lan' | 'tunnel' }> => candidate.type !== 'relay')
+      .map((candidate) => normalizeHostUrl(candidate.url))
+      .find((value): value is string => Boolean(value));
+    const directUrl = redeemed.kind === 'direct' ? redeemed.url : firstDirectUrl;
+    const { token } = redeemed;
+
+    const url = directUrl || (relay ? relayHostDisplayUrl(relay.serverId) : null);
+    if (!url) {
+      setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
+      return;
+    }
+    const transportFields = {
+      url,
+      apiUrl: directUrl || undefined,
+      clientToken: token,
+      ...(relay ? { relay } : {}),
+    };
+    // One host per server: match by relay serverId when the link has a relay
+    // leg, else by direct URL — re-importing updates the record in place.
+    const existing = directHosts.find((host) => (
+      relay ? host.relay?.serverId === relay.serverId : (!host.relay && normalizeHostUrl(host.apiUrl || host.url) === url)
+    ));
+    if (existing) {
+      const nextHosts = directHosts.map((host) => host.id === existing.id
+        ? { ...host, label: payload.label || host.label, ...transportFields }
+        : host);
+      await persistDirectHosts(nextHosts, directDefaultHostId);
     } else {
-      const { url, token } = redeemed;
-      const existing = directHosts.find((host) => !host.relay && normalizeHostUrl(host.apiUrl || host.url) === url);
-      if (existing) {
-        const nextHosts = directHosts.map((host) => host.id === existing.id
-          ? { ...host, label: payload.label || host.label, url, apiUrl: url, clientToken: token }
-          : host);
-        await persistDirectHosts(nextHosts, directDefaultHostId);
-      } else {
-        await persistDirectHosts([{ id: makeId(), label: payload.label || redactSensitiveUrl(url), url, apiUrl: url, clientToken: token }, ...directHosts], directDefaultHostId);
-      }
+      // payload.label is normally the issuing server's hostname.
+      await persistDirectHosts([{ id: makeId(), label: payload.label || redactSensitiveUrl(url), ...transportFields }, ...directHosts], directDefaultHostId);
     }
     setDirectConnectLink('');
     setDirectError(null);
@@ -724,6 +747,39 @@ export const RemoteInstancesPage: React.FC = () => {
   const setDefaultDirectHost = React.useCallback(async (id: string) => {
     await persistDirectHosts(directHosts, id);
   }, [directHosts, persistDirectHosts]);
+
+  // Probe saved hosts whenever the list changes so each row shows a live
+  // Connected/Unreachable status like the host switcher does. One pass per
+  // list identity — no polling; the row set changes rarely.
+  React.useEffect(() => {
+    if (!showInstanceManagement || directHosts.length === 0) return;
+    let cancelled = false;
+    void Promise.all(directHosts.map(async (host) => {
+      const relayProbe = () => probeRelayDesktopHost(host.relay!).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+      // Relay-only host: tunnel probe. Multi-transport host: direct first,
+      // relay as the away-from-home fallback.
+      if (host.relay && !host.apiUrl) {
+        return [host.id, await relayProbe()] as const;
+      }
+      const url = normalizeHostUrl(getDesktopHostApiUrl(host));
+      if (!url) {
+        return [host.id, host.relay ? await relayProbe() : ({ status: 'unreachable', latencyMs: 0 } as HostProbeResult)] as const;
+      }
+      const direct = await desktopHostProbe(url, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null })
+        .catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+      if (direct.status === 'unreachable' && host.relay) {
+        const relayResult = await relayProbe();
+        if (relayResult.status === 'ok') return [host.id, relayResult] as const;
+      }
+      return [host.id, direct] as const;
+    })).then((entries) => {
+      if (cancelled) return;
+      setDirectHostStatus(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [directHosts, showInstanceManagement]);
 
   const loadRemoteClients = React.useCallback(async (options?: { silent?: boolean }) => {
     if (!clientAuth) return;
@@ -1438,45 +1494,73 @@ export const RemoteInstancesPage: React.FC = () => {
           description={t('settings.remoteInstances.direct.description')}
           settingsItem="remote-instances.direct-hosts"
           contentClassName="space-y-4"
-        >
-            <div className="flex items-center justify-between gap-2">
-              <p className="typography-meta text-muted-foreground/70">{t('settings.remoteInstances.direct.note')}</p>
-              <div className="flex shrink-0 items-center gap-2">
-                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectImportDialogOpen(true)} disabled={directSaving}>
-                  {t('settings.remoteInstances.direct.import.action')}
-                </Button>
-                <Button type="button" size="xs" className="!font-normal" onClick={() => setDirectAddDialogOpen(true)} disabled={directSaving}>
-                  <Icon name="add" className="h-3.5 w-3.5" />
-                  {t('settings.remoteInstances.direct.actions.add')}
-                </Button>
-              </div>
+          headerAction={(
+            /* Importing a pairing link is the flagship path; add-by-address is
+               the manual fallback. The token-storage note lives in the add
+               dialog next to the token field it describes. */
+            <div className="flex shrink-0 items-center gap-2">
+              <Button type="button" size="xs" className="!font-normal" onClick={() => setDirectImportDialogOpen(true)} disabled={directSaving}>
+                {t('settings.remoteInstances.direct.import.action')}
+              </Button>
+              <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectAddDialogOpen(true)} disabled={directSaving}>
+                <Icon name="add" className="h-3.5 w-3.5" />
+                {t('settings.remoteInstances.direct.actions.add')}
+              </Button>
             </div>
-
+          )}
+        >
             <div className="space-y-1">
               {directLoading ? (
                 <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.state.loading')}</p>
               ) : directHosts.length === 0 ? (
                 <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.state.empty')}</p>
-              ) : directHosts.map((host) => (
+              ) : directHosts.map((host) => {
+                const probe = directHostStatus[host.id];
+                const statusKey: I18nKey = !probe
+                  ? 'desktopHostSwitcher.status.checking'
+                  : probe.status === 'ok'
+                    ? 'desktopHostSwitcher.status.connected'
+                    : probe.status === 'auth'
+                      ? 'desktopHostSwitcher.status.authRequired'
+                      : probe.status === 'update-recommended'
+                        ? 'desktopHostSwitcher.status.updateRecommended'
+                        : probe.status === 'incompatible'
+                          ? 'desktopHostSwitcher.status.incompatible'
+                          : probe.status === 'wrong-service'
+                            ? 'desktopHostSwitcher.status.wrongService'
+                            : 'desktopHostSwitcher.status.unreachable';
+                const isOnline = probe?.status === 'ok';
+                return (
                 <div key={host.id} className="py-1.5">
                   <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex min-w-0 items-center gap-2">
+                          <span className={cn(
+                            'h-2 w-2 shrink-0 rounded-full',
+                            !probe ? 'bg-muted-foreground/30 animate-pulse' : isOnline ? 'bg-[var(--status-success)]' : 'bg-[var(--status-error)]',
+                          )} />
                           <p className="typography-ui-label text-foreground truncate">{redactSensitiveUrl(host.label)}</p>
-                          {directDefaultHostId === host.id ? <span className="typography-micro text-muted-foreground">{t('desktopHostSwitcher.header.default')}</span> : null}
+                          {directDefaultHostId === host.id ? <span className="typography-micro text-muted-foreground shrink-0">{t('desktopHostSwitcher.header.default')}</span> : null}
+                          <span className={cn('typography-micro shrink-0', isOnline ? 'text-[var(--status-success)]' : 'text-muted-foreground')}>
+                            {t(statusKey)}
+                            {isOnline && typeof probe?.latencyMs === 'number'
+                              ? t('desktopHostSwitcher.status.ping', { ms: Math.max(0, Math.round(probe.latencyMs)) })
+                              : ''}
+                          </span>
                         </div>
-                        <p className={cn('typography-micro text-muted-foreground truncate', !host.relay && 'font-mono')}>
-                          {host.relay ? t('mobile.connect.relay.badge') : redactSensitiveUrl(host.apiUrl || host.url)}
+                        <p className={cn('typography-micro text-muted-foreground truncate', host.apiUrl && 'font-mono')}>
+                          {host.relay && !host.apiUrl ? t('mobile.connect.relay.badge') : redactSensitiveUrl(host.apiUrl || host.url)}
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
                         <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void setDefaultDirectHost(host.id)} disabled={directSaving || directDefaultHostId === host.id} aria-label={t('desktopHostSwitcher.actions.setAsDefaultAria')}>
                           {directDefaultHostId === host.id ? <Icon name="star-fill" className="h-3.5 w-3.5" /> : <Icon name="star" className="h-3.5 w-3.5" />}
                         </Button>
-                        {/* The edit form is URL/token-centric; saving it would drop a
-                            relay host's tunnel descriptor. Relay hosts are re-imported
-                            via a fresh pairing link instead. */}
-                        {host.relay ? null : (
+                        {/* The edit form is URL/token-centric; relay-ONLY hosts have
+                            nothing it can edit and are re-imported via a fresh pairing
+                            link instead. Multi-transport hosts keep their relay leg
+                            through the edit (object spread preserves it). */}
+                        {host.relay && !host.apiUrl ? null : (
                           <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => beginEditDirectHost(host)} disabled={directSaving}>
                             <Icon name="pencil" className="h-3.5 w-3.5" />
                             {t('desktopHostSwitcher.actions.edit')}
@@ -1489,7 +1573,8 @@ export const RemoteInstancesPage: React.FC = () => {
                       </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             {directError ? <p className="typography-meta text-[var(--status-error)]">{directError}</p> : null}
@@ -1499,12 +1584,15 @@ export const RemoteInstancesPage: React.FC = () => {
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>{t('settings.remoteInstances.direct.actions.add')}</DialogTitle>
-              <DialogDescription>{t('settings.remoteInstances.direct.description')}</DialogDescription>
+              <DialogDescription>{t('settings.remoteInstances.direct.addDialog.description')}</DialogDescription>
             </DialogHeader>
             <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void handleAddDirectHost(); }}>
               <Input className="h-8" value={directLabel} onChange={(event) => setDirectLabel(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.labelPlaceholder')} disabled={directSaving} />
               <Input className="h-8" value={directUrl} onChange={(event) => setDirectUrl(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.urlPlaceholder')} disabled={directSaving} autoFocus />
-              <Input className="h-8" value={directToken} onChange={(event) => setDirectToken(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.tokenPlaceholder')} type="password" disabled={directSaving} />
+              <div className="space-y-1">
+                <Input className="h-8" value={directToken} onChange={(event) => setDirectToken(event.target.value)} placeholder={t('settings.remoteInstances.direct.field.tokenPlaceholder')} type="password" disabled={directSaving} />
+                <p className="px-1 typography-micro text-muted-foreground">{t('settings.remoteInstances.direct.note')}</p>
+              </div>
               <div className="space-y-2">
                 <div>
                   <SettingsGroupTitle>{t('settings.remoteInstances.direct.headers.title')}</SettingsGroupTitle>

@@ -100,6 +100,18 @@ export const areRenderRelevantPartsEqual = (left: Part[], right: Part[]): boolea
       if (readPartText(leftPart) !== readPartText(rightPart)) {
         return false;
       }
+      // Shell-mode user messages carry their live command state in an
+      // injected `shellAction` payload on a synthetic text part; without
+      // comparing it, a running→completed transition never re-renders.
+      const leftShell = (leftPart as { shellAction?: { command?: unknown; output?: unknown; status?: unknown } }).shellAction;
+      const rightShell = (rightPart as { shellAction?: { command?: unknown; output?: unknown; status?: unknown } }).shellAction;
+      if (leftShell || rightShell) {
+        if (leftShell?.command !== rightShell?.command
+          || leftShell?.output !== rightShell?.output
+          || leftShell?.status !== rightShell?.status) {
+          return false;
+        }
+      }
     }
   }
 

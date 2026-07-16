@@ -657,6 +657,7 @@ export interface SettingsPayload {
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  editorFontSize?: number;
   uiFont?: string;
   monoFont?: string;
   padding?: number;
@@ -673,6 +674,7 @@ export interface SettingsPayload {
   pwaAppName?: string;
   mobileKeyboardMode?: 'native' | 'resize-content';
   draftStarters?: DraftStarterRef[];
+  draftStartersCraftGoalAdded?: boolean;
 
   [key: string]: unknown;
 }

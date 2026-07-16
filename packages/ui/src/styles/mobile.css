@@ -521,7 +521,32 @@
    not match — so nothing reserves bottom room in the native app. Expose it as a token
    so any native surface can consume it; the chat shell does so below. */
 :root.oc-capacitor-app {
-  --oc-app-bottom-safe: max(16px, calc(env(safe-area-inset-bottom, 0px) * 0.5));
+  --oc-app-bottom-safe: max(16px, calc(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) * 0.5));
+}
+
+/* Android native safe areas. Every --oc-safe-area-* definition above is gated
+   behind -webkit-touch-callout (iOS) or display-mode: standalone, neither of
+   which matches the Capacitor Android WebView — so the Android app used to rely
+   entirely on StatusBar overlay:false insetting the WebView natively. Android 15
+   enforces edge-to-edge and ignores that call, leaving content under the status
+   bar. Capacitor injects the real insets as --safe-area-inset-* inline vars on
+   <html> (env() still reads 0 on WebViews without the safe-area passthrough
+   fix), so read those first and fall back to env(). On devices where the native
+   inset still applies, both sources report 0 — no double padding. */
+:root.oc-capacitor-app.oc-platform-android {
+  --oc-safe-area-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --oc-safe-area-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --oc-safe-area-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
+  --oc-safe-area-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+}
+
+:root.oc-capacitor-app.oc-platform-android .header-safe-area {
+  padding-top: var(--oc-safe-area-top);
+}
+
+:root.oc-capacitor-app.oc-platform-android [data-sonner-toaster][data-y-position='top'] {
+  top: calc(var(--oc-safe-area-top) + 16px) !important;
 }
 
 /* Paint the document canvas with the theme background in the native app — the same
@@ -590,6 +615,20 @@
    keyboard in the same moment, and animating both made the entrance jerky. */
 :root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap {
   transition: opacity 0.2s ease-out;
+}
+
+/* Bottom-sheet overlays live inside a keyboard-inset surface whose bottom is
+   lifted by the keyboard height, but their max-height is expressed in 100dvh —
+   which does NOT shrink in the Capacitor app (native keyboard resize is off).
+   Without this cap a sheet with the keyboard raised (typing inside it) can
+   grow past the top safe area and slide under the notch/status bar. Subtract
+   both the keyboard inset and the top safe area from the available height. */
+:root.oc-capacitor-app .pwa-overlay-panel {
+  max-height: calc(
+    100dvh
+    - var(--oc-keyboard-inset, 0px)
+    - max(0.75rem, env(safe-area-inset-top))
+  );
 }
 
 /* Full-screen scroll views (e.g. the connect/login screen) live outside the app

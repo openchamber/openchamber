@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { createTunnelAuth } from './tunnel-auth.js';
 import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerServerStatusRoutes } from './core-routes.js';
 
 describe('core-routes', () => {
@@ -570,6 +571,56 @@ describe('client auth routes', () => {
     expect(listedAfterPurge.body.clients).toHaveLength(0);
   });
 
+  it('reports current connection candidates with server identity for paired devices', async () => {
+    const app = express();
+    const relayCandidate = {
+      type: 'relay',
+      relayUrl: 'wss://relay.example/ws',
+      serverId: 'server-abc',
+      hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+      priority: 30,
+    };
+    const dependencies = {
+      ...createDependencies({ resolveAuthContext: async () => ({ type: 'client', clientId: 'client-1' }) }),
+      getDirectCandidateUrls: () => ['http://192.168.1.20:3000', 'http://10.0.0.5:3000', 'not-a-url'],
+      getRelayPairingCandidate: async () => relayCandidate,
+      getServerId: async () => 'server-abc',
+      getServerLabel: () => 'my-host',
+    };
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    const response = await request(app).get('/api/client-auth/connection/candidates');
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body.serverId).toBe('server-abc');
+    expect(response.body.label).toBe('my-host');
+    expect(response.body.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:3000', priority: 10 },
+      { type: 'lan', url: 'http://10.0.0.5:3000', priority: 10 },
+      relayCandidate,
+    ]);
+  });
+
+  it('omits serverId and relay candidate when unavailable and survives failures', async () => {
+    const app = express();
+    const dependencies = {
+      ...createDependencies(),
+      getDirectCandidateUrls: () => {
+        throw new Error('scan failed');
+      },
+      getRelayPairingCandidate: async () => {
+        throw new Error('relay status failed');
+      },
+      getServerId: async () => null,
+    };
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    const response = await request(app).get('/api/client-auth/connection/candidates');
+    expect(response.status).toBe(200);
+    expect(response.body).not.toHaveProperty('serverId');
+    expect(response.body.candidates).toEqual([]);
+  });
+
   it('scopes non-desktop client credentials to list and revoke only themselves', async () => {
     const app = express();
     let authContext = { type: 'session' };
@@ -678,5 +729,35 @@ describe('client auth routes', () => {
 
     expect(dependencies.testHooks.requireSessionAuth).toHaveBeenCalledTimes(2);
     expect(dependencies.testHooks.requireAuth).not.toHaveBeenCalled();
+  });
+
+  it('treats private LAN hosts as local even when a tunnel is active', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const tunnelAuthController = createTunnelAuth();
+    tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://tunnel.example.com' });
+    dependencies.tunnelAuthController = tunnelAuthController;
+    dependencies.uiAuthController.handlePasskeyStatus = vi.fn((_req, res) => {
+      res.json({ enabled: true, hasPasskeys: true, passkeyCount: 1, rpID: 'example.com' });
+    });
+
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    await request(app)
+      .get('/auth/passkey/status')
+      .set('Host', '192.168.1.5:57123')
+      .expect(200, { enabled: true, hasPasskeys: true, passkeyCount: 1, rpID: 'example.com' });
+
+    expect(dependencies.uiAuthController.handlePasskeyStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not trust a private Host header from a public socket peer', () => {
+    const tunnelAuthController = createTunnelAuth();
+    tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://tunnel.example.com' });
+
+    expect(tunnelAuthController.classifyRequestScope({
+      headers: { host: '192.168.1.5:57123' },
+      socket: { remoteAddress: '203.0.113.10' },
+    })).toBe('unknown-public');
   });
 });

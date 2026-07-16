@@ -517,7 +517,7 @@ export const PullRequestSection: React.FC<{
     setHydratingPrBodyKey(hydrationKey);
 
     let cancelled = false;
-    void github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: false })
+    void github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: false, sourceRepo: status?.repo ?? null })
       .then((ctx) => {
         if (cancelled) {
           return;
@@ -550,7 +550,7 @@ export const PullRequestSection: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, [directory, github, pr, prStatusKey, updatePrStatus]);
+  }, [directory, github, pr, prStatusKey, status?.repo, updatePrStatus]);
 
   React.useEffect(() => {
     if (!pr) {
@@ -590,6 +590,7 @@ export const PullRequestSection: React.FC<{
       const ctx = await github.prContext(directory, pr.number, {
         includeDiff: false,
         includeCheckDetails: true,
+        sourceRepo: status?.repo ?? null,
       });
       setCheckDetails(ctx);
     } catch (e) {
@@ -598,7 +599,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsLoadingCheckDetails(false);
     }
-  }, [directory, github, pr, t]);
+  }, [directory, github, pr, status?.repo, t]);
 
   const openCommentsDialog = React.useCallback(async () => {
     if (!github?.prContext) {
@@ -613,6 +614,7 @@ export const PullRequestSection: React.FC<{
       const ctx = await github.prContext(directory, pr.number, {
         includeDiff: false,
         includeCheckDetails: false,
+        sourceRepo: status?.repo ?? null,
       });
       setCommentsDetails(ctx);
     } catch (e) {
@@ -621,7 +623,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsLoadingCommentsDetails(false);
     }
-  }, [directory, github, pr, t]);
+  }, [directory, github, pr, status?.repo, t]);
 
   const formatTimestamp = React.useCallback((value?: string) => {
     if (!value) return '';
@@ -886,7 +888,7 @@ export const PullRequestSection: React.FC<{
     }
 
     try {
-      const context = await github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: true });
+      const context = await github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: true, sourceRepo: status?.repo ?? null });
       const runs = context.checkRuns ?? [];
       const failed = runs.filter((r) => {
         const conclusion = typeof r.conclusion === 'string' ? r.conclusion.toLowerCase() : '';
@@ -926,7 +928,7 @@ export const PullRequestSection: React.FC<{
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.loadChecksFailed'), { description: message });
     }
-  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, t]);
+  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, status?.repo, t]);
 
   const sendCommentsToChat = React.useCallback(async () => {
     setActiveMainTab('chat');
@@ -942,7 +944,7 @@ export const PullRequestSection: React.FC<{
     }
 
     try {
-      const context = await github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: false });
+      const context = await github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: false, sourceRepo: status?.repo ?? null });
       const issueComments = context.issueComments ?? [];
       const reviewComments = context.reviewComments ?? [];
       const total = issueComments.length + reviewComments.length;
@@ -965,7 +967,7 @@ export const PullRequestSection: React.FC<{
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.loadPrCommentsFailed'), { description: message });
     }
-  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, t]);
+  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, status?.repo, t]);
 
   const sendSingleCommentToChat = React.useCallback(async (comment: TimelineCommentItem) => {
     setCommentsDialogOpen(false);

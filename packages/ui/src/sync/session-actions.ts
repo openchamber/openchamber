@@ -161,9 +161,9 @@ export function getSessionLastAssistantModel(sessionId: string): { providerID: s
   }
 }
 
-function updateLiveSession(session: Session, directory?: string): void {
+function updateLiveSession(session: Session, directory?: string): boolean {
   const stores = _childStores
-  if (!stores) return
+  if (!stores) return false
 
   const candidates = directory
     ? [[directory, stores.getChild(directory)] as const]
@@ -178,8 +178,17 @@ function updateLiveSession(session: Session, directory?: string): void {
     const next = [...current]
     next[index] = mergeSessionDirectoryMetadata(session, current[index])
     store.setState({ session: next })
+    return true
+  }
+
+  return false
+}
+
+export function mirrorSessionIntoLiveStores(session: Session, directory?: string): void {
+  if (directory && updateLiveSession(session, directory)) {
     return
   }
+  updateLiveSession(session)
 }
 
 function dir() {
@@ -624,6 +633,7 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
   const sessionDirectory = getSessionDirectory(sessionId)
   const session = await opencodeClient.updateSession(sessionId, { title }, sessionDirectory)
   useGlobalSessionsStore.getState().upsertSession(session)
+  mirrorSessionIntoLiveStores(session, sessionDirectory)
 }
 
 export async function shareSession(sessionId: string): Promise<Session | null> {

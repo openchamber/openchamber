@@ -20,6 +20,13 @@ const DATA_SOCKET_OPEN_TIMEOUT_MS = 15000;
 // honest instead of counting ghosts.
 const DATA_SOCKET_IDLE_TIMEOUT_MS = 90_000;
 const DATA_SOCKET_IDLE_SWEEP_INTERVAL_MS = 30_000;
+// Protocol-level keepalive for the control socket. Without it, a network path
+// that dies silently (NAT timeout, relay-edge eviction without close frames)
+// leaves the host believing it is registered while the relay has forgotten it —
+// every client tunnel then hangs in `connecting` forever. A missed pong window
+// terminates the socket, which drives the normal reconnect + re-registration.
+const CONTROL_PING_INTERVAL_MS = 30_000;
+const CONTROL_PONG_GRACE_MS = 10_000;
 const DEFAULT_BATCH_WINDOW_MS = 150;
 
 // Resolve the frame-batching flush window: explicit option wins, then env, then
@@ -283,13 +290,41 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }
     controlSocket = socket;
 
+    // Liveness: ping on an interval; any pong (or message) proves the path.
+    // A quiet window beyond interval+grace means the connection silently died —
+    // terminate so the close handler reconnects and re-registers at the relay.
+    let lastAliveAt = Date.now();
+    const pingTimer = setInterval(() => {
+      if (controlSocket !== socket || socket.readyState !== WebSocket.OPEN) return;
+      if (Date.now() - lastAliveAt > CONTROL_PING_INTERVAL_MS + CONTROL_PONG_GRACE_MS) {
+        logger.warn('[Relay] control socket unresponsive (missed pong) — reconnecting');
+        try {
+          socket.terminate();
+        } catch {
+          // terminate is best-effort; the close handler still runs.
+        }
+        return;
+      }
+      try {
+        socket.ping();
+      } catch {
+        // Send failure surfaces via the error/close handlers.
+      }
+    }, CONTROL_PING_INTERVAL_MS);
+    if (typeof pingTimer.unref === 'function') pingTimer.unref();
+
     socket.on('open', () => {
       if (controlSocket !== socket) return;
       consecutiveFailures = 0;
+      lastAliveAt = Date.now();
       setState('connected', null);
+    });
+    socket.on('pong', () => {
+      lastAliveAt = Date.now();
     });
     socket.on('message', (data, isBinary) => {
       if (controlSocket !== socket || isBinary) return;
+      lastAliveAt = Date.now();
       handleControlMessage(data.toString('utf8'));
     });
     socket.on('error', (error) => {
@@ -297,6 +332,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       lastError = error?.message ?? String(error);
     });
     socket.on('close', (code, reasonBuffer) => {
+      clearInterval(pingTimer);
       if (controlSocket !== socket) return;
       controlSocket = null;
       const reason = reasonBuffer ? reasonBuffer.toString('utf8') : '';

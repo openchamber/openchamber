@@ -31,3 +31,10 @@ jobs:
 
       - name: Lint
         run: bun run lint
+
+      - name: Electron Linux packaging unit tests
+        working-directory: packages/electron
+        run: |
+          bun run test:architecture
+          bun run test:updater
+          bun run type-check

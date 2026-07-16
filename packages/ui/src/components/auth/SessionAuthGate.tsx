@@ -27,6 +27,16 @@ import {
 } from '@/lib/passkeys';
 
 const STATUS_CHECK_ENDPOINT = '/auth/session';
+// Transient-failure auto-retry for the initial session check. Over the relay the
+// very first /auth/session can race the tunnel's initial WebSocket attempt (a
+// failed attempt rejects requests queued on the channel even though the tunnel
+// immediately reconnects), and on a lossy link the first request can simply drop.
+// A single-shot check pins the gate on the error screen for a self-healing
+// condition, so network errors and non-auth server errors (5xx during startup)
+// retry a bounded number of times before surfacing the error UI. Definitive auth
+// answers (200/401/429) are never retried.
+const TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
+const TRANSIENT_RETRY_BASE_DELAY_MS = 1_500;
 const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
 const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
 const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
@@ -373,6 +383,40 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     };
   }, [skipAuth]);
 
+  // Bounded retry scheduling for transient session-check failures. Lives in refs
+  // so retries survive re-renders; the timer is cleared on unmount, endpoint
+  // switch, and any definitive server answer.
+  const transientRetryAttemptRef = React.useRef(0);
+  const transientRetryTimerRef = React.useRef<number | null>(null);
+  const checkStatusRef = React.useRef<(() => Promise<void>) | null>(null);
+
+  const clearTransientRetry = React.useCallback(() => {
+    if (transientRetryTimerRef.current !== null) {
+      window.clearTimeout(transientRetryTimerRef.current);
+      transientRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const resetTransientRetry = React.useCallback(() => {
+    transientRetryAttemptRef.current = 0;
+    clearTransientRetry();
+  }, [clearTransientRetry]);
+
+  // Returns true when another attempt was scheduled (caller keeps the pending
+  // UI); false when the retry budget is exhausted (caller shows the error UI).
+  const scheduleTransientRetry = React.useCallback((): boolean => {
+    if (transientRetryAttemptRef.current >= TRANSIENT_RETRY_MAX_ATTEMPTS) return false;
+    transientRetryAttemptRef.current += 1;
+    clearTransientRetry();
+    transientRetryTimerRef.current = window.setTimeout(() => {
+      transientRetryTimerRef.current = null;
+      void checkStatusRef.current?.();
+    }, TRANSIENT_RETRY_BASE_DELAY_MS * transientRetryAttemptRef.current);
+    return true;
+  }, [clearTransientRetry]);
+
+  React.useEffect(() => clearTransientRetry, [clearTransientRetry]);
+
   const checkStatus = React.useCallback(async () => {
     if (skipAuth) {
       setState('authenticated');
@@ -386,8 +430,9 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         refreshPasskeyStatus(),
       ]);
       const responseText = await response.text();
-      
+
         if (response.ok) {
+          resetTransientRetry();
           setState('authenticated');
           setIsTunnelLocked(false);
           setErrorMessage('');
@@ -401,6 +446,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
           } catch {
             data = {};
           }
+          resetTransientRetry();
           setIsTunnelLocked(data.tunnelLocked === true);
           setPasskeyStatus(latestPasskeyStatus);
           setState('locked');
@@ -414,11 +460,15 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         } catch {
           data = {};
         }
+        resetTransientRetry();
         setRetryAfter(data.retryAfter);
         setIsTunnelLocked(false);
         setState('rate-limited');
         return;
       }
+      // Non-auth server error (e.g. 502/503 while the backend is still coming
+      // up) — transient; keep the pending UI and retry before surfacing.
+      if (scheduleTransientRetry()) return;
       setState('error');
       setIsTunnelLocked(false);
     } catch (error) {
@@ -429,10 +479,17 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
         setIsTunnelLocked(false);
         return;
       }
+      // Network-level failure — over the relay this is typically the initial
+      // tunnel attempt racing this request; it self-heals within seconds.
+      if (scheduleTransientRetry()) return;
       setState('error');
       setIsTunnelLocked(false);
     }
-  }, [refreshPasskeyStatus, skipAuth]);
+  }, [refreshPasskeyStatus, resetTransientRetry, scheduleTransientRetry, skipAuth]);
+
+  React.useEffect(() => {
+    checkStatusRef.current = checkStatus;
+  }, [checkStatus]);
 
   React.useEffect(() => {
     if (skipAuth) {
@@ -451,10 +508,11 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setErrorMessage('');
       setRetryAfter(undefined);
       setIsTunnelLocked(false);
+      resetTransientRetry();
       setState('pending');
       void checkStatus();
     });
-  }, [checkStatus, skipAuth]);
+  }, [checkStatus, resetTransientRetry, skipAuth]);
 
   React.useEffect(() => {
     if (!skipAuth && state === 'locked') {
@@ -719,7 +777,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
 
   if (state === 'error') {
     return (
-      <ErrorScreen onRetry={() => void checkStatus()} errorType="network">
+      <ErrorScreen onRetry={() => { resetTransientRetry(); void checkStatus(); }} errorType="network">
         {showHostSwitcher && (
           <div className="w-full max-w-xs">
             <DesktopHostSwitcherInline />

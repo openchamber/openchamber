@@ -267,7 +267,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -285,6 +285,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const sessionSuggestionEnabled = useUIStore(state => state.sessionSuggestionEnabled);
     const setSessionRecapEnabled = useUIStore(state => state.setSessionRecapEnabled);
     const setSessionSuggestionEnabled = useUIStore(state => state.setSessionSuggestionEnabled);
+    const sessionGoalEnabled = useUIStore(state => state.sessionGoalEnabled);
+    const setSessionGoalEnabled = useUIStore(state => state.setSessionGoalEnabled);
+    const sessionGoalDefaultBudgetEnabled = useUIStore(state => state.sessionGoalDefaultBudgetEnabled);
+    const setSessionGoalDefaultBudgetEnabled = useUIStore(state => state.setSessionGoalDefaultBudgetEnabled);
+    const sessionGoalDefaultBudget = useUIStore(state => state.sessionGoalDefaultBudget);
+    const setSessionGoalDefaultBudget = useUIStore(state => state.setSessionGoalDefaultBudget);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
     const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
     const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
@@ -296,7 +302,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const collapsibleUserMessages = useUIStore(state => state.collapsibleUserMessages);
     const setCollapsibleUserMessages = useUIStore(state => state.setCollapsibleUserMessages);
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
+    const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
     const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
+    const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const expandedEditorToolbar = useUIStore(state => state.expandedEditorToolbar);
     const setExpandedEditorToolbar = useUIStore(state => state.setExpandedEditorToolbar);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
@@ -311,6 +319,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setFontSize = useUIStore(state => state.setFontSize);
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
     const setTerminalFontSize = useUIStore(state => state.setTerminalFontSize);
+    const editorFontSize = useUIStore(state => state.editorFontSize);
+    const setEditorFontSize = useUIStore(state => state.setEditorFontSize);
     const uiFont = useUIStore(state => state.uiFont);
     const setUiFont = useUIStore(state => state.setUiFont);
     const monoFont = useUIStore(state => state.monoFont);
@@ -347,6 +357,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const showSplitAssistantMessageActions = useUIStore(state => state.showSplitAssistantMessageActions);
     const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
+    const allowPromptingSubagentSessions = useUIStore(state => state.allowPromptingSubagentSessions);
+    const setAllowPromptingSubagentSessions = useUIStore(state => state.setAllowPromptingSubagentSessions);
     const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
     const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
     const effectiveMessageStreamTransport = messageStreamTransport;
@@ -452,6 +464,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setStickyUserHeader(enabled);
         void updateDesktopSettings({ stickyUserHeader: enabled });
     }, [setStickyUserHeader]);
+
+    const handlePromptNavigatorEnabledChange = React.useCallback((enabled: boolean) => {
+        setPromptNavigatorEnabled(enabled);
+        void updateDesktopSettings({ promptNavigatorEnabled: enabled });
+    }, [setPromptNavigatorEnabled]);
 
     const handleExpandedEditorToolbarChange = React.useCallback((enabled: boolean) => {
         setExpandedEditorToolbar(enabled);
@@ -575,18 +592,21 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasAppearanceSettings = isVSCode
         ? hasLocalizationSettings
         : (shouldShow('theme') || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
-    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
+    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap') || shouldShow('expandedEditorToolbar');
     const hasBehaviorSettings = shouldShow('mermaidRendering')
+        || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
         || shouldShow('messageTransport')
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
+        || (shouldShow('promptNavigatorEnabled') && !isVSCode)
         || shouldShow('wideChatLayout')
         || shouldShow('codeBlockLineWrap')
         || shouldShow('splitAssistantMessageActions')
+        || shouldShow('subagentReadOnlyBanner')
         || shouldShow('diffLayout')
         || shouldShow('dotfiles')
         || shouldShow('fileViewerPreview')
@@ -604,8 +624,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || (shouldShow('diffLayout') && !isVSCode)
         || shouldShow('followUpBehavior');
     const showBehaviorFeatureCheckboxes = shouldShow('sessionAssist')
+        || (shouldShow('sessionGoal') && !isVSCode)
+        || shouldShow('subagentReadOnlyBanner')
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
+        || (shouldShow('promptNavigatorEnabled') && !isVSCode)
         || shouldShow('wideChatLayout')
         || shouldShow('codeBlockLineWrap')
         || shouldShow('splitAssistantMessageActions')
@@ -1201,7 +1224,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             </SettingsTwoColumn>
                         ) : null}
 
-                        {(shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize') ? (
+                        {(shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize') || shouldShow('editorFontSize') ? (
                             <SettingsTwoColumn>
                                 {shouldShow('fontSize') && !isMobile && (
                                     <SettingsStackedField
@@ -1254,6 +1277,35 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 disabled={terminalFontSize === 13}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
                                                 aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
+                                    </SettingsStackedField>
+                                )}
+                                {shouldShow('editorFontSize') && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.editorFontSize')}
+                                        settingsItem="appearance.editor-font-size"
+                                        controlClassName="w-full"
+                                    >
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+                                            <NumberInput
+                                                value={editorFontSize}
+                                                onValueChange={setEditorFontSize}
+                                                min={9}
+                                                max={32}
+                                                step={1}
+                                            />
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setEditorFontSize(13)}
+                                                disabled={editorFontSize === 13}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetEditorFontSizeAria')}
                                                 title={t('settings.common.actions.reset')}
                                             >
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1636,43 +1688,117 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         />
                                     </SettingsControlGroup>
                                 )}
-                                {shouldShow('sessionAssist') && (
-                                    <>
+                                {(shouldShow('sessionAssist') || shouldShow('subagentReadOnlyBanner')) && (
+                                    <SettingsControlGroup
+                                        title={t('settings.openchamber.visual.section.sessionAssistance')}
+                                        settingsItem="chat.session-assistance"
+                                    >
+                                        {shouldShow('sessionAssist') && (
+                                            <>
+                                                <SettingsCheckboxRow
+                                                    checked={sessionRecapEnabled}
+                                                    onChange={setSessionRecapEnabled}
+                                                    label={t('settings.openchamber.visual.field.sessionRecap')}
+                                                    ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
+                                                    settingsItem="chat.session-recap"
+                                                />
+                                                <SettingsCheckboxRow
+                                                    checked={sessionSuggestionEnabled}
+                                                    onChange={setSessionSuggestionEnabled}
+                                                    label={t('settings.openchamber.visual.field.sessionSuggestion')}
+                                                    ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
+                                                    settingsItem="chat.session-suggestion"
+                                                />
+                                            </>
+                                        )}
+                                        {shouldShow('subagentReadOnlyBanner') && (
+                                            <SettingsCheckboxRow
+                                                checked={allowPromptingSubagentSessions}
+                                                onChange={setAllowPromptingSubagentSessions}
+                                                label={t('settings.openchamber.visual.field.allowPromptingSubagentSessions')}
+                                                ariaLabel={t('settings.openchamber.visual.field.allowPromptingSubagentSessionsAria')}
+                                                settingsItem="chat.subagent-read-only-banner"
+                                            />
+                                        )}
+                                    </SettingsControlGroup>
+                                )}
+                                {/* The goal loop runs in the web server — VS Code only renders
+                                    goal state, so the settings section is hidden there too. */}
+                                {shouldShow('sessionGoal') && !isVSCode && (
+                                    <SettingsControlGroup
+                                        title={(
+                                            <span className="inline-flex items-center gap-1.5">
+                                                {t('settings.openchamber.visual.goal.sectionTitle')}
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <Icon name="information" className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
+                                                    </TooltipTrigger>
+                                                    <TooltipContent sideOffset={8} className="max-w-sm">
+                                                        {t('settings.openchamber.visual.goal.description')}
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </span>
+                                        )}
+                                    >
                                         <SettingsCheckboxRow
-                                            checked={sessionRecapEnabled}
-                                            onChange={setSessionRecapEnabled}
-                                            label={t('settings.openchamber.visual.field.sessionRecap')}
-                                            ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
-                                            settingsItem="chat.session-recap"
+                                            checked={sessionGoalEnabled}
+                                            onChange={setSessionGoalEnabled}
+                                            label={t('settings.openchamber.visual.field.sessionGoal')}
+                                            ariaLabel={t('settings.openchamber.visual.field.sessionGoalAria')}
+                                            settingsItem="chat.session-goal"
                                         />
-                                        <SettingsCheckboxRow
-                                            checked={sessionSuggestionEnabled}
-                                            onChange={setSessionSuggestionEnabled}
-                                            label={t('settings.openchamber.visual.field.sessionSuggestion')}
-                                            ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
-                                            settingsItem="chat.session-suggestion"
-                                        />
-                                    </>
+                                        <div data-settings-item="chat.session-goal-budget" className="flex items-center gap-2">
+                                            <SettingsCheckboxRow
+                                                checked={sessionGoalDefaultBudgetEnabled}
+                                                onChange={setSessionGoalDefaultBudgetEnabled}
+                                                disabled={!sessionGoalEnabled}
+                                                label={t('settings.openchamber.visual.goal.budgetLabel')}
+                                                ariaLabel={t('settings.openchamber.visual.goal.budgetAria')}
+                                            />
+                                            {sessionGoalEnabled && sessionGoalDefaultBudgetEnabled ? (
+                                                <NumberInput
+                                                    value={sessionGoalDefaultBudget}
+                                                    onValueChange={(value) => {
+                                                        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+                                                            setSessionGoalDefaultBudget(Math.floor(value));
+                                                        }
+                                                    }}
+                                                    min={1000}
+                                                    max={100000000}
+                                                    step={50000}
+                                                />
+                                            ) : null}
+                                        </div>
+                                    </SettingsControlGroup>
                                 )}
                                 {shouldShow('reasoning') && (
-                                    <SettingsCheckboxRow
-                                        checked={showReasoningTraces}
-                                        onChange={setShowReasoningTraces}
-                                        label={t('settings.openchamber.visual.field.showReasoningTraces')}
-                                        ariaLabel={t('settings.openchamber.visual.field.showReasoningTracesAria')}
-                                        settingsItem="chat.reasoning-traces"
-                                    />
+                                    <SettingsControlGroup
+                                        title={t('settings.openchamber.visual.section.reasoning')}
+                                        settingsItem="chat.reasoning"
+                                    >
+                                        <SettingsCheckboxRow
+                                            checked={showReasoningTraces}
+                                            onChange={setShowReasoningTraces}
+                                            label={t('settings.openchamber.visual.field.showReasoningTraces')}
+                                            ariaLabel={t('settings.openchamber.visual.field.showReasoningTracesAria')}
+                                            settingsItem="chat.reasoning-traces"
+                                        />
+                                        {showReasoningTraces && (
+                                            <SettingsCheckboxRow
+                                                checked={collapsibleThinkingBlocks}
+                                                onChange={setCollapsibleThinkingBlocks}
+                                                label={t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}
+                                                ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
+                                            />
+                                        )}
+                                    </SettingsControlGroup>
                                 )}
 
-                                {shouldShow('reasoning') && showReasoningTraces && (
-                                    <SettingsCheckboxRow
-                                        checked={collapsibleThinkingBlocks}
-                                        onChange={setCollapsibleThinkingBlocks}
-                                        label={t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}
-                                        ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
-                                    />
-                                )}
-
+                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
+                                <SettingsControlGroup
+                                    title={t('settings.openchamber.visual.section.messageAppearance')}
+                                    settingsItem="chat.message-appearance"
+                                >
                                 {shouldShow('collapsibleUserMessages') && (
                                     <SettingsCheckboxRow
                                         checked={collapsibleUserMessages}
@@ -1690,6 +1816,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         label={t('settings.openchamber.visual.field.stickyUserHeader')}
                                         ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
                                         settingsItem="chat.sticky-user-header"
+                                    />
+                                )}
+
+                                {shouldShow('promptNavigatorEnabled') && !isVSCode && (
+                                    <SettingsCheckboxRow
+                                        checked={promptNavigatorEnabled}
+                                        onChange={handlePromptNavigatorEnabledChange}
+                                        label={t('settings.openchamber.visual.field.promptNavigatorEnabled')}
+                                        ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
+                                        settingsItem="chat.prompt-navigator"
                                     />
                                 )}
 
@@ -1732,7 +1868,14 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         settingsItem="chat.code-block-line-wrap"
                                     />
                                 )}
+                                </SettingsControlGroup>
+                                )}
 
+                                {(shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (shouldShow('dotfiles') && !isVSCodeRuntime()) || shouldShow('fileViewerPreview')) && (
+                                <SettingsControlGroup
+                                    title={t('settings.openchamber.visual.section.toolsAndFiles')}
+                                    settingsItem="chat.tools-and-files"
+                                >
                                 {shouldShow('showToolFileIcons') && (
                                     <SettingsCheckboxRow
                                         checked={showToolFileIcons}
@@ -1771,7 +1914,14 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         ariaLabel={t('settings.openchamber.defaults.field.openFilesPreviewAria')}
                                     />
                                 )}
+                                </SettingsControlGroup>
+                                )}
 
+                                {(shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck'))) && (
+                                <SettingsControlGroup
+                                    title={t('settings.openchamber.visual.section.composer')}
+                                    settingsItem="chat.composer"
+                                >
                                 {shouldShow('persistDraft') && (
                                     <SettingsCheckboxRow
                                         checked={persistChatDraft}
@@ -1790,6 +1940,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         ariaLabel={t('settings.openchamber.visual.field.enableSpellcheckInTextInputsAria')}
                                         settingsItem="chat.spellcheck"
                                     />
+                                )}
+                                </SettingsControlGroup>
                                 )}
                             </SettingsSection>
                         )}

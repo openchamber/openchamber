@@ -4,13 +4,14 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
-import ReasoningPart, { MergedReasoningPart } from './parts/ReasoningPart';
+import ReasoningPart from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
 import type { TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
+import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
@@ -53,6 +54,7 @@ import {
     sendImplementationResponseToReviewer,
     sendReviewFeedbackToOriginal,
 } from '@/lib/reviewFlow';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -252,7 +254,11 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                         className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
                         onClick={() => {
                             if (!effectiveDirectory) return;
-                            if (isMobile || isVSCodeRuntime()) {
+                            // In contexts with no ContextPanel (embedded
+                            // session-chat iframe) or single-surface layouts
+                            // (mobile, VS Code), navigate in place. Otherwise
+                            // open a new side-panel tab.
+                            if (isEmbeddedSessionChat() || isMobile || isVSCodeRuntime()) {
                                 setCurrentSession(taskSessionID, effectiveDirectory);
                                 return;
                             }
@@ -272,6 +278,8 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
         </div>
     );
 };
+
+const SHELL_CODE_TAG_STYLE: React.CSSProperties = { background: 'transparent', backgroundColor: 'transparent' };
 
 const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) => {
     const [expanded, setExpanded] = React.useState(false);
@@ -330,9 +338,14 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
             </div>
 
             {command ? (
-                <pre className="typography-meta mt-1.5 overflow-x-auto whitespace-pre-wrap break-words text-foreground/90 font-mono">
-                    {command}
-                </pre>
+                <div className="typography-meta mt-1.5 overflow-x-auto font-mono">
+                    <WorkerHighlightedCode
+                        language="bash"
+                        code={command}
+                        codeStyle={SHELL_CODE_TAG_STYLE}
+                        wrap
+                    />
+                </div>
             ) : null}
 
             {hasOutput ? (
@@ -358,9 +371,14 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
                         </button>
                     </div>
                     {expanded ? (
-                        <pre className="typography-meta mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap break-words text-foreground/85 font-mono">
-                            {output}
-                        </pre>
+                        <div className="typography-meta mt-1.5 max-h-56 overflow-auto font-mono text-foreground/85">
+                            <WorkerHighlightedCode
+                                language="bash"
+                                code={output}
+                                codeStyle={SHELL_CODE_TAG_STYLE}
+                                wrap
+                            />
+                        </div>
                     ) : null}
                 </div>
             ) : null}
@@ -436,9 +454,10 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
     revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
-const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
+const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
     messageId: string;
     parts: Part[];
+    messageCreatedAt?: number | null;
     isMobile: boolean;
     alwaysShowActions?: boolean;
     hasTouchInput?: boolean;
@@ -452,8 +471,9 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
 }) => {
-    const { t } = useI18n();
+    const { locale, t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
+    const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
 
@@ -528,6 +548,12 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
     );
 
     const effectiveOnFork = chatSurfaceMode === 'mini-chat' ? undefined : onFork;
+    const timestamp = React.useMemo(() => {
+        void locale;
+        if (typeof messageCreatedAt !== 'number' || messageCreatedAt <= 0) return null;
+        const formatted = formatTimestampForDisplay(messageCreatedAt, timeFormatPreference);
+        return formatted.length > 0 ? formatted : null;
+    }, [locale, messageCreatedAt, timeFormatPreference]);
     const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
@@ -556,6 +582,20 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                         : 'pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100'
                 )}
             >
+                {timestamp ? (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <span
+                                className="mr-1 flex items-center gap-1 text-sm tabular-nums text-muted-foreground/60"
+                                aria-label={`Message time: ${timestamp}`}
+                            >
+                                <Icon name="time" className="h-3.5 w-3.5" />
+                                <span className="message-footer__label">{timestamp}</span>
+                            </span>
+                        </TooltipTrigger>
+                        <TooltipContent>{timestamp}</TooltipContent>
+                    </Tooltip>
+                ) : null}
                 {onRevert && (
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -1210,7 +1250,6 @@ const AssistantMessageBody = React.memo(({
     const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
-    const groupReasoningBlocks = useUIStore((state) => state.groupReasoningBlocks);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const vscodeApi = useRuntimeAPIs().vscode;
@@ -1712,15 +1751,6 @@ const AssistantMessageBody = React.memo(({
         // Group consecutive static tools (read, grep, glob, etc.) into compact rows.
         // Expandable tools (bash, edit, task) get individual rows.
         // Text renders inline at its natural position.
-        // Reasoning: all reasoning parts for this message are merged into ONE block
-        // at the position of the first reasoning part (VSCode Copilot pattern).
-        const flatReasoningParts = visibleParts.filter((p) => {
-            if (p.type !== 'reasoning') return false;
-            const a = activityByPart.get(p);
-            return a?.kind !== 'reasoning';
-        });
-        let reasoningMergeRendered = false;
-
         let i = 0;
         while (i < visibleParts.length) {
             const part = visibleParts[i];
@@ -1782,20 +1812,6 @@ const AssistantMessageBody = React.memo(({
                                 onShowPopup={onShowPopup}
                             />
                         );
-                    } else if (groupReasoningBlocks) {
-                        // Merged mode (VSCode pattern): one block for all reasoning parts.
-                        if (!reasoningMergeRendered) {
-                            reasoningMergeRendered = true;
-                            rendered.push(
-                                <MergedReasoningPart
-                                    key={`reasoning-merged-${messageId}`}
-                                    parts={flatReasoningParts}
-                                    messageId={messageId}
-                                    streamPhase={effectiveStreamPhase}
-                                    onContentChange={onContentChange}
-                                />
-                            );
-                        }
                     } else {
                         // Per-part mode: each reasoning block at its natural position.
                         rendered.push(
@@ -1823,7 +1839,7 @@ const AssistantMessageBody = React.memo(({
                 }
 
                 const activity = activityByPart.get(part);
-                if (activity?.kind === 'tool' && (shouldRenderActivityGroup || !isStandaloneTool(toolName))) {
+                if (activity?.kind === 'tool' && !isStandaloneTool(toolName)) {
                     i += 1;
                     continue;
                 }
@@ -1893,7 +1909,6 @@ const AssistantMessageBody = React.memo(({
         animateActivityRows,
         chatRenderMode,
         collapsibleThinkingBlocks,
-        groupReasoningBlocks,
         collapsedPreviewCount,
         expandedTools,
         isMobile,
@@ -2150,6 +2165,7 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
             <UserMessageBody
                 messageId={props.messageId}
                 parts={props.parts}
+                messageCreatedAt={props.messageCreatedAt}
                 isMobile={props.isMobile}
                 alwaysShowActions={props.alwaysShowActions}
                 hasTouchInput={props.hasTouchInput}
