@@ -64,7 +64,7 @@ type Props = {
   setActiveProjectIdOnly: (id: string) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
   openNewWorktreeDialog: () => void;
   openProjectEditDialog: (id: string) => void;
   removeProject: (id: string) => void;
@@ -243,7 +243,10 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
                       props.setActiveMainTab('chat');
                       if (props.mobileVariant) props.setSessionSwitcherOpen(false);
-                      props.openNewSessionDraft({ directoryOverride: project.normalizedPath });
+                      props.openNewSessionDraft({
+                        selectedProjectId: projectKey,
+                        directoryOverride: project.normalizedPath,
+                      });
                     }}
                     onNewWorktreeSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);

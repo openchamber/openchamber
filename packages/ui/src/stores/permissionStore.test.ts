@@ -4,7 +4,7 @@ let fetchImpl: (input: string, init?: RequestInit) => Promise<Response>;
 mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: (input: string, init?: RequestInit) => fetchImpl(input, init),
 }));
-mock.module('@/sync/sync-refs', () => ({ getAllSyncSessions: () => [] }));
+mock.module('@/sync/sync-refs', () => ({ getAllSyncSessionMap: () => new Map() }));
 mock.module('@/sync/session-ui-store', () => ({
   useSessionUIStore: { getState: () => ({ getDirectoryForSession: () => '/project' }) },
 }));

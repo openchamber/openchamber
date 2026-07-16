@@ -184,6 +184,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
       result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
     }
+    if (typeof candidate.desktopWindowControlsPosition === 'string') {
+      const mode = candidate.desktopWindowControlsPosition.trim();
+      if (mode === 'auto' || mode === 'left' || mode === 'right') {
+        result.desktopWindowControlsPosition = mode;
+      }
+    }
     if (candidate.permissionAutoAccept && typeof candidate.permissionAutoAccept === 'object' && !Array.isArray(candidate.permissionAutoAccept)) {
       const sessions = {};
       const sourceSessions = candidate.permissionAutoAccept.sessions;
@@ -525,6 +531,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
+    }
+    if (typeof candidate.promptNavigatorEnabled === 'boolean') {
+      result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
     }
     if (typeof candidate.expandedEditorToolbar === 'boolean') {
       result.expandedEditorToolbar = candidate.expandedEditorToolbar;

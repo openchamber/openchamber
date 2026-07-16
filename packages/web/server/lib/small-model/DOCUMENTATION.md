@@ -45,9 +45,19 @@ other runtime API.
     `ChatGPT-Account-Id`; expired tokens are refreshed against
     `auth.openai.com` (single-flight) and written back to `auth.json`.
   - **Anthropic** (`type: api`): `/v1/messages` with `x-api-key`.
-  - **Google** (`type: api`): `generateContent` with `x-goog-api-key`.
+  - **Google** (`type: api`): `generateContent` with `x-goog-api-key`; Gemini 3
+    uses `thinkingLevel` while older Flash models use `thinkingBudget: 0`.
   - Everything else: OpenAI-compatible `/chat/completions` against the
-    provider's models.dev base URL with `Authorization: Bearer <key>`.
+    provider's base URL, resolved from (1) `provider.<id>.options.baseURL`
+    in the OpenCode config, (2) the hardcoded `https://api.openai.com/v1`
+     endpoint, or (3) the provider's `api` field from the models.dev catalog.
+    Configured API keys honor OpenCode's `{env:NAME}` and `{file:path}`
+    substitutions; file contents and resolved credentials remain server-side.
+  - `[small-model:diagnostic]` logs record provider/model, input character
+    counts, output budget, thinking toggle, HTTP/finish status, and
+    content/reasoning lengths without logging prompts, response text, or
+    credentials. Goal audit parsing similarly emits
+    `[session-goal:diagnostic]` structural verdict metadata.
 - `catalog.js` — models.dev catalog via the shared in-process cache
   (`../opencode/models-metadata.js`, also serving
   `/api/openchamber/models-metadata`).

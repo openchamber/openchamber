@@ -83,65 +83,14 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
 export const isPathWithinProject = (directory?: string | null, projectPath?: string | null): boolean => {
   const normalizedDirectory = normalizePath(directory);
   const normalizedProjectPath = normalizePath(projectPath);
+  return isNormalizedPathWithinProject(normalizedDirectory, normalizedProjectPath);
+};
+
+const isNormalizedPathWithinProject = (normalizedDirectory: string | null, normalizedProjectPath: string | null): boolean => {
   if (!normalizedDirectory || !normalizedProjectPath) return false;
   if (normalizedDirectory === normalizedProjectPath) return true;
   if (normalizedProjectPath === '/') return normalizedDirectory.startsWith('/');
   return normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
-};
-
-type NormalizedProjectPath = { normalizedPath: string };
-type WorktreePath = { path: string };
-
-export const collectKnownProjectDirectories = (
-  normalizedProjects: NormalizedProjectPath[],
-  availableWorktreesByProject: Map<string, WorktreePath[]>,
-  isVSCode: boolean,
-): Set<string> => {
-  const knownDirectories = new Set<string>();
-
-  normalizedProjects.forEach((project) => {
-    if (project.normalizedPath) {
-      knownDirectories.add(project.normalizedPath);
-    }
-  });
-
-  if (isVSCode) {
-    return knownDirectories;
-  }
-
-  for (const worktrees of availableWorktreesByProject.values()) {
-    for (const worktree of worktrees) {
-      const normalized = normalizePath(worktree.path);
-      if (normalized) {
-        knownDirectories.add(normalized);
-      }
-    }
-  }
-
-  return knownDirectories;
-};
-
-const findBestProjectDirectoryMatch = (
-  value: string | null,
-  knownDirectories?: Iterable<string>,
-): string | null => {
-  if (!value || !knownDirectories) {
-    return null;
-  }
-
-  let bestMatch: string | null = null;
-  for (const candidate of knownDirectories) {
-    const normalizedCandidate = normalizePath(candidate);
-    if (!normalizedCandidate || !isPathWithinProject(value, normalizedCandidate)) {
-      continue;
-    }
-
-    if (!bestMatch || normalizedCandidate.length > bestMatch.length) {
-      bestMatch = normalizedCandidate;
-    }
-  }
-
-  return bestMatch;
 };
 
 export const normalizeForBranchComparison = (value: string): string => {
@@ -222,33 +171,6 @@ export const resolveArchivedFolderName = (session: Session, projectRoot: string 
   const segments = source.split('/').filter(Boolean);
   return segments[segments.length - 1] ?? 'unassigned';
 };
-
-export const isSessionRelatedToProject = (
-  session: Session,
-  projectRoot: string,
-  validDirectories?: Set<string>,
-  knownDirectories?: Iterable<string>,
-): boolean => {
-  const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-  const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
-  const resolvedDirectory = sessionDirectory ?? projectWorktree;
-
-  if (resolvedDirectory && validDirectories?.has(resolvedDirectory)) {
-    return true;
-  }
-
-  if (!resolvedDirectory) {
-    return false;
-  }
-
-  const bestMatch = findBestProjectDirectoryMatch(resolvedDirectory, knownDirectories);
-  if (bestMatch) {
-    return validDirectories ? validDirectories.has(bestMatch) : bestMatch === projectRoot;
-  }
-
-  return resolvedDirectory === projectRoot || resolvedDirectory.startsWith(`${projectRoot}/`);
-};
-
 
 export const formatProjectLabel = (label: string): string => {
   return label

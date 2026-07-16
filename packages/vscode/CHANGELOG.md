@@ -1,3 +1,9 @@
+## [1.16.1] - 2026-07-14
+
+- **Performance:** large workspace session lists no longer regroup every session while chats stream. Opening a long chat after an empty or aborted agent turn also no longer repeatedly loads larger portions of its history.
+- Chat: shell-mode command cards now update their status and output while the command runs, with syntax highlighting for the command and output.
+- Chat: task (subagents) now track the correct subagent when several run at once, preventing one subagent's activity or "Open subtask" action from pointing to another session.
+
 ## [1.16.0] - 2026-07-13
 
 - Chat: sessions with an active [goal](https://docs.openchamber.dev/session-goals/) (started from the web or desktop app) show the goal strip with its live status above the composer.

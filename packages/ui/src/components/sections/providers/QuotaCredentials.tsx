@@ -27,7 +27,7 @@ export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: 
       if (!response.ok) throw new Error(payload?.error);
       if (payload?.configured !== undefined) setStatus(payload);
       setValues((current) => current.workspaceId ? { workspaceId: current.workspaceId } : {} as Record<string, string>);
-      toast.success(t('settings.providers.page.openCodeGo.saved'));
+      toast.success(t('settings.providers.page.quotaCredentials.saved', { provider: providerName }));
     } catch (error) { toast.error(error instanceof Error && error.message ? error.message : t('settings.providers.page.openCodeGo.saveFailed')); }
     finally { setBusy(false); }
   };

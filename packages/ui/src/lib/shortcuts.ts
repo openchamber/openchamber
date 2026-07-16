@@ -173,6 +173,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'toggle_prompt_navigator',
+    defaultCombo: 'mod+alt+p',
+    label: 'Toggle prompt navigator',
+    description: 'Show or hide the prompt navigator panel in chat',
+    customizable: true,
+  },
+  {
     id: 'toggle_right_sidebar',
     defaultCombo: 'mod+b',
     label: 'Toggle right sidebar',

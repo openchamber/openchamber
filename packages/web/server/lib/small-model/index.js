@@ -111,6 +111,7 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
   const text = await callSmallModel({
     auth,
     catalog,
+    workingDirectory: directory,
     providerID: resolved.providerID,
     modelID: resolved.modelID,
     prompt: clamped.prompt,

@@ -20,6 +20,12 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionParts } from '@/sync/sync-context';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
+import {
+    USER_SHELL_MARKER,
+    isUserShellMarkerMessage,
+    getShellBridgeAssistantDetails,
+    type ShellBridgeDetails,
+} from './lib/shellBridge';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
@@ -122,8 +128,6 @@ const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TAr
     return React.useCallback((...args: TArgs) => handlerRef.current(...args), []);
 };
 
-const USER_SHELL_MARKER = 'The following tool was executed by the user';
-
 const resolveMessageRole = (message: ChatMessageEntry): string | null => {
     const info = message.info as unknown as { clientRole?: string | null | undefined; role?: string | null | undefined };
     return (typeof info.clientRole === 'string' ? info.clientRole : null)
@@ -216,72 +220,6 @@ const isInsideStuckSticky = (node: HTMLElement, container: HTMLElement, containe
     return false;
 };
 
-const isUserShellMarkerMessage = (message: ChatMessageEntry | undefined): boolean => {
-    if (!message) return false;
-    if (resolveMessageRole(message) !== 'user') return false;
-
-    return message.parts.some((part) => {
-        if (part?.type !== 'text') return false;
-        const text = (part as unknown as { text?: unknown }).text;
-        const synthetic = (part as unknown as { synthetic?: unknown }).synthetic;
-        return synthetic === true && typeof text === 'string' && text.trim().startsWith(USER_SHELL_MARKER);
-    });
-};
-
-type ShellBridgeDetails = {
-    command?: string;
-    output?: string;
-    status?: string;
-};
-
-const getShellBridgeAssistantDetails = (message: ChatMessageEntry, expectedParentId: string | null): { hide: boolean; details: ShellBridgeDetails | null } => {
-    if (resolveMessageRole(message) !== 'assistant') {
-        return { hide: false, details: null };
-    }
-
-    if (expectedParentId && getMessageParentId(message) !== expectedParentId) {
-        return { hide: false, details: null };
-    }
-
-    if (message.parts.length !== 1) {
-        return { hide: false, details: null };
-    }
-
-    const part = message.parts[0] as unknown as {
-        type?: unknown;
-        tool?: unknown;
-        state?: {
-            status?: unknown;
-            input?: { command?: unknown };
-            output?: unknown;
-            metadata?: { output?: unknown };
-        };
-    };
-
-    if (part?.type !== 'tool') {
-        return { hide: false, details: null };
-    }
-
-    const toolName = typeof part.tool === 'string' ? part.tool.toLowerCase() : '';
-    if (toolName !== 'bash') {
-        return { hide: false, details: null };
-    }
-
-    const command = typeof part.state?.input?.command === 'string' ? part.state.input.command : undefined;
-    const output =
-        (typeof part.state?.output === 'string' ? part.state.output : undefined)
-        ?? (typeof part.state?.metadata?.output === 'string' ? part.state.metadata.output : undefined);
-    const status = typeof part.state?.status === 'string' ? part.state.status : undefined;
-
-    return {
-        hide: true,
-        details: {
-            command,
-            output,
-            status,
-        },
-    };
-};
 
 const readTaskSessionId = (toolPart: Part): string | null => {
     const partRecord = toolPart as unknown as {

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Session } from "@opencode-ai/sdk/v2/client";
 import { autoRespondsPermission, type PermissionAutoAcceptMap } from "./utils/permissionAutoAccept";
-import { getAllSyncSessions } from "@/sync/sync-refs";
+import { getAllSyncSessionMap } from "@/sync/sync-refs";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
@@ -39,8 +39,11 @@ const readSnapshot = async (response: Response): Promise<PermissionPolicySnapsho
 
 const requestSnapshot = async (path: string, init?: RequestInit) => readSnapshot(await runtimeFetch(path, init));
 
-const isAutoAccepting = (autoAccept: PermissionAutoAcceptMap, sessions: Session[], sessionId: string) =>
-    autoRespondsPermission({ autoAccept, sessions, sessionID: sessionId });
+const isAutoAccepting = (
+    autoAccept: PermissionAutoAcceptMap,
+    sessionById: ReadonlyMap<string, Session>,
+    sessionId: string,
+) => autoRespondsPermission({ autoAccept, sessions: [], sessionById, sessionID: sessionId });
 
 export const usePermissionStore = create<PermissionStore>()(persist((set, get) => ({
     autoAccept: {},
@@ -79,7 +82,9 @@ export const usePermissionStore = create<PermissionStore>()(persist((set, get) =
 
     isSessionAutoAccepting: (sessionId) => {
         if (!sessionId) return false;
-        return isAutoAccepting(get().autoAccept, getAllSyncSessions(), sessionId);
+        const autoAccept = get().autoAccept;
+        if (Object.keys(autoAccept).length === 0) return false;
+        return isAutoAccepting(autoAccept, getAllSyncSessionMap(), sessionId);
     },
 
     setSessionAutoAccept: async (sessionId, enabled) => {

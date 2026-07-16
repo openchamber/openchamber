@@ -1,16 +1,12 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
-import type { WorktreeMetadata } from '@/types/worktree';
 import {
-  collectKnownProjectDirectories,
-  dedupeSessionsById,
   getArchivedScopeKey,
-  isSessionRelatedToProject,
-  normalizePath,
   resolveArchivedFolderName,
 } from '../utils';
+import type { SessionOwnershipIndex } from '../sessionOwnership';
 
 type ProjectForArchivedFolders = {
+  id: string;
   normalizedPath: string;
 };
 
@@ -22,83 +18,42 @@ type FolderEntry = {
 
 type Args = {
   normalizedProjects: ProjectForArchivedFolders[];
-  sessions: Session[];
-  archivedSessions: Session[];
-  availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
-  isVSCode: boolean;
+  ownership: SessionOwnershipIndex;
   isSessionsLoading: boolean;
+  hasAuthoritativeGlobalSessions: boolean;
+  isWorktreeTopologyLoading: boolean;
+  unresolvedWorktreeProjectPaths: ReadonlySet<string>;
   foldersMap: Record<string, FolderEntry[]>;
   createFolder: (scopeKey: string, name: string, parentId?: string | null) => FolderEntry;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   cleanupSessions: (scopeKey: string, existingSessionIds: Set<string>) => void;
 };
 
-const getArchivedSessionsForProject = (
-  project: ProjectForArchivedFolders,
-  params: Pick<Args, 'sessions' | 'archivedSessions' | 'availableWorktreesByProject' | 'isVSCode'> & {
-    knownProjectDirectories: Set<string>;
-  },
-): Session[] => {
-  const worktreesForProject = params.isVSCode ? [] : (params.availableWorktreesByProject.get(project.normalizedPath) ?? []);
-  const validDirectories = new Set<string>([
-    project.normalizedPath,
-    ...worktreesForProject
-      .map((meta) => normalizePath(meta.path) ?? meta.path)
-      .filter((value): value is string => Boolean(value)),
-  ]);
-
-  const collect = (input: Session[]): Session[] => input.filter((session) =>
-    isSessionRelatedToProject(session, project.normalizedPath, validDirectories, params.knownProjectDirectories),
-  );
-
-  const archived = collect(params.archivedSessions);
-  const unassignedLive = params.sessions.filter((session) => {
-    if (session.time?.archived) {
-      return false;
-    }
-    const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-    if (sessionDirectory) {
-      return false;
-    }
-    return isSessionRelatedToProject(session, project.normalizedPath, validDirectories, params.knownProjectDirectories);
-  });
-
-  return dedupeSessionsById([...archived, ...unassignedLive]);
-};
-
 export const useArchivedAutoFolders = (args: Args): void => {
   const {
     normalizedProjects,
-    sessions,
-    archivedSessions,
-    availableWorktreesByProject,
-    isVSCode,
+    ownership,
     isSessionsLoading,
+    hasAuthoritativeGlobalSessions,
+    isWorktreeTopologyLoading,
+    unresolvedWorktreeProjectPaths,
     foldersMap,
     createFolder,
     addSessionToFolder,
     cleanupSessions,
   } = args;
 
-  const knownProjectDirectories = React.useMemo(
-    () => collectKnownProjectDirectories(normalizedProjects, availableWorktreesByProject, isVSCode),
-    [normalizedProjects, availableWorktreesByProject, isVSCode],
-  );
-
   React.useEffect(() => {
-    if (isSessionsLoading) {
+    if (isSessionsLoading || !hasAuthoritativeGlobalSessions || isWorktreeTopologyLoading) {
       return;
     }
 
     normalizedProjects.forEach((project) => {
+      if (unresolvedWorktreeProjectPaths.has(project.normalizedPath)) {
+        return;
+      }
       const scopeKey = getArchivedScopeKey(project.normalizedPath);
-      const projectArchivedSessions = getArchivedSessionsForProject(project, {
-        sessions,
-        archivedSessions,
-        availableWorktreesByProject,
-        isVSCode,
-        knownProjectDirectories,
-      });
+      const projectArchivedSessions = ownership.archivedSessionsByProject.get(project.id) ?? [];
       const sessionIds = new Set(projectArchivedSessions.map((session) => session.id));
 
       const existingFolders = foldersMap[scopeKey] ?? [];
@@ -122,12 +77,11 @@ export const useArchivedAutoFolders = (args: Args): void => {
     });
   }, [
     normalizedProjects,
-    sessions,
-    archivedSessions,
-    availableWorktreesByProject,
-    knownProjectDirectories,
-    isVSCode,
+    ownership,
     isSessionsLoading,
+    hasAuthoritativeGlobalSessions,
+    isWorktreeTopologyLoading,
+    unresolvedWorktreeProjectPaths,
     foldersMap,
     createFolder,
     addSessionToFolder,

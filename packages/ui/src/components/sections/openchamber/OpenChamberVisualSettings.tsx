@@ -329,7 +329,7 @@ const DurationInput: React.FC<{
     );
 };
 
-export type VisibleSetting = 'sessionGoal' | 'sessionAssist' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'messageTimestampFormat' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+export type VisibleSetting = 'sessionGoal' | 'sessionAssist' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'messageTimestampFormat' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -364,7 +364,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const collapsibleUserMessages = useUIStore(state => state.collapsibleUserMessages);
     const setCollapsibleUserMessages = useUIStore(state => state.setCollapsibleUserMessages);
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
+    const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
     const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
+    const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const expandedEditorToolbar = useUIStore(state => state.expandedEditorToolbar);
     const setExpandedEditorToolbar = useUIStore(state => state.setExpandedEditorToolbar);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
@@ -529,6 +531,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ stickyUserHeader: enabled });
     }, [setStickyUserHeader]);
 
+    const handlePromptNavigatorEnabledChange = React.useCallback((enabled: boolean) => {
+        setPromptNavigatorEnabled(enabled);
+        void updateDesktopSettings({ promptNavigatorEnabled: enabled });
+    }, [setPromptNavigatorEnabled]);
+
     const handleExpandedEditorToolbarChange = React.useCallback((enabled: boolean) => {
         setExpandedEditorToolbar(enabled);
         void updateDesktopSettings({ expandedEditorToolbar: enabled });
@@ -671,9 +678,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
+        || (shouldShow('promptNavigatorEnabled') && !isVSCode)
         || shouldShow('wideChatLayout')
         || shouldShow('codeBlockLineWrap')
         || shouldShow('splitAssistantMessageActions')
+        || shouldShow('subagentReadOnlyBanner')
         || shouldShow('diffLayout')
         || shouldShow('dotfiles')
         || shouldShow('fileViewerPreview')
@@ -2032,7 +2041,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </section>
                             )}
 
-                            {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('codeBlockLineWrap') || shouldShow('splitAssistantMessageActions') || shouldShow('subagentReadOnlyBanner') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
+                            {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('codeBlockLineWrap') || shouldShow('splitAssistantMessageActions') || shouldShow('subagentReadOnlyBanner') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <div className="space-y-6">
                                     {(shouldShow('sessionAssist') || shouldShow('subagentReadOnlyBanner')) && (
                                         <section className="p-2 space-y-0.5">
@@ -2160,7 +2169,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </section>
                                     )}
 
-                                    {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
+                                    {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
                                         <section className="p-2 space-y-0.5">
                                             <h3 data-settings-item="chat.message-appearance" className="typography-ui-header font-medium text-foreground py-1.5">{t('settings.openchamber.visual.section.messageAppearance')}</h3>
                                     {shouldShow('collapsibleUserMessages') && (
@@ -2208,6 +2217,30 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
                                             />
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.stickyUserHeader')}</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('promptNavigatorEnabled') && !isVSCode && (
+                                        <div
+                                            data-settings-item="chat.prompt-navigator"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={promptNavigatorEnabled}
+                                            onClick={() => handlePromptNavigatorEnabledChange(!promptNavigatorEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handlePromptNavigatorEnabledChange(!promptNavigatorEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={promptNavigatorEnabled}
+                                                onChange={handlePromptNavigatorEnabledChange}
+                                                ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.promptNavigatorEnabled')}</span>
                                         </div>
                                     )}
 
