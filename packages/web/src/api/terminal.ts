@@ -7,6 +7,7 @@ import {
   closeTerminal,
   restartTerminalSession,
   forceKillTerminal,
+  listTerminalShells,
 } from '@openchamber/ui/lib/terminalApi';
 import type {
   TerminalAPI,
@@ -18,6 +19,10 @@ import type {
 } from '@openchamber/ui/lib/api/types';
 
 export const createWebTerminalAPI = (): TerminalAPI => ({
+  async listShells() {
+    return listTerminalShells();
+  },
+
   async createSession(options: CreateTerminalOptions): Promise<TerminalSession> {
     return createTerminalSession(options);
   },
@@ -61,6 +66,8 @@ export const createWebTerminalAPI = (): TerminalAPI => ({
       themeMode: options.themeMode,
       terminalBackground: options.terminalBackground,
       terminalForeground: options.terminalForeground,
+      shell: options.shell,
+      loginShell: options.loginShell,
     });
   },
 

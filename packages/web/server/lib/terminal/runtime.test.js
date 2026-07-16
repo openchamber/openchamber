@@ -51,21 +51,23 @@ function createRuntime(server, overrides = {}) {
 }
 
 describe('terminal runtime', () => {
-  const createHarness = () => {
-    const routes = { post: new Map(), delete: new Map() };
+  const createHarness = (overrides = {}) => {
+    const routes = { get: new Map(), post: new Map(), delete: new Map() };
     const processes = [];
     const app = {
       post(route, handler) { routes.post.set(route, handler); },
-      get() {},
+      get(route, handler) { routes.get.set(route, handler); },
       delete(route, handler) { routes.delete.set(route, handler); },
     };
     const loadPtyProvider = async () => ({
       backend: 'fake-pty',
-      spawn: (_shell, _args, options) => {
+      spawn: (shell, args, options) => {
         const dataHandlers = new Set();
         const exitHandlers = new Set();
         const process = {
           pid: 123 + processes.length,
+          shell,
+          args,
           options,
           writes: [],
           resizes: [],
@@ -91,6 +93,7 @@ describe('terminal runtime', () => {
       fs: { promises: { stat: async () => ({ isDirectory: () => true }) } },
       searchPathFor: () => '/bin/sh',
       isExecutable: () => true,
+      ...overrides,
     });
     return { routes, processes, runtime };
   };
@@ -170,6 +173,116 @@ describe('terminal runtime', () => {
     } finally { await harness.runtime.shutdown(); }
   });
 
+  it('lists available shells and uses the selected shell for create and restart', async () => {
+    const executables = new Set(['/bin/zsh', '/bin/bash', '/bin/sh']);
+    const harness = createHarness({
+      fs: {
+        promises: {
+          stat: async () => ({ isDirectory: () => true }),
+          readFile: async () => '/bin/zsh\n/bin/bash\n/bin/false\n',
+        },
+      },
+      searchPathFor: (name) => executables.has(`/bin/${name}`) ? `/bin/${name}` : null,
+      isExecutable: (candidate) => executables.has(candidate),
+    });
+    try {
+      const listed = createResponse();
+      await harness.routes.get.get('/api/terminal/shells')({}, listed);
+      expect(listed.body).toEqual(expect.arrayContaining([
+        { id: 'auto', name: 'Auto', supportsLogin: true },
+        { id: 'zsh', name: 'zsh', supportsLogin: true },
+        { id: 'bash', name: 'bash', supportsLogin: true },
+        { id: 'sh', name: 'sh', supportsLogin: false },
+      ]));
+
+      const created = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-shell', cwd: '/repo', shell: 'zsh', loginShell: true } }, created);
+      expect(created.statusCode).toBe(200);
+      expect(harness.processes[0].shell).toBe('/bin/zsh');
+      expect(harness.processes[0].args).toEqual(['-l']);
+
+      const restarted = createResponse();
+      await harness.routes.post.get('/api/terminal/:sessionId/restart')({ params: { sessionId: 'term-shell' }, body: { shell: 'bash', loginShell: true } }, restarted);
+      expect(restarted.statusCode).toBe(200);
+      expect(harness.processes[1].shell).toBe('/bin/bash');
+      expect(harness.processes[1].args).toEqual(['-l']);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('rejects invalid and unavailable explicit shells', async () => {
+    const harness = createHarness({
+      fs: {
+        promises: {
+          stat: async () => ({ isDirectory: () => true }),
+          readFile: async () => '/bin/sh\n',
+        },
+      },
+      searchPathFor: (name) => name === 'sh' ? '/bin/sh' : null,
+      isExecutable: (candidate) => candidate === '/bin/sh',
+    });
+    try {
+      for (const [shell, error] of [
+        ['zsh -c whoami', 'Invalid terminal shell'],
+        ['fish', 'Terminal shell "fish" is not available'],
+      ]) {
+        const response = createResponse();
+        await harness.routes.post.get('/api/terminal/create')({ body: { cwd: '/repo', shell } }, response);
+        expect(response.statusCode).toBe(400);
+        expect(response.body).toEqual({ error });
+      }
+      expect(harness.processes).toHaveLength(0);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('rejects invalid and unsupported login modes', async () => {
+    const harness = createHarness({
+      fs: {
+        promises: {
+          stat: async () => ({ isDirectory: () => true }),
+          readFile: async () => '/bin/sh\n',
+        },
+      },
+      searchPathFor: (name) => name === 'sh' ? '/bin/sh' : null,
+      isExecutable: (candidate) => candidate === '/bin/sh',
+    });
+    try {
+      for (const [loginShell, error] of [
+        ['true', 'Invalid terminal login mode'],
+        [true, 'Terminal shell "sh" does not support login mode'],
+      ]) {
+        const response = createResponse();
+        await harness.routes.post.get('/api/terminal/create')({ body: { cwd: '/repo', shell: 'sh', loginShell } }, response);
+        expect(response.statusCode).toBe(400);
+        expect(response.body).toEqual({ error });
+      }
+      expect(harness.processes).toHaveLength(0);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('preserves the running process when a replacement shell is unavailable', async () => {
+    const harness = createHarness({
+      fs: {
+        promises: {
+          stat: async () => ({ isDirectory: () => true }),
+          readFile: async () => '/bin/sh\n',
+        },
+      },
+      searchPathFor: (name) => name === 'sh' ? '/bin/sh' : null,
+      isExecutable: (candidate) => candidate === '/bin/sh',
+    });
+    try {
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-1', cwd: '/repo', shell: 'sh' } }, createResponse());
+      const restarted = createResponse();
+
+      await harness.routes.post.get('/api/terminal/:sessionId/restart')({ params: { sessionId: 'term-1' }, body: { shell: 'fish' } }, restarted);
+
+      expect(restarted.statusCode).toBe(400);
+      expect(restarted.body.error).toBe('Terminal shell "fish" is not available');
+      expect(harness.processes).toHaveLength(1);
+      expect(harness.processes[0].killed).toBe(false);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
   it('deduplicates concurrent creates and rejects cross-directory id reuse', async () => {
     const harness = createHarness();
     try {
@@ -192,6 +305,42 @@ describe('terminal runtime', () => {
     } finally { await harness.runtime.shutdown(); }
   });
 
+  it('rejects concurrent creates with conflicting shell preferences', async () => {
+    const harness = createHarness();
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      const first = createResponse();
+      const conflicting = createResponse();
+      await Promise.all([
+        create({ body: { sessionId: 'term-shared', cwd: '/repo', shell: 'auto' } }, first),
+        create({ body: { sessionId: 'term-shared', cwd: '/repo', shell: 'zsh' } }, conflicting),
+      ]);
+
+      expect(first.statusCode).toBe(200);
+      expect(conflicting.statusCode).toBe(400);
+      expect(conflicting.body.error).toBe('Terminal session is already being created with a different shell');
+      expect(harness.processes).toHaveLength(1);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('rejects concurrent creates with conflicting login modes', async () => {
+    const harness = createHarness();
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      const first = createResponse();
+      const conflicting = createResponse();
+      await Promise.all([
+        create({ body: { sessionId: 'term-shared', cwd: '/repo', shell: 'auto', loginShell: false } }, first),
+        create({ body: { sessionId: 'term-shared', cwd: '/repo', shell: 'auto', loginShell: true } }, conflicting),
+      ]);
+
+      expect(first.statusCode).toBe(200);
+      expect(conflicting.statusCode).toBe(400);
+      expect(conflicting.body.error).toBe('Terminal session is already being created with a different login mode');
+      expect(harness.processes).toHaveLength(1);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
   it('restarts atomically with the same identity and closes the previous process', async () => {
     const harness = createHarness();
     try {
@@ -202,6 +351,30 @@ describe('terminal runtime', () => {
       expect(harness.processes).toHaveLength(2);
       expect(harness.processes[0].killed).toBe(true);
       expect(harness.processes[1].options.cwd).toBe('/other');
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('serializes concurrent restarts without orphaning replacement processes', async () => {
+    const harness = createHarness();
+    try {
+      const create = harness.routes.post.get('/api/terminal/create');
+      const restart = harness.routes.post.get('/api/terminal/:sessionId/restart');
+      await create({ body: { sessionId: 'term-1', cwd: '/repo' } }, createResponse());
+      const first = createResponse();
+      const second = createResponse();
+
+      await Promise.all([
+        restart({ params: { sessionId: 'term-1' }, body: { cwd: '/first' } }, first),
+        restart({ params: { sessionId: 'term-1' }, body: { cwd: '/second' } }, second),
+      ]);
+
+      expect(first.statusCode).toBe(200);
+      expect(second.statusCode).toBe(200);
+      expect(harness.processes).toHaveLength(3);
+      expect(harness.processes[0].killed).toBe(true);
+      expect(harness.processes[1].killed).toBe(true);
+      expect(harness.processes[2].killed).toBe(false);
+      expect(harness.processes[2].options.cwd).toBe('/second');
     } finally { await harness.runtime.shutdown(); }
   });
 

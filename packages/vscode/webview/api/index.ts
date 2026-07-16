@@ -14,6 +14,7 @@ const terminalUnsupported = async (): Promise<never> => {
 };
 
 const createStubTerminalAPI = (): TerminalAPI => ({
+  listShells: terminalUnsupported,
   createSession: terminalUnsupported,
   connect: (_sessionId, handlers) => {
     handlers.onError?.(new Error('Terminal is not supported in the VS Code runtime'), true);

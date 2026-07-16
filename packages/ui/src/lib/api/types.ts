@@ -25,6 +25,14 @@ export interface TerminalSession {
   status: 'running' | 'exited' | 'error';
 }
 
+export type TerminalShell = 'auto' | 'bash' | 'zsh' | 'sh' | 'fish' | 'pwsh' | 'powershell' | 'cmd' | 'dash' | 'ksh' | 'nu';
+
+export interface TerminalShellOption {
+  id: TerminalShell;
+  name: string;
+  supportsLogin: boolean;
+}
+
 export interface TerminalStreamEvent {
   type: 'snapshot' | 'data' | 'exit' | 'reconnecting';
   sequence?: number;
@@ -52,6 +60,8 @@ export interface CreateTerminalOptions {
   themeMode?: 'light' | 'dark';
   terminalBackground?: string;
   terminalForeground?: string;
+  shell?: TerminalShell;
+  loginShell?: boolean;
 }
 
 export interface ResizeTerminalPayload {
@@ -71,6 +81,7 @@ export interface ForceKillOptions {
 }
 
 export interface TerminalAPI {
+  listShells?(): Promise<TerminalShellOption[]>;
   createSession(options: CreateTerminalOptions): Promise<TerminalSession>;
   connect(sessionId: string, handlers: TerminalHandlers): Subscription;
   sendInput(sessionId: string, input: string): Promise<void>;
@@ -645,6 +656,8 @@ export interface SettingsPayload {
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  terminalShell?: TerminalShell;
+  terminalLoginShells?: TerminalShell[];
   editorFontSize?: number;
   uiFont?: string;
   monoFont?: string;

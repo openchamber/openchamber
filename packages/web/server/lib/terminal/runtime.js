@@ -9,6 +9,7 @@ import {
 } from './terminal-ws-protocol.js';
 import { sanitizeTerminalHistoryChunk } from './history.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
+import { createTerminalShellResolver, getTerminalShellLoginArgs, normalizeTerminalShell } from './shells.js';
 
 const MAX_SESSIONS = 20;
 const MAX_HISTORY_BYTES = 512 * 1024;
@@ -31,11 +32,13 @@ export function createTerminalRuntime({
 }) {
   const sessions = new Map();
   const pendingSessionCreates = new Map();
+  const pendingSessionRestarts = new Map();
   const connections = new Set();
   const pendingTerminations = new Set();
   const runtime = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
   let ptyProviderPromise = null;
   let wsServer = new WebSocketServer({ noServer: true, maxPayload: TERMINAL_WS_MAX_PAYLOAD_BYTES });
+  const shellResolver = createTerminalShellResolver({ fs, path, searchPathFor, isExecutable, buildAugmentedPath });
 
   const getPtyProvider = async () => {
     if (!ptyProviderPromise) {
@@ -50,21 +53,13 @@ export function createTerminalRuntime({
     return ptyProviderPromise;
   };
 
-  const shellCandidates = () => {
-    const candidates = process.platform === 'win32'
-      ? [process.env.OPENCHAMBER_TERMINAL_SHELL, process.env.SHELL, process.env.ComSpec, path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), 'pwsh.exe', 'powershell.exe', 'cmd.exe']
-      : [process.env.OPENCHAMBER_TERMINAL_SHELL, process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh', 'zsh', 'bash', 'sh'];
-    const seen = new Set();
-    return candidates.filter(Boolean).map(String).map((candidate) => {
-      const found = candidate.includes('/') || candidate.includes('\\') ? candidate : searchPathFor(candidate);
-      return found && isExecutable(found) ? found : (isExecutable(candidate) ? candidate : null);
-    }).filter((candidate) => candidate && !seen.has(candidate) && seen.add(candidate));
-  };
-
-  const spawnPty = async ({ cwd, cols, rows, themeMode }) => {
+  const spawnPty = async ({ cwd, cols, rows, themeMode, shell, loginShell }) => {
     const provider = await getPtyProvider();
+    const resolvedShell = await shellResolver.resolve(shell);
     let lastError = null;
-    for (const shell of shellCandidates()) {
+    for (const executable of resolvedShell.executables) {
+      const args = loginShell ? getTerminalShellLoginArgs(executable) : [];
+      if (!args) throw new Error(`Terminal shell "${resolvedShell.id}" does not support login mode`);
       try {
         const env = { ...process.env, PATH: buildAugmentedPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
         // The daemon's IPC fd is closed inside the PTY. An explicit override is
@@ -72,7 +67,7 @@ export function createTerminalRuntime({
         env.NODE_CHANNEL_FD = '';
         delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
         const options = { name: 'xterm-256color', cwd, cols, rows, env, ...(process.platform === 'win32' ? { useConpty: true } : {}) };
-        return { process: provider.spawn(shell, [], options), backend: provider.backend, shell };
+        return { process: provider.spawn(executable, args, options), backend: provider.backend, shell: resolvedShell.id, loginShell };
       } catch (error) { lastError = error; }
     }
     throw lastError ?? new Error('No executable shell found');
@@ -192,19 +187,22 @@ export function createTerminalRuntime({
     }
   };
 
-  const startSession = async (session, { cwd, cols, rows, themeMode = 'dark', terminalBackground, terminalForeground }, clear = true) => {
+  const startSession = async (session, { cwd, cols, rows, themeMode = 'dark', terminalBackground, terminalForeground, shell, loginShell }, clear = true) => {
     await validateCwd(cwd);
-    const spawned = await spawnPty({ cwd, cols, rows, themeMode });
+    const spawned = await spawnPty({ cwd, cols, rows, themeMode, shell, loginShell });
     if (clear) { session.history = ''; session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; }
     session.cwd = cwd; session.cols = cols; session.rows = rows; session.process = spawned.process;
-    session.backend = spawned.backend; session.status = 'running'; session.exitCode = null; session.signal = null;
+    session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.status = 'running'; session.exitCode = null; session.signal = null;
     session.themeMode = themeMode === 'light' ? 'light' : 'dark'; session.terminalBackground = terminalBackground; session.terminalForeground = terminalForeground;
     session.lastActivity = Date.now(); session.eventQueue.length = 0;
     wire(session, spawned.process);
   };
 
-  const createSession = async ({ sessionId, cwd, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground }) => {
+  const createSession = async ({ sessionId, cwd, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground, shell = 'auto', loginShell = false }) => {
     if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
+    if (typeof loginShell !== 'boolean') throw new Error('Invalid terminal login mode');
+    const normalizedShell = normalizeTerminalShell(shell);
+    if (!normalizedShell) throw new Error('Invalid terminal shell');
     const id = typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : randomUUID();
     if (id.length > 128) throw new Error('Invalid terminal session id');
     const existing = sessions.get(id);
@@ -217,6 +215,8 @@ export function createTerminalRuntime({
     const pending = pendingSessionCreates.get(id);
     if (pending) {
       if (pending.cwd !== resolvedCwd) throw new Error('Terminal session belongs to a different working directory');
+      if (pending.shell !== normalizedShell) throw new Error('Terminal session is already being created with a different shell');
+      if (pending.loginShell !== loginShell) throw new Error('Terminal session is already being created with a different login mode');
       const session = await pending.promise;
       applyAppearance(session, { themeMode, terminalBackground, terminalForeground });
       return session;
@@ -224,11 +224,11 @@ export function createTerminalRuntime({
     if (!existing && sessions.size + pendingSessionCreates.size >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
     const creation = (async () => {
       const session = existing ?? { id, sequence: 0, history: '', pendingHistoryControlSequence: '', pendingThemeControlSequence: '', eventQueue: [], draining: false };
-      await startSession(session, { cwd, cols, rows, themeMode, terminalBackground, terminalForeground });
+      await startSession(session, { cwd, cols, rows, themeMode, terminalBackground, terminalForeground, shell: normalizedShell, loginShell });
       sessions.set(id, session);
       return session;
     })();
-    const pendingEntry = { cwd: resolvedCwd, promise: creation };
+    const pendingEntry = { cwd: resolvedCwd, shell: normalizedShell, loginShell, promise: creation };
     pendingSessionCreates.set(id, pendingEntry);
     try { return await creation; }
     finally { if (pendingSessionCreates.get(id) === pendingEntry) pendingSessionCreates.delete(id); }
@@ -284,6 +284,14 @@ export function createTerminalRuntime({
   };
   server.on('upgrade', upgradeHandler);
 
+  app.get('/api/terminal/shells', async (_req, res) => {
+    try {
+      const shells = await shellResolver.list();
+      res.json(shells.map(({ id, name, supportsLogin }) => ({ id, name, supportsLogin })));
+    } catch (error) {
+      res.status(500).json({ error: error?.message || 'Failed to list terminal shells' });
+    }
+  });
   app.post('/api/terminal/create', async (req, res) => {
     try { const session = await createSession(req.body ?? {}); res.json({ sessionId: session.id, cols: session.cols, rows: session.rows, status: session.status }); }
     catch (error) { res.status(error?.message === 'Maximum terminal sessions reached' ? 429 : 400).json({ error: error?.message || 'Failed to create terminal session' }); }
@@ -305,19 +313,32 @@ export function createTerminalRuntime({
   app.post('/api/terminal/:sessionId/restart', async (req, res) => {
     const session = sessions.get(req.params.sessionId);
     if (!session) return res.status(404).json({ error: 'Terminal session not found' });
-    const cwd = req.body?.cwd ?? session.cwd; const cols = req.body?.cols ?? session.cols; const rows = req.body?.rows ?? session.rows;
-    const themeMode = req.body?.themeMode ?? session.themeMode; const terminalBackground = req.body?.terminalBackground ?? session.terminalBackground; const terminalForeground = req.body?.terminalForeground ?? session.terminalForeground;
-    try {
+    const cwd = req.body?.cwd ?? session.cwd;
+    const cols = req.body?.cols ?? session.cols;
+    const rows = req.body?.rows ?? session.rows;
+    const themeMode = req.body?.themeMode ?? session.themeMode;
+    const terminalBackground = req.body?.terminalBackground ?? session.terminalBackground;
+    const terminalForeground = req.body?.terminalForeground ?? session.terminalForeground;
+    const shell = req.body?.shell ?? 'auto';
+    const loginShell = req.body?.loginShell ?? false;
+    const previousRestart = pendingSessionRestarts.get(session.id) ?? Promise.resolve();
+    const restart = previousRestart.catch(() => {}).then(async () => {
       await validateCwd(cwd);
       if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
+      if (typeof loginShell !== 'boolean') throw new Error('Invalid terminal login mode');
       const oldProcess = session.process;
-      const spawned = await spawnPty({ cwd, cols, rows, themeMode });
-      session.process = spawned.process; session.backend = spawned.backend; session.cwd = cwd; session.cols = cols; session.rows = rows;
+      const spawned = await spawnPty({ cwd, cols, rows, themeMode, shell, loginShell });
+      session.process = spawned.process; session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.cwd = cwd; session.cols = cols; session.rows = rows;
       session.history = ''; session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; session.status = 'running'; session.exitCode = null; session.signal = null; session.eventQueue.length = 0;
       session.themeMode = themeMode === 'light' ? 'light' : 'dark'; session.terminalBackground = terminalBackground; session.terminalForeground = terminalForeground;
       wire(session, spawned.process); void terminateProcess(oldProcess); publish(session, { t: 'restarted', history: '' });
+    });
+    pendingSessionRestarts.set(session.id, restart);
+    try {
+      await restart;
       res.json({ sessionId: session.id, cols, rows, status: session.status });
     } catch (error) { res.status(400).json({ error: error?.message || 'Failed to restart terminal' }); }
+    finally { if (pendingSessionRestarts.get(session.id) === restart) pendingSessionRestarts.delete(session.id); }
   });
   app.delete('/api/terminal/:sessionId', async (req, res) => {
     const session = sessions.get(req.params.sessionId);
@@ -349,6 +370,7 @@ export function createTerminalRuntime({
 
   const shutdown = async () => {
     server.off('upgrade', upgradeHandler); clearInterval(idleSweep);
+    await Promise.allSettled([...pendingSessionRestarts.values()]);
     for (const session of sessions.values()) void terminateProcess(session.process, true);
     sessions.clear();
     await Promise.allSettled([...pendingTerminations]);

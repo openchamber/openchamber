@@ -139,6 +139,8 @@ const VisualSectionContent: React.FC = () => {
         'inputBarOffset',
         'expandedEditorToolbar',
         ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
+        ...(!isVSCode ? ['terminalShell' as const] : []),
+        ...(!isVSCode ? ['terminalLoginShell' as const] : []),
         'reportUsage',
     ]} />;
 };

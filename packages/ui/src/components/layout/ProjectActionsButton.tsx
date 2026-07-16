@@ -157,6 +157,8 @@ export const ProjectActionsButton = ({
   const loadDesktopSsh = useDesktopSshStore((state) => state.load);
 
   const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
+  const terminalShell = useUIStore((state) => state.terminalShell);
+  const terminalLoginShell = useUIStore((state) => state.terminalLoginShells.includes(state.terminalShell));
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -466,6 +468,8 @@ export const ProjectActionsButton = ({
           const created = await terminal.createSession({
             cwd: normalizedDirectory,
             sessionId: tabId,
+            shell: terminalShell,
+            loginShell: terminalLoginShell,
             themeMode: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
             terminalBackground: currentTheme.colors.surface.background,
             terminalForeground: currentTheme.colors.syntax.base.foreground,
@@ -594,6 +598,8 @@ export const ProjectActionsButton = ({
     isMobile,
     isDesktopShellApp,
     normalizedDirectory,
+    terminalLoginShell,
+    terminalShell,
     openExternal,
     openContextPreview,
     projectActionRuns,

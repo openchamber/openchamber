@@ -1,9 +1,10 @@
-import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalSession, TerminalStreamEvent } from './api/types';
+import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalSession, TerminalShellOption, TerminalStreamEvent } from './api/types';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
 import type { RelayTunnelWebSocket } from './relay/tunnel-client';
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { refreshRuntimeUrlAuthToken } from './runtime-auth';
+import { isTerminalShell } from './terminalShell';
 
 type Message = Record<string, unknown> & { t: string; s?: string; q?: number };
 type Subscriber = { handlers: TerminalHandlers; lastSequence: number };
@@ -293,6 +294,16 @@ export async function createTerminalSession(options: CreateTerminalOptions): Pro
   const response = await runtimeFetch('/api/terminal/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) });
   if (!response.ok) throw await responseError(response, 'Failed to create terminal session');
   return response.json() as Promise<TerminalSession>;
+}
+export async function listTerminalShells(): Promise<TerminalShellOption[]> {
+  const response = await runtimeFetch('/api/terminal/shells');
+  if (!response.ok) throw await responseError(response, 'Failed to list terminal shells');
+  const payload = await response.json().catch(() => []);
+  return Array.isArray(payload)
+    ? payload.filter((entry): entry is TerminalShellOption => (
+        entry && typeof entry === 'object' && isTerminalShell(entry.id) && typeof entry.name === 'string' && typeof entry.supportsLogin === 'boolean'
+      ))
+    : [];
 }
 export function connectTerminalStream(sessionId: string, onEvent: TerminalHandlers['onEvent'], onError?: TerminalHandlers['onError']): () => void { return transport.subscribe(sessionId, { onEvent, onError }); }
 export async function sendTerminalInput(sessionId: string, data: string): Promise<void> { await transport.write(sessionId, data); }

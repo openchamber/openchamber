@@ -534,8 +534,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     if (state === 'authenticated' && !hasResyncedRef.current) {
       hasResyncedRef.current = true;
       void (async () => {
-        await syncDesktopSettings();
         await initializeAppearancePreferences();
+        await syncDesktopSettings();
         await applyPersistedDirectoryPreferences();
       })();
     }

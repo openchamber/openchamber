@@ -118,6 +118,19 @@ const createRuntime = (settings, options = {}) => {
 };
 
 describe('OpenCode env runtime', () => {
+  it('searches an explicit PATH without mutating the process environment', () => {
+    const defaultDir = createTempDir('openchamber-default-path-');
+    const explicitDir = createTempDir('openchamber-explicit-path-');
+    const binary = path.join(explicitDir, process.platform === 'win32' ? 'custom-shell.exe' : 'custom-shell');
+    fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
+    process.env.PATH = defaultDir;
+    const { runtime } = createRuntime({});
+
+    expect(runtime.searchPathFor('custom-shell', explicitDir)).toBe(binary);
+    expect(process.env.PATH).toBe(defaultDir);
+  });
+
   it('throws a specific error for a missing configured OpenCode binary in strict mode', async () => {
     const { runtime } = createRuntime({ opencodeBinary: '/missing/opencode' });
 

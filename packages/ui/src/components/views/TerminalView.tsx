@@ -30,6 +30,8 @@ export const TerminalView: React.FC = () => {
     terminalAppearanceRef.current = { themeMode: currentTheme.metadata.variant === 'light' ? 'light' : 'dark', terminalBackground: currentTheme.colors.surface.background, terminalForeground: currentTheme.colors.syntax.base.foreground };
     const { monoFont } = useFontPreferences();
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
+    const terminalShell = useUIStore(state => state.terminalShell);
+    const terminalLoginShell = useUIStore(state => state.terminalLoginShells.includes(state.terminalShell));
     const bottomTerminalHeight = useUIStore((state) => state.bottomTerminalHeight);
     const isBottomTerminalExpanded = useUIStore((state) => state.isBottomTerminalExpanded);
     const { isMobile, isTablet, hasTouchOnlyPointer } = useDeviceInfo();
@@ -451,6 +453,8 @@ export const TerminalView: React.FC = () => {
                         sessionId: tabId,
                         cols: size?.cols,
                         rows: size?.rows,
+                        shell: terminalShell,
+                        loginShell: terminalLoginShell,
                         ...terminalAppearanceRef.current,
                     });
 
@@ -517,6 +521,8 @@ export const TerminalView: React.FC = () => {
         disconnectStream,
         t,
         terminal,
+        terminalLoginShell,
+        terminalShell,
     ]);
 
     React.useEffect(() => {
@@ -547,6 +553,8 @@ export const TerminalView: React.FC = () => {
             ? (activeTabId ?? state?.activeTabId ?? state?.tabs[0]?.id ?? null)
             : (state?.tabs[0]?.id ?? null);
         if (!tabId) return;
+        const originalSessionId = state?.tabs.find((tab) => tab.id === tabId)?.terminalSessionId ?? null;
+        if (!originalSessionId || !terminal.restartSession) return;
 
         setIsRestarting(true);
         setConnectionError(null);
@@ -557,24 +565,33 @@ export const TerminalView: React.FC = () => {
         resetTerminalPreviewScan();
 
         try {
-            const current = useTerminalStore.getState().getDirectoryState(effectiveDirectory)?.tabs.find((tab) => tab.id === tabId);
             const size = lastViewportSizeRef.current ?? { cols: 80, rows: 24 };
-            if (current?.terminalSessionId && terminal.restartSession) {
-                const restarted = await terminal.restartSession(current.terminalSessionId, { cwd: effectiveDirectory, ...size, ...terminalAppearanceRef.current });
-                setTabSessionId(effectiveDirectory, tabId, restarted.sessionId);
-                setTabLifecycle(effectiveDirectory, tabId, 'running');
-                startStream(effectiveDirectory, tabId, restarted.sessionId);
-            }
+            const restarted = await terminal.restartSession(originalSessionId, { cwd: effectiveDirectory, shell: terminalShell, loginShell: terminalLoginShell, ...size, ...terminalAppearanceRef.current });
+            const owningTab = useTerminalStore.getState().getDirectoryState(effectiveDirectory)?.tabs.find((tab) => tab.id === tabId);
+            if (owningTab?.terminalSessionId !== originalSessionId) return;
+            setTabSessionId(effectiveDirectory, tabId, restarted.sessionId);
+            setTabLifecycle(effectiveDirectory, tabId, 'running');
+            if (directoryRef.current !== effectiveDirectory || activeTabIdRef.current !== tabId) return;
+            terminalIdRef.current = restarted.sessionId;
+            startStream(effectiveDirectory, tabId, restarted.sessionId);
         } catch (error) {
+            const owningTab = useTerminalStore.getState().getDirectoryState(effectiveDirectory)?.tabs.find((tab) => tab.id === tabId);
+            if (
+                owningTab?.terminalSessionId !== originalSessionId
+                || directoryRef.current !== effectiveDirectory
+                || activeTabIdRef.current !== tabId
+            ) return;
             setConnectionError(
                 error instanceof Error ? error.message : t('terminalView.error.restartFailed')
             );
-            setIsFatalError(true);
+            setIsFatalError(false);
             setIsReconnectPending(false);
+            terminalIdRef.current = originalSessionId;
+            startStream(effectiveDirectory, tabId, originalSessionId);
         } finally {
             setIsRestarting(false);
         }
-    }, [activeTabId, disconnectStream, effectiveDirectory, enableTabs, isRestarting, resetTerminalPreviewScan, setTabLifecycle, setTabSessionId, startStream, t, terminal]);
+    }, [activeTabId, disconnectStream, effectiveDirectory, enableTabs, isRestarting, resetTerminalPreviewScan, setTabLifecycle, setTabSessionId, startStream, t, terminal, terminalLoginShell, terminalShell]);
 
     const handleHardRestart = React.useCallback(async () => {
         // Keep semantics: “close tab -> new clean tab”.
