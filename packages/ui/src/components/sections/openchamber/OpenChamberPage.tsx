@@ -14,7 +14,7 @@ import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
-import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime, usesFramelessElectronChrome } from '@/lib/desktop';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { OpenChamberSection } from './types';
 
@@ -39,7 +39,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
     const showAbout = isMobile && isWebRuntime();
     const isVSCode = isVSCodeRuntime();
     void runtimeEndpointEpoch;
-    const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
+    const showDesktopNetworkSettings = isDesktopShell() && (isDesktopLocalOriginActive() || usesFramelessElectronChrome());
 
     // If no section specified, show all (mobile/legacy behavior)
     if (!section) {
@@ -133,6 +133,7 @@ const VisualSectionContent: React.FC = () => {
         ...(!isVSCode ? ['weekStart' as const] : []),
         'fontSize',
         'terminalFontSize',
+        'editorFontSize',
         'fileEditorKeymap',
         'spacing',
         'inputBarOffset',
@@ -144,7 +145,37 @@ const VisualSectionContent: React.FC = () => {
 
 // Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Follow-up behavior, Persist draft
 const ChatSectionContent: React.FC = () => {
-    return <OpenChamberVisualSettings visibleSettings={['sessionAssist', 'chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'showTurnChangedFiles', 'expandedTools', 'collapsibleUserMessages', 'stickyUserHeader', 'wideChatLayout', 'splitAssistantMessageActions', 'diffLayout', 'dotfiles', 'fileViewerPreview', 'followUpBehavior', 'persistDraft', 'inputSpellcheck']} />;
+    const isVSCode = isVSCodeRuntime();
+    return (
+        <OpenChamberVisualSettings
+            visibleSettings={[
+                'sessionGoal',
+                'sessionAssist',
+                'chatRenderMode',
+                'messageTransport',
+                'activityRenderMode',
+                'userMessageRendering',
+                'mermaidRendering',
+                'reasoning',
+                'showToolFileIcons',
+                'showTurnChangedFiles',
+                'expandedTools',
+                'collapsibleUserMessages',
+                'stickyUserHeader',
+                ...(!isVSCode ? ['promptNavigatorEnabled' as const] : []),
+                'wideChatLayout',
+                'codeBlockLineWrap',
+                'splitAssistantMessageActions',
+                'subagentReadOnlyBanner',
+                'diffLayout',
+                'dotfiles',
+                'fileViewerPreview',
+                'followUpBehavior',
+                'persistDraft',
+                'inputSpellcheck',
+            ]}
+        />
+    );
 };
 
 // Sessions section: Default model & agent, Session retention
@@ -152,7 +183,7 @@ const SessionsSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
     void runtimeEndpointEpoch;
-    const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
+    const showDesktopNetworkSettings = isDesktopShell() && (isDesktopLocalOriginActive() || usesFramelessElectronChrome());
     return (
         <div className="space-y-6">
             <DefaultsSettings />

@@ -68,13 +68,28 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       return trimmed;
     }
 
-    const resolved = options.resolveRealpath === false ? trimmed : safeRealpathSync(trimmed);
+    // Normalize Windows drive letter to uppercase to ensure consistent
+    // case across all path representations on Windows. NTFS is case-insensitive
+    // but case-preserving, so a path like "c:\\Users\\..." and "C:\\Users\\..."
+    // would be stored differently in settings.json across sessions.
+    const uppercaseDriveLetter = (p) =>
+      p.replace(/^([a-z]):/, (_, letter) => letter.toUpperCase() + ':');
 
-    if (processLike.platform !== 'win32') {
-      return resolved;
+    const isWindows = processLike.platform === 'win32';
+    const caseNormalized = isWindows ? uppercaseDriveLetter(trimmed) : trimmed;
+    const resolved = options.resolveRealpath === false ? caseNormalized : safeRealpathSync(caseNormalized);
+
+    // Re-normalize after realpath — safeRealpathSync may return a
+    // lowercase drive letter on some Windows environments.
+    const finalResolved = isWindows && typeof resolved === 'string'
+      ? uppercaseDriveLetter(resolved)
+      : resolved;
+
+    if (!isWindows) {
+      return finalResolved;
     }
 
-    return resolved.replace(/\//g, '\\');
+    return finalResolved.replace(/\//g, '\\');
   };
 
   const areStringArraysEqual = (a, b) => {
@@ -139,6 +154,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
         : null;
       const iconBackground = normalizeIconBackground(candidate.iconBackground);
       const color = typeof candidate.color === 'string' ? candidate.color.trim() : '';
+      const defaultModel = typeof candidate.defaultModel === 'string' ? candidate.defaultModel.trim() : '';
       const addedAt = Number.isFinite(candidate.addedAt) ? Number(candidate.addedAt) : null;
       const lastOpenedAt = Number.isFinite(candidate.lastOpenedAt)
         ? Number(candidate.lastOpenedAt)
@@ -158,6 +174,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
         ...(icon ? { icon } : {}),
         ...(iconBackground ? { iconBackground } : {}),
         ...(color ? { color } : {}),
+        ...(defaultModel && defaultModel.includes('/') ? { defaultModel } : {}),
         ...(Number.isFinite(addedAt) && addedAt >= 0 ? { addedAt } : {}),
         ...(Number.isFinite(lastOpenedAt) && lastOpenedAt >= 0 ? { lastOpenedAt } : {}),
       };

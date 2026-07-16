@@ -12,6 +12,15 @@ When you can't reach OpenChamber from your phone or another machine, the fix dep
 - open `http://localhost:3000` on the same computer first — if that fails, it's not a remote problem; see [OpenCode connection](/troubleshooting/opencode-connection/)
 - confirm the server is running with `openchamber status`
 
+## Paired device won't connect
+
+- the QR code / pairing link is **single-use** — if it was already scanned (or expired), create a new one from **Add a device**
+- if the device was paired with **Home network only**, it can't connect from outside that network — pair it again with **Anywhere**
+- for **Anywhere** pairing, check **Settings → Remote Instances → OpenChamber Relay** on the server: it should say **Connected**; if not, disable and re-enable it
+- if a device was **revoked**, its token is gone for good — pair it again with a new QR code
+
+See [Connect a Device](/connect-devices/) and [Private Relay](/private-relay/) for how these connections work.
+
 ## Tunnel link doesn't work
 
 - run `openchamber tunnel status --all`
@@ -34,5 +43,5 @@ If you put OpenChamber behind a reverse proxy and it loads oddly or won't connec
 
 ## Related
 
-- [Tunnels](/tunnels/) · [Remote Instances](/remote-instances/) · [Reverse Proxy](/reverse-proxy/)
+- [Connect a Device](/connect-devices/) · [Private Relay](/private-relay/) · [Tunnels](/tunnels/) · [Remote Instances](/remote-instances/) · [Reverse Proxy](/reverse-proxy/)
 - [Security](/security/) — protect the UI before exposing it

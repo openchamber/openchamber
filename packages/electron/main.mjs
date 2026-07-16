@@ -14,6 +14,9 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import { assertUpdaterCapability } from './updater-capability.mjs';
+import { checkForDesktopUpdate } from './updater-check.mjs';
+import { resolveUpdaterFeed } from './updater-feed.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -29,10 +32,21 @@ const DEV_APP_USER_MODEL_ID = 'dev.openchamber.desktop.dev';
 const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 const BACKGROUND_START_ARG = '--background';
 
+const getLoginItemOptions = () => {
+  if (process.platform === 'win32') {
+    return {
+      path: process.execPath,
+      args: [BACKGROUND_START_ARG],
+      name: APP_USER_MODEL_ID,
+    };
+  }
+  return {};
+};
+
 const readLoginItemSettings = () => {
-  if (process.platform !== 'darwin') return null;
+  if (process.platform !== 'darwin' && process.platform !== 'win32') return null;
   try {
-    return app.getLoginItemSettings();
+    return app.getLoginItemSettings(getLoginItemOptions());
   } catch {
     return null;
   }
@@ -49,6 +63,9 @@ const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) =>
 // Set the product name early so electron-log derives its log directory as
 // ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
 app.setName('OpenChamber');
+if (process.platform === 'linux') {
+  app.setDesktopName('openchamber.desktop');
+}
 if (isDev) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
 }
@@ -154,6 +171,10 @@ const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
 const LOCAL_HOST_ID = 'local';
 const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
 const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
+// Remote hosts get a regular 'desktop' client (NOT 'desktop-local' — that kind
+// grants whole-server device management and must never be issued to a desktop
+// connecting to someone else's server).
+const REMOTE_DESKTOP_CLIENT_KIND = 'desktop';
 const ENV_OVERRIDE_HOST_ID = '__env';
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/CHANGELOG.md';
 const GITHUB_BUG_REPORT_URL = 'https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml';
@@ -219,6 +240,22 @@ const readDesktopKeepAwakeStatus = () => {
   const currentId = state.keepAwakeBlockerId;
   const active = Number.isInteger(currentId) && powerSaveBlocker.isStarted(currentId);
   return { supported: true, enabled, active };
+};
+
+const readDesktopMinimizeToTrayStatus = () => {
+  const supported = process.platform === 'win32';
+  return {
+    supported,
+    enabled: supported && readSettingsRoot().desktopMinimizeToTrayEnabled === true,
+  };
+};
+
+const shouldHideMainWindowToTray = (browserWindow) => {
+  if (process.platform !== 'win32') return false;
+  if (!state.trayController) return false;
+  if (!browserWindow || browserWindow.isDestroyed()) return false;
+  if (browserWindow.__ocMiniChat === true) return false;
+  return readSettingsRoot().desktopMinimizeToTrayEnabled === true;
 };
 
 const quitRisk = {
@@ -486,6 +523,41 @@ const mutateSettingsRoot = (mutator) => {
 
 const writeSettingsRoot = async (root) => writeJsonFile(settingsFilePath(), root);
 
+// Stable per-install identifier for this desktop, persisted in settings. Used as
+// the client dedupe key on remote hosts so re-authenticating (e.g. after a login
+// session expires) reuses the same "OpenChamber Desktop" record instead of
+// piling up a new one each time. Different desktops get different ids.
+// Display-only device metadata shown in a server's device list ("macOS",
+// app version). Never used for auth decisions.
+const desktopDeviceMetadata = () => {
+  const platformMap = { darwin: 'macos', win32: 'windows', linux: 'linux' };
+  const devicePlatform = platformMap[process.platform];
+  let appVersion;
+  try {
+    appVersion = app.getVersion();
+  } catch {
+    appVersion = undefined;
+  }
+  return {
+    ...(devicePlatform ? { devicePlatform } : {}),
+    ...(appVersion ? { appVersion } : {}),
+  };
+};
+
+const getOrCreateDesktopInstallId = async () => {
+  const existing = readSettingsRoot().desktopInstallId;
+  if (typeof existing === 'string' && existing.trim()) return existing.trim();
+  const generated = globalThis.crypto.randomUUID();
+  await mutateSettingsRoot((root) => {
+    // Race guard: keep an id another writer may have already persisted.
+    if (typeof root.desktopInstallId === 'string' && root.desktopInstallId.trim()) return root;
+    root.desktopInstallId = generated;
+    return root;
+  });
+  const after = readSettingsRoot().desktopInstallId;
+  return typeof after === 'string' && after.trim() ? after.trim() : generated;
+};
+
 const normalizeHostUrl = (raw) => {
   const trimmed = typeof raw === 'string' ? raw.trim() : '';
   if (!trimmed) return null;
@@ -527,10 +599,13 @@ const buildRendererRuntimeConfig = (uiUrl, runtimeConfig = {}) => {
   const apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : (state.apiBaseUrl || '');
   const clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : (state.clientToken || '');
   const requestHeaders = sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || state.requestHeaders || {});
+  // Relay-capable hosts have no injectable HTTP base: the renderer reads this
+  // host id, probes the direct leg, and falls back to the E2EE tunnel itself.
+  const relayHostId = typeof runtimeConfig.relayHostId === 'string' ? runtimeConfig.relayHostId : '';
   if (shouldUseSameOriginDevProxy(uiUrl, apiBaseUrl)) {
-    return { apiBaseUrl: '', clientToken: '', requestHeaders: {} };
+    return { apiBaseUrl: '', clientToken: '', requestHeaders: {}, relayHostId };
   }
-  return { apiBaseUrl, clientToken, requestHeaders };
+  return { apiBaseUrl, clientToken, requestHeaders, relayHostId };
 };
 
 const readDesktopLocalClientToken = () => {
@@ -570,20 +645,61 @@ const isLocalRuntimeUrl = (targetUrl) => {
   }
 };
 
+// A relay host is reached over the E2EE tunnel: it has no http(s) apiUrl, only a
+// { relayUrl (ws/wss), serverId, hostEncPubJwk } descriptor. The relay grant is a
+// one-time pairing artifact and is never persisted.
+const sanitizeHostRelayForStorage = (value) => {
+  if (!value || typeof value !== 'object') return null;
+  const relayUrl = typeof value.relayUrl === 'string' ? value.relayUrl.trim() : '';
+  const serverId = typeof value.serverId === 'string' ? value.serverId.trim() : '';
+  const jwk = value.hostEncPubJwk;
+  if (!relayUrl || !serverId || !jwk || typeof jwk !== 'object' || Array.isArray(jwk)) return null;
+  // Minimal EC public JWK shape check so a malformed descriptor is rejected at
+  // storage time instead of surfacing later as a tunnel handshake failure.
+  if (typeof jwk.kty !== 'string' || typeof jwk.crv !== 'string' || typeof jwk.x !== 'string') return null;
+  try {
+    const parsed = new URL(relayUrl);
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return null;
+  } catch {
+    return null;
+  }
+  return { relayUrl, serverId, hostEncPubJwk: jwk };
+};
+
+// Shared storage shape for a persisted host. A host may carry a direct HTTP
+// transport, a relay transport, or BOTH (a multi-transport device: direct on
+// the home network, relay away — mirrors the mobile connection model). Returns
+// null for entries that can't be stored (missing id, reserved 'local', or no
+// usable transport at all).
+const buildStoredHostEntry = (entry) => {
+  const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
+  if (!id || id === LOCAL_HOST_ID) return null;
+  const clientToken = sanitizeClientTokenForStorage(entry?.clientToken);
+  const requestHeaders = sanitizeRuntimeRequestHeaders(entry?.requestHeaders);
+  const headerFields = Object.keys(requestHeaders).length > 0 ? { requestHeaders } : {};
+  const tokenField = clientToken ? { clientToken } : {};
+  const labelRaw = typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : '';
+
+  const relay = sanitizeHostRelayForStorage(entry?.relay);
+  const relayField = relay ? { relay } : {};
+  const directUrl = sanitizeHostUrlForStorage(entry?.url);
+  const apiUrl = directUrl ? (sanitizeHostUrlForStorage(entry?.apiUrl) || directUrl) : null;
+
+  if (directUrl) {
+    return { id, label: labelRaw || directUrl, url: directUrl, apiUrl, ...tokenField, ...headerFields, ...relayField };
+  }
+  if (relay) {
+    const url = `relay://${relay.serverId}`;
+    return { id, label: labelRaw || url, url, ...tokenField, ...headerFields, relay };
+  }
+  return null;
+};
+
 const readDesktopHostsConfig = () => {
   const root = readSettingsRoot();
   const hostsRaw = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
   const hosts = hostsRaw
-    .map((entry) => {
-      const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
-      const url = sanitizeHostUrlForStorage(entry?.url);
-      if (!id || id === LOCAL_HOST_ID || !url) return null;
-      const apiUrl = sanitizeHostUrlForStorage(entry?.apiUrl) || url;
-      const clientToken = sanitizeClientTokenForStorage(entry?.clientToken);
-      const requestHeaders = sanitizeRuntimeRequestHeaders(entry?.requestHeaders);
-      const label = typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : url;
-      return { id, label, url, apiUrl, ...(clientToken ? { clientToken } : {}), ...(Object.keys(requestHeaders).length > 0 ? { requestHeaders } : {}) };
-    })
+    .map(buildStoredHostEntry)
     .filter(Boolean);
 
   return {
@@ -599,22 +715,7 @@ const writeDesktopHostsConfig = async (config) => {
   await mutateSettingsRoot((root) => {
     root.desktopHosts = Array.isArray(config?.hosts)
       ? config.hosts
-          .map((entry) => {
-            const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
-            const url = sanitizeHostUrlForStorage(entry?.url);
-            if (!id || id === LOCAL_HOST_ID || !url) return null;
-            const apiUrl = sanitizeHostUrlForStorage(entry?.apiUrl) || url;
-            const clientToken = sanitizeClientTokenForStorage(entry?.clientToken);
-            const requestHeaders = sanitizeRuntimeRequestHeaders(entry?.requestHeaders);
-            return {
-              id,
-              label: typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : url,
-              url,
-              apiUrl,
-              ...(clientToken ? { clientToken } : {}),
-              ...(Object.keys(requestHeaders).length > 0 ? { requestHeaders } : {}),
-            };
-          })
+          .map(buildStoredHostEntry)
           .filter(Boolean)
       : [];
     root.desktopDefaultHostId = typeof config?.defaultHostId === 'string' && config.defaultHostId.trim()
@@ -767,13 +868,37 @@ const fetchVersionPayload = async (versionUrl, { headers, timeoutMs }) => {
   }
 };
 
-const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}) => {
+const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}, expectedServerId = '') => {
   const versionUrl = buildVersionUrl(url);
   if (!versionUrl) {
     throw new Error('Invalid URL');
   }
 
   const started = Date.now();
+
+  // Identity gate for learned/untrusted addresses: verify the UNAUTHENTICATED
+  // /health identity before the token-carrying version fetch, so the bearer
+  // token is never sent to a re-assigned address that now belongs to a
+  // different machine. Older servers omit serverId from /health; only an
+  // explicit mismatch rejects.
+  if (typeof expectedServerId === 'string' && expectedServerId.trim()) {
+    const healthUrl = buildHealthUrl(url);
+    if (healthUrl) {
+      try {
+        const response = await fetch(healthUrl, { signal: AbortSignal.timeout(timeoutMs), headers: { Accept: 'application/json' } });
+        if (response.ok) {
+          const payload = await response.json().catch(() => null);
+          const reported = typeof payload?.serverId === 'string' ? payload.serverId.trim() : '';
+          if (reported && reported !== expectedServerId.trim()) {
+            return { status: 'wrong-service', latencyMs: Date.now() - started };
+          }
+        }
+      } catch {
+        // Unreachable/timeout surfaces in the version fetch below.
+      }
+    }
+  }
+
   try {
     const headers = { ...sanitizeRuntimeRequestHeaders(requestHeaders), Accept: 'application/json' };
     const token = typeof clientToken === 'string' ? clientToken.trim() : '';
@@ -1582,6 +1707,13 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
   if (!baseUrl) throw new Error('Invalid URL');
   if (!candidatePassword) throw new Error('Password is required');
 
+  // Stable client identity so re-login reuses the same device record. Local
+  // uses the fixed desktop-local identity; remote uses this install's id with a
+  // regular 'desktop' kind.
+  const clientIdentity = isLocalRuntimeUrl(baseUrl)
+    ? { clientKind: LOCAL_DESKTOP_CLIENT_KIND, dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY, ...desktopDeviceMetadata() }
+    : { clientKind: REMOTE_DESKTOP_CLIENT_KIND, dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`, ...desktopDeviceMetadata() };
+
   const loginResponse = await fetch(new URL('/auth/session', `${baseUrl}/`).toString(), {
     method: 'POST',
     signal: AbortSignal.timeout(10_000),
@@ -1595,10 +1727,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
       trustDevice: trustDevice === true,
       issueClientToken: true,
       clientLabel: 'OpenChamber Desktop',
-      ...(isLocalRuntimeUrl(baseUrl) ? {
-        clientKind: LOCAL_DESKTOP_CLIENT_KIND,
-        dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY,
-      } : {}),
+      ...clientIdentity,
     }),
   });
   if (!loginResponse.ok) {
@@ -1626,10 +1755,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
     },
     body: JSON.stringify({
       label: 'OpenChamber Desktop',
-      ...(isLocalRuntimeUrl(baseUrl) ? {
-        clientKind: LOCAL_DESKTOP_CLIENT_KIND,
-        dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY,
-      } : {}),
+      ...clientIdentity,
     }),
   });
   if (!tokenResponse.ok) {
@@ -1711,19 +1837,53 @@ const parseDeepLink = (raw) => {
   }
 };
 
-const parseConnectDeepLinkPayload = (raw) => {
+const decodeBase64UrlJson = (value) => {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const json = Buffer.from(value.trim(), 'base64url').toString('utf8');
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+};
+
+const parseConnectPairingDeepLinkPayload = (raw) => {
   if (typeof raw !== 'string') return null;
   try {
     const url = new URL(raw.trim());
     if (url.protocol !== `${DEEP_LINK_PROTOCOL}:` || url.hostname !== 'connect') return null;
-    const version = url.searchParams.get('v');
-    const serverUrl = normalizeHostUrl(url.searchParams.get('server') || '');
-    const token = sanitizeClientTokenForStorage(url.searchParams.get('token') || '');
-    const label = typeof url.searchParams.get('label') === 'string'
-      ? url.searchParams.get('label').trim()
-      : '';
-    if (version !== '1' || !serverUrl || !token) return null;
-    return { serverUrl, token, label: label || serverUrl };
+    if (url.searchParams.get('v') !== '2') return null;
+    const payload = decodeBase64UrlJson(url.searchParams.get('p') || '');
+    if (!payload || payload.v !== 2 || typeof payload !== 'object') return null;
+    const pairingId = typeof payload.pairingId === 'string' ? payload.pairingId.trim() : '';
+    const secret = typeof payload.secret === 'string' ? payload.secret.trim() : '';
+    if (!pairingId || !secret) return null;
+    const candidates = Array.isArray(payload.candidates)
+      ? payload.candidates.flatMap((candidate) => {
+        if (!candidate || typeof candidate !== 'object') return [];
+        const type = candidate.type === 'lan' || candidate.type === 'tunnel' || candidate.type === 'relay'
+          ? candidate.type
+          : null;
+        const candidateUrl = normalizeHostUrl(candidate.url || '');
+        if (!type || !candidateUrl) return [];
+        const priority = Number.isFinite(candidate.priority) ? candidate.priority : 100;
+        return [{ type, url: candidateUrl, priority }];
+      })
+      : [];
+    if (candidates.length === 0) return null;
+    const expiresAt = typeof payload.expiresAt === 'string' ? payload.expiresAt.trim() : '';
+    if (expiresAt) {
+      const expiresTime = Date.parse(expiresAt);
+      if (!Number.isFinite(expiresTime) || expiresTime <= Date.now()) return null;
+    }
+    return {
+      pairingId,
+      secret,
+      label: typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim() : 'OpenChamber',
+      fingerprint: typeof payload.fingerprint === 'string' && payload.fingerprint.trim() ? payload.fingerprint.trim() : '',
+      expiresAt: expiresAt || null,
+      candidates: candidates.sort((left, right) => left.priority - right.priority),
+    };
   } catch {
     return null;
   }
@@ -1731,20 +1891,22 @@ const parseConnectDeepLinkPayload = (raw) => {
 
 const importConnectDeepLink = async (payload) => {
   if (!payload?.serverUrl || !payload?.token) return null;
+  const serverUrl = normalizeHostUrl(payload.serverUrl);
+  if (!serverUrl) return null;
   const config = readDesktopHostsConfig();
   const existing = config.hosts.find((host) => {
     const hostUrl = normalizeHostUrl(host?.url || '');
     const apiUrl = normalizeHostUrl(host?.apiUrl || host?.url || '');
-    return payload.serverUrl === hostUrl || payload.serverUrl === apiUrl;
+    return serverUrl === hostUrl || serverUrl === apiUrl;
   });
 
   const id = existing?.id || `host-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const importedHost = {
     ...(existing || {}),
     id,
-    label: payload.label || existing?.label || payload.serverUrl,
-    url: payload.serverUrl,
-    apiUrl: payload.serverUrl,
+    label: payload.label || existing?.label || serverUrl,
+    url: serverUrl,
+    apiUrl: serverUrl,
     clientToken: payload.token,
   };
   const hosts = existing
@@ -1757,6 +1919,51 @@ const importConnectDeepLink = async (payload) => {
     initialHostChoiceCompleted: true,
   });
   return id;
+};
+
+const requestJsonWithTimeout = async (url, init = {}, timeoutMs = 8000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const data = await response.json().catch(() => null);
+    return { ok: response.ok, status: response.status, data };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const selectPairingCandidateUrl = async (payload) => {
+  for (const candidate of payload.candidates || []) {
+    try {
+      const health = await requestJsonWithTimeout(`${candidate.url.replace(/\/+$/g, '')}/health`, { method: 'GET' }, 3500);
+      if (health.ok) return candidate.url.replace(/\/+$/g, '');
+    } catch {
+    }
+  }
+  return null;
+};
+
+const redeemConnectPairingDeepLink = async (payload, serverUrl) => {
+  const response = await requestJsonWithTimeout(`${serverUrl.replace(/\/+$/g, '')}/api/client-auth/pairing/redeem`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      pairingId: payload.pairingId,
+      secret: payload.secret,
+      clientLabel: 'OpenChamber Desktop',
+      clientKind: 'desktop',
+      deviceName: 'OpenChamber Desktop',
+      ...desktopDeviceMetadata(),
+      dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`,
+    }),
+  });
+  if (!response.ok || !response.data || typeof response.data.clientToken !== 'string') return null;
+  return {
+    serverUrl,
+    token: sanitizeClientTokenForStorage(response.data.clientToken),
+    label: payload.label || response.data?.server?.label || serverUrl,
+  };
 };
 
 const switchToHostById = async (rawId) => {
@@ -1830,28 +2037,41 @@ const dispatchDeepLink = (link) => {
   if (!link) return;
   log.info('[electron] dispatching deep-link', { type: link.type, valueLen: link.value?.length || 0 });
   if (link.type === 'connect') {
-    const payload = parseConnectDeepLinkPayload(link.raw);
-    if (!payload) {
-      log.warn('[electron] invalid connect deep-link payload');
-      return;
-    }
-    void confirmConnectDeepLink(payload).then((confirmed) => {
-      if (!confirmed) {
-        log.info('[electron] connect deep-link declined by user');
-        return;
-      }
-      return importConnectDeepLink(payload).then((id) => {
+    const pairingPayload = parseConnectPairingDeepLinkPayload(link.raw);
+    if (pairingPayload) {
+      const previewUrl = pairingPayload.candidates[0]?.url || pairingPayload.label;
+      void confirmConnectDeepLink({
+        serverUrl: previewUrl,
+        token: 'pairing-v2',
+        label: pairingPayload.fingerprint ? `${pairingPayload.label} (${pairingPayload.fingerprint})` : pairingPayload.label,
+      }).then(async (confirmed) => {
+        if (!confirmed) {
+          log.info('[electron] connect pairing deep-link declined by user');
+          return;
+        }
+        const serverUrl = await selectPairingCandidateUrl(pairingPayload);
+        if (!serverUrl) {
+          log.warn('[electron] connect pairing deep-link has no reachable candidate');
+          return;
+        }
+        const importedPayload = await redeemConnectPairingDeepLink(pairingPayload, serverUrl).catch((error) => {
+          log.warn('[electron] connect pairing redeem failed:', error);
+          return null;
+        });
+        if (!importedPayload?.token) {
+          log.warn('[electron] connect pairing redeem returned no client token');
+          return;
+        }
+        const id = await importConnectDeepLink(importedPayload);
         if (id) void switchToHostById(id);
       });
-    });
+      return;
+    }
+    log.warn('[electron] invalid connect deep-link payload');
     return;
   }
   if (link.type === 'session' && link.value) {
     emitToAllWindows('openchamber:open-session', { sessionId: link.value });
-    return;
-  }
-  if (link.type === 'project' && link.value) {
-    emitToAllWindows('openchamber:open-project', { projectPath: link.value });
     return;
   }
   if (link.type === 'host' && link.value) {
@@ -1964,12 +2184,11 @@ const readThemeSource = () => {
 };
 
 const getWindowIconPath = () => {
-  if (process.platform !== 'win32' && process.platform !== 'linux') {
-    return undefined;
-  }
+  if (process.platform !== 'win32' && process.platform !== 'linux') return undefined;
+  const iconFileName = process.platform === 'linux' ? 'icon.png' : 'icon.ico';
   const iconPath = isDev
-    ? path.join(__dirname, 'resources', 'icons', 'icon.ico')
-    : path.join(process.resourcesPath, 'icons', 'icon.ico');
+    ? path.join(__dirname, 'resources', 'icons', iconFileName)
+    : path.join(process.resourcesPath, 'icons', iconFileName);
   return fs.existsSync(iconPath) ? iconPath : undefined;
 };
 
@@ -1991,7 +2210,8 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   const desktopRequestHeaders = rendererRuntimeConfig.requestHeaders || {};
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
-  const usesCustomTitleBar = process.platform === 'darwin' || process.platform === 'win32';
+  const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
+  const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome;
   // macOS vibrancy, on by default; users can disable it (Appearance settings).
   const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const titleBarOverlayEnabled = false;
@@ -2013,7 +2233,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     // here: setting it in the constructor leaves the material uncomposited on a
     // cold launch until a window event. No `transparent: true` either — vibrancy
     // alone is enough and composites reliably once applied to a live window.
-    frame: process.platform === 'win32' ? false : undefined,
+    frame: usesFramelessChrome ? false : undefined,
     autoHideMenuBar: autoHidesNativeMenuBar,
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.
@@ -2030,6 +2250,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
         `--openchamber-macos-major=${desktopMacosMajor}`,
         `--openchamber-mac-vibrancy=${useVibrancy ? '1' : '0'}`,
         `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
+        `--openchamber-relay-host-id=${rendererRuntimeConfig.relayHostId || ''}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
       backgroundThrottling: false,
@@ -2110,7 +2331,20 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.on('move', () => {
     debounceWindowStatePersist(browserWindow, false);
   });
+  browserWindow.on('minimize', (event) => {
+    if (!shouldHideMainWindowToTray(browserWindow)) return;
+    debounceWindowStatePersist(browserWindow, true);
+    event.preventDefault();
+    browserWindow.hide();
+  });
   browserWindow.on('close', (event) => {
+    if (!state.quitRequested && shouldHideMainWindowToTray(browserWindow)) {
+      debounceWindowStatePersist(browserWindow, true);
+      event.preventDefault();
+      browserWindow.hide();
+      return;
+    }
+
     if (process.platform === 'darwin' && !state.quitRequested) {
       const remainingVisible = BrowserWindow.getAllWindows().filter(
         (window) => !window.isDestroyed() && window.isVisible(),
@@ -2278,6 +2512,20 @@ const openMainWindow = async () => {
   const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
     ? config.hosts.find((entry) => entry.id === config.defaultHostId)
     : null;
+  const relayHost = host && host.relay && typeof host.relay === 'object' ? host : null;
+  if (relayHost) {
+    // Relay hosts have no reachable HTTP base. Boot the LOCAL UI with the local
+    // runtime; the renderer re-opens the E2EE tunnel on startup by reading the
+    // relay descriptor + token from desktopHosts and calling
+    // switchRuntimeEndpoint({ relay }).
+    const localApiBaseUrl = state.sidecarUrl || state.apiBaseUrl || state.localOrigin || '';
+    const localToken = resolveStoredClientTokenForUrl(localApiBaseUrl, config) || state.clientToken || '';
+    return activateMainWindow(localUiUrl, state.localOrigin, state.bootOutcome, {
+      apiBaseUrl: localApiBaseUrl,
+      clientToken: localToken,
+      requestHeaders: {},
+    });
+  }
   const apiBaseUrl = host?.apiUrl || host?.url || state.sidecarUrl || state.apiBaseUrl || '';
   const clientToken = host?.clientToken || resolveStoredClientTokenForUrl(apiBaseUrl, config) || state.clientToken || '';
   const requestHeaders = sanitizeRuntimeRequestHeaders(host?.requestHeaders || {});
@@ -2358,6 +2606,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const desktopRequestHeaders = effectiveRuntimeConfig.requestHeaders || {};
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
+  const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
   // macOS vibrancy, on by default; users can disable it (Appearance settings).
   const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const browserWindow = new BrowserWindow({
@@ -2373,9 +2622,9 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     // here: setting it in the constructor leaves the material uncomposited on a
     // cold launch until a window event. No `transparent: true` either — vibrancy
     // alone is enough and composites reliably once applied to a live window.
-    frame: process.platform === 'win32' ? false : undefined,
+    frame: usesFramelessChrome ? false : undefined,
     autoHideMenuBar: process.platform !== 'darwin',
-    titleBarStyle: process.platform === 'darwin' || process.platform === 'win32' ? 'hidden' : 'default',
+    titleBarStyle: process.platform === 'darwin' || usesFramelessChrome ? 'hidden' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
       additionalArguments: [
@@ -2573,10 +2822,6 @@ const compareSemver = (left, right) => {
   return 0;
 };
 
-const parseGithubRepo = () => {
-  return { owner: 'openchamber', repo: 'openchamber' };
-};
-
 const setupAutoUpdater = () => {
   if (!app.isPackaged) {
     return;
@@ -2588,11 +2833,13 @@ const setupAutoUpdater = () => {
   autoUpdater.disableWebInstaller = false;
   autoUpdater.logger = log;
 
-  const { owner, repo } = parseGithubRepo();
-  autoUpdater.setFeedURL({
-    provider: 'github',
-    owner,
-    repo,
+  const testBuild = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
+    && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
+  const feed = resolveUpdaterFeed({ testBuild });
+  autoUpdater.setFeedURL(feed);
+  log.info('[electron] updater feed configured', {
+    provider: feed.provider,
+    target: feed.provider === 'github' ? `${feed.owner}/${feed.repo}` : feed.url,
   });
 
   autoUpdater.on('download-progress', (progress) => {
@@ -3207,21 +3454,37 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return APP_VERSION;
 
     case 'desktop_get_launch_at_login': {
-      if (process.platform !== 'darwin') return { supported: false, enabled: false };
-      const settings = app.getLoginItemSettings();
+      if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
+      const settings = app.getLoginItemSettings(getLoginItemOptions());
       return { supported: true, enabled: settings.openAtLogin === true };
     }
 
     case 'desktop_set_launch_at_login': {
-      if (process.platform !== 'darwin') return { supported: false, enabled: false };
+      if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
       const enabled = args.enabled === true;
-      app.setLoginItemSettings({
+      const settingsArgs = {
         openAtLogin: enabled,
-        openAsHidden: enabled,
-        args: enabled ? [BACKGROUND_START_ARG] : [],
-      });
-      const settings = app.getLoginItemSettings();
+        ...(process.platform === 'darwin' ? { openAsHidden: enabled } : {}),
+        ...(process.platform === 'win32' ? getLoginItemOptions() : { args: enabled ? [BACKGROUND_START_ARG] : [] }),
+        ...(process.platform === 'win32' ? { enabled } : {}),
+      };
+      app.setLoginItemSettings(settingsArgs);
+      const settings = app.getLoginItemSettings(getLoginItemOptions());
       return { supported: true, enabled: settings.openAtLogin === true };
+    }
+
+    case 'desktop_get_minimize_to_tray': {
+      return readDesktopMinimizeToTrayStatus();
+    }
+
+    case 'desktop_set_minimize_to_tray': {
+      if (process.platform !== 'win32') return { supported: false, enabled: false };
+      const enabled = args.enabled === true;
+      await mutateSettingsRoot((root) => {
+        root.desktopMinimizeToTrayEnabled = enabled;
+      });
+      setupTray();
+      return readDesktopMinimizeToTrayStatus();
     }
 
     case 'desktop_get_keep_awake': {
@@ -3536,7 +3799,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         emitToAllWindows('openchamber:installed-apps-updated', apps);
       };
       if (process.platform !== 'darwin' && process.platform !== 'win32') {
-        throw new Error('desktop_get_installed_apps is only supported on macOS and Windows');
+        return { apps: [], hasCache: false, isCacheStale: false, supported: false };
       }
       if (!hasCache || isCacheStale || args.force === true) {
         void refresh();
@@ -3572,8 +3835,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_local_client_token_get':
       return readDesktopLocalClientToken();
 
+    case 'desktop_install_id_get':
+      return getOrCreateDesktopInstallId();
+
     case 'desktop_host_probe':
-      return probeHostWithTimeout(String(args.url || ''), 2_000, String(args.clientToken || ''), args.requestHeaders || {});
+      return probeHostWithTimeout(String(args.url || ''), 2_000, String(args.clientToken || ''), args.requestHeaders || {}, String(args.expectedServerId || ''));
 
     case 'desktop_remote_password_login':
       return loginRemoteAndIssueClientToken({
@@ -3636,22 +3902,18 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_check_for_updates': {
+      assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
-      let updateResult = null;
-      try {
-        updateResult = await autoUpdater.checkForUpdates();
-      } catch {
-      }
-
-      const updateInfo = updateResult?.updateInfo;
-      const nextVersion =
-        (typeof updateInfo?.version === 'string' && updateInfo.version) ||
-        currentVersion;
-      const available = compareSemver(nextVersion, currentVersion) > 0;
+      const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
+        autoUpdater,
+        currentVersion,
+        pendingUpdate: state.pendingUpdate,
+        compareVersions: compareSemver,
+      });
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         await parseRelevantChangelogNotes(currentVersion, nextVersion);
-      state.pendingUpdate = available ? { version: nextVersion, electronUpdate: updateResult } : null;
+      state.pendingUpdate = pendingUpdate;
       return {
         available,
         currentVersion,
@@ -3664,6 +3926,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_download_and_install_update':
+      assertUpdaterCapability({ packaged: app.isPackaged });
       if (!state.pendingUpdate) {
         throw new Error('No pending update');
       }
@@ -3709,6 +3972,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
+      if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged });
       log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {
@@ -3779,6 +4043,36 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         }
       }
       await createAdditionalWindow(targetUrl, runtimeConfig);
+      return null;
+    }
+
+    case 'desktop_new_window_for_host': {
+      // Open a saved host in a new window. Hosts with a relay leg boot the
+      // LOCAL UI and let the renderer pick the transport (direct first, E2EE
+      // tunnel fallback) via the injected relay host id — a fixed apiBaseUrl
+      // would strand the window when the direct leg is unreachable.
+      const hostId = typeof args.hostId === 'string' ? args.hostId.trim() : '';
+      const config = readDesktopHostsConfig();
+      const host = config.hosts.find((entry) => entry.id === hostId);
+      if (!host) throw new Error('Host not found');
+      if (host.relay) {
+        const windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
+        await createAdditionalWindow(windowUrl, {
+          apiBaseUrl: '',
+          clientToken: host.clientToken || '',
+          requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders || {}),
+          relayHostId: host.id,
+        });
+        return null;
+      }
+      const targetUrl = normalizeHostUrl(host.apiUrl || host.url);
+      if (!targetUrl) throw new Error('Invalid URL');
+      const windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : targetUrl;
+      await createAdditionalWindow(windowUrl, {
+        apiBaseUrl: targetUrl,
+        clientToken: host.clientToken || '',
+        requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders || {}),
+      });
       return null;
     }
 
@@ -4218,6 +4512,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_host_probe',
   'desktop_new_window',
   'desktop_new_window_at_url',
+  'desktop_new_window_for_host',
   'desktop_set_window_title',
   'desktop_set_window_theme',
   'desktop_is_window_fullscreen',
@@ -4309,8 +4604,8 @@ ipcMain.handle('openchamber:file:grant-existing', async (event, filePath) => {
   };
 });
 
-// --- macOS menu bar (status bar) ---------------------------------------------
-// Tray lives only on macOS; the renderer streams a compact state snapshot via
+// --- Native tray / menu bar ---------------------------------------------------
+// Tray lives on macOS and Windows; the renderer streams a compact state snapshot via
 // the `desktop_tray_update` IPC command (see the command switch). Tray clicks
 // flow back through dispatchTrayAction → renderer (focus/respond) or native
 // handlers (show window / quit).
@@ -4342,6 +4637,21 @@ const resolveTraySurface = () => {
 const trayIconAssets = () => {
   const dir = path.join(resourceRoot(), 'icons', 'tray');
   const statusDir = path.join(dir, 'status');
+  if (process.platform === 'win32') {
+    const iconPath = getWindowIconPath() || path.join(resourceRoot(), 'icons', 'icon.ico');
+    return {
+      idleIconPath: iconPath,
+      unseenIconPath: iconPath,
+      breathIconPaths: [iconPath],
+      statusIconPaths: {
+        busy: path.join(statusDir, 'busy.png'),
+        retry: path.join(statusDir, 'retry.png'),
+        error: path.join(statusDir, 'error.png'),
+        unseen: path.join(statusDir, 'unseen.png'),
+        blank: path.join(statusDir, 'blank.png'),
+      },
+    };
+  }
   return {
     idleIconPath: path.join(dir, 'trayTemplate-idle.png'),
     unseenIconPath: path.join(dir, 'trayTemplate-unseen.png'),
@@ -4360,7 +4670,7 @@ const trayIconAssets = () => {
 };
 
 const setupTray = () => {
-  if (process.platform !== 'darwin' || state.trayController) return;
+  if (!['darwin', 'win32'].includes(process.platform) || state.trayController) return;
   const assets = trayIconAssets();
   if (!fs.existsSync(assets.idleIconPath)) {
     log.warn('[electron] tray icon missing, skipping tray setup', { iconPath: assets.idleIconPath });
@@ -4562,17 +4872,17 @@ app.whenReady().then(async () => {
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());
-    setupTray();
   } else {
     Menu.setApplicationMenu(buildAutoHiddenMenu());
   }
+  setupTray();
 
-  if (process.platform === 'darwin' && app.isPackaged) {
+  if ((process.platform === 'darwin' || process.platform === 'win32') && app.isPackaged) {
     const openAtLogin = loginItemSettings?.openAtLogin === true;
     app.setLoginItemSettings({
       openAtLogin,
-      openAsHidden: openAtLogin,
-      args: openAtLogin ? [BACKGROUND_START_ARG] : [],
+      ...(process.platform === 'darwin' ? { openAsHidden: openAtLogin, args: openAtLogin ? [BACKGROUND_START_ARG] : [] } : {}),
+      ...(process.platform === 'win32' ? { ...getLoginItemOptions(), enabled: openAtLogin } : {}),
     });
   }
 

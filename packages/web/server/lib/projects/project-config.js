@@ -213,6 +213,12 @@ const normalizeExecution = (value) => {
   const modelID = asNonEmptyString(value.modelID);
   const variant = asNonEmptyString(value.variant);
   const agent = asNonEmptyString(value.agent);
+  const goalEnabled = value.goalEnabled === true;
+  const goalTokenBudget = typeof value.goalTokenBudget === 'number'
+    && Number.isFinite(value.goalTokenBudget)
+    && value.goalTokenBudget > 0
+    ? Math.floor(value.goalTokenBudget)
+    : undefined;
 
   if (!prompt) {
     throw new Error('execution.prompt is required');
@@ -230,6 +236,8 @@ const normalizeExecution = (value) => {
     modelID,
     ...(variant ? { variant } : {}),
     ...(agent ? { agent } : {}),
+    ...(goalEnabled ? { goalEnabled: true } : {}),
+    ...(goalEnabled && goalTokenBudget ? { goalTokenBudget } : {}),
   };
 };
 

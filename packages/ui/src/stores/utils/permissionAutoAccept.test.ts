@@ -60,6 +60,17 @@ describe("autoRespondsPermission", () => {
     })).toBe(true)
   })
 
+  test("uses a prebuilt session index for lineage lookup", () => {
+    const parent = makeSession("parent")
+    const child = makeSession("child", "parent")
+    expect(autoRespondsPermission({
+      autoAccept: { parent: true },
+      sessions: [],
+      sessionById: new Map([[parent.id, parent], [child.id, child]]),
+      sessionID: "child",
+    })).toBe(true)
+  })
+
   test("returns false when only sibling has autoAccept enabled", () => {
     const autoAccept: PermissionAutoAcceptMap = { sibling: true }
     const sessions = [

@@ -25,13 +25,20 @@ openchamber --ui-password be-creative-here
 
 패스키는 현재 비밀번호에 연결됩니다. 비밀번호를 변경하거나 제거하면 저장된 패스키가 삭제되며, 다시 추가해야 합니다.
 
+## 기기 토큰
+
+[기기 연결](/ko/connect-devices/)로 페어링된 기기는 UI 비밀번호가 아닌 기기별 고유 토큰으로 인증합니다. 페어링 링크는 일회용이며 사용되지 않으면 만료됩니다. 페어링된 모든 기기는 **Settings → Remote Instances → 이 서버에 연결**에 표시되며, 언제든 어떤 기기든 해지할 수 있습니다. 집 밖에서의 연결은 종단 간 암호화되어 트래픽을 읽을 수 없는 [Private Relay](/ko/private-relay/)를 통해 이루어집니다.
+
 ## 노출하기 전에
 
 - 기본적으로 OpenChamber는 사용자 자신의 컴퓨터(`127.0.0.1`)에서만 수신 대기합니다. 더 넓게 수신 대기하려면 의도적인 변경이 필요하며, 먼저 비밀번호를 설정해야 합니다.
-- 인터넷에 포트를 여는 것보다 [터널](/ko/tunnels/)이나 사설 네트워크(예: VPN)를 선호하세요.
+- 자신의 기기라면 [Private Relay](/ko/private-relay/)를 통한 [페어링](/ko/connect-devices/)을 선호하세요. 아무것도 공개적으로 노출되지 않습니다.
+- 공개 URL이 필요하다면 인터넷에 포트를 여는 것보다 [터널](/ko/tunnels/)이나 사설 네트워크(예: VPN)를 선호하세요.
 - OpenChamber를 자체 HTTPS 서버 뒤에 둔다면 [Reverse Proxy](/ko/reverse-proxy/)를 참고하세요.
 
 ## 관련 항목
 
-- [Tunnels](/ko/tunnels/) — 원격으로 인스턴스에 접근하는 권장 방법
+- [기기 연결](/ko/connect-devices/) — 일회용 페어링과 기기별 토큰
+- [Private Relay](/ko/private-relay/) — 어디서든 가능한 종단 간 암호화 접속
+- [Tunnels](/ko/tunnels/) — 필요할 때 공개 URL 노출
 - [Reverse Proxy](/ko/reverse-proxy/) — 자체 서버 뒤에서 OpenChamber 실행

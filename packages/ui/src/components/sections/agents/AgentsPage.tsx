@@ -624,7 +624,7 @@ export const AgentsPage: React.FC = () => {
       const permissionConfig = buildPermissionConfigWithGlobal(globalPermission, permissionRules);
       const config: AgentConfig = {
         name: agentName,
-        description: description.trim() || undefined,
+        ...(description.trim() ? { description: description.trim() } : {}),
         mode,
         model: trimmedModel === '' ? null : trimmedModel,
         variant: trimmedVariant === '' ? null : trimmedVariant || undefined,
@@ -632,7 +632,7 @@ export const AgentsPage: React.FC = () => {
         top_p: topP ?? null,
         prompt: trimmedPrompt || (isNewAgent ? undefined : null),
         permission: permissionConfig,
-        scope: isNewAgent ? draftScope : undefined,
+        ...(isNewAgent && draftScope ? { scope: draftScope } : {}),
       };
 
       let result: AgentMutationResult;
