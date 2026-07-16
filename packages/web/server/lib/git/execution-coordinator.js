@@ -258,7 +258,7 @@ class GitExecutionCoordinator {
 
   pruneIdle({ force = false } = {}) {
     const now = this.now();
-    for (const state of this.contexts.values()) {
+    for (const state of [...this.contexts.values()]) {
       if (state.activeCount > 0 || state.pending.length > 0 || this.hasStatusForContext(state.commonId)) {
         continue;
       }
@@ -306,6 +306,17 @@ class GitExecutionCoordinator {
     }
   }
 
+  deleteWorktreeState(state, worktree) {
+    if (state.worktrees.get(worktree.worktreeId) !== worktree) {
+      return false;
+    }
+    if (!state.worktrees.delete(worktree.worktreeId)) {
+      return false;
+    }
+    this.totalWorktrees = Math.max(0, this.totalWorktrees - 1);
+    return true;
+  }
+
   evictOldestIdleContext() {
     let candidate = null;
     for (const state of this.contexts.values()) {
@@ -344,9 +355,7 @@ class GitExecutionCoordinator {
     if (!candidate || !candidateContext) {
       return false;
     }
-    candidateContext.worktrees.delete(candidate.worktreeId);
-    this.totalWorktrees -= 1;
-    return true;
+    return this.deleteWorktreeState(candidateContext, candidate);
   }
 
   ensureContext(commonId) {
@@ -406,8 +415,7 @@ class GitExecutionCoordinator {
       && worktree.generation === 0
       && !this.hasStatusForWorktree(state.commonId, worktree.worktreeId)
     ) {
-      state.worktrees.delete(worktree.worktreeId);
-      this.totalWorktrees -= 1;
+      this.deleteWorktreeState(state, worktree);
     }
     if (
       state.activeCount === 0
@@ -454,9 +462,9 @@ class GitExecutionCoordinator {
       ) {
         continue;
       }
-      state.worktrees.delete(worktreeId);
-      this.totalWorktrees -= 1;
-      removed += 1;
+      if (this.deleteWorktreeState(state, worktree)) {
+        removed += 1;
+      }
     }
     return removed;
   }
@@ -830,11 +838,11 @@ class GitExecutionCoordinator {
       if (operation.worktree) {
         operation.state.activeWorktreeWrites.add(operation.worktree.worktreeId);
       }
-    } else if (operation.kind === GIT_OPERATION_KIND.READ) {
+    } else if (operation.kind === GIT_OPERATION_KIND.READ && operation.worktree) {
       operation.state.activeReads += 1;
       const current = operation.state.activeReadsByWorktree.get(operation.worktree.worktreeId) || 0;
       operation.state.activeReadsByWorktree.set(operation.worktree.worktreeId, current + 1);
-    } else {
+    } else if (operation.worktree) {
       operation.state.activeWorktreeWrites.add(operation.worktree.worktreeId);
     }
 
@@ -881,7 +889,7 @@ class GitExecutionCoordinator {
       if (operation.worktree) {
         operation.state.activeWorktreeWrites.delete(operation.worktree.worktreeId);
       }
-    } else if (operation.kind === GIT_OPERATION_KIND.READ) {
+    } else if (operation.kind === GIT_OPERATION_KIND.READ && operation.worktree) {
       operation.state.activeReads -= 1;
       const current = operation.state.activeReadsByWorktree.get(operation.worktree.worktreeId) || 0;
       if (current <= 1) {
@@ -889,7 +897,7 @@ class GitExecutionCoordinator {
       } else {
         operation.state.activeReadsByWorktree.set(operation.worktree.worktreeId, current - 1);
       }
-    } else {
+    } else if (operation.worktree) {
       operation.state.activeWorktreeWrites.delete(operation.worktree.worktreeId);
     }
 

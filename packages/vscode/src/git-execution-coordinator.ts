@@ -432,6 +432,13 @@ export class GitExecutionCoordinator {
     this.totalWorktrees = Math.max(0, this.totalWorktrees - state.worktrees.size);
   }
 
+  private deleteWorktreeState(state: ContextState, worktree: WorktreeState): boolean {
+    if (state.worktrees.get(worktree.worktreeId) !== worktree) return false;
+    if (!state.worktrees.delete(worktree.worktreeId)) return false;
+    this.totalWorktrees = Math.max(0, this.totalWorktrees - 1);
+    return true;
+  }
+
   private evictOldestIdleContext(): boolean {
     let candidate: ContextState | null = null;
     for (const state of this.contexts.values()) {
@@ -460,9 +467,7 @@ export class GitExecutionCoordinator {
       }
     }
     if (!candidate || !candidateContext) return false;
-    candidateContext.worktrees.delete(candidate.worktreeId);
-    this.totalWorktrees = Math.max(0, this.totalWorktrees - 1);
-    return true;
+    return this.deleteWorktreeState(candidateContext, candidate);
   }
 
   private ensureContext(commonId: string): ContextState {
@@ -514,8 +519,7 @@ export class GitExecutionCoordinator {
       && worktree.generation === 0
       && !this.hasStatusForWorktree(state.commonId, worktree.worktreeId)
     ) {
-      state.worktrees.delete(worktree.worktreeId);
-      this.totalWorktrees = Math.max(0, this.totalWorktrees - 1);
+      this.deleteWorktreeState(state, worktree);
     }
     if (state.activeCount === 0 && state.pending.length === 0 && !this.hasStatusForContext(state.commonId)) {
       this.deleteContextState(state);
@@ -551,9 +555,7 @@ export class GitExecutionCoordinator {
         || worktree.pendingCount > 0
         || this.hasStatusForWorktree(commonId, worktreeId)
       ) continue;
-      state.worktrees.delete(worktreeId);
-      this.totalWorktrees = Math.max(0, this.totalWorktrees - 1);
-      removed += 1;
+      if (this.deleteWorktreeState(state, worktree)) removed += 1;
     }
     return removed;
   }

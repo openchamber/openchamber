@@ -172,6 +172,45 @@ describe('VS Code Git execution conflicts and fairness', () => {
 });
 
 describe('VS Code Git execution bounds, clones, and status', () => {
+  it('rejects pre-aborted entry points without retaining state', async () => {
+    const calls = { run: 0, status: 0, clone: 0, canonicalize: 0 };
+    const coordinator = createGitExecutionCoordinator({
+      canonicalizeCloneDestination: async (destination) => {
+        calls.canonicalize += 1;
+        return destination;
+      },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const worktree = context('shared', 'pre-aborted');
+
+    await expect(coordinator.run({
+      context: worktree,
+      kind: GIT_OPERATION_KIND.READ,
+      signal: controller.signal,
+    }, async () => {
+      calls.run += 1;
+    })).rejects.toMatchObject({ code: GIT_EXECUTION_ERROR_CODES.CANCELLED });
+    await expect(coordinator.runStatus({ context: worktree, signal: controller.signal }, async () => {
+      calls.status += 1;
+    })).rejects.toMatchObject({ code: GIT_EXECUTION_ERROR_CODES.CANCELLED });
+    await expect(coordinator.runClone({ destination: '/tmp/pre-aborted', signal: controller.signal }, async () => {
+      calls.clone += 1;
+    })).rejects.toMatchObject({ code: GIT_EXECUTION_ERROR_CODES.CANCELLED });
+
+    expect(calls).toEqual({ run: 0, status: 0, clone: 0, canonicalize: 0 });
+    expect(coordinator.getStats()).toMatchObject({
+      active: 0,
+      pending: 0,
+      activeNetwork: 0,
+      contexts: 0,
+      worktrees: 0,
+      statusInFlight: 0,
+      clonePending: 0,
+      cloneDestinations: 0,
+    });
+  });
+
   it('applies backpressure and cleans queued cancellation generations', async () => {
     const coordinator = createGitExecutionCoordinator({
       globalConcurrency: 1,
@@ -232,6 +271,54 @@ describe('VS Code Git execution bounds, clones, and status', () => {
     gate.resolve();
     await active;
     expect(coordinator.getStats()).toMatchObject({ active: 0, pending: 0 });
+  });
+
+  it('evicts the oldest idle worktree within one common context without count drift', async () => {
+    let now = 0;
+    const coordinator = createGitExecutionCoordinator({ maxWorktrees: 1, now: () => now });
+    const first = context('shared', 'a');
+    const second = context('shared', 'b');
+
+    await coordinator.run({ context: first, kind: GIT_OPERATION_KIND.WORKTREE_WRITE }, async () => 'first');
+    now = 1;
+    await coordinator.run({ context: second, kind: GIT_OPERATION_KIND.WORKTREE_WRITE }, async () => 'second');
+
+    expect(coordinator.getGeneration(first)).toEqual({ common: 0, worktree: 0 });
+    expect(coordinator.getGeneration(second)).toEqual({ common: 0, worktree: 2 });
+    expect(coordinator.getStats()).toMatchObject({ contexts: 1, worktrees: 1 });
+  });
+
+  it('removes a newly created worktree state when admission fails', async () => {
+    const coordinator = createGitExecutionCoordinator({ globalConcurrency: 1, maxQueuePerContext: 1 });
+    const gate = deferred();
+    const admitted = context('shared', 'admitted');
+    const rejected = context('shared', 'rejected');
+    const active = coordinator.run({ context: admitted, kind: GIT_OPERATION_KIND.READ }, () => gate.promise);
+    const queued = coordinator.run({ context: admitted, kind: GIT_OPERATION_KIND.READ }, async () => 'queued');
+
+    await expect(coordinator.run({ context: rejected, kind: GIT_OPERATION_KIND.READ }, async () => 'never'))
+      .rejects.toMatchObject({ code: GIT_EXECUTION_ERROR_CODES.OVERLOADED });
+    expect(coordinator.getGeneration(rejected)).toEqual({ common: 0, worktree: 0 });
+    expect(coordinator.getStats().worktrees).toBe(1);
+
+    gate.resolve();
+    await Promise.all([active, queued]);
+    expect(coordinator.getStats()).toMatchObject({ active: 0, pending: 0, worktrees: 1 });
+  });
+
+  it('decrements worktree totals only for successful invalidation', async () => {
+    const coordinator = createGitExecutionCoordinator();
+    const first = context('shared', 'a');
+    const second = context('shared', 'b');
+    await coordinator.run({ context: first, kind: GIT_OPERATION_KIND.READ }, async () => 'first');
+    await coordinator.run({ context: second, kind: GIT_OPERATION_KIND.READ }, async () => 'second');
+
+    expect(coordinator.invalidateWorktrees(first.commonId, [first.worktreeId, first.worktreeId])).toBe(1);
+    expect(coordinator.invalidateWorktrees(first.commonId, [first.worktreeId])).toBe(0);
+    expect(coordinator.getStats().worktrees).toBe(1);
+    expect(coordinator.invalidateWorktrees(first.commonId, [second.worktreeId, second.worktreeId])).toBe(1);
+    expect(coordinator.invalidateWorktrees(first.commonId, [second.worktreeId])).toBe(0);
+    expect(coordinator.getStats().worktrees).toBe(0);
   });
 
   it('serializes clone destinations and releases network separately from destination ownership', async () => {

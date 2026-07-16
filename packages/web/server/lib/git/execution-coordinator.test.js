@@ -276,6 +276,61 @@ describe('GitExecutionCoordinator bounds and lifecycle', () => {
     expect(state.worktrees.size).toBe(0);
   });
 
+  it('rejects public worktree-scoped admission without running tasks', async () => {
+    const coordinator = createGitExecutionCoordinator();
+    const invalidContext = { isRepository: true, commonId: '/repos/shared/.git', worktreeId: '' };
+    let taskCalls = 0;
+    const task = async () => {
+      taskCalls += 1;
+    };
+
+    for (const kind of [GIT_OPERATION_KIND.READ, GIT_OPERATION_KIND.WORKTREE_WRITE]) {
+      await expect(coordinator.run({ context: invalidContext, kind }, task)).rejects.toThrow(TypeError);
+    }
+
+    expect(taskCalls).toBe(0);
+    expect(coordinator.getStats()).toMatchObject({ contexts: 0, worktrees: 0, active: 0, pending: 0 });
+  });
+
+  it('rejects pre-aborted entry points without retaining state', async () => {
+    const calls = { run: 0, status: 0, clone: 0, canonicalize: 0 };
+    const coordinator = createGitExecutionCoordinator({
+      canonicalizeCloneDestination: async (destination) => {
+        calls.canonicalize += 1;
+        return destination;
+      },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const worktree = context('shared', 'pre-aborted');
+
+    await expect(coordinator.run({
+      context: worktree,
+      kind: GIT_OPERATION_KIND.READ,
+      signal: controller.signal,
+    }, async () => {
+      calls.run += 1;
+    })).rejects.toMatchObject({ code: GIT_EXECUTION_ERROR_CODES.CANCELLED });
+    await expect(coordinator.runStatus({ context: worktree, signal: controller.signal }, async () => {
+      calls.status += 1;
+    })).rejects.toMatchObject({ code: GIT_EXECUTION_ERROR_CODES.CANCELLED });
+    await expect(coordinator.runClone({ destination: '/tmp/pre-aborted', signal: controller.signal }, async () => {
+      calls.clone += 1;
+    })).rejects.toMatchObject({ code: GIT_EXECUTION_ERROR_CODES.CANCELLED });
+
+    expect(calls).toEqual({ run: 0, status: 0, clone: 0, canonicalize: 0 });
+    expect(coordinator.getStats()).toMatchObject({
+      active: 0,
+      pending: 0,
+      activeNetwork: 0,
+      contexts: 0,
+      worktrees: 0,
+      statusInFlight: 0,
+      clonePending: 0,
+      cloneDestinations: 0,
+    });
+  });
+
   it('applies per-context backpressure and cleans queued cancellation', async () => {
     const coordinator = createGitExecutionCoordinator({
       globalConcurrency: 1,
@@ -402,6 +457,40 @@ describe('GitExecutionCoordinator bounds and lifecycle', () => {
     expect(coordinator.getStats()).toMatchObject({ contexts: 1, worktrees: 1 });
   });
 
+  it('evicts the oldest idle worktree within one common context without count drift', async () => {
+    let now = 0;
+    const coordinator = createGitExecutionCoordinator({ maxWorktrees: 1, now: () => now });
+    const first = context('shared', 'a');
+    const second = context('shared', 'b');
+
+    await coordinator.run({ context: first, kind: GIT_OPERATION_KIND.WORKTREE_WRITE }, async () => 'first');
+    now = 1;
+    await coordinator.run({ context: second, kind: GIT_OPERATION_KIND.WORKTREE_WRITE }, async () => 'second');
+
+    expect([...coordinator.contexts.get(first.commonId).worktrees.keys()]).toEqual([second.worktreeId]);
+    expect(coordinator.getGeneration(first).worktree).toBe(0);
+    expect(coordinator.getGeneration(second).worktree).toBe(2);
+    expect(coordinator.getStats()).toMatchObject({ contexts: 1, worktrees: 1 });
+  });
+
+  it('removes a newly created worktree state when admission fails', async () => {
+    const coordinator = createGitExecutionCoordinator({ globalConcurrency: 1, maxQueuePerContext: 1 });
+    const gate = deferred();
+    const admitted = context('shared', 'admitted');
+    const rejected = context('shared', 'rejected');
+    const active = coordinator.run({ context: admitted, kind: GIT_OPERATION_KIND.READ }, () => gate.promise);
+    const queued = coordinator.run({ context: admitted, kind: GIT_OPERATION_KIND.READ }, async () => 'queued');
+
+    await expect(coordinator.run({ context: rejected, kind: GIT_OPERATION_KIND.READ }, async () => 'never'))
+      .rejects.toMatchObject({ code: GIT_EXECUTION_ERROR_CODES.OVERLOADED });
+    expect(coordinator.contexts.get(admitted.commonId).worktrees.has(rejected.worktreeId)).toBe(false);
+    expect(coordinator.getStats().worktrees).toBe(1);
+
+    gate.resolve();
+    await Promise.all([active, queued]);
+    expect(coordinator.getStats()).toMatchObject({ active: 0, pending: 0, worktrees: 1 });
+  });
+
   it('keeps diagnostics side-effect-free while throttled drain pruning evicts expired idle state', async () => {
     let now = 0;
     const coordinator = createGitExecutionCoordinator({
@@ -420,6 +509,20 @@ describe('GitExecutionCoordinator bounds and lifecycle', () => {
     expect(coordinator.contexts.get(first.commonId)).toBe(retainedState);
 
     coordinator.drain();
+    expect(coordinator.getStats()).toMatchObject({ contexts: 0, worktrees: 0, idleContexts: 0 });
+  });
+
+  it('prunes every eligible context from one snapshot pass', async () => {
+    const coordinator = createGitExecutionCoordinator();
+    const worktrees = [context('one', 'a'), context('two', 'b'), context('three', 'c')];
+
+    await Promise.all(worktrees.map((entry) => coordinator.run({
+      context: entry,
+      kind: GIT_OPERATION_KIND.READ,
+    }, async () => entry.worktreeId)));
+    expect(coordinator.getStats()).toMatchObject({ contexts: 3, worktrees: 3, idleContexts: 3 });
+
+    coordinator.pruneIdle({ force: true });
     expect(coordinator.getStats()).toMatchObject({ contexts: 0, worktrees: 0, idleContexts: 0 });
   });
 
@@ -454,6 +557,11 @@ describe('GitExecutionCoordinator bounds and lifecycle', () => {
     expect(coordinator.contexts.get(first.commonId).worktrees.has(first.worktreeId)).toBe(false);
     expect(coordinator.contexts.get(first.commonId).worktrees.has(second.worktreeId)).toBe(true);
     expect(coordinator.getStats().worktrees).toBe(1);
+    expect(coordinator.invalidateWorktrees(first.commonId, [first.worktreeId, first.worktreeId])).toBe(0);
+    expect(coordinator.getStats().worktrees).toBe(1);
+    expect(coordinator.invalidateWorktrees(first.commonId, [second.worktreeId, second.worktreeId])).toBe(1);
+    expect(coordinator.invalidateWorktrees(first.commonId, [second.worktreeId])).toBe(0);
+    expect(coordinator.getStats().worktrees).toBe(0);
   });
 
   it('enforces the status in-flight map bound', async () => {
@@ -749,7 +857,6 @@ describe('Git execution pathological fan-out correctness guard', () => {
     const commonCount = 200;
     const callerCount = 30_000;
     const observationCount = 29_400;
-    const mutationCount = callerCount - observationCount;
     const aliases = Array.from({ length: worktreeCount }, (_, index) => `/aliases/worktree-${index}`);
     const discoveryByAlias = new Map(aliases.map((alias, index) => {
       const commonIndex = index % commonCount;
@@ -831,9 +938,27 @@ describe('Git execution pathological fan-out correctness guard', () => {
       return { full: 'full', light: 'light' };
     }));
 
-    const mutations = contexts.slice(observationCount).map((resolvedContext, index) => {
+    const mutationContexts = contexts.slice(observationCount);
+    const expectedCommonGenerations = new Map();
+    const expectedWorktreeGenerations = new Map();
+    const contextByCommon = new Map();
+    const contextByWorktree = new Map();
+    const mutations = mutationContexts.map((resolvedContext, index) => {
       const commonMutation = index % 2 === 1;
       const network = commonMutation && index % 10 === 1;
+      contextByCommon.set(resolvedContext.commonId, resolvedContext);
+      contextByWorktree.set(resolvedContext.worktreeId, resolvedContext);
+      if (commonMutation) {
+        expectedCommonGenerations.set(
+          resolvedContext.commonId,
+          (expectedCommonGenerations.get(resolvedContext.commonId) || 0) + 2,
+        );
+      } else {
+        expectedWorktreeGenerations.set(
+          resolvedContext.worktreeId,
+          (expectedWorktreeGenerations.get(resolvedContext.worktreeId) || 0) + 2,
+        );
+      }
       return coordinator.run({
         context: resolvedContext,
         kind: commonMutation ? GIT_OPERATION_KIND.COMMON_WRITE : GIT_OPERATION_KIND.WORKTREE_WRITE,
@@ -873,12 +998,12 @@ describe('Git execution pathological fan-out correctness guard', () => {
     expect(maxReadsForOneCommon).toBeLessThanOrEqual(2);
     expect(maxActiveNetwork).toBeLessThanOrEqual(2);
     expect(maxNetworkForOneCommon).toBeLessThanOrEqual(1);
-    const commonGenerationTotal = [...coordinator.contexts.values()]
-      .reduce((total, state) => total + state.commonGeneration, 0);
-    const worktreeGenerationTotal = [...coordinator.contexts.values()]
-      .flatMap((state) => [...state.worktrees.values()])
-      .reduce((total, worktree) => total + worktree.generation, 0);
-    expect(commonGenerationTotal + worktreeGenerationTotal).toBe(mutationCount * 2);
+    for (const [commonId, expected] of expectedCommonGenerations) {
+      expect(coordinator.getGeneration(contextByCommon.get(commonId)).common).toBe(expected);
+    }
+    for (const [worktreeId, expected] of expectedWorktreeGenerations) {
+      expect(coordinator.getGeneration(contextByWorktree.get(worktreeId)).worktree).toBe(expected);
+    }
     expect(stats.limits).toMatchObject({
       readsPerCommonContext: 2,
       maxQueuePerContext: 64,
