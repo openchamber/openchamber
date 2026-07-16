@@ -23,8 +23,8 @@ type ProjectSection = {
 
 type Args = {
   normalizedProjects: ProjectItem[];
-  getSessionsForProject: (project: { normalizedPath: string }) => Session[];
-  getArchivedSessionsForProject: (project: { normalizedPath: string }) => Session[];
+  getSessionsForProject: (projectId: string) => Session[];
+  getArchivedSessionsForProject: (projectId: string) => Session[];
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
   projectRepoStatus: Map<string, boolean | null>;
   projectRootBranches: Map<string, string | null>;
@@ -63,8 +63,8 @@ export const useSessionSidebarSections = (args: Args) => {
   const projectSections = React.useMemo<ProjectSection[]>(() => {
     return normalizedProjects.map((project) => {
       const projectSessions = dedupeSessionsById([
-        ...getSessionsForProject(project),
-        ...getArchivedSessionsForProject(project),
+        ...getSessionsForProject(project.id),
+        ...getArchivedSessionsForProject(project.id),
       ]);
       const worktreesForProject = availableWorktreesByProject.get(project.normalizedPath) ?? [];
       const isRepo = projectRepoStatus.has(project.id)

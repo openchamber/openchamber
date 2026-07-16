@@ -1,4 +1,5 @@
 import type { MainTab } from '@/stores/useUIStore';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { ROUTE_PARAMS } from './types';
 
 /**
@@ -100,7 +101,8 @@ function routeMatchesURL(state: AppRouteState): boolean {
 
 /**
  * Update the browser URL using pushState or replaceState.
- * Does nothing if URL already matches or in VS Code context.
+ * Does nothing if URL already matches, in VS Code context, or in the
+ * embedded session-chat iframe (whose URL identity is fixed at mount).
  */
 export function updateBrowserURL(
   state: AppRouteState,
@@ -110,8 +112,10 @@ export function updateBrowserURL(
     return;
   }
 
-  // Skip URL updates in VS Code webview
-  if (isVSCodeContext()) {
+  // Both VS Code webviews and embedded session-chat iframes carry session
+  // identity outside the route params (`__VSCODE_CONFIG__` / `?ocPanel=…`).
+  // Rebuilding the URL here would strip those params, so skip entirely.
+  if (isVSCodeContext() || isEmbeddedSessionChat()) {
     return;
   }
 

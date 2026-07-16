@@ -1,5 +1,5 @@
 import React from 'react';
-import { Virtualizer } from 'virtua';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 // Archived buckets routinely grow into the hundreds/thousands; virtualize
@@ -82,7 +82,7 @@ type Props = {
   setActiveProjectIdOnly: (id: string) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { directoryOverride?: string | null; targetFolderId?: string }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; targetFolderId?: string }) => void;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   renamingFolderId: string | null;
@@ -581,7 +581,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   });
 
   const archivedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
-  const archivedScrollRef = React.useRef<HTMLElement | null>(null);
   const [archivedScrollEl, setArchivedScrollEl] = React.useState<HTMLElement | null>(null);
   // Offset of the virtual container from the scroll element's content origin.
   // virtua reads startMargin from Virtualizer options and uses it
@@ -617,7 +616,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   React.useLayoutEffect(() => {
     if (!shouldVirtualize) {
       if (archivedScrollEl !== null) setArchivedScrollEl(null);
-      archivedScrollRef.current = null;
       if (archivedScrollMargin !== 0) setArchivedScrollMargin(0);
       return;
     }
@@ -632,7 +630,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     if (providedScrollEl && providedScrollEl.contains(container)) {
       scrollEl = providedScrollEl;
       if (scrollEl !== archivedScrollEl) {
-        archivedScrollRef.current = scrollEl;
         setArchivedScrollEl(scrollEl);
         return;
       }
@@ -649,7 +646,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         el = el.parentElement;
       }
       if (scrollEl !== archivedScrollEl) {
-        archivedScrollRef.current = scrollEl;
         setArchivedScrollEl(scrollEl);
         return;
       }
@@ -659,6 +655,31 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
       - scrollEl.getBoundingClientRect().top
       + scrollEl.scrollTop;
     setArchivedScrollMargin((prev) => (Math.abs(prev - offset) < 1 ? prev : offset));
+  });
+
+  // The scroll element is an ANCESTOR of this section (the sidebar's
+  // ScrollableOverlay), so scrollMargin translates its scrollTop into
+  // container-relative coordinates — the tanstack equivalent of virtua's
+  // startMargin this replaces.
+  // Enable ONLY once the ancestor scroll element is resolved. While the
+  // virtualizer is disabled the core resets its cached scroll offset, so the
+  // first enabled read takes initialOffset() from the LIVE scrollTop below —
+  // making the core's attach-time scrollTo target the current position (a
+  // visual no-op) instead of a stale 0 that reset the sidebar to the top.
+  // The core only learns the offset from scroll events after that, so this
+  // initial seeding is what makes the first render window correct too.
+  const virtualizerReady = shouldVirtualize && archivedScrollEl !== null;
+  const sessionVirtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
+    count: visibleSessions.length,
+    enabled: virtualizerReady,
+    getScrollElement: () => archivedScrollEl,
+    initialOffset: () => archivedScrollEl?.scrollTop ?? 0,
+    estimateSize: () => ARCHIVED_ROW_ESTIMATE_PX,
+    // Expanded parents render children inline and dwarf the row estimate;
+    // widen the window so their extra height stays covered.
+    overscan: hasExpandedParent ? 20 : 8,
+    scrollMargin: archivedScrollMargin,
+    getItemKey: (index) => visibleSessions[index]?.session.id ?? index,
   });
 
   // Hooks below MUST stay above the search-empty early-return so they
@@ -876,7 +897,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
               if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
               setActiveMainTab('chat');
               if (mobileVariant) setSessionSwitcherOpen(false);
-              openNewSessionDraft({ directoryOverride: group.directory, targetFolderId: folder.id });
+              openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory, targetFolderId: folder.id });
             }}
             onNewSubFolder={depth === 0 ? () => {
               if (!folderScopeKey) return;
@@ -913,21 +934,63 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
       {renderFolderItems()}
       {shouldVirtualize ? (
         <div ref={archivedVirtualContainerRef}>
-          <Virtualizer
-            data={visibleSessions}
-            itemSize={ARCHIVED_ROW_ESTIMATE_PX}
-            bufferSize={hasExpandedParent ? ARCHIVED_ROW_ESTIMATE_PX * 20 : ARCHIVED_ROW_ESTIMATE_PX * 8}
-            scrollRef={archivedScrollRef}
-            startMargin={archivedScrollMargin}
-          >
-            {(node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
+          {!virtualizerReady ? (
+            // At most one pre-paint frame: this wrapper must exist for the
+            // layout effect to resolve the ancestor scroll element, which
+            // re-renders synchronously before paint. Rendering the plain rows
+            // meanwhile keeps the container's height real so the scroller
+            // never collapses/clamps during the flip.
+            visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
               subtreeContainsActive,
               subtreeContainsEditing,
               menuOpenSessionId,
               nodeStructureKey: resolveNodeStructureKey(node),
               childRenderExtrasFor,
-            }) as React.ReactElement}
-          </Virtualizer>
+            }))
+          ) : (
+          <div style={{ height: sessionVirtualizer.getTotalSize(), position: 'relative' }}>
+            {/* Absolutely positioned rows (canonical tanstack layout): with
+                variable-height rows, flow-stacking can drift from the computed
+                total height until measurements settle and overlap the content
+                below the group. Per-item offsets cannot drift. item.start
+                includes scrollMargin (ancestor-scroll offset), so subtract it. */}
+            {sessionVirtualizer.getVirtualItems().map((item) => {
+              const node = visibleSessions[item.index];
+              if (!node) return null;
+              return (
+                <div
+                  key={node.session.id}
+                  data-index={item.index}
+                  ref={sessionVirtualizer.measureElement}
+                  // Rows carry my-0.5 (2px), which COLLAPSES to 2px between
+                  // neighbors in normal flow but cannot collapse across
+                  // isolated virtualized wrappers — spacing doubles to 4px the
+                  // moment virtualization kicks in. Replace the row margin
+                  // with 1px per side (no collapse, 1+1 = the same visual 2px
+                  // gap). The [data-session-row] selector reaches the row
+                  // through the dnd/context-menu wrappers at any depth and
+                  // keeps nested child rows consistent too.
+                  className="[&_[data-session-row]]:my-px"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${item.start - archivedScrollMargin}px)`,
+                  }}
+                >
+                  {renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
+                    subtreeContainsActive,
+                    subtreeContainsEditing,
+                    menuOpenSessionId,
+                    nodeStructureKey: resolveNodeStructureKey(node),
+                    childRenderExtrasFor,
+                  })}
+                </div>
+              );
+            })}
+          </div>
+          )}
         </div>
       ) : (
         visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
@@ -1206,7 +1269,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
                     if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
                     setActiveMainTab('chat');
                     if (mobileVariant) setSessionSwitcherOpen(false);
-                    openNewSessionDraft({ directoryOverride: group.directory });
+                    openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                   aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}

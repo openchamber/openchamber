@@ -24,5 +24,26 @@ describe('request security runtime', () => {
       },
       socket: {},
     })).resolves.toBe(true);
+
+    // Android Capacitor WebView (androidScheme 'https') reports this origin.
+    await expect(runtime.isRequestOriginAllowed({
+      headers: {
+        origin: 'https://localhost',
+        host: '192.168.1.130:1202',
+      },
+      socket: {},
+    })).resolves.toBe(true);
+  });
+
+  test('rejects unknown origins', async () => {
+    const runtime = createRuntime();
+
+    await expect(runtime.isRequestOriginAllowed({
+      headers: {
+        origin: 'https://evil.example.com',
+        host: '192.168.1.130:1202',
+      },
+      socket: {},
+    })).resolves.toBe(false);
   });
 });

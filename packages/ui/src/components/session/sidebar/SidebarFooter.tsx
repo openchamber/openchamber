@@ -25,6 +25,10 @@ export function SidebarFooter({
 }: Props): React.ReactNode {
   const { t } = useI18n();
 
+  if (!showRuntimeButtons && !showUpdateButton) {
+    return null;
+  }
+
   return (
     <div className="flex shrink-0 items-center justify-start gap-1 px-2.5 py-2">
       {showRuntimeButtons ? (

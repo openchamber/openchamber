@@ -19,7 +19,7 @@ type Args = {
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, projectId?: string | null) => void;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
-  openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
 };
@@ -131,7 +131,10 @@ export const useProjectSessionSelection = (args: Args): void => {
       if (mobileVariant) {
         setSessionSwitcherOpen(false);
       }
-      openNewSessionDraft({ directoryOverride: section.project.normalizedPath });
+      openNewSessionDraft({
+        selectedProjectId: section.project.id,
+        directoryOverride: section.project.normalizedPath,
+      });
       return;
     }
 

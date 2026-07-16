@@ -44,7 +44,6 @@ import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { VoiceProvider } from '@/components/voice';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
@@ -55,6 +54,7 @@ import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { SyncAppEffects } from '@/apps/AppEffects';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
@@ -118,15 +118,11 @@ const normalizeEmbeddedDirectory = (value: string | null | undefined): string =>
 };
 
 const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || !isEmbeddedSessionChat()) {
     return null;
   }
 
   const params = new URLSearchParams(window.location.search);
-  if (params.get('ocPanel') !== 'session-chat') {
-    return null;
-  }
-
   const sessionIdRaw = params.get('sessionId');
   const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
   if (!sessionId) {
@@ -172,7 +168,12 @@ const EmbeddedSessionChatContent: React.FC<{
     if (expectedDirectory && activeDirectory !== expectedDirectory) return;
 
     const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.sessionId}`;
-    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId === embeddedSessionChat.sessionId) {
+    // Skip if this session was already bootstrapped and a session is still
+    // active — allows in-place navigation (e.g. "Open subtask") to change
+    // currentSessionId without this effect forcing it back. Only re-bootstrap
+    // when currentSessionId was cleared (store init, draft, delete/archive,
+    // runtime-switch remount).
+    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId) {
       return;
     }
 
@@ -669,26 +670,6 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ projectPath?: string }>).detail;
-      const projectPath = typeof detail?.projectPath === 'string' ? detail.projectPath.trim() : '';
-      if (!projectPath) return;
-      const projectsStore = useProjectsStore.getState();
-      const existing = projectsStore.projects.find((project) => project.path === projectPath);
-      if (existing) {
-        projectsStore.setActiveProject(existing.id);
-      } else {
-        projectsStore.addProject(projectPath);
-      }
-    };
-
-    window.addEventListener('openchamber:open-project', handler as EventListener);
-    return () => window.removeEventListener('openchamber:open-project', handler as EventListener);
-  }, []);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
     if (!isInitialized || isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
@@ -928,8 +909,8 @@ function App({ apis }: AppProps) {
   }
 
   // Always mount the full provider tree to avoid remounts when isInitialized
-  // flips from false → true. FireworksProvider and VoiceProvider are lightweight
-  // shells; their heavy children are only activated when actually needed.
+  // flips from false → true. FireworksProvider is a lightweight shell; its
+  // heavy children are only activated when actually needed.
   const isBootShell = !isInitialized && !isDesktopRuntime;
 
   return (
@@ -937,7 +918,6 @@ function App({ apis }: AppProps) {
       <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
-            <VoiceProvider>
               <TooltipProvider delayDuration={300} skipDelayDuration={150}>
                 <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
                   <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
@@ -955,7 +935,6 @@ function App({ apis }: AppProps) {
                   )}
                 </div>
               </TooltipProvider>
-            </VoiceProvider>
           </FireworksProvider>
         </RuntimeAPIProvider>
       </SyncProvider>

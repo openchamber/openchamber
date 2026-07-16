@@ -13,9 +13,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     getCachedZenModels,
   } = dependencies;
 
-  let cachedModelsMetadata = null;
-  let cachedModelsMetadataTimestamp = 0;
-
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
       const { checkForUpdates } = await import('../package-manager.js');
@@ -42,6 +39,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         arch: parseString(req.query.arch),
         instanceMode: parseString(req.query.instanceMode),
         currentVersion: parseString(req.query.currentVersion),
+        installId: parseString(req.query.installId),
         reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
       });
       res.json(updateInfo);
@@ -254,48 +252,18 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
   });
 
   app.get('/api/openchamber/models-metadata', async (_req, res) => {
-    const now = Date.now();
-
-    if (cachedModelsMetadata && now - cachedModelsMetadataTimestamp < modelsMetadataCacheTtl) {
-      res.setHeader('Cache-Control', 'public, max-age=60');
-      return res.json(cachedModelsMetadata);
-    }
-
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
-
     try {
-      const response = await fetch(modelsDevApiUrl, {
-        signal: controller?.signal,
-        headers: {
-          Accept: 'application/json'
-        }
+      const { getModelsMetadata } = await import('./models-metadata.js');
+      const { metadata, fromCache, stale } = await getModelsMetadata({
+        url: modelsDevApiUrl,
+        ttlMs: modelsMetadataCacheTtl,
       });
-
-      if (!response.ok) {
-        throw new Error(`models.dev responded with status ${response.status}`);
-      }
-
-      const metadata = await response.json();
-      cachedModelsMetadata = metadata;
-      cachedModelsMetadataTimestamp = Date.now();
-
-      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.setHeader('Cache-Control', fromCache && !stale ? 'public, max-age=60' : 'public, max-age=300');
       res.json(metadata);
     } catch (error) {
       console.warn('Failed to fetch models.dev metadata via server:', error);
-
-      if (cachedModelsMetadata) {
-        res.setHeader('Cache-Control', 'public, max-age=60');
-        res.json(cachedModelsMetadata);
-      } else {
-        const statusCode = error?.name === 'AbortError' ? 504 : 502;
-        res.status(statusCode).json({ error: 'Failed to retrieve model metadata' });
-      }
-    } finally {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
+      const statusCode = error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 504 : 502;
+      res.status(statusCode).json({ error: 'Failed to retrieve model metadata' });
     }
   });
 
