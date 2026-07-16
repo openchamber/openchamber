@@ -11,6 +11,8 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { CodexImportDialog } from './CodexImportDialog';
 
 export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onItemSelect }) => {
   const { t } = useI18n();
@@ -18,6 +20,8 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
   const selectedId = useUIStore((state) => state.settingsProjectsSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
   const { currentTheme } = useThemeSystem();
+  const { imports } = useRuntimeAPIs();
+  const [codexImportOpen, setCodexImportOpen] = React.useState(false);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
@@ -46,17 +50,34 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
           <h2 className="text-base font-semibold text-foreground mb-3">{t('settings.page.projects.title')}</h2>
           <div className="flex items-center justify-between gap-2">
             <span className="typography-meta text-muted-foreground">{t('settings.projects.sidebar.total', { count: projects.length })}</span>
-            {!isVSCode && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 -my-1 text-muted-foreground"
-                onClick={handleAddProject}
-                aria-label={t('settings.projects.sidebar.actions.addProject')}
-              >
-                <Icon name="add" className="size-4" />
-              </Button>
+            {(!isVSCode || imports) && (
+              <div className="flex items-center gap-1">
+                {imports ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 -my-1 text-muted-foreground"
+                    onClick={() => setCodexImportOpen(true)}
+                    aria-label={t('settings.projects.codexImport.action')}
+                    data-settings-item="projects.import-codex"
+                  >
+                    <Icon name="chat-history" className="size-4" />
+                  </Button>
+                ) : null}
+                {!isVSCode ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 -my-1 text-muted-foreground"
+                    onClick={handleAddProject}
+                    aria-label={t('settings.projects.sidebar.actions.addProject')}
+                  >
+                    <Icon name="add" className="size-4" />
+                  </Button>
+                ) : null}
+              </div>
             )}
           </div>
         </div>
@@ -105,6 +126,7 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
           />
         );
       })}
+      {imports ? <CodexImportDialog open={codexImportOpen} onOpenChange={setCodexImportOpen} /> : null}
     </SettingsSidebarLayout>
   );
 };

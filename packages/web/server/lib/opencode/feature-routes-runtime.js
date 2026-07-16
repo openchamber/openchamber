@@ -1,3 +1,5 @@
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+
 import { registerFsRoutes } from '../fs/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
@@ -6,6 +8,9 @@ import { registerGitHubRoutes } from '../github/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
+import { createCodexImportRuntime } from '../codex-import/runtime.js';
+import { createCodexProjectRegistrar } from '../codex-import/project-registrar.js';
+import { registerCodexImportRoutes } from '../codex-import/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
@@ -88,6 +93,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       readSettingsFromDisk,
       readSettingsFromDiskMigrated,
       persistSettings,
+      updateSettings,
       sanitizeProjects,
       sanitizeSkillCatalogs,
       isUnsafeSkillRelativePath,
@@ -102,6 +108,22 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       permissionAutoAcceptRuntime,
     } = routeDependencies;
 
+    const registerCodexProjects = createCodexProjectRegistrar({
+      fsPromises,
+      path,
+      updateSettings,
+      sanitizeProjects,
+    });
+    const codexImportRuntime = createCodexImportRuntime({
+      spawn,
+      fsPromises,
+      path,
+      registerProjects: registerCodexProjects,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      createOpenCodeClient: (options) => createOpencodeClient(options),
+    });
+
     registerSettingsUtilityRoutes(app, {
       readCustomThemesFromDisk,
       refreshOpenCodeAfterConfigChange,
@@ -109,6 +131,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
 
     registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
+    registerCodexImportRoutes(app, { codexImportRuntime });
 
     registerOpenCodeRoutes(app, {
       crypto,

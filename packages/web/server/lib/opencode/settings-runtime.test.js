@@ -16,7 +16,7 @@ const createRuntime = async () => {
     SETTINGS_FILE_PATH: settingsFilePath,
     sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
     sanitizeSettingsUpdate: (settings) => settings,
-    mergePersistedSettings: (_current, changes) => changes,
+    mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
     normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
     normalizeStringArray: (values) => Array.isArray(values) ? values.filter((value) => typeof value === 'string') : [],
     formatSettingsResponse: (settings) => settings,
@@ -39,6 +39,25 @@ const createRuntime = async () => {
 };
 
 describe('settings runtime', () => {
+  it('runs functional updates against the latest queued settings', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      let observedTheme = null;
+      const first = runtime.persistSettings({ theme: 'dark' });
+      const second = runtime.updateSettings((current) => {
+        observedTheme = current.theme;
+        return { locale: 'en' };
+      });
+
+      await Promise.all([first, second]);
+
+      expect(observedTheme).toBe('dark');
+      await expect(runtime.readSettingsFromDisk()).resolves.toMatchObject({ theme: 'dark', locale: 'en' });
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('only remaps project plan paths within the migrated storage directory', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {

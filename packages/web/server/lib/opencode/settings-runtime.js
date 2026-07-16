@@ -815,12 +815,14 @@ export const createSettingsRuntime = (deps) => {
     return migration8.settings;
   };
 
-  const persistSettings = async (changes) => {
-    persistSettingsLock = persistSettingsLock.then(async () => {
+  const updateSettings = (createChanges) => {
+    const operation = persistSettingsLock.catch(() => {}).then(async () => {
+      const current = await readSettingsFromDisk();
+      const changes = await createChanges(current);
+      if (changes == null) return formatSettingsResponse(current);
       // Log field names only — changes can carry credentials (UI password,
       // client tokens, tunnel tokens) that must never reach the log file.
       console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
-      const current = await readSettingsFromDisk();
       const sanitized = sanitizeSettingsUpdate(changes);
       let next = mergePersistedSettings(current, sanitized);
 
@@ -889,8 +891,11 @@ export const createSettingsRuntime = (deps) => {
       return formatSettingsResponse(next);
     });
 
-    return persistSettingsLock;
+    persistSettingsLock = operation;
+    return operation;
   };
+
+  const persistSettings = (changes) => updateSettings(() => changes);
 
   return {
     readSettingsFromDisk,
@@ -898,5 +903,6 @@ export const createSettingsRuntime = (deps) => {
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,
+    updateSettings,
   };
 };

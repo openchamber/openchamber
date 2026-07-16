@@ -691,6 +691,56 @@ export interface SettingsAPI {
   restartOpenCode?: () => Promise<{ restarted: boolean }>;
 }
 
+export interface CodexImportConfigSummary {
+  model: string | null;
+  modelProvider: string | null;
+  reasoningEffort: string | null;
+  approvalPolicy: string | null;
+  sandboxMode: string | null;
+}
+
+export interface CodexImportProject {
+  path: string;
+  trustLevel: string | null;
+  threadCount: number;
+  threadIds: string[];
+  exists: boolean;
+}
+
+export interface CodexImportThread {
+  id: string;
+  title: string;
+  cwd: string;
+  createdAt: number | null;
+  updatedAt: number | null;
+  archived: boolean;
+}
+
+export interface CodexImportPreview {
+  config: CodexImportConfigSummary;
+  projects: CodexImportProject[];
+  threads: CodexImportThread[];
+}
+
+export interface CodexImportResultItem {
+  threadId: string;
+  status: 'imported' | 'skipped' | 'failed';
+  sessionId?: string;
+  error?: string;
+}
+
+export interface CodexImportResult {
+  projectsAdded: number;
+  projectsExisting: number;
+  projectsUnavailable: number;
+  results: CodexImportResultItem[];
+}
+
+export interface ImportsAPI {
+  inspectCodex(): Promise<CodexImportPreview>;
+  applyCodex(input: { threadIds: string[]; projectPaths: string[] }): Promise<CodexImportResult>;
+}
+
 export interface DirectoryPermissionRequest {
   path: string;
 }
@@ -1200,6 +1250,7 @@ export interface RuntimeAPIs {
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;
+  imports?: ImportsAPI;
   tools: ToolsAPI;
   editor?: EditorAPI;
   vscode?: VSCodeAPI;

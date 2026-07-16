@@ -482,6 +482,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['label', 'display name', 'project metadata'],
   },
   {
+    id: 'projects.import-codex',
+    page: 'projects',
+    titleKey: 'settings.projects.codexImport.action',
+    descriptionKey: 'settings.projects.codexImport.description',
+    keywords: ['codex', 'conversation', 'history', 'migration', 'import'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'projects.accent-color',
     page: 'projects',
     titleKey: 'settings.projects.page.field.accentColor',

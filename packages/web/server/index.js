@@ -369,6 +369,7 @@ const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(.
 const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
 const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
+const updateSettings = (...args) => settingsRuntime.updateSettings(...args);
 
 const requestSecurityRuntime = createRequestSecurityRuntime({
   readSettingsFromDiskMigrated,
@@ -1520,6 +1521,7 @@ async function main(options = {}) {
     readSettingsFromDisk,
     readSettingsFromDiskMigrated,
     persistSettings,
+    updateSettings,
     sanitizeProjects,
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
