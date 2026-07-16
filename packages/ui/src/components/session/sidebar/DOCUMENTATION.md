@@ -40,11 +40,11 @@
 - `hooks/useSessionActions.ts`: Centralizes session row actions (select/open, rename, share/unshare, archive/delete, confirmations).
 - `hooks/useSessionSearchEffects.ts`: Handles search open/close UX and input focus behavior.
 - `hooks/useSessionPrefetch.ts`: Prefetches messages for nearby/active sessions to improve perceived load speed.
-- `hooks/useSessionGrouping.ts`: Builds grouped session structures and search text/filter helpers.
+- `hooks/useSessionGrouping.ts`: Builds grouped session structures and search text/filter helpers. Subagents nest under their parent whenever it is present; a subagent detaches into the archived bucket only when it is archived while its parent is still active. Active subagents of an archived parent therefore render nested inside the archived group.
 - `hooks/useSessionSidebarSections.ts`: Composes final per-project sections and group search metadata for rendering.
 - `hooks/useProjectSessionSelection.ts`: Resolves active/current project-session selection logic and session-directory context.
 - `hooks/useGroupOrdering.ts`: Applies persisted/custom group order with stable fallback ordering; archived groups are reorderable.
-- `hooks/useArchivedAutoFolders.ts`: Maintains archived auto-folder structure and assignment behavior.
+- `hooks/useArchivedAutoFolders.ts`: Maintains archived auto-folder structure and assignment behavior. Only tree roots get folder assignments; nested subagents render through their parent's node, and the matching cleanup set removes stale subagent assignments.
 - `hooks/useSidebarPersistence.ts`: Persists sidebar UI state (expanded/collapsed/pinned/group order/active session) to storage + desktop settings.
 - `hooks/useProjectRepoStatus.ts`: Tracks per-project git-repo state and root branch metadata.
 - `hooks/useProjectSessionLists.ts`: Reads live and archived project buckets from the shared ownership index.

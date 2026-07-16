@@ -23,6 +23,34 @@ type Args = {
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
 
+// A child detaches from its parent only when it was archived independently
+// (child archived, parent still active): it must surface as its own root in
+// the archived bucket instead of staying nested in an active group. Children
+// of an archived parent always stay nested under it, including still-active
+// subagents spawned by continuing an archived session (#2266).
+const isDetachedFromParent = (session: Session, parentSession: Session): boolean =>
+  isArchivedSession(session) && !isArchivedSession(parentSession);
+
+export const indexSessionsByParent = (
+  sessions: Session[],
+): { roots: Session[]; childrenByParent: Map<string, Session[]> } => {
+  const sessionMap = new Map(sessions.map((session) => [session.id, session]));
+  const roots: Session[] = [];
+  const childrenByParent = new Map<string, Session[]>();
+  sessions.forEach((session) => {
+    const parentID = (session as Session & { parentID?: string | null }).parentID;
+    const parentSession = parentID ? sessionMap.get(parentID) : undefined;
+    if (!parentSession || isDetachedFromParent(session, parentSession)) {
+      roots.push(session);
+      return;
+    }
+    const collection = childrenByParent.get(parentSession.id) ?? [];
+    collection.push(session);
+    childrenByParent.set(parentSession.id, collection);
+  });
+  return { roots, childrenByParent };
+};
+
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
   const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
@@ -70,20 +98,8 @@ export const useSessionGrouping = (args: Args) => {
       const sortedProjectSessions = dedupeSessionsById(projectSessions)
         .sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds));
 
-      const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));
-      const childrenMap = new Map<string, Session[]>();
-      sortedProjectSessions.forEach((session) => {
-        const parentID = (session as Session & { parentID?: string | null }).parentID;
-        if (!parentID) return;
-        const parentSession = sessionMap.get(parentID);
-        if (!parentSession || isArchivedSession(parentSession) !== isArchivedSession(session)) {
-          return;
-        }
-        const collection = childrenMap.get(parentID) ?? [];
-        collection.push(session);
-        childrenMap.set(parentID, collection);
-      });
-      childrenMap.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds)));
+      const { roots, childrenByParent } = indexSessionsByParent(sortedProjectSessions);
+      childrenByParent.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds)));
 
       const worktreeByPath = new Map<string, WorktreeMetadata>();
       availableWorktrees.forEach((meta) => {
@@ -107,17 +123,9 @@ export const useSessionGrouping = (args: Args) => {
       };
 
       const buildProjectNode = (session: Session): SessionNode => {
-        const children = childrenMap.get(session.id) ?? [];
+        const children = childrenByParent.get(session.id) ?? [];
         return { session, children: children.map((child) => buildProjectNode(child)), worktree: getSessionWorktree(session) };
       };
-
-      const roots = sortedProjectSessions.filter((session) => {
-        const parentID = (session as Session & { parentID?: string | null }).parentID;
-        if (!parentID) return true;
-        const parentSession = sessionMap.get(parentID);
-        if (!parentSession) return true;
-        return isArchivedSession(parentSession) !== isArchivedSession(session);
-      });
 
       const groupedNodes = new Map<string, SessionNode[]>();
       const archivedKey = '__archived__';

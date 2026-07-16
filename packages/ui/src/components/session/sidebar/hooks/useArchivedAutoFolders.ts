@@ -1,4 +1,5 @@
 import React from 'react';
+import type { Session } from '@opencode-ai/sdk/v2';
 import {
   getArchivedScopeKey,
   resolveArchivedFolderName,
@@ -29,6 +30,18 @@ type Args = {
   cleanupSessions: (scopeKey: string, existingSessionIds: Set<string>) => void;
 };
 
+// Only tree roots get auto-folder assignments: a subagent whose parent is
+// archived too renders nested under the parent's node, so a direct folder
+// entry would render it a second time (#2266). The cleanup set uses the same
+// filter so previously persisted subagent assignments are removed.
+export const filterArchivedFolderSessions = (archivedSessions: Session[]): Session[] => {
+  const archivedIds = new Set(archivedSessions.map((session) => session.id));
+  return archivedSessions.filter((session) => {
+    const parentID = (session as Session & { parentID?: string | null }).parentID;
+    return !parentID || !archivedIds.has(parentID);
+  });
+};
+
 export const useArchivedAutoFolders = (args: Args): void => {
   const {
     normalizedProjects,
@@ -54,12 +67,13 @@ export const useArchivedAutoFolders = (args: Args): void => {
       }
       const scopeKey = getArchivedScopeKey(project.normalizedPath);
       const projectArchivedSessions = ownership.archivedSessionsByProject.get(project.id) ?? [];
-      const sessionIds = new Set(projectArchivedSessions.map((session) => session.id));
+      const folderSessions = filterArchivedFolderSessions(projectArchivedSessions);
+      const folderSessionIds = new Set(folderSessions.map((session) => session.id));
 
       const existingFolders = foldersMap[scopeKey] ?? [];
       const folderByName = new Map(existingFolders.map((folder) => [folder.name.toLowerCase(), folder]));
 
-      projectArchivedSessions.forEach((session) => {
+      folderSessions.forEach((session) => {
         const folderName = resolveArchivedFolderName(session, project.normalizedPath);
         const key = folderName.toLowerCase();
         let folder = folderByName.get(key);
@@ -73,7 +87,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
         }
       });
 
-      cleanupSessions(scopeKey, sessionIds);
+      cleanupSessions(scopeKey, folderSessionIds);
     });
   }, [
     normalizedProjects,
