@@ -25,7 +25,10 @@ other runtime API.
   2. Family-priority scan (`gemini-flash` → `gpt-nano` → `claude-haiku`)
      **within the session's provider first** (`preferredProviderID`, like
      OpenCode resolves within the current provider), then over the other
-     providers with a usable auth entry, newest `release_date` first.
+     providers with a usable credential, newest `release_date` first. A
+     usable credential is an auth.json entry or a config
+     `provider.<id>.options.apiKey` that resolves in this process
+     (`{env:}`/`{file:}` included).
   3. GitHub Copilot hidden utility models (`gpt-*-nano/mini`) — these never
      appear in the catalog, so they participate as the `gpt-nano` family entry
      and as a final utility fallback.
@@ -52,7 +55,9 @@ other runtime API.
     in the OpenCode config, (2) the hardcoded `https://api.openai.com/v1`
      endpoint, or (3) the provider's `api` field from the models.dev catalog.
     Configured API keys honor OpenCode's `{env:NAME}` and `{file:path}`
-    substitutions; file contents and resolved credentials remain server-side.
+    substitutions, and base URLs expand inline `{env:NAME}` tokens (an unset
+    variable collapses the URL and falls back to the catalog); file contents
+    and resolved credentials remain server-side.
   - `[small-model:diagnostic]` logs record provider/model, input character
     counts, output budget, thinking toggle, HTTP/finish status, and
     content/reasoning lengths without logging prompts, response text, or
@@ -75,9 +80,10 @@ module is imported on first request, not at server startup.
 - OpenCode's free models (`opencode/big-pickle`, `*-free`) work without a
   token only through OpenCode's own server — direct calls are rejected, and
   piggybacking on their subsidized infra is out of bounds by design. Every
-  resolution step therefore requires a usable auth entry for the provider:
-  a session on an unauthenticated `opencode` provider falls through to the
-  global scan (or a clean 404 on a vanilla setup with no logins).
+  resolution step therefore requires a usable credential for the provider
+  (an auth.json entry or a resolvable config `options.apiKey`): a session on
+  an unauthenticated `opencode` provider falls through to the global scan
+  (or a clean 404 on a vanilla setup with no logins).
 
 - Anthropic OAuth (Claude Pro/Max) entries are not supported — OpenCode itself
   keeps those outside `auth.json` in this generation; only `type: api` keys

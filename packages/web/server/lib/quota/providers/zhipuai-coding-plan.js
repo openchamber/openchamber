@@ -27,6 +27,7 @@
  */
 import { readAuthFile } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/shared.js';
+import { resolveConfigApiKey } from '../../small-model/call.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -53,9 +54,12 @@ function getApiKey() {
     const { mergedConfig } = readConfigLayers();
 
     for (const alias of aliases) {
-      const providerConfig = mergedConfig?.provider?.[alias];
-      if (providerConfig?.options?.apiKey) {
-        return providerConfig.options.apiKey;
+      const rawApiKey = mergedConfig?.provider?.[alias]?.options?.apiKey;
+      if (typeof rawApiKey !== 'string' || !rawApiKey.trim()) continue;
+      // Resolve {env:}/{file:} placeholders rather than send them literally.
+      const resolved = resolveConfigApiKey(rawApiKey.trim(), undefined, alias);
+      if (resolved) {
+        return resolved;
       }
     }
   } catch {

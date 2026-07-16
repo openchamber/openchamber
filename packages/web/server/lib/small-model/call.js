@@ -315,14 +315,20 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
 // Custom provider configuration support
 // ---------------------------------------------------------------------------
 
-const resolveConfigApiKey = (value, workingDirectory, providerID) => {
+// Inline `{env:NAME}` substitution like OpenCode's config loader; unset
+// variables become empty strings.
+const substituteEnvTokens = (value) =>
+  value.replace(/\{env:([^}]+)\}/gi, (_, name) => process.env[name.trim()] || '');
+
+export const resolveConfigApiKey = (value, workingDirectory, providerID) => {
+  // Whole-value `{env:NAME}`: null when unset so auth.json can take over.
   const envMatch = value.match(/^\{env:([^}]+)\}$/i);
   if (envMatch) {
     return process.env[envMatch[1].trim()]?.trim() || null;
   }
 
   const fileMatch = value.match(/^\{file:(.+)\}$/i);
-  if (!fileMatch) return value;
+  if (!fileMatch) return substituteEnvTokens(value);
 
   const configuredPath = fileMatch[1].trim();
   let resolvedPath;
@@ -354,7 +360,10 @@ const readProviderConfig = (workingDirectory, providerID) => {
     const config = readConfig(workingDirectory);
     const providerCfg = config?.provider?.[providerID];
     if (!providerCfg || typeof providerCfg !== 'object') return null;
-    const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
+    const rawBaseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
+    // Base URLs may embed `{env:...}` too; an unset variable collapses the
+    // URL so the catalog fallback below takes over.
+    const baseURL = rawBaseURL ? substituteEnvTokens(rawBaseURL).trim() || null : null;
     const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
     const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
     return {
@@ -367,6 +376,23 @@ const readProviderConfig = (workingDirectory, providerID) => {
   } catch {
     // Provider config is non-essential — continue with catalog-only resolution.
     return null;
+  }
+}
+
+/**
+ * Provider ids whose config `options.apiKey` resolves right now — callable
+ * without an auth.json login.
+ */
+export function listConfigCredentialProviders(workingDirectory) {
+  try {
+    const config = readConfig(workingDirectory);
+    const providers = config?.provider;
+    if (!providers || typeof providers !== 'object') return [];
+    return Object.keys(providers).filter(
+      (providerID) => Boolean(readProviderConfig(workingDirectory, providerID)?.auth),
+    );
+  } catch {
+    return [];
   }
 }
 
