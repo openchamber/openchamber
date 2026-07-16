@@ -23,7 +23,7 @@
   "scripts": {
     "dev": "node ./scripts/dev-web-hmr.mjs",
     "oc-dev": "node scripts/oc-dev.mjs",
-    "build": "bun run --filter '*' build",
+    "build": "bun run --sequential --workspaces build",
     "build:web": "bun run --cwd packages/web build",
     "build:ui": "bun run --cwd packages/ui build",
     "build:electron": "bun run --cwd packages/electron build",

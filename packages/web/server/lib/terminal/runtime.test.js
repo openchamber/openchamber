@@ -444,16 +444,16 @@ describe('terminal runtime', () => {
       const messages = [];
       socket.on('message', (raw) => messages.push(readTerminalWsControlFrame(raw)));
       await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
-      const next = async (type) => {
+      const next = async (type, sessionId) => {
         for (let attempt = 0; attempt < 100; attempt += 1) {
-          const index = messages.findIndex((message) => message?.t === type);
+          const index = messages.findIndex((message) => message?.t === type && (!sessionId || message.s === sessionId));
           if (index >= 0) return messages.splice(index, 1)[0];
           await new Promise((resolve) => setTimeout(resolve, 2));
         }
         throw new Error(`Timed out waiting for ${type}`);
       };
       await next('hello');
-      return { socket, next };
+      return { socket, next, messages };
     };
 
     try {
@@ -462,17 +462,38 @@ describe('terminal runtime', () => {
         body: JSON.stringify({ sessionId: 'term-live', cwd: '/repo', cols: 80, rows: 24 }),
       });
       expect(created.status).toBe(200);
+      const secondCreated = await fetch(`${base}/api/terminal/create`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId: 'term-second', cwd: '/other', cols: 80, rows: 24 }),
+      });
+      expect(secondCreated.status).toBe(200);
 
       const first = await open();
       first.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-live' }));
-      expect(await first.next('snapshot')).toMatchObject({ s: 'term-live', q: 0, history: '', status: 'running' });
+      first.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-second' }));
+      expect(await first.next('snapshot', 'term-live')).toMatchObject({ s: 'term-live', q: 0, history: '', status: 'running' });
+      expect(await first.next('snapshot', 'term-second')).toMatchObject({ s: 'term-second', q: 0, history: '', status: 'running' });
       first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 3, s: 'term-live', d: 'echo ok\r' }));
+      first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 3, s: 'term-second', d: 'pwd\r' }));
+      first.socket.send(createTerminalWsControlFrame({ t: 'write', v: 3, s: 'term-live', d: 'echo next\r' }));
       await new Promise((resolve) => setTimeout(resolve, 5));
-      expect(processes[0].writes).toEqual(['echo ok\r']);
+      expect(processes[0].writes).toEqual(['echo ok\r', 'echo next\r']);
+      expect(processes[1].writes).toEqual(['pwd\r']);
+
+      processes[1].emitData('/other\r\n');
+      expect(await first.next('output', 'term-second')).toMatchObject({ s: 'term-second', q: 1, d: '/other\r\n' });
+      first.socket.send(createTerminalWsControlFrame({ t: 'detach', v: 3, s: 'term-second' }));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      processes[1].emitData('detached\r\n');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(first.messages.some((message) => message?.t === 'output' && message.s === 'term-second')).toBe(false);
+
       processes[0].emitData('ok\r\n');
-      expect(await first.next('output')).toMatchObject({ s: 'term-live', q: 1, d: 'ok\r\n' });
+      expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 1, d: 'ok\r\n' });
       processes[0].emitData('\u001b[6n');
-      expect(await first.next('output')).toMatchObject({ s: 'term-live', q: 2, d: '\u001b[6n', r: '' });
+      expect(await first.next('output', 'term-live')).toMatchObject({ s: 'term-live', q: 2, d: '\u001b[6n', r: '' });
+      const secondClosed = await fetch(`${base}/api/terminal/term-second`, { method: 'DELETE' });
+      expect(secondClosed.status).toBe(200);
       first.socket.close();
 
       const second = await open();
@@ -497,7 +518,7 @@ describe('terminal runtime', () => {
       });
       expect(await killed.json()).toEqual({ success: true, killedCount: 1, killedSessionIds: ['term-kill'] });
       expect(await second.next('error')).toMatchObject({ s: 'term-kill', code: 'KILLED', fatal: true });
-      expect(processes[1].killed).toBe(true);
+      expect(processes[2].killed).toBe(true);
     } finally {
       for (const socket of sockets) socket.terminate();
       await runtime.shutdown();
