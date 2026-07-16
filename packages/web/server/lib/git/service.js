@@ -3217,66 +3217,114 @@ export async function push(directory, options = {}) {
   return runClassifiedGitOperation('push', directory, 'Git push', async (context) => {
     const { git } = await createRepositoryGitContext(directory, { executionContext: context });
 
-  const describePushError = (error) => {
-    const fromNestedGit = error?.git && typeof error.git === 'object'
-      ? [error.git.message, error.git.stderr, error.git.stdout]
-      : [];
-    const candidates = [
-      error?.message,
-      error?.stderr,
-      error?.stdout,
-      ...fromNestedGit,
-    ]
-      .map((value) => String(value || '').trim())
-      .filter(Boolean);
+    const describePushError = (error) => {
+      const fromNestedGit = error?.git && typeof error.git === 'object'
+        ? [error.git.message, error.git.stderr, error.git.stdout]
+        : [];
+      const candidates = [
+        error?.message,
+        error?.stderr,
+        error?.stdout,
+        ...fromNestedGit,
+      ]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
 
-    return candidates[0] || 'Failed to push to remote';
-  };
-
-  const buildUpstreamOptions = (raw) => {
-    if (Array.isArray(raw)) {
-      return raw.includes('--set-upstream') ? raw : [...raw, '--set-upstream'];
-    }
-
-    if (raw && typeof raw === 'object') {
-      return { ...raw, '--set-upstream': null };
-    }
-
-    return ['--set-upstream'];
-  };
-
-  const looksLikeMissingUpstream = (error) => {
-    const message = String(error?.message || error?.stderr || '').toLowerCase();
-    return (
-      message.includes('has no upstream') ||
-      message.includes('no upstream') ||
-      message.includes('set-upstream') ||
-      message.includes('set upstream') ||
-      (message.includes('upstream') && message.includes('push') && message.includes('-u'))
-    );
-  };
-
-  const normalizePushResult = (result) => {
-    return {
-      success: true,
-      pushed: result.pushed,
-      repo: result.repo,
-      ref: result.ref,
+      return candidates[0] || 'Failed to push to remote';
     };
-  };
 
-  const remote = String(options.remote || '').trim();
+    const buildUpstreamOptions = (raw) => {
+      if (Array.isArray(raw)) {
+        return raw.includes('--set-upstream') ? raw : [...raw, '--set-upstream'];
+      }
 
-  if (!remote && !options.branch) {
-    try {
-      await git.push();
+      if (raw && typeof raw === 'object') {
+        return { ...raw, '--set-upstream': null };
+      }
+
+      return ['--set-upstream'];
+    };
+
+    const looksLikeMissingUpstream = (error) => {
+      const message = String(error?.message || error?.stderr || '').toLowerCase();
+      return (
+        message.includes('has no upstream') ||
+        message.includes('no upstream') ||
+        message.includes('set-upstream') ||
+        message.includes('set upstream') ||
+        (message.includes('upstream') && message.includes('push') && message.includes('-u'))
+      );
+    };
+
+    const normalizePushResult = (result) => {
       return {
         success: true,
-        pushed: [],
-        repo: directory,
-        ref: null,
+        pushed: result.pushed,
+        repo: result.repo,
+        ref: result.ref,
       };
+    };
+
+    const remote = String(options.remote || '').trim();
+
+    if (!remote && !options.branch) {
+      try {
+        await git.push();
+        return {
+          success: true,
+          pushed: [],
+          repo: directory,
+          ref: null,
+        };
+      } catch (error) {
+        if (!looksLikeMissingUpstream(error)) {
+          const message = describePushError(error);
+          console.error('Failed to push:', error);
+          throw new Error(message);
+        }
+
+        try {
+          const status = await git.status();
+          const branch = status.current;
+          const remotes = await git.getRemotes(true);
+          const fallbackRemote = remotes.find((entry) => entry.name === 'origin')?.name || remotes[0]?.name;
+          if (!branch || !fallbackRemote) {
+            const message = describePushError(error);
+            throw new Error(message);
+          }
+
+          const result = await git.push(fallbackRemote, branch, buildUpstreamOptions(options.options));
+          return normalizePushResult(result);
+        } catch (fallbackError) {
+          const message = describePushError(fallbackError);
+          console.error('Failed to push (including upstream fallback):', fallbackError);
+          throw new Error(message);
+        }
+      }
+    }
+
+    const remoteName = remote || 'origin';
+
+    // If caller didn't specify a branch, this is the common "Push"/"Commit & Push" path.
+    // When there's no upstream yet (typical for freshly-created worktree branches), publish it on first push.
+    if (!options.branch) {
+      try {
+        const status = await git.status();
+        if (status.current && !status.tracking) {
+          const result = await git.push(remoteName, status.current, buildUpstreamOptions(options.options));
+          return normalizePushResult(result);
+        }
+      } catch (error) {
+        // If we can't read status, fall back to the regular push path below.
+        console.warn('Failed to read git status before push:', error);
+      }
+    }
+
+    try {
+      const result = await git.push(remoteName, options.branch, options.options || {});
+      return normalizePushResult(result);
     } catch (error) {
+      // Last-resort fallback: retry with upstream if the error suggests it's missing.
       if (!looksLikeMissingUpstream(error)) {
         const message = describePushError(error);
         console.error('Failed to push:', error);
@@ -3285,67 +3333,19 @@ export async function push(directory, options = {}) {
 
       try {
         const status = await git.status();
-        const branch = status.current;
-        const remotes = await git.getRemotes(true);
-        const fallbackRemote = remotes.find((entry) => entry.name === 'origin')?.name || remotes[0]?.name;
-        if (!branch || !fallbackRemote) {
-          const message = describePushError(error);
-          throw new Error(message);
+        const branch = options.branch || status.current;
+        if (!branch) {
+          console.error('Failed to push: missing branch name for upstream setup:', error);
+          throw error;
         }
 
-        const result = await git.push(fallbackRemote, branch, buildUpstreamOptions(options.options));
+        const result = await git.push(remoteName, branch, buildUpstreamOptions(options.options));
         return normalizePushResult(result);
       } catch (fallbackError) {
         const message = describePushError(fallbackError);
         console.error('Failed to push (including upstream fallback):', fallbackError);
         throw new Error(message);
       }
-    }
-  }
-
-  const remoteName = remote || 'origin';
-
-  // If caller didn't specify a branch, this is the common "Push"/"Commit & Push" path.
-  // When there's no upstream yet (typical for freshly-created worktree branches), publish it on first push.
-  if (!options.branch) {
-    try {
-      const status = await git.status();
-      if (status.current && !status.tracking) {
-        const result = await git.push(remoteName, status.current, buildUpstreamOptions(options.options));
-        return normalizePushResult(result);
-      }
-    } catch (error) {
-      // If we can't read status, fall back to the regular push path below.
-      console.warn('Failed to read git status before push:', error);
-    }
-  }
-
-  try {
-    const result = await git.push(remoteName, options.branch, options.options || {});
-    return normalizePushResult(result);
-  } catch (error) {
-    // Last-resort fallback: retry with upstream if the error suggests it's missing.
-    if (!looksLikeMissingUpstream(error)) {
-      const message = describePushError(error);
-      console.error('Failed to push:', error);
-      throw new Error(message);
-    }
-
-    try {
-      const status = await git.status();
-      const branch = options.branch || status.current;
-      if (!branch) {
-        console.error('Failed to push: missing branch name for upstream setup:', error);
-        throw error;
-      }
-
-      const result = await git.push(remoteName, branch, buildUpstreamOptions(options.options));
-      return normalizePushResult(result);
-    } catch (fallbackError) {
-      const message = describePushError(fallbackError);
-      console.error('Failed to push (including upstream fallback):', fallbackError);
-      throw new Error(message);
-    }
     }
   });
 }
@@ -4740,63 +4740,63 @@ export async function canonicalizeWorktreeState(directory) {
     const git = await createGitForLease(directoryPath, lease);
     const repoRoot = await resolveGitRepositoryRoot(directoryPath, git).catch(() => directoryPath);
 
-  let worktreeRoot = null;
-  let worktreeStatus = 'ready';
-  let headState = /** @type {'branch' | 'detached' | 'unborn'} */ ('branch');
-  let branch = null;
-  let attentionReason = /** @type {'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null} */ (null);
+    let worktreeRoot = null;
+    let worktreeStatus = 'ready';
+    let headState = /** @type {'branch' | 'detached' | 'unborn'} */ ('branch');
+    let branch = null;
+    let attentionReason = /** @type {'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null} */ (null);
 
-  try {
-    const context = await resolveWorktreeProjectContext(directoryPath, lease);
-    worktreeRoot = await canonicalPath(context.worktreeRoot);
-  } catch {
-    worktreeStatus = 'invalid';
-  }
+    try {
+      const context = await resolveWorktreeProjectContext(directoryPath, lease);
+      worktreeRoot = await canonicalPath(context.worktreeRoot);
+    } catch {
+      worktreeStatus = 'invalid';
+    }
 
-  try {
-    const symbolicRef = await git.raw(['symbolic-ref', '-q', 'HEAD']).catch(() => '');
-    if (symbolicRef.trim()) {
-      headState = 'branch';
-      branch = cleanBranchName(symbolicRef.trim());
-    } else {
-      const revParse = await git.raw(['rev-parse', 'HEAD']).catch(() => '');
-      if (!revParse.trim()) {
-        headState = 'unborn';
-        branch = null;
+    try {
+      const symbolicRef = await git.raw(['symbolic-ref', '-q', 'HEAD']).catch(() => '');
+      if (symbolicRef.trim()) {
+        headState = 'branch';
+        branch = cleanBranchName(symbolicRef.trim());
       } else {
-        headState = 'detached';
-        branch = revParse.trim().slice(0, 7);
+        const revParse = await git.raw(['rev-parse', 'HEAD']).catch(() => '');
+        if (!revParse.trim()) {
+          headState = 'unborn';
+          branch = null;
+        } else {
+          headState = 'detached';
+          branch = revParse.trim().slice(0, 7);
+        }
       }
+    } catch {
+      headState = 'unborn';
+      branch = null;
     }
-  } catch {
-    headState = 'unborn';
-    branch = null;
-  }
 
-  // Detect attention reasons from getStatus side-effects
-  try {
-    const status = await git.status(['-uall']);
-    if (status.current && (await git.raw(['rev-parse', '--verify', 'MERGE_HEAD']).then(() => true).catch(() => false))) {
-      attentionReason = 'merge';
-    } else {
-      const rebaseMergePath = await resolveGitInternalPath(repoRoot, git, 'rebase-merge').catch(() => '');
-      const rebaseApplyPath = await resolveGitInternalPath(repoRoot, git, 'rebase-apply').catch(() => '');
-      const rebaseMerge = rebaseMergePath ? await fsp.stat(rebaseMergePath).then(() => true).catch(() => false) : false;
-      const rebaseApply = rebaseApplyPath ? await fsp.stat(rebaseApplyPath).then(() => true).catch(() => false) : false;
-      if (rebaseMerge || rebaseApply) {
-        attentionReason = 'rebase';
-      } else if (status.conflicted && status.conflicted.length > 0) {
-        const cherryPickHeadPath = await resolveGitInternalPath(repoRoot, git, 'CHERRY_PICK_HEAD').catch(() => '');
-        const revertHeadPath = await resolveGitInternalPath(repoRoot, git, 'REVERT_HEAD').catch(() => '');
-        const cherryPickHead = cherryPickHeadPath ? await fsp.stat(cherryPickHeadPath).then(() => true).catch(() => false) : false;
-        const revertHead = revertHeadPath ? await fsp.stat(revertHeadPath).then(() => true).catch(() => false) : false;
-        if (cherryPickHead) attentionReason = 'cherry-pick';
-        else if (revertHead) attentionReason = 'revert';
+    // Detect attention reasons from getStatus side-effects
+    try {
+      const status = await git.status(['-uall']);
+      if (status.current && (await git.raw(['rev-parse', '--verify', 'MERGE_HEAD']).then(() => true).catch(() => false))) {
+        attentionReason = 'merge';
+      } else {
+        const rebaseMergePath = await resolveGitInternalPath(repoRoot, git, 'rebase-merge').catch(() => '');
+        const rebaseApplyPath = await resolveGitInternalPath(repoRoot, git, 'rebase-apply').catch(() => '');
+        const rebaseMerge = rebaseMergePath ? await fsp.stat(rebaseMergePath).then(() => true).catch(() => false) : false;
+        const rebaseApply = rebaseApplyPath ? await fsp.stat(rebaseApplyPath).then(() => true).catch(() => false) : false;
+        if (rebaseMerge || rebaseApply) {
+          attentionReason = 'rebase';
+        } else if (status.conflicted && status.conflicted.length > 0) {
+          const cherryPickHeadPath = await resolveGitInternalPath(repoRoot, git, 'CHERRY_PICK_HEAD').catch(() => '');
+          const revertHeadPath = await resolveGitInternalPath(repoRoot, git, 'REVERT_HEAD').catch(() => '');
+          const cherryPickHead = cherryPickHeadPath ? await fsp.stat(cherryPickHeadPath).then(() => true).catch(() => false) : false;
+          const revertHead = revertHeadPath ? await fsp.stat(revertHeadPath).then(() => true).catch(() => false) : false;
+          if (cherryPickHead) attentionReason = 'cherry-pick';
+          else if (revertHead) attentionReason = 'revert';
+        }
       }
+    } catch {
+      // Status check failed — ignore
     }
-  } catch {
-    // Status check failed — ignore
-  }
 
     return {
       worktreeRoot,
