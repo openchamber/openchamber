@@ -59,6 +59,7 @@ A total one-subprocess FIFO per `git-common-dir` is not a safe or scalable execu
 6. **Compatibility**
    - Existing route/API response shapes and web/Electron behavior remain stable.
    - Read-class subprocesses receive `GIT_OPTIONAL_LOCKS=0` only for that operation; mutations do not inherit it.
+   - Manually configured `core.fsmonitor` passes through to Git unchanged across web/Electron and VS Code; OpenChamber neither mutates nor manages it.
    - No internal identity, generation, queue, or lane controls are exposed to users.
 
 ## Performance contract

@@ -187,6 +187,8 @@ GIT_OPTIONAL_LOCKS=0
 
 Mutation clients do not receive this override. It is not applied to the process environment globally.
 
+Web and the in-process Electron backend otherwise inherit Git's system, global, and repository-local configuration unchanged, including a manually configured `core.fsmonitor`. OpenChamber does not read, write, override, cache, probe, or expose that value, inject `-c core.fsmonitor`, or run `git fsmonitor--daemon` lifecycle or health commands. Git itself handles `core.fsmonitor=true` (including any supported built-in daemon startup) or invokes the configured pathname as an fsmonitor hook.
+
 ### Structured internal failures
 
 Coordinator/resolver overload, queued cancellation/timeout, and incompatible re-entry use internal errors with stable codes:

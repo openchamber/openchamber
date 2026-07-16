@@ -370,6 +370,67 @@ describe('applyHunk', () => {
 // ---------------------------------------------------------------------------
 
 describe('getStatus', () => {
+  it.skipIf(process.platform === 'win32')(
+    'passes a manually configured POSIX fsmonitor hook through scheduled status',
+    async () => {
+      if (!canRunGit()) return;
+
+      const fixture = createTempDir();
+      const repo = path.join(fixture, 'repo');
+      const isolatedGlobalConfig = path.join(fixture, 'isolated global config');
+      const previousGlobalConfig = process.env.GIT_CONFIG_GLOBAL;
+      const previousNoSystemConfig = process.env.GIT_CONFIG_NOSYSTEM;
+      fs.mkdirSync(repo);
+      fs.writeFileSync(isolatedGlobalConfig, '');
+      process.env.GIT_CONFIG_GLOBAL = isolatedGlobalConfig;
+      process.env.GIT_CONFIG_NOSYSTEM = '1';
+
+      try {
+        runGit(repo, ['init', '-b', 'main']);
+        runGit(repo, ['config', '--local', 'user.email', 'test@example.com']);
+        runGit(repo, ['config', '--local', 'user.name', 'Test User']);
+        runGit(repo, ['config', '--local', 'commit.gpgsign', 'false']);
+        fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+        runGit(repo, ['add', 'README.md']);
+        runGit(repo, ['commit', '-m', 'Initial commit']);
+        expect(runGit(repo, ['status', '--porcelain=v1', '-uall'])).toBe('');
+
+        const hookPath = path.join(repo, '.git', 'openchamber-fsmonitor-hook');
+        const markerPath = path.join(repo, '.git', 'openchamber-fsmonitor-marker');
+        fs.writeFileSync(hookPath, `#!/bin/sh
+marker_path="\${0%/*}/openchamber-fsmonitor-marker"
+printf '%s\\n' "$1" >> "$marker_path"
+if [ "$1" = "2" ]; then
+  printf '%s\\000/\\000' "$2"
+else
+  printf '/\\000'
+fi
+`, { encoding: 'utf8', mode: 0o755 });
+        fs.chmodSync(hookPath, 0o755);
+        runGit(repo, ['config', '--local', 'core.fsmonitor', hookPath]);
+        const configuredFsmonitor = runGit(repo, ['config', '--local', '--get', 'core.fsmonitor']);
+        expect(configuredFsmonitor).toBe(`${hookPath}\n`);
+        expect(fs.existsSync(markerPath)).toBe(false);
+
+        const status = await getStatus(repo);
+
+        expect(status.current).toBe('main');
+        expect(status.isClean).toBe(true);
+        expect(status.files).toEqual([]);
+        expect(fs.existsSync(markerPath)).toBe(true);
+        const invocations = fs.readFileSync(markerPath, 'utf8').trim().split('\n');
+        expect(invocations.length).toBeGreaterThan(0);
+        expect(invocations.every((version) => version === '1' || version === '2')).toBe(true);
+        expect(runGit(repo, ['config', '--local', '--get', 'core.fsmonitor'])).toBe(configuredFsmonitor);
+      } finally {
+        if (previousGlobalConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+        else process.env.GIT_CONFIG_GLOBAL = previousGlobalConfig;
+        if (previousNoSystemConfig === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+        else process.env.GIT_CONFIG_NOSYSTEM = previousNoSystemConfig;
+      }
+    }
+  );
+
   it('handles repositories without upstream tracking', async () => {
     if (!canRunGit()) return;
 

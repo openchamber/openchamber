@@ -156,6 +156,7 @@ Local hardening validation:
 - `pr-real`: PASS with 8 API/scheduled operations, 31 Git commands, the 60,000ms default, and zero timeouts.
 - Short soak (`10500ms`, rate 2): PASS with 21 API submissions, 20 scheduled operations, 70 Git commands, generation 14, the 60,000ms default, and zero timeouts.
 - Harness type-check/lint passed. Docs validation passed for 387 pages and 43 sidebar links. Root no-install Knip retained 184 unused files, 303 unused exports, 175 unused exported types, and five hints with no harness finding.
+- [x] Add executable web/VS Code `core.fsmonitor` pass-through coverage and document the manual-config/no-mutation contract.
 
 ## Blocked ideas
 

@@ -1,3 +1,8 @@
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 // @ts-expect-error Bun provides this module at test runtime; the extension tsconfig intentionally omits Bun globals.
 import { describe, expect, it } from 'bun:test';
 
@@ -6,6 +11,21 @@ import { createGitContextResolver } from './git-context-resolver';
 import { GIT_EXECUTION_ERROR_CODES } from './git-execution-errors';
 import { createGitExecutionRuntime } from './git-execution-runtime';
 import { getGitExecutionEnv, runWithGitExecutionScope } from './git-execution-scope';
+
+const runGit = (cwd: string, args: string[]): string => execFileSync('git', args, {
+  cwd,
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+
+const canRunGit = (): boolean => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const deferred = <T = void>() => {
   let resolve!: (value: T) => void;
@@ -38,6 +58,82 @@ describe('VS Code Git execution runtime', () => {
       coordinator: { active: 0, pending: 0 },
     });
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'passes a manually configured POSIX fsmonitor hook through the real raw observation path',
+    async () => {
+      if (!canRunGit()) return;
+
+      const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-fsmonitor-'));
+      const repo = path.join(fixture, 'repo');
+      const isolatedGlobalConfig = path.join(fixture, 'isolated global config');
+      const previousGlobalConfig = process.env.GIT_CONFIG_GLOBAL;
+      const previousNoSystemConfig = process.env.GIT_CONFIG_NOSYSTEM;
+
+      try {
+        fs.mkdirSync(repo);
+        fs.writeFileSync(isolatedGlobalConfig, '');
+        process.env.GIT_CONFIG_GLOBAL = isolatedGlobalConfig;
+        process.env.GIT_CONFIG_NOSYSTEM = '1';
+        runGit(repo, ['init', '-b', 'main']);
+        runGit(repo, ['config', '--local', 'user.email', 'test@example.com']);
+        runGit(repo, ['config', '--local', 'user.name', 'Test User']);
+        runGit(repo, ['config', '--local', 'commit.gpgsign', 'false']);
+        fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+        runGit(repo, ['add', 'README.md']);
+        runGit(repo, ['commit', '-m', 'Initial commit']);
+        expect(runGit(repo, ['status', '--porcelain=v1', '-uall'])).toBe('');
+
+        const hookPath = path.join(repo, '.git', 'openchamber-fsmonitor-hook');
+        const markerPath = path.join(repo, '.git', 'openchamber-fsmonitor-marker');
+        fs.writeFileSync(hookPath, `#!/bin/sh
+marker_path="\${0%/*}/openchamber-fsmonitor-marker"
+printf '%s\\n' "$1" >> "$marker_path"
+if [ "$1" = "2" ]; then
+  printf '%s\\000/\\000' "$2"
+else
+  printf '/\\000'
+fi
+`, { encoding: 'utf8', mode: 0o755 });
+        fs.chmodSync(hookPath, 0o755);
+        runGit(repo, ['config', '--local', 'core.fsmonitor', hookPath]);
+        const configuredFsmonitor = runGit(repo, ['config', '--local', '--get', 'core.fsmonitor']);
+        expect(configuredFsmonitor).toBe(`${hookPath}\n`);
+        expect(fs.existsSync(markerPath)).toBe(false);
+
+        const runtime = createGitExecutionRuntime();
+        const result = await runtime.runRawObservation(
+          ['status', '--porcelain=v1', '-b', '-uall'],
+          repo,
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout.trim()).toBe('## main');
+        expect(fs.existsSync(markerPath)).toBe(true);
+        const invocations = fs.readFileSync(markerPath, 'utf8').trim().split('\n');
+        expect(invocations.length).toBeGreaterThan(0);
+        expect(invocations.every((version) => version === '1' || version === '2')).toBe(true);
+        expect(runGit(repo, ['config', '--local', '--get', 'core.fsmonitor'])).toBe(configuredFsmonitor);
+        expect(runtime.getStats()).toMatchObject({
+          resolver: { inFlightAliases: 0, inFlightContexts: 0, discovery: { active: 0, pending: 0 } },
+          coordinator: {
+            active: 0,
+            pending: 0,
+            activeNetwork: 0,
+            statusInFlight: 0,
+            clonePending: 0,
+            cloneDestinations: 0,
+          },
+        });
+      } finally {
+        if (previousGlobalConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+        else process.env.GIT_CONFIG_GLOBAL = previousGlobalConfig;
+        if (previousNoSystemConfig === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+        else process.env.GIT_CONFIG_NOSYSTEM = previousNoSystemConfig;
+        fs.rmSync(fixture, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('bounds built-in-capable work under a canonical fallback when PATH discovery fails', async () => {
     const coordinator = createGitExecutionCoordinator({ globalConcurrency: 2 });

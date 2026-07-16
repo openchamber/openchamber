@@ -5,6 +5,7 @@
 This PR #2276 follow-up combines the final `target-real` and corrected default `soak` PASS runs. Deterministic counts, safety checks, and lifecycle assertions are blocking. Wall-clock duration, latency, CPU, memory, file-descriptor, and event-loop values are advisory and machine-specific.
 
 This evidence does not claim cross-process serialization or absolute latency guarantees.
+The harness isolates Git configuration and does not enable or measure `core.fsmonitor`.
 
 ## Provenance
 

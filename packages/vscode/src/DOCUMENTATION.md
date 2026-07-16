@@ -127,6 +127,8 @@ Status sharing is in-flight only and keyed by common/worktree identity, full/lig
 
 Only raw subprocesses inside classified reads receive operation-local `GIT_OPTIONAL_LOCKS=0`. Mutations, built-in Repository calls, and read probes inside a mutation compound do not inherit that environment override.
 
+Both extension-host built-in Repository operations and raw Git subprocesses inherit Git's system, global, and repository-local configuration unchanged, including a manually configured `core.fsmonitor`. OpenChamber does not read, write, override, cache, probe, or expose that value, inject `-c core.fsmonitor`, or run `git fsmonitor--daemon` lifecycle or health commands. Git itself handles `core.fsmonitor=true` or invokes the configured pathname as an fsmonitor hook. The raw production-path regression uses `runRawObservation` with a real repository and hook to cover discovery, scheduling, `GIT_OPTIONAL_LOCKS=0`, invocation, unchanged configuration, and drained runtime state.
+
 Queued work can be cancelled or time out before admission. A running built-in VS Code Repository API promise cannot be reliably cancelled; once admitted, its lease remains held until the promise settles. Cancelling one status waiter does not cancel shared work or other waiters.
 
 ### Background worktree work
