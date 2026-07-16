@@ -38,7 +38,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { DiscordOnboardingWizard } from './DiscordOnboardingWizard';
 import { DiscordCommandsButton } from './DiscordCommandPalette';
 
@@ -99,8 +99,8 @@ const VERBOSITY_OPTIONS: { id: MessengerVerbosity; label: string; desc: string }
 
 const PERMISSION_MODE_OPTIONS: {
   id: MessengerPermissionMode;
-  labelKey: string;
-  descKey: string;
+  labelKey: I18nKey;
+  descKey: I18nKey;
 }[] = [
   {
     id: 'ask',
