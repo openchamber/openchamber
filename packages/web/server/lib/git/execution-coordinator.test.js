@@ -265,6 +265,17 @@ describe('GitExecutionCoordinator network resources', () => {
 });
 
 describe('GitExecutionCoordinator bounds and lifecycle', () => {
+  it('rejects a falsy worktree identity at the internal state boundary', () => {
+    const coordinator = createGitExecutionCoordinator();
+    const state = coordinator.ensureContext('/repos/shared/.git');
+
+    expect(() => coordinator.ensureWorktree(state, '')).toThrow(TypeError);
+    expect(() => coordinator.ensureWorktree(state, '')).toThrow(
+      'A worktree identity is required for local Git execution',
+    );
+    expect(state.worktrees.size).toBe(0);
+  });
+
   it('applies per-context backpressure and cleans queued cancellation', async () => {
     const coordinator = createGitExecutionCoordinator({
       globalConcurrency: 1,
@@ -466,6 +477,55 @@ describe('GitExecutionCoordinator bounds and lifecycle', () => {
 });
 
 describe('GitExecutionCoordinator clone reservations', () => {
+  it('dispatches clones from mixed pending sources after the clone queue is copied', async () => {
+    const coordinator = createGitExecutionCoordinator({
+      globalConcurrency: 2,
+      canonicalizeCloneDestination: async (destination) => destination,
+    });
+    const gate = deferred();
+    const events = [];
+    const worktree = context('shared', 'copy-source');
+
+    const active = coordinator.run({
+      context: worktree,
+      kind: GIT_OPERATION_KIND.WORKTREE_WRITE,
+    }, async () => {
+      events.push('active:start');
+      await gate.promise;
+      events.push('active:end');
+    });
+    const blocked = coordinator.run({
+      context: worktree,
+      kind: GIT_OPERATION_KIND.READ,
+    }, async () => {
+      events.push('blocked');
+    });
+    await flushMicrotasks();
+
+    const findRunnableIndex = coordinator.findRunnableIndex.bind(coordinator);
+    let copiedCloneQueue = false;
+    coordinator.findRunnableIndex = (state) => {
+      if (!copiedCloneQueue && coordinator.clonePending.length > 0) {
+        coordinator.clonePending = [...coordinator.clonePending];
+        copiedCloneQueue = true;
+      }
+      return findRunnableIndex(state);
+    };
+
+    const clone = coordinator.runClone({ destination: '/tmp/copied-source' }, async () => {
+      events.push('clone');
+      return 'cloned';
+    });
+    await expect(clone).resolves.toBe('cloned');
+    expect(copiedCloneQueue).toBe(true);
+    expect(events).toEqual(['active:start', 'clone']);
+
+    gate.resolve();
+    await Promise.all([active, blocked]);
+    expect(events).toEqual(['active:start', 'clone', 'active:end', 'blocked']);
+    expect(coordinator.getStats()).toMatchObject({ active: 0, pending: 0, clonePending: 0 });
+  });
+
   it('serializes canonical destinations and shares the global network cap', async () => {
     const coordinator = createGitExecutionCoordinator({
       globalConcurrency: 4,

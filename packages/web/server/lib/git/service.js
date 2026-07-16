@@ -4356,74 +4356,74 @@ export async function removeWorktree(directory, input = {}) {
     const deleteLocalBranch = input?.deleteLocalBranch === true;
     const removedExecutionContext = await gitContextResolver.resolve(targetDirectory).catch(() => null);
 
-  const targetCanonical = await canonicalPath(targetDirectory);
-  const primaryCanonical = await canonicalPath(context.primaryWorktree);
-  if (targetCanonical === primaryCanonical) {
-    throw new Error('Cannot remove the primary workspace');
-  }
-  const worktreeRootCanonical = await canonicalPath(context.worktreeRoot);
+    const targetCanonical = await canonicalPath(targetDirectory);
+    const primaryCanonical = await canonicalPath(context.primaryWorktree);
+    if (targetCanonical === primaryCanonical) {
+      throw new Error('Cannot remove the primary workspace');
+    }
+    const worktreeRootCanonical = await canonicalPath(context.worktreeRoot);
 
-  const entries = await listWorktreeEntries(context.primaryWorktree);
-  const matchedEntry = await (async () => {
-    for (const entry of entries) {
-      if (!entry?.worktree) {
-        continue;
+    const entries = await listWorktreeEntries(context.primaryWorktree);
+    const matchedEntry = await (async () => {
+      for (const entry of entries) {
+        if (!entry?.worktree) {
+          continue;
+        }
+        const entryCanonical = await canonicalPath(entry.worktree);
+        if (entryCanonical === targetCanonical) {
+          return entry;
+        }
       }
-      const entryCanonical = await canonicalPath(entry.worktree);
-      if (entryCanonical === targetCanonical) {
-        return entry;
+      return null;
+    })();
+
+    if (!matchedEntry?.worktree) {
+      const isManagedOrphan = targetCanonical !== worktreeRootCanonical
+        && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical);
+
+      const targetExists = await checkPathExists(targetDirectory);
+      if (targetExists && isManagedOrphan) {
+        await fsp.rm(targetDirectory, { recursive: true, force: true });
       }
-    }
-    return null;
-  })();
 
-  if (!matchedEntry?.worktree) {
-    const isManagedOrphan = targetCanonical !== worktreeRootCanonical
-      && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical);
+      try {
+        await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, targetDirectory);
+      } catch (error) {
+        console.warn('Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
+      }
 
-    const targetExists = await checkPathExists(targetDirectory);
-    if (targetExists && isManagedOrphan) {
-      await fsp.rm(targetDirectory, { recursive: true, force: true });
-    }
-
-    try {
-      await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, targetDirectory);
-    } catch (error) {
-      console.warn('Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
-    }
-
-    clearWorktreeBootstrapState(targetDirectory);
+      clearWorktreeBootstrapState(targetDirectory);
 
       if (removedExecutionContext?.worktreeId) {
         gitExecutionCoordinator.invalidateWorktrees(executionContext.commonId, [removedExecutionContext.worktreeId]);
       }
       return true;
-  }
-
-  await runGitCommandOrThrow(
-    context.primaryWorktree,
-    ['worktree', 'remove', '--force', matchedEntry.worktree],
-    'Failed to remove git worktree'
-  );
-
-  if (deleteLocalBranch) {
-    const branchName = cleanBranchName(String(matchedEntry.branchRef || matchedEntry.branch || '').trim());
-    if (branchName) {
-      await runGitCommandOrThrow(
-        context.primaryWorktree,
-        ['branch', '-D', branchName],
-        `Failed to delete local branch ${branchName}`
-      );
     }
-  }
 
-  try {
-    await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, matchedEntry.worktree);
-  } catch (error) {
-    console.warn('Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
-  }
+    await runGitCommandOrThrow(
+      context.primaryWorktree,
+      ['worktree', 'remove', '--force', matchedEntry.worktree],
+      'Failed to remove git worktree'
+    );
 
-  clearWorktreeBootstrapState(matchedEntry.worktree);
+    if (deleteLocalBranch) {
+      const branchName = cleanBranchName(String(matchedEntry.branchRef || matchedEntry.branch || '').trim());
+      if (branchName) {
+        await runGitCommandOrThrow(
+          context.primaryWorktree,
+          ['branch', '-D', branchName],
+          `Failed to delete local branch ${branchName}`
+        );
+      }
+    }
+
+    try {
+      await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, matchedEntry.worktree);
+    } catch (error) {
+      console.warn('Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
+    }
+
+    clearWorktreeBootstrapState(matchedEntry.worktree);
 
     if (removedExecutionContext?.worktreeId) {
       gitExecutionCoordinator.invalidateWorktrees(executionContext.commonId, [removedExecutionContext.worktreeId]);

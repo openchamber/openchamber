@@ -374,7 +374,7 @@ class GitExecutionCoordinator {
 
   ensureWorktree(state, worktreeId) {
     if (!worktreeId) {
-      return null;
+      throw new TypeError('A worktree identity is required for local Git execution');
     }
     const existing = state.worktrees.get(worktreeId);
     if (existing) {
@@ -764,9 +764,11 @@ class GitExecutionCoordinator {
       let madeProgress = true;
       while (this.globalActive < this.limits.globalConcurrency && madeProgress) {
         madeProgress = false;
-        const sources = [...this.contexts.values()].filter((state) => state.pending.length > 0);
+        const sources = [...this.contexts.values()]
+          .filter((state) => state.pending.length > 0)
+          .map((state) => ({ kind: 'context', state }));
         if (this.clonePending.length > 0) {
-          sources.push(this.clonePending);
+          sources.push({ kind: 'clone' });
         }
         if (sources.length === 0) {
           break;
@@ -775,20 +777,18 @@ class GitExecutionCoordinator {
         for (let offset = 0; offset < sources.length; offset += 1) {
           const index = (this.contextCursor + offset) % sources.length;
           const source = sources[index];
-          const isCloneSource = source === this.clonePending;
-          const operationIndex = isCloneSource
+          const operationIndex = source.kind === 'clone'
             ? this.findRunnableCloneIndex()
-            : this.findRunnableIndex(source);
+            : this.findRunnableIndex(source.state);
           if (operationIndex < 0) {
             continue;
           }
-          const [operation] = isCloneSource
-            ? this.clonePending.splice(operationIndex, 1)
-            : source.pending.splice(operationIndex, 1);
           this.contextCursor = (index + 1) % sources.length;
-          if (isCloneSource) {
+          if (source.kind === 'clone') {
+            const [operation] = this.clonePending.splice(operationIndex, 1);
             this.startCloneOperation(operation);
           } else {
+            const [operation] = source.state.pending.splice(operationIndex, 1);
             this.startOperation(operation);
           }
           madeProgress = true;
