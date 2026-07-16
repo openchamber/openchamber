@@ -120,7 +120,7 @@ describe('permissions (/yolo) wizard', () => {
       { type: 'discord', botTokenHash: expect.any(String), targetKey: 'chan-1', permissionModeOverride: 'yolo' },
     ]);
     expect(permissionModeDefaults).toHaveLength(0);
-    expect(calls.at(-1).body.data.content).toContain('YOLO');
+    expect(calls.at(-1).body.data.content).toContain('Allow all');
   });
 
   it('mode → "whole system" scope writes the messenger default', async () => {

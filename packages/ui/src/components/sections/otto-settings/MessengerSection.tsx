@@ -20,6 +20,7 @@ import {
   type MessengerType,
   type MessengerConnection,
   type MessengerVerbosity,
+  type MessengerPermissionMode,
   type MessengerDiagnosisCheck,
   type MessengerInboundMessage,
 } from '@/stores/useMessengerStore';
@@ -93,6 +94,28 @@ const VERBOSITY_OPTIONS: { id: MessengerVerbosity; label: string; desc: string }
     id: 'verbose',
     label: 'Verbose',
     desc: 'Full detail — commands, diffs, outputs and reasoning, formatted for reading',
+  },
+];
+
+const PERMISSION_MODE_OPTIONS: {
+  id: MessengerPermissionMode;
+  labelKey: string;
+  descKey: string;
+}[] = [
+  {
+    id: 'ask',
+    labelKey: 'settings.integrations.discord.bridge.permissionMode.ask.label',
+    descKey: 'settings.integrations.discord.bridge.permissionMode.ask.desc',
+  },
+  {
+    id: 'auto-edit',
+    labelKey: 'settings.integrations.discord.bridge.permissionMode.autoEdit.label',
+    descKey: 'settings.integrations.discord.bridge.permissionMode.autoEdit.desc',
+  },
+  {
+    id: 'yolo',
+    labelKey: 'settings.integrations.discord.bridge.permissionMode.yolo.label',
+    descKey: 'settings.integrations.discord.bridge.permissionMode.yolo.desc',
   },
 ];
 
@@ -541,9 +564,12 @@ function BridgePanel({
   refreshBridgeStatus: (t?: MessengerType) => Promise<void>;
   onToggle: (v: boolean) => void;
 }) {
+  const { t } = useI18n();
   const enabled = conn.bridgeEnabled !== false;
   const bridgeVerbosity = useMessengerStore((s) => s.bridgeVerbosity);
   const setBridgeVerbosity = useMessengerStore((s) => s.setBridgeVerbosity);
+  const bridgePermissionMode = useMessengerStore((s) => s.bridgePermissionMode);
+  const setBridgePermissionMode = useMessengerStore((s) => s.setBridgePermissionMode);
   useEffect(() => {
     refreshBridgeStatus(type);
     const id = setInterval(() => refreshBridgeStatus(type), 8000);
@@ -554,6 +580,10 @@ function BridgePanel({
   const bindings = bridgeStatus.bindings.filter((b) => b.type === type);
   const active = bridgeStatus.active.filter((a) => a.type === type);
   const currentVerbosity: MessengerVerbosity = bridgeVerbosity[type] ?? 'normal';
+  const currentPermissionMode: MessengerPermissionMode = bridgePermissionMode[type] ?? 'ask';
+  const currentPermissionOption =
+    PERMISSION_MODE_OPTIONS.find((o) => o.id === currentPermissionMode) ??
+    PERMISSION_MODE_OPTIONS[0];
 
   return (
     <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
@@ -617,6 +647,35 @@ function BridgePanel({
         </div>
         <div className="text-[10px] text-muted-foreground leading-snug">
           {VERBOSITY_OPTIONS.find((o) => o.id === currentVerbosity)?.desc}.
+        </div>
+      </div>
+
+      {/* Tool permission mode — same defaults as /yolo and /permissions. */}
+      <div className="space-y-1.5 border-t border-border/60 pt-2">
+        <div className="text-[11px] font-medium text-foreground">
+          {t('settings.integrations.discord.bridge.permissionMode.title')}
+        </div>
+        <div className="flex gap-1">
+          {PERMISSION_MODE_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setBridgePermissionMode(type, opt.id)}
+              disabled={!bridgeStatus.enabled}
+              className={cn(
+                'flex-1 rounded-md px-2 py-1.5 text-[10px] font-medium transition-colors disabled:opacity-50',
+                currentPermissionMode === opt.id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:text-foreground',
+              )}
+              title={t(opt.descKey)}
+            >
+              {t(opt.labelKey)}
+            </button>
+          ))}
+        </div>
+        <div className="text-[10px] text-muted-foreground leading-snug">
+          {t(currentPermissionOption.descKey)}
         </div>
       </div>
 

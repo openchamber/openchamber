@@ -211,7 +211,7 @@ export function createDiscordCommandWizards({ restCall, bridge }) {
     });
   }
 
-  // ── /yolo (permission mode) ────────────────────────────────────────────────
+  // ── /yolo|/permissions (permission mode) ───────────────────────────────────
   function permissionModeSelect(hash) {
     const options = PERMISSION_MODES.map((mode) => ({
       label: PERMISSION_MODE_LABELS[mode] ?? mode,

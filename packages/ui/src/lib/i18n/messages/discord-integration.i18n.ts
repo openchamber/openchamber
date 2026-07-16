@@ -95,7 +95,20 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.commands.desc.agent': 'Pick agent for this conversation',
     'settings.integrations.discord.commands.desc.verbosity': 'Choose how much detail streams back',
     'settings.integrations.discord.commands.desc.skill': 'Pick a skill for the agent',
-    'settings.integrations.discord.commands.desc.yolo': 'Toggle auto-approve for tool permissions',
+    'settings.integrations.discord.commands.desc.yolo':
+      'Set tool permission mode (always ask / non-destructive / allow all)',
+    'settings.integrations.discord.commands.desc.permissions':
+      'Synonym for /yolo — set tool permission mode',
+    'settings.integrations.discord.bridge.permissionMode.title': 'Tool permissions',
+    'settings.integrations.discord.bridge.permissionMode.ask.label': 'Always ask',
+    'settings.integrations.discord.bridge.permissionMode.ask.desc':
+      'Ask for permission on every tool — Approve / Deny buttons each time',
+    'settings.integrations.discord.bridge.permissionMode.autoEdit.label': 'Non-destructive',
+    'settings.integrations.discord.bridge.permissionMode.autoEdit.desc':
+      'Allow non-destructive commands (edits and reads); still ask before shell commands',
+    'settings.integrations.discord.bridge.permissionMode.yolo.label': 'Allow all',
+    'settings.integrations.discord.bridge.permissionMode.yolo.desc':
+      'Allow all commands without prompts — stop a run with /abort',
     'settings.integrations.discord.commands.desc.shell': 'Run a shell command in the project',
     'settings.integrations.discord.commands.desc.init': 'Run OpenCode init (AGENTS.md)',
     'settings.integrations.discord.commands.desc.review': 'Run the review workflow',
@@ -209,7 +222,20 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.commands.desc.agent': 'Вибір агента для розмови',
     'settings.integrations.discord.commands.desc.verbosity': 'Рівень деталізації виводу',
     'settings.integrations.discord.commands.desc.skill': 'Передати skill агенту',
-    'settings.integrations.discord.commands.desc.yolo': 'Авто-апрув дозволів інструментів',
+    'settings.integrations.discord.commands.desc.yolo':
+      'Режим дозволів інструментів (завжди питати / недеструктивні / дозволити всі)',
+    'settings.integrations.discord.commands.desc.permissions':
+      'Синонім /yolo — режим дозволів інструментів',
+    'settings.integrations.discord.bridge.permissionMode.title': 'Дозволи інструментів',
+    'settings.integrations.discord.bridge.permissionMode.ask.label': 'Завжди питати',
+    'settings.integrations.discord.bridge.permissionMode.ask.desc':
+      'Питати дозвіл на кожен інструмент — кнопки Approve / Deny щоразу',
+    'settings.integrations.discord.bridge.permissionMode.autoEdit.label': 'Недеструктивні',
+    'settings.integrations.discord.bridge.permissionMode.autoEdit.desc':
+      'Дозволити недеструктивні команди (редагування й читання); на shell — питати дозвіл',
+    'settings.integrations.discord.bridge.permissionMode.yolo.label': 'Дозволити всі',
+    'settings.integrations.discord.bridge.permissionMode.yolo.desc':
+      'Дозволити всі команди без запитів — зупинити відповідь через /abort',
     'settings.integrations.discord.commands.desc.shell': 'Shell-команда в проєкті',
     'settings.integrations.discord.commands.desc.init': 'Запустити OpenCode init (AGENTS.md)',
     'settings.integrations.discord.commands.desc.review': 'Запустити review workflow',

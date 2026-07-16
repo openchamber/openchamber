@@ -7,6 +7,7 @@ import {
 import { createMessengerOpencodeBridge } from './messenger-opencode-bridge.js';
 import { createDiscordAgentRouter } from './discord-agent-api.js';
 import { parseVerbosityLevel, VERBOSITY_LEVELS } from './messenger-verbosity.js';
+import { parsePermissionMode, PERMISSION_MODES } from './messenger-permissions.js';
 import { bootstrapProject as bootstrapProjectFn } from '../projects/project-bootstrap.js';
 import { renderPermissionContext, escapeMd } from './messenger-render.js';
 import { discoverSkills } from '../opencode/skills.js';
@@ -1094,16 +1095,27 @@ export function createMessengerSyncRouter({
   // "Discord channel X is bound to session Y".
   router.post('/bridge/status', (req, res) => {
     if (!bridge) {
-      return res.json({ ok: true, enabled: false, bindings: [], active: [], verbosity: {} });
+      return res.json({
+        ok: true,
+        enabled: false,
+        bindings: [],
+        active: [],
+        verbosity: {},
+        permissionMode: {},
+      });
     }
     const { type, token } = req.body ?? {};
     const verbosity = {
       discord: bridge.store.getVerbosityDefault?.('discord') ?? null,
     };
+    const permissionMode = {
+      discord: bridge.store.getPermissionModeDefault?.('discord') ?? null,
+    };
     return res.json({
       ok: true,
       enabled: true,
       verbosity,
+      permissionMode,
       ...bridge.statusSnapshot({ type, token }),
     });
   });
@@ -1148,6 +1160,54 @@ export function createMessengerSyncRouter({
       levels: VERBOSITY_LEVELS,
       verbosity: {
         discord: bridge.store.getVerbosityDefault?.('discord') ?? null,
+      },
+    });
+  });
+
+  /**
+   * Per-messenger default tool permission mode (`ask` | `auto-edit` | `yolo`).
+   * Same value as `/yolo default <mode>` / `/permissions default <mode>`, so
+   * the OpenChamber UI and Discord stay in sync. A per-conversation
+   * `/permissions <mode>` override always wins over this default.
+   *
+   * POST body: { type: 'discord', mode }  (mode null clears it)
+   * GET query: ?type=discord
+   */
+  router.post('/bridge/permission-mode', (req, res) => {
+    if (!bridge) return res.status(503).json({ ok: false, error: 'bridge unavailable' });
+    const { type, mode } = req.body ?? {};
+    if (type !== 'discord') {
+      return res.status(400).json({ ok: false, error: "type must be 'discord'" });
+    }
+    if (mode == null || mode === '') {
+      bridge.store.setPermissionModeDefault(type, null);
+      return res.json({ ok: true, type, mode: null });
+    }
+    const parsed = parsePermissionMode(mode);
+    if (!parsed) {
+      return res
+        .status(400)
+        .json({ ok: false, error: `mode must be one of: ${PERMISSION_MODES.join(', ')}` });
+    }
+    bridge.store.setPermissionModeDefault(type, parsed);
+    return res.json({ ok: true, type, mode: parsed });
+  });
+
+  router.get('/bridge/permission-mode', (req, res) => {
+    if (!bridge) return res.status(503).json({ ok: false, error: 'bridge unavailable' });
+    const type = typeof req.query?.type === 'string' ? req.query.type : '';
+    if (type === 'discord') {
+      return res.json({
+        ok: true,
+        type,
+        mode: bridge.store.getPermissionModeDefault?.(type) ?? null,
+      });
+    }
+    return res.json({
+      ok: true,
+      modes: PERMISSION_MODES,
+      permissionMode: {
+        discord: bridge.store.getPermissionModeDefault?.('discord') ?? null,
       },
     });
   });

@@ -149,11 +149,12 @@ describe('/model + /status surface the OpenChamber default model', () => {
 });
 
 describe('/help includes verbosity and skill', () => {
-  it('lists the /verbosity, /skill and /yolo commands', async () => {
+  it('lists the /verbosity, /skill and /yolo|/permissions commands', async () => {
     const { result } = await run('/help');
     expect(result.reply).toContain('/verbosity');
     expect(result.reply).toContain('/skill');
     expect(result.reply).toContain('/yolo');
+    expect(result.reply).toContain('/permissions');
   });
 });
 
@@ -201,6 +202,29 @@ describe('/yolo (permission mode) command', () => {
     const { result, surfaceMutators } = await run('/yolo maybe');
     expect(result.reply).toMatch(/Unknown mode/);
     expect(surfaceMutators.setOverrides).not.toHaveBeenCalled();
+  });
+});
+
+describe('/permissions synonym for /yolo', () => {
+  it('lists modes the same way as /yolo', async () => {
+    const { result, surfaceMutators } = await run('/permissions', {
+      binding: { permissionModeDefault: 'ask' },
+    });
+    expect(result.reply).toContain('Tool permission mode');
+    expect(result.reply).toContain('➤ `ask`');
+    expect(surfaceMutators.setOverrides).not.toHaveBeenCalled();
+  });
+
+  it('sets a conversation override', async () => {
+    const { surfaceMutators } = await run('/permissions auto-edit');
+    expect(surfaceMutators.setOverrides).toHaveBeenCalledWith({
+      permissionModeOverride: 'auto-edit',
+    });
+  });
+
+  it('sets the messenger default via `default`', async () => {
+    const { surfaceMutators } = await run('/permissions default yolo');
+    expect(surfaceMutators.setPermissionModeDefault).toHaveBeenCalledWith('yolo');
   });
 });
 
