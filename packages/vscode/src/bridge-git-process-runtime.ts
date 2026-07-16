@@ -73,8 +73,18 @@ const buildGitEnv = async (): Promise<NodeJS.ProcessEnv> => {
   return env;
 };
 
-export const execGit = async (args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
-  const env = await buildGitEnv();
+export type ExecGitOptions = {
+  env?: NodeJS.ProcessEnv;
+};
+
+export type ExecGitResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+};
+
+export const execGit = async (args: string[], cwd: string, options: ExecGitOptions = {}): Promise<ExecGitResult> => {
+  const env = { ...await buildGitEnv(), ...options.env };
   return new Promise((resolve) => {
     const proc = spawn('git', args, {
       cwd,

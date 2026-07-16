@@ -6,6 +6,7 @@ import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleConfigBridgeMessage } from './bridge-config-runtime';
 import { handleSystemBridgeMessage } from './bridge-system-runtime';
 import { handleProxyBridgeMessage } from './bridge-proxy-runtime';
+import * as gitService from './git-execution-service';
 import {
   fetchOpenCodeSkillsFromApi,
   persistSettings,
@@ -15,7 +16,7 @@ import {
   resetMagicPromptOverride,
   resetAllMagicPromptOverrides,
 } from './bridge-settings-runtime';
-import { execGit } from './bridge-git-process-runtime';
+import { runGitObservation, withGitRawRead } from './git-execution-runtime';
 import {
   parseDroppedFileReference,
   readUriAsAttachment,
@@ -70,7 +71,12 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     const specialGitResponse = await handleSpecialGitBridgeMessage(
       { id, type, payload },
       ctx,
-      { readSettings, execGit }
+      {
+        readSettings,
+        getGitRangeFiles: gitService.getGitRangeFiles,
+        getGitRangeDiff: gitService.getGitRangeDiff,
+        withGitRawRead,
+      }
     );
     if (specialGitResponse) {
       return specialGitResponse;
@@ -81,7 +87,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         resolveUserPath,
         listDirectoryEntries,
         normalizeFsPath,
-        execGit,
+        execGit: runGitObservation,
         searchDirectory,
         resolveFileReadPath,
         parseDroppedFileReference,

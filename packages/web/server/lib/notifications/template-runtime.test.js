@@ -4,12 +4,13 @@ import { createNotificationTemplateRuntime } from './template-runtime.js';
 
 const originalFetch = globalThis.fetch;
 
-const createRuntime = (settings = {}) => createNotificationTemplateRuntime({
+const createRuntime = (settings = {}, overrides = {}) => createNotificationTemplateRuntime({
   readSettingsFromDisk: async () => settings,
   persistSettings: vi.fn(async () => {}),
   buildOpenCodeUrl: (path) => path,
   getOpenCodeAuthHeaders: () => ({}),
-  resolveGitBinaryForSpawn: () => 'git',
+  getGitStatus: vi.fn(async () => ({ current: 'main' })),
+  ...overrides,
 });
 
 describe('notification template runtime zen models', () => {
@@ -80,5 +81,22 @@ describe('notification template message extraction', () => {
     ])));
 
     await expect(runtime.fetchLastAssistantMessageText('session-1', 'msg-1')).resolves.toBe('final answer');
+  });
+});
+
+describe('notification template Git variables', () => {
+  it('uses the classified Git status service for branch state', async () => {
+    const getGitStatus = vi.fn(async () => ({ current: 'feature/phase-2' }));
+    const runtime = createRuntime({}, { getGitStatus });
+
+    const variables = await runtime.buildTemplateVariables({
+      properties: {
+        sessionTitle: 'Session',
+        info: { path: { cwd: '/repo' } },
+      },
+    }, 'session-1');
+
+    expect(variables.branch).toBe('feature/phase-2');
+    expect(getGitStatus).toHaveBeenCalledWith('/repo', { mode: 'light', queueTimeoutMs: 3000 });
   });
 });

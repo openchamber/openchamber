@@ -114,7 +114,6 @@ const registerExec = ({ spawn }) => {
     normalizeDirectoryPath: (p) => p,
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
     openchamberUserConfigRoot: '/home/user/.config',
   });
   return getRoute('POST', '/api/fs/exec');
@@ -134,7 +133,6 @@ const registerWrite = (fsPromises) => {
     normalizeDirectoryPath: (p) => p,
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
     openchamberUserConfigRoot: '/home/user/.config',
   });
   return getRoute('POST', '/api/fs/write');
@@ -154,7 +152,6 @@ const registerRead = (fsPromises) => {
     normalizeDirectoryPath: (p) => p,
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
     openchamberUserConfigRoot: '/home/user/.config',
   });
   return getRoute('GET', '/api/fs/read');
@@ -174,7 +171,6 @@ const registerRaw = (fsPromises) => {
     normalizeDirectoryPath: (p) => p,
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
     openchamberUserConfigRoot: '/home/user/.config',
   });
   return getRoute('GET', '/api/fs/raw');
@@ -194,10 +190,60 @@ const registerMkdir = (fsPromises) => {
     normalizeDirectoryPath: (p) => p,
     resolveProjectDirectory: async () => ({ directory: '/repo' }),
     buildAugmentedPath: () => '/usr/bin',
-    resolveGitBinaryForSpawn: () => 'git',
     openchamberUserConfigRoot: '/home/user/.config',
   });
   return getRoute('POST', '/api/fs/mkdir');
+};
+
+const registerClone = ({ cloneRepository, fsPromises = {} }) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => {
+        const error = new Error('missing');
+        error.code = 'ENOENT';
+        throw error;
+      }),
+      mkdir: vi.fn(async () => undefined),
+      ...fsPromises,
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/augmented/bin',
+    cloneRepository,
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('POST', '/api/fs/clone');
+};
+
+const registerList = ({ getIgnoredPaths }) => {
+  const { app, getRoute } = createRouteRegistry();
+  const dirents = [
+    { name: 'ignored.txt', isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false },
+    { name: 'visible.txt', isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false },
+  ];
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isDirectory: () => true })),
+      readdir: vi.fn(async () => dirents),
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/augmented/bin',
+    getIgnoredPaths,
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('GET', '/api/fs/list');
 };
 
 const callExec = async (handler, body) => {
@@ -229,6 +275,124 @@ const callMkdir = async (handler, body) => {
   await handler({ body }, res);
   return res;
 };
+
+const callClone = async (handler, body) => {
+  const res = createMockResponse();
+  await handler({ body }, res);
+  return res;
+};
+
+describe('fs clone', () => {
+  it('delegates cloning to the bounded Git service without changing the response', async () => {
+    const cloneRepository = vi.fn(async () => 'Cloning into repo...');
+    const handler = registerClone({ cloneRepository });
+
+    const res = await callClone(handler, {
+      remoteUrl: 'https://example.com/owner/repo.git',
+      destinationPath: '/repo/clone',
+    });
+
+    expect(cloneRepository).toHaveBeenCalledWith({
+      remoteUrl: 'https://example.com/owner/repo.git',
+      destination: '/repo/clone',
+      identity: null,
+      pathEnvironment: '/augmented/bin',
+    });
+    expect(res.body).toEqual({
+      success: true,
+      path: '/repo/clone',
+      output: 'Cloning into repo...',
+    });
+  });
+
+  it('preserves the destination-exists conflict response after reservation wait', async () => {
+    const cloneRepository = vi.fn(async () => {
+      const error = new Error('Destination path already exists');
+      error.code = 'EEXIST';
+      throw error;
+    });
+    const handler = registerClone({ cloneRepository });
+
+    const res = await callClone(handler, {
+      remoteUrl: 'https://example.com/owner/repo.git',
+      destinationPath: '/repo/clone',
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'Destination path already exists' });
+  });
+});
+
+describe('fs list Git ignore filtering', () => {
+  it('delegates ignore checks to the classified Git service', async () => {
+    const getIgnoredPaths = vi.fn(async () => ['ignored.txt']);
+    const handler = registerList({ getIgnoredPaths });
+    const res = createMockResponse();
+
+    await handler({ query: { path: '/repo', respectGitignore: 'true' } }, res);
+
+    expect(getIgnoredPaths).toHaveBeenCalledWith(
+      '/repo',
+      ['ignored.txt', 'visible.txt'],
+      { signal: expect.anything() },
+    );
+    expect(res.body.entries.map((entry) => entry.name)).toEqual(['visible.txt']);
+  });
+
+  it('fails open when the classified ignore check fails', async () => {
+    const getIgnoredPaths = vi.fn(async () => {
+      throw new Error('ignore check failed');
+    });
+    const handler = registerList({ getIgnoredPaths });
+    const res = createMockResponse();
+
+    await handler({ query: { path: '/repo', respectGitignore: 'true' } }, res);
+
+    expect(res.body.entries.map((entry) => entry.name)).toEqual(['ignored.txt', 'visible.txt']);
+  });
+
+  it('aborts a timed-out ignore check, fails open, and leaves no unsettled work', async () => {
+    const previousTimeout = process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS;
+    process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS = '25';
+    const unhandledRejection = vi.fn();
+    process.on('unhandledRejection', unhandledRejection);
+    let activeChecks = 0;
+    let observedAbort = false;
+
+    try {
+      const getIgnoredPaths = vi.fn((_directory, _paths, { signal }) => {
+        activeChecks += 1;
+        return new Promise((_resolve, reject) => {
+          const onAbort = () => {
+            signal.removeEventListener('abort', onAbort);
+            observedAbort = true;
+            activeChecks -= 1;
+            reject(new Error('ignore check aborted'));
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+        });
+      });
+      const handler = registerList({ getIgnoredPaths });
+      const res = createMockResponse();
+      const request = handler({ query: { path: '/repo', respectGitignore: 'true' } }, res);
+
+      await request;
+      await Promise.resolve();
+
+      expect(observedAbort).toBe(true);
+      expect(activeChecks).toBe(0);
+      expect(unhandledRejection).not.toHaveBeenCalled();
+      expect(res.body.entries.map((entry) => entry.name)).toEqual(['ignored.txt', 'visible.txt']);
+    } finally {
+      process.off('unhandledRejection', unhandledRejection);
+      if (previousTimeout === undefined) {
+        delete process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS;
+      } else {
+        process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS = previousTimeout;
+      }
+    }
+  });
+});
 
 describe('fs write', () => {
   it('does not rewrite a file when content is unchanged', async () => {

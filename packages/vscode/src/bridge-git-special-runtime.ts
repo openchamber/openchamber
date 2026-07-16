@@ -1,7 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import * as gitService from './gitService';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -14,7 +13,18 @@ type ExecGitResult = { stdout: string; stderr: string; exitCode: number };
 
 type SpecialGitDeps = {
   readSettings: (ctx?: BridgeContext) => Record<string, unknown>;
-  execGit: (args: string[], cwd: string) => Promise<ExecGitResult>;
+  getGitRangeFiles: (directory: string, base: string, head: string) => Promise<string[]>;
+  getGitRangeDiff: (
+    directory: string,
+    base: string,
+    head: string,
+    filePath: string,
+    contextLines?: number,
+  ) => Promise<{ diff: string }>;
+  withGitRawRead: <T>(
+    directory: string,
+    task: (execGit: (args: string[]) => Promise<ExecGitResult>) => Promise<T> | T,
+  ) => Promise<T>;
 };
 
 const BRIDGE_ZEN_DEFAULT_MODEL = 'gpt-5-nano';
@@ -304,7 +314,7 @@ export async function handleSpecialGitBridgeMessage(
 
       let files: string[] = [];
       try {
-        const listed = await gitService.getGitRangeFiles(directory, base, head);
+        const listed = await deps.getGitRangeFiles(directory, base, head);
         files = Array.isArray(listed) ? listed : [];
       } catch {
         files = [];
@@ -317,7 +327,7 @@ export async function handleSpecialGitBridgeMessage(
       let diffSummaries = '';
       for (const file of files) {
         try {
-          const diff = await gitService.getGitRangeDiff(directory, base, head, file, 3);
+          const diff = await deps.getGitRangeDiff(directory, base, head, file, 3);
           const raw = typeof diff?.diff === 'string' ? diff.diff : '';
           if (!raw.trim()) continue;
           diffSummaries += `FILE: ${file}\n${raw}\n\n`;
@@ -385,58 +395,60 @@ export async function handleSpecialGitBridgeMessage(
       }
 
       try {
-        const statusResult = await deps.execGit(['status', '--porcelain'], directory);
-        const statusPorcelain = statusResult.stdout;
+        return await deps.withGitRawRead(directory, async (execGit) => {
+          const statusResult = await execGit(['status', '--porcelain']);
+          const statusPorcelain = statusResult.stdout;
 
-        const unmergedResult = await deps.execGit(['diff', '--name-only', '--diff-filter=U'], directory);
-        const unmergedFiles = unmergedResult.stdout
-          .split('\n')
-          .map((line) => line.trim())
-          .filter(Boolean);
+          const unmergedResult = await execGit(['diff', '--name-only', '--diff-filter=U']);
+          const unmergedFiles = unmergedResult.stdout
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean);
 
-        const diffResult = await deps.execGit(['diff'], directory);
-        const diff = diffResult.stdout;
+          const diffResult = await execGit(['diff']);
+          const diff = diffResult.stdout;
 
-        let operation: 'merge' | 'rebase' = 'merge';
-        let headInfo = '';
+          let operation: 'merge' | 'rebase' = 'merge';
+          let headInfo = '';
 
-        const mergeHeadResult = await deps.execGit(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], directory);
-        const mergeHeadExists = mergeHeadResult.exitCode === 0;
+          const mergeHeadResult = await execGit(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']);
+          const mergeHeadExists = mergeHeadResult.exitCode === 0;
 
-        if (mergeHeadExists) {
-          operation = 'merge';
-          const mergeHead = mergeHeadResult.stdout.trim();
-          let mergeMsg = '';
-          try {
-            const mergeMsgPath = path.join(directory, '.git', 'MERGE_MSG');
-            mergeMsg = await fs.promises.readFile(mergeMsgPath, 'utf8');
-          } catch {
-            // MERGE_MSG may not exist
+          if (mergeHeadExists) {
+            operation = 'merge';
+            const mergeHead = mergeHeadResult.stdout.trim();
+            let mergeMsg = '';
+            try {
+              const mergeMsgPath = path.join(directory, '.git', 'MERGE_MSG');
+              mergeMsg = await fs.promises.readFile(mergeMsgPath, 'utf8');
+            } catch {
+              // MERGE_MSG may not exist
+            }
+            headInfo = `MERGE_HEAD: ${mergeHead}${mergeMsg ? '\n' + mergeMsg : ''}`;
+          } else {
+            const rebaseHeadResult = await execGit(['rev-parse', '--verify', '--quiet', 'REBASE_HEAD']);
+            const rebaseHeadExists = rebaseHeadResult.exitCode === 0;
+
+            if (rebaseHeadExists) {
+              operation = 'rebase';
+              const rebaseHead = rebaseHeadResult.stdout.trim();
+              headInfo = `REBASE_HEAD: ${rebaseHead}`;
+            }
           }
-          headInfo = `MERGE_HEAD: ${mergeHead}${mergeMsg ? '\n' + mergeMsg : ''}`;
-        } else {
-          const rebaseHeadResult = await deps.execGit(['rev-parse', '--verify', '--quiet', 'REBASE_HEAD'], directory);
-          const rebaseHeadExists = rebaseHeadResult.exitCode === 0;
 
-          if (rebaseHeadExists) {
-            operation = 'rebase';
-            const rebaseHead = rebaseHeadResult.stdout.trim();
-            headInfo = `REBASE_HEAD: ${rebaseHead}`;
-          }
-        }
-
-        return {
-          id,
-          type,
-          success: true,
-          data: {
-            statusPorcelain: statusPorcelain.trim(),
-            unmergedFiles,
-            diff: diff.trim(),
-            headInfo: headInfo.trim(),
-            operation,
-          },
-        };
+          return {
+            id,
+            type,
+            success: true,
+            data: {
+              statusPorcelain: statusPorcelain.trim(),
+              unmergedFiles,
+              diff: diff.trim(),
+              headInfo: headInfo.trim(),
+              operation,
+            },
+          };
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: message };

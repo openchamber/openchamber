@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { withGitCloneReservation } from '../git/service.js';
 import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
 
@@ -216,7 +217,9 @@ export async function installSkillsFromRepository({
   const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-skills-install-'));
 
   try {
-    const cloned = await cloneRepo({ cloneUrl, identity, tempDir: tempBase });
+    return await withGitCloneReservation(tempBase, async (lease) => {
+      const cloned = await cloneRepo({ cloneUrl, identity, tempDir: tempBase });
+      lease.releaseNetwork();
     if (!cloned.ok) {
       const msg = `${cloned.error?.stderr || ''}\n${cloned.error?.message || ''}`.trim();
       if (looksLikeAuthError(msg)) {
@@ -287,7 +290,8 @@ export async function installSkillsFromRepository({
       }
     }
 
-    return { ok: true, installed, skipped };
+      return { ok: true, installed, skipped };
+    }, { label: 'Install skills Git repository' });
   } finally {
     await safeRm(tempBase);
   }

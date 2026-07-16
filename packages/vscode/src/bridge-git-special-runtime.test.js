@@ -24,7 +24,6 @@ const rawFetch = mock(async () => {
   throw new Error('raw fetch should not be used');
 });
 
-mock.module('./gitService', () => gitService);
 mock.module('@opencode-ai/sdk/v2', () => ({ createOpencodeClient }));
 
 const { handleSpecialGitBridgeMessage } = await import('./bridge-git-special-runtime');
@@ -82,7 +81,9 @@ describe('bridge git special runtime', () => {
       },
     }, {
       readSettings: () => ({}),
-      execGit: mock(),
+      getGitRangeFiles: gitService.getGitRangeFiles,
+      getGitRangeDiff: gitService.getGitRangeDiff,
+      withGitRawRead: async (_directory, task) => task(mock()),
     });
 
     expect(response).toEqual({
@@ -112,5 +113,47 @@ describe('bridge git special runtime', () => {
       limit: 10,
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(sdkClient.session.delete).toHaveBeenCalledWith({ sessionID: 'ses_1' }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it('holds one scheduled raw-read boundary across conflict-detail probes', async () => {
+    const calls = [];
+    const execGit = mock(async (args) => {
+      calls.push(args);
+      if (args[0] === 'status') return { stdout: 'UU src/a.ts\n', stderr: '', exitCode: 0 };
+      if (args.includes('--name-only')) return { stdout: 'src/a.ts\n', stderr: '', exitCode: 0 };
+      if (args[0] === 'diff') return { stdout: 'diff --git a/src/a.ts b/src/a.ts', stderr: '', exitCode: 0 };
+      return { stdout: 'abcdef123456\n', stderr: '', exitCode: 0 };
+    });
+    const withGitRawRead = mock(async (_directory, task) => task(execGit));
+
+    const response = await handleSpecialGitBridgeMessage({
+      id: '2',
+      type: 'api:git/conflict-details',
+      payload: { directory: '/repo' },
+    }, undefined, {
+      readSettings: () => ({}),
+      getGitRangeFiles: gitService.getGitRangeFiles,
+      getGitRangeDiff: gitService.getGitRangeDiff,
+      withGitRawRead,
+    });
+
+    expect(response).toMatchObject({
+      id: '2',
+      type: 'api:git/conflict-details',
+      success: true,
+      data: {
+        statusPorcelain: 'UU src/a.ts',
+        unmergedFiles: ['src/a.ts'],
+        operation: 'merge',
+      },
+    });
+    expect(withGitRawRead).toHaveBeenCalledTimes(1);
+    expect(withGitRawRead).toHaveBeenCalledWith('/repo', expect.any(Function));
+    expect(calls).toEqual([
+      ['status', '--porcelain'],
+      ['diff', '--name-only', '--diff-filter=U'],
+      ['diff'],
+      ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'],
+    ]);
   });
 });

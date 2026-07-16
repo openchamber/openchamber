@@ -666,7 +666,6 @@ const applyOpencodeBinaryFromSettings = (...args) => openCodeEnvRuntime.applyOpe
 const resolveOpencodeCliPath = (...args) => openCodeEnvRuntime.resolveOpencodeCliPath(...args);
 const isExecutable = (...args) => openCodeEnvRuntime.isExecutable(...args);
 const searchPathFor = (...args) => openCodeEnvRuntime.searchPathFor(...args);
-const resolveGitBinaryForSpawn = (...args) => openCodeEnvRuntime.resolveGitBinaryForSpawn(...args);
 const resolveManagedOpenCodeLaunchSpec = (...args) => openCodeEnvRuntime.resolveManagedOpenCodeLaunchSpec(...args);
 const clearResolvedOpenCodeBinary = (...args) => openCodeEnvRuntime.clearResolvedOpenCodeBinary(...args);
 const openCodeResolutionRuntime = createOpenCodeResolutionRuntime({
@@ -699,7 +698,6 @@ notificationTemplateRuntime = createNotificationTemplateRuntime({
   persistSettings,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  resolveGitBinaryForSpawn,
 });
 
 const notificationTriggerRuntime = createNotificationTriggerRuntime({
@@ -1505,7 +1503,6 @@ async function main(options = {}) {
     path,
     fsPromises,
     spawn,
-    resolveGitBinaryForSpawn,
     createFsSearchRuntime: createFsSearchRuntimeFactory,
     openchamberDataDir: OPENCHAMBER_DATA_DIR,
     openchamberUserConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
