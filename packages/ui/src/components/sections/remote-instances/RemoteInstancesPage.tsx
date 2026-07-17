@@ -600,6 +600,11 @@ export const RemoteInstancesPage: React.FC = () => {
         }
         continue;
       }
+      if (candidate.type === 'direct-e2ee') {
+        // PR D teaches shared clients to parse the encrypted candidate; the
+        // managed-tunnel pairing UI is enabled by the following settings layer.
+        continue;
+      }
       // Direct: the remote instance is a user-provided URL, so a plain
       // cross-origin fetch is correct here (not the active runtime).
       const candidateUrl = normalizeHostUrl(candidate.url);

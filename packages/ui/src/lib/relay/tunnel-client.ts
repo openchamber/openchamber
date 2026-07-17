@@ -140,19 +140,44 @@ export const wrapBrowserWebSocket = (ws: WebSocket): RelayTunnelWebSocket => {
 };
 
 export type RelayTunnelState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error';
+export type RelayTunnelFailureClassification = 'network' | 'protocol' | 'crypto' | 'terminal';
+
+export class TunnelChannelReadinessError extends Error {
+  constructor(
+    message: string,
+    readonly failureClassification: RelayTunnelFailureClassification,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = 'TunnelChannelReadinessError';
+  }
+}
+
+export interface TunnelChannelReadinessContext {
+  fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
+}
 
 export interface RelayTunnelStatus {
   state: RelayTunnelState;
   lastError?: string;
+  failureClassification?: RelayTunnelFailureClassification;
 }
 
 export interface RelayTunnelClientOptions {
-  relayUrl: string;
-  serverId: string;
+  relayUrl?: string;
+  serverId?: string;
   hostEncPubJwk: JsonWebKey;
   grant?: string;
-  /** Test hook: replaces native WebSocket construction with a fake wire. */
+  /** Exact outer WebSocket URL. When omitted, the hosted-relay URL is built as before. */
+  outerWebSocketUrl?: string | (() => string);
+  /** Transport seam for constructing the outer socket. */
+  createOuterWebSocket?: (url: string) => TunnelWireSocket;
+  /** Backward-compatible test alias for createOuterWebSocket. */
   createWireSocket?: (url: string) => TunnelWireSocket;
+  /** Override which outer close codes are terminal. Hosted-relay defaults are unchanged. */
+  isTerminalCloseCode?: (code: number) => boolean;
+  /** Override which locally detected failures are terminal. Hosted-relay defaults are unchanged. */
+  isTerminalFailureClassification?: (classification: RelayTunnelFailureClassification) => boolean;
   helloRetryMs?: number;
   helloTimeoutMs?: number;
   pingIntervalMs?: number;
@@ -164,6 +189,8 @@ export interface RelayTunnelClientOptions {
   reconnectBaseDelayMs?: number;
   reconnectMaxDelayMs?: number;
   hiddenOrOfflineMaxDelayMs?: number;
+  /** Verifies the newly encrypted channel before it is exposed to callers. */
+  channelReadiness?: (context: TunnelChannelReadinessContext) => Promise<void>;
 }
 
 export interface RelayTunnelClient {
@@ -230,7 +257,11 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   const reconnectMaxDelayMs = options.reconnectMaxDelayMs ?? 30_000;
   const hiddenOrOfflineMaxDelayMs = options.hiddenOrOfflineMaxDelayMs ?? 60_000;
 
-  const createWire = options.createWireSocket ?? ((url: string) => wrapNativeWebSocket(new WebSocket(url)));
+  const createWire = options.createOuterWebSocket
+    ?? options.createWireSocket
+    ?? ((url: string) => wrapNativeWebSocket(new WebSocket(url)));
+  const isTerminalCloseCode = options.isTerminalCloseCode ?? ((code: number) => TERMINAL_RELAY_CLOSE_CODES.has(code));
+  const isTerminalFailureClassification = options.isTerminalFailureClassification ?? (() => false);
 
   let closed = false;
   let status: RelayTunnelStatus = { state: 'idle' };
@@ -246,7 +277,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   let wakeListenersInstalled = false;
 
   const setStatus = (next: RelayTunnelStatus): void => {
-    if (status.state === next.state && status.lastError === next.lastError) return;
+    if (status.state === next.state && status.lastError === next.lastError && status.failureClassification === next.failureClassification) return;
     status = next;
     for (const listener of statusListeners) {
       try {
@@ -332,6 +363,12 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   };
 
   const buildRelayWsUrl = (): string => {
+    if (options.outerWebSocketUrl) {
+      return typeof options.outerWebSocketUrl === 'function' ? options.outerWebSocketUrl() : options.outerWebSocketUrl;
+    }
+    if (!options.relayUrl || !options.serverId) {
+      throw new Error('relayUrl and serverId are required when outerWebSocketUrl is omitted');
+    }
     const url = new URL(options.relayUrl);
     url.searchParams.set('v', String(RELAY_PROTOCOL_VERSION));
     url.searchParams.set('role', 'client');
@@ -345,14 +382,14 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     clearReconnectTimer();
     attemptGeneration += 1;
     const generation = attemptGeneration;
-    setStatus({ state: consecutiveFailures > 0 ? 'reconnecting' : 'connecting', lastError: status.lastError });
+    setStatus({ state: consecutiveFailures > 0 ? 'reconnecting' : 'connecting', lastError: status.lastError, failureClassification: status.failureClassification });
 
     let handshake;
     try {
       handshake = await createClientHandshake(options.hostEncPubJwk, { batch: advertiseBatch });
     } catch (error) {
       if (generation !== attemptGeneration || closed) return;
-      failAttempt(generation, toError(error), true);
+      failAttempt(generation, toError(error), 'crypto', true);
       return;
     }
     if (generation !== attemptGeneration || closed) return;
@@ -361,7 +398,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     try {
       wire = createWire(buildRelayWsUrl());
     } catch (error) {
-      failAttempt(generation, toError(error));
+      failAttempt(generation, toError(error), 'network');
       return;
     }
     currentWire = wire;
@@ -408,7 +445,13 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     };
     currentAttemptCleanup = cleanupTimers;
 
-    function failAttemptLocal(error: Error, asErrorState = false, terminal = false): void {
+    function failAttemptLocal(
+      error: Error,
+      failureClassification: RelayTunnelFailureClassification,
+      asErrorState = false,
+      terminal = false,
+    ): void {
+      terminal ||= isTerminalFailureClassification(failureClassification);
       if (settled || generation !== attemptGeneration) return;
       settled = true;
       cleanupTimers();
@@ -416,7 +459,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         activeChannel = null;
         failChannelStreams(channel, new Error(`relay tunnel reset: ${error.message}`));
       }
-      rejectWaiters(error);
+      if (terminal) rejectWaiters(error);
       try {
         wire.close();
       } catch {
@@ -428,10 +471,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       // A permanent rejection (auth failed, duplicate, limit) won't resolve by
       // retrying — surface a terminal error instead of reconnecting forever.
       if (terminal) {
-        setStatus({ state: 'error', lastError: error.message });
+        setStatus({ state: 'error', lastError: error.message, failureClassification });
         return;
       }
-      setStatus({ state: asErrorState ? 'error' : 'reconnecting', lastError: error.message });
+      setStatus({ state: asErrorState ? 'error' : 'reconnecting', lastError: error.message, failureClassification });
       scheduleReconnect();
     }
 
@@ -492,12 +535,14 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         },
       };
       channel = channelObj;
-      activeChannel = channelObj;
-      consecutiveFailures = 0;
       lastActivityAt = Date.now();
-      setStatus({ state: 'connected' });
-      resolveWaiters(channelObj);
-      pingTimer = setInterval(() => {
+      const publishChannel = (): void => {
+        if (settled || generation !== attemptGeneration || channelObj.dead) return;
+        activeChannel = channelObj;
+        consecutiveFailures = 0;
+        setStatus({ state: 'connected' });
+        resolveWaiters(channelObj);
+        pingTimer = setInterval(() => {
         const now = Date.now();
         // Only ping when the tunnel has actually been idle; streaming traffic
         // keeps lastActivityAt fresh, so sustained bursts send zero pings.
@@ -507,10 +552,28 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         if (pongDeadline === null) {
           pongDeadline = setTimeout(() => {
             pongDeadline = null;
-            failAttemptLocal(new Error('relay keepalive timeout'));
+            failAttemptLocal(new Error('relay keepalive timeout'), 'network');
           }, pingTimeoutMs);
         }
-      }, pingIntervalMs);
+        }, pingIntervalMs);
+      };
+      if (!options.channelReadiness) {
+        publishChannel();
+        return;
+      }
+      void options.channelReadiness({
+        fetch: (input, init) => tunnelFetchOnChannel(channelObj, input, init),
+      }).then(publishChannel).catch((error: unknown) => {
+        const readinessError = error instanceof TunnelChannelReadinessError
+          ? error
+          : new TunnelChannelReadinessError('tunnel channel readiness callback failed', 'terminal', false);
+        failAttemptLocal(
+          readinessError,
+          readinessError.failureClassification,
+          !readinessError.retryable,
+          !readinessError.retryable,
+        );
+      });
     };
 
     const handleTunnelFrame = (channelObj: ActiveChannel, plaintext: Uint8Array): void => {
@@ -518,7 +581,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       try {
         frame = decodeTunnelFrame(plaintext);
       } catch (error) {
-        failAttemptLocal(toError(error));
+        failAttemptLocal(toError(error), 'protocol');
         return;
       }
       // Any received frame proves the tunnel is alive — clear the pong deadline.
@@ -540,13 +603,13 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         try {
           complete = channelObj.assembler.push(frame);
         } catch (error) {
-          failAttemptLocal(toError(error));
+          failAttemptLocal(toError(error), 'protocol');
           return;
         }
         if (complete === null) return;
         payload = complete;
       } else if (frame.hasMoreFragments) {
-        failAttemptLocal(new Error('unexpected fragmented tunnel frame'));
+        failAttemptLocal(new Error('unexpected fragmented tunnel frame'), 'protocol');
         return;
       }
 
@@ -577,11 +640,11 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
               if (cryptoChannel) return;
               establish(action.channel, action.batch);
             } else if (action.type === 'fail') {
-              failAttemptLocal(new Error(`relay handshake failed: ${action.reason}`));
+              failAttemptLocal(new Error(`relay handshake failed: ${action.reason}`), 'protocol');
             }
           })
           .catch((error: unknown) => {
-            failAttemptLocal(toError(error));
+            failAttemptLocal(toError(error), 'crypto');
           });
         return;
       }
@@ -594,14 +657,14 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
           const currentChannel = channel;
           const currentCrypto = cryptoChannel;
           if (!currentChannel || !currentCrypto) {
-            failAttemptLocal(new Error('encrypted frame before handshake completed'));
+            failAttemptLocal(new Error('encrypted frame before handshake completed'), 'protocol');
             return;
           }
           let plaintext: Uint8Array;
           try {
             plaintext = await currentCrypto.decryptor.decrypt(bytes);
           } catch (error) {
-            failAttemptLocal(toError(error));
+            failAttemptLocal(toError(error), 'crypto');
             return;
           }
           if (batchNegotiated) {
@@ -611,7 +674,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
             try {
               frames = decodeFrameBatch(plaintext);
             } catch (error) {
-              failAttemptLocal(toError(error));
+              failAttemptLocal(toError(error), 'protocol');
               return;
             }
             for (const frame of frames) {
@@ -623,14 +686,15 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
           handleTunnelFrame(currentChannel, plaintext);
         })
         .catch((error: unknown) => {
-          failAttemptLocal(toError(error));
+          failAttemptLocal(toError(error), 'protocol');
         });
     };
 
     wire.onclose = (event) => {
-      const terminal = TERMINAL_RELAY_CLOSE_CODES.has(event.code);
+      const terminal = isTerminalCloseCode(event.code);
       failAttemptLocal(
         new Error(RELAY_CLOSE_MESSAGES[event.code] ?? `relay socket closed (code ${event.code})`),
+        terminal ? 'terminal' : 'network',
         terminal,
         terminal,
       );
@@ -642,14 +706,20 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
 
     helloDeadline = setTimeout(() => {
       helloDeadline = null;
-      failAttemptLocal(new Error('relay handshake timeout'), true);
+      failAttemptLocal(new Error('relay handshake timeout'), 'network', true);
     }, helloTimeoutMs);
 
-    function failAttempt(gen: number, error: Error, asErrorState = false): void {
+    function failAttempt(gen: number, error: Error, failureClassification: RelayTunnelFailureClassification, asErrorState = false): void {
       if (gen !== attemptGeneration || closed) return;
+      if (isTerminalFailureClassification(failureClassification)) {
+        rejectWaiters(error);
+        consecutiveFailures += 1;
+        setStatus({ state: 'error', lastError: error.message, failureClassification });
+        return;
+      }
       rejectWaiters(error);
       consecutiveFailures += 1;
-      setStatus({ state: asErrorState ? 'error' : 'reconnecting', lastError: error.message });
+      setStatus({ state: asErrorState ? 'error' : 'reconnecting', lastError: error.message, failureClassification });
       scheduleReconnect();
     }
   };
@@ -681,11 +751,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     });
   };
 
-  const tunnelFetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+  const tunnelFetchOnChannel = async (channel: ActiveChannel, input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const request = await normalizeTunnelRequest(input, init);
     const signal = request.signal;
     if (signal?.aborted) throw abortError();
-    const channel = await waitForChannel(signal);
     const streamId = channel.nextStreamId();
 
     return await new Promise<Response>((resolve, reject) => {
@@ -809,14 +878,18 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         headers: request.headers,
       };
       channel.send(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload(head)));
+      if (request.method === 'GET' || request.method === 'HEAD') return;
+      if (request.body === null) {
+        channel.send(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, EMPTY_PAYLOAD));
+        return;
+      }
+      const body = request.body;
       void (async () => {
         try {
-          if (request.body) {
-            for await (const chunk of request.body) {
-              if (finished || channel.dead) return;
-              for (const piece of chunkPayload(chunk)) {
-                channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
-              }
+          for await (const chunk of body) {
+            if (finished || channel.dead) return;
+            for (const piece of chunkPayload(chunk)) {
+              channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
             }
           }
           if (!finished && !channel.dead) {
@@ -828,6 +901,12 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         }
       })();
     });
+  };
+
+  const tunnelFetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const signal = input instanceof Request ? input.signal : init?.signal;
+    const channel = await waitForChannel(signal ?? undefined);
+    return tunnelFetchOnChannel(channel, input, init);
   };
 
   const splitPathQuery = (pathWithQuery: string): { path: string; query: string } => {

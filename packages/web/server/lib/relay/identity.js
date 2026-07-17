@@ -11,9 +11,18 @@ import {
   getOrCreateRelaySigningKeypair,
   signRelayMessage,
 } from './signing-key.js';
-import { exportPublicKeyJwk, generateEcdhKeyPair, importEcdhPrivateKey } from './e2ee.js';
+import { exportPublicKeyJwk, generateEcdhKeyPair, importEcdhPrivateKey, importEcdhPublicKey } from './e2ee.js';
 
-const isJwkPair = (value) => Boolean(value && typeof value === 'object' && value.privateJwk && value.publicJwk);
+const publicJwkFromPrivate = (privateJwk) => ({
+  kty: privateJwk?.kty,
+  crv: privateJwk?.crv,
+  x: privateJwk?.x,
+  y: privateJwk?.y,
+});
+
+const samePublicJwk = (left, right) =>
+  left?.kty === right.kty && left?.crv === right.crv && left?.x === right.x && left?.y === right.y
+  && Object.keys(left).every((key) => ['kty', 'crv', 'x', 'y'].includes(key));
 
 /**
  * @param {{
@@ -27,13 +36,61 @@ export const createRelayIdentityRuntime = (deps) => {
   const { crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict } = deps;
 
   let cachedIdentity = null;
+  let cachedIdentityGeneration = null;
+  let pendingIdentity = null;
+  let identityGeneration = 0;
+  let settingsWriteTail = Promise.resolve();
 
-  const getOrCreateEncryptionKeypair = async () => {
-    const settings = await readSettingsFromDiskMigrated();
+  const generationSupersededError = () => Object.assign(
+    new Error('Relay identity initialization superseded'),
+    {
+      name: 'RelayIdentityGenerationSupersededError',
+      code: 'relay_identity_generation_superseded',
+    },
+  );
+
+  const assertCurrentGeneration = (generation) => {
+    if (generation !== identityGeneration) throw generationSupersededError();
+  };
+
+  const writeSettingsForGeneration = (generation, settings) => {
+    assertCurrentGeneration(generation);
+    const operation = settingsWriteTail.then(async () => {
+      assertCurrentGeneration(generation);
+      await writeSettingsToDisk(settings);
+      assertCurrentGeneration(generation);
+    });
+    settingsWriteTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  };
+
+  const importPersistedEncryptionKeypair = async (generation, settings) => {
     const existing = settings?.relayEncryptionKey;
-    if (isJwkPair(existing)) {
-      return existing;
+    if (!existing?.privateJwk) return null;
+    try {
+      const privateKey = await importEcdhPrivateKey(existing.privateJwk);
+      const publicJwk = publicJwkFromPrivate(existing.privateJwk);
+      await importEcdhPublicKey(publicJwk);
+      if (!samePublicJwk(existing.publicJwk, publicJwk)) {
+        await writeSettingsForGeneration(generation, { ...settings, relayEncryptionKey: { privateJwk: existing.privateJwk, publicJwk } });
+      }
+      return { privateJwk: existing.privateJwk, publicJwk, privateKey };
+    } catch {
+      // Invalid private material cannot be repaired; replace the keypair only
+      // after the strict settings read confirms regeneration is safe.
+      return null;
     }
+  };
+
+  const getOrCreateEncryptionKeypair = async (generation) => {
+    const settings = await readSettingsFromDiskMigrated();
+    assertCurrentGeneration(generation);
+    const existing = await importPersistedEncryptionKeypair(generation, settings);
+    if (existing) return existing;
+
     // Same regeneration gate as the signing key: never mint a replacement
     // identity key off a swallowed read failure — a new encryption key breaks
     // the E2EE trust anchor pinned by every paired device. Verify "missing" via
@@ -41,10 +98,9 @@ export const createRelayIdentityRuntime = (deps) => {
     let verifiedSettings = settings;
     if (readSettingsStrict) {
       verifiedSettings = await readSettingsStrict();
-      const verified = verifiedSettings?.relayEncryptionKey;
-      if (isJwkPair(verified)) {
-        return verified;
-      }
+      assertCurrentGeneration(generation);
+      const verified = await importPersistedEncryptionKeypair(generation, verifiedSettings);
+      if (verified) return verified;
     }
     // Loud on purpose: a new encryption key invalidates the E2EE trust anchor of
     // every paired device. Expected exactly once, on first relay use.
@@ -52,8 +108,8 @@ export const createRelayIdentityRuntime = (deps) => {
     const keyPair = await generateEcdhKeyPair();
     const privateJwk = await globalThis.crypto.subtle.exportKey('jwk', keyPair.privateKey);
     const publicJwk = await exportPublicKeyJwk(keyPair.publicKey);
-    await writeSettingsToDisk({ ...settings, ...(verifiedSettings || {}), relayEncryptionKey: { privateJwk, publicJwk } });
-    return { privateJwk, publicJwk };
+    await writeSettingsForGeneration(generation, { ...settings, ...(verifiedSettings || {}), relayEncryptionKey: { privateJwk, publicJwk } });
+    return { privateJwk, publicJwk, privateKey: keyPair.privateKey };
   };
 
   /**
@@ -64,12 +120,18 @@ export const createRelayIdentityRuntime = (deps) => {
    *   signRelayAuth: (role: string, connectionId?: string | null) => { ts: number, sig: string, pk: string },
    * }>}
    */
-  const getRelayIdentity = async () => {
-    if (cachedIdentity) return cachedIdentity;
-    const signing = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
+  const initializeRelayIdentity = async (generation) => {
+    if (cachedIdentity && cachedIdentityGeneration === generation) return cachedIdentity;
+    const signing = await getOrCreateRelaySigningKeypair({
+      crypto,
+      readSettingsFromDiskMigrated,
+      writeSettingsToDisk: (settings) => writeSettingsForGeneration(generation, settings),
+      readSettingsStrict,
+    });
+    assertCurrentGeneration(generation);
     const serverId = deriveServerId({ crypto }, signing.publicJwk);
-    const encryption = await getOrCreateEncryptionKeypair();
-    const hostEncPrivateKey = await importEcdhPrivateKey(encryption.privateJwk);
+    const encryption = await getOrCreateEncryptionKeypair(generation);
+    const hostEncPrivateKey = encryption.privateKey || await importEcdhPrivateKey(encryption.privateJwk);
     const pk = Buffer.from(canonicalPublicJwkString(signing.publicJwk), 'utf8').toString('base64url');
 
     // Relay-layer auth for host-control / host-data upgrades. Signature payload
@@ -80,14 +142,39 @@ export const createRelayIdentityRuntime = (deps) => {
       return { ts, sig, pk };
     };
 
+    assertCurrentGeneration(generation);
     cachedIdentity = {
       serverId,
       hostEncPubJwk: encryption.publicJwk,
       hostEncPrivateKey,
       signRelayAuth,
     };
+    cachedIdentityGeneration = generation;
     return cachedIdentity;
   };
 
-  return { getRelayIdentity };
+  const getRelayIdentity = () => {
+    if (cachedIdentity && cachedIdentityGeneration === identityGeneration) return Promise.resolve(cachedIdentity);
+    if (pendingIdentity?.generation === identityGeneration) return pendingIdentity.promise;
+
+    const generation = identityGeneration;
+    const promise = initializeRelayIdentity(generation).catch((error) => {
+      if (generation !== identityGeneration) throw generationSupersededError();
+      throw error;
+    }).finally(() => {
+      if (pendingIdentity?.generation === generation) pendingIdentity = null;
+    });
+    pendingIdentity = { generation, promise };
+    return promise;
+  };
+
+  const abandonPendingRelayIdentity = () => {
+    if (cachedIdentity && cachedIdentityGeneration === identityGeneration) return false;
+    if (pendingIdentity?.generation !== identityGeneration) return false;
+    identityGeneration += 1;
+    pendingIdentity = null;
+    return true;
+  };
+
+  return { abandonPendingRelayIdentity, getRelayIdentity };
 };

@@ -12,6 +12,10 @@ Desktop starts the OpenChamber web server in the same Electron main process. The
 
 The preload bridge exposes desktop-only APIs to the web UI through `window.__OPENCHAMBER_DESKTOP__`. Privileged commands are checked in `main.mjs`, not only in the UI.
 
+Runtime bearer tokens and credential-bearing headers never travel in renderer command-line arguments. At document start, preload synchronously requests a small per-window runtime bootstrap from main; main derives the sender BrowserWindow itself and returns credentials only for the exact packaged UI or configured local runtime origins. Remote pages receive no runtime bootstrap.
+
+Remote pages may render the Desktop Host Switcher, but `desktop_hosts_get` returns only redacted display metadata and normalized public transport descriptors. Tokens, runtime headers, pairing material, grants, private JWK members, and unknown nested fields remain main-process-only. Host activation from a remote page delegates an opaque saved-host ID back to main, which opens a local UI window and resolves credentials from main-owned settings.
+
 ## Main Files
 
 | File | Purpose |
@@ -144,9 +148,12 @@ Electron uses `electron-log`. In development, console logs are also visible in t
 
 Development builds use a separate user data directory named `OpenChamber Dev`, so dev state does not overwrite normal packaged app state.
 
+The shared settings file can contain desktop bearer tokens and private key material. POSIX writes use an owner-only atomic temporary file and leave the final file at `0600`. The default app-owned `~/.config/openchamber` directory is created privately; a user-provided `OPENCHAMBER_DATA_DIR` is never chmod-ed by Desktop.
+
 ## Things To Be Careful With
 
 - Keep desktop-specific code in this package. Do not move OpenCode feature backend logic into Electron.
+- OS-level Pairing v2 deep links are accepted only when every candidate is plain HTTP(S). Links containing relay or direct-E2EE candidates are rejected as a whole so Electron cannot silently downgrade by dropping encrypted descriptors; paste those links into the shared UI pairing flow instead.
 - Use hidden Windows process launches for background helpers. Avoid visible console flashes.
 - Keep `@openchamber/web`, `bun-pty`, `node-pty`, and native modules external in `bundle-main.mjs`; bundling them can break Electron startup.
 - Rebuild native modules after dependency or Electron version changes.

@@ -261,6 +261,7 @@ export function createCloudflareTunnelProvider() {
     getMetadata: (controller) => ({
       configPath: controller?.getEffectiveConfigPath?.() ?? null,
       resolvedHostname: controller?.getResolvedHostname?.() ?? null,
+      managedRemoteTunnelPresetId: controller?.managedRemoteTunnelPresetId ?? null,
     }),
   };
 }

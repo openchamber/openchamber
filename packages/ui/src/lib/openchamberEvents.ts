@@ -1,5 +1,8 @@
+import { getActiveRelayTunnel } from './relay/runtime-tunnel';
+import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
+import { createSseDataParser } from './sse-data-parser';
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
@@ -13,7 +16,42 @@ type ScheduledTaskRanEvent = {
 type OpenChamberEvent = ScheduledTaskRanEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
-let eventSource: EventSource | null = null;
+interface OpenChamberEventSource {
+  readyState: number;
+  onopen: ((event: Event) => void) | null;
+  onmessage: ((event: MessageEvent<string>) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  close(): void;
+}
+
+interface OpenChamberEventsDependencies {
+  isBrowserAvailable(): boolean;
+  isTunnelActive(): boolean;
+  runtimeFetch: typeof runtimeFetch;
+  getSseUrl(path: string): string;
+  subscribeRuntimeSwitch(listener: () => void): () => void;
+  createEventSource(url: string): OpenChamberEventSource | null;
+  eventSourceClosedState: number;
+  setTimer(callback: () => void, delay: number): ReturnType<typeof setTimeout>;
+  clearTimer(timer: ReturnType<typeof setTimeout>): void;
+}
+
+const productionDependencies: OpenChamberEventsDependencies = {
+  isBrowserAvailable: () => typeof window !== 'undefined',
+  isTunnelActive: () => Boolean(getActiveRelayTunnel()),
+  runtimeFetch,
+  getSseUrl: (path) => getRuntimeUrlResolver().sse(path),
+  subscribeRuntimeSwitch: subscribeRuntimeEndpointChanged,
+  createEventSource: (url) => typeof EventSource === 'function' ? new EventSource(url) : null,
+  eventSourceClosedState: typeof EventSource === 'function' ? EventSource.CLOSED : 2,
+  setTimer: (callback, delay) => setTimeout(callback, delay),
+  clearTimer: (timer) => clearTimeout(timer),
+};
+
+let dependencies = productionDependencies;
+let eventSource: OpenChamberEventSource | null = null;
+let streamAbortController: AbortController | null = null;
+let connectionGeneration = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
@@ -27,7 +65,7 @@ const clearHeartbeatTimer = () => {
   if (!heartbeatTimer) {
     return;
   }
-  clearTimeout(heartbeatTimer);
+  dependencies.clearTimer(heartbeatTimer);
   heartbeatTimer = null;
 };
 
@@ -36,7 +74,7 @@ const scheduleReconnect = () => {
     return;
   }
   const delay = Math.min(1_000 * Math.pow(2, Math.min(reconnectAttempt, 5)), MAX_RECONNECT_DELAY_MS);
-  reconnectTimer = setTimeout(() => {
+  reconnectTimer = dependencies.setTimer(() => {
     reconnectTimer = null;
     reconnectAttempt += 1;
     connect();
@@ -44,11 +82,22 @@ const scheduleReconnect = () => {
 };
 
 const cleanupSource = () => {
+  connectionGeneration += 1;
   clearHeartbeatTimer();
+  streamAbortController?.abort();
+  streamAbortController = null;
   if (eventSource) {
     eventSource.close();
   }
   eventSource = null;
+};
+
+const isCurrentConnection = (generation: number): boolean => generation === connectionGeneration && listeners.size > 0;
+
+const failConnection = (generation: number): void => {
+  if (!isCurrentConnection(generation)) return;
+  cleanupSource();
+  scheduleReconnect();
 };
 
 const resetHeartbeatTimer = () => {
@@ -56,7 +105,7 @@ const resetHeartbeatTimer = () => {
   if (listeners.size === 0) {
     return;
   }
-  heartbeatTimer = setTimeout(() => {
+  heartbeatTimer = dependencies.setTimer(() => {
     cleanupSource();
     scheduleReconnect();
   }, HEARTBEAT_TIMEOUT_MS);
@@ -119,25 +168,74 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
 };
 
+const connectTunnelStream = (generation: number, controller: AbortController): void => {
+  void (async () => {
+    try {
+      const response = await dependencies.runtimeFetch('/api/openchamber/events', {
+        signal: controller.signal,
+        headers: { Accept: 'text/event-stream' },
+      });
+      if (!isCurrentConnection(generation)) return;
+
+      const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+      if (!response.ok || !response.body || !contentType.startsWith('text/event-stream')) {
+        failConnection(generation);
+        return;
+      }
+
+      resetHeartbeatTimer();
+      const parser = createSseDataParser((data) => {
+        if (!isCurrentConnection(generation)) return;
+        resetHeartbeatTimer();
+        const envelope = parseEnvelope(data);
+        if (envelope) dispatchFromEnvelope(envelope);
+      });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (isCurrentConnection(generation)) {
+        const { done, value } = await reader.read();
+        if (!isCurrentConnection(generation)) return;
+        if (done) {
+          parser.end();
+          failConnection(generation);
+          return;
+        }
+        parser.push(decoder.decode(value, { stream: true }));
+      }
+    } catch {
+      failConnection(generation);
+    }
+  })();
+};
+
 const connect = () => {
-  if (typeof window === 'undefined' || listeners.size === 0) {
-    return;
-  }
-  if (typeof EventSource !== 'function') {
+  if (!dependencies.isBrowserAvailable() || listeners.size === 0) {
     return;
   }
 
-  if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
+  if (streamAbortController || (eventSource && eventSource.readyState !== dependencies.eventSourceClosedState)) {
     return;
   }
 
   cleanupSource();
+  const generation = connectionGeneration;
 
-  const source = new EventSource(getRuntimeUrlResolver().sse('/api/openchamber/events'));
+  if (dependencies.isTunnelActive()) {
+    const controller = new AbortController();
+    streamAbortController = controller;
+    connectTunnelStream(generation, controller);
+    return;
+  }
+
+  const source = dependencies.createEventSource(dependencies.getSseUrl('/api/openchamber/events'));
+  if (!source) return;
   source.onopen = () => {
+    if (!isCurrentConnection(generation)) return;
     resetHeartbeatTimer();
   };
   source.onmessage = (event) => {
+    if (!isCurrentConnection(generation)) return;
     resetHeartbeatTimer();
     const envelope = parseEnvelope(event.data);
     if (!envelope) {
@@ -147,16 +245,15 @@ const connect = () => {
   };
 
   source.onerror = () => {
-    cleanupSource();
-    scheduleReconnect();
+    failConnection(generation);
   };
 
   eventSource = source;
 };
 
 const ensureRuntimeChangeSubscription = () => {
-  if (runtimeChangeUnsubscribe || typeof window === 'undefined') return;
-  runtimeChangeUnsubscribe = subscribeRuntimeEndpointChanged(() => {
+  if (runtimeChangeUnsubscribe || !dependencies.isBrowserAvailable()) return;
+  runtimeChangeUnsubscribe = dependencies.subscribeRuntimeSwitch(() => {
     cleanupSource();
     reconnectAttempt = 0;
     connect();
@@ -177,7 +274,7 @@ export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => 
     listeners.delete(listener);
     if (listeners.size === 0) {
       if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
+        dependencies.clearTimer(reconnectTimer);
         reconnectTimer = null;
       }
       reconnectAttempt = 0;
@@ -185,4 +282,20 @@ export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => 
       cleanupRuntimeChangeSubscription();
     }
   };
+};
+
+export const setOpenchamberEventsDependenciesForTests = (
+  overrides: Partial<OpenChamberEventsDependencies>,
+): void => {
+  dependencies = { ...productionDependencies, ...overrides };
+};
+
+export const resetOpenchamberEventsForTests = (): void => {
+  listeners.clear();
+  if (reconnectTimer) dependencies.clearTimer(reconnectTimer);
+  reconnectTimer = null;
+  reconnectAttempt = 0;
+  cleanupSource();
+  cleanupRuntimeChangeSubscription();
+  dependencies = productionDependencies;
 };

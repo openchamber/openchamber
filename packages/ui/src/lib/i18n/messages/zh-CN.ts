@@ -60,6 +60,8 @@ export const dict: Record<I18nKey, string> = {
   'mobile.connect.error.invalidUrl': '该服务器 URL 无效。',
   'mobile.connect.error.unreachable': '无法连接到该 OpenChamber 服务器。',
   'mobile.connect.error.authRequired': '该服务器需要密码或客户端令牌。',
+  'mobile.connect.error.pairingSecurity': '无法验证此服务器的安全连接。请检查配对码后重试。',
+  'mobile.connect.error.pairingUncertain': '配对可能已完成，但确认信息已丢失。重试前请检查已保存的连接。',
   'mobile.connect.error.passwordFailed': '无法解锁该服务器。请检查密码。',
   'mobile.instances.addTitle': '添加实例',
   'mobile.instances.addManual': '通过地址添加',

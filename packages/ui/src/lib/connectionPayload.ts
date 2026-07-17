@@ -26,7 +26,14 @@ export type PairingRelayCandidate = {
   priority?: number;
 };
 
-export type PairingEndpointCandidate = PairingDirectCandidate | PairingRelayCandidate;
+export type PairingDirectE2eeCandidate = {
+  type: 'direct-e2ee';
+  wssUrl: string;
+  hostEncPubJwk: JsonWebKey;
+  priority?: number;
+};
+
+export type PairingEndpointCandidate = PairingDirectCandidate | PairingRelayCandidate | PairingDirectE2eeCandidate;
 
 export type PairingConnectionPayload = {
   v: 2;
@@ -105,7 +112,7 @@ const isNonEmptyString = (value: unknown): value is string => typeof value === '
 
 // EC P-256 public JWK (the relay E2EE trust anchor). Strict: only the four
 // public-key members are retained; a private `d` or any other member is dropped.
-const normalizeEcPublicJwk = (value: unknown): JsonWebKey | null => {
+export const normalizeEcPublicJwk = (value: unknown): JsonWebKey | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const jwk = value as Record<string, unknown>;
   if (jwk.kty !== 'EC' || jwk.crv !== 'P-256') return null;
@@ -113,10 +120,39 @@ const normalizeEcPublicJwk = (value: unknown): JsonWebKey | null => {
   return { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y };
 };
 
+export const normalizeDirectE2eeCandidate = (
+  value: unknown,
+  options: { allowInsecureLocal?: boolean } = {},
+): PairingDirectE2eeCandidate | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.type !== 'direct-e2ee' || typeof record.wssUrl !== 'string') return null;
+  try {
+    const url = new URL(record.wssUrl.trim());
+    const localTestUrl = options.allowInsecureLocal === true
+      && url.protocol === 'ws:'
+      && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1');
+    if (url.protocol !== 'wss:' && !localTestUrl) return null;
+    if (url.username || url.password || url.search || url.hash) return null;
+    if (url.pathname !== '/api/openchamber/direct-e2ee/ws') return null;
+    const hostEncPubJwk = normalizeEcPublicJwk(record.hostEncPubJwk);
+    if (!hostEncPubJwk) return null;
+    const priority = normalizePriority(record.priority);
+    return {
+      type: 'direct-e2ee',
+      wssUrl: url.toString(),
+      hostEncPubJwk,
+      ...(priority === undefined ? {} : { priority }),
+    };
+  } catch {
+    return null;
+  }
+};
+
 const normalizePriority = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 
-const normalizePairingCandidate = (value: unknown): PairingEndpointCandidate | null => {
+export const normalizePairingCandidate = (value: unknown): PairingEndpointCandidate | null => {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
   const priority = normalizePriority(record.priority);
@@ -144,6 +180,8 @@ const normalizePairingCandidate = (value: unknown): PairingEndpointCandidate | n
       ...(priority === undefined ? {} : { priority }),
     };
   }
+
+  if (record.type === 'direct-e2ee') return normalizeDirectE2eeCandidate(record);
 
   return null;
 };

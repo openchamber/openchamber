@@ -154,6 +154,7 @@ export const encodeFragmentedMessage = (frameType, streamId, payload) => {
  */
 export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
   const pending = new Map();
+  let pendingBytes = 0;
   return {
     /**
      * Returns the complete message payload once all fragments arrived, or null
@@ -169,14 +170,17 @@ export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
       const chunks = entry?.chunks ?? [];
       const totalBytes = (entry?.totalBytes ?? 0) + frame.payload.length;
       if (totalBytes > maxMessageBytes) {
+        pendingBytes -= entry?.totalBytes ?? 0;
         pending.delete(key);
         throw new TunnelCodecError('fragmented message exceeds maximum size');
       }
       chunks.push(frame.payload);
       if (frame.hasMoreFragments) {
+        pendingBytes += frame.payload.length;
         pending.set(key, { chunks, totalBytes });
         return null;
       }
+      pendingBytes -= entry?.totalBytes ?? 0;
       pending.delete(key);
       const message = new Uint8Array(totalBytes);
       let offset = 0;
@@ -188,9 +192,19 @@ export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
     },
     /** @param {number} streamId */
     dropStream(streamId) {
-      for (const key of pending.keys()) {
-        if (key.startsWith(`${streamId}:`)) pending.delete(key);
+      for (const [key, entry] of pending) {
+        if (key.startsWith(`${streamId}:`)) {
+          pendingBytes -= entry.totalBytes;
+          pending.delete(key);
+        }
       }
+    },
+    clear() {
+      pending.clear();
+      pendingBytes = 0;
+    },
+    get pendingBytes() {
+      return pendingBytes;
     },
   };
 };
