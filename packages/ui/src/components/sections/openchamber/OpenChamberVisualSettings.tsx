@@ -3,7 +3,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import type { ThemeMode } from '@/types/theme';
+import type { Theme, ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { cn } from '@/lib/utils';
@@ -37,6 +37,75 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { TerminalShellOption } from '@/lib/api/types';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+
+interface ThemePreviewOptionProps {
+    theme: Theme;
+    label: string;
+    selected: boolean;
+    disabled?: boolean;
+    onSelect: (themeId: string) => void;
+}
+
+// Keep theme previews dense and comparable: two panes, tiny text, and one
+// accent cue are enough to scan many themes quickly without turning each card
+// into a mini mockup of the whole app.
+function ThemePreviewOption({ theme, label, selected, disabled = false, onSelect }: ThemePreviewOptionProps) {
+    const sidebarBackground = theme.colors.sidebar?.background ?? theme.colors.surface.muted;
+    const sidebarForeground = theme.colors.sidebar?.foreground ?? theme.colors.surface.mutedForeground;
+    const borderColor = theme.colors.interactive.border;
+    const accentColor = theme.colors.primary.base;
+
+    return (
+        <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={disabled}
+            aria-pressed={selected}
+            onClick={() => onSelect(theme.metadata.id)}
+            className={cn(
+                'h-auto w-full flex-col items-stretch gap-1.5 rounded-[12px] border px-1.5 py-1.5 !normal-case tracking-normal',
+                'hover:bg-interactive-hover/40',
+                selected
+                    ? 'border-[var(--primary-base)] bg-[color-mix(in_srgb,var(--primary-base)_8%,var(--background))] ring-1 ring-[color-mix(in_srgb,var(--primary-base)_20%,transparent)]'
+                    : 'border-border/60 bg-transparent',
+            )}
+        >
+            <div
+                className="relative h-10 w-full overflow-hidden rounded-[8px] border"
+                style={{
+                    backgroundColor: theme.colors.surface.background,
+                    borderColor,
+                }}
+            >
+                <div
+                    className="absolute inset-y-0 left-0 w-[28%] border-r px-1.5 py-1"
+                    style={{
+                        backgroundColor: sidebarBackground,
+                        borderColor,
+                        color: sidebarForeground,
+                    }}
+                >
+                    <div className="flex h-full flex-col justify-between">
+                        <span className="text-[8px] font-medium leading-none">Aa</span>
+                        <span className="h-1 w-4 rounded-full opacity-70" style={{ backgroundColor: sidebarForeground }} />
+                    </div>
+                </div>
+                <div
+                    className="absolute inset-y-0 left-[28%] right-0 flex flex-col justify-between px-2 py-1"
+                    style={{ color: theme.colors.surface.foreground }}
+                >
+                    <span className="text-[8px] font-medium leading-none">Aa Aa</span>
+                    <div className="flex items-center justify-between gap-1">
+                        <span className="h-1 w-5 rounded-full opacity-70" style={{ backgroundColor: theme.colors.surface.foreground }} />
+                        <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: accentColor }} />
+                    </div>
+                </div>
+            </div>
+            <span className="w-full truncate px-0.5 text-left text-foreground">{label}</span>
+        </Button>
+    );
+}
 
 interface Option<T extends string> {
     id: T;
@@ -552,16 +621,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         [availableThemes],
     );
 
-    const selectedLightTheme = React.useMemo(
-        () => lightThemes.find((theme) => theme.metadata.id === lightThemeId) ?? lightThemes[0],
-        [lightThemes, lightThemeId],
-    );
-
-    const selectedDarkTheme = React.useMemo(
-        () => darkThemes.find((theme) => theme.metadata.id === darkThemeId) ?? darkThemes[0],
-        [darkThemes, darkThemeId],
-    );
-
     const formatThemeLabel = React.useCallback((themeName: string, variant: 'light' | 'dark') => {
         const suffix = variant === 'dark' ? ' Dark' : ' Light';
         return themeName.endsWith(suffix) ? themeName.slice(0, -suffix.length) : themeName;
@@ -819,44 +878,36 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </div>
                                 )}
 
-                                <div className="grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
-                                    <div data-settings-item="appearance.light-theme" className="flex min-w-0 items-center gap-2">
+                                <div className="space-y-3 py-1.5">
+                                    <div data-settings-item="appearance.light-theme" className="flex min-w-0 flex-col gap-1.5">
                                         <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.lightTheme')}</span>
-                                        <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectLightThemeAria')} className="w-fit">
-                                                <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
-                                                    {selectedLightTheme
-                                                        ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
-                                                        : undefined}
-                                                </SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {lightThemes.map((theme) => (
-                                                    <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                        {formatThemeLabel(theme.metadata.name, 'light')}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                                            {lightThemes.map((theme) => (
+                                                <ThemePreviewOption
+                                                    key={theme.metadata.id}
+                                                    theme={theme}
+                                                    label={formatThemeLabel(theme.metadata.name, 'light')}
+                                                    selected={theme.metadata.id === lightThemeId}
+                                                    disabled={customThemesLoading || themesReloading}
+                                                    onSelect={setLightThemePreference}
+                                                />
+                                            ))}
+                                        </div>
                                     </div>
-                                    <div data-settings-item="appearance.dark-theme" className="flex min-w-0 items-center gap-2">
+                                    <div data-settings-item="appearance.dark-theme" className="flex min-w-0 flex-col gap-1.5">
                                         <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.darkTheme')}</span>
-                                        <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectDarkThemeAria')} className="w-fit">
-                                                <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
-                                                    {selectedDarkTheme
-                                                        ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
-                                                        : undefined}
-                                                </SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {darkThemes.map((theme) => (
-                                                    <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                        {formatThemeLabel(theme.metadata.name, 'dark')}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                                            {darkThemes.map((theme) => (
+                                                <ThemePreviewOption
+                                                    key={theme.metadata.id}
+                                                    theme={theme}
+                                                    label={formatThemeLabel(theme.metadata.name, 'dark')}
+                                                    selected={theme.metadata.id === darkThemeId}
+                                                    disabled={customThemesLoading || themesReloading}
+                                                    onSelect={setDarkThemePreference}
+                                                />
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
 
