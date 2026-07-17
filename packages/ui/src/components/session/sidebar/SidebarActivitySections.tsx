@@ -1,4 +1,7 @@
 import React from 'react';
+import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
 import type { SessionNode } from './types';
 import { useI18n } from '@/lib/i18n';
@@ -9,6 +12,7 @@ import {
   resolveMenuOpenSessionId,
 } from './sessionNodeItemUtils';
 import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
+import { useRecentOrderStore } from '@/stores/useRecentOrderStore';
 
 type ActivityItem = {
   node: SessionNode;
@@ -50,6 +54,20 @@ type RenderExtras = SessionNodeRenderExtras;
 
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
 
+function SortableRecentItem({ id, children }: { id: string; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {children}
+    </div>
+  );
+}
+
 export function SidebarActivitySections({
   sections,
   renderSessionNode,
@@ -64,6 +82,13 @@ export function SidebarActivitySections({
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const [visibleCountBySection, setVisibleCountBySection] = React.useState<Map<string, number>>(new Map());
   const flatVariant = variant === 'flat';
+  const reorder = useRecentOrderStore((s) => s.reorder);
+
+  const handleDragEnd = React.useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    reorder(String(active.id), String(over.id));
+  }, [reorder]);
 
   const resetSectionLimit = React.useCallback((key: string) => {
     setVisibleCountBySection((prev) => {
@@ -161,7 +186,18 @@ export function SidebarActivitySections({
         if (flatVariant) {
           return (
             <div key={section.key} className="space-y-0.5">
-              {visibleItems.map(renderItem)}
+              <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext
+                  items={visibleItems.map((item) => item.node.session.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {visibleItems.map((item) => (
+                    <SortableRecentItem key={item.node.session.id} id={item.node.session.id}>
+                      {renderItem(item)}
+                    </SortableRecentItem>
+                  ))}
+                </SortableContext>
+              </DndContext>
               {remainingCount > 0 ? (
                 <button
                   type="button"
@@ -190,7 +226,18 @@ export function SidebarActivitySections({
             </button>
             {!isCollapsed ? (
               <div className={cn('space-y-0.5 pl-7')}>
-                {visibleItems.map(renderItem)}
+                <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext
+                    items={visibleItems.map((item) => item.node.session.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {visibleItems.map((item) => (
+                      <SortableRecentItem key={item.node.session.id} id={item.node.session.id}>
+                        {renderItem(item)}
+                      </SortableRecentItem>
+                    ))}
+                  </SortableContext>
+                </DndContext>
                 {remainingCount > 0 ? (
                   <button
                     type="button"

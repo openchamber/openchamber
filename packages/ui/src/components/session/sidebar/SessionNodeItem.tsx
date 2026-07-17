@@ -42,6 +42,8 @@ import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
 import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog';
 import { FusionIcon } from '@/components/icons/FusionIcon';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { useSessionLabelsStore, LABEL_COLOR_CSS_MAP } from '@/stores/useSessionLabelsStore';
+import { SessionLabelPopover } from './SessionLabelPopover';
 
 type Folder = { id: string; name: string; sessionIds: string[] };
 
@@ -385,6 +387,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isSessionMenuOpen = isMenuOpen || isContextMenuOpen;
   const isMultiRunLikeSession = React.useMemo(() => parseMultiRunSessionTitle(resolvedSession.title) !== null, [resolvedSession.title]);
   const [fusionDialogOpen, setFusionDialogOpen] = React.useState(false);
+  const labelColor = useSessionLabelsStore((s) => {
+    const lid = s.sessionLabelMap[node.session.id];
+    if (!lid) return null;
+    const label = s.labels.find((l) => l.id === lid);
+    return label ? LABEL_COLOR_CSS_MAP[label.color] : null;
+  });
+  const [labelPopoverOpen, setLabelPopoverOpen] = React.useState(false);
   const metadataSubsessionChevron = isVSCode && renderContext === 'recent' && !isMinimalMode;
   const inlineSubsessionChevron = isVSCode && renderContext === 'recent' && isMinimalMode;
 
@@ -1016,6 +1025,21 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             }
           >
           {leadingIndicators}
+          <SessionLabelPopover
+            sessionId={session.id}
+            open={labelPopoverOpen}
+            onOpenChange={setLabelPopoverOpen}
+          >
+            <button
+              type="button"
+              className={cn(
+                'h-2.5 w-2.5 shrink-0 rounded-full transition-opacity',
+                labelColor ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'
+              )}
+              style={{ backgroundColor: labelColor ?? 'currentColor' }}
+              onClick={(e) => { e.stopPropagation(); setLabelPopoverOpen(true); }}
+            />
+          </SessionLabelPopover>
           {subsessionChevron}
           <div className="flex min-w-0 flex-1 items-center">
             {isMinimalMode ? (

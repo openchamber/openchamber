@@ -12,6 +12,21 @@ import {
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { useSessionLabelsStore } from '@/stores/useSessionLabelsStore';
+
+/**
+ * Filter sessions by active label filters. Returns all sessions if no filters are active.
+ * Uses imperative store read — designed to be called inside callbacks, not as a hook subscription.
+ * Callers that need reactivity should subscribe to `activeFilterLabelIds` and re-invoke when it changes.
+ */
+export function filterSessionsByLabel(sessions: Session[]): Session[] {
+  const { activeFilterLabelIds, sessionLabelMap } = useSessionLabelsStore.getState();
+  if (activeFilterLabelIds.size === 0) return sessions;
+  return sessions.filter((session) => {
+    const labelId = sessionLabelMap[session.id];
+    return labelId != null && activeFilterLabelIds.has(labelId);
+  });
+}
 
 type Args = {
   homeDirectory: string | null;
