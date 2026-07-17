@@ -444,9 +444,56 @@ export const createScheduledTasksRuntime = (deps) => {
   // from session events like any other goal.
   const createTaskGoal = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
     const now = Date.now();
+    // File-backed objective keyed by session id: metadata stays light, the
+    // full expanded prompt lives under the OpenChamber data dir. If the file
+    // write fails, fall back to an inline (clamped) objective.
+    // Oversized prompts are distilled into audit criteria by the small model
+    // (the working agent gets the full prompt in chat anyway); on distill
+    // failure a head+tail excerpt keeps intent and acceptance criteria.
+    let objectiveText = expandSnippets(task.execution.prompt, projectPath);
+    if (objectiveText.length > 5000) {
+      let distilled = null;
+      try {
+        const { generateSmallModelText } = await import('../small-model/index.js');
+        const generated = await generateSmallModelText({
+          restrictToPreferredProvider: true,
+          prompt: objectiveText,
+          system: [
+            'You distill a large task description into the COMPLETION CRITERIA a progress auditor will judge against.',
+            'Return ONLY the criteria text — no preamble, no headers, no markdown fences.',
+            'Capture: the end goals, what must exist and work when the task is fully done, and how each major part is verified. Omit implementation steps.',
+            'Preserve verbatim any file paths, commands, and identifiers that define the task.',
+            'Stay under 4000 characters.',
+            'Write in the same language as the task text.',
+          ].join('\n'),
+          directory: projectPath,
+          preferredProviderID: task.execution.providerID,
+          preferredModelID: task.execution.modelID,
+        });
+        distilled = typeof generated?.text === 'string' ? generated.text.trim() : null;
+      } catch (error) {
+        console.warn('[scheduled-tasks] goal objective distillation failed:', error?.message || error);
+      }
+      if (distilled) {
+        objectiveText = distilled;
+      } else {
+        const marker = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
+        const half = Math.max(0, Math.floor((5000 - marker.length) / 2));
+        objectiveText = `${objectiveText.slice(0, half)}${marker}${objectiveText.slice(-half)}`;
+      }
+    }
+    let objectiveFile = false;
+    try {
+      const { writeObjective } = await import('../session-goal/objectives.js');
+      await writeObjective(sessionID, objectiveText);
+      objectiveFile = true;
+    } catch (error) {
+      console.warn('[scheduled-tasks] goal objective file write failed, falling back to inline:', error?.message || error);
+    }
     const goal = {
       id: `${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      objective: expandSnippets(task.execution.prompt, projectPath).slice(0, 2000),
+      objective: objectiveFile ? '' : objectiveText.slice(0, 5000),
+      objectiveFile,
       status: 'active',
       tokenBudget: task.execution.goalTokenBudget || null,
       tokensUsed: 0,

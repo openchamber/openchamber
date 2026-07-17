@@ -76,6 +76,9 @@ const MOBILE_TURN_MODEL_CACHE_MAX = 4
 const MOBILE_TURN_MODEL_CACHE_MAX_MESSAGES = 30
 const HISTORY_RENDER_WAIT_TIMEOUT_MS = 250
 const HISTORY_INTERACTION_GUARD_MS = 2000
+// Long smooth scrolls across a big session can take a couple of seconds;
+// the pin releases early as soon as the spy reports the target turn.
+const SCROLL_PIN_TIMEOUT_MS = 2500
 const turnModelCache = new Map<string, { messages: ChatMessageEntry[]; model: TurnWindowModel }>()
 const getTurnModelCacheMax = () => {
     if (isVSCodeRuntime()) return VSCODE_TURN_MODEL_CACHE_MAX
@@ -241,6 +244,7 @@ export const useChatTimelineController = ({
     const initializedSessionRef = React.useRef<string | null>(null);
     const pendingRenderResolversRef = React.useRef<Array<() => void>>([]);
     const pendingScrollRequestRef = React.useRef<PendingScrollRequest | null>(null);
+    const scrollPinRef = React.useRef<{ turnId: string; expiresAt: number } | null>(null);
     const historyInteractionRef = React.useRef(false);
     const historyInteractionTimerRef = React.useRef<number | null>(null);
 
@@ -305,6 +309,7 @@ export const useChatTimelineController = ({
         initializedSessionRef.current = sessionId;
         setIsLoadingOlder(false);
         setPendingRevealWork(false);
+        scrollPinRef.current = null;
         setActiveTurnId(null);
     }, [sessionId]);
 
@@ -362,6 +367,13 @@ export const useChatTimelineController = ({
 
         if (didScroll) {
             if (pending.turnId) {
+                // Pin the indicator to the target so the scroll spy's
+                // intermediate reports during the smooth scroll don't drag
+                // it backwards before the animation lands.
+                scrollPinRef.current = {
+                    turnId: pending.turnId,
+                    expiresAt: Date.now() + SCROLL_PIN_TIMEOUT_MS,
+                };
                 setActiveTurnId(pending.turnId);
             }
             resolvePendingScrollRequest(true);
@@ -890,6 +902,13 @@ export const useChatTimelineController = ({
     }, [goToBottom]);
 
     const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
+        const pin = scrollPinRef.current;
+        if (pin) {
+            if (turnId !== pin.turnId && Date.now() < pin.expiresAt) {
+                return;
+            }
+            scrollPinRef.current = null;
+        }
         setActiveTurnId(turnId);
     }, []);
 

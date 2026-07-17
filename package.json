@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "1.15.0",
+  "version": "1.16.1",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -23,7 +23,7 @@
   "scripts": {
     "dev": "node ./scripts/dev-web-hmr.mjs",
     "oc-dev": "node scripts/oc-dev.mjs",
-    "build": "bun run --filter '*' build",
+    "build": "bun run --sequential --filter '!@openchamber/mobile' build && bun run --cwd packages/mobile build:assets",
     "build:web": "bun run --cwd packages/web build",
     "build:ui": "bun run --cwd packages/ui build",
     "build:electron": "bun run --cwd packages/electron build",

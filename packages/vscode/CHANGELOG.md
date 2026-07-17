@@ -1,3 +1,23 @@
+## [1.16.1] - 2026-07-14
+
+- **Performance:** large workspace session lists no longer regroup every session while chats stream. Opening a long chat after an empty or aborted agent turn also no longer repeatedly loads larger portions of its history.
+- Chat: shell-mode command cards now update their status and output while the command runs, with syntax highlighting for the command and output.
+- Chat: task (subagents) now track the correct subagent when several run at once, preventing one subagent's activity or "Open subtask" action from pointing to another session.
+
+## [1.16.0] - 2026-07-13
+
+- Chat: sessions with an active [goal](https://docs.openchamber.dev/session-goals/) (started from the web or desktop app) show the goal strip with its live status above the composer.
+- Chat: code blocks highlight correctly again — the webview's security policy was blocking the syntax highlighter (thanks to @bashrusakh).
+- Chat: queued messages now send when the session is already idle instead of waiting forever (thanks to @bashrusakh).
+- Chat: pending agent questions stay answerable after a restart, and session renames no longer flicker back to the old title (thanks to @bashrusakh).
+- Chat: tool output rendering no longer breaks on tools that return non-text results (thanks to @bashrusakh).
+- Settings: a new editor font size setting for the code editor (thanks to @bashrusakh).
+- Sessions: pinned sessions survive refreshes (thanks to @bashrusakh).
+- Agents: saving agent settings from the UI no longer drops custom YAML frontmatter fields (thanks to @bashrusakh).
+- Notifications: subagent completion notifications now follow the same settings as the main app.
+- Usage: OpenCode Go usage tracking was added.
+- Windows: paths no longer mismatch on drive letter casing, which could split one project into duplicates (thanks to @bashrusakh).
+
 ## [1.15.0] - 2026-07-10
 
 - Chat/Tools: every tool call now expands to show its input, result, and errors, including MCP, plugin, and custom tools; Read and Skill stay compact links to their files. JSON results now offer navigable summary, tree, and raw views.

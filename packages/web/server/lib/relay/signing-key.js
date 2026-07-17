@@ -6,22 +6,45 @@
 // serverId must stay stable because push token binding depends on it.
 
 /**
- * @param {{ crypto: typeof import('node:crypto'), readSettingsFromDiskMigrated: () => Promise<object>, writeSettingsToDisk: (settings: object) => Promise<void> }} deps
+ * @param {{
+ *   crypto: typeof import('node:crypto'),
+ *   readSettingsFromDiskMigrated: () => Promise<object>,
+ *   writeSettingsToDisk: (settings: object) => Promise<void>,
+ *   readSettingsStrict?: () => Promise<object>,
+ * }} deps
  * @returns {Promise<{ privateKey: import('node:crypto').KeyObject, publicJwk: JsonWebKey }>}
  */
-export const getOrCreateRelaySigningKeypair = async ({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk }) => {
+export const getOrCreateRelaySigningKeypair = async ({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict }) => {
+  const toKeypair = (stored) => ({
+    privateKey: crypto.createPrivateKey({ key: stored.privateJwk, format: 'jwk' }),
+    publicJwk: stored.publicJwk,
+  });
   const settings = await readSettingsFromDiskMigrated();
   const existing = settings?.relaySigningKey;
   if (existing && existing.privateJwk && existing.publicJwk) {
-    return {
-      privateKey: crypto.createPrivateKey({ key: existing.privateJwk, format: 'jwk' }),
-      publicJwk: existing.publicJwk,
-    };
+    return toKeypair(existing);
   }
+  // Regeneration gate: the lenient settings reader maps read failures to `{}`,
+  // indistinguishable from "first run". Minting a new keypair changes serverId,
+  // which orphans every paired device and push binding AND the write below would
+  // clobber the settings file with the empty spread. Re-verify with the strict
+  // reader (throws on corrupt/unreadable) before generating; if it finds the
+  // key the lenient read lost, use it and generate nothing.
+  let verifiedSettings = settings;
+  if (readSettingsStrict) {
+    verifiedSettings = await readSettingsStrict();
+    const verified = verifiedSettings?.relaySigningKey;
+    if (verified && verified.privateJwk && verified.publicJwk) {
+      return toKeypair(verified);
+    }
+  }
+  // Loud on purpose: a new signing key means a new serverId — every previously
+  // paired device and push binding is orphaned. Expected exactly once, on first run.
+  console.warn('[relay-identity] Generating NEW relay signing keypair (serverId changes; previously paired devices must re-pair)');
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const privateJwk = privateKey.export({ format: 'jwk' });
   const publicJwk = publicKey.export({ format: 'jwk' });
-  await writeSettingsToDisk({ ...settings, relaySigningKey: { privateJwk, publicJwk } });
+  await writeSettingsToDisk({ ...settings, ...(verifiedSettings || {}), relaySigningKey: { privateJwk, publicJwk } });
   return { privateKey, publicJwk };
 };
 

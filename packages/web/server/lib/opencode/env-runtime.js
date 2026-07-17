@@ -87,14 +87,13 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return isExecutable(trimmed) ? trimmed : null;
   };
 
-  const searchPathFor = (binaryName) => {
+  const searchPathFor = (binaryName, searchPath = process.env.PATH || '') => {
     const trimmed = typeof binaryName === 'string' ? binaryName.trim() : '';
     if (!trimmed) {
       return null;
     }
 
-    const current = process.env.PATH || '';
-    const parts = current.split(path.delimiter).filter(Boolean);
+    const parts = searchPath.split(path.delimiter).filter(Boolean);
     const candidateNames = [];
 
     if (process.platform === 'win32' && !path.extname(trimmed)) {

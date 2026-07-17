@@ -9,11 +9,13 @@ export type SessionGoalStatus = 'active' | 'paused' | 'blocked' | 'budgetLimited
 
 const SESSION_GOAL_STATUSES: SessionGoalStatus[] = ['active', 'paused', 'blocked', 'budgetLimited', 'complete'];
 
-export const SESSION_GOAL_OBJECTIVE_CHAR_LIMIT = 2000;
+export const SESSION_GOAL_OBJECTIVE_CHAR_LIMIT = 5000;
 
 export interface SessionGoalPayload {
   id: string;
   objective: string;
+  /** True when the objective text lives in a server-side file keyed by session id. */
+  objectiveFile: boolean;
   status: SessionGoalStatus;
   tokenBudget: number | null;
   tokensUsed: number;
@@ -21,6 +23,8 @@ export interface SessionGoalPayload {
   blockedStreak: number;
   note: string;
   statusReason: string;
+  evaluationProviderID: string;
+  evaluationModelID: string;
   lastAccountedMessageID: string;
   createdAt: number;
   updatedAt: number;
@@ -42,7 +46,8 @@ export function getSessionGoal(session: Session | null | undefined): SessionGoal
 
   const id = typeof goal.id === 'string' ? goal.id : '';
   const objective = typeof goal.objective === 'string' ? goal.objective.trim() : '';
-  if (!id || !objective || !isGoalStatus(goal.status)) return null;
+  const objectiveFile = goal.objectiveFile === true;
+  if (!id || (!objective && !objectiveFile) || !isGoalStatus(goal.status)) return null;
 
   const tokenBudget = typeof goal.tokenBudget === 'number' && Number.isFinite(goal.tokenBudget) && goal.tokenBudget > 0
     ? Math.floor(goal.tokenBudget)
@@ -53,6 +58,7 @@ export function getSessionGoal(session: Session | null | undefined): SessionGoal
   return {
     id,
     objective: objective.slice(0, SESSION_GOAL_OBJECTIVE_CHAR_LIMIT),
+    objectiveFile,
     status: goal.status,
     tokenBudget,
     tokensUsed: asCount(goal.tokensUsed),
@@ -60,6 +66,8 @@ export function getSessionGoal(session: Session | null | undefined): SessionGoal
     blockedStreak: asCount(goal.blockedStreak),
     note: typeof goal.note === 'string' ? goal.note : '',
     statusReason: typeof goal.statusReason === 'string' ? goal.statusReason : '',
+    evaluationProviderID: typeof goal.evaluationProviderID === 'string' ? goal.evaluationProviderID : '',
+    evaluationModelID: typeof goal.evaluationModelID === 'string' ? goal.evaluationModelID : '',
     lastAccountedMessageID: typeof goal.lastAccountedMessageID === 'string' ? goal.lastAccountedMessageID : '',
     createdAt: typeof goal.createdAt === 'number' ? goal.createdAt : 0,
     updatedAt: typeof goal.updatedAt === 'number' ? goal.updatedAt : 0,

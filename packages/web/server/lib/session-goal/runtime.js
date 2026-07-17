@@ -18,6 +18,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { GOAL_OBJECTIVE_CHAR_LIMIT, readObjective } from './objectives.js';
+
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
     ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -45,7 +47,6 @@ const RESUME_KICKOFF_MS = 250;
 const FETCH_TIMEOUT_MS = 10_000;
 const MESSAGE_FETCH_LIMIT = 40;
 const TRANSCRIPT_PART_CHAR_LIMIT = 6_000;
-const GOAL_OBJECTIVE_CHAR_LIMIT = 2_000;
 const NOTE_CHAR_LIMIT = 280;
 const REASON_CHAR_LIMIT = 200;
 // Hard safety cap on auto-continuations per goal id. The audit and markers are
@@ -192,12 +193,16 @@ const parseGoalMetadata = (session) => {
   const goal = namespace.goal;
   if (!goal || typeof goal !== 'object') return null;
   const objective = typeof goal.objective === 'string' ? goal.objective.trim() : '';
+  const objectiveFile = goal.objectiveFile === true;
   const id = typeof goal.id === 'string' ? goal.id : '';
   const status = GOAL_STATUSES.includes(goal.status) ? goal.status : '';
-  if (!id || !objective || !status) return null;
+  // File-backed goals carry only the flag (the file is keyed by session id);
+  // inline goals carry the objective text directly.
+  if (!id || !status || (!objective && !objectiveFile)) return null;
   return {
     id,
     objective: objective.slice(0, GOAL_OBJECTIVE_CHAR_LIMIT),
+    objectiveFile,
     status,
     tokenBudget: Number.isFinite(goal.tokenBudget) && goal.tokenBudget > 0 ? Math.floor(goal.tokenBudget) : null,
     tokensUsed: Number.isFinite(goal.tokensUsed) && goal.tokensUsed > 0 ? Math.floor(goal.tokensUsed) : 0,
@@ -208,6 +213,8 @@ const parseGoalMetadata = (session) => {
     auditFailStreak: Number.isFinite(goal.auditFailStreak) && goal.auditFailStreak > 0 ? Math.floor(goal.auditFailStreak) : 0,
     note: typeof goal.note === 'string' ? goal.note.slice(0, NOTE_CHAR_LIMIT) : '',
     statusReason: typeof goal.statusReason === 'string' ? goal.statusReason.slice(0, REASON_CHAR_LIMIT) : '',
+    evaluationProviderID: typeof goal.evaluationProviderID === 'string' ? goal.evaluationProviderID : '',
+    evaluationModelID: typeof goal.evaluationModelID === 'string' ? goal.evaluationModelID : '',
     lastAccountedMessageID: typeof goal.lastAccountedMessageID === 'string' ? goal.lastAccountedMessageID : '',
     createdAt: Number.isFinite(goal.createdAt) ? goal.createdAt : 0,
     updatedAt: Number.isFinite(goal.updatedAt) ? goal.updatedAt : 0,
@@ -288,6 +295,19 @@ export const createSessionGoalRuntime = ({
     return Array.isArray(messages) ? messages : null;
   };
 
+  const fetchSessionStatuses = async (directory) => {
+    const statuses = await openCodeFetch('/session/status', { directory }).catch(() => null);
+    return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : null;
+  };
+
+  const fetchSessionChildren = async (sessionId, directory) => {
+    const children = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/children`, { directory })
+      .catch(() => null);
+    return Array.isArray(children) ? children : null;
+  };
+
+  const isWorkingStatus = (status) => status?.type === 'busy' || status?.type === 'retry';
+
   // Merge-write the goal payload from a FRESH session read so concurrent
   // metadata writes (assist payloads, dismissals, UI goal edits) survive.
   // Returns the written goal, or null when the stored goal no longer matches
@@ -314,7 +334,7 @@ export const createSessionGoalRuntime = ({
     return nextGoal;
   };
 
-  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID }) => {
+  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID }) => {
     const written = await writeGoal(sessionId, directory, goal.id, (current) => ({
       status,
       statusReason: clampText(statusReason, REASON_CHAR_LIMIT),
@@ -325,6 +345,8 @@ export const createSessionGoalRuntime = ({
       ...(tokensBaseline !== undefined ? { tokensBaseline } : {}),
       ...(tokensCommitted !== undefined ? { tokensCommitted } : {}),
       ...(lastAccountedMessageID ? { lastAccountedMessageID } : {}),
+      ...(evaluationProviderID ? { evaluationProviderID } : {}),
+      ...(evaluationModelID ? { evaluationModelID } : {}),
     }));
     if (!written) return;
     console.log(`[session-goal] ${sessionId} settled as ${status}${statusReason ? ` (${statusReason})` : ''}`);
@@ -360,13 +382,35 @@ export const createSessionGoalRuntime = ({
       });
       const structured = extractJsonObject(generated?.text);
       const verdict = typeof structured?.verdict === 'string' ? structured.verdict.trim().toLowerCase() : '';
-      if (!['continue', 'complete', 'blocked'].includes(verdict)) return null;
+      if (!structured || !['continue', 'complete', 'blocked'].includes(verdict)) {
+        console.warn('[session-goal:diagnostic] audit parse failed', {
+          sessionId: lastAssistantInfo?.sessionID ?? null,
+          provider: generated?.providerID ?? null,
+          model: generated?.modelID ?? null,
+          outputChars: typeof generated?.text === 'string' ? generated.text.length : 0,
+          jsonObjectFound: Boolean(structured),
+          verdict: verdict || null,
+        });
+        return null;
+      }
+      console.log('[session-goal:diagnostic] audit verdict', {
+        sessionId: lastAssistantInfo?.sessionID ?? null,
+        provider: generated?.providerID ?? null,
+        model: generated?.modelID ?? null,
+        outputChars: generated.text.length,
+        verdict,
+      });
       let note = clampText(structured?.note, NOTE_CHAR_LIMIT);
       if (note && hasScriptMismatch(note, `${goal.objective}\n${assistantText}`)) {
         console.warn('[session-goal] dropped audit note: language mismatch with objective');
         note = '';
       }
-      return { verdict, note };
+      return {
+        verdict,
+        note,
+        evaluationProviderID: generated.providerID,
+        evaluationModelID: generated.modelID,
+      };
     } catch (error) {
       // No authenticated small model (404) or a transient failure — the loop
       // still terminates via markers, budget, and the turn cap.
@@ -414,6 +458,44 @@ export const createSessionGoalRuntime = ({
     const goal = parseGoalMetadata(session);
     if (!goal || goal.status !== 'active') return;
 
+    // File-backed objectives: the metadata carries only a flag; the objective
+    // TEXT lives under the OpenChamber data dir keyed by session id and is
+    // read fresh on every tick (live-editable). A missing file falls back to
+    // whatever inline objective the metadata still has — the goal must never
+    // die just because a file went away.
+    let effectiveObjective = goal.objective;
+    if (goal.objectiveFile) {
+      const fileObjective = await readObjective(sessionId);
+      if (fileObjective) {
+        effectiveObjective = fileObjective;
+      } else if (!effectiveObjective) {
+        console.warn(`[session-goal] ${sessionId} objective file unreadable and no inline fallback`);
+        return;
+      } else {
+        console.warn(`[session-goal] ${sessionId} objective file unreadable, using inline fallback`);
+      }
+    }
+
+    // Parent idle does not imply the whole task is quiescent: a background
+    // subagent runs in a child session while its parent stays idle. Re-read
+    // authoritative live status after the quiet window. If the parent resumed,
+    // its next idle event will arm a fresh tick. If a child is still working,
+    // OpenCode will inject its result into the parent and produce the same
+    // busy→idle cycle, so do not poll or audit the interim parent reply.
+    const statuses = await fetchSessionStatuses(directory);
+    if (!statuses) {
+      armTimer(sessionId, directory, idleQuietMs);
+      return;
+    }
+    if (isWorkingStatus(statuses[sessionId])) return;
+
+    const children = await fetchSessionChildren(sessionId, directory);
+    if (!children) {
+      armTimer(sessionId, directory, idleQuietMs);
+      return;
+    }
+    if (children.some((child) => typeof child?.id === 'string' && isWorkingStatus(statuses[child.id]))) return;
+
     const messages = await fetchRecentMessages(sessionId, directory);
     if (!messages) return;
 
@@ -426,6 +508,19 @@ export const createSessionGoalRuntime = ({
     }
     const lastAssistantInfo = lastAssistant?.info;
     const lastMessageInfo = messages.length > 0 ? messages[messages.length - 1]?.info : null;
+
+    // Execution source for audits and continuations: the newest NON-summary
+    // assistant turn. The compaction summary message carries agent/mode
+    // "compaction" and the summarize model — inheriting those would continue
+    // the session with the wrong agent/model.
+    let executionInfo = null;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const info = messages[i]?.info;
+      if (info?.role === 'assistant' && info.summary !== true) {
+        executionInfo = info;
+        break;
+      }
+    }
 
     // Quiescence check: the idle event may have raced a follow-up prompt, and
     // the kickoff path arms without knowing the live status at all. A trailing
@@ -475,8 +570,17 @@ export const createSessionGoalRuntime = ({
       sawNewMessages = true;
       const total = messageTokenTotal(info);
       if (info.summary === true) {
-        const closing = Math.max(segmentSnapshot ?? 0, total);
-        tokensCommitted += Math.max(0, closing - tokensBaseline);
+        // The summary message's own tokens are ZEROED by opencode — never
+        // feed them into the closing value. Close the segment from what is
+        // already known, with the previously displayed total as a continuity
+        // floor (the latest pre-summary snapshot was already folded into
+        // tokensUsed on earlier ticks); otherwise the counter freezes at the
+        // pre-compaction value until the new context outgrows it. Known
+        // undercount: the summarization call itself is reported as 0 tokens.
+        tokensCommitted = Math.max(
+          goal.tokensUsed,
+          tokensCommitted + Math.max(0, (segmentSnapshot ?? 0) - tokensBaseline),
+        );
         tokensBaseline = 0;
         segmentSnapshot = null;
       } else {
@@ -557,7 +661,7 @@ export const createSessionGoalRuntime = ({
     if (lastAssistantInfo.summary === true || abortedTail) {
       blockedStreak = goal.blockedStreak;
     } else {
-      audit = await runAudit({ goal, assistantText, directory, lastAssistantInfo });
+      audit = await runAudit({ goal: { ...goal, objective: effectiveObjective }, assistantText, directory, lastAssistantInfo: executionInfo ?? lastAssistantInfo });
 
       // Audit unavailable: tolerate one consecutive failure (transient
       // hiccup), then stop the goal instead of continuing blind. Blocked is
@@ -578,15 +682,22 @@ export const createSessionGoalRuntime = ({
       if (audit?.verdict === 'complete') {
         await settleGoal({
           sessionId, directory, goal, status: 'complete', statusReason: 'verified by audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+          evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
         });
         return;
       }
 
       if (audit?.verdict === 'blocked') {
         blockedStreak = goal.blockedStreak + 1;
+        console.warn('[session-goal:diagnostic] blocked audit streak', {
+          sessionId,
+          blockedStreak,
+          blockedStreakLimit: BLOCKED_STREAK_LIMIT,
+        });
         if (blockedStreak >= BLOCKED_STREAK_LIMIT) {
           await settleGoal({
             sessionId, directory, goal, status: 'blocked', statusReason: audit.note || 'blocked per audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+            evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
           });
           return;
         }
@@ -606,6 +717,8 @@ export const createSessionGoalRuntime = ({
       auditFailStreak,
       statusReason: '',
       ...(audit?.note ? { note: audit.note } : {}),
+      ...(audit?.evaluationProviderID ? { evaluationProviderID: audit.evaluationProviderID } : {}),
+      ...(audit?.evaluationModelID ? { evaluationModelID: audit.evaluationModelID } : {}),
     }));
     if (!written) {
       console.log('[session-goal] goal changed during tick, dropping continuation');
@@ -622,7 +735,7 @@ export const createSessionGoalRuntime = ({
     }
 
     console.log(`[session-goal] continuing ${sessionId} (turn ${written.turnsUsed}/${maxAutoTurns}, tokens ${written.tokensUsed}${written.tokenBudget ? `/${written.tokenBudget}` : ''})`);
-    await sendContinuation({ sessionId, directory, goal: written, lastAssistantInfo });
+    await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective }, lastAssistantInfo: executionInfo ?? lastAssistantInfo });
   };
 
   const armTimer = (sessionId, directory, quietMs) => {
