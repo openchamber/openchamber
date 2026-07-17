@@ -1,4 +1,4 @@
-# Phase 5 Implementation Plan
+# Phase 5 Three-Way Comparison Implementation Plan
 
 Status: **complete (2026-07-18)**
 
@@ -8,25 +8,27 @@ Status: **complete (2026-07-18)**
 
 - Add a standalone comparison harness under `scripts/perf/`.
 - Materialize the historical `service.js` with `git show` after proving the baseline is the direct parent of the architecture commit.
-- Run historical/current modules in isolated workers so module singletons, environment, queues, and caches cannot cross-contaminate results.
+- Run historical/current service targets in isolated workers so module singletons, environment, queues, and caches cannot cross-contaminate results.
+- Run a third worker against the byte-identical current module with only fixture-local Git fsmonitor configuration changed; reject fsmonitor mode for historical source.
 
 ### 2. Real-Git fixture and workload
 
 - Create deterministic local seed/bare repositories, 200 clones, and 100 linked worktrees under one temporary boundary per worker.
 - Build 30,000 session records without invoking the service.
-- Execute status, staged mutation, and local fetch operations only through exports shared by both service versions.
+- Execute cold status, unchanged warm status, staged mutation, and local fetch operations only through exports shared by both service versions and all three targets.
 - Keep the 30,000-caller fan-out behind a separate explicit profile and submit fixed 600-caller waves for safe legacy comparison. Retain the exact simultaneous burst only in the current-architecture guard.
 
 ### 3. Correctness and measurements
 
 - Validate per-worktree status identity and final staged paths with direct oracle Git excluded from workload counts.
 - Record per-operation latency distributions and overall workload throughput.
-- Prepend a temporary POSIX shim to PATH; log one start record and `exec` the real Git binary so both implementations receive the same low-overhead launch counter.
+- Prepend a temporary POSIX shim to PATH; log one start record and `exec` the real Git binary so all three targets receive the same low-overhead launch counter.
 - Snapshot exact Git launches per scenario and report the direct-child scope/caveat.
+- For the current+fsmonitor target, configure one valid protocol-v2 hook per common directory, report exact per-scenario hook invocations/responses, and verify that Git-owned local config is unchanged after the workload.
 
 ### 4. Focused tests and discovery guard
 
-- Test profile cardinalities, CLI validation, baseline-parent verification, output boundaries, and a reduced real-Git current/current comparison.
+- Test profile cardinalities, CLI validation, baseline-parent verification, output boundaries, and a reduced real-Git current/current/current+fsmonitor comparison.
 - Prove no normal test script invokes representative target or pathological fan-out.
 
 ### 5. Validation and evidence
@@ -42,7 +44,7 @@ bun run dead-code
 ```
 
 - Run the pathological profile only after the representative target is stable and with an explicit long timeout.
-- Keep raw reports local and uncommitted; curate only reviewed before/after evidence.
+- Keep raw reports local and uncommitted; curate only reviewed before/after/after+fsmonitor evidence.
 
 ## Expected files
 
@@ -64,4 +66,5 @@ bun run dead-code
 - Historical/current workers validate their unique temporary boundary, service source hash, fixed profile, executable, and cleanup target before creating or deleting fixture data.
 - Both workers use authoritative Git topology checks, per-worktree status identity checks, final staged-state oracles, local-only fetches, exact launch accounting, advisory latency distributions, and outer cleanup.
 - Focused suite passed 5/5; the existing execution harness remained 12/12. Harness type-check/lint, docs validation, diff check, and non-blocking dead-code inspection passed/ran as recorded in the handover.
-- Final representative and pathological evidence is curated in `reviews/benchmark-report.md`; raw JSON remains local and uncommitted.
+- Comparison schema v2 adds current+fsmonitor, cold/warm status for all targets, explicit before→after and after→after+fsmonitor deltas, hook accounting, and manual-config preservation without changing production Git code.
+- Final representative and pathological three-way evidence is curated in `reviews/benchmark-report.md`; raw JSON remains local and uncommitted.

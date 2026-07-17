@@ -1,8 +1,8 @@
 /**
- * Architecture-neutral before/after benchmark for the exported web Git service.
+ * Architecture-neutral before/after/after+fsmonitor benchmark for the exported web Git service.
  *
  * The historical service is materialized under an OS temporary directory and
- * both implementations run in isolated child processes against equivalent
+ * all targets run in isolated child processes against equivalent
  * disposable local repositories. Reports are JSON and generated artifacts are
  * never retained unless --output names one new file outside the workspace.
  */
@@ -62,7 +62,13 @@ type CorrectnessReport = {
 };
 
 export type GitServiceTargetReport = {
-  label: 'before' | 'after' | 'control-before' | 'control-after';
+  label:
+    | 'before'
+    | 'after'
+    | 'after-fsmonitor'
+    | 'control-before'
+    | 'control-after'
+    | 'control-after-fsmonitor';
   passed: boolean;
   profile: GitServiceComparisonProfile;
   sourceHash: string;
@@ -76,12 +82,14 @@ export type GitServiceTargetReport = {
   };
   scenarios: {
     entityMapping: ScenarioReport;
-    startupStatus: ScenarioReport;
+    coldStatus: ScenarioReport;
+    warmStatus: ScenarioReport;
     pathologicalFanout: ScenarioReport | null;
     mixedWorkload: ScenarioReport;
   };
   latencyMs: {
-    startupStatus: Distribution;
+    coldStatus: Distribution;
+    warmStatus: Distribution;
     pathologicalFanoutStatus: Distribution | null;
     mutation: Distribution;
     fetch: Distribution;
@@ -101,6 +109,20 @@ export type GitServiceTargetReport = {
     heapStartBytes: number;
     heapEndBytes: number;
   };
+  fsmonitor: {
+    mode: 'disabled' | 'fixture-hook-v2';
+    configurationOwner: 'Git fixture local config';
+    configuredCommonDirectories: number;
+    configurationPreserved: boolean | null;
+    protocolVersion: 2 | null;
+    invocations: number;
+    invocationsByScenario: Record<string, number>;
+    coldResponses: number;
+    warmResponses: number;
+    refreshResponses: number;
+    unexpectedVersions: string[];
+    unclassifiedInvocations: number;
+  };
   correctness: CorrectnessReport;
   cleanupSucceeded: boolean;
   operationalError: { name: string; message: string } | null;
@@ -115,7 +137,7 @@ type ComparisonDelta = {
 };
 
 export type GitServiceComparisonReport = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   passed: boolean;
   profile: GitServiceComparisonProfile;
   seed: number;
@@ -131,20 +153,35 @@ export type GitServiceComparisonReport = {
     gitVersion: string;
     bunVersion: string | null;
     nodeVersion: string;
-    dependencyPolicy: 'same current installed dependency tree for before and after';
-    runOrder: ['before', 'after'] | ['after', 'before'];
+    dependencyPolicy: 'same current installed dependency tree for before, after, and after-fsmonitor';
+    runOrder:
+      | ['before', 'after', 'after-fsmonitor']
+      | ['after-fsmonitor', 'after', 'before'];
   };
   config: WorkloadConfig;
   before: GitServiceTargetReport;
   after: GitServiceTargetReport;
+  afterFsmonitor: GitServiceTargetReport;
   comparison: {
     valid: boolean;
-    workloadDurationMs: ComparisonDelta;
-    workloadGitLaunches: ComparisonDelta;
-    startupStatusP95Ms: ComparisonDelta;
-    mutationP95Ms: ComparisonDelta;
-    fetchP95Ms: ComparisonDelta;
-    pathologicalFanoutP95Ms: ComparisonDelta | null;
+    beforeToAfter: {
+      workloadDurationMs: ComparisonDelta;
+      workloadGitLaunches: ComparisonDelta;
+      coldStatusP95Ms: ComparisonDelta;
+      warmStatusP95Ms: ComparisonDelta;
+      mutationP95Ms: ComparisonDelta;
+      fetchP95Ms: ComparisonDelta;
+      pathologicalFanoutP95Ms: ComparisonDelta | null;
+    };
+    afterToAfterFsmonitor: {
+      workloadDurationMs: ComparisonDelta;
+      workloadGitLaunches: ComparisonDelta;
+      coldStatusP95Ms: ComparisonDelta;
+      warmStatusP95Ms: ComparisonDelta;
+      mutationP95Ms: ComparisonDelta;
+      fetchP95Ms: ComparisonDelta;
+      pathologicalFanoutP95Ms: ComparisonDelta | null;
+    };
     interpretation: string[];
   };
 };
@@ -170,6 +207,7 @@ type WorkerConfig = {
   comparisonRoot: string;
   fixtureRoot: string;
   realGit: string;
+  fsmonitorMode: GitServiceTargetReport['fsmonitor']['mode'];
 };
 
 type CliOptions = {
@@ -190,6 +228,17 @@ type Fixture = {
   primaryWorktrees: string[];
   linkedWorktrees: string[];
   allWorktrees: string[];
+  fsmonitor: {
+    mode: GitServiceTargetReport['fsmonitor']['mode'];
+    tracePath: string;
+    configurations: Array<{ directory: string; hookPath: string }>;
+  };
+};
+
+type FsmonitorInvocation = {
+  scenario: string;
+  version: string;
+  response: string;
 };
 
 type ProcessResult = {
@@ -208,6 +257,7 @@ const ARCHITECTURE_COMMIT = '57c297527';
 const DEFAULT_SEED = 0x2233;
 const MAX_ERROR_SAMPLES = 20;
 const PROCESS_OUTPUT_LIMIT = 4 * 1024 * 1024;
+const FSMONITOR_TOKEN = 'openchamber-git-service-comparison-v1';
 const SAFE_RUNTIME_ENVIRONMENT_KEYS = [
   'PATH',
   'TMPDIR',
@@ -554,15 +604,18 @@ const createFixture = async (config: WorkerConfig): Promise<Fixture> => {
   const xdgConfig = path.join(root, 'xdg-config');
   const xdgData = path.join(root, 'xdg-data');
   const shimDirectory = path.join(root, 'git-shim');
+  const fsmonitorDirectory = path.join(root, 'fsmonitor-hooks');
   const globalConfig = path.join(root, 'global.gitconfig');
   const askpass = path.join(root, 'disabled-askpass');
   const tracePath = path.join(root, 'git-launches.log');
+  const fsmonitorTracePath = path.join(root, 'fsmonitor-invocations.log');
   await Promise.all([
     mkdir(hooksDirectory, { recursive: true }),
     mkdir(homeDirectory, { recursive: true }),
     mkdir(xdgConfig, { recursive: true }),
     mkdir(xdgData, { recursive: true }),
     mkdir(shimDirectory, { recursive: true }),
+    mkdir(fsmonitorDirectory, { recursive: true }),
   ]);
   await writeFile(globalConfig, '', 'utf8');
   await writeFile(askpass, '#!/bin/sh\nexit 1\n', 'utf8');
@@ -617,6 +670,49 @@ const createFixture = async (config: WorkerConfig): Promise<Fixture> => {
     writeFile(path.join(directory, `identity-${index}.txt`), `identity ${index}\n`, 'utf8')
   )));
 
+  await writeFile(fsmonitorTracePath, '', 'utf8');
+  const fsmonitorConfigurations: Array<{ directory: string; hookPath: string }> = [];
+  if (config.fsmonitorMode === 'fixture-hook-v2') {
+    await mapLimit(primaryWorktrees, 8, async (directory, index) => {
+      const hookPath = path.join(fsmonitorDirectory, `repository-${index}`);
+      await writeFile(
+        hookPath,
+        [
+          '#!/bin/sh',
+          `token="${FSMONITOR_TOKEN}"`,
+          'scenario="${OPENCHAMBER_GIT_PERF_SCENARIO:-unclassified}"',
+          'if [ "$1" = "2" ]; then',
+          '  if [ "$scenario" = "mixed-workload" ]; then',
+          '    response="refresh"',
+          '    printf "%s\\000/\\000" "$token"',
+          '  elif [ "$2" = "$token" ]; then',
+          '    response="warm"',
+          '    printf "%s\\000" "$token"',
+          '  else',
+          '    response="cold"',
+          '    printf "%s\\000/\\000" "$token"',
+          '  fi',
+          'else',
+          '  response="unsupported"',
+          '  printf "/\\000"',
+          'fi',
+          'printf "%s\\t%s\\t%s\\n" "$scenario" "$1" "$response" >> "$OPENCHAMBER_GIT_PERF_FSMONITOR_TRACE"',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+      await chmod(hookPath, 0o700);
+      await runGit(root, config.realGit, directEnvironment, directory, [
+        'config', '--local', 'core.fsmonitor', hookPath,
+      ]);
+      await runGit(root, config.realGit, directEnvironment, directory, [
+        'config', '--local', 'core.fsmonitorHookVersion', '2',
+      ]);
+      fsmonitorConfigurations[index] = { directory, hookPath };
+      return undefined;
+    });
+  }
+
   const shimPath = path.join(shimDirectory, 'git');
   await writeFile(
     shimPath,
@@ -635,6 +731,9 @@ const createFixture = async (config: WorkerConfig): Promise<Fixture> => {
     PATH: `${shimDirectory}${path.delimiter}${originalPath}`,
     OPENCHAMBER_GIT_PERF_REAL: config.realGit,
     OPENCHAMBER_GIT_PERF_TRACE: tracePath,
+    ...(config.fsmonitorMode === 'fixture-hook-v2'
+      ? { OPENCHAMBER_GIT_PERF_FSMONITOR_TRACE: fsmonitorTracePath }
+      : {}),
   };
   return {
     root,
@@ -644,6 +743,11 @@ const createFixture = async (config: WorkerConfig): Promise<Fixture> => {
     primaryWorktrees,
     linkedWorktrees,
     allWorktrees,
+    fsmonitor: {
+      mode: config.fsmonitorMode,
+      tracePath: fsmonitorTracePath,
+      configurations: fsmonitorConfigurations,
+    },
   };
 };
 
@@ -663,6 +767,117 @@ const readLaunchCounts = async (tracePath: string): Promise<Record<string, numbe
     counts[scenario] = (counts[scenario] ?? 0) + 1;
   }
   return counts;
+};
+
+const readFsmonitorInvocations = async (tracePath: string): Promise<FsmonitorInvocation[]> => {
+  const raw = await readFile(tracePath, 'utf8').catch(() => '');
+  return raw
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const [scenario = '', version = '', response = 'malformed'] = line.split('\t');
+      return { scenario, version, response };
+    });
+};
+
+const buildFsmonitorReport = async (
+  fixture: Fixture,
+  config: WorkerConfig,
+  correctness: CorrectnessCollector,
+): Promise<GitServiceTargetReport['fsmonitor']> => {
+  const invocations = await readFsmonitorInvocations(fixture.fsmonitor.tracePath);
+  const invocationCounts = new Map<string, number>();
+  for (const invocation of invocations) {
+    invocationCounts.set(invocation.scenario, (invocationCounts.get(invocation.scenario) ?? 0) + 1);
+  }
+  const invocationsByScenario = Object.fromEntries(
+    [...invocationCounts.entries()].sort(([left], [right]) => left.localeCompare(right)),
+  );
+
+  if (fixture.fsmonitor.mode === 'disabled') {
+    correctness.check(invocations.length === 0, 'disabled fsmonitor target unexpectedly invoked a hook');
+    return {
+      mode: 'disabled',
+      configurationOwner: 'Git fixture local config',
+      configuredCommonDirectories: 0,
+      configurationPreserved: null,
+      protocolVersion: null,
+      invocations: invocations.length,
+      invocationsByScenario,
+      coldResponses: 0,
+      warmResponses: 0,
+      refreshResponses: 0,
+      unexpectedVersions: [],
+      unclassifiedInvocations: 0,
+    };
+  }
+
+  correctness.check(
+    fixture.fsmonitor.configurations.length === config.workload.commonDirectories,
+    'fsmonitor configured common-directory count differs',
+  );
+  let configurationPreserved = true;
+  for (const entry of fixture.fsmonitor.configurations) {
+    const configuredPath = (await runGit(
+      fixture.root,
+      config.realGit,
+      fixture.directEnvironment,
+      entry.directory,
+      ['config', '--local', '--get', 'core.fsmonitor'],
+    )).trim();
+    const configuredVersion = (await runGit(
+      fixture.root,
+      config.realGit,
+      fixture.directEnvironment,
+      entry.directory,
+      ['config', '--local', '--get', 'core.fsmonitorHookVersion'],
+    )).trim();
+    const entryPreserved = configuredPath === entry.hookPath && configuredVersion === '2';
+    configurationPreserved = configurationPreserved && entryPreserved;
+    correctness.check(entryPreserved, 'Git service changed fixture-local fsmonitor configuration');
+  }
+
+  const unexpectedVersions = [...new Set(
+    invocations.filter((invocation) => invocation.version !== '2').map((invocation) => invocation.version || '<empty>'),
+  )].sort();
+  const coldResponses = invocations.filter((invocation) => invocation.response === 'cold').length;
+  const warmResponses = invocations.filter((invocation) => invocation.response === 'warm').length;
+  const refreshResponses = invocations.filter((invocation) => invocation.response === 'refresh').length;
+  const unclassifiedInvocations = invocations.filter((invocation) => invocation.scenario === 'unclassified').length;
+  correctness.check(invocations.length > 0, 'configured fsmonitor hook was not invoked');
+  correctness.check(unexpectedVersions.length === 0, 'configured fsmonitor hook did not use protocol version 2');
+  correctness.check(
+    (invocationsByScenario['cold-status'] ?? 0) === config.workload.startupCallers,
+    'cold status did not invoke fsmonitor exactly once per worktree identity',
+  );
+  correctness.check(
+    (invocationsByScenario['warm-status'] ?? 0) === config.workload.startupCallers,
+    'warm status did not invoke fsmonitor exactly once per worktree identity',
+  );
+  correctness.check(
+    coldResponses === config.workload.startupCallers,
+    'fsmonitor cold-response count differs from worktree identity count',
+  );
+  correctness.check(
+    warmResponses >= config.workload.startupCallers,
+    'fsmonitor did not exercise its warm token response',
+  );
+  correctness.check(unclassifiedInvocations === 0, 'fsmonitor hook invocation was not assigned to a scenario');
+
+  return {
+    mode: 'fixture-hook-v2',
+    configurationOwner: 'Git fixture local config',
+    configuredCommonDirectories: fixture.fsmonitor.configurations.length,
+    configurationPreserved,
+    protocolVersion: 2,
+    invocations: invocations.length,
+    invocationsByScenario,
+    coldResponses,
+    warmResponses,
+    refreshResponses,
+    unexpectedVersions,
+    unclassifiedInvocations,
+  };
 };
 
 const sumCounts = (counts: Record<string, number>): number => (
@@ -853,11 +1068,15 @@ const failedTargetReport = (
     sessionEntities: config.workload.sessionRecords,
     uniqueCommonDirectories: config.workload.commonDirectories,
     uniqueWorktreeIdentities: config.workload.worktreeIdentities,
-    serviceCalls: config.workload.startupCallers + config.workload.fanoutCallers + config.workload.mutations + config.workload.fetches,
+    serviceCalls: (config.workload.startupCallers * 2)
+      + config.workload.fanoutCallers
+      + config.workload.mutations
+      + config.workload.fetches,
   },
   scenarios: {
     entityMapping: { logicalCallers: config.workload.sessionRecords, durationMs: 0, gitLaunches: 0 },
-    startupStatus: { logicalCallers: config.workload.startupCallers, durationMs: 0, gitLaunches: 0 },
+    coldStatus: { logicalCallers: config.workload.startupCallers, durationMs: 0, gitLaunches: 0 },
+    warmStatus: { logicalCallers: config.workload.startupCallers, durationMs: 0, gitLaunches: 0 },
     pathologicalFanout: config.workload.fanoutCallers > 0
       ? { logicalCallers: config.workload.fanoutCallers, durationMs: 0, gitLaunches: 0 }
       : null,
@@ -868,7 +1087,8 @@ const failedTargetReport = (
     },
   },
   latencyMs: {
-    startupStatus: distribution([]),
+    coldStatus: distribution([]),
+    warmStatus: distribution([]),
     pathologicalFanoutStatus: config.workload.fanoutCallers > 0 ? distribution([]) : null,
     mutation: distribution([]),
     fetch: distribution([]),
@@ -887,6 +1107,20 @@ const failedTargetReport = (
     rssEndBytes: 0,
     heapStartBytes: 0,
     heapEndBytes: 0,
+  },
+  fsmonitor: {
+    mode: config.fsmonitorMode,
+    configurationOwner: 'Git fixture local config',
+    configuredCommonDirectories: 0,
+    configurationPreserved: config.fsmonitorMode === 'fixture-hook-v2' ? false : null,
+    protocolVersion: config.fsmonitorMode === 'fixture-hook-v2' ? 2 : null,
+    invocations: 0,
+    invocationsByScenario: {},
+    coldResponses: 0,
+    warmResponses: 0,
+    refreshResponses: 0,
+    unexpectedVersions: [],
+    unclassifiedInvocations: 0,
   },
   correctness: { checks: 0, failures: 1, failureSamples: ['worker did not complete'] },
   cleanupSucceeded,
@@ -908,7 +1142,8 @@ const runWorker = async (config: WorkerConfig): Promise<GitServiceTargetReport> 
     const service = await loadService(config.servicePath);
     const correctness = new CorrectnessCollector();
     await verifyFixtureTopology(fixture, config, correctness);
-    const startupLatencies: number[] = [];
+    const coldLatencies: number[] = [];
+    const warmLatencies: number[] = [];
     const fanoutLatencies: number[] = [];
     const mutationLatencies: number[] = [];
     const fetchLatencies: number[] = [];
@@ -927,13 +1162,21 @@ const runWorker = async (config: WorkerConfig): Promise<GitServiceTargetReport> 
     correctness.check(uniqueSessionWorktrees.size === config.workload.worktreeIdentities, 'entity mapping worktree count differs');
     correctness.check(mappingLaunchesAfter === mappingLaunchesBefore, 'entity mapping started Git');
 
-    const startupIndices = Array.from({ length: fixture.allWorktrees.length }, (_, index) => index);
-    const startupStatus = await runStatusScenario(
-      'startup-status',
+    const statusIndices = Array.from({ length: fixture.allWorktrees.length }, (_, index) => index);
+    const coldStatus = await runStatusScenario(
+      'cold-status',
       service,
       fixture,
-      startupIndices,
-      startupLatencies,
+      statusIndices,
+      coldLatencies,
+      correctness,
+    );
+    const warmStatus = await runStatusScenario(
+      'warm-status',
+      service,
+      fixture,
+      statusIndices,
+      warmLatencies,
       correctness,
     );
 
@@ -967,15 +1210,18 @@ const runWorker = async (config: WorkerConfig): Promise<GitServiceTargetReport> 
       correctness,
     );
     const durationMs = mappingDurationMs
-      + startupStatus.durationMs
+      + coldStatus.durationMs
+      + warmStatus.durationMs
       + (pathologicalFanout?.durationMs ?? 0)
       + mixedWorkload.durationMs;
     const cpuEnd = process.resourceUsage();
     const memoryEnd = process.memoryUsage();
     const launchCounts = await readLaunchCounts(fixture.tracePath);
-    const totalServiceCalls = startupStatus.logicalCallers
+    const totalServiceCalls = coldStatus.logicalCallers
+      + warmStatus.logicalCallers
       + (pathologicalFanout?.logicalCallers ?? 0)
       + mixedWorkload.logicalCallers;
+    const fsmonitor = await buildFsmonitorReport(fixture, config, correctness);
     const correctnessReport = correctness.report();
     report = {
       label: config.label,
@@ -996,12 +1242,14 @@ const runWorker = async (config: WorkerConfig): Promise<GitServiceTargetReport> 
           durationMs: round(mappingDurationMs),
           gitLaunches: mappingLaunchesAfter - mappingLaunchesBefore,
         },
-        startupStatus,
+        coldStatus,
+        warmStatus,
         pathologicalFanout,
         mixedWorkload,
       },
       latencyMs: {
-        startupStatus: distribution(startupLatencies),
+        coldStatus: distribution(coldLatencies),
+        warmStatus: distribution(warmLatencies),
         pathologicalFanoutStatus: pathologicalFanout ? distribution(fanoutLatencies) : null,
         mutation: distribution(mutationLatencies),
         fetch: distribution(fetchLatencies),
@@ -1021,6 +1269,7 @@ const runWorker = async (config: WorkerConfig): Promise<GitServiceTargetReport> 
         heapStartBytes: memoryStart.heapUsed,
         heapEndBytes: memoryEnd.heapUsed,
       },
+      fsmonitor,
       correctness: correctnessReport,
       cleanupSucceeded: false,
       operationalError: null,
@@ -1124,31 +1373,47 @@ const runWorkerChild = async (config: WorkerConfig, comparisonRoot: string): Pro
   }
 };
 
+const buildMetricComparison = (
+  baseline: GitServiceTargetReport,
+  candidate: GitServiceTargetReport,
+): GitServiceComparisonReport['comparison']['beforeToAfter'] => ({
+  workloadDurationMs: delta(baseline.durationMs, candidate.durationMs),
+  workloadGitLaunches: delta(baseline.gitProcesses.totalLaunches, candidate.gitProcesses.totalLaunches),
+  coldStatusP95Ms: delta(baseline.latencyMs.coldStatus.p95, candidate.latencyMs.coldStatus.p95),
+  warmStatusP95Ms: delta(baseline.latencyMs.warmStatus.p95, candidate.latencyMs.warmStatus.p95),
+  mutationP95Ms: delta(baseline.latencyMs.mutation.p95, candidate.latencyMs.mutation.p95),
+  fetchP95Ms: delta(baseline.latencyMs.fetch.p95, candidate.latencyMs.fetch.p95),
+  pathologicalFanoutP95Ms: baseline.latencyMs.pathologicalFanoutStatus
+    && candidate.latencyMs.pathologicalFanoutStatus
+    ? delta(baseline.latencyMs.pathologicalFanoutStatus.p95, candidate.latencyMs.pathologicalFanoutStatus.p95)
+    : null,
+});
+
 const buildComparison = (
   before: GitServiceTargetReport,
   after: GitServiceTargetReport,
+  afterFsmonitor: GitServiceTargetReport,
 ): GitServiceComparisonReport['comparison'] => {
-  const valid = before.passed && after.passed
-    && before.cardinality.sessionEntities === after.cardinality.sessionEntities
-    && before.cardinality.uniqueCommonDirectories === after.cardinality.uniqueCommonDirectories
-    && before.cardinality.uniqueWorktreeIdentities === after.cardinality.uniqueWorktreeIdentities
-    && before.cardinality.serviceCalls === after.cardinality.serviceCalls;
+  const cardinalities = [before, after, afterFsmonitor].map((target) => JSON.stringify(target.cardinality));
+  const valid = before.passed && after.passed && afterFsmonitor.passed
+    && new Set(cardinalities).size === 1
+    && after.sourceHash === afterFsmonitor.sourceHash
+    && before.fsmonitor.mode === 'disabled'
+    && after.fsmonitor.mode === 'disabled'
+    && afterFsmonitor.fsmonitor.mode === 'fixture-hook-v2';
   return {
     valid,
-    workloadDurationMs: delta(before.durationMs, after.durationMs),
-    workloadGitLaunches: delta(before.gitProcesses.totalLaunches, after.gitProcesses.totalLaunches),
-    startupStatusP95Ms: delta(before.latencyMs.startupStatus.p95, after.latencyMs.startupStatus.p95),
-    mutationP95Ms: delta(before.latencyMs.mutation.p95, after.latencyMs.mutation.p95),
-    fetchP95Ms: delta(before.latencyMs.fetch.p95, after.latencyMs.fetch.p95),
-    pathologicalFanoutP95Ms: before.latencyMs.pathologicalFanoutStatus && after.latencyMs.pathologicalFanoutStatus
-      ? delta(before.latencyMs.pathologicalFanoutStatus.p95, after.latencyMs.pathologicalFanoutStatus.p95)
-      : null,
+    beforeToAfter: buildMetricComparison(before, after),
+    afterToAfterFsmonitor: buildMetricComparison(after, afterFsmonitor),
     interpretation: [
-      'Correctness and equal cardinality are required before timing or launch deltas are valid.',
-      'Latency includes the same lightweight POSIX launch-count shim in both implementations and remains machine-specific.',
+      'Correctness, equal cardinality, identical current source hashes, hook invocation, and preserved Git config are required before timing or launch deltas are valid.',
+      'Cold and warm status are measured for all three targets; only after-fsmonitor has a fixture-local Git fsmonitor hook.',
+      'The version-2 fixture hook reports all paths for an unknown token or the mutation scenario and no paths for its unchanged warm token; Git owns invocation and index state.',
+      'Latency includes the same lightweight POSIX launch-count shim in all implementations and remains machine-specific.',
       'Reported workload duration is the sum of measured service scenarios; fixture setup and direct correctness-oracle time are excluded.',
       'Git launch counts cover top-level service-started git executables; Git helpers and fixture/oracle commands are excluded.',
-      'Both service sources use the current installed dependency tree, isolating source architecture rather than historical dependency drift.',
+      'All service targets use the current installed dependency tree, isolating source architecture and fsmonitor configuration rather than historical dependency drift.',
+      'OpenChamber does not read, write, probe, cache, or manage production core.fsmonitor configuration or daemon lifecycle.',
       'The representative target maps 30,000 entities to 300 identities; only the explicit pathological profile submits 30,000 status callers.',
       'The comparative pathological profile submits those callers in reviewed 600-caller waves to avoid an unsafe 30,000-process legacy burst; it is not the current-only simultaneous fan-out guard.',
     ],
@@ -1161,6 +1426,7 @@ const runComparisonWithTargets = async (options: {
   baselineRef: string;
   beforeTarget?: { servicePath: string; sourceHash: string; label: GitServiceTargetReport['label'] };
   afterTarget?: { servicePath: string; sourceHash: string; label: GitServiceTargetReport['label'] };
+  afterFsmonitorTarget?: { servicePath: string; sourceHash: string; label: GitServiceTargetReport['label'] };
   order?: 'before-first' | 'after-first';
 }): Promise<GitServiceComparisonReport> => {
   const realGit = await resolveExecutable('git');
@@ -1187,6 +1453,11 @@ const runComparisonWithTargets = async (options: {
       sourceHash: hashSource(currentSource),
       label: 'after' as const,
     };
+    const afterFsmonitorTarget = options.afterFsmonitorTarget ?? {
+      servicePath: CURRENT_SERVICE_PATH,
+      sourceHash: hashSource(currentSource),
+      label: 'after-fsmonitor' as const,
+    };
     const beforeConfig: WorkerConfig = {
       label: beforeTarget.label,
       profile: options.profile,
@@ -1197,6 +1468,7 @@ const runComparisonWithTargets = async (options: {
       comparisonRoot,
       fixtureRoot: path.join(comparisonRoot, 'before-fixture'),
       realGit,
+      fsmonitorMode: 'disabled',
     };
     const afterConfig: WorkerConfig = {
       label: afterTarget.label,
@@ -1208,24 +1480,40 @@ const runComparisonWithTargets = async (options: {
       comparisonRoot,
       fixtureRoot: path.join(comparisonRoot, 'after-fixture'),
       realGit,
+      fsmonitorMode: 'disabled',
+    };
+    const afterFsmonitorConfig: WorkerConfig = {
+      label: afterFsmonitorTarget.label,
+      profile: options.profile,
+      workload,
+      seed: options.seed,
+      servicePath: afterFsmonitorTarget.servicePath,
+      sourceHash: afterFsmonitorTarget.sourceHash,
+      comparisonRoot,
+      fixtureRoot: path.join(comparisonRoot, 'after-fsmonitor-fixture'),
+      realGit,
+      fsmonitorMode: 'fixture-hook-v2',
     };
     let before: GitServiceTargetReport;
     let after: GitServiceTargetReport;
+    let afterFsmonitor: GitServiceTargetReport;
     if (options.order === 'after-first') {
+      afterFsmonitor = await runWorkerChild(afterFsmonitorConfig, comparisonRoot);
       after = await runWorkerChild(afterConfig, comparisonRoot);
       before = await runWorkerChild(beforeConfig, comparisonRoot);
     } else {
       before = await runWorkerChild(beforeConfig, comparisonRoot);
       after = await runWorkerChild(afterConfig, comparisonRoot);
+      afterFsmonitor = await runWorkerChild(afterFsmonitorConfig, comparisonRoot);
     }
-    const comparison = buildComparison(before, after);
+    const comparison = buildComparison(before, after, afterFsmonitor);
     const gitVersionResult = await runProcess(realGit, ['--version'], {
       cwd: WORKSPACE_ROOT,
       env: process.env,
       timeoutMs: 10_000,
     });
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       passed: comparison.valid,
       profile: options.profile,
       seed: options.seed,
@@ -1241,12 +1529,15 @@ const runComparisonWithTargets = async (options: {
         gitVersion: gitVersionResult.stdout.trim(),
         bunVersion: process.versions.bun ?? null,
         nodeVersion: process.versions.node,
-        dependencyPolicy: 'same current installed dependency tree for before and after',
-        runOrder: options.order === 'after-first' ? ['after', 'before'] : ['before', 'after'],
+        dependencyPolicy: 'same current installed dependency tree for before, after, and after-fsmonitor',
+        runOrder: options.order === 'after-first'
+          ? ['after-fsmonitor', 'after', 'before']
+          : ['before', 'after', 'after-fsmonitor'],
       },
       config: workload,
       before,
       after,
+      afterFsmonitor,
       comparison,
     };
   } finally {
@@ -1268,6 +1559,11 @@ export const runFocusedGitServiceComparison = async (): Promise<GitServiceCompar
     order: 'before-first',
     beforeTarget: { servicePath: CURRENT_SERVICE_PATH, sourceHash, label: 'control-before' },
     afterTarget: { servicePath: CURRENT_SERVICE_PATH, sourceHash, label: 'control-after' },
+    afterFsmonitorTarget: {
+      servicePath: CURRENT_SERVICE_PATH,
+      sourceHash,
+      label: 'control-after-fsmonitor',
+    },
   });
 };
 
@@ -1354,8 +1650,24 @@ const validateWorkerConfig = async (config: WorkerConfig, configPath: string): P
   if (!['smoke', 'target', 'pathological-fanout'].includes(config.profile)) {
     throw new Error('worker profile is invalid');
   }
-  if (!['before', 'after', 'control-before', 'control-after'].includes(config.label)) {
+  if (![
+    'before',
+    'after',
+    'after-fsmonitor',
+    'control-before',
+    'control-after',
+    'control-after-fsmonitor',
+  ].includes(config.label)) {
     throw new Error('worker label is invalid');
+  }
+  let expectedFixtureName = 'after-fixture';
+  if (config.label.includes('after-fsmonitor')) expectedFixtureName = 'after-fsmonitor-fixture';
+  else if (config.label.includes('before')) expectedFixtureName = 'before-fixture';
+  const expectedFsmonitorMode = config.label.includes('after-fsmonitor')
+    ? 'fixture-hook-v2'
+    : 'disabled';
+  if (config.fsmonitorMode !== expectedFsmonitorMode) {
+    throw new Error('worker fsmonitor mode does not match its target label');
   }
   const temporaryRoot = await realpath(tmpdir());
   const comparisonRoot = await realpath(config.comparisonRoot);
@@ -1372,7 +1684,7 @@ const validateWorkerConfig = async (config: WorkerConfig, configPath: string): P
   const fixtureRoot = path.resolve(config.fixtureRoot);
   if (
     path.dirname(fixtureRoot) !== comparisonRoot
-    || !['before-fixture', 'after-fixture'].includes(path.basename(fixtureRoot))
+    || path.basename(fixtureRoot) !== expectedFixtureName
     || existsSync(fixtureRoot)
   ) {
     throw new Error('worker fixture root is not a new approved child of its comparison root');
@@ -1381,6 +1693,9 @@ const validateWorkerConfig = async (config: WorkerConfig, configPath: string): P
   const targetService = await realpath(config.servicePath);
   if (targetService !== currentService && !isWithin(comparisonRoot, targetService)) {
     throw new Error('worker service source is outside the approved current/baseline boundary');
+  }
+  if (config.fsmonitorMode === 'fixture-hook-v2' && targetService !== currentService) {
+    throw new Error('fsmonitor comparison is restricted to the current Git service');
   }
   if (!/^[0-9a-f]{64}$/i.test(config.sourceHash)) throw new Error('worker source hash is invalid');
   if (hashSource(await readFile(targetService, 'utf8')) !== config.sourceHash) {

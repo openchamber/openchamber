@@ -83,55 +83,101 @@ test('CLI requires explicit opt-in for the pathological 30,000-caller profile', 
   );
 });
 
-test('current/current smoke proves architecture-neutral correctness and launch accounting', {
+test('current/current/current+fsmonitor smoke proves correctness, accounting, and hook ownership', {
   timeout: 120_000,
   skip: process.platform === 'win32' ? 'exact launch counting currently uses a POSIX shim' : false,
 }, async () => {
   const report = await runFocusedGitServiceComparison();
   if (!report.passed) {
-    console.error(JSON.stringify({ before: report.before, after: report.after }, null, 2));
+    console.error(JSON.stringify({
+      before: report.before,
+      after: report.after,
+      afterFsmonitor: report.afterFsmonitor,
+    }, null, 2));
   }
 
   assert.equal(report.passed, true);
-  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.schemaVersion, 2);
   assert.equal(report.profile, 'smoke');
   assert.equal(report.comparison.valid, true);
   assert.equal(report.before.sourceHash, report.after.sourceHash);
+  assert.equal(report.after.sourceHash, report.afterFsmonitor.sourceHash);
+  assert.deepEqual(report.environment.runOrder, ['before', 'after', 'after-fsmonitor']);
   assert.equal(report.before.cardinality.sessionEntities, 60);
   assert.equal(report.before.cardinality.uniqueCommonDirectories, 2);
   assert.equal(report.before.cardinality.uniqueWorktreeIdentities, 3);
-  assert.equal(report.before.cardinality.serviceCalls, 11);
-  assert.equal(report.after.cardinality.serviceCalls, 11);
+  assert.equal(report.before.cardinality.serviceCalls, 14);
+  assert.equal(report.after.cardinality.serviceCalls, 14);
+  assert.equal(report.afterFsmonitor.cardinality.serviceCalls, 14);
   assert.equal(report.before.scenarios.entityMapping.gitLaunches, 0);
   assert.equal(report.after.scenarios.entityMapping.gitLaunches, 0);
-  assert.equal(report.before.scenarios.startupStatus.logicalCallers, 3);
-  assert.equal(report.after.scenarios.startupStatus.logicalCallers, 3);
+  assert.equal(report.afterFsmonitor.scenarios.entityMapping.gitLaunches, 0);
+  assert.equal(report.before.scenarios.coldStatus.logicalCallers, 3);
+  assert.equal(report.after.scenarios.coldStatus.logicalCallers, 3);
+  assert.equal(report.afterFsmonitor.scenarios.coldStatus.logicalCallers, 3);
+  assert.equal(report.before.scenarios.warmStatus.logicalCallers, 3);
+  assert.equal(report.after.scenarios.warmStatus.logicalCallers, 3);
+  assert.equal(report.afterFsmonitor.scenarios.warmStatus.logicalCallers, 3);
   assert.equal(report.before.scenarios.mixedWorkload.logicalCallers, 8);
   assert.equal(report.after.scenarios.mixedWorkload.logicalCallers, 8);
+  assert.equal(report.afterFsmonitor.scenarios.mixedWorkload.logicalCallers, 8);
   assert.equal(report.before.scenarios.pathologicalFanout, null);
   assert.equal(report.after.scenarios.pathologicalFanout, null);
-  assert.equal(report.before.latencyMs.startupStatus.count, 3);
-  assert.equal(report.after.latencyMs.startupStatus.count, 3);
+  assert.equal(report.afterFsmonitor.scenarios.pathologicalFanout, null);
+  assert.equal(report.before.latencyMs.coldStatus.count, 3);
+  assert.equal(report.after.latencyMs.coldStatus.count, 3);
+  assert.equal(report.afterFsmonitor.latencyMs.coldStatus.count, 3);
+  assert.equal(report.before.latencyMs.warmStatus.count, 3);
+  assert.equal(report.after.latencyMs.warmStatus.count, 3);
+  assert.equal(report.afterFsmonitor.latencyMs.warmStatus.count, 3);
   assert.equal(report.before.latencyMs.mutation.count, 6);
   assert.equal(report.after.latencyMs.mutation.count, 6);
+  assert.equal(report.afterFsmonitor.latencyMs.mutation.count, 6);
   assert.equal(report.before.latencyMs.fetch.count, 2);
   assert.equal(report.after.latencyMs.fetch.count, 2);
+  assert.equal(report.afterFsmonitor.latencyMs.fetch.count, 2);
   assert.equal(report.before.correctness.failures, 0);
   assert.equal(report.after.correctness.failures, 0);
+  assert.equal(report.afterFsmonitor.correctness.failures, 0);
   assert.equal(report.before.cleanupSucceeded, true);
   assert.equal(report.after.cleanupSucceeded, true);
+  assert.equal(report.afterFsmonitor.cleanupSucceeded, true);
   assert.ok(report.before.gitProcesses.totalLaunches > 0);
   assert.equal(report.before.gitProcesses.totalLaunches, report.after.gitProcesses.totalLaunches);
   assert.equal(report.before.gitProcesses.unclassifiedLaunches, 0);
   assert.equal(report.after.gitProcesses.unclassifiedLaunches, 0);
+  assert.equal(report.afterFsmonitor.gitProcesses.unclassifiedLaunches, 0);
   assert.equal(
     report.before.gitProcesses.totalLaunches,
-    report.before.scenarios.startupStatus.gitLaunches + report.before.scenarios.mixedWorkload.gitLaunches,
+    report.before.scenarios.coldStatus.gitLaunches
+      + report.before.scenarios.warmStatus.gitLaunches
+      + report.before.scenarios.mixedWorkload.gitLaunches,
   );
   assert.equal(
     report.after.gitProcesses.totalLaunches,
-    report.after.scenarios.startupStatus.gitLaunches + report.after.scenarios.mixedWorkload.gitLaunches,
+    report.after.scenarios.coldStatus.gitLaunches
+      + report.after.scenarios.warmStatus.gitLaunches
+      + report.after.scenarios.mixedWorkload.gitLaunches,
   );
+  assert.equal(
+    report.afterFsmonitor.gitProcesses.totalLaunches,
+    report.afterFsmonitor.scenarios.coldStatus.gitLaunches
+      + report.afterFsmonitor.scenarios.warmStatus.gitLaunches
+      + report.afterFsmonitor.scenarios.mixedWorkload.gitLaunches,
+  );
+  assert.equal(report.before.fsmonitor.mode, 'disabled');
+  assert.equal(report.after.fsmonitor.mode, 'disabled');
+  assert.equal(report.afterFsmonitor.fsmonitor.mode, 'fixture-hook-v2');
+  assert.equal(report.afterFsmonitor.fsmonitor.configuredCommonDirectories, 2);
+  assert.equal(report.afterFsmonitor.fsmonitor.configurationPreserved, true);
+  assert.equal(report.afterFsmonitor.fsmonitor.protocolVersion, 2);
+  assert.equal(report.afterFsmonitor.fsmonitor.invocationsByScenario['cold-status'], 3);
+  assert.equal(report.afterFsmonitor.fsmonitor.invocationsByScenario['warm-status'], 3);
+  assert.equal(report.afterFsmonitor.fsmonitor.coldResponses, 3);
+  assert.ok(report.afterFsmonitor.fsmonitor.warmResponses >= 3);
+  assert.ok(report.afterFsmonitor.fsmonitor.refreshResponses > 0);
+  assert.deepEqual(report.afterFsmonitor.fsmonitor.unexpectedVersions, []);
+  assert.equal(report.afterFsmonitor.fsmonitor.unclassifiedInvocations, 0);
 });
 
 test('normal test scripts cannot invoke target or pathological comparison profiles', async () => {
@@ -170,6 +216,7 @@ test('internal worker mode rejects cleanup targets outside its unique comparison
       comparisonRoot: process.cwd(),
       fixtureRoot: path.join(process.cwd(), 'must-not-be-removed'),
       realGit: '/usr/bin/git',
+      fsmonitorMode: 'disabled',
     }), 'utf8');
     const result = await runHarnessCli(['--worker-config', configPath]);
     assert.equal(result.exitCode, 1);

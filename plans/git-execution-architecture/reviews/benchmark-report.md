@@ -5,7 +5,7 @@
 This PR #2276 follow-up combines the final `target-real` and corrected default `soak` PASS runs. Deterministic counts, safety checks, and lifecycle assertions are blocking. Wall-clock duration, latency, CPU, memory, file-descriptor, and event-loop values are advisory and machine-specific.
 
 This evidence does not claim cross-process serialization or absolute latency guarantees.
-The harness isolates Git configuration and does not enable or measure `core.fsmonitor`.
+The Phase 4 coordinator profiles isolate Git configuration and do not enable or measure `core.fsmonitor`. The separate Phase 5 three-way comparison below enables one deterministic fixture-local hook only for its current+fsmonitor target.
 
 ## Provenance
 
@@ -137,57 +137,87 @@ The full soak is manual and takes about five minutes.
 
 The raw JSON artifacts remain local and uncommitted. This Markdown report is a curated evidence snapshot, not a portable latency baseline. Superseded or non-passing evidence is excluded.
 
-## Historical/current web service comparison
+## Historical/current/current+fsmonitor web service comparison
 
 ### Purpose and provenance
 
-Phase 5 adds a separate architecture-neutral service benchmark. It invokes exported light-status, stage, and local-fetch operations rather than coordinator internals.
+Phase 5 adds a separate architecture-neutral service benchmark. Comparison schema v2 invokes exported light-status, stage, and local-fetch operations rather than coordinator internals and evaluates three isolated targets.
 
 - Before source: `4c2f8946b37315835cba55c88c5faaa829c32254`, runtime-verified as the direct parent of architecture commit `57c2975270369987fbde0b4bb578dceaa1f59aba`.
 - Before `service.js` SHA-256: `d530b09950f1b3643c4b64bdb365247b5abb3e7dfb8e4bbc3bf4047996c4575a`.
 - After `service.js` SHA-256: `7e34f26d6ab6a040b129538cf1e2977ae3c5148a11a29db6eefe480a003c4af5`.
+- After+fsmonitor uses the same current-service SHA-256. Only its disposable repositories receive local `core.fsmonitor=<fixture hook>` and `core.fsmonitorHookVersion=2`.
 - Environment: Linux x64, Git 2.52.0, Bun 1.3.14, Node 24.3.0.
-- Both sources used the same current installed dependency tree. This isolates source architecture but is not a reconstruction of historical dependencies or hardware.
-- A POSIX PATH shim logged each top-level service-started Git executable and immediately `exec`ed the real binary. Fixture setup, direct correctness-oracle Git, and Git helpers are excluded.
-- Absolute latency is advisory. Correctness, cardinality, launch accounting, and cleanup are blocking.
+- All targets used the same current installed dependency tree. This isolates source architecture/configuration but is not a reconstruction of historical dependencies or hardware.
+- A POSIX PATH shim logged each top-level service-started Git executable and immediately `exec`ed the real binary. Fixture setup, direct correctness-oracle Git, Git helpers, and fsmonitor hook processes are excluded from Git-launch counts. Hook invocations are reported separately.
+- The deterministic protocol-v2 hook returns `/` for an unknown token and for the mutation scenario, then no changed paths for its unchanged warm token. It is a controlled fixture hook, not a production watcher/daemon benchmark.
+- Absolute latency is advisory. Correctness, equal cardinality, source/config provenance, launch/hook accounting, and cleanup are blocking.
 
 ### Representative 30,000 / 200 / 100 target
 
-This profile maps 30,000 session entities to 200 common directories plus 100 linked worktrees (300 identities), then runs 300 status calls, 600 stage operations, and 60 local fetches. Entity mapping starts no Git process. Both run orders passed all 1,066 correctness checks for each implementation, including authoritative common-directory/top-level topology checks, produced zero unclassified launches, and cleaned their fixtures.
+This profile maps 30,000 session entities to 200 common directories plus 100 linked worktrees (300 identities), then runs 300 cold status calls, 300 unchanged warm status calls, 600 stage operations, and 60 local fetches. Entity mapping starts no Git process. Both run orders passed 1,667 correctness checks in Before and After and 1,874 in After+fsmonitor, produced zero unclassified launches/invocations, and cleaned all fixtures.
 
-| Run order | Before duration | After duration | Before Git | After Git | Duration change | Git reduction |
-|---|---:|---:|---:|---:|---:|---:|
-| Before → after | 11,548.750 ms | 16,540.896 ms | 5,220 | 3,960 | after 43.227% longer | 24.138% |
-| After → before | 10,596.833 ms | 15,551.758 ms | 5,220 | 3,960 | after 46.759% longer | 24.138% |
+Measured workload duration:
+
+| Run order | Before | After | After + fsmonitor |
+|---|---:|---:|---:|
+| Before → after → after+fsmonitor | 16,281.249 ms | 22,563.860 ms | 23,655.630 ms |
+| After+fsmonitor → after → before | 15,988.804 ms | 22,643.539 ms | 24,087.816 ms |
+
+Blocking count/correctness evidence was stable in both orders:
+
+| Metric | Before | After | After + fsmonitor |
+|---|---:|---:|---:|
+| Service calls | 1,260 | 1,260 | 1,260 |
+| Top-level Git launches | 7,320 | 5,760 | 5,760 |
+| Correctness checks | 1,667/1,667 PASS | 1,667/1,667 PASS | 1,874/1,874 PASS |
+| Unclassified Git launches | 0 | 0 | 0 |
+| Fixture cleanup | PASS | PASS | PASS |
 
 Advisory p95 ranges across the two orders:
 
-| Operation | Before p95 | After p95 |
-|---|---:|---:|
-| Startup status | 4,581.188–4,803.168 ms | 5,670.701–6,432.429 ms |
-| Stage mutation | 5,915.716–6,663.972 ms | 9,011.120–9,173.991 ms |
-| Local fetch | 2,447.418–2,867.017 ms | 9,370.659–9,441.419 ms |
+| Operation | Before | After | After + fsmonitor |
+|---|---:|---:|---:|
+| Cold status | 4,571.925–4,670.398 ms | 6,087.424–6,534.220 ms | 5,938.174–6,413.596 ms |
+| Unchanged warm status | 4,525.761–4,588.477 ms | 6,008.937–6,068.893 ms | 5,974.635–6,038.283 ms |
+| Stage mutation | 6,715.522–6,988.978 ms | 8,919.251–9,315.345 ms | 10,358.474–10,431.057 ms |
+| Local fetch | 2,887.977–3,104.416 ms | 9,202.637–9,704.555 ms | 10,649.534–10,886.118 ms |
 
-Interpretation: this representative profile has only one status caller per worktree identity, so it does not exercise same-identity status coalescing. The historical path permits much broader burst parallelism across 200 repositories; the current architecture deliberately enforces global/read/network bounds. On this machine that trade reduced top-level Git launches by 1,260 but increased completion and queue-observed latency. This is evidence of the bounded-throughput trade, not a portable latency threshold.
+Interpretation: the current architecture used 21.311% fewer top-level Git launches than the historical path, while its bounded workload duration was 38.588–41.621% longer on this machine. Relative to current without fsmonitor, the third target's cold/warm p95 was 0.504–2.452% lower, but whole-workload duration was 4.839–6.378% longer and Git-launch count was unchanged. The shell hook adds one external process per invocation, the fixture has only one tracked file per repository, and mutation safety deliberately returns `/`; this is not evidence of a universal fsmonitor speedup.
+
+### Fsmonitor contract evidence
+
+| Metric | Before | After | After + fsmonitor |
+|---|---:|---:|---:|
+| Fsmonitor mode | Disabled | Disabled | Fixture hook, protocol v2 |
+| Configured common directories | 0 | 0 | 200 |
+| Hook invocations | 0 | 0 | 1,860 |
+| Invocation scenarios | — | — | 300 cold; 300 warm; 1,260 mutation refresh |
+| Hook responses | — | — | 300 cold; 300 warm; 1,260 refresh |
+| Config preserved | N/A | N/A | 200/200 |
+| Unexpected versions / unclassified invocations | 0 / 0 | 0 / 0 | 0 / 0 |
+
+The configuration is created by the harness with direct fixture Git before the measured worker path. The service only inherits it. Production OpenChamber does not read, write, probe, cache, expose, start, stop, or inspect fsmonitor configuration or daemon lifecycle.
 
 ### Batched 30,000-caller fan-out
 
 The explicit pathological profile retains the same 30,000 entities and topology, then adds 30,000 status callers. For host safety and legacy comparability, callers are grouped evenly by worktree and submitted in fixed 600-caller waves. It is not equivalent to the current-only simultaneous 30,000-caller guard.
 
-The final-code reverse-order run passed all 61,067 correctness checks per implementation, including authoritative topology checks, had zero unclassified launches, and cleaned both fixtures.
+The final-code reverse-order run passed 61,668 correctness checks in Before and After and 61,875 in After+fsmonitor, including authoritative topology and hook/config checks. It had zero unclassified launches/invocations and cleaned all three fixtures.
 
-| Metric | Before | After | Change |
+| Metric | Before | After | After + fsmonitor |
 |---|---:|---:|---:|
-| Whole measured workload | 906,456.058 ms | 27,888.368 ms | 32.503× faster after |
-| Total top-level Git launches | 215,220 | 5,760 | 97.324% fewer after |
-| Fan-out scenario duration | 895,880.638 ms | 11,608.410 ms | 77.175× faster after |
-| Fan-out Git launches | 210,000 | 1,800 | 99.143% fewer after |
-| Fan-out caller latency p50 | 9,716.253 ms | 203.438 ms | 47.760× lower after |
-| Fan-out caller latency p95 | 17,073.159 ms | 236.470 ms | 72.200× lower after |
-| Fan-out caller latency p99 | 17,815.126 ms | 249.649 ms | 71.361× lower after |
-| Fan-out caller latency max | 18,616.131 ms | 285.076 ms | 65.302× lower after |
+| Whole measured workload | 919,602.404 ms | 34,040.489 ms | 37,616.044 ms |
+| Total top-level Git launches | 217,320 | 7,560 | 7,560 |
+| Fan-out scenario duration | 902,948.869 ms | 11,596.824 ms | 12,022.228 ms |
+| Fan-out Git launches | 210,000 | 1,800 | 1,800 |
+| Fan-out caller latency p50 | 9,808.308 ms | 203.981 ms | 212.040 ms |
+| Fan-out caller latency p95 | 17,221.023 ms | 236.764 ms | 247.857 ms |
+| Fan-out caller latency p99 | 17,978.202 ms | 254.839 ms | 262.163 ms |
+| Fan-out caller latency max | 18,912.777 ms | 264.138 ms | 271.237 ms |
+| Fsmonitor hook invocations | 0 | 0 | 2,160 |
 
-Interpretation: when many callers ask the same worktree/generation question, the current service performs bounded generation-aware in-flight sharing. The historical total common-directory FIFO repeats the full service Git sequence per caller. The comparison therefore shows both sides of the architecture: lower unconstrained completion time for a one-call-per-identity burst in the old path, versus dramatically lower work and latency under repeated same-identity fan-out in the current path.
+Interpretation: when many callers ask the same worktree/generation question, the current service performs bounded generation-aware in-flight sharing. Compared with historical, current completed the whole workload 27.015× faster, used 96.521% fewer top-level Git launches, and lowered fan-out p95 72.735×. The shell-hook target retained the same Git-launch count but was 10.504% slower overall and 4.685% higher at fan-out p95 than current without fsmonitor. This reports the measured hook overhead honestly; it does not model a persistent Watchman/native daemon on a large tracked tree.
 
 ### Comparison reproduction
 
@@ -199,4 +229,4 @@ bun run perf:git:compare:target -- --order after-first
 bun run perf:git:compare:pathological -- --order after-first
 ```
 
-Raw comparison JSON remains local and uncommitted. The report does not enable or measure `core.fsmonitor`, claim cross-process serialization, count Git helpers, or make machine-specific latency blocking.
+Raw comparison JSON remains local and uncommitted. Only the third disposable comparison target enables `core.fsmonitor`; the report does not add production management, claim cross-process serialization, count Git helpers/hooks as top-level Git launches, or make machine-specific latency blocking.

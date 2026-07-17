@@ -158,7 +158,7 @@ Local hardening validation:
 - Harness type-check/lint passed. Docs validation passed for 387 pages and 43 sidebar links. Root no-install Knip retained 184 unused files, 303 unused exports, 175 unused exported types, and five hints with no harness finding.
 - [x] Add executable web/VS Code `core.fsmonitor` pass-through coverage and document the manual-config/no-mutation contract.
 
-## Phase 5 — before/after service comparison
+## Phase 5 — before/after/after+fsmonitor service comparison
 
 - [x] Confirm the baseline as `4c2f8946b`, the direct parent of `57c297527`, rather than the earlier `0afe61976` single-flight revision.
 - [x] Define one architecture-neutral workload over exported web Git service operations and separate 30,000 entities from concurrent callers.
@@ -167,6 +167,10 @@ Local hardening validation:
 - [x] Run focused smoke/static validation, then both run orders of the representative 30,000/200/100 comparison.
 - [x] Run the separately labeled 30,000-caller comparison in reviewed 600-caller waves only after the representative target is stable; keep the exact simultaneous current-only fan-out guard distinct.
 - [x] Record exact before/after evidence, caveats, cleanup state, and validation without committing raw reports.
+- [x] Extend comparison schema v2 to historical/current/current+fsmonitor while restricting fsmonitor to the byte-identical current service.
+- [x] Add cold and unchanged warm status for all targets plus protocol-v2 hook invocation, response, config-preservation, and cleanup gates.
+- [x] Run both smoke/representative orders and the reverse-order 30,000-caller wave profile with all three targets.
+- [x] Supersede two-target evidence with three-column Markdown tables and explicit shell-hook/tiny-fixture caveats.
 
 ## Blocked ideas
 
