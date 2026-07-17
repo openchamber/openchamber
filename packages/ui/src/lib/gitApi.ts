@@ -549,6 +549,23 @@ const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
   const config = useConfigStore.getState();
   const lastChoice = useSessionUIStore.getState().getLastUserChoice(sessionId);
 
+  const configuredGitModel = config.getResolvedGitGenerationModel();
+  if (configuredGitModel?.providerId && configuredGitModel?.modelId) {
+    const agent = selection.getSessionAgentSelection(sessionId) || lastChoice?.agent || config.currentAgentName || undefined;
+    const agentVariant = agent
+      ? selection.getAgentModelVariantForSession(sessionId, agent, configuredGitModel.providerId, configuredGitModel.modelId)
+      : undefined;
+    const variant = agentVariant || config.currentVariant || undefined;
+
+    return {
+      sessionId,
+      providerID: configuredGitModel.providerId,
+      modelID: configuredGitModel.modelId,
+      agent,
+      variant,
+    };
+  }
+
   const agent = selection.getSessionAgentSelection(sessionId) || lastChoice?.agent || config.currentAgentName || undefined;
   const sessionModel = selection.getSessionModelSelection(sessionId);
   const agentModel = agent ? selection.getAgentModelForSession(sessionId, agent) : null;

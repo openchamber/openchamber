@@ -1374,6 +1374,8 @@
   'settings.openchamber.defaults.option.default': '預設',
   'settings.openchamber.defaults.option.defaultLowercase': '預設',
   'settings.openchamber.git.title': 'Git 偏好設定',
+  'settings.openchamber.git.generationModelTitle': '產生模型',
+  'settings.openchamber.git.generationModelPlaceholder': '使用目前工作階段模型',
   'settings.openchamber.git.changesViewTitle': '變更檢視',
   'settings.openchamber.git.changesViewAria': 'Git 變更檢視模式',
   'settings.openchamber.git.option.flatList': '平面清單',

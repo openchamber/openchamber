@@ -453,6 +453,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['identity', 'profile', 'author', 'email', 'credentials', 'signing', 'commit signing', 'ssh signing', 'gpg'],
   },
   {
+    id: 'git.generation-model',
+    page: 'git',
+    titleKey: 'settings.openchamber.git.generationModelTitle',
+    keywords: ['commit', 'pr', 'description', 'model', 'provider'],
+  },
+  {
     id: 'git.changes-view',
     page: 'git',
     titleKey: 'settings.openchamber.git.changesViewTitle',

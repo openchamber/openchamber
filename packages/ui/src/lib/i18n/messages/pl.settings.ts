@@ -737,6 +737,8 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.hint.openAfterRestart': 'Po restarcie otwórz z innego urządzenia: ',
   'settings.openchamber.desktopNetwork.hint.openNow': 'Otwórz z innego urządzenia: ',
   'settings.openchamber.desktopNetwork.title': 'Dostęp sieciowy pulpitu',
+  'settings.openchamber.git.generationModelTitle': 'Model generowania',
+  'settings.openchamber.git.generationModelPlaceholder': 'Użyj modelu aktywnej sesji',
   'settings.openchamber.desktopNetwork.field.windowControlsPosition': 'Pozycja elementów sterujących oknem',
   'settings.openchamber.desktopNetwork.field.windowControlsPositionDescription': 'Wybierz, gdzie mają się pojawiać przyciski minimalizacji, maksymalizacji i zamykania. Automatycznie dopasowuje się do systemu operacyjnego.',
   'settings.openchamber.desktopNetwork.field.windowControlsPositionAria': 'Pozycja elementów sterujących oknem',

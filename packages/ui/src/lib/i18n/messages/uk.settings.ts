@@ -1463,6 +1463,8 @@ export const settingsDict = {
   "settings.openchamber.defaults.option.default": "За замовчуванням",
   "settings.openchamber.defaults.option.defaultLowercase": "за замовчуванням",
   "settings.openchamber.git.title": "Налаштування Git",
+  "settings.openchamber.git.generationModelTitle": "Модель генерації",
+  "settings.openchamber.git.generationModelPlaceholder": "Використовувати модель активної сесії",
   "settings.openchamber.git.changesViewTitle": "Перегляд змін",
   "settings.openchamber.git.changesViewAria": "Режим перегляду змін Git",
   "settings.openchamber.git.option.flatList": "Плоский список",

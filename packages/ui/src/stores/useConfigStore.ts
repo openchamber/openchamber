@@ -58,6 +58,8 @@ interface OpenChamberDefaults {
     gitmojiEnabled?: boolean;
     defaultFileViewerPreview?: boolean;
     zenModel?: string;
+    gitProviderId?: string;
+    gitModelId?: string;
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
     sttProvider?: 'local' | 'openai-compatible';
     sttServerUrl?: string;
@@ -93,6 +95,8 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                     const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
                     const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
                     const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
+                    const gitProviderId = typeof data?.gitProviderId === 'string' ? data.gitProviderId.trim() : '';
+                    const gitModelId = typeof data?.gitModelId === 'string' ? data.gitModelId.trim() : '';
                     const messageStreamTransport =
                         data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
                             ? data.messageStreamTransport
@@ -111,6 +115,8 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
                         gitmojiEnabled,
                         defaultFileViewerPreview,
                         zenModel: zenModel.length > 0 ? zenModel : undefined,
+                        gitProviderId: gitProviderId.length > 0 ? gitProviderId : undefined,
+                        gitModelId: gitModelId.length > 0 ? gitModelId : undefined,
                         messageStreamTransport,
                         sttProvider,
                         sttServerUrl,
@@ -139,6 +145,8 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
         const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
         const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
         const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
+        const gitProviderId = typeof data?.gitProviderId === 'string' ? data.gitProviderId.trim() : '';
+        const gitModelId = typeof data?.gitModelId === 'string' ? data.gitModelId.trim() : '';
         const messageStreamTransport =
             data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
                 ? data.messageStreamTransport
@@ -157,6 +165,8 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
             gitmojiEnabled,
             defaultFileViewerPreview,
             zenModel: zenModel.length > 0 ? zenModel : undefined,
+            gitProviderId: gitProviderId.length > 0 ? gitProviderId : undefined,
+            gitModelId: gitModelId.length > 0 ? gitModelId : undefined,
             messageStreamTransport,
             sttProvider,
             sttServerUrl,
@@ -983,6 +993,8 @@ interface ConfigStore {
     settingsGitmojiEnabled: boolean;
     settingsDefaultFileViewerPreview: boolean;
     settingsZenModel: string | undefined;
+    settingsGitProviderId: string | undefined;
+    settingsGitModelId: string | undefined;
     settingsMessageStreamTransport: 'auto' | 'ws' | 'sse';
     // Voice provider preference ('browser', 'openai', 'openai-compatible', or 'say' for macOS)
     voiceProvider: 'browser' | 'local' | 'openai' | 'openai-compatible' | 'say';
@@ -1063,6 +1075,7 @@ interface ConfigStore {
     setSettingsGitmojiEnabled: (enabled: boolean) => void;
     setSettingsDefaultFileViewerPreview: (enabled: boolean) => void;
     setSettingsZenModel: (model: string | undefined) => void;
+    setSettingsGitModel: (providerId: string | undefined, modelId: string | undefined) => void;
     setSettingsMessageStreamTransport: (transport: 'auto' | 'ws' | 'sse') => void;
     getResolvedGitGenerationModel: () => { providerId: string; modelId: string } | null;
     saveAgentModelSelection: (agentName: string, providerId: string, modelId: string) => void;
@@ -1123,6 +1136,8 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsGitmojiEnabled: false,
                 settingsDefaultFileViewerPreview: false,
                 settingsZenModel: undefined,
+                settingsGitProviderId: undefined,
+                settingsGitModelId: undefined,
                 settingsMessageStreamTransport: 'auto',
                 // Voice provider preference - load from localStorage or default to 'browser'
                 voiceProvider: (() => {
@@ -2032,6 +2047,8 @@ export const useConfigStore = create<ConfigStore>()(
                                     settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
                                     settingsDefaultFileViewerPreview: openChamberDefaults.defaultFileViewerPreview ?? false,
                                     settingsZenModel: resolvedZenModel,
+                                    settingsGitProviderId: openChamberDefaults.gitProviderId ?? state.settingsGitProviderId,
+                                    settingsGitModelId: openChamberDefaults.gitModelId ?? state.settingsGitModelId,
                                     settingsMessageStreamTransport: openChamberDefaults.messageStreamTransport ?? state.settingsMessageStreamTransport ?? 'auto',
                                     sttProvider: openChamberDefaults.sttProvider ?? state.sttProvider,
                                     sttServerUrl: openChamberDefaults.sttServerUrl ?? state.sttServerUrl,
@@ -2062,13 +2079,12 @@ export const useConfigStore = create<ConfigStore>()(
 
                             const shouldPersistResolvedZenModel =
                                 !!resolvedZenModel &&
-                                resolvedZenModel !== defaultZenModel;
+                                resolvedZenModel !== defaultZenModel &&
+                                !get().settingsGitProviderId;
 
                             if (shouldPersistResolvedZenModel && resolvedZenModel) {
                                 updateDesktopSettings({
                                     zenModel: resolvedZenModel,
-                                    gitProviderId: '',
-                                    gitModelId: '',
                                 }).catch(() => {
                                     // Ignore errors - best effort cleanup
                                 });
@@ -2764,12 +2780,19 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ settingsZenModel: model });
                 },
 
+                setSettingsGitModel: (providerId: string | undefined, modelId: string | undefined) => {
+                    set({ settingsGitProviderId: providerId, settingsGitModelId: modelId });
+                },
+
                 setSettingsMessageStreamTransport: (transport: 'auto' | 'ws' | 'sse') => {
                     set({ settingsMessageStreamTransport: transport });
                 },
 
                 getResolvedGitGenerationModel: () => {
                     const state = get();
+                    if (state.settingsGitProviderId && state.settingsGitModelId) {
+                        return { providerId: state.settingsGitProviderId, modelId: state.settingsGitModelId };
+                    }
                     return resolveGitGenerationModelSelection({
                         providers: state.providers,
                         settingsZenModel: state.settingsZenModel,
@@ -3283,6 +3306,8 @@ export const useConfigStore = create<ConfigStore>()(
                     settingsGitmojiEnabled: state.settingsGitmojiEnabled,
                     settingsDefaultFileViewerPreview: state.settingsDefaultFileViewerPreview,
                     settingsZenModel: state.settingsZenModel,
+                    settingsGitProviderId: state.settingsGitProviderId,
+                    settingsGitModelId: state.settingsGitModelId,
                     settingsMessageStreamTransport: state.settingsMessageStreamTransport,
                     speechRate: state.speechRate,
                     speechPitch: state.speechPitch,
