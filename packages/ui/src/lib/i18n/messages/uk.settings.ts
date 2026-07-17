@@ -1235,6 +1235,8 @@ export const settingsDict = {
   "settings.providers.page.connect.selectProviderTitle": "Вибрати провайдера",
   "settings.providers.page.connect.providerField": "Провайдер",
   "settings.providers.page.connect.selectProviderPlaceholder": "Виберіть провайдера",
+  "settings.providers.page.connect.selectProviderHint": "Виберіть провайдера, щоб налаштувати автентифікацію.",
+  "settings.providers.page.connect.backToProviders": "Назад до провайдерів",
   "settings.providers.page.connect.searchProvidersPlaceholder": "Пошук...",
   "settings.providers.page.connect.noProvidersFound": "Немає провайдерів",
   "settings.providers.page.connect.allProvidersConnected": "Усі провайдери підключені.",

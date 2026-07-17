@@ -1268,6 +1268,8 @@ export const settingsDict = {
   'settings.providers.page.connect.selectProviderTitle': 'Provider を選択',
   'settings.providers.page.connect.providerField': 'プロバイダー',
   'settings.providers.page.connect.selectProviderPlaceholder': 'Provider を選択',
+  'settings.providers.page.connect.selectProviderHint': '認証を設定するプロバイダーを選択してください。',
+  'settings.providers.page.connect.backToProviders': 'プロバイダー一覧に戻る',
   'settings.providers.page.connect.searchProvidersPlaceholder': '検索...',
   'settings.providers.page.connect.noProvidersFound': 'Provider が見つかりません',
   'settings.providers.page.connect.allProvidersConnected': 'すべての Provider が接続されています。',

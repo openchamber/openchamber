@@ -1268,6 +1268,8 @@ export const settingsDict = {
   'settings.providers.page.connect.selectProviderTitle': 'Select Provider',
   'settings.providers.page.connect.providerField': 'Provider',
   'settings.providers.page.connect.selectProviderPlaceholder': 'Select provider',
+  'settings.providers.page.connect.selectProviderHint': 'Choose a provider to configure authentication.',
+  'settings.providers.page.connect.backToProviders': 'Back to providers',
   'settings.providers.page.connect.searchProvidersPlaceholder': 'Search...',
   'settings.providers.page.connect.noProvidersFound': 'No providers found',
   'settings.providers.page.connect.allProvidersConnected': 'All providers connected.',

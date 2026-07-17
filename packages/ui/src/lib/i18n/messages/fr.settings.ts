@@ -1160,6 +1160,8 @@ export const settingsDict = {
   'settings.providers.page.connect.selectProviderTitle': 'Sélectionnez le fournisseur',
   'settings.providers.page.connect.providerField': 'Fournisseur',
   'settings.providers.page.connect.selectProviderPlaceholder': 'Sélectionnez le fournisseur',
+  'settings.providers.page.connect.selectProviderHint': 'Choisissez un fournisseur pour configurer l\'authentification.',
+  'settings.providers.page.connect.backToProviders': 'Retour aux fournisseurs',
   'settings.providers.page.connect.searchProvidersPlaceholder': 'Recherche...',
   'settings.providers.page.connect.noProvidersFound': 'Aucun fournisseur trouvé',
   'settings.providers.page.connect.allProvidersConnected': 'Tous les fournisseurs connectés.',

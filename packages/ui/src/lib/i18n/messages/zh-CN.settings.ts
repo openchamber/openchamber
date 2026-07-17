@@ -1235,6 +1235,8 @@ export const settingsDict = {
   'settings.providers.page.connect.selectProviderTitle': '选择提供商',
   'settings.providers.page.connect.providerField': '提供商',
   'settings.providers.page.connect.selectProviderPlaceholder': '选择提供商',
+  'settings.providers.page.connect.selectProviderHint': '选择一个提供商以配置身份验证。',
+  'settings.providers.page.connect.backToProviders': '返回提供商列表',
   'settings.providers.page.connect.searchProvidersPlaceholder': '搜索...',
   'settings.providers.page.connect.noProvidersFound': '未找到提供商',
   'settings.providers.page.connect.allProvidersConnected': '所有提供商均已连接。',

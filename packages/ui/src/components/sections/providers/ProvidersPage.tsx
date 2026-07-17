@@ -5,12 +5,6 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
@@ -24,6 +18,15 @@ import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
 import { shouldLoadAvailableProviders } from './providerAvailability';
+import {
+  filterUnconnectedProviders,
+  getProviderOptionLabel,
+  groupProviderOptions,
+  startProviderOAuth,
+  type AuthMethod,
+  type ProviderOAuthDetails,
+  type ProviderOption,
+} from './providerConnect';
 import { QuotaCredentials } from './QuotaCredentials';
 
 const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
@@ -45,21 +48,6 @@ const formatTokens = (value?: number | null) => {
 };
 
 const ADD_PROVIDER_ID = '__add_provider__';
-
-interface AuthMethod {
-  type?: string;
-  name?: string;
-  label?: string;
-  description?: string;
-  help?: string;
-  method?: number;
-  [key: string]: unknown;
-}
-
-interface ProviderOption {
-  id: string;
-  name?: string;
-}
 
 interface ProviderSourceInfo {
   exists: boolean;
@@ -162,16 +150,17 @@ export const ProvidersPage: React.FC = () => {
   const [modelQuery, setModelQuery] = React.useState('');
   const [pendingOAuth, setPendingOAuth] = React.useState<{ providerId: string; methodIndex: number } | null>(null);
   const [oauthCodes, setOauthCodes] = React.useState<Record<string, string>>({});
-  const [oauthDetails, setOauthDetails] = React.useState<Record<string, { url?: string; instructions?: string; userCode?: string }>>({});
+  const [oauthDetails, setOauthDetails] = React.useState<Record<string, ProviderOAuthDetails>>({});
   const [availableProviders, setAvailableProviders] = React.useState<ProviderOption[]>([]);
   const [availableLoading, setAvailableLoading] = React.useState(false);
   const [availableError, setAvailableError] = React.useState<string | null>(null);
   const [candidateProviderId, setCandidateProviderId] = React.useState('');
   const [providerSearchQuery, setProviderSearchQuery] = React.useState('');
-  const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
   const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
+  const hasCandidateProvider = candidateProviderId.length > 0;
+  const authBusyKeyRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -263,6 +252,16 @@ export const ProvidersPage: React.FC = () => {
           return labelA.localeCompare(labelB);
         }),
     [availableProviders, connectedProviderIds]
+  );
+
+  const filteredUnconnectedProviders = React.useMemo(
+    () => filterUnconnectedProviders(unconnectedProviders, providerSearchQuery),
+    [providerSearchQuery, unconnectedProviders]
+  );
+
+  const groupedUnconnectedProviders = React.useMemo(
+    () => groupProviderOptions(filteredUnconnectedProviders),
+    [filteredUnconnectedProviders]
   );
 
   React.useEffect(() => {
@@ -361,61 +360,21 @@ export const ProvidersPage: React.FC = () => {
   };
 
   const handleOAuthStart = async (providerId: string, methodIndex: number) => {
-    const busyKey = `oauth:${providerId}:${methodIndex}`;
-    setAuthBusyKey(busyKey);
-
-    try {
-      const result = await opencodeClient.getSdkClient().provider.oauth.authorize({
-        providerID: providerId,
-        method: methodIndex,
-      });
-      if (result.error) {
-        throw new Error(t('settings.providers.page.toast.oauthStartFailed'));
-      }
-
-      const payloadRecord: Record<string, unknown> = isRecord(result.data) ? result.data : {};
-      const nestedData = payloadRecord.data;
-      const dataRecord: Record<string, unknown> = isRecord(nestedData) ? nestedData : payloadRecord;
-      const urlCandidate =
-        (typeof dataRecord.url === 'string' && dataRecord.url) ||
-        (typeof dataRecord.verification_uri_complete === 'string' && dataRecord.verification_uri_complete) ||
-        (typeof dataRecord.verification_uri === 'string' && dataRecord.verification_uri) ||
-        undefined;
-      const instructions =
-        (typeof dataRecord.instructions === 'string' && dataRecord.instructions) ||
-        (typeof dataRecord.message === 'string' && dataRecord.message) ||
-        undefined;
-      const userCode =
-        (typeof dataRecord.user_code === 'string' && dataRecord.user_code) ||
-        (typeof dataRecord.code === 'string' && dataRecord.code) ||
-        (typeof dataRecord.userCode === 'string' && dataRecord.userCode) ||
-        undefined;
-
-      if (!urlCandidate && !instructions && !userCode) {
-        throw new Error(t('settings.providers.page.toast.oauthDetailsMissing'));
-      }
-
-      const detailsKey = `${providerId}:${methodIndex}`;
-      setOauthDetails((prev) => ({
-        ...prev,
-        [detailsKey]: {
-          url: urlCandidate,
-          instructions,
-          userCode,
-        },
-      }));
-
-      if (urlCandidate) {
-        void openExternalUrl(urlCandidate);
-      }
-      setPendingOAuth({ providerId, methodIndex });
-      toast.message(t('settings.providers.page.toast.completeOAuthInBrowser'));
-    } catch (error) {
-      console.error('Failed to start OAuth flow:', error);
-      toast.error(t('settings.providers.page.toast.oauthStartFailed'));
-    } finally {
-      setAuthBusyKey(null);
-    }
+    await startProviderOAuth({
+      providerId,
+      methodIndex,
+      authorize: (input) => opencodeClient.getSdkClient().provider.oauth.authorize(input),
+      authBusyKeyRef,
+      setAuthBusyKey,
+      setOauthDetails,
+      setPendingOAuth,
+      toastMessage: (message) => toast.message(message),
+      toastError: (message) => toast.error(message),
+      t,
+      onError: (error) => {
+        console.error('Failed to start OAuth flow:', error);
+      },
+    });
   };
 
   const handleOAuthComplete = async (providerId: string, methodIndex: number) => {
@@ -512,250 +471,266 @@ export const ProvidersPage: React.FC = () => {
 
   if (isAddMode) {
     return (
-      <ScrollableOverlay outerClassName="h-full" className="w-full">
-        <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+      <div className="h-full overflow-hidden">
+        <div className="mx-auto flex h-full w-full max-w-6xl flex-col p-3 sm:p-6 sm:pt-8">
           <div data-settings-item="providers.connect" className="mb-4">
             <h1 className="typography-ui-header font-semibold text-foreground">{t('settings.providers.page.connect.title')}</h1>
           </div>
 
-          <div className="mb-8">
-            <div className="mb-1 px-1">
-              <h2 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.connect.selectProviderTitle')}</h2>
-            </div>
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 xl:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
+            <section
+              className={cn(
+                'min-h-0 flex-col rounded-xl border border-[var(--surface-subtle)] bg-[var(--surface-elevated)]',
+                hasCandidateProvider ? 'hidden xl:flex' : 'flex'
+              )}
+            >
+              <div className="border-b border-[var(--surface-subtle)] px-4 py-4">
+                <div className="relative">
+                  <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={providerSearchQuery}
+                    onChange={(event) => setProviderSearchQuery(event.target.value)}
+                    placeholder={t('settings.providers.page.connect.searchProvidersPlaceholder')}
+                    className="h-10 pl-9"
+                    autoFocus
+                  />
+                </div>
+              </div>
 
-            <section className="px-2 pb-2 pt-0">
-              <div className="flex flex-wrap items-center gap-2 py-1.5">
-                <span className="typography-ui-label text-foreground">{t('settings.providers.page.connect.providerField')}</span>
-                  {availableLoading ? (
-                    <p className="typography-meta text-muted-foreground">{t('settings.providers.page.state.loading')}</p>
-                  ) : availableError ? (
-                    <p className="typography-meta text-muted-foreground">{availableError}</p>
-                  ) : unconnectedProviders.length === 0 ? (
-                    <p className="typography-meta text-muted-foreground">{t('settings.providers.page.connect.allProvidersConnected')}</p>
-                  ) : (
-                    <DropdownMenu open={providerDropdownOpen} onOpenChange={(open) => {
-                      setProviderDropdownOpen(open);
-                      if (!open) setProviderSearchQuery('');
-                    }}>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          className={cn(
-                            "flex items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-2 py-2 typography-ui-label whitespace-nowrap shadow-none outline-none hover:bg-interactive-hover h-6 w-fit",
-                          )}
-                        >
-                          <span className="flex items-center gap-2 min-w-0">
-                            {candidateProviderId ? <ProviderLogo providerId={candidateProviderId} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-                            <span className={cn("truncate typography-ui-label font-normal", candidateProviderId ? "text-foreground" : "text-muted-foreground")}>
-                              {candidateProviderId
-                                ? (unconnectedProviders.find(p => p.id === candidateProviderId)?.name || candidateProviderId)
-                                : t('settings.providers.page.connect.selectProviderPlaceholder')}
-                            </span>
-                          </span>
-                          <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="start"
-                        className="w-[280px] p-0"
-                        onCloseAutoFocus={(e) => e.preventDefault()}
-                      >
-                        <div
-                          className="flex items-center gap-2 border-b border-[var(--surface-subtle)] px-3 py-2"
-                          onKeyDown={(e) => e.stopPropagation()}
-                        >
-                          <Icon name="search" className="h-4 w-4 text-muted-foreground" />
-                          <input
-                            type="text"
-                            value={providerSearchQuery}
-                            onChange={(e) => setProviderSearchQuery(e.target.value)}
-                            onKeyDown={(e) => e.stopPropagation()}
-                            placeholder={t('settings.providers.page.connect.searchProvidersPlaceholder')}
-                            className="flex-1 bg-transparent typography-meta outline-none placeholder:text-muted-foreground"
-                            autoFocus
-                          />
+              <div className="min-h-0 flex-1 px-2 py-2">
+                {availableLoading ? (
+                  <div className="px-2 py-3 typography-meta text-muted-foreground">{t('settings.providers.page.state.loading')}</div>
+                ) : availableError ? (
+                  <div className="px-2 py-3 typography-meta text-muted-foreground">{availableError}</div>
+                ) : unconnectedProviders.length === 0 ? (
+                  <div className="px-2 py-3 typography-meta text-muted-foreground">{t('settings.providers.page.connect.allProvidersConnected')}</div>
+                ) : filteredUnconnectedProviders.length === 0 ? (
+                  <div className="px-2 py-6 text-center typography-meta text-muted-foreground">{t('settings.providers.page.connect.noProvidersFound')}</div>
+                ) : (
+                  <ScrollableOverlay outerClassName="h-full" className="space-y-3 pr-1">
+                    {groupedUnconnectedProviders.map(([groupKey, groupProviders]) => (
+                      <div key={groupKey} className="space-y-1">
+                        <div className="px-2 pb-1 pt-1 typography-micro font-semibold uppercase tracking-wide text-muted-foreground">
+                          {groupKey}
                         </div>
-                        <ScrollableOverlay outerClassName="max-h-[240px]" className="p-1">
-                          {(() => {
-                            const filtered = unconnectedProviders.filter(p => {
-                              const query = providerSearchQuery.toLowerCase();
-                              return (p.name || p.id).toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
-                            });
-                            if (filtered.length === 0) {
-                              return <p className="py-4 text-center typography-meta text-muted-foreground">{t('settings.providers.page.connect.noProvidersFound')}</p>;
-                            }
-                            return filtered.map((provider) => (
-                              <DropdownMenuItem
-                                key={provider.id}
-                                onSelect={() => {
-                                  setCandidateProviderId(provider.id);
-                                  setProviderDropdownOpen(false);
-                                  setProviderSearchQuery('');
-                                }}
-                                className="flex items-center justify-between"
-                              >
-                                <span className="flex items-center gap-2 min-w-0">
-                                  <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />
-                                  <span className="truncate">{provider.name || provider.id}</span>
-                                </span>
-                                {candidateProviderId === provider.id && (
-                                  <Icon name="check" className="h-4 w-4 text-[var(--primary-base)]" />
-                                )}
-                              </DropdownMenuItem>
-                            ));
-                          })()}
-                        </ScrollableOverlay>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                   )}
-              </div>
-            </section>
-          </div>
-
-          {candidateProviderId && (
-            <div data-settings-item="providers.auth" className="mb-8">
-              <div className="mb-1 px-1">
-                <h2 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.auth.title')}</h2>
-              </div>
-
-              {authLoading ? (
-                <p className="typography-meta text-muted-foreground px-2">{t('settings.providers.page.auth.loadingMethods')}</p>
-              ) : (
-                <section className="px-2 pb-2 pt-0 space-y-4">
-                  <div className="py-1.5">
-                    <label className="typography-ui-label text-foreground flex items-center gap-1.5">
-                      {t('settings.providers.page.auth.apiKeyLabel')}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                        </TooltipTrigger>
-                        <TooltipContent sideOffset={8} className="max-w-xs">
-                          {t('settings.providers.page.auth.apiKeyTooltip')}
-                        </TooltipContent>
-                      </Tooltip>
-                    </label>
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-1.5">
-                      <Input
-                        type="password"
-                        value={apiKeyInputs[candidateProviderId] ?? ''}
-                        onChange={(event) =>
-                          setApiKeyInputs((prev) => ({
-                            ...prev,
-                            [candidateProviderId]: event.target.value,
-                          }))
-                        }
-                        placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
-                        className="flex-1 font-mono text-xs"
-                      />
-                      <Button
-                        size="xs"
-                        className="!font-normal shrink-0"
-                        onClick={() => handleSaveApiKey(candidateProviderId)}
-                        disabled={authBusyKey === `api:${candidateProviderId}`}
-                      >
-                        {authBusyKey === `api:${candidateProviderId}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
-                      </Button>
-                    </div>
-                  </div>
-
-                  {(() => {
-                    const candidateAuthMethods = authMethodsByProvider[candidateProviderId] ?? [];
-                    const candidateOAuthMethods = candidateAuthMethods.filter(
-                      (method) => normalizeAuthType(method) === 'oauth'
-                    );
-
-                    if (candidateOAuthMethods.length === 0) {
-                      return null;
-                    }
-
-                    return (
-                      <div className="space-y-4 border-t border-[var(--surface-subtle)] pt-2">
-                        {candidateOAuthMethods.map((method, index) => {
-                          const methodLabel = method.label || method.name || t('settings.providers.page.auth.oauthMethodFallback', { index: String(index + 1) });
-                          const codeKey = `${candidateProviderId}:${index}`;
-                          const isPending =
-                            pendingOAuth?.providerId === candidateProviderId && pendingOAuth?.methodIndex === index;
-
+                        {groupProviders.map((provider) => {
+                          const isSelected = candidateProviderId === provider.id;
                           return (
-                            <div key={`${candidateProviderId}-${methodLabel}`} className="space-y-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <div>
-                                  <div className="typography-ui-label text-foreground">{methodLabel}</div>
-                                  {(method.description || method.help) && (
-                                    <div className="typography-meta text-muted-foreground">
-                                      {String(method.description || method.help)}
-                                    </div>
-                                  )}
+                            <button
+                              key={provider.id}
+                              type="button"
+                              onClick={() => setCandidateProviderId(provider.id)}
+                              className={cn(
+                                'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors',
+                                isSelected ? 'bg-interactive-selection text-interactive-selection-foreground' : 'hover:bg-interactive-hover'
+                              )}
+                            >
+                              <ProviderLogo providerId={provider.id} className="h-4 w-4 shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate typography-ui-label font-normal">
+                                  {getProviderOptionLabel(provider)}
                                 </div>
-                                <Button
-                                  variant="outline"
-                                  size="xs"
-                                  className="!font-normal"
-                                  onClick={() => handleOAuthStart(candidateProviderId, index)}
-                                  disabled={authBusyKey === `oauth:${candidateProviderId}:${index}`}
-                                >
-                                  {t('settings.providers.page.actions.connect')}
-                                </Button>
+                                <div className={cn(
+                                  'truncate typography-meta',
+                                  isSelected ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground'
+                                )}>
+                                  {provider.id}
+                                </div>
                               </div>
-
-                              {oauthDetails[codeKey]?.instructions && (
-                                <p className="typography-meta text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-2 py-1.5 rounded">
-                                  {oauthDetails[codeKey]?.instructions}
-                                </p>
-                              )}
-
-                              {oauthDetails[codeKey]?.userCode && (
-                                <div className="flex items-center gap-2 mt-2">
-                                  <Input value={oauthDetails[codeKey]?.userCode} readOnly className="font-mono text-center tracking-widest" />
-                                  <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>{t('settings.providers.page.actions.copyCode')}</Button>
-                                </div>
-                              )}
-
-                              {oauthDetails[codeKey]?.url && (
-                                <div className="flex items-center gap-2 mt-2">
-                                  <Input value={oauthDetails[codeKey]?.url} readOnly className="text-xs text-muted-foreground" />
-                                  <div className="flex gap-1 shrink-0">
-                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>{t('settings.providers.page.actions.open')}</Button>
-                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>{t('settings.providers.page.actions.copy')}</Button>
-                                  </div>
-                                </div>
-                              )}
-
-                              {isPending && (
-                                <div className="flex items-center gap-2 mt-2">
-                                  <Input
-                                    value={oauthCodes[codeKey] ?? ''}
-                                    onChange={(event) =>
-                                      setOauthCodes((prev) => ({
-                                        ...prev,
-                                        [codeKey]: event.target.value,
-                                      }))
-                                    }
-                                    placeholder={t('settings.providers.page.auth.pasteAuthorizationCodePlaceholder')}
-                                    className="font-mono text-xs"
-                                  />
-                                  <Button
-                                    size="xs"
-                                    className="!font-normal"
-                                    onClick={() => handleOAuthComplete(candidateProviderId, index)}
-                                    disabled={authBusyKey === `oauth-complete:${candidateProviderId}:${index}`}
-                                  >
-                                    {authBusyKey === `oauth-complete:${candidateProviderId}:${index}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.complete')}
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
+                              {isSelected ? <Icon name="check" className="h-4 w-4 shrink-0" /> : null}
+                            </button>
                           );
                         })}
                       </div>
-                    );
-                  })()}
-                </section>
+                    ))}
+                  </ScrollableOverlay>
+                )}
+              </div>
+            </section>
+
+            <section
+              data-settings-item="providers.auth"
+              className={cn(
+                'min-h-0 rounded-xl border border-[var(--surface-subtle)] bg-background',
+                hasCandidateProvider ? 'block' : 'hidden xl:block'
               )}
-            </div>
-          )}
+            >
+              {!candidateProviderId ? (
+                <div className="flex h-full min-h-[18rem] items-center justify-center px-6 py-10 text-center text-muted-foreground">
+                  <div>
+                    <Icon name="stack" className="mx-auto mb-3 h-10 w-10 opacity-50" />
+                    <p className="typography-ui-label text-foreground">{t('settings.providers.page.connect.selectProviderPlaceholder')}</p>
+                    <p className="mt-1 typography-meta">{t('settings.providers.page.connect.selectProviderHint')}</p>
+                  </div>
+                </div>
+              ) : (
+                <ScrollableOverlay outerClassName="h-full" className="w-full">
+                  <div className="p-4 sm:p-6">
+                    <div className="mb-4 xl:hidden">
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="-ml-2 !font-normal"
+                        onClick={() => setCandidateProviderId('')}
+                      >
+                        <Icon name="arrow-left-s" className="h-4 w-4" />
+                        {t('settings.providers.page.connect.backToProviders')}
+                      </Button>
+                    </div>
+
+                    <div className="mb-4 flex items-center gap-3">
+                      <ProviderLogo providerId={candidateProviderId} className="h-5 w-5 shrink-0" />
+                      <div className="min-w-0">
+                        <h2 className="truncate typography-ui-header font-semibold text-foreground">
+                          {getProviderOptionLabel(unconnectedProviders.find((provider) => provider.id === candidateProviderId) ?? { id: candidateProviderId })}
+                        </h2>
+                        <p className="truncate typography-meta text-muted-foreground">
+                          <span className="font-mono">{candidateProviderId}</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    {authLoading ? (
+                      <p className="typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</p>
+                    ) : (
+                      <section className="space-y-4">
+                        <div className="py-1.5">
+                          <label className="flex items-center gap-1.5 typography-ui-label text-foreground">
+                            {t('settings.providers.page.auth.apiKeyLabel')}
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Icon name="information" className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
+                              </TooltipTrigger>
+                              <TooltipContent sideOffset={8} className="max-w-xs">
+                                {t('settings.providers.page.auth.apiKeyTooltip')}
+                              </TooltipContent>
+                            </Tooltip>
+                          </label>
+                          <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <Input
+                              type="password"
+                              value={apiKeyInputs[candidateProviderId] ?? ''}
+                              onChange={(event) =>
+                                setApiKeyInputs((prev) => ({
+                                  ...prev,
+                                  [candidateProviderId]: event.target.value,
+                                }))
+                              }
+                              placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
+                              className="flex-1 font-mono text-xs"
+                            />
+                            <Button
+                              size="xs"
+                              className="shrink-0 !font-normal"
+                              onClick={() => handleSaveApiKey(candidateProviderId)}
+                              disabled={authBusyKey === `api:${candidateProviderId}`}
+                            >
+                              {authBusyKey === `api:${candidateProviderId}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
+                            </Button>
+                          </div>
+                        </div>
+
+                        {(() => {
+                          const candidateAuthMethods = authMethodsByProvider[candidateProviderId] ?? [];
+                          const candidateOAuthMethods = candidateAuthMethods.filter(
+                            (method) => normalizeAuthType(method) === 'oauth'
+                          );
+
+                          if (candidateOAuthMethods.length === 0) {
+                            return null;
+                          }
+
+                          return (
+                            <div className="space-y-4 border-t border-[var(--surface-subtle)] pt-2">
+                              {candidateOAuthMethods.map((method, index) => {
+                                const methodLabel = method.label || method.name || t('settings.providers.page.auth.oauthMethodFallback', { index: String(index + 1) });
+                                const codeKey = `${candidateProviderId}:${index}`;
+                                const isPending =
+                                  pendingOAuth?.providerId === candidateProviderId && pendingOAuth?.methodIndex === index;
+
+                                return (
+                                  <div key={`${candidateProviderId}-${methodLabel}`} className="space-y-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div>
+                                        <div className="typography-ui-label text-foreground">{methodLabel}</div>
+                                        {(method.description || method.help) && (
+                                          <div className="typography-meta text-muted-foreground">
+                                            {String(method.description || method.help)}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <Button
+                                        variant="outline"
+                                        size="xs"
+                                        className="!font-normal"
+                                        onClick={() => handleOAuthStart(candidateProviderId, index)}
+                                        disabled={authBusyKey === `oauth:${candidateProviderId}:${index}`}
+                                      >
+                                        {t('settings.providers.page.actions.connect')}
+                                      </Button>
+                                    </div>
+
+                                    {oauthDetails[codeKey]?.instructions && (
+                                      <p className="rounded bg-[var(--primary-base)]/10 px-2 py-1.5 typography-meta text-[var(--primary-base)]">
+                                        {oauthDetails[codeKey]?.instructions}
+                                      </p>
+                                    )}
+
+                                    {oauthDetails[codeKey]?.userCode && (
+                                      <div className="mt-2 flex items-center gap-2">
+                                        <Input value={oauthDetails[codeKey]?.userCode} readOnly className="font-mono text-center tracking-widest" />
+                                        <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>{t('settings.providers.page.actions.copyCode')}</Button>
+                                      </div>
+                                    )}
+
+                                    {oauthDetails[codeKey]?.url && (
+                                      <div className="mt-2 flex items-center gap-2">
+                                        <Input value={oauthDetails[codeKey]?.url} readOnly className="text-xs text-muted-foreground" />
+                                        <div className="flex shrink-0 gap-1">
+                                          <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>{t('settings.providers.page.actions.open')}</Button>
+                                          <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>{t('settings.providers.page.actions.copy')}</Button>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {isPending && (
+                                      <div className="mt-2 flex items-center gap-2">
+                                        <Input
+                                          value={oauthCodes[codeKey] ?? ''}
+                                          onChange={(event) =>
+                                            setOauthCodes((prev) => ({
+                                              ...prev,
+                                              [codeKey]: event.target.value,
+                                            }))
+                                          }
+                                          placeholder={t('settings.providers.page.auth.pasteAuthorizationCodePlaceholder')}
+                                          className="font-mono text-xs"
+                                        />
+                                        <Button
+                                          size="xs"
+                                          className="!font-normal"
+                                          onClick={() => handleOAuthComplete(candidateProviderId, index)}
+                                          disabled={authBusyKey === `oauth-complete:${candidateProviderId}:${index}`}
+                                        >
+                                          {authBusyKey === `oauth-complete:${candidateProviderId}:${index}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.complete')}
+                                        </Button>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </section>
+                    )}
+                  </div>
+                </ScrollableOverlay>
+              )}
+            </section>
+          </div>
         </div>
-      </ScrollableOverlay>
+      </div>
     );
   }
 

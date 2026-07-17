@@ -1146,6 +1146,8 @@
   'settings.providers.page.connect.selectProviderTitle': '選擇供應商',
   'settings.providers.page.connect.providerField': '供應商',
   'settings.providers.page.connect.selectProviderPlaceholder': '選擇供應商',
+  'settings.providers.page.connect.selectProviderHint': '選擇要設定驗證的供應商。',
+  'settings.providers.page.connect.backToProviders': '返回供應商列表',
   'settings.providers.page.connect.searchProvidersPlaceholder': '搜尋...',
   'settings.providers.page.connect.noProvidersFound': '找不到供應商',
   'settings.providers.page.connect.allProvidersConnected': '所有供應商均已連線。',

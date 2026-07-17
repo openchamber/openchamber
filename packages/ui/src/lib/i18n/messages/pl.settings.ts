@@ -1308,6 +1308,8 @@ export const settingsDict = {
   'settings.providers.page.connect.providerField': 'Dostawca',
   'settings.providers.page.connect.searchProvidersPlaceholder': 'Szukaj...',
   'settings.providers.page.connect.selectProviderPlaceholder': 'Wybierz dostawcę',
+  'settings.providers.page.connect.selectProviderHint': 'Wybierz dostawcę, aby skonfigurować uwierzytelnianie.',
+  'settings.providers.page.connect.backToProviders': 'Powrót do dostawców',
   'settings.providers.page.connect.selectProviderTitle': 'Wybierz dostawcę',
   'settings.providers.page.connect.title': 'Połącz dostawcę',
   'settings.providers.page.connectionDetails.configuredIn': 'Skonfigurowano w:',

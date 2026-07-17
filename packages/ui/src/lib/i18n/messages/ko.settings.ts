@@ -1235,6 +1235,8 @@ export const settingsDict = {
   'settings.providers.page.connect.selectProviderTitle': '프로바이더 선택',
   'settings.providers.page.connect.providerField': '프로바이더',
   'settings.providers.page.connect.selectProviderPlaceholder': '프로바이더 선택',
+  'settings.providers.page.connect.selectProviderHint': '인증을 구성할 프로바이더를 선택하세요.',
+  'settings.providers.page.connect.backToProviders': '프로바이더 목록으로',
   'settings.providers.page.connect.searchProvidersPlaceholder': '검색...',
   'settings.providers.page.connect.noProvidersFound': '프로바이더를 찾을 수 없습니다',
   'settings.providers.page.connect.allProvidersConnected': '모든 프로바이더가 연결되었습니다.',

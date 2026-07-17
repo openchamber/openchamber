@@ -607,6 +607,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       useConfigStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
     }
 
+    if (result.id === 'providers.auth') {
+      const configStore = useConfigStore.getState();
+      const isNarrowProvidersAddFlow = configStore.selectedProviderId === ADD_PROVIDER_SETTINGS_ID
+        && typeof window !== 'undefined'
+        && window.matchMedia('(max-width: 1279.98px)').matches;
+
+      if (isNarrowProvidersAddFlow) {
+        return 'providers.connect';
+      }
+    }
+
     if (result.id === 'plugins.create') {
       return 'plugins.spec';
     }
