@@ -17,7 +17,7 @@ type SupersedeIncomingPayload = {
 };
 
 /**
- * Listens for messenger.discord.supersede_incoming events from the Otto
+ * Listens for messenger.discord.supersede_incoming events from the OpenChamber agent
  * WebSocket and stores the incoming Discord message text in the pending
  * Discord store so the UI can render it immediately — before the aborted
  * turn settles and the real OpenCode response begins streaming.

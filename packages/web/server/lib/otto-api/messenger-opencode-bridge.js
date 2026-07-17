@@ -424,7 +424,7 @@ async function addThreadMembers({ token, threadId, userIds }) {
  */
 async function startDiscordThread({ token, channelId, messageId, name, userId }) {
   if (!messageId) return { ok: false, error: 'no source message id' };
-  const safeName = (name || 'Otto').replace(/\s+/g, ' ').slice(0, 80) || 'Otto';
+  const safeName = (name || 'OpenChamber agent').replace(/\s+/g, ' ').slice(0, 80) || 'OpenChamber agent';
   const r = await fetch(
     `https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/threads`,
     {
@@ -448,7 +448,7 @@ async function startDiscordThread({ token, channelId, messageId, name, userId })
  * error (callers fall back to posting in the channel itself).
  */
 async function startStandaloneDiscordThread({ token, channelId, name, userIds }) {
-  const safeName = (name || 'Otto').replace(/\s+/g, ' ').slice(0, 90) || 'Otto';
+  const safeName = (name || 'OpenChamber agent').replace(/\s+/g, ' ').slice(0, 90) || 'OpenChamber agent';
   const r = await fetch(
     `https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/threads`,
     {
@@ -2200,7 +2200,7 @@ export function createMessengerOpencodeBridge({
           // mirror thread is created), then the user's first line, then a
           // generic project label. The polling title sweep upgrades the name
           // later if the title lands after creation.
-          let name = threadName || target.threadName || `Otto · ${target.projectLabel ?? 'web'}`;
+          let name = threadName || target.threadName || `OpenChamber agent · ${target.projectLabel ?? 'web'}`;
           try {
             const dir = effectiveProjectPath ? `?directory=${encodeURIComponent(effectiveProjectPath)}` : '';
             const sRes = await opencodeFetch(`/session/${encodeURIComponent(sessionId)}${dir}`);
@@ -2299,7 +2299,7 @@ export function createMessengerOpencodeBridge({
     // later continued from Discord.
     if (consumeMessengerInbound(sessionId, text)) return;
     // Name the thread (when one is created) after the user's first line so the
-    // Discord thread list is meaningful instead of a wall of "Otto · web".
+    // Discord thread list is meaningful instead of a wall of "OpenChamber agent · web".
     const threadName = text ? clipBlock(text.split('\n')[0], 80) : null;
     const ctx = await ensureDefaultSessionContext(sessionId, { projectPath, threadName });
     if (!ctx?.webMirror) return;
@@ -3754,7 +3754,7 @@ export function createMessengerOpencodeBridge({
           bootstrapPending.delete(surfaceKey);
           await postMessengerSurface(
             { type, token, channelId, threadId: threadId ?? null },
-            `✓ Project ready: *${escapeMd(result.project.label ?? result.project.path)}* → ${escapeMd(result.project.path)}\nOtto will use this directory from now on. Re-sending your earlier message…`,
+            `✓ Project ready: *${escapeMd(result.project.label ?? result.project.path)}* → ${escapeMd(result.project.path)}\nOpenChamber agent will use this directory from now on. Re-sending your earlier message…`,
           );
           // Recurse with the stashed original text + the now-known project.
           // sourceMessageId remains from the ORIGINAL message so the thread
@@ -3804,18 +3804,18 @@ export function createMessengerOpencodeBridge({
             });
             const intro =
               type === 'discord'
-                ? `**Otto — new channel detected**`
-                : `🤖 *Otto — new chat detected*`;
+                ? `**OpenChamber agent — new channel detected**`
+                : `🤖 *OpenChamber agent — new chat detected*`;
             const guidance = [
               intro,
               ``,
               `I don't have a project bound to this ${type === 'discord' ? 'channel' : 'chat'} yet.`,
               `Reply with one of:`,
-              `• \`clone <git-url>\` — git-clone the repo into Otto's projects folder`,
+              `• \`clone <git-url>\` — git-clone the repo into OpenChamber agent's projects folder`,
               `• \`path </absolute/path>\` — use an existing folder on the server`,
               `• \`new <project-name>\` — create an empty project`,
               ``,
-              `Your message _"${clipBlock(text, 120)}"_ is stashed; I'll re-send it to Otto once the project is ready.`,
+              `Your message _"${clipBlock(text, 120)}"_ is stashed; I'll re-send it to OpenChamber agent once the project is ready.`,
             ].join('\n');
             await postMessengerSurface(
               { type, token, channelId, threadId: threadId ?? null },
@@ -3842,7 +3842,7 @@ export function createMessengerOpencodeBridge({
     if (type === 'discord' && !effectiveThreadId && sourceMessageId) {
       // Initial name: whole message collapsed to one line,
       // capped at 80 chars. Renamed later to OpenCode's generated title.
-      const threadName = text.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Otto';
+      const threadName = text.replace(/\s+/g, ' ').trim().slice(0, 80) || 'OpenChamber agent';
       const thread = await startDiscordThread({
         token,
         channelId,
@@ -4052,7 +4052,7 @@ export function createMessengerOpencodeBridge({
       } catch (err) {
         const errMsg = err?.message ?? 'prompt failed';
         stopTypingPulse(ctx);
-        await postToSurface(ctx, `⚠ Otto could not reach OpenCode: ${escapeMd(clipBlock(errMsg, 300))}`);
+        await postToSurface(ctx, `⚠ OpenChamber agent could not reach OpenCode: ${escapeMd(clipBlock(errMsg, 300))}`);
         return { ok: false, sessionId, threadId: effectiveThreadId, error: errMsg };
       }
 

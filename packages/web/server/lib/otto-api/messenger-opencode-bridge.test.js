@@ -244,11 +244,11 @@ describe('discord project sync persistence', () => {
         return {
           ok: true,
           status: 200,
-          json: async () => [{ id: 'chan-otto-ui', name: 'otto-ui', type: 0, position: 1 }],
+          json: async () => [{ id: 'chan-demo-ui', name: 'demo-ui', type: 0, position: 1 }],
           text: async () => '',
         };
       }
-      if (u.includes('/channels/chan-otto-ui/messages')) {
+      if (u.includes('/channels/chan-demo-ui/messages')) {
         return {
           ok: true,
           status: 200,
@@ -267,7 +267,7 @@ describe('discord project sync persistence', () => {
         broadcastEvent: () => {},
         readSettings: async () => ({
           discord: { botToken: 'old-token', guildId: 'guild-1', defaultChannelId: 'general' },
-          projects: [{ id: 'proj-1', path: '/data/projects/otto-ui', label: 'Otto Ui' }],
+          projects: [{ id: 'proj-1', path: '/data/projects/otto-ui', label: 'Demo Ui' }],
         }),
         persistSettings,
         sanitizeProjects: (projects) => projects,
@@ -280,7 +280,7 @@ describe('discord project sync persistence', () => {
         token: 'bot-token',
         guildId: 'guild-1',
         createThreads: false,
-        projects: [{ id: 'proj-1', label: 'Otto Ui', body: 'sync body' }],
+        projects: [{ id: 'proj-1', label: 'Demo Ui', body: 'sync body' }],
         mappings: [],
       })
       .expect(200);
@@ -289,7 +289,7 @@ describe('discord project sync persistence', () => {
     expect(res.body.channels[0]).toMatchObject({
       projectId: 'proj-1',
       projectPath: '/data/projects/otto-ui',
-      channelId: 'chan-otto-ui',
+      channelId: 'chan-demo-ui',
     });
     expect(persistSettings).toHaveBeenCalledWith({
       discord: expect.objectContaining({
@@ -297,7 +297,7 @@ describe('discord project sync persistence', () => {
         guildId: 'guild-1',
         defaultChannelId: 'general',
         projectBindings: [
-          { channelId: 'chan-otto-ui', projectPath: '/data/projects/otto-ui', projectLabel: 'Otto Ui' },
+          { channelId: 'chan-demo-ui', projectPath: '/data/projects/otto-ui', projectLabel: 'Demo Ui' },
         ],
       }),
     });
@@ -712,7 +712,7 @@ describe('discord inbound mirroring', () => {
     // The status reply is posted back to the originating channel.
     const reply = calls.find(([url]) => url.includes('/channels/channel-1/messages'));
     expect(reply).toBeTruthy();
-    expect(JSON.parse(reply[1].body).content).toContain('Otto status');
+    expect(JSON.parse(reply[1].body).content).toContain('OpenChamber agent status');
   });
 
   it('does not echo a Discord reply back into a web-created thread (mixed surface)', async () => {

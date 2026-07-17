@@ -747,7 +747,7 @@ export function createMessengerSyncRouter({
   /**
    * Per-project Discord sync. For each project we find-or-create a text channel
    * under an optional parent category, post a status message, and (optionally)
-   * spawn a thread from that message named "Otto sync — {date}" so details
+   * spawn a thread from that message named "OpenChamber agent sync — {date}" so details
    * stay out of the main channel feed.
    *
    * Body: {
@@ -896,7 +896,7 @@ export function createMessengerSyncRouter({
                 name: desiredSlug,
                 type: 0, // GUILD_TEXT
                 parent_id: parentCategoryId || null,
-                topic: `Otto sync channel for project ${label}`.slice(0, 1024),
+                topic: `OpenChamber agent sync channel for project ${label}`.slice(0, 1024),
               }),
             },
           );
@@ -929,7 +929,7 @@ export function createMessengerSyncRouter({
               method: 'POST',
               headers,
               body: JSON.stringify({
-                content: String(project.body ?? `Otto sync update for ${label}`).slice(0, 2000),
+                content: String(project.body ?? `OpenChamber agent sync update for ${label}`).slice(0, 2000),
               }),
             },
           );
@@ -949,7 +949,7 @@ export function createMessengerSyncRouter({
         // entryError so the row can render "channel ✓ message ✓ thread ✗"
         // instead of dropping the whole project on the floor.
         if (!entryError && messageId && createThreads !== false) {
-          threadName = `Otto sync — ${new Date().toISOString().slice(0, 10)}`;
+          threadName = `OpenChamber agent sync — ${new Date().toISOString().slice(0, 10)}`;
           await sleep(SYNC_THREAD_DELAY_MS);
           try {
             const tResp = await discordFetch(
@@ -1019,7 +1019,7 @@ export function createMessengerSyncRouter({
         continue;
       }
       const retryThreadName =
-        row.threadName ?? `Otto sync — ${new Date().toISOString().slice(0, 10)}`;
+        row.threadName ?? `OpenChamber agent sync — ${new Date().toISOString().slice(0, 10)}`;
       await sleep(SYNC_THREAD_DELAY_MS * 2);
       try {
         const tResp = await discordFetch(
@@ -1332,7 +1332,7 @@ export function createMessengerSyncRouter({
                 name: slug,
                 type: 0,
                 parent_id: discord.parentCategoryId ?? null,
-                topic: `Otto sync channel for ${projectLabel}`.slice(0, 1024),
+                topic: `OpenChamber agent sync channel for ${projectLabel}`.slice(0, 1024),
               }),
             },
           );
@@ -1408,7 +1408,7 @@ export function createMessengerSyncRouter({
   /**
    * The UI renamed a project → rename its Discord channel to match and update
    * the persisted projectLabel on the binding. Creates the channel when the
-   * project has no binding yet (so renaming a project Otto never saw still
+   * project has no binding yet (so renaming a project OpenChamber agent never saw still
    * produces a channel). Best-effort — Discord errors are reported, not thrown.
    *
    * Body: { project: { id?, path, label }, discord: { token, guildId?, parentCategoryId? } }
@@ -1469,7 +1469,7 @@ export function createMessengerSyncRouter({
             headers,
             body: JSON.stringify({
               name: slug,
-              topic: `Otto sync channel for ${projectLabel}`.slice(0, 1024),
+              topic: `OpenChamber agent sync channel for ${projectLabel}`.slice(0, 1024),
             }),
           },
         );
@@ -1874,7 +1874,7 @@ export function createMessengerSyncRouter({
     const preamble = `**⚠️ Permission Required**\n**Type:** \`${escapeMd(String(permission?.permission ?? 'approval'))}\``;
     const bodyContent = permissionContext
       ? `${preamble}\n\n${permissionContext}\n\n${String(prompt).slice(0, 1000)}`
-      : `**Otto needs approval**\n${String(prompt).slice(0, 1600)}`;
+      : `**OpenChamber agent needs approval**\n${String(prompt).slice(0, 1600)}`;
 
     const body = {
       content: bodyContent.slice(0, 1900),

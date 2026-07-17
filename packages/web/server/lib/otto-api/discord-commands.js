@@ -1,5 +1,5 @@
 /**
- * Native Discord application (slash) command registration for the Otto bot.
+ * Native Discord application (slash) command registration for the OpenChamber agent bot.
  *
  * Without registering these, typing `/model` in Discord just sends literal text
  * and the interactive wizards (which fire on APPLICATION_COMMAND interactions)
@@ -15,14 +15,14 @@
 const STRING_OPTION = 3;
 
 /**
- * The canonical Otto slash command set. Descriptions are kept ≤ 100 chars
+ * The canonical OpenChamber agent slash command set. Descriptions are kept ≤ 100 chars
  * (Discord's hard limit). Commands backed by an interactive wizard
  * (`model`, `agent`, `verbosity`, `skill`) take no options — the dropdowns
  * collect everything. The rest map straight onto the text command pipeline.
  */
 export function buildSlashCommandDefinitions() {
   return [
-    { name: 'help', description: 'List Otto messenger commands' },
+    { name: 'help', description: 'List OpenChamber agent messenger commands' },
     { name: 'status', description: 'Show the session, project, model and agent for this conversation' },
     { name: 'abort', description: 'Stop the current OpenCode turn' },
     { name: 'new', description: 'Drop the current session and start fresh on the next message' },
@@ -47,7 +47,7 @@ export function buildSlashCommandDefinitions() {
     },
     { name: 'model', description: 'Pick the model + thinking effort (this chat, project, or everywhere)' },
     { name: 'agent', description: 'Pick the agent for this conversation (or set a project default)' },
-    { name: 'verbosity', description: 'Choose how much Otto streams back (this chat, project, or everywhere)' },
+    { name: 'verbosity', description: 'Choose how much OpenChamber agent streams back (this chat, project, or everywhere)' },
     { name: 'yolo', description: 'Set tool permission mode: always ask / non-destructive / allow all' },
     { name: 'permissions', description: 'Synonym for /yolo — set tool permission mode' },
     { name: 'skill', description: 'Pick an available skill and hand it to the agent' },
@@ -103,7 +103,7 @@ export function buildSlashCommandDefinitions() {
 }
 
 /**
- * Register the Otto slash commands against a bot application.
+ * Register the OpenChamber agent slash commands against a bot application.
  *
  * @param {object} args
  * @param {(token, method, path, body) => Promise<{ok:boolean,status:number,body:any}>} args.restCall

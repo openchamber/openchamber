@@ -200,7 +200,7 @@ export function useOttoWebSocket({ enabled = true }: UseOttoWebSocketOptions = {
         }),
       );
     } catch {
-      setConnectionStatus('error', 'Failed to subscribe to Otto events stream');
+      setConnectionStatus('error', 'Failed to subscribe to OpenChamber agent events stream');
     }
   }, [enabled, patternsKey, patterns, setConnectionStatus]);
 }

@@ -101,7 +101,7 @@ export interface MessengerConnection {
   discordListenerScopeToGuild?: boolean;
   /**
    * Bridge inbound channel/chat messages to OpenCode (default true). When
-   * off, the listener only does the legacy "Otto received: ..." auto-reply.
+   * off, the listener only does the legacy "OpenChamber agent received: ..." auto-reply.
    */
   bridgeEnabled?: boolean;
 
@@ -688,7 +688,7 @@ export const useMessengerStore = create<MessengerState>()(
           lastSyncMessage: 'Sending test message…',
         });
 
-        const text = `**Otto connected ✓**\nThis is a test message from your Otto assistant.\nOtto can now post project updates to this channel.`;
+        const text = `**OpenChamber agent connected ✓**\nThis is a test message from your OpenChamber agent.\nOpenChamber agent can now post project updates to this channel.`;
 
         try {
           const data = await postJson<{ ok: boolean; error?: string }>(

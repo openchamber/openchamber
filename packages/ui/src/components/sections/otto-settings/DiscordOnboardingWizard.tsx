@@ -80,14 +80,14 @@ export function DiscordOnboardingWizard({
     const now = new Date().toLocaleString();
     return projects.map((p) => {
       const label = p.label || p.path.split('/').pop() || p.path;
-      const lines = [`🤖 Otto sync — ${label}`, '', `Last synced ${now}`];
+      const lines = [`🤖 OpenChamber agent sync — ${label}`, '', `Last synced ${now}`];
       return { id: p.id, path: p.path, label, body: lines.join('\n') };
     });
   };
 
   const buildSummary = () => {
     return [
-      '**🤖 Otto sync summary**',
+      '**🤖 OpenChamber agent sync summary**',
       '',
       `• Projects: ${projects.length}`,
       '',

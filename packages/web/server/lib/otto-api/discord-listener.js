@@ -83,22 +83,22 @@ function buildAutoReply(message) {
     'there';
 
   if (text.startsWith('/start') || text.toLowerCase().startsWith('!ping')) {
-    return `pong — Otto is listening (last update at ${new Date().toISOString()})`;
+    return `pong — OpenChamber agent is listening (last update at ${new Date().toISOString()})`;
   }
   if (text.toLowerCase().startsWith('!help')) {
     return [
-      'Otto commands:',
+      'OpenChamber agent commands:',
       '`!ping` — health check',
       '`!status` — listener status',
       '`!help` — this message',
     ].join('\n');
   }
   if (text.toLowerCase().startsWith('!status')) {
-    return `Otto listener is online. Reply received from ${fromName}.`;
+    return `OpenChamber agent listener is online. Reply received from ${fromName}.`;
   }
   // No echo. Only explicit `!cmd` shortcuts get a reply. We deliberately do NOT
-  // mirror arbitrary user text back ("Otto received: ...") — when a user writes
-  // from Discord they should only ever see Otto's real OpenCode responses, never
+  // mirror arbitrary user text back ("OpenChamber agent received: ...") — when a user writes
+  // from Discord they should only ever see OpenChamber agent's real OpenCode responses, never
   // a quoted copy of their own message.
   return null;
 }
@@ -670,7 +670,7 @@ function send(ws, payload) {
 }
 
 /**
- * Register the Otto slash commands for this listener's bot, once per process.
+ * Register the OpenChamber agent slash commands for this listener's bot, once per process.
  * Guild-scoped when a guildId is configured (instant), otherwise global.
  */
 async function ensureSlashCommandsRegistered(state) {
@@ -747,7 +747,7 @@ function startSession(state, broadcastEvent, bridge) {
             properties: { os: 'linux', browser: 'otto-ui', device: 'otto-ui' },
             presence: {
               status: 'online',
-              activities: [{ name: 'Otto sync', type: 0 }],
+              activities: [{ name: 'OpenChamber agent sync', type: 0 }],
             },
           },
         });

@@ -705,7 +705,7 @@ function App({ apis }: AppProps) {
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
   usePushVisibilityBeacon({ enabled: embeddedBackgroundWorkEnabled });
-  // Activate the Otto realtime WS so messenger.bridge.* events, approval
+  // Activate the OpenChamber agent realtime WS so messenger.bridge.* events, approval
   // decisions and incoming Discord messages reach the UI.
   useOttoWebSocket();
   // Surface bridge events as user-visible toasts.

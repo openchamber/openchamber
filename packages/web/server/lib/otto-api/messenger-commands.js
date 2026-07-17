@@ -93,19 +93,19 @@ const COMMAND_HELP = [
     name: 'verbosity',
     usage: '/verbosity [quiet | normal | verbose | default <level> | reset]',
     summary:
-      'How much Otto streams back: `quiet` = answer only, `normal` = tool names + thinking marker, `verbose` = full commands/diffs/outputs. `default <level>` sets the messenger-wide default.',
+      'How much OpenChamber agent streams back: `quiet` = answer only, `normal` = tool names + thinking marker, `verbose` = full commands/diffs/outputs. `default <level>` sets the messenger-wide default.',
   },
   {
     name: 'skill',
     usage: '/skill [name]',
     summary:
-      'List the skills available to the agent / hand one to Otto for the next turn. On Discord, run `/skill` for a dropdown picker.',
+      'List the skills available to the agent / hand one to OpenChamber agent for the next turn. On Discord, run `/skill` for a dropdown picker.',
   },
   {
     name: 'yolo',
     usage: '/yolo|/permissions [ask | auto-edit | yolo | project <mode> | default <mode> | reset]',
     summary:
-      'How Otto handles tool permissions: `ask` = always ask, `auto-edit` = allow non-destructive tools (still ask for shell), `yolo` = allow all. `/permissions` is a synonym. On Discord, run `/yolo` or `/permissions` for a dropdown. Stop any run with `/abort`.',
+      'How OpenChamber agent handles tool permissions: `ask` = always ask, `auto-edit` = allow non-destructive tools (still ask for shell), `yolo` = allow all. `/permissions` is a synonym. On Discord, run `/yolo` or `/permissions` for a dropdown. Stop any run with `/abort`.',
   },
   {
     name: 'sessions',
@@ -278,7 +278,7 @@ export async function executeMessengerCommand({
 
   switch (cmd) {
     case 'help': {
-      const lines = ['**Otto messenger commands**', ''];
+      const lines = ['**OpenChamber agent messenger commands**', ''];
       for (const c of COMMAND_HELP) lines.push(`\`${c.usage}\` — ${c.summary}`);
       lines.push('');
       lines.push(
@@ -288,7 +288,7 @@ export async function executeMessengerCommand({
     }
 
     case 'status': {
-      const lines = ['**Otto status**'];
+      const lines = ['**OpenChamber agent status**'];
       lines.push(
         `Project: ${binding?.projectLabel ?? binding?.projectPath ?? '_not bound — reply `clone <url>`, `path </abs>` or `new <name>` to set up_'}`,
       );
@@ -378,7 +378,7 @@ export async function executeMessengerCommand({
       const r = await opencode.sendPrompt(sessionId, binding?.projectPath ?? null, synthetic);
       return {
         reply: r.ok
-          ? '⏳ Summary requested — Otto is writing it now.'
+          ? '⏳ Summary requested — OpenChamber agent is writing it now.'
           : `✗ Could not request summary: ${r.error ?? 'unknown error'}`,
       };
     }
@@ -553,7 +553,7 @@ export async function executeMessengerCommand({
         'normal';
       if (!command.args) {
         const lines = [
-          '**Output verbosity** — how much of each turn Otto mirrors back here',
+          '**Output verbosity** — how much of each turn OpenChamber agent mirrors back here',
           '',
         ];
         for (const level of VERBOSITY_LEVELS) {
@@ -649,7 +649,7 @@ export async function executeMessengerCommand({
         'ask';
       if (!command.args) {
         const lines = [
-          '**Tool permission mode** — how Otto handles approval requests (shell, edits, …)',
+          '**Tool permission mode** — how OpenChamber agent handles approval requests (shell, edits, …)',
           '',
         ];
         for (const mode of PERMISSION_MODES) {
@@ -746,7 +746,7 @@ export async function executeMessengerCommand({
           };
         }
         const lines = [
-          '**Available skills** — hand one to Otto with `/skill <name>` (on Discord, `/skill` opens a dropdown)',
+          '**Available skills** — hand one to OpenChamber agent with `/skill <name>` (on Discord, `/skill` opens a dropdown)',
           '',
         ];
         for (const s of skills.slice(0, 25)) {
@@ -774,7 +774,7 @@ export async function executeMessengerCommand({
       const r = await opencode.sendPrompt(sessionId, projectPath, prompt);
       return {
         reply: r.ok
-          ? `▶ Handed the \`${match.name}\` skill to Otto.`
+          ? `▶ Handed the \`${match.name}\` skill to OpenChamber agent.`
           : `✗ Could not run skill: ${r.error ?? 'unknown error'}`,
       };
     }
