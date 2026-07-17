@@ -981,8 +981,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                 <div key={group} className="space-y-0.5">
                   <div
                     className={cn(
-                      'px-2 pb-0.5 typography-micro font-medium text-muted-foreground/70',
-                      groupIndex === 0 ? 'pt-1' : 'pt-3',
+                      'px-3 pb-1 typography-micro font-medium text-muted-foreground/70 sm:px-2 sm:pb-0.5',
+                      groupIndex === 0 ? 'pt-1' : 'pt-4 sm:pt-3',
                     )}
                   >
                     {t(`settings.view.nav.group.${group}`)}
@@ -1000,15 +1000,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                             onClick={() => openPage(page.slug)}
                             aria-current={selected ? 'page' : undefined}
                             className={cn(
-                              'flex h-8 w-full items-center gap-2 rounded-md px-2 overflow-hidden',
+                              'flex h-11 w-full items-center gap-2.5 rounded-md px-3 overflow-hidden sm:h-8 sm:gap-2 sm:px-2',
                               selected
                                 ? 'bg-interactive-selection text-foreground'
                                 : 'text-foreground hover:bg-interactive-hover'
                             )}
                           >
                             {page.slug === 'mcp'
-                              ? <McpIcon className="h-4 w-4 shrink-0" />
-                              : <Icon name={iconName!} className="h-4 w-4 shrink-0" />}
+                              ? <McpIcon className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />
+                              : <Icon name={iconName!} className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />}
                             <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
                               <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
                               {page.slug === 'tunnel' && (
@@ -1030,14 +1030,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
         {/* Footer */}
         <div className="overflow-hidden transition-opacity duration-150 opacity-100">
-          <div className="border-t border-border bg-sidebar px-2 py-1 space-y-0.5">
+          <div className="border-t border-border bg-background px-2 py-1 space-y-0.5 sm:bg-sidebar">
             {!runtimeCtx.isVSCode && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     className={cn(
-                      'flex h-7 w-full items-center gap-2 rounded-md px-2 overflow-hidden whitespace-nowrap',
+                      'flex h-11 w-full items-center gap-2 rounded-md px-3 overflow-hidden whitespace-nowrap sm:h-7 sm:px-2',
                       'text-sm font-semibold text-sidebar-foreground/90',
                       'hover:text-sidebar-foreground hover:bg-interactive-hover',
                     )}
@@ -1062,7 +1062,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const renderMobileStage = () => {
     if (mobileStage === 'nav') {
       return (
-        <div className={cn('flex-1 min-h-0 overflow-hidden', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')}>
+        <div className="flex-1 min-h-0 overflow-hidden bg-background">
           <div className="flex h-full min-h-0 flex-col">
             <ErrorBoundary>{renderSettingsNav()}</ErrorBoundary>
           </div>
@@ -1085,7 +1085,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         );
       }
       return (
-        <div className={cn('flex-1 min-h-0 overflow-hidden', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')}>
+        <div className="flex-1 min-h-0 overflow-hidden bg-background">
           <ErrorBoundary>
             {renderPageSidebar(settingsSlug, { onItemSelect: handleMobilePageSidebarItemSelect })}
           </ErrorBoundary>
