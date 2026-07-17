@@ -567,6 +567,7 @@ function trimSessions(draft: State) {
     const candidate = draft.session[0]
     if (hasPermission.has(candidate.id)) break
     draft.session.shift()
+    delete draft.postRevertBranch[candidate.id]
   }
 }
 

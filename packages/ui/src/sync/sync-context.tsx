@@ -50,6 +50,12 @@ import { setSessionPrefetch } from "./session-prefetch-cache"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
+import {
+  getEffectiveVisibleMessages,
+  getSessionRevertMessageID,
+  reconcilePostRevertBranchOverlay,
+  reconcilePostRevertBranchOverlays,
+} from "./message-visibility"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 
 // ---------------------------------------------------------------------------
@@ -1262,6 +1268,7 @@ async function resyncDirectoryAfterReconnect(
 
     store.setState((state: DirectoryStore) => {
       const sessionIndex = state.session.findIndex((item) => item.id === nextSession.id)
+      const previousSession = sessionIndex >= 0 ? state.session[sessionIndex] : undefined
       let sessions = state.session
       let sessionChanged = false
       let sessionTotal = state.sessionTotal
@@ -1291,7 +1298,13 @@ async function resyncDirectoryAfterReconnect(
       )
       const messagesChanged = materialized.messagesChanged
       const partsChanged = materialized.partsChanged
-      if (!sessionChanged && !messagesChanged && !partsChanged) {
+      const postRevertBranch = reconcilePostRevertBranchOverlay(
+        state.postRevertBranch,
+        sessionId,
+        previousSession,
+        nextSession,
+      )
+      if (!sessionChanged && !messagesChanged && !partsChanged && postRevertBranch === state.postRevertBranch) {
         return state
       }
 
@@ -1299,6 +1312,7 @@ async function resyncDirectoryAfterReconnect(
         ...(sessionChanged ? { session: sessions, sessionTotal } : {}),
         ...(messagesChanged ? { message: materialized.message } : {}),
         ...(partsChanged ? { part: materialized.part } : {}),
+        ...(postRevertBranch !== state.postRevertBranch ? { postRevertBranch } : {}),
       }
     })
 
@@ -1378,6 +1392,7 @@ function handleEvent(
   }
 
   // Directory events
+  const sessionID = getSessionIdFromPayload(payload) ?? undefined
   let store = childStores.getChild(directory)
   let resolvedDirectory = directory
 
@@ -1385,7 +1400,6 @@ function handleEvent(
     // Store not found for this directory — attempt recovery by scanning
     // child stores for the session. This handles directory mismatches
     // (trailing slashes, case differences, events with wrong directory).
-    const sessionID = getSessionIdFromPayload(payload)
     if (sessionID) {
       const fallbackDir = findSessionInChildStores(sessionID, childStores, routingIndex)
       if (fallbackDir) {
@@ -1503,10 +1517,9 @@ function handleEvent(
   // parent's task tool part reflects the child's completion even when
   // no ToolPart component is mounted.
   if (payload.type === "session.idle") {
-    const idleSessionId = getSessionIdFromPayload(payload)
-    if (idleSessionId && resolvedDirectory && resolvedDirectory !== "global") {
+    if (sessionID && resolvedDirectory && resolvedDirectory !== "global") {
       const sessionState = store.getState()
-      const idleSession = sessionState.session.find((s) => s.id === idleSessionId)
+      const idleSession = sessionState.session.find((s) => s.id === sessionID)
       const parentID = idleSession
         ? (idleSession as Session & { parentID?: string | null }).parentID
         : null
@@ -1527,6 +1540,7 @@ function handleEvent(
     case "session.updated":
     case "session.deleted":
       draft.session = [...current.session]
+      draft.postRevertBranch = { ...current.postRevertBranch }
       draft.permission = { ...current.permission }
       draft.todo = { ...current.todo }
       draft.part = { ...current.part }
@@ -1581,8 +1595,24 @@ function handleEvent(
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization
 
   if (reducerChanged) {
+    if (
+      payload.type === "session.created"
+      || payload.type === "session.updated"
+      || payload.type === "session.deleted"
+    ) {
+      if (sessionID) {
+        const postRevertBranch = reconcilePostRevertBranchOverlay(
+          draft.postRevertBranch,
+          sessionID,
+          current.session.find((session) => session.id === sessionID),
+          draft.session.find((session) => session.id === sessionID),
+        )
+        if (postRevertBranch !== draft.postRevertBranch) {
+          draft.postRevertBranch = postRevertBranch
+        }
+      }
+    }
     store.setState(draft)
-    const sessionID = getSessionIdFromPayload(payload) ?? undefined
     const messageID = getMessageIdFromPayload(payload) ?? undefined
     syncDebug.dispatch.eventApplied(payload.type, sessionID, messageID)
 
@@ -1600,7 +1630,6 @@ function handleEvent(
       }
     }
   } else {
-    const sessionID = getSessionIdFromPayload(payload) ?? undefined
     const messageID = getMessageIdFromPayload(payload) ?? undefined
     syncDebug.dispatch.eventNoChange(payload.type, sessionID, messageID)
 
@@ -1610,7 +1639,7 @@ function handleEvent(
   // inferring meaning from a generic false/no-change result.
   if (materializationResult) {
     const materializationSessionID = resolveMaterializationSessionID(
-      materializationResult.sessionID ?? getSessionIdFromPayload(payload) ?? undefined,
+      materializationResult.sessionID ?? sessionID,
       materializationResult.messageID ?? getMessageIdFromPayload(payload) ?? undefined,
       resolvedDirectory,
       routingIndex,
@@ -1797,7 +1826,18 @@ export function SyncProvider(props: {
                 )
                 return
               }
-              store.setState({ session: sessions, sessionTotal: rootSessions.length, limit: Math.max(sessions.length, 50) })
+              const current = store.getState()
+              const postRevertBranch = reconcilePostRevertBranchOverlays(
+                current.postRevertBranch,
+                current.session,
+                sessions,
+              )
+              store.setState({
+                session: sessions,
+                sessionTotal: rootSessions.length,
+                limit: Math.max(sessions.length, 50),
+                ...(postRevertBranch !== current.postRevertBranch ? { postRevertBranch } : {}),
+              })
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })
@@ -1983,7 +2023,16 @@ export function SyncProvider(props: {
           const sessions = [...state.session, ...newChildSessions].sort((a, b) =>
             a.id < b.id ? -1 : a.id > b.id ? 1 : 0
           )
-          return { session: sessions, limit: Math.max(sessions.length, 50) }
+          const postRevertBranch = reconcilePostRevertBranchOverlays(
+            state.postRevertBranch,
+            state.session,
+            sessions,
+          )
+          return {
+            session: sessions,
+            limit: Math.max(sessions.length, 50),
+            ...(postRevertBranch !== state.postRevertBranch ? { postRevertBranch } : {}),
+          }
         })
         // Trigger parent session materialization so the task tool part
         // state (metadata, sessionId, output) is refreshed.
@@ -2378,6 +2427,7 @@ type SessionMessageRecordsSnapshot = {
   sourceMessages: Message[]
   visibleMessages: Message[]
   revertMessageID?: string
+  postRevertBranch?: State["postRevertBranch"][string]
   suspendPartUpdates: boolean
   suspendedPartUpdatesMessageID?: string
   list: SessionMessageRecord[]
@@ -2528,10 +2578,12 @@ const getReusableSessionMessageRecordsSnapshot = (
   if (!cached) return undefined
   const sourceMessages = state.message[sessionID] ?? EMPTY_MESSAGES
   const session = state.session.find((candidate) => candidate.id === sessionID)
-  const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID
+  const revertMessageID = getSessionRevertMessageID(session)
+  const postRevertBranch = state.postRevertBranch[sessionID]
   if (
     cached.sourceMessages === sourceMessages
     && cached.revertMessageID === revertMessageID
+    && cached.postRevertBranch === postRevertBranch
     && cached.suspendPartUpdates === suspendPartUpdates
     && cached.suspendedPartUpdatesMessageID === suspendedPartUpdatesMessageID
     && snapshotPartsMatchState(cached, state)
@@ -2545,27 +2597,32 @@ function getVisibleMessagesForSession(state: State, sessionID: string, previous?
   sourceMessages: Message[]
   visibleMessages: Message[]
   revertMessageID?: string
+  postRevertBranch?: State["postRevertBranch"][string]
 } {
   const sourceMessages = state.message[sessionID] ?? EMPTY_MESSAGES
   const session = state.session.find((candidate) => candidate.id === sessionID)
-  const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID
+  const revertMessageID = getSessionRevertMessageID(session)
+  const postRevertBranch = state.postRevertBranch[sessionID]
 
   if (
     previous
     && previous.sourceMessages === sourceMessages
     && previous.revertMessageID === revertMessageID
+    && previous.postRevertBranch === postRevertBranch
   ) {
     return {
       sourceMessages,
       visibleMessages: previous.visibleMessages,
       revertMessageID,
+      postRevertBranch,
     }
   }
 
   return {
     sourceMessages,
-    visibleMessages: revertMessageID ? sourceMessages.filter((message) => message.id < revertMessageID) : sourceMessages,
+    visibleMessages: getEffectiveVisibleMessages(sourceMessages, session, postRevertBranch),
     revertMessageID,
+    postRevertBranch,
   }
 }
 
@@ -2576,7 +2633,7 @@ export function buildSessionMessageRecordsSnapshot(
   suspendPartUpdates = false,
   suspendedPartUpdatesMessageID?: string,
 ): SessionMessageRecordsSnapshot {
-  const { sourceMessages, visibleMessages, revertMessageID } = getVisibleMessagesForSession(state, sessionID, previous)
+  const { sourceMessages, visibleMessages, revertMessageID, postRevertBranch } = getVisibleMessagesForSession(state, sessionID, previous)
   const nextById = new Map<string, SessionMessageRecord>()
   const nextList = visibleMessages.map((message) => {
     const previousRecord = previous?.byId.get(message.id)
@@ -2598,6 +2655,8 @@ export function buildSessionMessageRecordsSnapshot(
 
   const unchanged = Boolean(previous)
     && previous?.visibleMessages === visibleMessages
+    && previous.revertMessageID === revertMessageID
+    && previous.postRevertBranch === postRevertBranch
     && previous.suspendPartUpdates === suspendPartUpdates
     && previous.suspendedPartUpdatesMessageID === suspendedPartUpdatesMessageID
     && previous.list.length === nextList.length
@@ -2612,6 +2671,7 @@ export function buildSessionMessageRecordsSnapshot(
     sourceMessages,
     visibleMessages,
     revertMessageID,
+    postRevertBranch,
     suspendPartUpdates,
     suspendedPartUpdatesMessageID,
     list: nextList,
@@ -2654,7 +2714,17 @@ export function useUserMessageHistory(sessionID: string, directory?: string): st
 
   const subscribe = useCallback((notify: () => void) => {
     if (!sessionID) return () => undefined
-    return store.subscribe(notify)
+    return store.subscribe((state, previous) => {
+      if (
+        state.message === previous.message
+        && state.part === previous.part
+        && state.session === previous.session
+        && state.postRevertBranch[sessionID] === previous.postRevertBranch[sessionID]
+      ) {
+        return
+      }
+      notify()
+    })
   }, [sessionID, store])
 
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
@@ -2678,6 +2748,7 @@ export function useSessionMessageRecords(
     sourceMessages: EMPTY_MESSAGES,
     visibleMessages: EMPTY_MESSAGES,
     revertMessageID: undefined,
+    postRevertBranch: undefined,
     suspendPartUpdates: Boolean(options?.suspendPartUpdates),
     suspendedPartUpdatesMessageID: options?.suspendPartUpdatesForMessageId ?? undefined,
     list: [],
@@ -2722,7 +2793,17 @@ export function useSessionMessageRecords(
 
   const subscribe = useCallback((notify: () => void) => {
     if (!sessionID) return () => undefined
-    return store.subscribe(notify)
+    return store.subscribe((state, previous) => {
+      if (
+        state.message === previous.message
+        && state.part === previous.part
+        && state.session === previous.session
+        && state.postRevertBranch[sessionID] === previous.postRevertBranch[sessionID]
+      ) {
+        return
+      }
+      notify()
+    })
   }, [sessionID, store])
 
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)

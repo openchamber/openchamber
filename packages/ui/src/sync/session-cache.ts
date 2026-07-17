@@ -6,7 +6,7 @@ import type {
   SessionStatus,
   Todo,
 } from "@opencode-ai/sdk/v2/client"
-import type { FileDiff } from "./types"
+import type { FileDiff, PostRevertBranchOverlays } from "./types"
 
 type SessionCache = {
   session_status: Record<string, SessionStatus | undefined>
@@ -16,6 +16,7 @@ type SessionCache = {
   part: Record<string, Part[] | undefined>
   permission: Record<string, PermissionRequest[] | undefined>
   question: Record<string, QuestionRequest[] | undefined>
+  postRevertBranch?: PostRevertBranchOverlays
 }
 
 export function getProtectedSessionCacheIds(store: SessionCache): Set<string> {
@@ -81,6 +82,7 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
     delete store.session_status[sessionID]
     delete store.permission[sessionID]
     delete store.question[sessionID]
+    delete store.postRevertBranch?.[sessionID]
   }
 }
 

@@ -1,5 +1,6 @@
 import type { Message, Part } from '@opencode-ai/sdk/v2/client';
-import type { State } from '@/sync/types';
+import type { PostRevertBranchOverlay, State } from '@/sync/types';
+import { getSessionRevertMessageID, isEffectivelyVisibleMessage } from '@/sync/message-visibility';
 
 type RevertedMessageRecord = {
     message: Message & { role: 'user' };
@@ -8,6 +9,7 @@ type RevertedMessageRecord = {
 
 export type RevertedMessageDockState = {
     revertMessageID?: string;
+    postRevertBranch?: PostRevertBranchOverlay;
     records: RevertedMessageRecord[];
 };
 
@@ -16,6 +18,7 @@ const EMPTY_REVERTED_RECORDS: RevertedMessageRecord[] = [];
 
 export const EMPTY_REVERTED_MESSAGE_DOCK_STATE: RevertedMessageDockState = {
     revertMessageID: undefined,
+    postRevertBranch: undefined,
     records: EMPTY_REVERTED_RECORDS,
 };
 
@@ -35,7 +38,7 @@ const areRecordsEqual = (left: RevertedMessageRecord[], right: RevertedMessageRe
 };
 
 export const buildRevertedMessageDockState = (
-    state: Pick<State, 'session' | 'message' | 'part'>,
+    state: Pick<State, 'session' | 'message' | 'part' | 'postRevertBranch'>,
     sessionId: string | null,
     previous: RevertedMessageDockState = EMPTY_REVERTED_MESSAGE_DOCK_STATE,
 ): RevertedMessageDockState => {
@@ -44,15 +47,16 @@ export const buildRevertedMessageDockState = (
     }
 
     const session = state.session.find((item) => item.id === sessionId);
-    const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID;
+    const revertMessageID = getSessionRevertMessageID(session);
     if (!revertMessageID) {
         return EMPTY_REVERTED_MESSAGE_DOCK_STATE;
     }
 
     const messages = state.message[sessionId] ?? [];
+    const postRevertBranch = state.postRevertBranch[sessionId];
     const records: RevertedMessageRecord[] = [];
     for (const message of messages) {
-        if (!isUserMessage(message) || message.id < revertMessageID) {
+        if (!isUserMessage(message) || isEffectivelyVisibleMessage(message.id, session, postRevertBranch)) {
             continue;
         }
         records.push({
@@ -62,12 +66,17 @@ export const buildRevertedMessageDockState = (
     }
 
     const next = records.length === 0 ? EMPTY_REVERTED_RECORDS : records;
-    if (previous.revertMessageID === revertMessageID && areRecordsEqual(previous.records, next)) {
+    if (
+        previous.revertMessageID === revertMessageID
+        && previous.postRevertBranch === postRevertBranch
+        && areRecordsEqual(previous.records, next)
+    ) {
         return previous;
     }
 
     return {
         revertMessageID,
+        postRevertBranch,
         records: next,
     };
 };

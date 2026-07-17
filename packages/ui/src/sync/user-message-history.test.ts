@@ -3,6 +3,8 @@ import type { Message, Part } from '@opencode-ai/sdk/v2/client';
 import type { State } from './types';
 
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot } from './user-message-history';
+import { buildSessionMessageRecordsSnapshot } from './sync-context';
+import { addPostRevertBranchReplacement } from './message-visibility';
 
 const message = (id: string, role: 'user' | 'assistant'): Message => ({
   id,
@@ -17,10 +19,11 @@ const textPart = (id: string, text: string): Part => ({
   text,
 } as Part);
 
-const state = (partial: Partial<State>): Pick<State, 'session' | 'message' | 'part'> => ({
+const state = (partial: Partial<State>): Pick<State, 'session' | 'message' | 'part' | 'postRevertBranch'> => ({
   session: [],
   message: {},
   part: {},
+  postRevertBranch: {},
   ...partial,
 });
 
@@ -94,5 +97,34 @@ describe('buildUserMessageHistorySnapshot', () => {
     );
 
     expect(snapshot.history).toEqual(['kept']);
+  });
+
+  test('matches timeline visibility for a post-revert replacement branch', () => {
+    const beforeRevert = message('msg_001', 'user');
+    const reverted = message('msg_002', 'user');
+    const discarded = message('msg_003', 'assistant');
+    const replacement = message('msg_004', 'user');
+    const replacementAssistant = message('msg_005', 'assistant');
+    const input = state({
+      session: [{ id: 'ses_1', revert: { messageID: 'msg_002' } } as State['session'][number]],
+      message: { ses_1: [beforeRevert, reverted, discarded, replacement, replacementAssistant] },
+      part: {
+        msg_001: [textPart('part_1', 'kept')],
+        msg_002: [textPart('part_2', 'discarded')],
+        msg_004: [textPart('part_4', 'replacement')],
+      },
+      postRevertBranch: addPostRevertBranchReplacement({}, 'ses_1', 'msg_002', 'msg_004'),
+    });
+
+    const history = buildUserMessageHistorySnapshot(input, 'ses_1');
+    const timeline = buildSessionMessageRecordsSnapshot(input as State, 'ses_1');
+    const visibleUserIDs = timeline.list
+      .filter((record) => record.info.role === 'user')
+      .map((record) => record.info.id)
+      .reverse();
+
+    expect(timeline.list.map((record) => record.info.id)).toEqual(['msg_001', 'msg_004', 'msg_005']);
+    expect(history.records.map((record) => record.message.id)).toEqual(visibleUserIDs);
+    expect(history.history).toEqual(['replacement', 'kept']);
   });
 });

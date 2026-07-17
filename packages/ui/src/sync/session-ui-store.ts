@@ -69,6 +69,11 @@ import { getAttachedSessionDirectory } from "./session-worktree-contract"
 import { setSessionOpener } from "./session-navigation"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
+import {
+  getEffectiveVisibleMessages,
+  getSessionRevertMessageID,
+  hasEffectivePostRevertBranch,
+} from "./message-visibility"
 
 export type { AttachedFile }
 
@@ -1276,22 +1281,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // handleSlashUndo — reads from sync, records history for redo
   // ---------------------------------------------------------------------------
   handleSlashUndo: async (sessionId) => {
-    const messages = getSyncMessages(sessionId)
-    const sessions = getSyncSessions()
-    const currentSession = sessions.find((s) => s.id === sessionId)
-
-    const userMessages = messages.filter((m) => m.role === "user")
+    const state = getDirectoryState()
+    const currentSession = state?.session.find((session) => session.id === sessionId)
+    const messages = getEffectiveVisibleMessages(
+      state?.message[sessionId] ?? [],
+      currentSession,
+      state?.postRevertBranch[sessionId],
+    )
+    const userMessages = messages.filter((message) => message.role === "user")
     if (userMessages.length === 0) return
 
-    const revertToId = currentSession?.revert?.messageID
-    let targetMessage: typeof messages[number] | undefined
-    if (revertToId) {
-      targetMessage = [...userMessages].reverse().find((m) => m.id < revertToId)
-    } else {
-      targetMessage = userMessages[userMessages.length - 1]
-    }
-
-    if (!targetMessage) return
+    const targetMessage = userMessages[userMessages.length - 1]
 
     // Read target message parts BEFORE calling revertToMessage.
     // revertToMessage optimistically deletes messages from the sync store
@@ -1325,14 +1325,19 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return
     }
 
-    const sessions = getSyncSessions()
-    const currentSession = sessions.find((s) => s.id === sessionId)
-    const revertToId = currentSession?.revert?.messageID
+    const beforeRefetch = getDirectoryState()
+    const currentSession = beforeRefetch?.session.find((session) => session.id === sessionId)
+    const revertToId = getSessionRevertMessageID(currentSession)
     if (!revertToId) return
+
+    // A replacement branch diverges from the hidden history. Do not let /redo
+    // select a raw discarded target while that branch is still visible.
+    if (hasEffectivePostRevertBranch(currentSession, beforeRefetch?.postRevertBranch[sessionId])) return
 
     await refetchSessionMessages(sessionId)
     const messages = getSyncMessages(sessionId)
     const userMessages = messages.filter((m) => m.role === "user")
+    // Identifier.ascending keeps lexical message IDs in server creation order.
     const targetMessage = userMessages.find((m) => m.id > revertToId)
 
     if (targetMessage) {

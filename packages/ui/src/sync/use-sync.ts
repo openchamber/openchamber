@@ -20,6 +20,13 @@ import {
   clearSessionPrefetch,
 } from "./session-prefetch-cache"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
+import {
+  addPostRevertBranchReplacement,
+  clearPostRevertBranchOverlay,
+  getSessionRevertMessageID,
+  reconcilePostRevertBranchOverlay,
+  removePostRevertBranchReplacement,
+} from "./message-visibility"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const INITIAL_MESSAGE_PAGE_SIZE = 50
@@ -195,6 +202,7 @@ export function useSync() {
         todo: { ...current.todo },
         permission: { ...current.permission },
         question: { ...current.question },
+        postRevertBranch: { ...current.postRevertBranch },
       }
       dropSessionCaches(draft, sessionIDs)
       dropCachedSessionMessageRecordsSnapshots(dirStore, sessionIDs)
@@ -570,13 +578,23 @@ export function useSync() {
                     const s = store.getState()
                     const sessions = [...s.session]
                     const idx = Binary.search(sessions, sessionID, (s) => s.id)
+                    const previousSession = idx.found ? sessions[idx.index] : undefined
                     if (idx.found) {
                       sessions[idx.index] = nextSession
                     } else {
                       sessions.splice(idx.index, 0, nextSession)
                     }
                     if (!isStale()) {
-                      store.setState({ session: sessions })
+                      const postRevertBranch = reconcilePostRevertBranchOverlay(
+                        s.postRevertBranch,
+                        sessionID,
+                        previousSession,
+                        nextSession,
+                      )
+                      store.setState({
+                        session: sessions,
+                        ...(postRevertBranch !== s.postRevertBranch ? { postRevertBranch } : {}),
+                      })
                     }
                   }
                 } catch (e) {
@@ -649,7 +667,12 @@ export function useSync() {
 
   // Optimistic add (for prompt submission)
   const optimisticAdd = useCallback(
-    (input: { sessionID: string; directory?: string | null; message: Message; parts: Part[] }) => {
+    (input: {
+      sessionID: string
+      directory?: string | null
+      message: Message
+      parts: Part[]
+    }) => {
       setOptimistic(input.sessionID, { message: input.message, parts: input.parts }, input.directory)
       const targetStore = getOptimisticStore(input.directory)
       const current = targetStore.getState()
@@ -665,7 +688,22 @@ export function useSync() {
       // Insert parts
       part[input.message.id] = sortParts(input.parts)
 
-      targetStore.setState({ message, part })
+      const session = current.session.find((item) => item.id === input.sessionID)
+      const revertMessageID = getSessionRevertMessageID(session)
+      const postRevertBranch = revertMessageID
+        ? addPostRevertBranchReplacement(
+          current.postRevertBranch,
+          input.sessionID,
+          revertMessageID,
+          input.message.id,
+        )
+        : clearPostRevertBranchOverlay(current.postRevertBranch, input.sessionID)
+
+      targetStore.setState({
+        message,
+        part,
+        ...(postRevertBranch !== current.postRevertBranch ? { postRevertBranch } : {}),
+      })
     },
     [getOptimisticStore, setOptimistic],
   )
@@ -690,7 +728,17 @@ export function useSync() {
       }
       delete part[input.messageID]
 
-      targetStore.setState({ message, part })
+      const postRevertBranch = removePostRevertBranchReplacement(
+        current.postRevertBranch,
+        input.sessionID,
+        input.messageID,
+      )
+
+      targetStore.setState({
+        message,
+        part,
+        ...(postRevertBranch !== current.postRevertBranch ? { postRevertBranch } : {}),
+      })
     },
     [clearOptimistic, getOptimisticStore],
   )
