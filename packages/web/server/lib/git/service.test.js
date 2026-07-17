@@ -2,14 +2,17 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import simpleGit from 'simple-git';
 
 import {
   checkoutCommit,
   cherryPick,
+  cloneRepository,
   createWorktree,
+  getIgnoredPaths,
   getStatus,
+  getWorktreeBootstrapStatus,
   removeWorktree,
   resolvePrimaryWorktreeRoot,
   resolveWorktreeTopLevel,
@@ -18,9 +21,17 @@ import {
   revertCommit,
   stageFiles,
   unstageFiles,
+  validateWorktreeCreate,
   applyHunk,
   getDiff,
+  isGitRepository,
 } from './service.js';
+import {
+  GitExecutionOverloadedError,
+  GitExecutionQueueTimeoutError,
+  GitExecutionReentrancyError,
+} from './execution-errors.js';
+import { GIT_OPERATION_KIND } from './execution-coordinator.js';
 
 // ---------------------------------------------------------------------------
 // Shared test infrastructure
@@ -51,6 +62,30 @@ const canRunGit = () => {
   }
 };
 
+const waitFor = async (predicate, message, timeoutMs = 5_000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await predicate();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(message);
+};
+
+const withTimeout = async (promise, message, timeoutMs = 5_000) => {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -70,6 +105,63 @@ async function createTempRepo() {
   await git.raw(['symbolic-ref', 'HEAD', 'refs/heads/main']);
   return { tmpDir, git };
 }
+
+// ---------------------------------------------------------------------------
+// isGitRepository
+// ---------------------------------------------------------------------------
+
+describe('isGitRepository', () => {
+  it('returns false only for confirmed non-repositories and true for repositories', async () => {
+    if (!canRunGit()) return;
+    const nonRepository = createTempDir();
+    await expect(isGitRepository(nonRepository)).resolves.toBe(false);
+
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    await expect(isGitRepository(repository)).resolves.toBe(true);
+  });
+
+  it('does not turn an infrastructure cwd failure into a non-repository result', async () => {
+    if (!canRunGit()) return;
+    const directory = createTempDir();
+    const filePath = path.join(directory, 'not-a-directory');
+    fs.writeFileSync(filePath, 'file');
+
+    await expect(isGitRepository(filePath)).rejects.toThrow();
+  });
+});
+
+describe('cloneRepository', () => {
+  it('clones a local repository through a destination reservation', async () => {
+    if (!canRunGit()) return;
+    const source = createTempDir();
+    runGit(source, ['init', '-b', 'main']);
+    runGit(source, ['config', 'user.email', 'test@example.com']);
+    runGit(source, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(source, 'README.md'), '# source\n');
+    runGit(source, ['add', 'README.md']);
+    runGit(source, ['commit', '-m', 'Initial']);
+
+    const parent = createTempDir();
+    const destination = path.join(parent, 'clone');
+    await expect(cloneRepository({ remoteUrl: source, destination })).resolves.toBeTypeOf('string');
+    expect(fs.existsSync(path.join(destination, '.git'))).toBe(true);
+
+    await expect(cloneRepository({ remoteUrl: source, destination })).rejects.toMatchObject({ code: 'EEXIST' });
+  });
+});
+
+describe('getIgnoredPaths', () => {
+  it('returns only paths ignored by the repository', async () => {
+    if (!canRunGit()) return;
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    fs.writeFileSync(path.join(repository, '.gitignore'), 'ignored.txt\n');
+
+    await expect(getIgnoredPaths(repository, ['ignored.txt', 'visible.txt']))
+      .resolves.toEqual(['ignored.txt']);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // resolveBaseRefForLog
@@ -122,6 +214,17 @@ describe('git index path validation', () => {
     await expect(unstageFiles('/repo', ['../secret.txt'])).rejects.toThrow(
       'Path is outside repository: ../secret.txt'
     );
+  });
+
+  it('preserves authoritative external Git lock failures', async () => {
+    if (!canRunGit()) return;
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    fs.writeFileSync(path.join(repository, 'file.txt'), 'content\n');
+    fs.writeFileSync(path.join(repository, '.git', 'index.lock'), 'external owner\n');
+
+    await expect(stageFiles(repository, ['file.txt']))
+      .rejects.toThrow(/index\.lock|another git process|file exists/i);
   });
 });
 
@@ -267,6 +370,67 @@ describe('applyHunk', () => {
 // ---------------------------------------------------------------------------
 
 describe('getStatus', () => {
+  it.skipIf(process.platform === 'win32')(
+    'passes a manually configured POSIX fsmonitor hook through scheduled status',
+    async () => {
+      if (!canRunGit()) return;
+
+      const fixture = createTempDir();
+      const repo = path.join(fixture, 'repo');
+      const isolatedGlobalConfig = path.join(fixture, 'isolated global config');
+      const previousGlobalConfig = process.env.GIT_CONFIG_GLOBAL;
+      const previousNoSystemConfig = process.env.GIT_CONFIG_NOSYSTEM;
+      fs.mkdirSync(repo);
+      fs.writeFileSync(isolatedGlobalConfig, '');
+      process.env.GIT_CONFIG_GLOBAL = isolatedGlobalConfig;
+      process.env.GIT_CONFIG_NOSYSTEM = '1';
+
+      try {
+        runGit(repo, ['init', '-b', 'main']);
+        runGit(repo, ['config', '--local', 'user.email', 'test@example.com']);
+        runGit(repo, ['config', '--local', 'user.name', 'Test User']);
+        runGit(repo, ['config', '--local', 'commit.gpgsign', 'false']);
+        fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+        runGit(repo, ['add', 'README.md']);
+        runGit(repo, ['commit', '-m', 'Initial commit']);
+        expect(runGit(repo, ['status', '--porcelain=v1', '-uall'])).toBe('');
+
+        const hookPath = path.join(repo, '.git', 'openchamber-fsmonitor-hook');
+        const markerPath = path.join(repo, '.git', 'openchamber-fsmonitor-marker');
+        fs.writeFileSync(hookPath, `#!/bin/sh
+marker_path="\${0%/*}/openchamber-fsmonitor-marker"
+printf '%s\\n' "$1" >> "$marker_path"
+if [ "$1" = "2" ]; then
+  printf '%s\\000/\\000' "$2"
+else
+  printf '/\\000'
+fi
+`, { encoding: 'utf8', mode: 0o755 });
+        fs.chmodSync(hookPath, 0o755);
+        runGit(repo, ['config', '--local', 'core.fsmonitor', hookPath]);
+        const configuredFsmonitor = runGit(repo, ['config', '--local', '--get', 'core.fsmonitor']);
+        expect(configuredFsmonitor).toBe(`${hookPath}\n`);
+        expect(fs.existsSync(markerPath)).toBe(false);
+
+        const status = await getStatus(repo);
+
+        expect(status.current).toBe('main');
+        expect(status.isClean).toBe(true);
+        expect(status.files).toEqual([]);
+        expect(fs.existsSync(markerPath)).toBe(true);
+        const invocations = fs.readFileSync(markerPath, 'utf8').trim().split('\n');
+        expect(invocations.length).toBeGreaterThan(0);
+        expect(invocations.every((version) => version === '1' || version === '2')).toBe(true);
+        expect(runGit(repo, ['config', '--local', '--get', 'core.fsmonitor'])).toBe(configuredFsmonitor);
+      } finally {
+        if (previousGlobalConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+        else process.env.GIT_CONFIG_GLOBAL = previousGlobalConfig;
+        if (previousNoSystemConfig === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+        else process.env.GIT_CONFIG_NOSYSTEM = previousNoSystemConfig;
+      }
+    }
+  );
+
   it('handles repositories without upstream tracking', async () => {
     if (!canRunGit()) return;
 
@@ -279,6 +443,145 @@ describe('getStatus', () => {
     runGit(repo, ['commit', '-m', 'Initial commit']);
 
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+  });
+
+  it('preserves light and full response shapes', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.writeFileSync(path.join(repo, 'new.md'), 'one\ntwo\n');
+
+    const light = await getStatus(repo, { mode: 'light' });
+    const full = await getStatus(repo);
+
+    expect(light).toMatchObject({ current: 'main' });
+    expect(light.diffStats).toBeUndefined();
+    expect(light.upstreamComparison).toBeUndefined();
+    expect(full.diffStats['new.md']).toEqual({ insertions: 2, deletions: 0 });
+  });
+
+  it('returns consistent status for concurrent getStatus calls', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.writeFileSync(path.join(repo, 'new.md'), 'new file\n');
+
+    const [r1, r2, r3] = await Promise.all([
+      getStatus(repo),
+      getStatus(repo),
+      getStatus(repo),
+    ]);
+
+    expect(r1).toMatchObject({ current: 'main' });
+    expect(r1.files).toEqual(r2.files);
+    expect(r2.files).toEqual(r3.files);
+  });
+
+  it('queues getStatus behind a mutating stage operation', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n');
+    runGit(repo, ['add', 'a.txt']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.writeFileSync(path.join(repo, 'b.txt'), 'b\n');
+
+    // getStatus should complete without error even when a stage is in-flight
+    await Promise.all([
+      stageFiles(repo, ['b.txt']),
+      getStatus(repo),
+    ]);
+  });
+
+  it('shares serialization between a primary repo and its linked worktree', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.rmSync(worktree, { recursive: true, force: true });
+    runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
+    fs.writeFileSync(path.join(worktree, 'wt.md'), 'worktree file\n');
+
+    const [r1, r2] = await Promise.all([
+      getStatus(repo),
+      getStatus(worktree),
+    ]);
+
+    expect(r1).toMatchObject({ current: 'main' });
+    expect(r2).toMatchObject({ current: 'feature/test' });
+  });
+
+  it('handles a repository subdirectory in a monorepo', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const subdirectory = path.join(repo, 'packages', 'app');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.mkdirSync(subdirectory, { recursive: true });
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.writeFileSync(path.join(subdirectory, 'app.md'), 'app file\n');
+
+    const [rootStatus, subStatus] = await Promise.all([
+      getStatus(repo),
+      getStatus(subdirectory),
+    ]);
+
+    expect(rootStatus).toMatchObject({ current: 'main' });
+    expect(subStatus).toMatchObject({ current: 'main' });
+  });
+
+  it('allows concurrent getStatus across unrelated repositories', async () => {
+    if (!canRunGit()) return;
+
+    const repoA = createTempDir();
+    const repoB = createTempDir();
+
+    runGit(repoA, ['init', '-b', 'main']);
+    runGit(repoA, ['config', 'user.email', 'test@example.com']);
+    runGit(repoA, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repoA, 'a.md'), '# A\n');
+    runGit(repoA, ['add', 'a.md']);
+    runGit(repoA, ['commit', '-m', 'Init A']);
+
+    runGit(repoB, ['init', '-b', 'main']);
+    runGit(repoB, ['config', 'user.email', 'test@example.com']);
+    runGit(repoB, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repoB, 'b.md'), '# B\n');
+    runGit(repoB, ['add', 'b.md']);
+    runGit(repoB, ['commit', '-m', 'Init B']);
+
+    const [rA, rB] = await Promise.all([
+      getStatus(repoA),
+      getStatus(repoB),
+    ]);
+
+    expect(rA).toMatchObject({ current: 'main' });
+    expect(rB).toMatchObject({ current: 'main' });
   });
 });
 
@@ -313,6 +616,77 @@ describe('worktree root resolution', () => {
     runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
 
     await expect(resolvePrimaryWorktreeRoot(worktree)).resolves.toEqual({ root: fs.realpathSync(repo) });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateWorktreeCreate
+// ---------------------------------------------------------------------------
+
+describe('validateWorktreeCreate', () => {
+  it('preserves structured coordinator overload, queue-timeout, and re-entry errors', async () => {
+    const errors = [
+      new GitExecutionOverloadedError('overloaded'),
+      new GitExecutionQueueTimeoutError('timed out'),
+      new GitExecutionReentrancyError('re-entry'),
+    ];
+
+    for (const error of errors) {
+      const runOperation = vi.fn(async () => {
+        throw error;
+      });
+      await expect(validateWorktreeCreate('/repo', {}, { runOperation })).rejects.toBe(error);
+    }
+  });
+
+  it('keeps ordinary Git validation failures in the existing result envelope', async () => {
+    const runOperation = vi.fn(async () => {
+      throw new Error('ordinary validation failure');
+    });
+
+    await expect(validateWorktreeCreate('/repo', {}, { runOperation })).resolves.toEqual({
+      ok: false,
+      errors: [{ code: 'validation_failed', message: 'ordinary validation failure' }],
+    });
+  });
+
+  it('preserves ordinary core validation details for an unresolved start ref', async () => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+
+    const result = await validateWorktreeCreate(repo, {
+      mode: 'new',
+      branchName: 'feature/new',
+      startRef: 'missing-start-ref',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContainEqual({
+      code: 'start_ref_not_found',
+      message: 'Start ref not found: missing-start-ref',
+    });
+  });
+
+  it('executes the unscheduled validation core once with the already-held common lease', async () => {
+    const lease = { kind: GIT_OPERATION_KIND.COMMON_WRITE, active: true };
+    const validateCore = vi.fn(async (_directory, _input, receivedLease) => {
+      expect(receivedLease).toBe(lease);
+      return { ok: true, errors: [], resolved: { mode: 'new', localBranch: null } };
+    });
+    const runOperation = vi.fn(async (_name, _directory, _label, task, options) => {
+      expect(options).toEqual({ network: false });
+      return task({ commonId: 'common', worktreeId: 'worktree' }, lease);
+    });
+
+    await expect(validateWorktreeCreate('/repo', {}, { runOperation, validateCore })).resolves.toMatchObject({ ok: true });
+    expect(runOperation).toHaveBeenCalledTimes(1);
+    expect(validateCore).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -353,6 +727,90 @@ describe('createWorktree', () => {
 
       const candidateDirectory = path.join(dataHome, 'opencode', 'worktree', projectID, 'feature-in-use');
       expect(fs.existsSync(candidateDirectory)).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('releases the outer topology lease before background attachment and reaches ready', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await withTimeout(createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/fast-ready',
+        worktreeName: 'fast-ready',
+        returnAfterDirectoryCreated: true,
+      }), 'Fast worktree creation deadlocked');
+
+      expect(created).toMatchObject({
+        directoryCreated: true,
+        bootstrapStatus: { status: 'pending', error: null },
+      });
+
+      const ready = await waitFor(async () => {
+        const status = await getWorktreeBootstrapStatus(created.path);
+        return status.status === 'ready' ? status : null;
+      }, 'Fast worktree bootstrap did not reach ready');
+      expect(ready).toMatchObject({ status: 'ready', error: null });
+      expect(runGit(repo, ['worktree', 'list', '--porcelain'])).toContain(created.path);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('preserves pending then failed polling when background attachment fails', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await withTimeout(createWorktree(repo, {
+        mode: 'new',
+        branchName: 'invalid branch name',
+        worktreeName: 'fast-failed',
+        returnAfterDirectoryCreated: true,
+      }), 'Fast failed worktree creation deadlocked');
+
+      expect(created.bootstrapStatus).toMatchObject({ status: 'pending', error: null });
+
+      const failed = await waitFor(async () => {
+        const status = await getWorktreeBootstrapStatus(created.path);
+        return status.status === 'failed' ? status : null;
+      }, 'Fast worktree bootstrap did not expose failure');
+      expect(failed.status).toBe('failed');
+      expect(failed.error).toMatch(/valid branch name|failed to create git worktree/i);
+      await waitFor(() => !fs.existsSync(created.path), 'Failed fast-create directory cleanup did not settle');
     } finally {
       if (previousXdgDataHome === undefined) {
         delete process.env.XDG_DATA_HOME;

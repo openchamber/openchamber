@@ -47,7 +47,15 @@ const normalizeFsProxyPath = (pathname: string): '/api/fs/stat' | '/api/fs/read'
   return null;
 };
 
-export const tryHandleLocalFsProxy = async (method: string, requestPath: string): Promise<ApiProxyResponsePayload | null> => {
+type LocalFsProxyDeps = {
+  resolveFileReadPath?: (targetPath: string) => Promise<FsReadPathResolution>;
+};
+
+export const tryHandleLocalFsProxy = async (
+  method: string,
+  requestPath: string,
+  deps: LocalFsProxyDeps = {},
+): Promise<ApiProxyResponsePayload | null> => {
   let parsed: URL;
   try {
     parsed = new URL(requestPath, 'https://openchamber.local');
@@ -66,7 +74,7 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
 
   const targetPath = parsed.searchParams.get('path') || '';
   const optional = parsed.searchParams.get('optional') === 'true';
-  const resolution: FsReadPathResolution = await resolveFileReadPath(targetPath);
+  const resolution: FsReadPathResolution = await (deps.resolveFileReadPath ?? resolveFileReadPath)(targetPath);
   if (!resolution.ok) {
     if (fsProxyPath === '/api/fs/stat' && optional && resolution.status === 404) {
       return {

@@ -90,8 +90,6 @@ describe('project icon routes', () => {
       }),
       persistSettings: async () => ({}),
       createFsSearchRuntime: () => ({ searchFilesystemFiles: async () => [] }),
-      spawn: vi.fn(),
-      resolveGitBinaryForSpawn: vi.fn(),
     });
 
     const res = createMockResponse();

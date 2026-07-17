@@ -5,6 +5,9 @@ const execCalls = [];
 const execMock = mock(() => {
   throw new Error('exec should be called through promisify');
 });
+const unusedChildProcessMock = mock(() => {
+  throw new Error('unexpected child process invocation');
+});
 
 execMock[promisify.custom] = (command, options) => {
   execCalls.push({ command, options });
@@ -17,6 +20,8 @@ execMock[promisify.custom] = (command, options) => {
 
 mock.module('child_process', () => ({
   exec: execMock,
+  execFile: unusedChildProcessMock,
+  spawn: unusedChildProcessMock,
 }));
 
 mock.module('vscode', () => ({
@@ -50,6 +55,8 @@ describe('bridge fs exec git read cache', () => {
   beforeEach(() => {
     execCalls.length = 0;
     clearGitReadCacheForTests();
+    deps.listDirectoryEntries.mockReset();
+    deps.execGit.mockReset();
   });
 
   it('dedupes in-flight cacheable git reads and reuses fresh results', async () => {
@@ -84,5 +91,32 @@ describe('bridge fs exec git read cache', () => {
     await handleFsBridgeMessage({ id: '2', type: 'api:fs:exec', payload: { commands: [command], cwd } }, deps);
 
     expect(execCalls).toHaveLength(2);
+  });
+
+  it('delegates list ignore probes to the injected scheduled Git owner', async () => {
+    deps.listDirectoryEntries.mockImplementation(async () => [
+      { name: 'visible.ts', path: '/repo/visible.ts', isDirectory: false },
+      { name: 'ignored.log', path: '/repo/ignored.log', isDirectory: false },
+    ]);
+    deps.execGit.mockImplementation(async () => ({
+      stdout: 'ignored.log\n',
+      stderr: '',
+      exitCode: 0,
+    }));
+
+    const response = await handleFsBridgeMessage({
+      id: '4',
+      type: 'api:fs:list',
+      payload: { path: '/repo', respectGitignore: true },
+    }, deps);
+
+    expect(deps.execGit).toHaveBeenCalledTimes(1);
+    expect(deps.execGit).toHaveBeenCalledWith(
+      ['check-ignore', '--', 'visible.ts', 'ignored.log'],
+      '/repo',
+    );
+    expect(response?.data?.entries).toEqual([
+      { name: 'visible.ts', path: '/repo/visible.ts', isDirectory: false },
+    ]);
   });
 });

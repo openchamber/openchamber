@@ -1,4 +1,4 @@
-import * as gitService from './gitService';
+import * as gitService from './git-execution-service';
 import type { BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -6,6 +6,15 @@ type BridgeMessageInput = {
   type: string;
   payload?: unknown;
 };
+
+type StandardGitBridgeDependencies = Partial<Pick<typeof gitService,
+  | 'stageGitFiles'
+  | 'unstageGitFiles'
+  | 'checkoutCommit'
+  | 'cherryPick'
+  | 'revertCommit'
+  | 'resetToCommit'
+>>;
 
 const requireDirectory = (id: string, type: string, directory?: string): BridgeResponse | null => {
   if (!directory) {
@@ -18,7 +27,10 @@ const isValidCommitHash = (hash: string | undefined): hash is string => (
   typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
 );
 
-export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
+export async function handleStandardGitBridgeMessage(
+  message: BridgeMessageInput,
+  dependencies: StandardGitBridgeDependencies = {},
+): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
   switch (type) {
@@ -236,7 +248,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!directory || filePaths.length === 0) {
         return { id, type, success: false, error: 'Directory and path are required' };
       }
-      await gitService.stageGitFiles(directory, filePaths);
+      await (dependencies.stageGitFiles ?? gitService.stageGitFiles)(directory, filePaths);
       return { id, type, success: true, data: { success: true } };
     }
 
@@ -247,7 +259,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!directory || filePaths.length === 0) {
         return { id, type, success: false, error: 'Directory and path are required' };
       }
-      await gitService.unstageGitFiles(directory, filePaths);
+      await (dependencies.unstageGitFiles ?? gitService.unstageGitFiles)(directory, filePaths);
       return { id, type, success: true, data: { success: true } };
     }
 
@@ -444,7 +456,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!isValidCommitHash(hash)) {
         return { id, type, success: false, error: 'Invalid commit hash' };
       }
-      const result = await gitService.checkoutCommit(directory!, hash);
+      const result = await (dependencies.checkoutCommit ?? gitService.checkoutCommit)(directory!, hash);
       return { id, type, success: true, data: result };
     }
 
@@ -455,7 +467,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!isValidCommitHash(hash)) {
         return { id, type, success: false, error: 'Invalid commit hash' };
       }
-      const result = await gitService.cherryPick(directory!, hash);
+      const result = await (dependencies.cherryPick ?? gitService.cherryPick)(directory!, hash);
       return { id, type, success: true, data: result };
     }
 
@@ -466,7 +478,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!isValidCommitHash(hash)) {
         return { id, type, success: false, error: 'Invalid commit hash' };
       }
-      const result = await gitService.revertCommit(directory!, hash);
+      const result = await (dependencies.revertCommit ?? gitService.revertCommit)(directory!, hash);
       return { id, type, success: true, data: result };
     }
 
@@ -485,7 +497,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       if (!mode || !['soft', 'mixed', 'hard'].includes(mode)) {
         return { id, type, success: false, error: 'mode must be soft, mixed, or hard' };
       }
-      const result = await gitService.resetToCommit(directory!, hash, mode, force);
+      const result = await (dependencies.resetToCommit ?? gitService.resetToCommit)(directory!, hash, mode, force);
       return { id, type, success: true, data: result };
     }
 

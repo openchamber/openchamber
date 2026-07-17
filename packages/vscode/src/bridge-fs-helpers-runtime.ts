@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { execGit } from './bridge-git-process-runtime';
+import { runGitObservation } from './git-execution-runtime';
 
 const MAX_FILE_ATTACH_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -124,13 +124,13 @@ export const normalizeFsPath = (value: string) => value.replace(/\\/g, '/');
 
 const execGitCheckIgnore = async (args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number } | null> => {
   if (GIT_CHECK_IGNORE_TIMEOUT_MS <= 0) {
-    return execGit(args, cwd);
+    return runGitObservation(args, cwd);
   }
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      execGit(args, cwd),
+      runGitObservation(args, cwd),
       new Promise<null>((resolve) => {
         timeout = setTimeout(() => resolve(null), GIT_CHECK_IGNORE_TIMEOUT_MS);
       }),

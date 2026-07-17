@@ -1,11 +1,12 @@
 import { summarizeText as summarizeSharedText } from '../text/summarization.js';
+import { getStatus as getGitStatusDefault } from '../git/service.js';
 
 export const createNotificationTemplateRuntime = (deps) => {
   const {
     readSettingsFromDisk,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
-    resolveGitBinaryForSpawn,
+    getGitStatus = getGitStatusDefault,
   } = deps;
 
   const NOTIFICATION_BODY_MAX_CHARS = 1000;
@@ -308,16 +309,11 @@ export const createNotificationTemplateRuntime = (deps) => {
 
     if (worktreeDir) {
       try {
-        const { simpleGit } = await import('simple-git');
-        const git = simpleGit({
-          baseDir: worktreeDir,
-          spawnOptions: { windowsHide: true },
-          binary: resolveGitBinaryForSpawn(),
-        });
-        branch = await Promise.race([
-          git.revparse(['--abbrev-ref', 'HEAD']),
+        const status = await Promise.race([
+          getGitStatus(worktreeDir, { mode: 'light', queueTimeoutMs: 3000 }),
           new Promise((_, reject) => setTimeout(() => reject(new Error('git timeout')), 3000)),
-        ]).catch(() => '');
+        ]).catch(() => null);
+        branch = typeof status?.current === 'string' ? status.current : '';
       } catch {
       }
     }

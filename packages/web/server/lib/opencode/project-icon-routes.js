@@ -8,8 +8,6 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     readSettingsFromDiskMigrated,
     persistSettings,
     createFsSearchRuntime,
-    spawn,
-    resolveGitBinaryForSpawn,
   } = dependencies;
 
   const projectIconsDirPath = path.join(openchamberDataDir, 'project-icons');
@@ -172,8 +170,6 @@ export const registerProjectIconRoutes = (app, dependencies) => {
   const fsSearchRuntime = createFsSearchRuntime({
     fsPromises,
     path,
-    spawn,
-    resolveGitBinaryForSpawn,
   });
 
   app.get('/api/projects/:projectId/icon', async (req, res) => {

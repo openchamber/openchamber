@@ -291,6 +291,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `createFeatureRoutesRuntime(dependencies)`: creates runtime for main feature route registration orchestration.
 - Returned API:
   - `registerRoutes(app, routeDependencies)`
+- Feature composition passes `spawn` only to filesystem command execution. Project-icon search and filesystem Git-owned operations no longer receive `spawn` or `resolveGitBinaryForSpawn`; they delegate through the classified Git service.
 
 ## Public exports (opencode-resolution-runtime.js)
 - `createOpenCodeResolutionRuntime(dependencies)`: creates runtime for OpenCode binary/source snapshot resolution.

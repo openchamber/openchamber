@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import yaml from 'yaml';
 
+import { withGitCloneReservation } from '../git/service.js';
 import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
 
@@ -83,7 +84,9 @@ export async function scanSkillsRepository({
   const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-skills-scan-'));
 
   try {
-    const cloned = await cloneRepo({ cloneUrl, identity, tempDir: tempBase });
+    return await withGitCloneReservation(tempBase, async (lease) => {
+      const cloned = await cloneRepo({ cloneUrl, identity, tempDir: tempBase });
+      lease.releaseNetwork();
     if (!cloned.ok) {
       const msg = `${cloned.error?.stderr || ''}\n${cloned.error?.message || ''}`.trim();
       if (looksLikeAuthError(msg)) {
@@ -209,12 +212,13 @@ export async function scanSkillsRepository({
     // Stable ordering for UX
     items.sort((a, b) => a.skillName.localeCompare(b.skillName));
 
-    return {
-      ok: true,
-      normalizedRepo: parsed.normalizedRepo,
-      effectiveSubpath,
-      items,
-    };
+      return {
+        ok: true,
+        normalizedRepo: parsed.normalizedRepo,
+        effectiveSubpath,
+        items,
+      };
+    }, { label: 'Scan skills Git repository' });
   } finally {
     await safeRm(tempBase);
   }

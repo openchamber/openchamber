@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import yaml from 'yaml';
 
 import { discoverSkills } from './opencodeConfig';
+import { withGitCloneReservation } from './git-execution-runtime';
 
 const execFileAsync = promisify(execFile);
 
@@ -258,8 +259,8 @@ async function runGit(args: string[], options?: { cwd?: string; timeoutMs?: numb
   }
 }
 
-async function assertGitAvailable() {
-  const result = await runGit(['--version'], { timeoutMs: 5_000 });
+async function assertGitAvailable(runGitCommand: typeof runGit = runGit) {
+  const result = await runGitCommand(['--version'], { timeoutMs: 5_000 });
   if (!result.ok) {
     return { ok: false as const, error: { kind: 'gitUnavailable' as const, message: 'Git is not available in PATH' } };
   }
@@ -357,14 +358,28 @@ async function safeRm(dir: string) {
   }
 }
 
-async function cloneRepo(cloneUrl: string, targetDir: string) {
+type SkillsCatalogExecution = {
+  runGit: typeof runGit;
+  reserveClone: typeof withGitCloneReservation;
+  removeDirectory: typeof safeRm;
+};
+
+const resolveSkillsCatalogExecution = (
+  overrides: Partial<SkillsCatalogExecution> = {},
+): SkillsCatalogExecution => ({
+  runGit: overrides.runGit ?? runGit,
+  reserveClone: overrides.reserveClone ?? withGitCloneReservation,
+  removeDirectory: overrides.removeDirectory ?? safeRm,
+});
+
+async function cloneRepo(cloneUrl: string, targetDir: string, runGitCommand: typeof runGit) {
   const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', cloneUrl, targetDir];
   const fallback = ['clone', '--depth', '1', '--no-checkout', cloneUrl, targetDir];
 
-  const result = await runGit(preferred, { timeoutMs: 60_000 });
+  const result = await runGitCommand(preferred, { timeoutMs: 60_000 });
   if (result.ok) return { ok: true as const };
 
-  const fallbackResult = await runGit(fallback, { timeoutMs: 60_000 });
+  const fallbackResult = await runGitCommand(fallback, { timeoutMs: 60_000 });
   if (fallbackResult.ok) return { ok: true as const };
 
   const combined = `${fallbackResult.stderr}\n${fallbackResult.message}`.trim();
@@ -382,8 +397,46 @@ async function cloneRepo(cloneUrl: string, targetDir: string) {
   return { ok: false as const, error: { kind: 'networkError' as const, message: combined || 'Failed to clone repository' } };
 }
 
-export async function scanSkillsRepository(options: { source: string; subpath?: string; defaultSubpath?: string }): Promise<SkillsRepoScanResult> {
-  const gitCheck = await assertGitAvailable();
+async function withClonedRepository<T>(
+  cloneUrl: string,
+  targetDir: string,
+  task: () => Promise<T>,
+  execution: SkillsCatalogExecution,
+): Promise<T | { ok: false; error: SkillsRepoError }> {
+  let cleaned = false;
+  const cleanup = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    await execution.removeDirectory(targetDir);
+  };
+
+  try {
+    return await execution.reserveClone(targetDir, async (lease) => {
+      try {
+        const cloned = await cloneRepo(cloneUrl, targetDir, execution.runGit);
+        if (!cloned.ok) {
+          return cloned;
+        }
+        // Release only scarce network capacity after clone. The clone lease
+        // keeps destination ownership until local work and cleanup finish.
+        lease.releaseNetwork();
+        return await task();
+      } finally {
+        await cleanup();
+      }
+    });
+  } finally {
+    // Reservation overload/cancellation can reject before the task starts.
+    await cleanup();
+  }
+}
+
+export async function scanSkillsRepository(
+  options: { source: string; subpath?: string; defaultSubpath?: string },
+  executionOverrides: Partial<SkillsCatalogExecution> = {},
+): Promise<SkillsRepoScanResult> {
+  const execution = resolveSkillsCatalogExecution(executionOverrides);
+  const gitCheck = await assertGitAvailable(execution.runGit);
   if (!gitCheck.ok) {
     return { ok: false as const, error: gitCheck.error };
   }
@@ -396,12 +449,7 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
   const effectiveSubpath = parsed.effectiveSubpath || options.defaultSubpath || null;
   const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-vscode-skills-scan-'));
 
-  try {
-    const cloned = await cloneRepo(parsed.cloneUrlHttps, tempBase);
-    if (!cloned.ok) {
-      return { ok: false as const, error: cloned.error };
-    }
-
+  return withClonedRepository(parsed.cloneUrlHttps, tempBase, async () => {
     const toFsPath = (posixPath: string) => path.join(tempBase, ...posixPath.split('/').filter(Boolean));
 
     const patterns = effectiveSubpath
@@ -410,13 +458,13 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
 
     let skillMdPaths: string[] | null = null;
 
-    const sparseInit = await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--no-cone'], { timeoutMs: 15_000 });
+    const sparseInit = await execution.runGit(['-C', tempBase, 'sparse-checkout', 'init', '--no-cone'], { timeoutMs: 15_000 });
     if (sparseInit.ok) {
-      const sparseSet = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...patterns], { timeoutMs: 30_000 });
+      const sparseSet = await execution.runGit(['-C', tempBase, 'sparse-checkout', 'set', ...patterns], { timeoutMs: 30_000 });
       if (sparseSet.ok) {
-        const checkout = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
+        const checkout = await execution.runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
         if (checkout.ok) {
-          const lsFiles = await runGit(['-C', tempBase, 'ls-files'], { timeoutMs: 15_000 });
+          const lsFiles = await execution.runGit(['-C', tempBase, 'ls-files'], { timeoutMs: 15_000 });
           if (lsFiles.ok) {
             skillMdPaths = lsFiles.stdout
               .split(/\r?\n/)
@@ -434,7 +482,7 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
         listArgs.push('--', effectiveSubpath);
       }
 
-      const list = await runGit(listArgs, { timeoutMs: 30_000 });
+      const list = await execution.runGit(listArgs, { timeoutMs: 30_000 });
       if (!list.ok) {
         return { ok: true as const, items: [] as SkillsCatalogItem[] };
       }
@@ -460,7 +508,7 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
       try {
         content = await fs.promises.readFile(toFsPath(skillMdPath), 'utf8');
       } catch {
-        const show = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { timeoutMs: 15_000 });
+        const show = await execution.runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { timeoutMs: 15_000 });
         if (!show.ok) {
           warnings.push('Failed to read SKILL.md');
         } else {
@@ -494,9 +542,7 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
     items.sort((a, b) => String(a.skillName).localeCompare(String(b.skillName)));
 
     return { ok: true as const, items };
-  } finally {
-    await safeRm(tempBase);
-  }
+  }, execution);
 }
 
 async function copyDirectoryNoSymlinks(srcDir: string, dstDir: string) {
@@ -565,8 +611,9 @@ export async function installSkillsFromRepository(options: {
   selections: Array<{ skillDir: string }>;
   conflictPolicy?: 'prompt' | 'skipAll' | 'overwriteAll';
   conflictDecisions?: Record<string, 'skip' | 'overwrite'>;
-}): Promise<SkillsInstallResult> { 
-  const gitCheck = await assertGitAvailable();
+}, executionOverrides: Partial<SkillsCatalogExecution> = {}): Promise<SkillsInstallResult> {
+  const execution = resolveSkillsCatalogExecution(executionOverrides);
+  const gitCheck = await assertGitAvailable(execution.runGit);
   if (!gitCheck.ok) {
     return { ok: false as const, error: gitCheck.error };
   }
@@ -622,19 +669,14 @@ export async function installSkillsFromRepository(options: {
 
   const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-vscode-skills-install-'));
 
-  try {
-    const cloned = await cloneRepo(parsed.cloneUrlHttps, tempBase);
-    if (!cloned.ok) {
-      return { ok: false as const, error: cloned.error };
-    }
-
-    await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--cone'], { timeoutMs: 15_000 });
-    const setResult = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...requestedDirs], { timeoutMs: 30_000 });
+  return withClonedRepository(parsed.cloneUrlHttps, tempBase, async () => {
+    await execution.runGit(['-C', tempBase, 'sparse-checkout', 'init', '--cone'], { timeoutMs: 15_000 });
+    const setResult = await execution.runGit(['-C', tempBase, 'sparse-checkout', 'set', ...requestedDirs], { timeoutMs: 30_000 });
     if (!setResult.ok) {
       return { ok: false as const, error: { kind: 'unknown' as const, message: setResult.stderr || setResult.message || 'Failed to configure sparse checkout' } };
     }
 
-    const checkoutResult = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
+    const checkoutResult = await execution.runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
     if (!checkoutResult.ok) {
       return { ok: false as const, error: { kind: 'unknown' as const, message: checkoutResult.stderr || checkoutResult.message || 'Failed to checkout repository' } };
     }
@@ -695,9 +737,7 @@ export async function installSkillsFromRepository(options: {
     }
 
     return { ok: true as const, installed, skipped };
-  } finally {
-    await safeRm(tempBase);
-  }
+  }, execution);
 }
 
 const catalogCache = new Map<string, { expiresAt: number; items: SkillsCatalogItem[] }>();

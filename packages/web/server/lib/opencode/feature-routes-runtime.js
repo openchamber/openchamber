@@ -73,7 +73,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       path,
       fsPromises,
       spawn,
-      resolveGitBinaryForSpawn,
       createFsSearchRuntime,
       openchamberDataDir,
       openchamberUserConfigRoot,
@@ -137,8 +136,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       persistSettings,
       createFsSearchRuntime,
-      spawn,
-      resolveGitBinaryForSpawn,
     });
 
     registerScheduledTaskRoutes(app, {
@@ -263,7 +260,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       normalizeDirectoryPath,
       resolveProjectDirectory,
       buildAugmentedPath,
-      resolveGitBinaryForSpawn,
       openchamberUserConfigRoot,
     });
   };

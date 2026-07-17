@@ -74,6 +74,9 @@ The following functions are internal helpers used by exported functions:
 
 ### Git Clone Helpers (`install.js`, `scan.js`)
 - `cloneRepo({ cloneUrl, identity, tempDir })`: Clone git repository with preferred partial clone (`--filter=blob:none`) and fallback. Uses non-interactive mode.
+- Scan/install clone and temporary-repository Git commands run inside `withGitCloneReservation(tempDir, task)`. The canonical destination remains exclusive through sparse checkout and repository reads.
+- The clone lease releases global network capacity immediately after preferred/fallback clone attempts finish, without releasing destination ownership.
+- `assertGitAvailable()` remains a pre-repository `git --version` capability probe and is intentionally outside repository execution scheduling.
 
 ### SKILL.md Parsing (`scan.js`)
 - `parseSkillMd(content)`: Parse YAML frontmatter from SKILL.md content. Returns `{ ok, frontmatter, warnings }`.
@@ -137,6 +140,7 @@ The following functions are internal helpers used by exported functions:
 - Preferred clone uses `--depth=1 --filter=blob:none` for partial clone with fallback to `--depth=1`.
 - Always use non-interactive mode (`GIT_TERMINAL_PROMPT=0`) to avoid hangs.
 - SSH keys are injected via `core.sshCommand` in git config.
+- Keep clone/fallback and all temporary-repository Git commands within one bounded destination reservation; call `lease.releaseNetwork()` only after clone network work is complete.
 
 ### Conflict Resolution
 - Installation checks for existing skills before downloading/cloning.
@@ -170,6 +174,7 @@ The following functions are internal helpers used by exported functions:
 
 ### Testing
 - Run `bun run type-check`, `bun run lint`, and `bun run build` before finalizing changes.
+- `git.test.js` executes scan/install workflows with the real clone coordinator and controlled Git results. Keep coverage for reservation acquisition, preferred/fallback propagation, network release before destination-local work, concurrent destinations, and temporary-directory cleanup.
 - Consider edge cases: non-existent repos, private repos without auth, missing SKILL.md files, invalid skill names, conflicts, network failures.
 
 ## Verification Commands
