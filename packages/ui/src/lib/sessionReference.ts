@@ -13,7 +13,7 @@ export type SessionReferencePayload = {
 
 export async function fetchSessionReference(sessionId: string): Promise<SessionReferencePayload | null> {
   const encoded = encodeURIComponent(sessionId);
-  const response = await runtimeFetch(`/api/openchamber-agent/messenger/agent/session-reference/${encoded}`);
+  const response = await runtimeFetch(`/api/messenger/agent/session-reference/${encoded}`);
   if (!response.ok) {
     return null;
   }

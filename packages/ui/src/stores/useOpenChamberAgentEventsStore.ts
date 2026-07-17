@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 
-export const OPENCHAMBER_AGENT_UI_EVENTS_WS_PATH = '/ws/openchamber-agent/events';
+export const MESSENGER_UI_EVENTS_WS_PATH = '/api/messenger/ws';
 
-export const OPENCHAMBER_AGENT_UI_EVENTS_BUFFER_LIMIT = 100;
+export const MESSENGER_UI_EVENTS_BUFFER_LIMIT = 100;
 
 export type OpenChamberAgentWsConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
@@ -75,8 +75,8 @@ export const useOpenChamberAgentEventsStore = create<OpenChamberAgentEventsState
 
     set((state) => {
       const events = [...state.events, event];
-      if (events.length > OPENCHAMBER_AGENT_UI_EVENTS_BUFFER_LIMIT) {
-        events.splice(0, events.length - OPENCHAMBER_AGENT_UI_EVENTS_BUFFER_LIMIT);
+      if (events.length > MESSENGER_UI_EVENTS_BUFFER_LIMIT) {
+        events.splice(0, events.length - MESSENGER_UI_EVENTS_BUFFER_LIMIT);
       }
 
       return {

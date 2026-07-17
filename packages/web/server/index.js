@@ -84,12 +84,12 @@ import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
-import { createMessengerSyncRouter } from './lib/openchamber-agent-api/messenger-sync.js';
+import { createMessengerSyncRouter } from './lib/messenger/messenger-sync.js';
 import { syncSystemSkills } from './lib/opencode/system-skills.js';
 import {
   createOpenChamberAgentEventsWebSocketRuntime,
   broadcast as openChamberAgentEventsBroadcast,
-} from './lib/openchamber-agent-api/websocket.js';
+} from './lib/messenger/websocket.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
@@ -1339,8 +1339,9 @@ async function main(options = {}) {
     // headless server doesn't depend on a browser client connecting first.
     ensureEventStream: () => ensureGlobalWatcherStarted(),
   });
+  app.use('/api/messenger', messengerRouter);
+  // Legacy aliases — same router, kept for in-flight clients / system skills.
   app.use('/api/openchamber-agent/messenger', messengerRouter);
-  // Legacy alias — same router, kept for in-flight clients / system skills.
   app.use('/api/otto/messenger', messengerRouter);
 
   const previewProxyRuntime = createPreviewProxyRuntime({

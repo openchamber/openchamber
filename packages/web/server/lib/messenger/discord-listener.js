@@ -27,7 +27,7 @@ const MESSENGER_COMMAND_NAMES = new Set(COMMAND_HELP.map((c) => c.name));
  *    MESSAGE_CONTENT  (and we receive INTERACTION_CREATE without any intent)
  *  - DISPATCH events:
  *      READY        — capture session_id + resume_gateway_url
- *      MESSAGE_CREATE — broadcast over /ws/openchamber-agent/events + push into ring buffer
+ *      MESSAGE_CREATE — broadcast over /api/messenger/ws + push into ring buffer
  *                      + (optional) auto-reply via REST
  *      INTERACTION_CREATE — for button clicks on approval messages: broadcast
  *                      a structured event + ACK the interaction

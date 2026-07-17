@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import {
-  OPENCHAMBER_AGENT_UI_EVENTS_WS_PATH,
+  MESSENGER_UI_EVENTS_WS_PATH,
   type OpenChamberAgentUiRealtimeEvent,
   useOpenChamberAgentEventsStore,
 } from '@/stores/useOpenChamberAgentEventsStore';
@@ -15,7 +15,7 @@ const MAX_BACKOFF_MS = 30_000;
 
 function buildWsUrl(lastEventId: string | null) {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  const pathname = OPENCHAMBER_AGENT_UI_EVENTS_WS_PATH;
+  const pathname = MESSENGER_UI_EVENTS_WS_PATH;
   const url = new URL(`${protocol}://${window.location.host}${pathname}`);
 
   if (lastEventId) {

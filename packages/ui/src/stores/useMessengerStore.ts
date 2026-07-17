@@ -410,7 +410,7 @@ export const useMessengerStore = create<MessengerState>()(
               username?: string;
               discriminator?: string;
               guilds?: { id: string; name: string }[];
-            }>('/api/openchamber-agent/messenger/test', { type: 'discord', token: conn.botToken });
+            }>('/api/messenger/test', { type: 'discord', token: conn.botToken });
             if (!data.ok) throw new Error(data.error ?? 'Discord API failed');
             get().updateConnection(type, {
               status: 'connected',
@@ -450,7 +450,7 @@ export const useMessengerStore = create<MessengerState>()(
             channelTypeLabel?: string;
             guildId?: string | null;
             guildName?: string | null;
-          }>('/api/openchamber-agent/messenger/discord/resolve-channel', {
+          }>('/api/messenger/discord/resolve-channel', {
             token: conn.botToken,
             channelId: conn.defaultChannelId,
           });
@@ -489,7 +489,7 @@ export const useMessengerStore = create<MessengerState>()(
             categories?: { id: string; name: string }[];
             activeThreads?: { id: string; name: string; parentId: string | null }[];
             defaultChannelId?: string | null;
-          }>('/api/openchamber-agent/messenger/discord/resolve-guild', {
+          }>('/api/messenger/discord/resolve-guild', {
             token: conn.botToken,
             guildId: conn.discordGuildId,
           });
@@ -605,7 +605,7 @@ export const useMessengerStore = create<MessengerState>()(
             ok: boolean;
             error?: string;
             channels?: NonNullable<MessengerConnection['lastSyncChannels']>;
-          }>('/api/openchamber-agent/messenger/discord/sync-projects', {
+          }>('/api/messenger/discord/sync-projects', {
             token: conn.botToken,
             guildId: conn.discordGuildId,
             parentCategoryId: conn.discordParentCategoryId,
@@ -653,7 +653,7 @@ export const useMessengerStore = create<MessengerState>()(
         if (!conn?.discordBotId) return null;
         try {
           const data = await postJson<{ ok: boolean; url?: string; error?: string }>(
-            '/api/openchamber-agent/messenger/discord/invite-url',
+            '/api/messenger/discord/invite-url',
             { clientId: conn.discordBotId },
           );
           if (!data.ok || !data.url) return null;
@@ -692,7 +692,7 @@ export const useMessengerStore = create<MessengerState>()(
 
         try {
           const data = await postJson<{ ok: boolean; error?: string }>(
-            '/api/openchamber-agent/messenger/send',
+            '/api/messenger/send',
             { type, token, target, text },
           );
           if (!data.ok) {
@@ -735,7 +735,7 @@ export const useMessengerStore = create<MessengerState>()(
         });
         try {
           const data = await postJson<{ ok: boolean; error?: string }>(
-            '/api/openchamber-agent/messenger/send',
+            '/api/messenger/send',
             { type, token, target, text: summary },
           );
           if (!data.ok) {
@@ -771,7 +771,7 @@ export const useMessengerStore = create<MessengerState>()(
             active?: MessengerState['bridgeStatus']['active'];
             verbosity?: Partial<Record<MessengerType, MessengerVerbosity | null>>;
             permissionMode?: Partial<Record<MessengerType, MessengerPermissionMode | null>>;
-          }>('/api/openchamber-agent/messenger/bridge/status', { type, token });
+          }>('/api/messenger/bridge/status', { type, token });
           set({
             bridgeStatus: {
               enabled: Boolean(data.enabled),
@@ -789,7 +789,7 @@ export const useMessengerStore = create<MessengerState>()(
       setBridgeVerbosity: async (type, level) => {
         try {
           const data = await postJson<{ ok: boolean; level?: MessengerVerbosity | null }>(
-            '/api/openchamber-agent/messenger/bridge/verbosity',
+            '/api/messenger/bridge/verbosity',
             { type, level },
           );
           if (!data.ok) return false;
@@ -805,7 +805,7 @@ export const useMessengerStore = create<MessengerState>()(
       setBridgePermissionMode: async (type, mode) => {
         try {
           const data = await postJson<{ ok: boolean; mode?: MessengerPermissionMode | null }>(
-            '/api/openchamber-agent/messenger/bridge/permission-mode',
+            '/api/messenger/bridge/permission-mode',
             { type, mode },
           );
           if (!data.ok) return false;
@@ -829,7 +829,7 @@ export const useMessengerStore = create<MessengerState>()(
           const data = await postJson<{
             ok: boolean;
             checks?: MessengerDiagnosisCheck[];
-          }>('/api/openchamber-agent/messenger/discord/diagnose', {
+          }>('/api/messenger/discord/diagnose', {
             token: conn.botToken,
             guildId: conn.discordGuildId,
             channelId: conn.defaultChannelId,
@@ -882,7 +882,7 @@ export const useMessengerStore = create<MessengerState>()(
             ];
           });
         try {
-          await postJson('/api/openchamber-agent/messenger/discord/save-config', {
+          await postJson('/api/messenger/discord/save-config', {
             botToken: conn.botToken,
             guildId: conn.discordGuildId,
             autoReply: conn.discordListenerAutoReply !== false,
@@ -928,7 +928,7 @@ export const useMessengerStore = create<MessengerState>()(
             totalRawMessages?: number;
             lastError?: string | null;
             botUsername?: string;
-          }>('/api/openchamber-agent/messenger/discord/listener/start', {
+          }>('/api/messenger/discord/listener/start', {
             token: conn.botToken,
             guildId: conn.discordGuildId,
             defaultChannelId: conn.defaultChannelId,
@@ -984,7 +984,7 @@ export const useMessengerStore = create<MessengerState>()(
         const conn = get().connections.find((c) => c.type === 'discord');
         if (!conn?.botToken) return false;
         try {
-          await postJson('/api/openchamber-agent/messenger/discord/listener/stop', {
+          await postJson('/api/messenger/discord/listener/stop', {
             token: conn.botToken,
           });
           get().updateConnection('discord', {
@@ -1021,7 +1021,7 @@ export const useMessengerStore = create<MessengerState>()(
             filteredOutCount?: number;
             lastFilteredGuildId?: string | null;
             lastError?: string | null;
-          }>('/api/openchamber-agent/messenger/discord/listener/status', { token: conn.botToken });
+          }>('/api/messenger/discord/listener/status', { token: conn.botToken });
           if (!data.ok) return;
           get().updateConnection('discord', {
             discordListenerRunning: data.running ?? false,
@@ -1051,7 +1051,7 @@ export const useMessengerStore = create<MessengerState>()(
           const data = await postJson<{
             ok: boolean;
             messages?: MessengerInboundMessage[];
-          }>('/api/openchamber-agent/messenger/discord/listener/recent', {
+          }>('/api/messenger/discord/listener/recent', {
             token: conn.botToken,
             limit: 25,
           });
@@ -1077,7 +1077,7 @@ export const useMessengerStore = create<MessengerState>()(
             ok: boolean;
             error?: string;
             messages?: DiscordHistoryMessage[];
-          }>('/api/openchamber-agent/messenger/discord/history', {
+          }>('/api/messenger/discord/history', {
             token: conn.botToken,
             channelId,
             limit,
@@ -1127,7 +1127,7 @@ export const useMessengerStore = create<MessengerState>()(
         }
 
         try {
-          const url = '/api/openchamber-agent/messenger/discord/send-approval';
+          const url = '/api/messenger/discord/send-approval';
           const perm = opts?.permission;
           // Build the request body — include structured permission data when available
           const body: Record<string, unknown> = {
@@ -1251,7 +1251,7 @@ export const useMessengerStore = create<MessengerState>()(
           const data = await postJson<{
             ok: boolean;
             results?: { ok: boolean; channelId?: string; channelName?: string }[];
-          }>('/api/openchamber-agent/messenger/bridge/project-added', {
+          }>('/api/messenger/bridge/project-added', {
             project: { id: project.id, path: project.path, label: projectLabel },
             discord: {
               token: conn.botToken,
@@ -1282,7 +1282,7 @@ export const useMessengerStore = create<MessengerState>()(
             ok: boolean;
             channelId?: string | null;
             channelName?: string | null;
-          }>('/api/openchamber-agent/messenger/bridge/project-renamed', {
+          }>('/api/messenger/bridge/project-renamed', {
             project: { id: project.id, path: project.path, label: projectLabel },
             discord: {
               token: conn.botToken,
@@ -1312,7 +1312,7 @@ export const useMessengerStore = create<MessengerState>()(
         const channelId = get().projectMappings.find((m) => m.projectId === projectId)?.discord
           ?.channelId;
         try {
-          await postJson('/api/openchamber-agent/messenger/bridge/project-removed', {
+          await postJson('/api/messenger/bridge/project-removed', {
             project: { id: projectId, path: projectPath, channelId },
             discord: { token: conn.botToken },
           });

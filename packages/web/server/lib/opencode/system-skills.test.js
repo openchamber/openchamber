@@ -24,7 +24,7 @@ describe('system-skills', () => {
     expect(createProject).toBeTruthy();
     expect(createProject.frontmatter['managed-by']).toBe('openchamber');
     expect(createProject.frontmatter.description).toMatch(/new project/i);
-    expect(createProject.body).toContain(`${API_BASE}/api/openchamber-agent/messenger/agent/create-project`);
+    expect(createProject.body).toContain(`${API_BASE}/api/messenger/agent/create-project`);
     expect(createProject.body).toContain('AGENTS.md');
     expect(createProject.body).toContain('Discord');
   });
@@ -34,8 +34,8 @@ describe('system-skills', () => {
     const readSession = skills.find((s) => s.name === 'read-session');
     expect(readSession).toBeTruthy();
     expect(readSession.frontmatter['managed-by']).toBe('openchamber');
-    expect(readSession.body).toContain(`${API_BASE}/api/openchamber-agent/messenger/agent/read-session`);
-    expect(readSession.body).toContain(`${API_BASE}/api/openchamber-agent/messenger/agent/resolve-reference`);
+    expect(readSession.body).toContain(`${API_BASE}/api/messenger/agent/read-session`);
+    expect(readSession.body).toContain(`${API_BASE}/api/messenger/agent/resolve-reference`);
   });
 
   it('installs a missing system skill', () => {

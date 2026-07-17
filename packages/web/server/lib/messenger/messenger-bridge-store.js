@@ -112,7 +112,7 @@ export class MessengerBridgeStore {
     //   surface override (channel/thread)  >  parent-channel fallback  >
     //   project default  >  OpenCode default.
     // Settable from Discord via `/model default <p/m>` and from
-    // the OpenChamber UI via POST /api/openchamber-agent/messenger/bridge/project-defaults.
+    // the OpenChamber UI via POST /api/messenger/bridge/project-defaults.
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS messenger_project_defaults (
         project_path TEXT PRIMARY KEY,

@@ -2,11 +2,14 @@ import { WebSocketServer } from 'ws';
 import { parseRequestPathname } from '../terminal/terminal-ws-protocol.js';
 import { sendMessageStreamWsFrame } from '../event-stream/protocol.js';
 
-export const OPENCHAMBER_AGENT_EVENTS_WS_PATH = '/ws/openchamber-agent/events';
-/** @deprecated Legacy path kept so already-open clients can finish reconnecting. */
-export const OPENCHAMBER_AGENT_EVENTS_WS_PATH_LEGACY = '/ws/otto/events';
-export const OPENCHAMBER_AGENT_EVENTS_WS_HEARTBEAT_MS = 30_000;
-export const OPENCHAMBER_AGENT_EVENTS_REPLAY_LIMIT = 100;
+export const MESSENGER_EVENTS_WS_PATH = '/api/messenger/ws';
+/** @deprecated Legacy paths kept so already-open clients can finish reconnecting. */
+export const MESSENGER_EVENTS_WS_PATH_LEGACY = [
+  '/ws/openchamber-agent/events',
+  '/ws/otto/events',
+];
+export const MESSENGER_EVENTS_WS_HEARTBEAT_MS = 30_000;
+export const MESSENGER_EVENTS_REPLAY_LIMIT = 100;
 
 let hubBroadcastFn = null;
 
@@ -68,8 +71,8 @@ export function createOpenChamberAgentEventsWebSocketRuntime({
   uiAuthController,
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
-  heartbeatIntervalMs = OPENCHAMBER_AGENT_EVENTS_WS_HEARTBEAT_MS,
-  replayLimit = OPENCHAMBER_AGENT_EVENTS_REPLAY_LIMIT,
+  heartbeatIntervalMs = MESSENGER_EVENTS_WS_HEARTBEAT_MS,
+  replayLimit = MESSENGER_EVENTS_REPLAY_LIMIT,
 }) {
   const wsServer = new WebSocketServer({
     noServer: true,
@@ -227,7 +230,7 @@ export function createOpenChamberAgentEventsWebSocketRuntime({
   };
 
   wsServer.on('connection', (socket, req) => {
-    const rawUrl = typeof req?.url === 'string' ? req.url : OPENCHAMBER_AGENT_EVENTS_WS_PATH;
+    const rawUrl = typeof req?.url === 'string' ? req.url : MESSENGER_EVENTS_WS_PATH;
     const requestUrl = new URL(rawUrl, 'http://127.0.0.1');
     const requestedLastEventId = requestUrl.searchParams.get('lastEventId')?.trim() ?? '';
     acceptSocket(socket, {
@@ -238,8 +241,8 @@ export function createOpenChamberAgentEventsWebSocketRuntime({
   const upgradeHandler = (req, socket, head) => {
     const pathname = parseRequestPathname(req.url);
     if (
-      pathname !== OPENCHAMBER_AGENT_EVENTS_WS_PATH
-      && pathname !== OPENCHAMBER_AGENT_EVENTS_WS_PATH_LEGACY
+      pathname !== MESSENGER_EVENTS_WS_PATH
+      && !MESSENGER_EVENTS_WS_PATH_LEGACY.includes(pathname)
     ) {
       return;
     }

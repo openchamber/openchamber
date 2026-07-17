@@ -14,7 +14,7 @@ import { buildSessionReferenceForId, readSessionTranscript, resolveSessionRefere
  *     session id, or by a raw channel/thread id or a discord.com URL;
  *   - returns a ready-to-share Discord deep link for every resolved target.
  *
- * Endpoints (mounted under /api/openchamber-agent/messenger/agent):
+ * Endpoints (mounted under /api/messenger/agent):
  *   GET  /agent/help           — compact, self-describing usage docs
  *   GET  /agent/targets        — list project channels + live session threads + URLs
  *   POST /agent/resolve        — resolve a single target → { channelId, url } (no post)
@@ -337,7 +337,7 @@ export function createDiscordAgentRouter({
 
   function helpPayload() {
     const base = typeof getLocalApiBaseUrl === 'function' ? getLocalApiBaseUrl() : null;
-    const api = base ? `${base}/api/openchamber-agent/messenger/agent` : '/api/openchamber-agent/messenger/agent';
+    const api = base ? `${base}/api/messenger/agent` : '/api/messenger/agent';
     return {
       ok: true,
       summary:

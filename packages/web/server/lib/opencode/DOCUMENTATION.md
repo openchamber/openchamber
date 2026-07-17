@@ -332,7 +332,7 @@ This module provides OpenCode server integration utilities for the web server ru
   - Supporting skill file read/write/delete routes
 
 ## Public exports (system-skills.js)
-- `buildSystemSkills({ apiBaseUrl })`: returns the OpenChamber system skill definitions (`{ name, frontmatter, body }`) with the local API base URL embedded. Currently ships `create-project` — bootstrap a new project, write its AGENTS.md, and link a Discord channel via `POST /api/openchamber-agent/messenger/agent/create-project`.
+- `buildSystemSkills({ apiBaseUrl })`: returns the OpenChamber system skill definitions (`{ name, frontmatter, body }`) with the local API base URL embedded. Currently ships `create-project` — bootstrap a new project, write its AGENTS.md, and link a Discord channel via `POST /api/messenger/agent/create-project`.
 - `syncSystemSkills({ apiBaseUrl, skillRootDir? })`: installs/refreshes system skills in the user skill dir (`~/.config/opencode/skills`). Files carrying `managed-by: openchamber` frontmatter are rewritten when content changes (e.g. new port); files without the marker are user-owned and never touched. Called from `server/index.js` after the startup pipeline binds the final port.
 
 ## Public exports (proxy.js)

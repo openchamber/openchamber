@@ -1989,7 +1989,7 @@ export function createMessengerOpencodeBridge({
       return null;
     }
     if (!settings?.discord?.botToken) return null;
-    const api = `${base}/api/openchamber-agent/messenger/agent`;
+    const api = `${base}/api/messenger/agent`;
     return [
       '<discord>',
       'This OpenChamber server is connected to Discord. You can post messages to Discord channels and threads via the local API using bash curl — the bot token is resolved server-side, so never ask for or pass it. Useful for status updates, sharing results, or pinging another project/thread.',
