@@ -84,8 +84,13 @@ export function createTunnelService({
       let publicUrl = provider.resolvePublicUrl(getController());
       const activeMode = resolveActiveMode();
       const activeProvider = resolveActiveProvider();
+      const activeManagedRemoteTunnelPresetId = getController()?.managedRemoteTunnelPresetId || '';
+      const profileChanged = request.mode === 'managed-remote'
+        && activeMode === request.mode
+        && activeProvider === request.provider
+        && activeManagedRemoteTunnelPresetId !== request.managedRemoteTunnelPresetId;
 
-      if (publicUrl && (activeMode !== request.mode || activeProvider !== request.provider)) {
+      if (publicUrl && (activeMode !== request.mode || activeProvider !== request.provider || profileChanged)) {
         stop();
         publicUrl = null;
       }
@@ -121,6 +126,8 @@ export function createTunnelService({
           throw new TunnelServiceError('startup_failed', message);
         }
         controller.provider = request.provider;
+        controller.mode = request.mode;
+        controller.managedRemoteTunnelPresetId = request.managedRemoteTunnelPresetId || null;
         setController(controller);
 
         publicUrl = provider.resolvePublicUrl(controller);

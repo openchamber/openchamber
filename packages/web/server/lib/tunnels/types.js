@@ -174,6 +174,9 @@ export function normalizeTunnelStartRequest(input = {}, defaults = {}) {
   const hostname = typeof (input.hostname ?? defaults.hostname) === 'string'
     ? (input.hostname ?? defaults.hostname).trim().toLowerCase()
     : '';
+  const managedRemoteTunnelPresetId = typeof (input.managedRemoteTunnelPresetId ?? defaults.managedRemoteTunnelPresetId) === 'string'
+    ? (input.managedRemoteTunnelPresetId ?? defaults.managedRemoteTunnelPresetId).trim()
+    : '';
 
   return {
     provider,
@@ -182,6 +185,7 @@ export function normalizeTunnelStartRequest(input = {}, defaults = {}) {
     configPath,
     token,
     hostname,
+    managedRemoteTunnelPresetId,
   };
 }
 

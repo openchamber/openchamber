@@ -16,7 +16,213 @@ const makeSettingsStore = (initial = {}) => {
   };
 };
 
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+};
+
 describe('relay identity', () => {
+  it('serializes a fresh generation behind an already-started abandoned write', async () => {
+    const store = makeSettingsStore();
+    const staleWriteStarted = deferred();
+    const releaseStaleWrite = deferred();
+    const writes = [];
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      writeSettingsToDisk: async (settings) => {
+        writes.push(settings);
+        if (writes.length === 1) {
+          staleWriteStarted.resolve();
+          await releaseStaleWrite.promise;
+        }
+        await store.writeSettingsToDisk(settings);
+      },
+    });
+
+    const staleResult = runtime.getRelayIdentity().catch((error) => error);
+    await staleWriteStarted.promise;
+    expect(runtime.abandonPendingRelayIdentity()).toBe(true);
+    const freshResult = runtime.getRelayIdentity();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(writes).toHaveLength(1);
+    releaseStaleWrite.resolve();
+
+    const staleError = await staleResult;
+    const freshIdentity = await freshResult;
+    const stored = store.peek();
+    const storedServerId = crypto
+      .createHash('sha256')
+      .update(canonicalPublicJwkString(stored.relaySigningKey.publicJwk))
+      .digest('base64url');
+
+    expect(staleError).toMatchObject({ code: 'relay_identity_generation_superseded' });
+    expect(storedServerId).toBe(freshIdentity.serverId);
+    expect(stored.relayEncryptionKey.publicJwk).toEqual(freshIdentity.hostEncPubJwk);
+  });
+
+  it('continues fresh generation writes after an abandoned queued write rejects', async () => {
+    const store = makeSettingsStore();
+    const staleWriteStarted = deferred();
+    const rejectStaleWrite = deferred();
+    const writes = [];
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      writeSettingsToDisk: async (settings) => {
+        writes.push(settings);
+        if (writes.length === 1) {
+          staleWriteStarted.resolve();
+          await rejectStaleWrite.promise;
+        }
+        await store.writeSettingsToDisk(settings);
+      },
+    });
+
+    const staleResult = runtime.getRelayIdentity().catch((error) => error);
+    await staleWriteStarted.promise;
+    expect(runtime.abandonPendingRelayIdentity()).toBe(true);
+    const freshResult = runtime.getRelayIdentity();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(writes).toHaveLength(1);
+    rejectStaleWrite.reject(new Error('stale deferred write failed'));
+
+    const staleError = await staleResult;
+    const freshIdentity = await freshResult;
+    const stored = store.peek();
+
+    expect(staleError).toMatchObject({ code: 'relay_identity_generation_superseded' });
+    expect(freshIdentity.serverId).toBeTruthy();
+    expect(stored.relaySigningKey).toBeDefined();
+    expect(stored.relayEncryptionKey.publicJwk).toEqual(freshIdentity.hostEncPubJwk);
+  });
+
+  it('abandons a pending generation without allowing its late success to write or replace fresh identity', async () => {
+    const store = makeSettingsStore();
+    const firstRead = deferred();
+    let reads = 0;
+    let writes = 0;
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      readSettingsFromDiskMigrated: async () => {
+        reads += 1;
+        if (reads === 1) return firstRead.promise;
+        return { ...store.peek() };
+      },
+      writeSettingsToDisk: async (settings) => {
+        writes += 1;
+        await store.writeSettingsToDisk(settings);
+      },
+    });
+
+    const staleResult = runtime.getRelayIdentity().catch((error) => error);
+    expect(runtime.abandonPendingRelayIdentity()).toBe(true);
+    const freshIdentity = await runtime.getRelayIdentity();
+    const writesAfterFreshIdentity = writes;
+
+    firstRead.resolve({});
+    const staleError = await staleResult;
+
+    expect(staleError).toMatchObject({
+      name: 'RelayIdentityGenerationSupersededError',
+      code: 'relay_identity_generation_superseded',
+    });
+    expect(writes).toBe(writesAfterFreshIdentity);
+    expect(await runtime.getRelayIdentity()).toBe(freshIdentity);
+    expect(runtime.abandonPendingRelayIdentity()).toBe(false);
+  });
+
+  it('normalizes a late rejection from an abandoned generation without clearing the fresh cache', async () => {
+    const store = makeSettingsStore();
+    const firstRead = deferred();
+    let reads = 0;
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      readSettingsFromDiskMigrated: async () => {
+        reads += 1;
+        if (reads === 1) return firstRead.promise;
+        return { ...store.peek() };
+      },
+    });
+
+    const staleResult = runtime.getRelayIdentity().catch((error) => error);
+    expect(runtime.abandonPendingRelayIdentity()).toBe(true);
+    const freshIdentity = await runtime.getRelayIdentity();
+    firstRead.reject(new Error('private-key-detail'));
+    const staleError = await staleResult;
+
+    expect(staleError).toMatchObject({
+      name: 'RelayIdentityGenerationSupersededError',
+      code: 'relay_identity_generation_superseded',
+      message: 'Relay identity initialization superseded',
+    });
+    expect(staleError.message).not.toContain('private-key-detail');
+    expect(await runtime.getRelayIdentity()).toBe(freshIdentity);
+  });
+
+  it('shares one cold initialization across concurrent callers', async () => {
+    let writes = 0;
+    const store = makeSettingsStore();
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      writeSettingsToDisk: async (next) => {
+        writes += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await store.writeSettingsToDisk(next);
+      },
+    });
+
+    const identities = await Promise.all(Array.from({ length: 8 }, () => runtime.getRelayIdentity()));
+
+    expect(identities.every((identity) => identity === identities[0])).toBe(true);
+    expect(writes).toBe(2);
+  });
+
+  it('clears a rejected initialization so a later call can retry', async () => {
+    const store = makeSettingsStore();
+    let reads = 0;
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      ...store,
+      readSettingsFromDiskMigrated: async () => {
+        reads += 1;
+        if (reads === 1) throw new Error('temporary read failure');
+        return { ...store.peek() };
+      },
+    });
+
+    await expect(runtime.getRelayIdentity()).rejects.toThrow('temporary read failure');
+    const identity = await runtime.getRelayIdentity();
+
+    expect(identity.serverId).toBeTruthy();
+    expect(reads).toBeGreaterThan(1);
+  });
+
+  it('does not regenerate or write when the strict settings read fails', async () => {
+    let writes = 0;
+    const runtime = createRelayIdentityRuntime({
+      crypto,
+      readSettingsFromDiskMigrated: async () => ({}),
+      readSettingsStrict: async () => { throw new Error('strict read failed'); },
+      writeSettingsToDisk: async () => { writes += 1; },
+    });
+
+    await expect(runtime.getRelayIdentity()).rejects.toThrow('strict read failed');
+    expect(writes).toBe(0);
+  });
+
   it('derives a stable serverId from the signing key and persists both keypairs', async () => {
     const store = makeSettingsStore();
     const runtime = createRelayIdentityRuntime({ crypto, ...store });
@@ -74,5 +280,31 @@ describe('relay identity', () => {
       Buffer.from(sig, 'base64url'),
     );
     expect(ok).toBe(true);
+  });
+
+  it('derives and repairs the public encryption JWK from a valid persisted private key', async () => {
+    const pair = await globalThis.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const privateJwk = await globalThis.crypto.subtle.exportKey('jwk', pair.privateKey);
+    const other = await globalThis.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const mismatched = await globalThis.crypto.subtle.exportKey('jwk', other.publicKey);
+    const store = makeSettingsStore({ relayEncryptionKey: { privateJwk, publicJwk: { ...mismatched, d: 'leak' } } });
+    const identity = await createRelayIdentityRuntime({ crypto, ...store }).getRelayIdentity();
+    expect(identity.hostEncPubJwk).toEqual({ kty: 'EC', crv: 'P-256', x: privateJwk.x, y: privateJwk.y });
+    expect(identity.hostEncPubJwk).not.toHaveProperty('d');
+    expect(store.peek().relayEncryptionKey.privateJwk.d).toBe(privateJwk.d);
+    expect(store.peek().relayEncryptionKey.publicJwk).toEqual(identity.hostEncPubJwk);
+  });
+
+  it('replaces an invalid persisted private encryption point', async () => {
+    const store = makeSettingsStore({
+      relayEncryptionKey: {
+        privateJwk: { kty: 'EC', crv: 'P-256', x: 'bad', y: 'bad', d: 'bad' },
+        publicJwk: { kty: 'EC', crv: 'P-256', x: 'bad', y: 'bad', d: 'leak' },
+      },
+    });
+    const identity = await createRelayIdentityRuntime({ crypto, ...store }).getRelayIdentity();
+    expect(identity.hostEncPubJwk).not.toHaveProperty('d');
+    expect(identity.hostEncPubJwk.x).not.toBe('bad');
+    expect(store.peek().relayEncryptionKey.privateJwk.d).not.toBe('bad');
   });
 });

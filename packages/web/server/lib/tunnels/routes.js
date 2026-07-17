@@ -1,3 +1,22 @@
+const allowedLifecycleErrorNames = new Set(['Error', 'TypeError', 'RangeError', 'AbortError']);
+const allowedLifecycleErrorCodes = new Set([
+  'EACCES',
+  'EBUSY',
+  'ECONNRESET',
+  'EIO',
+  'ENOENT',
+  'EPERM',
+  'ETIMEDOUT',
+  'ERR_ABORTED',
+]);
+
+const lifecycleErrorMetadata = (error) => {
+  const metadata = {};
+  if (allowedLifecycleErrorNames.has(error?.name)) metadata.name = error.name;
+  if (allowedLifecycleErrorCodes.has(error?.code)) metadata.code = error.code;
+  return metadata;
+};
+
 export const createTunnelRoutesRuntime = (dependencies) => {
   const {
     crypto,
@@ -15,7 +34,14 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     normalizeTunnelSessionTtlMs,
     isSupportedTunnelMode,
     upsertManagedRemoteTunnelToken,
+    setManagedRemoteTunnelDirectE2eeEnabled,
     resolveManagedRemoteTunnelToken,
+    getDirectE2eeActiveSessionCount = () => 0,
+    onManagedRemoteDirectE2eeDisabled = () => {},
+    onTunnelStopped = () => {},
+    onTunnelChanged = async () => {},
+    directE2eeSupported = false,
+    isDirectE2eeAvailable = () => false,
     TUNNEL_MODE_QUICK,
     TUNNEL_MODE_MANAGED_LOCAL,
     TUNNEL_MODE_MANAGED_REMOTE,
@@ -29,6 +55,55 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     getActiveTunnelController,
     setActiveTunnelController,
   } = dependencies;
+  const isDirectE2eeSupported = () => typeof directE2eeSupported === 'function'
+    ? directE2eeSupported() === true
+    : directE2eeSupported === true;
+
+  const settleLifecycleCallback = async ({ category, callback, args, includeMetadata }) => {
+    try {
+      await callback(...args);
+      return true;
+    } catch (error) {
+      const message = `Tunnel lifecycle callback failed (${category})`;
+      const metadata = includeMetadata ? lifecycleErrorMetadata(error) : {};
+      if (Object.keys(metadata).length > 0) {
+        console.error(message, metadata);
+      } else {
+        console.error(message);
+      }
+      return false;
+    }
+  };
+
+  // Production refresh clears direct-E2EE admission state before fallible reads,
+  // so notification failure remains fail-closed while the primary mutation succeeds.
+  const awaitBestEffortNotification = (category, callback, ...args) => settleLifecycleCallback({
+    category,
+    callback,
+    args,
+    includeMetadata: true,
+  });
+
+  const awaitCriticalCleanup = (category, callback, ...args) => settleLifecycleCallback({
+    category,
+    callback,
+    args,
+    includeMetadata: true,
+  });
+
+  const awaitStartFailureCleanup = (category, callback, ...args) => settleLifecycleCallback({
+    category,
+    callback,
+    args,
+    includeMetadata: false,
+  });
+
+  const sendLifecycleCleanupFailure = (res, fields = {}) => res.status(500).json({
+    ok: false,
+    error: 'Tunnel lifecycle cleanup failed',
+    code: 'lifecycle_callback_failed',
+    ...fields,
+  });
 
   const resolveActiveNormalizedTunnelMode = () => {
     const mode = tunnelService.resolveActiveMode();
@@ -79,12 +154,14 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       setRuntimeManagedRemoteTunnelToken(token);
 
       if (token && hostname) {
+        const profileId = selectedPresetId || hostname;
         await upsertManagedRemoteTunnelToken({
-          id: selectedPresetId || hostname,
+          id: profileId,
           name: selectedPresetName || hostname,
           hostname,
           token,
         });
+        await awaitBestEffortNotification('tunnel-changed:profile-upserted', onTunnelChanged, { reason: 'profile-upserted', profileId });
       }
     }
 
@@ -95,7 +172,9 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       configPath,
       token,
       hostname,
+      managedRemoteTunnelPresetId: selectedPresetId,
     });
+    await awaitBestEffortNotification('tunnel-changed:profile-switched', onTunnelChanged, { reason: 'profile-switched' });
 
     console.log(`Tunnel active (${result.provider}): ${result.publicUrl}`);
     return {
@@ -146,6 +225,30 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         .filter((entry) => entry.status === 'fail' && entry.id !== 'startup_readiness')
         .map((entry) => entry.detail || entry.label || entry.id),
     };
+  };
+
+  const summarizeManagedRemoteProfile = (entry) => ({
+    id: entry.id,
+    name: entry.name,
+    hostname: entry.hostname,
+    directE2eeEnabled: entry.directE2eeEnabled === true,
+  });
+
+  const resolveActiveManagedRemoteProfile = ({ config, providerMetadata, publicUrl, activeMode }) => {
+    if (activeMode !== TUNNEL_MODE_MANAGED_REMOTE) {
+      return null;
+    }
+    const activeId = typeof providerMetadata?.managedRemoteTunnelPresetId === 'string'
+      ? providerMetadata.managedRemoteTunnelPresetId
+      : '';
+    if (activeId) {
+      return config.tunnels.find((entry) => entry.id === activeId) || null;
+    }
+    const activeHostname = resolveNormalizedTunnelHost(publicUrl);
+    if (!activeHostname) return null;
+    const matches = config.tunnels.filter((entry) =>
+      entry.directE2eeEnabled === true && entry.hostname === activeHostname);
+    return matches.length === 1 ? matches[0] : null;
   };
 
   const runTunnelDoctor = async ({ providerId, modeFilter, doctorRequest }) => {
@@ -332,11 +435,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         const normalizedMode = normalizeTunnelMode(settings?.tunnelMode);
         const managedRemoteHostname = normalizeManagedRemoteTunnelHostname(settings?.managedRemoteTunnelHostname);
         const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
-        const managedRemoteTunnelPresetSummaries = managedRemoteTunnelConfig.tunnels.map((entry) => ({
-          id: entry.id,
-          name: entry.name,
-          hostname: entry.hostname,
-        }));
+        const managedRemoteTunnelPresetSummaries = managedRemoteTunnelConfig.tunnels.map(summarizeManagedRemoteProfile);
         const hasStoredManagedRemoteToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
         const hasManagedRemoteTunnelToken = getRuntimeManagedRemoteTunnelToken().length > 0 || managedRemoteTunnelConfig.tunnels.length > 0 || hasStoredManagedRemoteToken;
         const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
@@ -355,6 +454,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
             mode: normalizedMode,
             provider,
             providerMetadata: null,
+            activeManagedRemoteProfileId: null,
+            directE2eeActiveSessions: 0,
+            directE2eeConfigured: false,
+            directE2eeSupported: isDirectE2eeSupported(),
+            directE2eeAvailable: false,
             hasManagedRemoteTunnelToken,
             managedRemoteTunnelHostname: managedRemoteHostname || null,
             managedRemoteTunnelPresets: managedRemoteTunnelPresetSummaries,
@@ -392,6 +496,21 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
         const bootstrapStatus = tunnelAuthController.getBootstrapStatus();
         const providerMetadata = tunnelService.getProviderMetadata();
+        const activeManagedRemoteProfile = resolveActiveManagedRemoteProfile({
+          config: managedRemoteTunnelConfig,
+          providerMetadata,
+          publicUrl,
+          activeMode: activeNormalizedMode,
+        });
+        const directE2eeConfigured = activeManagedRemoteProfile?.directE2eeEnabled === true;
+        const directE2eeActiveSessions = activeManagedRemoteProfile
+          ? getDirectE2eeActiveSessionCount(activeManagedRemoteProfile.id)
+          : 0;
+        const directE2eeAvailable = isDirectE2eeAvailable({
+          profile: activeManagedRemoteProfile,
+          publicUrl,
+          activeMode: activeNormalizedMode,
+        });
 
         return res.json({
           active: true,
@@ -399,6 +518,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           mode: activeNormalizedMode,
           provider,
           providerMetadata,
+          activeManagedRemoteProfileId: activeManagedRemoteProfile?.id || null,
+          directE2eeActiveSessions,
+          directE2eeConfigured,
+          directE2eeSupported: isDirectE2eeSupported(),
+          directE2eeAvailable,
           hasManagedRemoteTunnelToken,
           managedRemoteTunnelHostname: managedRemoteHostname || null,
           managedRemoteTunnelPresets: managedRemoteTunnelPresetSummaries,
@@ -436,11 +560,51 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           hostname: managedRemoteTunnelHostname,
           token: managedRemoteTunnelToken,
         });
+        await awaitBestEffortNotification('tunnel-changed:profile-upserted', onTunnelChanged, { reason: 'profile-upserted', profileId: presetId });
 
         const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
         return res.json({ ok: true, managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id) });
       } catch (error) {
         return res.status(500).json({ ok: false, error: 'Failed to save managed remote tunnel token' });
+      }
+    });
+
+    app.patch('/api/openchamber/tunnel/managed-remote-profile/:id', async (req, res) => {
+      if (typeof req?.body?.directE2eeEnabled !== 'boolean') {
+        return res.status(400).json({ ok: false, error: 'directE2eeEnabled must be a boolean' });
+      }
+      try {
+        const config = await readManagedRemoteTunnelConfigFromDisk();
+        const profile = config.tunnels.find((entry) => entry.id === req.params.id);
+        if (!profile) {
+          return res.status(404).json({ ok: false, error: 'Managed remote profile not found' });
+        }
+        if (typeof setManagedRemoteTunnelDirectE2eeEnabled === 'function') {
+          await setManagedRemoteTunnelDirectE2eeEnabled({
+            id: profile.id,
+            directE2eeEnabled: req.body.directE2eeEnabled,
+          });
+        } else {
+          await upsertManagedRemoteTunnelToken({
+            id: profile.id,
+            name: profile.name,
+            hostname: profile.hostname,
+            token: profile.token,
+            directE2eeEnabled: req.body.directE2eeEnabled,
+          });
+        }
+        const cleanupSucceeded = req.body.directE2eeEnabled
+          || await awaitCriticalCleanup('direct-e2ee-disabled', onManagedRemoteDirectE2eeDisabled, profile.id);
+        await awaitBestEffortNotification('tunnel-changed:profile-direct-e2ee-updated', onTunnelChanged, { reason: 'profile-direct-e2ee-updated', profileId: profile.id });
+        if (!cleanupSucceeded) {
+          return sendLifecycleCleanupFailure(res);
+        }
+        return res.json({
+          ok: true,
+          profile: summarizeManagedRemoteProfile({ ...profile, directE2eeEnabled: req.body.directE2eeEnabled }),
+        });
+      } catch {
+        return res.status(500).json({ ok: false, error: 'Failed to update managed remote profile' });
       }
     });
 
@@ -501,6 +665,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         const previousMode = tunnelAuthController.getActiveTunnelMode();
         const previousProvider = tunnelService.resolveActiveProvider();
         const previousUrl = tunnelService.getPublicUrl();
+        const previousProviderMetadata = tunnelService.getProviderMetadata();
 
         const { publicUrl, provider: activeProvider, providerMetadata } = await startTunnelWithNormalizedRequest({
           provider,
@@ -513,10 +678,16 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           selectedPresetName,
         });
 
+        const previousManagedRemoteProfileId = previousProviderMetadata?.managedRemoteTunnelPresetId || null;
+        const activeManagedRemoteProfileId = providerMetadata?.managedRemoteTunnelPresetId || null;
+        const managedRemoteProfileChanged = previousMode === TUNNEL_MODE_MANAGED_REMOTE
+          && mode === TUNNEL_MODE_MANAGED_REMOTE
+          && previousManagedRemoteProfileId !== activeManagedRemoteProfileId;
         const replacedTunnel = Boolean(previousTunnelId) && (
           previousMode !== mode
           || previousProvider !== activeProvider
           || previousUrl !== publicUrl
+          || managedRemoteProfileChanged
         );
         let revokedBootstrapCount = 0;
         let invalidatedSessionCount = 0;
@@ -570,6 +741,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         console.error('Failed to start tunnel:', error);
         setActiveTunnelController(null);
         tunnelAuthController.clearActiveTunnel();
+        await awaitStartFailureCleanup('tunnel-stopped:start-failed', onTunnelStopped, 'tunnel-start-failed');
         if (error instanceof TunnelServiceError) {
           const status = error.code === 'missing_dependency'
             ? 400
@@ -582,7 +754,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
     });
 
-    app.post('/api/openchamber/tunnel/stop', (_req, res) => {
+    app.post('/api/openchamber/tunnel/stop', async (_req, res) => {
       let revokedBootstrapCount = 0;
       let invalidatedSessionCount = 0;
       const activeTunnelId = tunnelAuthController.getActiveTunnelId();
@@ -599,7 +771,11 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       }
 
       tunnelAuthController.clearActiveTunnel();
-      res.json({ ok: true, revokedBootstrapCount, invalidatedSessionCount });
+      const cleanupSucceeded = await awaitCriticalCleanup('tunnel-stopped:stop', onTunnelStopped, 'tunnel-stopped');
+      if (!cleanupSucceeded) {
+        return sendLifecycleCleanupFailure(res, { revokedBootstrapCount, invalidatedSessionCount });
+      }
+      return res.json({ ok: true, revokedBootstrapCount, invalidatedSessionCount });
     });
   };
 
