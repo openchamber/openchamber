@@ -39,6 +39,11 @@ export const DISCORD_COMMANDS: DiscordCommandEntry[] = [
   { name: 'verbosity', descriptionKey: 'settings.integrations.discord.commands.desc.verbosity', category: 'model' },
   { name: 'skill', descriptionKey: 'settings.integrations.discord.commands.desc.skill', category: 'model' },
   { name: 'yolo', descriptionKey: 'settings.integrations.discord.commands.desc.yolo', category: 'model', suggested: true },
+  {
+    name: 'permissions',
+    descriptionKey: 'settings.integrations.discord.commands.desc.permissions',
+    category: 'model',
+  },
   { name: 'shell', descriptionKey: 'settings.integrations.discord.commands.desc.shell', category: 'shell', example: '/shell command:pwd' },
   { name: 'init', descriptionKey: 'settings.integrations.discord.commands.desc.init', category: 'shell' },
   { name: 'review', descriptionKey: 'settings.integrations.discord.commands.desc.review', category: 'shell' },

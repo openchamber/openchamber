@@ -103,9 +103,9 @@ const COMMAND_HELP = [
   },
   {
     name: 'yolo',
-    usage: '/yolo [ask | auto-edit | yolo | project <mode> | default <mode> | reset]',
+    usage: '/yolo|/permissions [ask | auto-edit | yolo | project <mode> | default <mode> | reset]',
     summary:
-      'How Otto handles tool permissions: `ask` = Approve/Deny buttons, `auto-edit` = auto-approve edits/reads, `yolo` = auto-approve everything. On Discord, run `/yolo` for a dropdown. Stop any run with `/abort`.',
+      'How Otto handles tool permissions: `ask` = always ask, `auto-edit` = allow non-destructive tools (still ask for shell), `yolo` = allow all. `/permissions` is a synonym. On Discord, run `/yolo` or `/permissions` for a dropdown. Stop any run with `/abort`.',
   },
   {
     name: 'sessions',
@@ -158,7 +158,13 @@ const COMMAND_HELP = [
   },
 ];
 
-const KNOWN_TOP_LEVEL = new Set(COMMAND_HELP.map((c) => c.name));
+/** Aliases for COMMAND_HELP entries — recognised by the gate but not listed twice in `/help`. */
+const COMMAND_ALIASES = new Map([['permissions', 'yolo']]);
+
+const KNOWN_TOP_LEVEL = new Set([
+  ...COMMAND_HELP.map((c) => c.name),
+  ...COMMAND_ALIASES.keys(),
+]);
 
 /**
  * Whether `name` is a recognised console command (`/help`, `/status`, …).
@@ -652,7 +658,7 @@ export async function executeMessengerCommand({
         }
         lines.push('');
         lines.push(
-          'Set with `/yolo yolo` (this conversation), `/yolo project yolo` (this project) or `/yolo default yolo` (every channel/chat on this bot). `/yolo reset` clears the conversation override. You can always stop a run with `/abort`.',
+          'Set with `/permissions yolo` (this conversation), `/permissions project yolo` (this project) or `/permissions default yolo` (every channel/chat on this bot). `/permissions reset` clears the conversation override. `/yolo` is a synonym. You can always stop a run with `/abort`.',
         );
         if (binding?.permissionModeOverride) {
           lines.push('', `Conversation override: \`${binding.permissionModeOverride}\``);
@@ -717,7 +723,7 @@ export async function executeMessengerCommand({
       const mode = parsePermissionMode(raw);
       if (!mode) {
         return {
-          reply: `✗ Unknown mode. Use one of: ${PERMISSION_MODES.map((m) => `\`${m}\``).join(', ')}, or \`/yolo default <mode>\`.`,
+          reply: `✗ Unknown mode. Use one of: ${PERMISSION_MODES.map((m) => `\`${m}\``).join(', ')}, or \`/permissions default <mode>\`.`,
         };
       }
       await surfaceMutators.setOverrides({ permissionModeOverride: mode });

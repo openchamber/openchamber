@@ -8,6 +8,9 @@ export type MessengerType = 'discord';
 export type SyncMode = 'full' | 'notifications' | 'off';
 export type MessengerVerbosity = 'quiet' | 'normal' | 'verbose';
 
+/** Tool permission mode for the OpenCode bridge (`/yolo` / `/permissions`). */
+export type MessengerPermissionMode = 'ask' | 'auto-edit' | 'yolo';
+
 export interface MessengerConnection {
   type: MessengerType;
   enabled: boolean;
@@ -250,6 +253,14 @@ interface MessengerState {
    */
   bridgeVerbosity: Partial<Record<MessengerType, MessengerVerbosity | null>>;
 
+  /**
+   * Per-messenger default tool permission mode for the OpenCode bridge
+   * (`ask` | `auto-edit` | `yolo`). `null` means "never configured — the
+   * bridge uses its built-in `ask` default". Mirrors `/yolo default <mode>`
+   * / `/permissions default <mode>`; refreshed from /bridge/status.
+   */
+  bridgePermissionMode: Partial<Record<MessengerType, MessengerPermissionMode | null>>;
+
   addConnection: (type: MessengerType) => void;
   updateConnection: (type: MessengerType, updates: Partial<MessengerConnection>) => void;
   removeConnection: (type: MessengerType) => void;
@@ -266,6 +277,10 @@ interface MessengerState {
   diagnoseDiscord: () => Promise<boolean>;
   refreshBridgeStatus: (type?: MessengerType) => Promise<void>;
   setBridgeVerbosity: (type: MessengerType, level: MessengerVerbosity) => Promise<boolean>;
+  setBridgePermissionMode: (
+    type: MessengerType,
+    mode: MessengerPermissionMode,
+  ) => Promise<boolean>;
   saveDiscordConfig: () => Promise<void>;
   startDiscordListener: () => Promise<boolean>;
   stopDiscordListener: () => Promise<boolean>;
@@ -352,6 +367,7 @@ export const useMessengerStore = create<MessengerState>()(
       approvals: [],
       bridgeStatus: { enabled: false, bindings: [], active: [] },
       bridgeVerbosity: {},
+      bridgePermissionMode: {},
 
       addConnection: (type) => {
         const existing = get().connections.find((c) => c.type === type);
@@ -754,6 +770,7 @@ export const useMessengerStore = create<MessengerState>()(
             bindings?: MessengerState['bridgeStatus']['bindings'];
             active?: MessengerState['bridgeStatus']['active'];
             verbosity?: Partial<Record<MessengerType, MessengerVerbosity | null>>;
+            permissionMode?: Partial<Record<MessengerType, MessengerPermissionMode | null>>;
           }>('/api/otto/messenger/bridge/status', { type, token });
           set({
             bridgeStatus: {
@@ -762,6 +779,7 @@ export const useMessengerStore = create<MessengerState>()(
               active: data.active ?? [],
             },
             bridgeVerbosity: data.verbosity ?? get().bridgeVerbosity,
+            bridgePermissionMode: data.permissionMode ?? get().bridgePermissionMode,
           });
         } catch {
           // ignore
@@ -777,6 +795,25 @@ export const useMessengerStore = create<MessengerState>()(
           if (!data.ok) return false;
           set({
             bridgeVerbosity: { ...get().bridgeVerbosity, [type]: data.level ?? level },
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+
+      setBridgePermissionMode: async (type, mode) => {
+        try {
+          const data = await postJson<{ ok: boolean; mode?: MessengerPermissionMode | null }>(
+            '/api/otto/messenger/bridge/permission-mode',
+            { type, mode },
+          );
+          if (!data.ok) return false;
+          set({
+            bridgePermissionMode: {
+              ...get().bridgePermissionMode,
+              [type]: data.mode ?? mode,
+            },
           });
           return true;
         } catch {

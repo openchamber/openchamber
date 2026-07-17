@@ -48,7 +48,8 @@ export function buildSlashCommandDefinitions() {
     { name: 'model', description: 'Pick the model + thinking effort (this chat, project, or everywhere)' },
     { name: 'agent', description: 'Pick the agent for this conversation (or set a project default)' },
     { name: 'verbosity', description: 'Choose how much Otto streams back (this chat, project, or everywhere)' },
-    { name: 'yolo', description: 'Set tool permission mode: ask / auto-approve edits / auto-approve all' },
+    { name: 'yolo', description: 'Set tool permission mode: always ask / non-destructive / allow all' },
+    { name: 'permissions', description: 'Synonym for /yolo — set tool permission mode' },
     { name: 'skill', description: 'Pick an available skill and hand it to the agent' },
     { name: 'sessions', description: 'List recent OpenCode sessions for this project' },
     {

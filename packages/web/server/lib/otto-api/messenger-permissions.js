@@ -7,16 +7,16 @@
  * permission mode lets a user pre-decide how those requests are handled for
  * a conversation, project, or the whole bot — the "yolo" affordance:
  *
- *   - `ask`       — always prompt with buttons (the default, safest).
- *   - `auto-edit` — auto-approve low-risk edit/read tools (edit, write, patch,
- *                   read, list, grep, glob, webfetch); still prompt for shell
- *                   commands and anything unrecognised.
- *   - `yolo`      — auto-approve everything. Nothing is prompted; the user can
+ *   - `ask`       — always ask for permission (the default, safest).
+ *   - `auto-edit` — allow non-destructive tools (edit, write, patch, read,
+ *                   list, grep, glob, webfetch); still ask for shell commands
+ *                   and anything unrecognised.
+ *   - `yolo`      — allow all commands. Nothing is prompted; the user can
  *                   still stop the run with `/abort`.
  *
- * Both the `/yolo` Discord command (dropdown wizard + text form) and the
- * bridge's `permission.asked` handler read the SAME resolved value, so the
- * policy is enforced in core logic and never only in the UI.
+ * Both `/yolo` and its synonym `/permissions` (dropdown wizard + text form)
+ * and the bridge's `permission.asked` handler read the SAME resolved value,
+ * so the policy is enforced in core logic and never only in the UI.
  */
 
 export const PERMISSION_MODES = ['ask', 'auto-edit', 'yolo'];
@@ -24,16 +24,17 @@ export const PERMISSION_MODES = ['ask', 'auto-edit', 'yolo'];
 export const DEFAULT_PERMISSION_MODE = 'ask';
 
 export const PERMISSION_MODE_DESCRIPTIONS = {
-  ask: 'Ask every time — Approve / Deny buttons for each tool (default)',
-  'auto-edit': 'Auto-approve file edits + reads; still ask before running shell commands',
-  yolo: 'Auto-approve everything — no prompts (stop a run with /abort)',
+  ask: 'Always ask for permission — Approve / Deny buttons for each tool (default)',
+  'auto-edit':
+    'Allow non-destructive commands (edits/reads); still ask before running shell commands',
+  yolo: 'Allow all commands — no prompts (stop a run with /abort)',
 };
 
 /** Short labels for confirmations / status lines. */
 export const PERMISSION_MODE_LABELS = {
-  ask: 'Ask every time',
-  'auto-edit': 'Auto-approve edits',
-  yolo: 'YOLO — auto-approve all',
+  ask: 'Always ask',
+  'auto-edit': 'Non-destructive only',
+  yolo: 'Allow all',
 };
 
 const PERMISSION_ALIASES = new Map([
@@ -77,8 +78,9 @@ const AUTO_EDIT_TOOLS = new Set([
 ]);
 
 /**
- * Map free-text input (from `/yolo <mode>` or a wizard value) to a canonical
- * mode. Returns `null` for unrecognised input so callers can show an error.
+ * Map free-text input (from `/yolo|/permissions <mode>` or a wizard value) to
+ * a canonical mode. Returns `null` for unrecognised input so callers can show
+ * an error.
  */
 export function parsePermissionMode(input) {
   if (typeof input !== 'string') return null;
