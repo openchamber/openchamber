@@ -103,6 +103,7 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
   let batchNegotiated = false;
   const assembler = createFragmentAssembler();
   const httpBodies = new Map<number, Uint8Array[]>();
+  const httpRequests = new Map<number, { method: string; path: string }>();
   const aborted = new Set<number>();
   let sendChain: Promise<void> = Promise.resolve();
   let recvChain: Promise<void> = Promise.resolve();
@@ -123,6 +124,38 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
     sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
   };
 
+  const respondHttp = (streamId: number, path: string, body: Uint8Array): void => {
+    if (path === '/health') {
+      respondJson(streamId, 200, { ok: true });
+    } else if (path === '/echo-body') {
+      sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
+      sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, body));
+      sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
+    } else if (path === '/stream') {
+      sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
+      const emit = (index: number): void => {
+        if (aborted.has(streamId)) return;
+        if (index >= 3) {
+          sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
+          return;
+        }
+        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode(`chunk${index};`)));
+        setTimeout(() => emit(index + 1), 10);
+      };
+      emit(0);
+    } else if (path === '/never-ends') {
+      sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
+      const pump = (): void => {
+        if (aborted.has(streamId) || endpoint.closed) return;
+        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode('tick;')));
+        setTimeout(pump, 10);
+      };
+      pump();
+    } else {
+      respondJson(streamId, 404, { error: 'not found' });
+    }
+  };
+
   const handleTunnelFrame = (frame: TunnelFrame): void => {
     options.recordFrame?.(frame);
     if (options.silent) return;
@@ -133,8 +166,10 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
     if (frame.frameType === TunnelFrameType.HttpRequest) {
       const req = decodeJsonPayload(frame.payload, isHttpRequestPayload);
       httpBodies.set(frame.streamId, []);
-      (endpoint as FakeEndpoint & { pendingPath?: Map<number, string> }).pendingPath ??= new Map();
-      (endpoint as FakeEndpoint & { pendingPath: Map<number, string> }).pendingPath.set(frame.streamId, req.path);
+      httpRequests.set(frame.streamId, { method: req.method, path: req.path });
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        respondHttp(frame.streamId, req.path, new Uint8Array(0));
+      }
       return;
     }
     if (frame.frameType === TunnelFrameType.HttpBody) {
@@ -146,8 +181,8 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
       return;
     }
     if (frame.frameType === TunnelFrameType.StreamEnd) {
-      const paths = (endpoint as FakeEndpoint & { pendingPath?: Map<number, string> }).pendingPath;
-      const path = paths?.get(frame.streamId) ?? '';
+      const request = httpRequests.get(frame.streamId);
+      if (!request || request.method === 'GET' || request.method === 'HEAD') return;
       const bodyChunks = httpBodies.get(frame.streamId) ?? [];
       const total = bodyChunks.reduce((sum, c) => sum + c.length, 0);
       const body = new Uint8Array(total);
@@ -156,36 +191,7 @@ const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, optio
         body.set(c, off);
         off += c.length;
       }
-      const streamId = frame.streamId;
-      if (path === '/health') {
-        respondJson(streamId, 200, { ok: true });
-      } else if (path === '/echo-body') {
-        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
-        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, body));
-        sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
-      } else if (path === '/stream') {
-        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
-        const emit = (index: number): void => {
-          if (aborted.has(streamId)) return;
-          if (index >= 3) {
-            sendFrame(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
-            return;
-          }
-          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode(`chunk${index};`)));
-          setTimeout(() => emit(index + 1), 10);
-        };
-        emit(0);
-      } else if (path === '/never-ends') {
-        sendFrame(encodeTunnelFrame(TunnelFrameType.HttpResponse, streamId, encodeJsonPayload({ status: 200, headers: {} })));
-        const pump = (): void => {
-          if (aborted.has(streamId) || endpoint.closed) return;
-          sendFrame(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, textEncoder.encode('tick;')));
-          setTimeout(pump, 10);
-        };
-        pump();
-      } else {
-        respondJson(streamId, 404, { error: 'not found' });
-      }
+      respondHttp(frame.streamId, request.path, body);
       return;
     }
     if (frame.frameType === TunnelFrameType.WsOpen) {
@@ -246,12 +252,14 @@ const setupClient = async (
   killWire: () => void;
   sendTextToClient: (text: string) => void;
   clientBinaryCount: () => number;
+  requestedUrls: () => string[];
 }> => {
   const hostKeyPair = await generateEcdhKeyPair();
   const hostPubJwk = await exportPublicKeyJwk(hostKeyPair.publicKey);
   let count = 0;
   let lastClientEndpoint: FakeEndpoint | null = null;
   let lastHostEndpoint: FakeEndpoint | null = null;
+  const urls: string[] = [];
   const client = createRelayTunnelClient({
     relayUrl: 'wss://relay.test/ws',
     serverId: 'server-1',
@@ -262,7 +270,8 @@ const setupClient = async (
     reconnectBaseDelayMs: 20,
     reconnectMaxDelayMs: 80,
     ...clientOverrides,
-    createWireSocket: () => {
+    createWireSocket: (url) => {
+      urls.push(url);
       count += 1;
       const clientEndpoint = new FakeEndpoint();
       const hostEndpoint = new FakeEndpoint();
@@ -278,9 +287,10 @@ const setupClient = async (
   return {
     client,
     connectionCount: () => count,
-    killWire: () => lastClientEndpoint?.close(1006, 'killed'),
+    killWire: (code = 1006, reason = 'killed') => lastClientEndpoint?.close(code, reason),
     sendTextToClient: (text: string) => lastHostEndpoint?.send(text),
     clientBinaryCount: () => lastClientEndpoint?.binarySent ?? 0,
+    requestedUrls: () => urls,
   };
 };
 
@@ -296,6 +306,83 @@ const track = (client: RelayTunnelClient): RelayTunnelClient => {
 };
 
 describe('createRelayTunnelClient', () => {
+  test('does not publish or expose a channel until readiness succeeds', async () => {
+    let release!: () => void;
+    const readiness = new Promise<void>((resolve) => { release = resolve; });
+    const { client } = await setupClient({}, { channelReadiness: async ({ fetch }) => {
+      const health = await fetch('/health');
+      expect(health.status).toBe(200);
+      await readiness;
+    } });
+    track(client);
+    const request = client.fetch('/health');
+    await wait(50);
+    expect(client.getStatus().state).not.toBe('connected');
+    let settled = false;
+    void request.finally(() => { settled = true; });
+    await wait(10);
+    expect(settled).toBe(false);
+    release();
+    expect((await request).status).toBe(200);
+    expect(client.getStatus().state).toBe('connected');
+  });
+
+  test('runs readiness again before queued requests resume after reconnect', async () => {
+    let checks = 0;
+    let releaseSecond!: () => void;
+    const second = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    const { client, killWire } = await setupClient({}, { channelReadiness: async ({ fetch }) => {
+      checks += 1;
+      expect((await fetch('/health')).status).toBe(200);
+      if (checks === 2) await second;
+    } });
+    track(client);
+    await client.fetch('/health');
+    killWire();
+    await wait(10);
+    const queued = client.fetch('/health');
+    await wait(80);
+    expect(checks).toBe(2);
+    expect(client.getStatus().state).not.toBe('connected');
+    releaseSecond();
+    expect((await queued).status).toBe(200);
+  });
+
+  test('keeps public fetch and WebSocket blocked together until readiness publishes', async () => {
+    let release!: () => void;
+    const readiness = new Promise<void>((resolve) => { release = resolve; });
+    const { client } = await setupClient({}, { channelReadiness: async () => readiness });
+    track(client);
+    const request = client.fetch('/health');
+    const socket = client.openWebSocket('/api/event/ws');
+    let fetchSettled = false;
+    let socketOpened = false;
+    void request.then(() => { fetchSettled = true; });
+    socket.onopen = () => { socketOpened = true; };
+    await wait(50);
+    expect(fetchSettled).toBe(false);
+    expect(socketOpened).toBe(false);
+    expect(socket.readyState).toBe(0);
+    release();
+    expect((await request).status).toBe(200);
+    await wait(20);
+    expect(socketOpened).toBe(true);
+  });
+  test('preserves relay URL construction by default and accepts an exact outer URL', async () => {
+    const relay = await setupClient();
+    track(relay.client);
+    await relay.client.fetch('/health');
+    const relayUrl = new URL(relay.requestedUrls()[0]);
+    expect(relayUrl.origin + relayUrl.pathname).toBe('wss://relay.test/ws');
+    expect(relayUrl.searchParams.get('role')).toBe('client');
+    expect(relayUrl.searchParams.get('serverId')).toBe('server-1');
+
+    const direct = await setupClient({}, { outerWebSocketUrl: 'wss://managed.example/api/openchamber/direct-e2ee/ws' });
+    track(direct.client);
+    await direct.client.fetch('/health');
+    expect(direct.requestedUrls()[0]).toBe('wss://managed.example/api/openchamber/direct-e2ee/ws');
+  });
+
   test('performs concurrent fetches over one tunnel', async () => {
     const { client } = await setupClient();
     track(client);
@@ -309,6 +396,61 @@ describe('createRelayTunnelClient', () => {
     expect(b.status).toBe(200);
     expect(await b.text()).toBe(await new Response('{"ok":true}').text());
     expect(await c.text()).toBe('payload-xyz');
+  });
+
+  test('does not send request body frames or StreamEnd for GET and HEAD', async () => {
+    const received: TunnelFrame[] = [];
+    const { client } = await setupClient({ recordFrame: (frame) => received.push(frame) });
+    track(client);
+
+    await client.fetch('/health');
+    await client.fetch('/health', { method: 'HEAD' });
+    await wait(20);
+
+    const requestStreamIds = received
+      .filter((frame) => frame.frameType === TunnelFrameType.HttpRequest)
+      .map((frame) => frame.streamId);
+    expect(requestStreamIds).toHaveLength(2);
+    expect(received.some((frame) => requestStreamIds.includes(frame.streamId) && frame.frameType === TunnelFrameType.HttpBody)).toBe(false);
+    expect(received.some((frame) => requestStreamIds.includes(frame.streamId) && frame.frameType === TunnelFrameType.StreamEnd)).toBe(false);
+  });
+
+  test('sends StreamEnd immediately after POST and DELETE requests without bodies', async () => {
+    const received: TunnelFrame[] = [];
+    const { client } = await setupClient({ recordFrame: (frame) => received.push(frame) });
+    track(client);
+
+    for (const method of ['POST', 'DELETE']) {
+      const response = await client.fetch('/echo-body', { method });
+      expect(await response.text()).toBe('');
+    }
+
+    const requests = received.filter((frame) => frame.frameType === TunnelFrameType.HttpRequest);
+    expect(requests).toHaveLength(2);
+    for (const request of requests) {
+      const streamFrames = received.filter((frame) => frame.streamId === request.streamId);
+      expect(streamFrames.map((frame) => frame.frameType)).toEqual([
+        TunnelFrameType.HttpRequest,
+        TunnelFrameType.StreamEnd,
+      ]);
+    }
+  });
+
+  test('sends streamed request body frames before StreamEnd', async () => {
+    const received: TunnelFrame[] = [];
+    const { client } = await setupClient({ recordFrame: (frame) => received.push(frame) });
+    track(client);
+
+    const response = await client.fetch('/echo-body', { method: 'POST', body: 'streamed-body' });
+    expect(await response.text()).toBe('streamed-body');
+
+    const request = received.find((frame) => frame.frameType === TunnelFrameType.HttpRequest);
+    expect(request).toBeDefined();
+    const streamFrames = received.filter((frame) => frame.streamId === request?.streamId);
+    expect(streamFrames[0]?.frameType).toBe(TunnelFrameType.HttpRequest);
+    expect(streamFrames.at(-1)?.frameType).toBe(TunnelFrameType.StreamEnd);
+    expect(streamFrames.slice(1, -1).every((frame) => frame.frameType === TunnelFrameType.HttpBody)).toBe(true);
+    expect(streamFrames.slice(1, -1).length).toBeGreaterThan(0);
   });
 
   test('streams a response body incrementally', async () => {
@@ -366,6 +508,10 @@ describe('createRelayTunnelClient', () => {
   test('fails open streams on reconnect and recovers on retry', async () => {
     const { client, connectionCount, killWire } = await setupClient();
     track(client);
+    const failures: string[] = [];
+    client.subscribeStatus((status) => {
+      if (status.failureClassification) failures.push(status.failureClassification);
+    });
     const response = await client.fetch('/never-ends');
     const reader = response.body!.getReader();
     await reader.read();
@@ -380,6 +526,7 @@ describe('createRelayTunnelClient', () => {
     killWire();
     await expect(reader.read()).rejects.toThrow();
     expect(await socketClosed).toBe(1012);
+    expect(failures).toContain('network');
 
     // The client reconnects a fresh wire and works again.
     const health = await client.fetch('/health');
@@ -430,12 +577,17 @@ describe('createRelayTunnelClient', () => {
   test('fails closed on non-ready plaintext after establishment', async () => {
     const { client, connectionCount, sendTextToClient } = await setupClient();
     track(client);
+    const failures: string[] = [];
+    client.subscribeStatus((status) => {
+      if (status.failureClassification) failures.push(status.failureClassification);
+    });
     await client.fetch('/health');
     expect(connectionCount()).toBe(1);
     sendTextToClient('{"anything":"plaintext"}');
     // The channel must reset (fail closed) and the client reconnect a new wire.
     await wait(150);
     expect(connectionCount()).toBeGreaterThan(1);
+    expect(failures).toContain('protocol');
   });
 
   test('publishes status transitions to subscribers', async () => {

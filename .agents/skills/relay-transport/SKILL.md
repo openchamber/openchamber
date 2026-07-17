@@ -32,6 +32,10 @@ Adding a new WS endpoint (or porting one, e.g. the planned terminal port) requir
 4. **Do not touch origin handling.** The server rejects WS upgrades whose `Origin` it does not trust. Over the tunnel the host dials loopback and presents the loopback origin (`http://127.0.0.1:<port>`), which the server trusts as same-origin — this already covers every allowlisted WS path. **Never reintroduce reliance on `window.location.origin`**: in the iOS WKWebView it is `"null"`/empty for the custom scheme, so forwarding it produces a 403.
 5. **Test over the relay, not just direct/desktop.** A new WS may be the first WebSocket the mobile client runs through the tunnel (events are SSE-locked on Capacitor). Passing on desktop or a direct connection proves nothing about the relay path.
 
+The dedicated `/api/openchamber/direct-e2ee/ws` outer endpoint is an intentional exception to the normal WebSocket rules above.
+It is credential-free, carries only ciphertext, and owns its own authority validation and admission.
+It deliberately stays outside `ALLOWED_WS_PATHS` and `isUrlAuthWebSocketPath`; never add it to either URL-token allowlist.
+
 ## Rules for the tunnel/crypto/codec internals
 
 - **Two implementations must stay byte-compatible.** The E2EE and framing exist as TS (`packages/ui/src/lib/relay/{crypto,handshake,tunnel-codec}.ts`, normative) and a JS host mirror (`packages/web/server/lib/relay/{e2ee,tunnel-codec}.js`). Any wire-format, frame-type, handshake, or batching change must update **both** and keep `packages/web/server/lib/relay/cross-compat.test.js` green.
