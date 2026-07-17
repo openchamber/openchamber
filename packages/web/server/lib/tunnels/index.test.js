@@ -4,6 +4,7 @@ import { createTunnelService } from './index.js';
 import {
   TUNNEL_INTENT_EPHEMERAL_PUBLIC,
   TUNNEL_MODE_QUICK,
+  TUNNEL_MODE_MANAGED_REMOTE,
   TUNNEL_PROVIDER_CLOUDFLARE,
   TUNNEL_PROVIDER_NGROK,
 } from './types.js';
@@ -89,5 +90,44 @@ describe('createTunnelService', () => {
     expect(ngrokStarted).toBe(true);
     expect(result.provider).toBe(TUNNEL_PROVIDER_NGROK);
     expect(result.publicUrl).toBe('https://demo.ngrok-free.app');
+  });
+
+  it('replaces an active managed remote tunnel when the profile identity changes', async () => {
+    let stopCount = 0;
+    let startCount = 0;
+    let controller = {
+      provider: TUNNEL_PROVIDER_CLOUDFLARE,
+      mode: TUNNEL_MODE_MANAGED_REMOTE,
+      managedRemoteTunnelPresetId: 'profile-a',
+      getPublicUrl: () => 'https://shared.example.com',
+    };
+    const provider = {
+      ...createProvider({ provider: TUNNEL_PROVIDER_CLOUDFLARE }),
+      capabilities: {
+        provider: TUNNEL_PROVIDER_CLOUDFLARE,
+        modes: [{ key: TUNNEL_MODE_MANAGED_REMOTE, intent: 'persistent-public', requires: ['token', 'hostname'] }],
+      },
+      stop: () => { stopCount += 1; },
+      start: async () => {
+        startCount += 1;
+        return { getPublicUrl: () => 'https://shared.example.com' };
+      },
+      getMetadata: (value) => ({ managedRemoteTunnelPresetId: value.managedRemoteTunnelPresetId }),
+    };
+    const service = createTunnelService({
+      registry: createRegistry({ [TUNNEL_PROVIDER_CLOUDFLARE]: provider }),
+      getController: () => controller,
+      setController: (next) => { controller = next; },
+      getActivePort: () => 3000,
+    });
+
+    const result = await service.start({
+      provider: TUNNEL_PROVIDER_CLOUDFLARE, mode: TUNNEL_MODE_MANAGED_REMOTE,
+      hostname: 'shared.example.com', token: 'secret', managedRemoteTunnelPresetId: 'profile-b',
+    });
+    expect(stopCount).toBe(1);
+    expect(startCount).toBe(1);
+    expect(result.providerMetadata.managedRemoteTunnelPresetId).toBe('profile-b');
+    expect(controller.managedRemoteTunnelPresetId).toBe('profile-b');
   });
 });

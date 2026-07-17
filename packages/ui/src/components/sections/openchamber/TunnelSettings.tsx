@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -16,6 +17,7 @@ import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { setAddDeviceIntent } from '@/lib/pairingTransportOptions';
 
 type TunnelState =
   | 'checking'
@@ -30,11 +32,15 @@ type TtlOption = { value: string; label: string; ms: number | null };
 type TunnelMode = 'quick' | 'managed-remote' | 'managed-local';
 type ApiTunnelMode = TunnelMode;
 
-interface ManagedRemoteTunnelPreset {
-  id: string;
-  name: string;
-  hostname: string;
-}
+import {
+  createManagedPresetRequestFence,
+  reconcileSelectedPresetId,
+  sanitizeManagedRemoteTunnelPresets,
+  toggleDirectE2ee,
+  type ManagedPresetRefreshToken,
+  type ManagedRemoteTunnelPreset,
+  type TunnelStatusResponse,
+} from './tunnelSettingsState';
 
 const BOOTSTRAP_TTL_OPTIONS: TtlOption[] = [
   { value: '1800000', label: '30m', ms: 30 * 60 * 1000 },
@@ -99,29 +105,7 @@ interface TunnelSessionRecord {
   publicUrl?: string | null;
 }
 
-interface TunnelStatusResponse {
-  active: boolean;
-  url: string | null;
-  mode?: ApiTunnelMode;
-  hasManagedRemoteTunnelToken?: boolean;
-  managedRemoteTunnelHostname?: string | null;
-  hasBootstrapToken?: boolean;
-  bootstrapExpiresAt?: number | null;
-  managedRemoteTunnelTokenPresetIds?: string[];
-  managedRemoteTunnelPresets?: ManagedRemoteTunnelPreset[];
-  activeTunnelMode?: ApiTunnelMode | null;
-  providerMetadata?: {
-    configPath?: string | null;
-    resolvedHostname?: string | null;
-  };
-  activeSessions?: TunnelSessionRecord[];
-  localPort?: number;
-  policy?: string;
-  ttlConfig?: {
-    bootstrapTtlMs?: number | null;
-    sessionTtlMs?: number;
-  };
-}
+
 
 interface TunnelStartResponse {
   ok?: boolean;
@@ -307,37 +291,6 @@ const normalizePresetHostname = (value: string): string => {
   }
 };
 
-const sanitizePresets = (value: unknown): ManagedRemoteTunnelPreset[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const seenIds = new Set<string>();
-  const seenHosts = new Set<string>();
-  const result: ManagedRemoteTunnelPreset[] = [];
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-    const candidate = entry as Record<string, unknown>;
-    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
-    const hostname = normalizePresetHostname(typeof candidate.hostname === 'string' ? candidate.hostname : '');
-    if (!id || !name || !hostname) {
-      continue;
-    }
-    if (seenIds.has(id) || seenHosts.has(hostname)) {
-      continue;
-    }
-    seenIds.add(id);
-    seenHosts.add(hostname);
-    result.push({ id, name, hostname });
-  }
-
-  return result;
-};
-
 const createPresetId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -346,6 +299,7 @@ const createPresetId = (): string => {
 };
 
 export const TunnelSettings: React.FC = () => {
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
@@ -364,11 +318,15 @@ export const TunnelSettings: React.FC = () => {
   const [tunnelMode, setTunnelMode] = React.useState<TunnelMode>('quick');
   const [managedLocalConfigPath, setManagedLocalConfigPath] = React.useState<string | null>(null);
   const [managedRemoteTunnelPresets, setManagedRemoteTunnelPresets] = React.useState<ManagedRemoteTunnelPreset[]>([]);
+  const [directE2eeSupported, setDirectE2eeSupported] = React.useState<boolean>(false);
+  const [directE2eeAvailable, setDirectE2eeAvailable] = React.useState<boolean>(false);
+  const [, setActiveManagedRemoteProfileId] = React.useState<string | null>(null);
   const [expandedManagedRemoteTunnels, setExpandedManagedRemoteTunnels] = React.useState<Record<string, boolean>>({});
   const [selectedPresetId, setSelectedPresetId] = React.useState<string>('');
   const [sessionTokensByPresetId, setSessionTokensByPresetId] = React.useState<Record<string, string>>({});
   const [savedTokenPresetIds, setSavedTokenPresetIds] = React.useState<Set<string>>(new Set());
   const [isAddingPreset, setIsAddingPreset] = React.useState(false);
+  const [isTogglingProfile, setIsTogglingProfile] = React.useState<Record<string, boolean>>({});
   const [newPresetName, setNewPresetName] = React.useState('');
   const [newPresetHostname, setNewPresetHostname] = React.useState('');
   const [newPresetToken, setNewPresetToken] = React.useState('');
@@ -380,6 +338,32 @@ export const TunnelSettings: React.FC = () => {
   const [localPort, setLocalPort] = React.useState<number | null>(null);
   const managedLocalConfigExtensionError = t(MANAGED_LOCAL_CONFIG_EXTENSION_ERROR_KEY);
   const managedLocalConfigFileInputRef = React.useRef<HTMLInputElement>(null);
+  const managedPresetRequestFenceRef = React.useRef(createManagedPresetRequestFence());
+  const applyServerPresetRefresh = React.useCallback((
+    refreshToken: ManagedPresetRefreshToken,
+    value: unknown,
+    legacyHostname?: unknown,
+  ): boolean => {
+    if (!managedPresetRequestFenceRef.current.canApplyRefresh(refreshToken)) return false;
+    const nextPresets = sanitizeManagedRemoteTunnelPresets(value, legacyHostname);
+    setManagedRemoteTunnelPresets(nextPresets);
+    return true;
+  }, []);
+  const refreshManagedPresetStatus = React.useCallback(async (): Promise<void> => {
+    const refreshToken = managedPresetRequestFenceRef.current.beginRefresh();
+    try {
+      const statusRes = await runtimeFetch('/api/openchamber/tunnel/status');
+      if (!statusRes.ok) return;
+      const statusData = (await statusRes.json()) as TunnelStatusResponse;
+      applyServerPresetRefresh(
+        refreshToken,
+        statusData.managedRemoteTunnelPresets,
+        statusData.managedRemoteTunnelHostname,
+      );
+    } catch {
+      // Ignore transient refresh failures; the normal status poll remains authoritative.
+    }
+  }, [applyServerPresetRefresh]);
   const isManagedLocalConfigPathInvalid = React.useMemo(() => {
     if (!managedLocalConfigPath) {
       return false;
@@ -387,9 +371,16 @@ export const TunnelSettings: React.FC = () => {
     return !hasAllowedManagedLocalConfigExtension(managedLocalConfigPath);
   }, [managedLocalConfigPath]);
 
+  const effectiveSelectedPresetId = React.useMemo(
+    () => reconcileSelectedPresetId(selectedPresetId, managedRemoteTunnelPresets),
+    [managedRemoteTunnelPresets, selectedPresetId],
+  );
+  React.useEffect(() => {
+    setSelectedPresetId(effectiveSelectedPresetId);
+  }, [effectiveSelectedPresetId, managedRemoteTunnelPresets]);
   const selectedPreset = React.useMemo(
-    () => managedRemoteTunnelPresets.find((preset) => preset.id === selectedPresetId) || managedRemoteTunnelPresets[0] || null,
-    [managedRemoteTunnelPresets, selectedPresetId]
+    () => managedRemoteTunnelPresets.find((preset) => preset.id === effectiveSelectedPresetId) ?? null,
+    [effectiveSelectedPresetId, managedRemoteTunnelPresets],
   );
   const renderedSessionRecords = React.useMemo(() => {
     return sessionRecords.map((record) => {
@@ -521,6 +512,7 @@ export const TunnelSettings: React.FC = () => {
   }, [applyDependencyCheck]);
 
   const checkAvailabilityAndStatus = React.useCallback(async (signal: AbortSignal) => {
+    const presetRefreshToken = managedPresetRequestFenceRef.current.beginRefresh();
     try {
       const [checkRes, statusRes, settingsRes, providersRes] = await Promise.all([
         runtimeFetch('/api/openchamber/tunnel/check', { signal }),
@@ -555,30 +547,16 @@ export const TunnelSettings: React.FC = () => {
         : null;
       const dependencyAvailable = applyDependencyCheck(checkData, loadedProvider);
 
-      const loadedPresetsFromStatus = sanitizePresets(statusData?.managedRemoteTunnelPresets);
       const loadedHostname = typeof statusData.managedRemoteTunnelHostname === 'string'
         ? statusData.managedRemoteTunnelHostname
         : '';
-      const presets = loadedPresetsFromStatus.length > 0
-        ? loadedPresetsFromStatus
-        : (loadedHostname
-          ? [{
-            id: `legacy-${normalizePresetHostname(loadedHostname)}`,
-            name: loadedHostname,
-            hostname: normalizePresetHostname(loadedHostname),
-          }]
-          : []);
-
-      const selectedId = presets[0]?.id || '';
-
       setBootstrapTtlMs(loadedBootstrapTtl);
       setSessionTtlMs(loadedSessionTtl);
       setTunnelProvider(loadedProvider);
       setProviderCapabilities(Array.isArray(providersData?.providers) ? providersData.providers : []);
       setTunnelMode(loadedMode);
       setManagedLocalConfigPath(loadedManagedLocalConfigPath);
-      setManagedRemoteTunnelPresets(presets);
-      setSelectedPresetId(selectedId);
+      applyServerPresetRefresh(presetRefreshToken, statusData?.managedRemoteTunnelPresets, loadedHostname);
       setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
       setActiveTunnelMode(
         statusData.activeTunnelMode
@@ -586,6 +564,9 @@ export const TunnelSettings: React.FC = () => {
           : (statusData.active && statusData.mode ? toUiTunnelMode(statusData.mode) : null)
       );
       setSavedTokenPresetIds(new Set(Array.isArray(statusData.managedRemoteTunnelTokenPresetIds) ? statusData.managedRemoteTunnelTokenPresetIds : []));
+        setDirectE2eeSupported(!!statusData.directE2eeSupported);
+        setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
+        setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
       setLocalPort(typeof statusData.localPort === 'number' ? statusData.localPort : null);
 
       if (statusData.active && statusData.url) {
@@ -605,7 +586,7 @@ export const TunnelSettings: React.FC = () => {
         setErrorMessage(t('settings.openchamber.tunnel.toast.checkAvailabilityFailed'));
       }
     }
-  }, [applyDependencyCheck, t]);
+  }, [applyDependencyCheck, applyServerPresetRefresh, t]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -647,7 +628,7 @@ export const TunnelSettings: React.FC = () => {
 
     let rafId: number | null = null;
     let lastTime = Date.now();
-    
+
     const updateRemaining = () => {
       const remaining = tunnelInfo.bootstrapExpiresAt ? tunnelInfo.bootstrapExpiresAt - Date.now() : 0;
       if (remaining <= 0) {
@@ -668,12 +649,12 @@ export const TunnelSettings: React.FC = () => {
     };
 
     updateRemaining();
-    
+
     // Only run when visible
     if (typeof document === 'undefined' || document.visibilityState === 'visible') {
       rafId = requestAnimationFrame(tick);
     }
-    
+
     const onVisibility = () => {
       if (document.visibilityState === 'visible' && rafId === null) {
         rafId = requestAnimationFrame(tick);
@@ -682,7 +663,7 @@ export const TunnelSettings: React.FC = () => {
         rafId = null;
       }
     };
-    
+
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
@@ -697,7 +678,7 @@ export const TunnelSettings: React.FC = () => {
     // Use requestAnimationFrame for smoother updates without setInterval overhead
     let rafId: number | null = null;
     let lastTime = Date.now();
-    
+
     const tick = () => {
       const now = Date.now();
       // Update only once per second
@@ -707,12 +688,12 @@ export const TunnelSettings: React.FC = () => {
       }
       rafId = requestAnimationFrame(tick);
     };
-    
+
     // Only run when visible
     if (typeof document === 'undefined' || document.visibilityState === 'visible') {
       rafId = requestAnimationFrame(tick);
     }
-    
+
     const onVisibility = () => {
       if (document.visibilityState === 'visible' && rafId === null) {
         rafId = requestAnimationFrame(tick);
@@ -721,7 +702,7 @@ export const TunnelSettings: React.FC = () => {
         rafId = null;
       }
     };
-    
+
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
@@ -739,6 +720,7 @@ export const TunnelSettings: React.FC = () => {
 
     let cancelled = false;
     const refreshSessions = async () => {
+      const presetRefreshToken = managedPresetRequestFenceRef.current.beginRefresh();
       try {
         const statusRes = await runtimeFetch('/api/openchamber/tunnel/status');
         if (!statusRes.ok || cancelled) {
@@ -750,6 +732,14 @@ export const TunnelSettings: React.FC = () => {
         }
         setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
         setSavedTokenPresetIds(new Set(Array.isArray(statusData.managedRemoteTunnelTokenPresetIds) ? statusData.managedRemoteTunnelTokenPresetIds : []));
+        applyServerPresetRefresh(
+          presetRefreshToken,
+          statusData.managedRemoteTunnelPresets,
+          statusData.managedRemoteTunnelHostname,
+        );
+        setDirectE2eeSupported(!!statusData.directE2eeSupported);
+        setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
+        setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
         setLocalPort(typeof statusData.localPort === 'number' ? statusData.localPort : null);
       } catch {
         // ignore transient refresh failures
@@ -768,7 +758,7 @@ export const TunnelSettings: React.FC = () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [state]);
+  }, [applyServerPresetRefresh, state]);
 
   const saveTunnelSettings = React.useCallback(async (payload: {
     tunnelProvider?: string;
@@ -790,9 +780,6 @@ export const TunnelSettings: React.FC = () => {
       }
       if (Object.prototype.hasOwnProperty.call(payload, 'managedLocalTunnelConfigPath')) {
         setManagedLocalConfigPath(payload.managedLocalTunnelConfigPath ?? null);
-      }
-      if (Object.prototype.hasOwnProperty.call(payload, 'managedRemoteTunnelPresets') && payload.managedRemoteTunnelPresets) {
-        setManagedRemoteTunnelPresets(payload.managedRemoteTunnelPresets);
       }
     } catch {
       toast.error(t('settings.openchamber.tunnel.toast.saveSettingsFailed'));
@@ -1041,11 +1028,20 @@ export const TunnelSettings: React.FC = () => {
 
     try {
       await runtimeFetch('/api/openchamber/tunnel/stop', { method: 'POST' });
+      const presetRefreshToken = managedPresetRequestFenceRef.current.beginRefresh();
       const statusRes = await runtimeFetch('/api/openchamber/tunnel/status');
       if (statusRes.ok) {
         const statusData = (await statusRes.json()) as TunnelStatusResponse;
         setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
         setSavedTokenPresetIds(new Set(Array.isArray(statusData.managedRemoteTunnelTokenPresetIds) ? statusData.managedRemoteTunnelTokenPresetIds : []));
+        applyServerPresetRefresh(
+          presetRefreshToken,
+          statusData.managedRemoteTunnelPresets,
+          statusData.managedRemoteTunnelHostname,
+        );
+        setDirectE2eeSupported(!!statusData.directE2eeSupported);
+        setDirectE2eeAvailable(!!statusData.directE2eeAvailable);
+        setActiveManagedRemoteProfileId(statusData.activeManagedRemoteProfileId ?? null);
         setLocalPort(typeof statusData.localPort === 'number' ? statusData.localPort : null);
       }
       setTunnelInfo(null);
@@ -1058,7 +1054,7 @@ export const TunnelSettings: React.FC = () => {
       setErrorMessage(t('settings.openchamber.tunnel.toast.stopFailed'));
       toast.error(t('settings.openchamber.tunnel.toast.stopFailed'));
     }
-  }, [t]);
+  }, [applyServerPresetRefresh, t]);
 
   const handleCopyUrl = React.useCallback(async () => {
     if (!tunnelInfo?.connectUrl) {
@@ -1106,7 +1102,7 @@ export const TunnelSettings: React.FC = () => {
     });
   }, [managedRemoteTunnelPresets, saveTunnelSettings, state]);
 
-  const persistSelectedPreset = React.useCallback(async (preset: ManagedRemoteTunnelPreset, presets: ManagedRemoteTunnelPreset[]) => {
+  const persistSelectedPreset = React.useCallback(async (presets: ManagedRemoteTunnelPreset[]) => {
     try {
       await updateDesktopSettings({
         managedRemoteTunnelPresets: presets,
@@ -1124,7 +1120,7 @@ export const TunnelSettings: React.FC = () => {
 
     setSelectedPresetId(preset.id);
     setManagedRemoteValidationError(null);
-    void persistSelectedPreset(preset, managedRemoteTunnelPresets);
+    void persistSelectedPreset(managedRemoteTunnelPresets);
   }, [managedRemoteTunnelPresets, persistSelectedPreset]);
 
   const handleSaveNewPreset = React.useCallback(async () => {
@@ -1191,8 +1187,7 @@ export const TunnelSettings: React.FC = () => {
     }
 
     const nextPresets = managedRemoteTunnelPresets.filter((entry) => entry.id !== preset.id);
-    const fallbackSelectedId = nextPresets[0]?.id || '';
-    const nextSelectedId = selectedPresetId === preset.id ? fallbackSelectedId : selectedPresetId;
+    const nextSelectedId = reconcileSelectedPresetId(effectiveSelectedPresetId, nextPresets);
     const nextTokenMap = Object.fromEntries(
       Object.entries(sessionTokensByPresetId)
         .filter(([id, tokenValue]) => id !== preset.id && tokenValue.trim().length > 0)
@@ -1223,7 +1218,7 @@ export const TunnelSettings: React.FC = () => {
     });
 
     toast.success(t('settings.openchamber.tunnel.toast.managedRemoteRemoved'));
-  }, [managedRemoteTunnelPresets, saveTunnelSettings, selectedPresetId, sessionTokensByPresetId, t]);
+  }, [effectiveSelectedPresetId, managedRemoteTunnelPresets, saveTunnelSettings, sessionTokensByPresetId, t]);
 
   const primaryCtaClass = 'gap-2 border-[var(--primary-base)] bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:bg-[var(--primary-hover)] hover:text-[var(--primary-foreground)]';
 
@@ -1237,7 +1232,7 @@ export const TunnelSettings: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div data-settings-item="tunnel.direct-e2ee">
         <h3 className="typography-ui-header font-semibold text-foreground">{t('settings.openchamber.tunnel.title')}</h3>
         <p className="typography-meta mt-0 text-muted-foreground/70">
           {t('settings.openchamber.tunnel.description')}
@@ -1562,6 +1557,53 @@ export const TunnelSettings: React.FC = () => {
                                   {t('settings.openchamber.tunnel.actions.saveToken')}
                                 </Button>
                               </div>
+                              <label className="mt-3 flex items-start gap-2 cursor-pointer">
+                                <Checkbox
+                                  ariaLabel={t('settings.openchamber.tunnel.field.directE2eeLabel')}
+                                  checked={!!preset.directE2eeEnabled}
+                                  onChange={async (checked: boolean) => {
+                                    if (isTogglingProfile[preset.id]) return;
+                                    const mutationToken = managedPresetRequestFenceRef.current.beginMutation(preset.id);
+                                    setIsTogglingProfile((prev) => ({ ...prev, [preset.id]: true }));
+                                    try {
+                                      const res = await toggleDirectE2ee(preset.id, checked, runtimeFetch);
+                                      const updatedProfile = res.profile;
+                                      if (!managedPresetRequestFenceRef.current.canApplyMutation(mutationToken)) return;
+                                      if (res.ok && updatedProfile) {
+                                        setManagedRemoteTunnelPresets((current) => current.map((entry) => (
+                                          entry.id === preset.id ? updatedProfile : entry
+                                        )));
+                                        toast.success(t('settings.openchamber.tunnel.toast.directE2eeSaved'));
+                                      } else {
+                                        toast.error(t('settings.openchamber.tunnel.toast.directE2eeSaveFailed'));
+                                      }
+                                    } finally {
+                                      const completion = managedPresetRequestFenceRef.current.completeMutation(mutationToken);
+                                      if (completion.accepted) {
+                                        setIsTogglingProfile((prev) => ({ ...prev, [preset.id]: false }));
+                                      }
+                                      if (completion.authoritativeRefreshNeeded) {
+                                        void refreshManagedPresetStatus();
+                                      }
+                                    }
+                                  }}
+                                  disabled={state === 'starting' || state === 'stopping' || isSavingMode || !!isTogglingProfile[preset.id]}
+                                />
+                                <div className="space-y-1 leading-none">
+                                  <span className="typography-ui-label text-foreground">
+                                    {t('settings.openchamber.tunnel.field.directE2eeLabel')}
+                                  </span>
+                                  <p className="typography-meta text-muted-foreground/70">
+                                    {t('settings.openchamber.tunnel.field.directE2eeDescription')}
+                                  </p>
+                                  {!directE2eeSupported && (
+                                    <p className="typography-meta text-[var(--status-warning)]">
+                                      {t('settings.openchamber.tunnel.field.directE2eeUnsupported')}
+                                    </p>
+                                  )}
+                                </div>
+                              </label>
+
                             </div>
                           </CollapsibleContent>
                         </Collapsible>
@@ -1774,7 +1816,7 @@ export const TunnelSettings: React.FC = () => {
                 <div className="space-y-1.5">
                   <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.managedRemoteTunnelToConnect')}</p>
                   <Select
-                    value={selectedPresetId || (managedRemoteTunnelPresets[0]?.id ?? '')}
+                    value={effectiveSelectedPresetId}
                     onValueChange={(presetId) => {
                       void handleSelectPreset(presetId);
                     }}
@@ -1848,8 +1890,35 @@ export const TunnelSettings: React.FC = () => {
 
             {isConnectLinkLive && tunnelInfo.connectUrl && (
               <>
+                {directE2eeAvailable && (
+                  <div className="mb-4 rounded-lg border border-[var(--status-info-border)] bg-[var(--status-info-background)]/30 p-4">
+                    <div className="flex items-start gap-3">
+                      <Icon name="lock" className="mt-0.5 size-5 shrink-0 text-[var(--status-info)]" />
+                      <div className="space-y-2">
+                        <p className="typography-ui-label text-foreground">
+                          {t('settings.openchamber.tunnel.field.nativePairingLabel')}
+                        </p>
+                        <p className="typography-meta text-muted-foreground/80">
+                          {t('settings.openchamber.tunnel.field.nativePairingDescription')}
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-2"
+                          onClick={() => {
+                            setAddDeviceIntent('managed-e2ee');
+                            setSettingsPage('remote-instances');
+                          }}
+                        >
+                          <Icon name="add-circle" className="size-3.5" />
+                          {t('settings.openchamber.tunnel.actions.openAddDevice')}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div>
-                  <p className="typography-meta mb-1 text-muted-foreground/70">{t('settings.openchamber.tunnel.field.connectLink')}</p>
+                  <p className="typography-meta mb-1 text-muted-foreground/70">{t('settings.openchamber.tunnel.field.browserAccessLabel')}</p>
                   <div className="flex items-center gap-2">
                     <code className="typography-code flex-1 truncate rounded bg-muted/50 px-2 py-1 text-xs text-foreground">
                       {tunnelInfo.connectUrl}
@@ -1868,9 +1937,9 @@ export const TunnelSettings: React.FC = () => {
 
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-border/50 bg-[var(--surface-elevated)] p-4">
                   {qrDataUrl
-                    ? <img src={qrDataUrl} alt={t('settings.openchamber.tunnel.field.connectQrAlt')} className="size-48" />
+                    ? <img src={qrDataUrl} alt={t('settings.openchamber.tunnel.field.browserQrAlt')} className="size-48" />
                     : <div className="size-48 rounded bg-muted/30" />}
-                  <p className="typography-meta text-muted-foreground">{t('settings.openchamber.tunnel.note.scanQrToConnect')}</p>
+                  <p className="typography-meta text-muted-foreground">{t('settings.openchamber.tunnel.note.scanQrToConnectBrowser')}</p>
                 </div>
               </>
             )}

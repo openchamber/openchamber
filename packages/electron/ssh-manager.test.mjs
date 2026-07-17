@@ -66,5 +66,8 @@ describe('ElectronSshManager', () => {
       issueClientToken: true,
     });
     expect(settings.desktopHosts).toEqual([{ id: 'ssh-1', label: 'SSH Host', url: localUrl, apiUrl: localUrl, clientToken: 'ssh-client-token' }]);
+    if (process.platform !== 'win32') {
+      expect((await fsp.stat(settingsFilePath)).mode & 0o777).toBe(0o600);
+    }
   });
 });

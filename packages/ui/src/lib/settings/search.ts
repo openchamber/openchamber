@@ -26,7 +26,7 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isWindows: boolean;
 }
 
-const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'appearance.language',
     page: 'appearance',
@@ -816,6 +816,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tunnel.field.connectLinkTtl',
     descriptionKey: 'settings.openchamber.tunnel.field.tunnelSessionTtl',
     keywords: ['expiry', 'expiration', 'session ttl', 'connect link ttl'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'tunnel.direct-e2ee',
+    page: 'tunnel',
+    titleKey: 'settings.openchamber.tunnel.field.directE2eeLabel',
+    descriptionKey: 'settings.openchamber.tunnel.field.directE2eeDescription',
+    keywords: ['end-to-end encryption', 'e2ee', 'native app', 'direct e2ee'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
