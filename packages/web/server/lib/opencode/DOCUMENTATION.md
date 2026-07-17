@@ -34,6 +34,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/project-icon-routes.js`: project icon upload/read/discovery route registration and icon storage orchestration.
 - `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
 - `packages/web/server/lib/opencode/settings-runtime.js`: Settings persistence runtime (disk IO, migrations, normalization, project validation, and persisted update serialization).
+  Settings replacement is atomic, cleans failed temporary files, and enforces owner-only `0600` files on POSIX. Only the default app-owned data directory is created with private directory mode; custom data roots are not chmod-ed.
 - `packages/web/server/lib/opencode/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep.
 - `packages/web/server/lib/opencode/settings-normalization-runtime.js`: path/settings/tunnel normalization and sanitization helpers runtime used by settings/routes/config wiring.
 - `packages/web/server/lib/opencode/theme-runtime.js`: custom theme JSON validation and theme directory loading runtime for settings utility routes.
@@ -351,6 +352,12 @@ This module provides OpenCode server integration utilities for the web server ru
   - Can still create its own `/global/event` reader when no shared hub is provided, which keeps module tests and isolated reuse simple.
   - Reuses event-stream parsing, `Last-Event-ID`, stall timeout, and reconnect behavior.
   - Forwards unwrapped global event payloads into notification/session side effects.
+
+## Pairing and Client Access
+
+- **Pairing v2 (Managed E2EE)**: Supports secure, direct end-to-end encrypted connections between clients and the host.
+- **Fail-Closed Privacy**: Managed direct E2EE is strictly direct-only. It advertises only the exact direct-E2EE candidate over the user's managed Cloudflare tunnel: no plaintext LAN/tunnel candidate, no `apiUrl`, and no OpenChamber Relay candidate/fallback. The direct E2EE endpoint remains on the exact active managed Cloudflare tunnel and fails closed when unavailable. If direct reachability is lost, the connection fails rather than falling back to an unmanaged or third-party transport.
+- **Read-Only Paired Clients**: Clients connected via pairing (e.g., mobile apps) are granted a narrow capability set. They see sanitized, read-only status for system-level transports (Relay, Tunnels) and cannot perform administrative mutations. Full administrative control is reserved for the host desktop or authenticated browser UI sessions.
 
 ## Storage and configuration
 - Provider auth: `~/.local/share/opencode/auth.json`.

@@ -55,4 +55,15 @@ describe('relay tunnel codec', () => {
       assembler.push({ frameType: TunnelFrameType.WsText, streamId: 1, payload: chunk, hasMoreFragments: true }),
     ).toThrow(TunnelCodecError);
   });
+
+  it('clears aggregate fragment bytes on stream drop and assembler close cleanup', () => {
+    const assembler = createFragmentAssembler();
+    assembler.push({ frameType: TunnelFrameType.WsText, streamId: 1, payload: new Uint8Array(3), hasMoreFragments: true });
+    assembler.push({ frameType: TunnelFrameType.WsBinary, streamId: 2, payload: new Uint8Array(4), hasMoreFragments: true });
+    expect(assembler.pendingBytes).toBe(7);
+    assembler.dropStream(1);
+    expect(assembler.pendingBytes).toBe(4);
+    assembler.clear();
+    expect(assembler.pendingBytes).toBe(0);
+  });
 });

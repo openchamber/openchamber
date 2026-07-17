@@ -2,6 +2,9 @@ import crypto from 'crypto';
 
 const BOOTSTRAP_TOKEN_COOKIE_SAFE_BYTES = 32;
 const TUNNEL_SESSION_COOKIE_NAME = 'oc_tunnel_session';
+export const DIRECT_E2EE_TRANSPORT_HEADER = 'x-openchamber-internal-transport';
+
+export const createInternalTransportMarker = () => crypto.randomBytes(32).toString('base64url');
 
 const CONNECT_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 const CONNECT_RATE_LIMIT_LOCK_MS = 10 * 60 * 1000;
@@ -213,7 +216,7 @@ const rateLimitMaxForKey = (key) => {
   return CONNECT_RATE_LIMIT_MAX_ATTEMPTS;
 };
 
-export const createTunnelAuth = () => {
+export const createTunnelAuth = ({ internalRemoteClientMarker = null } = {}) => {
   let activeTunnelId = null;
   let activeTunnelHost = null;
   let activeTunnelMode = null;
@@ -247,6 +250,12 @@ export const createTunnelAuth = () => {
   };
 
   const classifyRequestScope = (req) => {
+    const marker = req?.headers?.[DIRECT_E2EE_TRANSPORT_HEADER];
+    if (internalRemoteClientMarker && typeof marker === 'string') {
+      const actual = Buffer.from(marker);
+      const expected = Buffer.from(internalRemoteClientMarker);
+      if (actual.length === expected.length && crypto.timingSafeEqual(actual, expected)) return 'remote-client';
+    }
     const hostHeader = normalizeHost(typeof req.headers.host === 'string' ? req.headers.host : '');
     const reqHost = normalizeHost(typeof req.hostname === 'string' ? req.hostname : '') || hostHeader;
 

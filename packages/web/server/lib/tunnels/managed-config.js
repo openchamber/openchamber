@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export const createManagedTunnelConfigRuntime = (deps) => {
   const {
     fsPromises,
@@ -5,6 +7,8 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     normalizeManagedRemoteTunnelHostname,
     normalizeManagedRemoteTunnelPresets,
     constants,
+    platform = process.platform,
+    managedConfigDirectoryIsPrivate = false,
   } = deps;
 
   const {
@@ -43,22 +47,48 @@ export const createManagedTunnelConfigRuntime = (deps) => {
 
       seenIds.add(id);
       seenHostnames.add(hostname);
-      result.push({ id, name, hostname, token, updatedAt });
+      result.push({
+        id,
+        name,
+        hostname,
+        token,
+        updatedAt,
+        directE2eeEnabled: entry.directE2eeEnabled === true,
+      });
     }
 
     return result;
   };
 
+  const parseManagedRemoteTunnelConfig = (raw) => {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.tunnels)) {
+      throw new TypeError('Managed remote tunnel config must be an object with a tunnels array');
+    }
+    return parsed;
+  };
+
   const writeManagedRemoteTunnelConfigToDisk = async (data) => {
-    await fsPromises.mkdir(path.dirname(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH), { recursive: true });
-    await fsPromises.writeFile(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    const directory = path.dirname(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH);
+    await fsPromises.mkdir(directory, { recursive: true, ...(managedConfigDirectoryIsPrivate ? { mode: 0o700 } : {}) });
+    if (managedConfigDirectoryIsPrivate && platform !== 'win32') await fsPromises.chmod(directory, 0o700);
+    const temporaryPath = `${CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await fsPromises.writeFile(temporaryPath, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+      if (platform !== 'win32') await fsPromises.chmod(temporaryPath, 0o600);
+      await fsPromises.rename(temporaryPath, CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH);
+      if (platform !== 'win32') await fsPromises.chmod(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH, 0o600);
+    } catch (error) {
+      await fsPromises.unlink(temporaryPath).catch(() => {});
+      throw error;
+    }
   };
 
   const migrateManagedRemoteTunnelConfigFromLegacyFile = async () => {
     try {
       const legacyRaw = await fsPromises.readFile(CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(legacyRaw);
-      const tunnels = sanitizeManagedRemoteTunnelConfigEntries(parsed?.tunnels);
+      const parsed = parseManagedRemoteTunnelConfig(legacyRaw);
+      const tunnels = sanitizeManagedRemoteTunnelConfigEntries(parsed.tunnels);
       const migrated = {
         version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
         tunnels,
@@ -69,18 +99,14 @@ export const createManagedTunnelConfigRuntime = (deps) => {
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
         return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
       }
-      console.warn('Failed to migrate legacy named tunnel config file:', error);
-      return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
+      throw error;
     }
   };
 
   const readManagedRemoteTunnelConfigFromDisk = async () => {
     try {
       const raw = await fsPromises.readFile(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') {
-        return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
-      }
+      const parsed = parseManagedRemoteTunnelConfig(raw);
 
       return {
         version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
@@ -90,13 +116,12 @@ export const createManagedTunnelConfigRuntime = (deps) => {
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
         return migrateManagedRemoteTunnelConfigFromLegacyFile();
       }
-      console.warn('Failed to read managed remote tunnel config file:', error);
-      return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
+      throw error;
     }
   };
 
   const updateManagedRemoteTunnelConfig = async (mutate) => {
-    persistManagedRemoteTunnelConfigLock = persistManagedRemoteTunnelConfigLock.then(async () => {
+    persistManagedRemoteTunnelConfigLock = persistManagedRemoteTunnelConfigLock.catch(() => {}).then(async () => {
       const current = await readManagedRemoteTunnelConfigFromDisk();
       const next = mutate({
         version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
@@ -141,7 +166,7 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     });
   };
 
-  const upsertManagedRemoteTunnelToken = async ({ id, name, hostname, token }) => {
+  const upsertManagedRemoteTunnelToken = async ({ id, name, hostname, token, directE2eeEnabled }) => {
     if (typeof id !== 'string' || typeof name !== 'string' || typeof hostname !== 'string' || typeof token !== 'string') {
       return;
     }
@@ -154,6 +179,9 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     }
 
     await updateManagedRemoteTunnelConfig((current) => {
+      const existing = current.tunnels.find((entry) => entry.id === normalizedId)
+        || current.tunnels.find((entry) => entry.hostname === normalizedHostname)
+        || null;
       const withoutConflicts = current.tunnels.filter((entry) => entry.id !== normalizedId && entry.hostname !== normalizedHostname);
       withoutConflicts.push({
         id: normalizedId,
@@ -161,6 +189,9 @@ export const createManagedTunnelConfigRuntime = (deps) => {
         hostname: normalizedHostname,
         token: normalizedToken,
         updatedAt: Date.now(),
+        directE2eeEnabled: typeof directE2eeEnabled === 'boolean'
+          ? directE2eeEnabled
+          : existing?.directE2eeEnabled === true,
       });
 
       return {
@@ -168,6 +199,26 @@ export const createManagedTunnelConfigRuntime = (deps) => {
         tunnels: withoutConflicts,
       };
     });
+  };
+
+  const setManagedRemoteTunnelDirectE2eeEnabled = async ({ id, directE2eeEnabled }) => {
+    const normalizedId = typeof id === 'string' ? id.trim() : '';
+    if (!normalizedId || typeof directE2eeEnabled !== 'boolean') {
+      return null;
+    }
+
+    let updatedProfile = null;
+    await updateManagedRemoteTunnelConfig((current) => ({
+      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
+      tunnels: current.tunnels.map((entry) => {
+        if (entry.id !== normalizedId) {
+          return entry;
+        }
+        updatedProfile = { ...entry, directE2eeEnabled };
+        return updatedProfile;
+      }),
+    }));
+    return updatedProfile;
   };
 
   const resolveManagedRemoteTunnelToken = async ({ presetId, hostname }) => {
@@ -196,6 +247,7 @@ export const createManagedTunnelConfigRuntime = (deps) => {
     readManagedRemoteTunnelConfigFromDisk,
     syncManagedRemoteTunnelConfigWithPresets,
     upsertManagedRemoteTunnelToken,
+    setManagedRemoteTunnelDirectE2eeEnabled,
     resolveManagedRemoteTunnelToken,
   };
 };

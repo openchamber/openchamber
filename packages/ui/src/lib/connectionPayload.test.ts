@@ -74,6 +74,38 @@ describe('connection payload helpers', () => {
     expect(parsed?.candidates[0]).toEqual({ type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'srv', hostEncPubJwk });
   });
 
+  test('normalizes a strict direct E2EE candidate and drops private JWK fields', () => {
+    const encoded = Buffer.from(JSON.stringify({
+      v: 2,
+      pairingId: 'pair_direct_e2ee',
+      secret: 'secret',
+      candidates: [{
+        type: 'direct-e2ee',
+        wssUrl: 'wss://host.example/api/openchamber/direct-e2ee/ws',
+        hostEncPubJwk: { ...hostEncPubJwk, d: 'private', unknown: true },
+      }],
+    })).toString('base64url');
+    expect(parsePairingConnectionPayload(`openchamber://connect?v=2&p=${encoded}`)?.candidates).toEqual([{
+      type: 'direct-e2ee',
+      wssUrl: 'wss://host.example/api/openchamber/direct-e2ee/ws',
+      hostEncPubJwk,
+    }]);
+  });
+
+  test('drops unsafe direct E2EE candidates and unknown candidate types', () => {
+    for (const wssUrl of [
+      'https://host.example/api/openchamber/direct-e2ee/ws',
+      'ws://host.example/api/openchamber/direct-e2ee/ws',
+      'wss://user:pass@host.example/api/openchamber/direct-e2ee/ws',
+      'wss://host.example/api/openchamber/direct-e2ee/ws?token=x',
+      'wss://host.example/api/openchamber/direct-e2ee/ws#fragment',
+      'wss://host.example/wrong',
+    ]) {
+      const encoded = Buffer.from(JSON.stringify({ v: 2, pairingId: 'p', secret: 's', candidates: [{ type: 'direct-e2ee', wssUrl, hostEncPubJwk }] })).toString('base64url');
+      expect(parsePairingConnectionPayload(`openchamber://connect?v=2&p=${encoded}`)).toBeNull();
+    }
+  });
+
   test('rejects invalid v2 pairing payloads', () => {
     expect(parsePairingConnectionPayload('openchamber://connect?v=1&server=https://runtime.example&token=t')).toBeNull();
     expect(parsePairingConnectionPayload('openchamber://connect?v=2&p=not-json')).toBeNull();

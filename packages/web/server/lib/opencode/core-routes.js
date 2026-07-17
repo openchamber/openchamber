@@ -388,8 +388,11 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     // hostEncPubJwk, priority }) when the host relay is enabled, else null.
     // Injected lazily because the relay service is constructed after these routes.
     getRelayPairingCandidate = async () => null,
+    getDirectE2eePairingState = () => null,
+    getDirectE2eePairingCandidate = async () => null,
     // Re-evaluate the relay lifecycle after pairing/device changes.
     reconcileRelay = async () => {},
+    onClientRevoked = () => {},
     // Returns { local, lan, relayAvailable } — the direct transport URLs the
     // server can actually be reached on (LAN derived from the server bind, not
     // the UI origin), for the create-device dialog.
@@ -560,9 +563,20 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   //   false → direct only, never relay;
   //   undefined → legacy: advertise relay only if it is already enabled.
   // `includeDirect === false` produces a relay-only link (no direct candidate).
-  const pairingServerCandidates = async (req, { preferredServerUrl, includeRelay, includeDirect = true } = {}) => {
+  // `includeDirectE2ee === true` is exclusive and suppresses every plaintext
+  // direct and Relay candidate regardless of caller-supplied mixed flags.
+  const pairingServerCandidates = async (req, { preferredServerUrl, includeRelay, includeDirect = true, includeDirectE2ee = false } = {}) => {
     const candidates = [];
-    if (includeDirect) {
+    const directE2eeState = includeDirectE2ee === true ? getDirectE2eePairingState() : null;
+    let directE2eeCandidate = null;
+    if (includeDirectE2ee === true) {
+      try {
+        directE2eeCandidate = await getDirectE2eePairingCandidate();
+      } catch {
+        directE2eeCandidate = null;
+      }
+    }
+    if (includeDirectE2ee !== true && includeDirect) {
       const direct = normalizeCandidateUrl(preferredServerUrl) || requestOrigin(req);
       if (direct) {
         let type = 'lan';
@@ -571,12 +585,26 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
           type = parsed.protocol === 'https:' ? 'tunnel' : 'lan';
         } catch {
         }
-        candidates.push({ type, url: direct, priority: 10 });
+        let suppressTunnel = false;
+        if (type === 'tunnel' && directE2eeState?.suppressOrigin) {
+          try {
+            const directOrigin = new URL(directE2eeState.suppressOrigin);
+            const tunnelOrigin = new URL(direct);
+            suppressTunnel = directOrigin.protocol === 'https:'
+              && tunnelOrigin.protocol === 'https:'
+              && directOrigin.hostname === tunnelOrigin.hostname
+              && (directOrigin.port || '443') === (tunnelOrigin.port || '443');
+          } catch {
+            suppressTunnel = false;
+          }
+        }
+        if (!suppressTunnel) candidates.push({ type, url: direct, priority: 10 });
       }
     }
+    if (directE2eeCandidate) candidates.push(directE2eeCandidate);
     // The client races candidates and falls back to relay only if the direct URL
     // is unreachable (relay carries a higher priority number).
-    if (includeRelay !== false) {
+    if (includeDirectE2ee !== true && includeRelay !== false) {
       try {
         const relayCandidate = await getRelayPairingCandidate({ ensureEnabled: includeRelay === true });
         if (relayCandidate) candidates.push(relayCandidate);
@@ -781,6 +809,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       if (!result.revoked) {
         return res.status(404).json({ revoked: false, error: 'Client not found' });
       }
+      onClientRevoked(req.params.id);
       void reconcileRelay();
       res.json(result);
     });
@@ -804,11 +833,16 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
 
   app.post('/api/client-auth/pairing/sessions', express.json({ limit: '64kb' }), async (req, res, next) => {
     await runWithClientCreateAuth(req, res, next, async (authContext) => {
+      const includeDirectE2ee = req.body?.includeDirectE2ee === true;
       const candidates = await pairingServerCandidates(req, {
         preferredServerUrl: req.body?.serverUrl,
         includeRelay: typeof req.body?.includeRelay === 'boolean' ? req.body.includeRelay : undefined,
         includeDirect: req.body?.includeDirect !== false,
+        includeDirectE2ee,
       });
+      if (includeDirectE2ee && !candidates.some((candidate) => candidate.type === 'direct-e2ee')) {
+        return res.status(422).json({ error: 'Managed direct E2EE is unavailable' });
+      }
       const usesRelay = candidates.some((candidate) => candidate.type === 'relay');
       const result = await clientPairingRuntime.createPairingSession({
         label: req.body?.label,
@@ -871,7 +905,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   app.get('/api/client-auth/pairing/transports', async (req, res, next) => {
     await runWithClientCreateAuth(req, res, next, async () => {
       res.setHeader('Cache-Control', 'no-store');
-      res.json(getPairingTransports(req));
+      res.json(await getPairingTransports(req));
     });
   });
 

@@ -59,6 +59,8 @@ export const dict = {
   'mobile.connect.error.invalidUrl': 'That server URL is not valid.',
   'mobile.connect.error.unreachable': 'Could not reach that OpenChamber server.',
   'mobile.connect.error.authRequired': 'This server needs a password or client token.',
+  'mobile.connect.error.pairingSecurity': 'Could not verify this server’s secure connection. Check the pairing code and try again.',
+  'mobile.connect.error.pairingUncertain': 'Pairing may have completed, but confirmation was lost. Check saved connections before trying again.',
   'mobile.connect.error.passwordFailed': 'Could not unlock that server. Check the password.',
   'mobile.instances.addTitle': 'Add instance',
   'mobile.instances.addManual': 'Add by address',

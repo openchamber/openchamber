@@ -69,12 +69,12 @@ import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
-import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { desktopHostsGet, redactSensitiveUrl, resolveActiveDesktopHost } from '@/lib/desktopHosts';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import type { Session } from '@opencode-ai/sdk/v2/client';
 import type { IconName } from "@/components/icon/icons";
 
@@ -898,19 +898,19 @@ export const Header: React.FC<HeaderProps> = ({
       const cfg = await desktopHostsGet();
       const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
       const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+      const activeRuntimeKey = getRuntimeKey();
 
-      if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
-        setCurrentInstanceLabel('Local');
-        setCurrentInstanceIsLocal(true);
-        return;
-      }
+      const activeHost = resolveActiveDesktopHost(cfg.hosts, localOrigin, runtimeApiBaseUrl, activeRuntimeKey);
 
-      const match = cfg.hosts.find((host) => {
-        return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false;
-      });
-
-      if (match?.label?.trim()) {
-        setCurrentInstanceLabel(redactSensitiveUrl(match.label.trim()));
+      if (activeHost) {
+        if (activeHost.id === 'local') {
+          setCurrentInstanceLabel('Local');
+          setCurrentInstanceIsLocal(true);
+        } else if (activeHost.label?.trim()) {
+          setCurrentInstanceLabel(redactSensitiveUrl(activeHost.label.trim()));
+        } else {
+          setCurrentInstanceLabel('Instance');
+        }
         return;
       }
 

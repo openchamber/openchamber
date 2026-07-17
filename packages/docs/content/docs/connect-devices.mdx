@@ -15,6 +15,8 @@ Pair another device — the mobile app, the desktop app, or a browser on another
    - **This computer only** — for apps running on this same machine
    - **Home network only** — connects directly over your Wi-Fi; does not work away from this network
    - **Anywhere** — works at home and away; away traffic goes through the [Private Relay](/private-relay/), an end-to-end encrypted tunnel with no setup needed
+   - **Managed tunnel (E2EE)** — when an enabled managed-remote profile is active,
+     connects the native app through your Cloudflare hostname with application-layer end-to-end encryption
 4. Press **Create QR code**.
 5. On the other device, scan the code:
    - **mobile app** — tap **Scan QR code** on the connect screen (or in the instances list)
@@ -28,6 +30,20 @@ The dialog closes on its own as soon as the device connects, and the device appe
 - **Each device gets its own token.** Scanning a code never exposes your UI password, and one device's token can't be used to impersonate another.
 - **You stay in control.** Every paired device is listed with its name, platform, and connection status — revoke any of them at any time.
 - **Away-from-home traffic is end-to-end encrypted.** With **Anywhere**, traffic outside your network rides the [Private Relay](/private-relay/), which cannot read what passes through it.
+- **Managed-tunnel E2EE is explicit.** It appears only for an enabled active managed-remote profile.
+  It does not turn the browser tunnel link into a native connection or silently fall back to plaintext application traffic.
+
+## Browser tunnel, managed E2EE, and Private Relay
+
+- A tunnel's **Browser access** QR opens `/connect` in a browser and creates a tunnel-session cookie.
+- **Managed tunnel (E2EE)** is a native Pairing v2 option through your own active Cloudflare hostname.
+  Cloudflare can observe connection metadata and ciphertext sizes,
+  but not the encrypted application payload.
+- **Anywhere** uses the hosted [Private Relay](/private-relay/) and remains available independently when requested.
+
+LAN candidates remain available under the existing local-network choices.
+Choosing managed E2EE suppresses only the plaintext native candidate for the same Cloudflare origin;
+it does not remove LAN or an explicitly requested hosted-relay candidate.
 
 ## Manage paired devices
 

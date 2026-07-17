@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { writeSecureAtomicJson } from './secure-json-file.mjs';
 
 const LOCAL_HOST_ID = 'local';
 const DEFAULT_CONNECTION_TIMEOUT_SEC = 60;
@@ -72,13 +73,7 @@ const readJsonRoot = (settingsFilePath) => {
 };
 
 const writeJsonRoot = async (settingsFilePath, root) => {
-  await fsp.mkdir(path.dirname(settingsFilePath), { recursive: true });
-  // Atomic write: concurrent readers (main.mjs, web server) would otherwise
-  // see partial JSON and readJsonRoot()'s catch would silently coerce to {},
-  // causing the next read-modify-write to wipe the entire settings file.
-  const tmp = `${settingsFilePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, JSON.stringify(root, null, 2));
-  await fsp.rename(tmp, settingsFilePath);
+  await writeSecureAtomicJson(settingsFilePath, root);
 };
 
 const defaultTrue = () => true;

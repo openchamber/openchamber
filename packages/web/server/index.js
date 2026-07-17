@@ -94,7 +94,9 @@ import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
+import { createRelayIdentityRuntime } from './lib/relay/identity.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
+import { createDirectE2eeRuntime } from './lib/direct-e2ee/runtime.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -284,6 +286,7 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
   : path.join(os.homedir(), '.config', 'openchamber');
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
+const PRIVATE_DEFAULT_SETTINGS_DIRECTORY = !process.env.OPENCHAMBER_DATA_DIR;
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
 const APNS_TOKENS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'apns-tokens.json');
 const REMOTE_CLIENTS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'remote-clients.json');
@@ -297,6 +300,7 @@ const managedTunnelConfigRuntime = createManagedTunnelConfigRuntime({
   path,
   normalizeManagedRemoteTunnelHostname,
   normalizeManagedRemoteTunnelPresets,
+  managedConfigDirectoryIsPrivate: PRIVATE_DEFAULT_SETTINGS_DIRECTORY,
   constants: {
     CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH,
     CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH,
@@ -308,6 +312,8 @@ const readManagedRemoteTunnelConfigFromDisk = (...args) => managedTunnelConfigRu
 const syncManagedRemoteTunnelConfigWithPresets = (...args) => managedTunnelConfigRuntime.syncManagedRemoteTunnelConfigWithPresets(...args);
 const upsertManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.upsertManagedRemoteTunnelToken(...args);
 const resolveManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.resolveManagedRemoteTunnelToken(...args);
+const setManagedRemoteTunnelDirectE2eeEnabled = (...args) =>
+  managedTunnelConfigRuntime.setManagedRemoteTunnelDirectE2eeEnabled(...args);
 
 const settingsHelpers = createSettingsHelpers({
   normalizePathForPersistence,
@@ -351,6 +357,7 @@ const settingsRuntime = createSettingsRuntime({
   path,
   crypto,
   SETTINGS_FILE_PATH,
+  privateSettingsDirectory: PRIVATE_DEFAULT_SETTINGS_DIRECTORY,
   sanitizeProjects,
   sanitizeSettingsUpdate,
   mergePersistedSettings,
@@ -502,7 +509,9 @@ const tunnelProviderRegistry = createTunnelProviderRegistry([
   createNgrokTunnelProvider(),
 ]);
 tunnelProviderRegistry.seal();
-const tunnelAuthController = createTunnelAuth();
+const directE2eeInternalTransportMarker = crypto.randomBytes(32).toString('base64url');
+const tunnelAuthController = createTunnelAuth({ internalRemoteClientMarker: directE2eeInternalTransportMarker });
+let directE2eeRuntimeInstance = null;
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
@@ -965,6 +974,7 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
   URL,
   tunnelProviderRegistry,
   tunnelAuthController,
+  getUiAuthController: () => uiAuthController,
   readSettingsFromDiskMigrated,
   readManagedRemoteTunnelConfigFromDisk,
   normalizeTunnelProvider,
@@ -975,7 +985,14 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
   normalizeTunnelSessionTtlMs,
   isSupportedTunnelMode,
   upsertManagedRemoteTunnelToken,
+  setManagedRemoteTunnelDirectE2eeEnabled,
   resolveManagedRemoteTunnelToken,
+  getDirectE2eeActiveSessionCount: (profileId) => directE2eeRuntimeInstance?.getActiveSessionCount(profileId) ?? 0,
+  onManagedRemoteDirectE2eeDisabled: (profileId) => directE2eeRuntimeInstance?.closeProfile(profileId, 'profile-disabled'),
+  onTunnelStopped: (reason = 'tunnel-stopped') => directE2eeRuntimeInstance?.deactivate(reason),
+  onTunnelChanged: (options) => directE2eeRuntimeInstance?.refresh(options),
+  directE2eeSupported: () => directE2eeRuntimeInstance?.initialized === true,
+  isDirectE2eeAvailable: (context) => directE2eeRuntimeInstance?.isAvailableFor(context) === true,
   TUNNEL_MODE_QUICK,
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
@@ -1167,6 +1184,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
   tunnelAuthController,
   scheduledTasksRuntime,
+  stopDirectE2ee: () => {
+    directE2eeRuntimeInstance?.stop();
+    directE2eeRuntimeInstance = null;
+  },
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -1222,7 +1243,9 @@ async function main(options = {}) {
       if (h && h !== '127.0.0.1' && h !== 'localhost' && h !== '::1') lanHost = effectiveBindHost;
     }
     const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort}` : null;
-    return { local, lan, relayAvailable: true };
+    const directE2eeAvailable = directE2eeRuntimeInstance?.isAvailable() === true;
+
+    return { local, lan, relayAvailable: true, directE2eeAvailable };
   };
   // ALL direct LAN URLs this server is currently reachable on, for the
   // candidates-refresh endpoint: the address the requesting client already
@@ -1356,11 +1379,33 @@ async function main(options = {}) {
   expressApp = app;
   server = http.createServer(app);
   let realtimeProxyRuntime = { stop: () => {} };
+  let tunnelRuntimeContext = null;
 
   // The relay service is constructed further below (it depends on the tunnel
   // runtime's active port). The pairing routes registered here only read the
   // relay candidate lazily at request time, so a late-bound holder is enough.
   let relayServiceInstance = null;
+  const relayIdentityRuntime = createRelayIdentityRuntime({
+    crypto,
+    readSettingsFromDiskMigrated,
+    writeSettingsToDisk,
+    readSettingsStrict: readSettingsFromDiskStrict,
+  });
+  const directE2eeRuntime = createDirectE2eeRuntime({
+    crypto,
+    httpServer: server,
+    readSettingsFromDiskMigrated,
+    writeSettingsToDisk,
+    readSettingsStrict: readSettingsFromDiskStrict,
+    identityRuntime: relayIdentityRuntime,
+    readManagedRemoteTunnelConfigFromDisk,
+    getActiveTunnelController: () => activeTunnelController,
+    getLocalPort: () => tunnelRuntimeContext?.getActivePort() || port,
+    internalTransportMarker: directE2eeInternalTransportMarker,
+    authenticateBearerToken: (token) => remoteClientAuthRuntime.authenticateBearerToken(token),
+  });
+  directE2eeRuntimeInstance = directE2eeRuntime;
+  await directE2eeRuntime.initialize();
 
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
@@ -1411,9 +1456,12 @@ async function main(options = {}) {
         ? relayServiceInstance.ensureEnabledForPairing()
         : relayServiceInstance.getPairingCandidate();
     },
+    getDirectE2eePairingCandidate: () => directE2eeRuntime.getPairingCandidate(),
+    getDirectE2eePairingState: () => directE2eeRuntime.getPairingState(),
     // Re-evaluate the relay lifecycle after pairing/device changes (a revoked or
     // redeemed device can flip relay demand on or off).
     reconcileRelay: () => (relayServiceInstance ? relayServiceInstance.reconcile() : Promise.resolve()),
+    onClientRevoked: (clientId) => directE2eeRuntime.revokeClient(clientId),
     getPairingTransports: resolvePairingTransports,
     getDirectCandidateUrls: resolveDirectLanUrls,
     // Stable server identity for client-side verification of learned addresses.
@@ -1470,7 +1518,7 @@ async function main(options = {}) {
     isRequestOriginAllowed,
   });
 
-  const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
+  tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
 
   // Private relay host service: config + management routes + host client
@@ -1482,8 +1530,10 @@ async function main(options = {}) {
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     readSettingsStrict: readSettingsFromDiskStrict,
+    identityRuntime: relayIdentityRuntime,
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
+    getUiAuthController: () => uiAuthController,
     // One relay host per machine: every instance sharing this data dir shares
     // the relay identity (serverId), so concurrent hosts evict each other at
     // the relay worker and devices land on a random local instance.
@@ -1532,6 +1582,7 @@ async function main(options = {}) {
     isUnsafeSkillRelativePath,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    getUiAuthController: () => uiAuthController,
     getOpenCodePort: () => openCodePort,
     buildAugmentedPath,
     projectConfigRuntime,
@@ -1659,6 +1710,8 @@ async function main(options = {}) {
     },
     stop: (shutdownOptions = {}) => {
       realtimeProxyRuntime.stop();
+      directE2eeRuntime.stop();
+      if (directE2eeRuntimeInstance === directE2eeRuntime) directE2eeRuntimeInstance = null;
       clearInterval(relayReconcileTimer);
       try {
         relayService.stop();

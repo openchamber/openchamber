@@ -5,9 +5,8 @@
 
 import { WebSocket } from 'ws';
 
-import { RELAY_PROTOCOL_VERSION, RelayCloseCode, createHostHandshake } from './e2ee.js';
-import { createOutboundFrameBatcher, decodeFrameBatch } from './tunnel-codec.js';
-import { createTunnelHost } from './tunnel-host.js';
+import { RELAY_PROTOCOL_VERSION } from './e2ee.js';
+import { createEncryptedSession } from './encrypted-session.js';
 
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_CAP_MS = 30000;
@@ -59,7 +58,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
   let controlSocket = null;
   let reconnectTimer = null;
   let consecutiveFailures = 0;
-  /** @type {Map<string, { socket: WebSocket, tunnel: ReturnType<typeof createTunnelHost> | null, openTimer: NodeJS.Timeout | null }>} */
+  /** @type {Map<string, { socket: WebSocket, session: ReturnType<typeof createEncryptedSession> | null, openTimer: NodeJS.Timeout | null, lastActivityAt: number }>} */
   const dataSockets = new Map();
 
   const emitStatus = () => {
@@ -94,8 +93,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     if (!entry) return;
     dataSockets.delete(connectionId);
     if (entry.openTimer) clearTimeout(entry.openTimer);
-    entry.batcher?.dispose();
-    entry.tunnel?.close();
+    entry.session?.close();
     try {
       if (entry.socket.readyState === WebSocket.OPEN || entry.socket.readyState === WebSocket.CONNECTING) {
         if (closeCode) entry.socket.close(closeCode, reason ?? '');
@@ -118,34 +116,12 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       return;
     }
 
-    const entry = { socket, tunnel: null, openTimer: null, batcher: null, lastActivityAt: Date.now() };
+    const entry = { socket, session: null, openTimer: null, lastActivityAt: Date.now() };
     dataSockets.set(connectionId, entry);
     entry.openTimer = setTimeout(() => {
       logger.warn('[Relay] host-data socket open timeout');
       teardownDataSocket(connectionId);
     }, DATA_SOCKET_OPEN_TIMEOUT_MS);
-
-    const handshake = createHostHandshake(identity.hostEncPrivateKey, { batch: localBatch });
-    let channel = null;
-    let batchNegotiated = false;
-    // Serialize async message handling so encrypted frame order (and the
-    // strictly-increasing decrypt counter) is preserved.
-    let processing = Promise.resolve();
-    // Serialize encrypt+send so the per-direction IV counter reaches the wire in
-    // encryption order. One encrypt() == one WS message == one counter tick,
-    // whether it carries a batch or a lone frame.
-    let sendChain = Promise.resolve();
-    const sendEncryptedPlaintext = (plaintext) => {
-      sendChain = sendChain
-        .then(async () => {
-          if (dataSockets.get(connectionId) !== entry || socket.readyState !== WebSocket.OPEN || !channel) return;
-          const encrypted = await channel.encryptor.encrypt(plaintext);
-          socket.send(encrypted, { binary: true });
-        })
-        .catch((error) => {
-          logger.warn(`[Relay] host-data send failed: ${error?.message ?? error}`);
-        });
-    };
 
     const failChannel = (closeCode, reason) => {
       // connectionId + reason only — never payload contents.
@@ -153,67 +129,18 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       teardownDataSocket(connectionId, closeCode, reason);
     };
 
-    const handleMessage = async (data, isBinary) => {
-      const current = dataSockets.get(connectionId);
-      if (current !== entry) return;
-      // Any inbound message (including the client's keepalive Ping) proves the
-      // client is alive; the idle sweeper reaps sockets this stops updating.
-      entry.lastActivityAt = Date.now();
-
-      if (!isBinary) {
-        const action = await handshake.handleText(data.toString('utf8'));
-        if (action.type === 'send-text') {
-          socket.send(action.text);
-        } else if (action.type === 'established') {
-          channel = action.channel;
-          batchNegotiated = action.batch === true;
-          entry.batcher = batchNegotiated
-            ? createOutboundFrameBatcher({ windowMs: resolvedBatchWindowMs, sendBatch: sendEncryptedPlaintext })
-            : null;
-          entry.tunnel = createTunnelHost({
-            connectionId,
-            getLocalPort: resolveLocalPort,
-            getBufferedAmount: () => socket.bufferedAmount,
-            sendFrame: (plaintextFrame) => {
-              if (dataSockets.get(connectionId) !== entry || socket.readyState !== WebSocket.OPEN) return;
-              if (entry.batcher) entry.batcher.enqueue(plaintextFrame);
-              else sendEncryptedPlaintext(plaintextFrame);
-            },
-          });
-          if (action.replyText) socket.send(action.replyText);
-        } else if (action.type === 'fail') {
-          failChannel(action.closeCode, action.reason);
-        }
-        return;
-      }
-
-      if (!channel || !entry.tunnel) {
-        // Encrypted traffic before the handshake completed: fail closed.
-        failChannel(RelayCloseCode.ChannelFailure, 'binary frame before handshake');
-        return;
-      }
-      let plaintext;
-      try {
-        plaintext = await channel.decryptor.decrypt(new Uint8Array(data));
-      } catch {
-        failChannel(RelayCloseCode.ChannelFailure, 'frame decryption failed');
-        return;
-      }
-      try {
-        if (batchNegotiated) {
-          // One encrypted message may carry several tunnel frames; dispatch each
-          // in order through the same per-frame handling as legacy.
-          for (const frame of decodeFrameBatch(plaintext)) {
-            if (dataSockets.get(connectionId) !== entry) return;
-            await entry.tunnel.handleFrame(frame);
-          }
-        } else {
-          await entry.tunnel.handleFrame(plaintext);
-        }
-      } catch (error) {
-        logger.warn(`[Relay] tunnel frame handling failed: ${error?.message ?? error}`);
-      }
-    };
+    entry.session = createEncryptedSession({
+      socket,
+      connectionId,
+      hostEncPrivateKey: identity.hostEncPrivateKey,
+      getLocalPort: resolveLocalPort,
+      isActive: () => dataSockets.get(connectionId) === entry,
+      onActivity: () => { entry.lastActivityAt = Date.now(); },
+      onFailure: failChannel,
+      logger,
+      batch: localBatch,
+      batchWindowMs: resolvedBatchWindowMs,
+    });
 
     socket.on('open', () => {
       if (entry.openTimer) {
@@ -223,12 +150,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       emitStatus();
     });
     socket.on('message', (data, isBinary) => {
-      processing = processing
-        .then(() => handleMessage(data, isBinary))
-        .catch((error) => {
-          logger.warn(`[Relay] data socket message failed: ${error?.message ?? error}`);
-          failChannel(RelayCloseCode.ChannelFailure, 'internal error');
-        });
+      entry.session?.receive(data, isBinary);
     });
     socket.on('close', () => {
       teardownDataSocket(connectionId);

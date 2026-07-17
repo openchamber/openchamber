@@ -1,5 +1,9 @@
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
-import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
+import { createRelayTunnelClient, type RelayTunnelFailureClassification } from '@/lib/relay/tunnel-client';
+import { createDirectE2eeTunnelClient } from '@/lib/relay/direct-e2ee-tunnel-client';
+import { normalizeDirectE2eeCandidate } from '@/lib/connectionPayload';
+import type { PairingEndpointCandidate } from '@/lib/connectionPayload';
+import type { PairingRedeemedTransport } from '@/lib/pairingCandidateRedemption';
 
 type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -37,6 +41,11 @@ export type DesktopHostRelay = {
   hostEncPubJwk: JsonWebKey;
 };
 
+export type DesktopHostDirectE2ee = {
+  wssUrl: string;
+  hostEncPubJwk: JsonWebKey;
+};
+
 export type DesktopHost = {
   id: string;
   label: string;
@@ -50,6 +59,7 @@ export type DesktopHost = {
   requestHeaders?: Record<string, string>;
   /** When set, this host is reached over the private relay tunnel. */
   relay?: DesktopHostRelay;
+  directE2ee?: DesktopHostDirectE2ee;
 };
 
 /** Display-only pseudo-URL for a relay host (never fetched). */
@@ -62,6 +72,16 @@ const parseHostRelay = (value: unknown): DesktopHostRelay | null => {
   const jwk = value.hostEncPubJwk ?? value.host_enc_pub_jwk;
   if (!relayUrl || !serverId || !isRecord(jwk)) return null;
   return { relayUrl, serverId, hostEncPubJwk: jwk as JsonWebKey };
+};
+
+const parseHostDirectE2ee = (value: unknown): DesktopHostDirectE2ee | null => {
+  const normalized = normalizeDirectE2eeCandidate(isRecord(value) ? { type: 'direct-e2ee', ...value } : value);
+  return normalized ? { wssUrl: normalized.wssUrl, hostEncPubJwk: normalized.hostEncPubJwk } : null;
+};
+
+export const directE2eeHostFingerprint = (descriptor: DesktopHostDirectE2ee): string => {
+  const key = descriptor.hostEncPubJwk;
+  return `p256:${key.x || ''}.${key.y || ''}`;
 };
 
 export type DesktopHostsConfig = {
@@ -82,6 +102,90 @@ export type DesktopHostsConfigInput = {
 export type HostProbeResult = {
   status: 'ok' | 'auth' | 'update-recommended' | 'incompatible' | 'wrong-service' | 'unreachable';
   latencyMs: number;
+  failureClassification?: RelayTunnelFailureClassification;
+};
+
+export type DesktopHostTransport =
+  | { kind: 'direct'; url: string }
+  | { kind: 'direct-e2ee'; descriptor: DesktopHostDirectE2ee }
+  | { kind: 'relay'; descriptor: DesktopHostRelay; tunnel?: ReturnType<typeof createRelayTunnelClient> };
+
+export type DesktopHostSelection = {
+  probe: HostProbeResult;
+  transport: DesktopHostTransport | null;
+  lateDirect?: Promise<HostProbeResult>;
+  directUrl?: string;
+};
+
+export type DesktopHostRuntimeSwitchOptions = {
+  apiBaseUrl: string;
+  clientToken: string | null;
+  runtimeKey: string;
+  requestHeaders?: Record<string, string> | null;
+  relay?: DesktopHostRelay;
+  tunnel?: { type: 'direct-e2ee' } & DesktopHostDirectE2ee;
+};
+
+export const runtimeKeyForHost = (host: DesktopHost): string => {
+  if (host.id === 'local') return 'local';
+  return `host:${host.id}`;
+};
+
+export const shouldDelegateDesktopHostActivation = (isLocalDesktopOrigin: boolean): boolean => !isLocalDesktopOrigin;
+
+export const resolveActiveDesktopHost = (
+  hosts: DesktopHost[],
+  localOrigin: string,
+  runtimeApiBaseUrl: string | null,
+  activeRuntimeKey: string | null,
+): DesktopHost | null => {
+  if (activeRuntimeKey) {
+    const relayMatch = hosts.find((h) => (h.relay || h.directE2ee) && runtimeKeyForHost(h) === activeRuntimeKey);
+    if (relayMatch) {
+      return relayMatch;
+    }
+  }
+
+  if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
+    return { id: 'local', label: 'Local', url: localOrigin };
+  }
+
+  const match = hosts.find((host) => {
+    return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false;
+  });
+
+  if (match) {
+    return match;
+  }
+
+  return null;
+};
+
+export const getDesktopHostRuntimeSwitchOptions = (
+  host: DesktopHost,
+  transport: DesktopHostTransport,
+  localUiOrigin: string,
+  runtimeKey: string,
+): DesktopHostRuntimeSwitchOptions | null => {
+  if (transport.kind === 'direct') {
+    return { apiBaseUrl: transport.url, clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey };
+  }
+  if (transport.kind === 'direct-e2ee') {
+    if (!host.clientToken) return null;
+    return { apiBaseUrl: localUiOrigin, clientToken: host.clientToken || null, runtimeKey, tunnel: { type: 'direct-e2ee', ...transport.descriptor } };
+  }
+  if (host.directE2ee) return null;
+  return { apiBaseUrl: localUiOrigin, clientToken: host.clientToken || null, runtimeKey, relay: transport.descriptor };
+};
+
+export type DesktopHostProbeDependencies = {
+  probeDirect: (url: string, options: { clientToken: string | null; requestHeaders: Record<string, string> | null; expectedServerId?: string | null }) => Promise<HostProbeResult>;
+  probeDirectE2ee: (descriptor: DesktopHostDirectE2ee, clientToken: string | null) => Promise<HostProbeResult>;
+  probeRelay: (descriptor: DesktopHostRelay, clientToken: string | null, options: { keepTunnel: boolean }) => Promise<HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> }>;
+};
+
+export type DesktopHostTransportProbeOptions = {
+  retainRelayTunnel?: boolean;
 };
 
 export type DesktopHostUrlResolution = {
@@ -104,6 +208,61 @@ export const normalizeHostUrl = (raw: string): string | null => {
   } catch {
     return null;
   }
+};
+
+export const buildPairedDesktopHostTransportFields = (
+  candidates: PairingEndpointCandidate[],
+  redeemedTransport: PairingRedeemedTransport,
+  clientToken: string,
+): Omit<DesktopHost, 'id' | 'label'> | null => {
+  const directCandidate = candidates.find(
+    (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'lan' | 'tunnel' }> =>
+      candidate.type === 'lan' || candidate.type === 'tunnel',
+  );
+  const directE2eeCandidate = candidates.find(
+    (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'direct-e2ee' }> => candidate.type === 'direct-e2ee',
+  );
+  const directE2ee: DesktopHostDirectE2ee | undefined = redeemedTransport.kind === 'direct-e2ee'
+    ? { wssUrl: redeemedTransport.wssUrl, hostEncPubJwk: redeemedTransport.hostEncPubJwk }
+    : directE2eeCandidate
+      ? { wssUrl: directE2eeCandidate.wssUrl, hostEncPubJwk: directE2eeCandidate.hostEncPubJwk }
+      : undefined;
+  const relayCandidate = candidates.find(
+    (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'relay' }> => candidate.type === 'relay',
+  );
+  const relay: DesktopHostRelay | undefined = directE2ee
+    ? undefined
+    : redeemedTransport.kind === 'relay'
+      ? { relayUrl: redeemedTransport.relayUrl, serverId: redeemedTransport.serverId, hostEncPubJwk: redeemedTransport.hostEncPubJwk }
+      : relayCandidate
+        ? { relayUrl: relayCandidate.relayUrl, serverId: relayCandidate.serverId, hostEncPubJwk: relayCandidate.hostEncPubJwk }
+        : undefined;
+  const directUrl = directE2ee
+    ? undefined
+    : normalizeHostUrl(redeemedTransport.kind === 'direct' ? redeemedTransport.url : directCandidate?.url || '') || undefined;
+  const url = directUrl
+    || (directE2ee ? `direct-e2ee://${new URL(directE2ee.wssUrl).hostname}` : null)
+    || (relay ? relayHostDisplayUrl(relay.serverId) : null);
+  if (!url) return null;
+
+  return {
+    url,
+    ...(directUrl ? { apiUrl: directUrl } : {}),
+    clientToken,
+    ...(directE2ee ? { directE2ee } : {}),
+    ...(relay ? { relay } : {}),
+  };
+};
+
+export const replacePairedDesktopHostTransportFields = (
+  host: DesktopHost,
+  transportFields: Omit<DesktopHost, 'id' | 'label'>,
+): DesktopHost => {
+  const identity = { ...host };
+  delete identity.apiUrl;
+  delete identity.directE2ee;
+  delete identity.relay;
+  return { ...identity, ...transportFields };
 };
 
 export const resolveDesktopHostUrl = (raw: string): DesktopHostUrlResolution | null => {
@@ -205,7 +364,8 @@ const parseHost = (value: unknown): DesktopHost | null => {
   const clientToken = readString(value, 'clientToken') || readString(value, 'client_token');
   const requestHeaders = sanitizeRequestHeaders(value.requestHeaders);
   const relay = parseHostRelay(value.relay);
-  if (!id || !label || !url) return null;
+  const directE2ee = parseHostDirectE2ee(value.directE2ee ?? value.direct_e2ee);
+  if (!id || !label || !url || (!apiUrl && !relay && !directE2ee && !normalizeHostUrl(url))) return null;
   return {
     id,
     label,
@@ -214,6 +374,7 @@ const parseHost = (value: unknown): DesktopHost | null => {
     ...(clientToken ? { clientToken } : {}),
     ...(requestHeaders ? { requestHeaders } : {}),
     ...(relay ? { relay } : {}),
+    ...(directE2ee ? { directE2ee } : {}),
   };
 };
 
@@ -291,6 +452,7 @@ export const desktopInstallIdGet = async (): Promise<string> => {
 };
 
 const RELAY_PROBE_TIMEOUT_MS = 8_000;
+const RELAY_RACE_HEADSTART_MS = 1_500;
 
 /**
  * Reachability check for a relay host: open a throwaway E2EE tunnel and hit
@@ -304,8 +466,11 @@ export const probeRelayDesktopHost = async (
   // With `keepTunnel`, an 'ok' probe RETURNS its live tunnel (the caller owns
   // it — typically adopting it as the runtime tunnel, skipping a second
   // WebSocket connect + E2EE handshake); every other outcome closes it.
-  options?: { keepTunnel?: boolean },
+  optionsOrClientToken?: { keepTunnel?: boolean; clientToken?: string | null } | string | null,
 ): Promise<HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> }> => {
+  const options = typeof optionsOrClientToken === 'object'
+    ? optionsOrClientToken
+    : { clientToken: optionsOrClientToken };
   const tunnel = createRelayTunnelClient({
     relayUrl: relay.relayUrl,
     serverId: relay.serverId,
@@ -324,6 +489,21 @@ export const probeRelayDesktopHost = async (
       }),
     ]);
     if (!response?.ok) return { status: 'unreachable', latencyMs: 0 };
+    if (options?.clientToken) {
+      const session = await Promise.race([
+        tunnel.fetch('/auth/session', { headers: { Authorization: `Bearer ${options.clientToken}` } }),
+        new Promise<null>((resolve) => { globalThis.setTimeout(() => resolve(null), RELAY_PROBE_TIMEOUT_MS); }),
+      ]);
+      if (!session) return { status: 'unreachable', latencyMs: 0 };
+      if (session.status === 401 || session.status === 403) return { status: 'auth', latencyMs: Math.max(0, Date.now() - startedAt) };
+      // Older relay hosts may not expose session verification. Preserve their
+      // existing health-only behavior while verifying credentials where supported.
+      if (!session.ok && session.status !== 404) return { status: 'unreachable', latencyMs: 0 };
+      if (session.ok) {
+        const body: unknown = await session.json().catch(() => null);
+        if (!isRecord(body) || body.authenticated !== true) return { status: 'auth', latencyMs: Math.max(0, Date.now() - startedAt) };
+      }
+    }
     keep = options?.keepTunnel === true;
     return { status: 'ok', latencyMs: Math.max(0, Date.now() - startedAt), ...(keep ? { tunnel } : {}) };
   } catch {
@@ -332,6 +512,154 @@ export const probeRelayDesktopHost = async (
     if (!keep) tunnel.close();
   }
 };
+
+const probeDirectE2eeDesktopHost = async (descriptor: DesktopHostDirectE2ee, clientToken?: string | null): Promise<HostProbeResult> => {
+  const tunnel = createDirectE2eeTunnelClient(descriptor, clientToken);
+  const startedAt = Date.now();
+  try {
+    const response = await Promise.race([
+      tunnel.fetch('/health'),
+      new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), RELAY_PROBE_TIMEOUT_MS); }),
+    ]);
+    const result: HostProbeResult = response?.status === 200
+      ? { status: 'ok', latencyMs: Math.max(0, Date.now() - startedAt) }
+      : { status: 'unreachable', latencyMs: 0 };
+    const failureClassification = tunnel.getStatus().failureClassification;
+    return failureClassification ? { ...result, failureClassification } : result;
+  } catch {
+    const failureClassification = tunnel.getStatus().failureClassification;
+    return failureClassification
+      ? { status: 'unreachable', latencyMs: 0, failureClassification }
+      : { status: 'unreachable', latencyMs: 0 };
+  } finally {
+    tunnel.close();
+  }
+};
+
+const blockedDirectStatus = (status: HostProbeResult['status']): boolean =>
+  status === 'unreachable' || status === 'wrong-service' || status === 'incompatible';
+
+const failedEncryptedStatus = (status: HostProbeResult['status']): boolean => status !== 'ok' && status !== 'update-recommended';
+
+const terminalEncryptedFailure = (probe: HostProbeResult): boolean =>
+  probe.failureClassification === 'crypto'
+  || probe.failureClassification === 'protocol'
+  || probe.failureClassification === 'terminal';
+
+const unreachableProbe = (): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 });
+
+export const probeDesktopHostTransports = async (
+  host: DesktopHost,
+  dependencies: DesktopHostProbeDependencies = {
+    probeDirect: desktopHostProbe,
+    probeDirectE2ee: probeDirectE2eeDesktopHost,
+    probeRelay: (descriptor, clientToken, options) => probeRelayDesktopHost(descriptor, { clientToken, keepTunnel: options.keepTunnel }),
+  },
+  options: DesktopHostTransportProbeOptions = {},
+): Promise<DesktopHostSelection> => {
+  const retainRelayTunnel = options.retainRelayTunnel === true;
+  let finalProbe = unreachableProbe();
+  const directUrl = normalizeHostUrl(host.apiUrl || host.url);
+  const probeDirect = async (): Promise<HostProbeResult> => {
+    if (!directUrl) return unreachableProbe();
+    return dependencies.probeDirect(directUrl, {
+      clientToken: host.clientToken || null,
+      requestHeaders: host.requestHeaders || null,
+      expectedServerId: host.relay?.serverId || null,
+    }).catch(unreachableProbe);
+  };
+  const probeRelay = async (): Promise<DesktopHostSelection> => {
+    if (!host.relay) return { probe: unreachableProbe(), transport: null };
+    const probe: HostProbeResult & { tunnel?: ReturnType<typeof createRelayTunnelClient> } = await dependencies
+      .probeRelay(host.relay, host.clientToken || null, { keepTunnel: retainRelayTunnel })
+      .catch(unreachableProbe);
+    const tunnel = probe.tunnel;
+    if (tunnel && !retainRelayTunnel) tunnel.close();
+    const statusProbe: HostProbeResult = {
+      status: probe.status,
+      latencyMs: probe.latencyMs,
+      ...(probe.failureClassification ? { failureClassification: probe.failureClassification } : {}),
+    };
+    return !failedEncryptedStatus(probe.status)
+      ? { probe: statusProbe, transport: { kind: 'relay', descriptor: host.relay, ...(retainRelayTunnel && tunnel ? { tunnel } : {}) } }
+      : { probe: statusProbe, transport: null };
+  };
+
+  // A managed direct-E2EE leg has terminal security semantics, so keep explicit
+  // candidate order and never let a relay race win before its verdict.
+  if (host.directE2ee) {
+    if (directUrl) {
+      finalProbe = await probeDirect();
+      if (!blockedDirectStatus(finalProbe.status)) {
+        return { probe: finalProbe, transport: { kind: 'direct', url: directUrl } };
+      }
+    }
+    if (!host.clientToken) {
+      finalProbe = { status: 'auth', latencyMs: 1 };
+    } else {
+      finalProbe = await dependencies.probeDirectE2ee(host.directE2ee, host.clientToken).catch(unreachableProbe);
+      if (!failedEncryptedStatus(finalProbe.status)) {
+        return { probe: finalProbe, transport: { kind: 'direct-e2ee', descriptor: host.directE2ee } };
+      }
+      if (terminalEncryptedFailure(finalProbe)) return { probe: finalProbe, transport: null };
+    }
+    return { probe: finalProbe, transport: null };
+  }
+
+  if (!directUrl) return probeRelay();
+  if (!host.relay) {
+    finalProbe = await probeDirect();
+    return !blockedDirectStatus(finalProbe.status)
+      ? { probe: finalProbe, transport: { kind: 'direct', url: directUrl } }
+      : { probe: finalProbe, transport: null };
+  }
+
+  // Existing LAN+relay hosts retain direct priority while avoiding a full dead
+  // LAN timeout before relay startup. The relay selection carries the live probe
+  // tunnel, and the still-running LAN probe is exposed for a late hot-switch.
+  const directPromise = probeDirect();
+  const headstart = await Promise.race([
+    directPromise.then((probe) => ({ probe })),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), RELAY_RACE_HEADSTART_MS)),
+  ]);
+  if (headstart) {
+    if (!blockedDirectStatus(headstart.probe.status)) {
+      return { probe: headstart.probe, transport: { kind: 'direct', url: directUrl } };
+    }
+    return probeRelay();
+  }
+
+  const relayPromise = probeRelay();
+  const first = await Promise.race([
+    directPromise.then((probe) => ({ kind: 'direct' as const, probe })),
+    relayPromise.then((selection) => ({ kind: 'relay' as const, selection })),
+  ]);
+  if (first.kind === 'direct') {
+    if (!blockedDirectStatus(first.probe.status)) {
+      void relayPromise.then((selection) => {
+        if (selection.transport?.kind === 'relay') selection.transport.tunnel?.close();
+      });
+      return { probe: first.probe, transport: { kind: 'direct', url: directUrl } };
+    }
+    return relayPromise;
+  }
+  if (first.selection.transport) {
+    return { ...first.selection, lateDirect: directPromise, directUrl };
+  }
+  const lateDirect = await directPromise;
+  return !blockedDirectStatus(lateDirect.status)
+    ? { probe: lateDirect, transport: { kind: 'direct', url: directUrl } }
+    : first.selection;
+};
+
+export const probeDesktopHostTransportsForActivation = (
+  host: DesktopHost,
+  dependencies?: DesktopHostProbeDependencies,
+): Promise<DesktopHostSelection> => probeDesktopHostTransports(
+  host,
+  dependencies,
+  { retainRelayTunnel: true },
+);
 
 export const desktopHostProbe = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null; expectedServerId?: string | null }): Promise<HostProbeResult> => {
   const invoke = getInvoke();

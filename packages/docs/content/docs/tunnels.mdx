@@ -5,7 +5,9 @@ description: Expose OpenChamber safely for remote and mobile access.
 
 # Tunnels
 
-A tunnel is a public link to your OpenChamber, so you can reach it from an ordinary browser on another network. Use `openchamber tunnel` to create one for a running instance.
+A tunnel is a public link to your OpenChamber,
+so you can reach it from an ordinary browser on another network.
+Use `openchamber tunnel` to create one for a running instance.
 
 > Connecting your **own devices** (the mobile app, another desktop) usually doesn't need a tunnel — [pair them](/connect-devices/) instead and let the end-to-end encrypted [Private Relay](/private-relay/) handle away-from-home access with zero setup.
 
@@ -70,6 +72,19 @@ Use a token + hostname managed by Cloudflare:
 ```bash
 openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
 ```
+
+Managed remote offers two distinct connection paths:
+
+- **Browser access** uses the existing HTTPS link and an HttpOnly tunnel-session cookie.
+  Cloudflare terminates TLS for this browser traffic.
+- **Managed tunnel (E2EE)** is an opt-in native app transport enabled per saved profile in Settings.
+  The native app connects through the same hostname,
+  but application traffic stays encrypted between the app and your OpenChamber host.
+
+This native transport is separate from the hosted [Private Relay](/private-relay/).
+The managed tunnel uses your Cloudflare hostname and running `cloudflared` connector;
+the hosted relay uses OpenChamber's outbound broker and does not require a public hostname.
+Disabling direct E2EE or stopping or switching the active profile closes its native encrypted sessions without deleting paired devices.
 
 ### Managed local
 

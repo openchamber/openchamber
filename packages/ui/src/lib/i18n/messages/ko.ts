@@ -60,6 +60,8 @@ export const dict: Record<I18nKey, string> = {
   'mobile.connect.error.invalidUrl': '유효하지 않은 서버 URL입니다.',
   'mobile.connect.error.unreachable': '해당 OpenChamber 서버에 연결할 수 없습니다.',
   'mobile.connect.error.authRequired': '이 서버에는 비밀번호 또는 클라이언트 토큰이 필요합니다.',
+  'mobile.connect.error.pairingSecurity': '이 서버의 보안 연결을 확인할 수 없습니다. 페어링 코드를 확인한 후 다시 시도하세요.',
+  'mobile.connect.error.pairingUncertain': '페어링이 완료되었을 수 있지만 확인 응답이 유실되었습니다. 다시 시도하기 전에 저장된 연결을 확인하세요.',
   'mobile.connect.error.passwordFailed': '서버 잠금을 해제할 수 없습니다. 비밀번호를 확인하세요.',
   'mobile.instances.addTitle': '인스턴스 추가',
   'mobile.instances.addManual': '주소로 추가',

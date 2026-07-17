@@ -47,6 +47,7 @@ export const createSettingsRuntime = (deps) => {
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
+  const platform = deps.platform || process.platform;
 
   // Orphan recovery is a one-shot best-effort scan: when orphans can't be
   // matched on first pass they stay on disk and every subsequent settings
@@ -465,14 +466,14 @@ export const createSettingsRuntime = (deps) => {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const isTransientWindowsReplaceError = (error) => {
-    if (process.platform !== 'win32' || !error || typeof error !== 'object') {
+    if (platform !== 'win32' || !error || typeof error !== 'object') {
       return false;
     }
     return error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'EBUSY';
   };
 
   const replaceFile = async (tmp, target) => {
-    const maxAttempts = process.platform === 'win32' ? 6 : 1;
+    const maxAttempts = platform === 'win32' ? 6 : 1;
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -501,16 +502,22 @@ export const createSettingsRuntime = (deps) => {
   };
 
   const writeSettingsToDisk = async (settings) => {
+    const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
-      await fsPromises.mkdir(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
+      await fsPromises.mkdir(path.dirname(SETTINGS_FILE_PATH), {
+        recursive: true,
+        ...(deps.privateSettingsDirectory ? { mode: 0o700 } : {}),
+      });
       // Atomic write: Electron main and ssh-manager read this file via plain
       // readFile + JSON.parse and silently coerce parse errors to {}. A
       // partial read during a non-atomic writeFile would make their next
       // read-modify-write wipe the settings file.
-      const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), 'utf8');
+      await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
+      if (platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
       await replaceFile(tmp, SETTINGS_FILE_PATH);
+      if (platform !== 'win32') await fsPromises.chmod(SETTINGS_FILE_PATH, 0o600);
     } catch (error) {
+      await fsPromises.rm(tmp, { force: true }).catch(() => {});
       console.warn('Failed to write settings file:', error);
       throw error;
     }

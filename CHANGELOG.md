@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- **Remote access:** native mobile and desktop apps can now pair through an explicitly enabled managed Cloudflare profile with end-to-end encrypted application traffic.
+  Browser tunnel links keep their existing cookie-based behavior,
+  while LAN and the hosted Private Relay remain independent connection options.
+
 ## [1.16.1] - 2026-07-14
 
 - **Performance:** large session sidebars stay responsive while chats stream, including setups with many projects, worktrees, and sessions. Opening a long chat after an empty or aborted agent turn also no longer repeatedly loads larger portions of its history.

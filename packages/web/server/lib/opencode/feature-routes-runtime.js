@@ -94,6 +94,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
       getOpenCodePort,
+      getUiAuthController,
       buildAugmentedPath,
       projectConfigRuntime,
       scheduledTasksRuntime,
@@ -126,6 +127,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       refreshOpenCodeAfterConfigChange,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
+      getUiAuthController,
     });
 
     registerProjectIconRoutes(app, {
