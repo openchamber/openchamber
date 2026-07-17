@@ -948,7 +948,7 @@ export const ProvidersPage: React.FC = () => {
         </div>
 
         {(selectedProvider.id === 'opencode' || selectedProvider.id === 'opencode-go') && <QuotaCredentials providerId="opencode-go" providerName="OpenCode Go" />}
-        {(selectedProvider.id === 'ollama' || selectedProvider.id === 'ollama-cloud') && <QuotaCredentials providerId="ollama-cloud" providerName="Ollama Cloud" />}
+        {selectedProvider.id === 'ollama-cloud' && <QuotaCredentials providerId="ollama-cloud" providerName="Ollama Cloud" />}
         {selectedProvider.id === 'cursor' && <QuotaCredentials providerId="cursor" providerName="Cursor" />}
 
         {/* Connection Details */}
