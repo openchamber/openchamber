@@ -117,6 +117,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['terminal', 'font', 'text size'],
   },
   {
+    id: 'appearance.terminal-shell',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.terminalShell',
+    descriptionKey: 'settings.openchamber.visual.field.terminalShellHint',
+    keywords: ['terminal', 'shell', 'bash', 'zsh', 'fish', 'pwsh', 'powershell'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'appearance.editor-font-size',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.editorFontSize',

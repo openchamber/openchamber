@@ -1196,12 +1196,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   createSession: async (title, directoryOverride, parentID, metadata) => {
     const draft = get().newSessionDraft
     const targetFolderId = draft.targetFolderId
-    get().closeNewSessionDraft()
 
     try {
       const dir = directoryOverride ?? opencodeClient.getDirectory()
       const session = await createSessionAction(title, dir, parentID ?? null, metadata)
       if (!session) return null
+
+      get().closeNewSessionDraft()
 
       if (targetFolderId) {
         const scopeKey = directoryOverride || get().lastLoadedDirectory || session.directory

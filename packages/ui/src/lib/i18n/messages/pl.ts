@@ -3,6 +3,11 @@ import { settingsDict } from './pl.settings';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  'terminalView.actions.attachSelection': 'Dołącz zaznaczone dane wyjściowe',
+  'terminalView.actions.restart': 'Uruchom terminal ponownie',
+  'chat.message.terminalContext': '{terminal}, wiersze {start}-{end}',
+  'chat.chatInput.terminalContext': '{terminal}, wiersze {start}-{end}',
+  'chat.chatInput.terminalContextRemove': 'Usuń kontekst terminala',
 
   'common.loading': 'Ładowanie...',
   'common.unavailable': 'Niedostępne',
@@ -88,6 +93,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.titleAria': 'Narzędzia obszaru roboczego',
   'mobile.menu.files': 'Pliki',
   'mobile.menu.changes': 'Zmiany',
+  'mobile.menu.terminal': 'Terminal',
   'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': 'Instancje',
   'mobile.menu.update': 'Aktualizuj',
@@ -777,6 +783,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.actions.fork': 'Rozwidl od tego miejsca',
   'chat.messageBody.actions.copyMessageAria': 'Kopiuj tekst wiadomości',
   'chat.messageBody.actions.copyMessage': 'Kopiuj wiadomość',
+  'chat.messageBody.actions.pinContext': 'Przypnij do kontekstu (przetrwa kompakcję)',
+  'chat.messageBody.actions.unpinContext': 'Odepnij od kontekstu (nie przetrwa kompakcji)',
+  'chat.messageBody.actions.contextPinFailed': 'Nie udało się zaktualizować przypięcia w kontekście',
   'chat.messageBody.actions.openPreviewAria': 'Otwórz podgląd',
   'chat.messageBody.actions.openPreview': 'Otwórz podgląd',
   'chat.messageBody.actions.copyAnswer': 'Kopiuj odpowiedź',
@@ -2621,6 +2630,8 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.commandModifierAria': 'Command modifier',
   'terminalView.quickKeys.controlLabel': 'Ctrl',
   'terminalView.quickKeys.controlModifierAria': 'Control modifier',
+  'terminalView.quickKeys.altLabel': 'Alt',
+  'terminalView.quickKeys.altModifierAria': 'Modyfikator Alt',
   'terminalView.quickKeys.enterAria': 'Enter',
   'terminalView.quickKeys.escape': 'Esc',
   'terminalView.quickKeys.tabAria': 'Tab',
