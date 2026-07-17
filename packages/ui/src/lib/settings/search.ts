@@ -137,19 +137,19 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'appearance.expanded-editor-toolbar',
-    page: 'appearance',
+    page: 'general',
     titleKey: 'settings.openchamber.visual.field.expandedEditorToolbar',
     keywords: ['editor', 'toolbar', 'tabs', 'docked', 'files'],
   },
   {
     id: 'appearance.file-editor-keymap',
-    page: 'appearance',
+    page: 'general',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',
     keywords: ['editor', 'vim', 'keymap'],
   },
   {
     id: 'appearance.terminal-quick-keys',
-    page: 'appearance',
+    page: 'general',
     titleKey: 'settings.openchamber.visual.field.terminalQuickKeys',
     descriptionKey: 'settings.openchamber.visual.field.terminalQuickKeysTooltip',
     keywords: ['terminal', 'keyboard', 'esc', 'ctrl', 'arrows'],

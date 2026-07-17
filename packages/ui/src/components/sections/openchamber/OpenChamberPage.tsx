@@ -144,7 +144,13 @@ const GeneralSectionContent: React.FC = () => {
             {showDesktopNetworkSettings && <DesktopNetworkSettings />}
             {showPasskeySettings && <PasskeySettings />}
             {!isVSCode && <OpenCodeCliSettings />}
-            <OpenChamberVisualSettings visibleSettings={['messageTransport', 'reportUsage']} />
+            <OpenChamberVisualSettings visibleSettings={[
+                'fileEditorKeymap',
+                'expandedEditorToolbar',
+                ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
+                'messageTransport',
+                'reportUsage',
+            ]} />
         </>
     );
 };
@@ -162,11 +168,8 @@ const VisualSectionContent: React.FC = () => {
         'fontSize',
         'terminalFontSize',
         'editorFontSize',
-        'fileEditorKeymap',
         'spacing',
         'inputBarOffset',
-        'expandedEditorToolbar',
-        ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
     ]} />;
 };
 

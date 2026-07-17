@@ -222,7 +222,7 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
     case 'voice':
       return 'mic';
     case 'tunnel':
-      return 'global';
+      return 'home-office';
     case 'about':
       return 'information';
     case 'home':

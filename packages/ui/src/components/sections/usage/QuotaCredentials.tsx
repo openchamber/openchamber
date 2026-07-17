@@ -32,7 +32,7 @@ export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: 
     finally { setBusy(false); }
   };
   const field = (name: string, label: string, placeholder: string) => <label className="block typography-ui-label text-foreground">{label}<Input className="mt-1 h-7 font-mono text-xs" type={name === 'workspaceId' ? 'text' : 'password'} autoComplete="off" value={values[name] ?? ''} onChange={(event) => setValues((current) => ({ ...current, [name]: event.target.value }))} placeholder={status?.secretMasked ?? placeholder} /></label>;
-  return <div data-settings-item={`providers.${providerId}-credentials`} className="mb-8">
+  return <div data-settings-item={`usage.${providerId}-credentials`} className="mb-8">
     <div className="mb-1 px-1"><h3 className="typography-ui-header font-medium text-foreground">{providerName}</h3></div>
     <section className="space-y-3 px-2 pb-2 pt-0">
       {providerId === 'opencode-go' && field('workspaceId', t('settings.providers.page.openCodeGo.workspaceId'), 'wrk_...')}
