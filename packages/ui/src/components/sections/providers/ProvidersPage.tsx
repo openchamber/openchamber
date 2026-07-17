@@ -73,6 +73,16 @@ interface ProviderSources {
   custom?: ProviderSourceInfo;
 }
 
+interface CopilotGheDetails {
+  serverUrl: string;
+  clientId: string;
+  deviceCode: string;
+  url?: string;
+  instructions?: string;
+  userCode?: string;
+  status?: string;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
@@ -163,6 +173,9 @@ export const ProvidersPage: React.FC = () => {
   const [pendingOAuth, setPendingOAuth] = React.useState<{ providerId: string; methodIndex: number } | null>(null);
   const [oauthCodes, setOauthCodes] = React.useState<Record<string, string>>({});
   const [oauthDetails, setOauthDetails] = React.useState<Record<string, { url?: string; instructions?: string; userCode?: string }>>({});
+  const [copilotGheInputs, setCopilotGheInputs] = React.useState<Record<string, { serverUrl: string; clientId: string }>>({});
+  const [copilotGheDetails, setCopilotGheDetails] = React.useState<Record<string, CopilotGheDetails>>({});
+  const [copilotGheExpanded, setCopilotGheExpanded] = React.useState<Record<string, boolean>>({});
   const [availableProviders, setAvailableProviders] = React.useState<ProviderOption[]>([]);
   const [availableLoading, setAvailableLoading] = React.useState(false);
   const [availableError, setAvailableError] = React.useState<string | null>(null);
@@ -453,6 +466,163 @@ export const ProvidersPage: React.FC = () => {
     }
   };
 
+  const handleCopilotGheFieldChange = (providerId: string, field: 'serverUrl' | 'clientId', value: string) => {
+    setCopilotGheInputs((prev) => ({
+      ...prev,
+      [providerId]: {
+        serverUrl: prev[providerId]?.serverUrl ?? '',
+        clientId: prev[providerId]?.clientId ?? '',
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleCopilotGheStart = async (providerId: string) => {
+    const input = copilotGheInputs[providerId] ?? { serverUrl: '', clientId: '' };
+    const serverUrl = input.serverUrl.trim();
+    if (!serverUrl) {
+      toast.error(t('settings.providers.copilotGhe.toast.serverUrlRequired'));
+      return;
+    }
+
+    const busyKey = `oauth-ghe:${providerId}`;
+    setAuthBusyKey(busyKey);
+
+    try {
+      const response = await runtimeFetch('/api/provider/github-copilot/ghe/auth/start', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        query: {
+          serverUrl,
+          clientId: input.clientId.trim() || undefined,
+        },
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          (typeof payload?.error === 'string' && payload.error) || t('settings.providers.copilotGhe.toast.startFailed')
+        );
+      }
+
+      const deviceCode =
+        (typeof payload?.deviceCode === 'string' && payload.deviceCode) ||
+        (typeof payload?.device_code === 'string' && payload.device_code) ||
+        '';
+      if (!deviceCode) {
+        throw new Error(t('settings.providers.copilotGhe.toast.startFailed'));
+      }
+
+      const resolvedServerUrl =
+        (typeof payload?.enterpriseUrl === 'string' && payload.enterpriseUrl) || serverUrl;
+      const resolvedClientId =
+        (typeof payload?.clientId === 'string' && payload.clientId) || input.clientId.trim();
+      const details: CopilotGheDetails = {
+        serverUrl: resolvedServerUrl,
+        clientId: resolvedClientId,
+        deviceCode,
+        url:
+          (typeof payload?.verificationUriComplete === 'string' && payload.verificationUriComplete) ||
+          (typeof payload?.verificationUri === 'string' && payload.verificationUri) ||
+          undefined,
+        userCode:
+          (typeof payload?.userCode === 'string' && payload.userCode) ||
+          (typeof payload?.user_code === 'string' && payload.user_code) ||
+          undefined,
+        instructions: typeof payload?.instructions === 'string' ? payload.instructions : undefined,
+      };
+
+      setCopilotGheInputs((prev) => ({
+        ...prev,
+        [providerId]: {
+          serverUrl: resolvedServerUrl,
+          clientId: resolvedClientId,
+        },
+      }));
+      setCopilotGheDetails((prev) => ({
+        ...prev,
+        [providerId]: details,
+      }));
+
+      if (details.url) {
+        void openExternalUrl(details.url);
+      }
+      toast.message(t('settings.providers.page.toast.completeOAuthInBrowser'));
+    } catch (error) {
+      console.error('Failed to start GitHub Copilot GHE auth flow:', error);
+      toast.error(error instanceof Error ? error.message : t('settings.providers.copilotGhe.toast.startFailed'));
+    } finally {
+      setAuthBusyKey(null);
+    }
+  };
+
+  const handleCopilotGheComplete = async (providerId: string) => {
+    const details = copilotGheDetails[providerId];
+    if (!details?.deviceCode) {
+      toast.error(t('settings.providers.copilotGhe.toast.startFirst'));
+      return;
+    }
+
+    const input = copilotGheInputs[providerId] ?? { serverUrl: '', clientId: '' };
+    const busyKey = `oauth-ghe-complete:${providerId}`;
+    setAuthBusyKey(busyKey);
+
+    try {
+      const response = await runtimeFetch('/api/provider/github-copilot/ghe/auth/complete', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        query: {
+          serverUrl: details.serverUrl || input.serverUrl.trim(),
+          clientId: input.clientId.trim() || details.clientId || undefined,
+          deviceCode: details.deviceCode,
+        },
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          (typeof payload?.error === 'string' && payload.error) || t('settings.providers.copilotGhe.toast.completeFailed')
+        );
+      }
+
+      if (payload?.connected) {
+        setCopilotGheDetails((prev) => {
+          const next = { ...prev };
+          delete next[providerId];
+          return next;
+        });
+        toast.success(t('settings.providers.copilotGhe.toast.connected'));
+        await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
+        setSelectedProvider(providerId);
+        return;
+      }
+
+      const status = typeof payload?.status === 'string' ? payload.status : '';
+      if (status === 'authorization_pending' || status === 'slow_down') {
+        setCopilotGheDetails((prev) => ({
+          ...prev,
+          [providerId]: {
+            ...details,
+            status,
+          },
+        }));
+        toast.message(
+          status === 'slow_down'
+            ? t('settings.providers.copilotGhe.toast.slowDown')
+            : t('settings.providers.copilotGhe.toast.authorizationPending')
+        );
+        return;
+      }
+
+      throw new Error(payload?.error || t('settings.providers.copilotGhe.toast.completeFailed'));
+    } catch (error) {
+      console.error('Failed to complete GitHub Copilot GHE auth flow:', error);
+      toast.error(error instanceof Error ? error.message : t('settings.providers.copilotGhe.toast.completeFailed'));
+    } finally {
+      setAuthBusyKey(null);
+    }
+  };
+
   const handleCopyOAuthLink = async (url: string) => {
     const result = await copyTextToClipboard(url);
     if (result.ok) {
@@ -471,6 +641,116 @@ export const ProvidersPage: React.FC = () => {
     }
     console.error('Failed to copy device code:', result.error);
     toast.error(t('settings.providers.page.toast.deviceCodeCopyFailed'));
+  };
+
+  const renderCopilotGheAuthSection = (providerId: string) => {
+    if (providerId !== 'github-copilot') {
+      return null;
+    }
+
+    const isExpanded = copilotGheExpanded[providerId] ?? false;
+    const input = copilotGheInputs[providerId] ?? { serverUrl: '', clientId: '' };
+    const details = copilotGheDetails[providerId];
+
+    return (
+      <div className="border-t border-[var(--surface-subtle)]">
+        <button
+          type="button"
+          onClick={() => setCopilotGheExpanded((prev) => ({ ...prev, [providerId]: !isExpanded }))}
+          className="flex w-full items-center justify-between gap-2 py-2 text-left"
+          aria-expanded={isExpanded}
+        >
+          <span className="typography-ui-label text-muted-foreground">
+            {t('settings.providers.copilotGhe.toggle')}
+          </span>
+          <Icon
+            name={isExpanded ? 'arrow-down-s' : 'arrow-right-s'}
+            className="size-4 flex-shrink-0 text-muted-foreground/60"
+          />
+        </button>
+
+        {isExpanded && (
+          <div className="space-y-3 pb-2">
+            <p className="typography-meta text-muted-foreground">{t('settings.providers.copilotGhe.clientIdHint', { clientId: 'Ov23lizomPOC3eFYo56r' })}</p>
+
+            <div className="space-y-1.5">
+              <label className="typography-ui-label text-foreground">{t('settings.providers.copilotGhe.serverUrlLabel')}</label>
+              <Input
+                value={input.serverUrl}
+                onChange={(event) => handleCopilotGheFieldChange(providerId, 'serverUrl', event.target.value)}
+                placeholder={t('settings.providers.copilotGhe.serverUrlPlaceholder')}
+                className="font-mono text-xs"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="typography-ui-label text-foreground">{t('settings.providers.copilotGhe.clientIdLabel')}</label>
+              <Input
+                value={input.clientId}
+                onChange={(event) => handleCopilotGheFieldChange(providerId, 'clientId', event.target.value)}
+                placeholder={t('settings.providers.copilotGhe.clientIdPlaceholder')}
+                className="font-mono text-xs"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="xs"
+                className="!font-normal"
+                onClick={() => handleCopilotGheStart(providerId)}
+                disabled={authBusyKey === `oauth-ghe:${providerId}`}
+              >
+                {t('settings.providers.page.actions.connect')}
+              </Button>
+              <Button
+                size="xs"
+                className="!font-normal"
+                onClick={() => handleCopilotGheComplete(providerId)}
+                disabled={authBusyKey === `oauth-ghe-complete:${providerId}` || !details?.deviceCode}
+              >
+                {authBusyKey === `oauth-ghe-complete:${providerId}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.complete')}
+              </Button>
+            </div>
+
+            {details?.status === 'authorization_pending' && (
+              <p className="typography-meta text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-2 py-1.5 rounded">
+                {t('settings.providers.copilotGhe.status.authorizationPending')}
+              </p>
+            )}
+
+            {details?.status === 'slow_down' && (
+              <p className="typography-meta text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-2 py-1.5 rounded">
+                {t('settings.providers.copilotGhe.status.slowDown')}
+              </p>
+            )}
+
+            {details?.instructions && (
+              <p className="typography-meta text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-2 py-1.5 rounded">
+                {details.instructions}
+              </p>
+            )}
+
+            {details?.userCode && (
+              <div className="flex items-center gap-2 mt-2">
+                <Input value={details.userCode} readOnly className="font-mono text-center tracking-widest" />
+                <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(details.userCode ?? '')}>{t('settings.providers.page.actions.copyCode')}</Button>
+              </div>
+            )}
+
+            {details?.url && (
+              <div className="flex items-center gap-2 mt-2">
+                <Input value={details.url} readOnly className="text-xs text-muted-foreground" />
+                <div className="flex gap-1 shrink-0">
+                  <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(details.url ?? '')}>{t('settings.providers.page.actions.open')}</Button>
+                  <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(details.url ?? '')}>{t('settings.providers.page.actions.copy')}</Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const handleDisconnectProvider = async (providerId: string) => {
@@ -750,6 +1030,7 @@ export const ProvidersPage: React.FC = () => {
                       </div>
                     );
                   })()}
+                  {renderCopilotGheAuthSection(candidateProviderId)}
                 </section>
               )}
             </div>
@@ -942,6 +1223,7 @@ export const ProvidersPage: React.FC = () => {
                     })}
                   </div>
                 )}
+                {renderCopilotGheAuthSection(selectedProvider.id)}
               </div>
             )}
           </section>

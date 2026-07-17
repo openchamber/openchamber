@@ -38,6 +38,38 @@ const buildCopilotWindows = (payload) => {
   return windows;
 };
 
+const normalizeEnterpriseHost = (enterpriseUrl) => {
+  if (typeof enterpriseUrl !== 'string' || !enterpriseUrl.trim()) {
+    return null;
+  }
+  const raw = enterpriseUrl.trim();
+  const candidate = /^[a-z][a-z\d+\-.]*:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(candidate);
+    const host = parsed.host.toLowerCase();
+    if (!host || host === 'github.com') {
+      return null;
+    }
+    return host;
+  } catch {
+    return null;
+  }
+};
+
+const resolveCopilotQuotaUrl = (enterpriseHost) => {
+  if (!enterpriseHost) {
+    return 'https://api.github.com/copilot_internal/user';
+  }
+  return `https://${enterpriseHost}/api/v3/copilot_internal/user`;
+};
+
+const resolveProviderName = (baseName, enterpriseHost) => {
+  if (!enterpriseHost) {
+    return baseName;
+  }
+  return `${baseName} (${enterpriseHost})`;
+};
+
 export const providerId = 'github-copilot';
 export const providerName = 'GitHub Copilot';
 const aliases = ['github-copilot', 'copilot'];
@@ -52,11 +84,14 @@ export const fetchQuota = async () => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const accessToken = entry?.access ?? entry?.token;
+  const enterpriseHost = normalizeEnterpriseHost(entry?.enterpriseUrl);
+  const endpointUrl = resolveCopilotQuotaUrl(enterpriseHost);
+  const resolvedProviderName = resolveProviderName(providerName, enterpriseHost);
 
   if (!accessToken) {
     return buildResult({
       providerId,
-      providerName,
+      providerName: resolvedProviderName,
       ok: false,
       configured: false,
       error: 'Not configured'
@@ -64,7 +99,7 @@ export const fetchQuota = async () => {
   }
 
   try {
-    const response = await fetch('https://api.github.com/copilot_internal/user', {
+    const response = await fetch(endpointUrl, {
       method: 'GET',
       headers: {
         Authorization: `token ${accessToken}`,
@@ -77,7 +112,7 @@ export const fetchQuota = async () => {
     if (!response.ok) {
       return buildResult({
         providerId,
-        providerName,
+        providerName: resolvedProviderName,
         ok: false,
         configured: true,
         error: `API error: ${response.status}`
@@ -87,7 +122,7 @@ export const fetchQuota = async () => {
     const payload = await response.json();
     return buildResult({
       providerId,
-      providerName,
+      providerName: resolvedProviderName,
       ok: true,
       configured: true,
       usage: { windows: buildCopilotWindows(payload) }
@@ -95,7 +130,7 @@ export const fetchQuota = async () => {
   } catch (error) {
     return buildResult({
       providerId,
-      providerName,
+      providerName: resolvedProviderName,
       ok: false,
       configured: true,
       error: error instanceof Error ? error.message : 'Request failed'
@@ -110,11 +145,14 @@ export const fetchQuotaAddon = async () => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const accessToken = entry?.access ?? entry?.token;
+  const enterpriseHost = normalizeEnterpriseHost(entry?.enterpriseUrl);
+  const endpointUrl = resolveCopilotQuotaUrl(enterpriseHost);
+  const resolvedProviderName = resolveProviderName(providerNameAddon, enterpriseHost);
 
   if (!accessToken) {
     return buildResult({
       providerId: providerIdAddon,
-      providerName: providerNameAddon,
+      providerName: resolvedProviderName,
       ok: false,
       configured: false,
       error: 'Not configured'
@@ -122,7 +160,7 @@ export const fetchQuotaAddon = async () => {
   }
 
   try {
-    const response = await fetch('https://api.github.com/copilot_internal/user', {
+    const response = await fetch(endpointUrl, {
       method: 'GET',
       headers: {
         Authorization: `token ${accessToken}`,
@@ -135,7 +173,7 @@ export const fetchQuotaAddon = async () => {
     if (!response.ok) {
       return buildResult({
         providerId: providerIdAddon,
-        providerName: providerNameAddon,
+        providerName: resolvedProviderName,
         ok: false,
         configured: true,
         error: `API error: ${response.status}`
@@ -148,7 +186,7 @@ export const fetchQuotaAddon = async () => {
 
     return buildResult({
       providerId: providerIdAddon,
-      providerName: providerNameAddon,
+      providerName: resolvedProviderName,
       ok: true,
       configured: true,
       usage: { windows: premium }
@@ -156,7 +194,7 @@ export const fetchQuotaAddon = async () => {
   } catch (error) {
     return buildResult({
       providerId: providerIdAddon,
-      providerName: providerNameAddon,
+      providerName: resolvedProviderName,
       ok: false,
       configured: true,
       error: error instanceof Error ? error.message : 'Request failed'

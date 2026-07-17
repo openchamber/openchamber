@@ -10,6 +10,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/cli-options.js`: CLI/environment option parsing for server startup arguments.
 - `packages/web/server/lib/opencode/cli-entry-runtime.js`: CLI entrypoint runtime that detects direct execution, parses CLI options, and starts server bootstrap.
 - `packages/web/server/lib/opencode/routes.js`: OpenCode/provider settings and auth-related route registration.
+- `packages/web/server/lib/opencode/copilot-ghe-auth.js`: GitHub Copilot GHE device-flow helper and auth persistence.
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring).
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
 - `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname).
@@ -77,6 +78,8 @@ This module provides OpenCode server integration utilities for the web server ru
   - `POST /api/opencode/upgrade` (proxies OpenCode upgrade, then restarts managed OpenCode so the new binary is active)
   - `GET /api/opencode/upgrade-status`
   - `POST /api/opencode/directory`
+  - `POST /api/provider/github-copilot/ghe/auth/start`
+  - `POST /api/provider/github-copilot/ghe/auth/complete`
   - `GET /api/provider/:providerId/source`
   - `DELETE /api/provider/:providerId/auth`
 - Owns lazy auth library loading for provider auth checks/removal.
