@@ -17,6 +17,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import type { GitRemote } from '@/lib/api/types';
+import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
+import { BRANCH_FUZZY_THRESHOLD } from '@/lib/worktrees/branchSearch';
 import { useI18n } from '@/lib/i18n';
 
 interface BranchInfo {
@@ -79,15 +81,19 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   );
 
   const filteredLocal = React.useMemo(() => {
-    const term = search.toLowerCase();
+    const term = search.trim();
     if (!term) return localBranches;
-    return localBranches.filter((b) => b.toLowerCase().includes(term));
+    return scoreByFuzzyQuery(localBranches, term, (b) => b, {
+      threshold: BRANCH_FUZZY_THRESHOLD,
+    }).map((entry) => entry.item);
   }, [search, localBranches]);
 
   const filteredRemote = React.useMemo(() => {
-    const term = search.toLowerCase();
+    const term = search.trim();
     if (!term) return remoteBranches;
-    return remoteBranches.filter((b) => b.toLowerCase().includes(term));
+    return scoreByFuzzyQuery(remoteBranches, term, (b) => b, {
+      threshold: BRANCH_FUZZY_THRESHOLD,
+    }).map((entry) => entry.item);
   }, [search, remoteBranches]);
 
   const handleCheckout = (branch: string) => {
