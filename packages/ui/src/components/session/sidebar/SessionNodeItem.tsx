@@ -25,7 +25,7 @@ import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSession
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
-import { nodeContainsSessionId } from './sessionNodeItemUtils';
+import { nodeContainsSessionId, resolveRevealPaddingClass } from './sessionNodeItemUtils';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
@@ -272,25 +272,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
   const showOpenInEditorAction = isVSCode;
   const showQuickArchiveAction = !archivedBucket && !mobileVariant;
-  const revealPaddingClass = isMinimalMode
-    ? (isVSCode
-        // VS Code minimal rows reveal up to three actions on hover
-        // (open-in-editor + quick-archive + menu, each h-4). The date sits in the
-        // row flow, so the title must shrink enough to clear the actions or they
-        // overlap the timestamp. Open-in-editor is always present in VS Code.
-        ? (showQuickArchiveAction && showOpenInEditorAction
-            ? 'group-hover:pr-18'
-            : showQuickArchiveAction || showOpenInEditorAction
-              ? 'group-hover:pr-14'
-              : 'group-hover:pr-8')
-        : 'group-hover:pr-2 group-focus-within:pr-2')
-    : (isVSCode
-        ? (showQuickArchiveAction && showOpenInEditorAction
-            ? 'group-hover:pr-18'
-            : showQuickArchiveAction || showOpenInEditorAction
-              ? 'group-hover:pr-12'
-              : 'group-hover:pr-5')
-        : (showQuickArchiveAction ? 'group-hover:pr-12 group-focus-within:pr-12' : 'group-hover:pr-5 group-focus-within:pr-5'));
   const alwaysActionPaddingClass = showQuickArchiveAction ? 'pr-13' : 'pr-7';
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
@@ -578,6 +559,15 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
+  // Defined here rather than beside the sibling reveal classes above because the
+  // permission-badge gate depends on `pendingPermissionCount` (#2284).
+  const revealPaddingClass = resolveRevealPaddingClass({
+    isMinimalMode,
+    isVSCode,
+    showQuickArchiveAction,
+    showOpenInEditorAction,
+    hasPendingPermissionBadge: pendingPermissionCount > 0,
+  });
   const showUnreadStatus = !isStreaming && needsAttention && !isActive;
   const showStatusMarker = isStreaming || showUnreadStatus;
   const statusMarkerContent = isStreaming
