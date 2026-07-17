@@ -452,6 +452,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.rename.cancel': '세션 이름 변경 취소',
   'sessions.sidebar.session.menu.unpin': '세션 고정 해제',
   'sessions.sidebar.session.menu.pin': '세션 고정',
+  'sessions.sidebar.session.menu.markUnread': '읽지 않음으로 표시',
+  'sessions.sidebar.session.menu.markRead': '읽음으로 표시',
   'sessions.sidebar.session.menu.share': '공유',
   'sessions.sidebar.session.menu.copied': '복사됨',
   'sessions.sidebar.session.menu.copyLink': '링크 복사',

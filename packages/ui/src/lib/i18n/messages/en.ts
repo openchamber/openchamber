@@ -451,6 +451,8 @@ export const dict = {
   'sessions.sidebar.session.rename.cancel': 'Cancel renaming session',
   'sessions.sidebar.session.menu.unpin': 'Unpin session',
   'sessions.sidebar.session.menu.pin': 'Pin session',
+  'sessions.sidebar.session.menu.markUnread': 'Mark as unread',
+  'sessions.sidebar.session.menu.markRead': 'Mark as read',
   'sessions.sidebar.session.menu.share': 'Share',
   'sessions.sidebar.session.menu.copied': 'Copied',
   'sessions.sidebar.session.menu.copyLink': 'Copy link',

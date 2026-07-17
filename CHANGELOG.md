@@ -97,6 +97,8 @@ All notable changes to this project will be documented in this file.
 - Desktop: the app prefers your own OpenCode install again — the bundled CLI is used only when no OpenCode is installed anywhere on the machine.
 - Windows: OpenCode installed via npm now launches from paths with spaces (such as C:\Program Files\nodejs), binary paths pasted with surrounding quotes work, and discovery also checks the system-wide npm prefix and Scoop's shims — in the web/desktop app and the VS Code extension.
 
+- Sessions: added a "Mark as unread" / "Mark as read" option to the session menu so you can restore or clear a session's unread indicator on demand.
+
 ## [1.13.9] - 2026-07-02
 
 - Mobile: added the native iOS and Android app projects ahead of the mobile app release, with continued polish for saved connections, password unlock, QR-code connection scanning, push notifications, iOS widgets, app resume, and native layout details.

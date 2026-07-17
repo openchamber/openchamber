@@ -293,6 +293,8 @@ export const dict = {
   'sessions.sidebar.session.rename.cancel': 'Annuler la session de changement de nom',
   'sessions.sidebar.session.menu.unpin': 'Désépingler la session',
   'sessions.sidebar.session.menu.pin': 'Session d\'épinglage',
+  'sessions.sidebar.session.menu.markUnread': 'Marquer comme non lu',
+  'sessions.sidebar.session.menu.markRead': 'Marquer comme lu',
   'sessions.sidebar.session.menu.share': 'Partager',
   'sessions.sidebar.session.menu.copied': 'Copié',
   'sessions.sidebar.session.menu.copyLink': 'Copier le lien',

@@ -257,6 +257,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.rename.cancel': 'Anuluj zmianę nazwy sesji',
   'sessions.sidebar.session.menu.unpin': 'Odepnij sesję',
   'sessions.sidebar.session.menu.pin': 'Przypnij sesję',
+  'sessions.sidebar.session.menu.markUnread': 'Oznacz jako nieprzeczytane',
+  'sessions.sidebar.session.menu.markRead': 'Oznacz jako przeczytane',
   'sessions.sidebar.session.menu.share': 'Udostępnij',
   'sessions.sidebar.session.menu.copied': 'Skopiowano',
   'sessions.sidebar.session.menu.copyLink': 'Kopiuj link',

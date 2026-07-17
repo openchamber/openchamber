@@ -91,6 +91,7 @@ interface NotificationStore {
   // Mutations
   append: (notification: Notification) => void
   markSessionViewed: (sessionId: string) => void
+  markSessionUnread: (sessionId: string, directory?: string) => void
   markProjectViewed: (directory: string) => void
 
   // Selectors
@@ -124,6 +125,24 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
     set({ list: next, index: buildIndex(next) })
   },
 
+  markSessionUnread: (sessionId, directory) => {
+    const current = get()
+    // Already unread — nothing to do (keeps the action idempotent).
+    if ((current.index.session.unseenCount[sessionId] ?? 0) > 0) return
+
+    // Inject a synthetic unviewed turn-complete notification so the session
+    // lights up through the same unseenCount mechanism as real notifications.
+    const notification: Notification = {
+      type: "turn-complete",
+      session: sessionId,
+      directory,
+      time: Date.now(),
+      viewed: false,
+    }
+    const next = pruneNotifications([...current.list, notification])
+    set({ list: next, index: buildIndex(next) })
+  },
+
   markProjectViewed: (directory) => {
     const current = get()
     const count = current.index.project.unseenCount[directory] ?? 0
@@ -151,6 +170,10 @@ export function appendNotification(notification: Notification) {
 
 export function markSessionViewed(sessionId: string) {
   useNotificationStore.getState().markSessionViewed(sessionId)
+}
+
+export function markSessionUnread(sessionId: string, directory?: string) {
+  useNotificationStore.getState().markSessionUnread(sessionId, directory)
 }
 
 // ---------------------------------------------------------------------------
