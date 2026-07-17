@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react';
 
 import {
-  OTTO_UI_EVENTS_WS_PATH,
-  type OttoUiRealtimeEvent,
-  useOttoEventsStore,
-} from '@/stores/useOttoEventsStore';
+  OPENCHAMBER_AGENT_UI_EVENTS_WS_PATH,
+  type OpenChamberAgentUiRealtimeEvent,
+  useOpenChamberAgentEventsStore,
+} from '@/stores/useOpenChamberAgentEventsStore';
 
-export type UseOttoWebSocketOptions = {
+export type UseOpenChamberAgentWebSocketOptions = {
   enabled?: boolean;
 };
 
@@ -15,7 +15,7 @@ const MAX_BACKOFF_MS = 30_000;
 
 function buildWsUrl(lastEventId: string | null) {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  const pathname = OTTO_UI_EVENTS_WS_PATH;
+  const pathname = OPENCHAMBER_AGENT_UI_EVENTS_WS_PATH;
   const url = new URL(`${protocol}://${window.location.host}${pathname}`);
 
   if (lastEventId) {
@@ -37,11 +37,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object');
 }
 
-export function useOttoWebSocket({ enabled = true }: UseOttoWebSocketOptions = {}) {
-  const patternsKey = useOttoEventsStore((state) => state.patterns.join('|'));
-  const patterns = useOttoEventsStore((state) => state.patterns);
-  const ingestServerEvent = useOttoEventsStore((state) => state.ingestServerEvent);
-  const setConnectionStatus = useOttoEventsStore((state) => state.setConnectionStatus);
+export function useOpenChamberAgentWebSocket({ enabled = true }: UseOpenChamberAgentWebSocketOptions = {}) {
+  const patternsKey = useOpenChamberAgentEventsStore((state) => state.patterns.join('|'));
+  const patterns = useOpenChamberAgentEventsStore((state) => state.patterns);
+  const ingestServerEvent = useOpenChamberAgentEventsStore((state) => state.ingestServerEvent);
+  const setConnectionStatus = useOpenChamberAgentEventsStore((state) => state.setConnectionStatus);
 
   const backoffMsRef = useRef(MIN_BACKOFF_MS);
   const reconnectTimerRef = useRef<number | null>(null);
@@ -89,7 +89,7 @@ export function useOttoWebSocket({ enabled = true }: UseOttoWebSocketOptions = {
 
       socketRef.current?.close();
 
-      const resumeAfterId = useOttoEventsStore.getState().lastEventId;
+      const resumeAfterId = useOpenChamberAgentEventsStore.getState().lastEventId;
 
       const socketUrl = buildWsUrl(resumeAfterId);
 
@@ -103,7 +103,7 @@ export function useOttoWebSocket({ enabled = true }: UseOttoWebSocketOptions = {
         backoffMsRef.current = MIN_BACKOFF_MS;
         setConnectionStatus('open');
 
-        const subscribePatterns = useOttoEventsStore.getState().patterns;
+        const subscribePatterns = useOpenChamberAgentEventsStore.getState().patterns;
 
         socket.send(
           JSON.stringify({
@@ -136,7 +136,7 @@ export function useOttoWebSocket({ enabled = true }: UseOttoWebSocketOptions = {
           return;
         }
 
-        const realtimeEvent: OttoUiRealtimeEvent = {
+        const realtimeEvent: OpenChamberAgentUiRealtimeEvent = {
           eventId: eventIdField,
           eventType: eventTypeField,
           timestamp: timestampField,

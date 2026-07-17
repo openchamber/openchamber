@@ -220,12 +220,27 @@ describe('skill wizard', () => {
 describe('component ownership', () => {
   it('claims only its own custom_id prefixes', () => {
     const { wizards } = makeHarness();
-    expect(wizards.ownsComponent('otto-verb-level:abc')).toBe(true);
-    expect(wizards.ownsComponent('otto-agent-scope:abc')).toBe(true);
-    expect(wizards.ownsComponent('otto-skill-pick:abc')).toBe(true);
-    expect(wizards.ownsComponent('otto-perm-mode:abc')).toBe(true);
-    expect(wizards.ownsComponent('otto-perm-scope:abc')).toBe(true);
-    expect(wizards.ownsComponent('otto-model-provider:abc')).toBe(false);
-    expect(wizards.ownsComponent('otto-approve:abc')).toBe(false);
+    expect(wizards.ownsComponent('openchamber-agent-verb-level:abc')).toBe(true);
+    expect(wizards.ownsComponent('openchamber-agent-scope:abc')).toBe(true);
+    expect(wizards.ownsComponent('openchamber-agent-skill-pick:abc')).toBe(true);
+    expect(wizards.ownsComponent('openchamber-agent-perm-mode:abc')).toBe(true);
+    expect(wizards.ownsComponent('openchamber-agent-perm-scope:abc')).toBe(true);
+    expect(wizards.ownsComponent('openchamber-agent-model-provider:abc')).toBe(false);
+    expect(wizards.ownsComponent('openchamber-agent-approve:abc')).toBe(false);
+  });
+});
+
+describe('legacy Otto custom_id normalization', () => {
+  it('rewrites deprecated Otto prefixes into the OpenChamber agent namespace', async () => {
+    const {
+      normalizeLegacyDiscordCustomId,
+      normalizeLegacyDiscordSelectValue,
+    } = await import('./discord-wizard-shared.js');
+
+    expect(normalizeLegacyDiscordCustomId('otto-approve:abc')).toBe('openchamber-agent-approve:abc');
+    expect(normalizeLegacyDiscordCustomId('otto-agent-pick:xyz')).toBe('openchamber-agent-pick:xyz');
+    expect(normalizeLegacyDiscordCustomId('openchamber-agent-deny:1')).toBe('openchamber-agent-deny:1');
+    expect(normalizeLegacyDiscordSelectValue('__otto_next')).toBe('__openchamber_agent_next');
+    expect(normalizeLegacyDiscordSelectValue('low')).toBe('low');
   });
 });

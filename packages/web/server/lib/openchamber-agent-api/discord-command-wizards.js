@@ -29,13 +29,13 @@ import {
  * and stays gateway/WebSocket-free for isolated unit testing.
  */
 
-const VERB_LEVEL_PREFIX = 'otto-verb-level:';
-const VERB_SCOPE_PREFIX = 'otto-verb-scope:';
-const AGENT_PICK_PREFIX = 'otto-agent-pick:';
-const AGENT_SCOPE_PREFIX = 'otto-agent-scope:';
-const SKILL_PICK_PREFIX = 'otto-skill-pick:';
-const PERM_MODE_PREFIX = 'otto-perm-mode:';
-const PERM_SCOPE_PREFIX = 'otto-perm-scope:';
+const VERB_LEVEL_PREFIX = 'openchamber-agent-verb-level:';
+const VERB_SCOPE_PREFIX = 'openchamber-agent-verb-scope:';
+const AGENT_PICK_PREFIX = 'openchamber-agent-pick:';
+const AGENT_SCOPE_PREFIX = 'openchamber-agent-scope:';
+const SKILL_PICK_PREFIX = 'openchamber-agent-skill-pick:';
+const PERM_MODE_PREFIX = 'openchamber-agent-perm-mode:';
+const PERM_SCOPE_PREFIX = 'openchamber-agent-perm-scope:';
 
 const VERBOSITY_DESCRIPTIONS = {
   quiet: 'Final answer only — hides reasoning + tool activity',

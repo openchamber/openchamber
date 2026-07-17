@@ -17,8 +17,35 @@ export const WIZARD_TTL_MS = 10 * 60 * 1000;
 // so the rendered menu never exceeds Discord's hard limit of 25 select options.
 export const PAGE_SIZE = 23;
 
-export const PREV_VALUE = '__otto_prev';
-export const NEXT_VALUE = '__otto_next';
+export const PREV_VALUE = '__openchamber_agent_prev';
+export const NEXT_VALUE = '__openchamber_agent_next';
+
+/**
+ * Rewrite deprecated Otto Discord component ids / select values to the
+ * OpenChamber agent namespace so in-flight messages keep working after rename.
+ */
+export function normalizeLegacyDiscordCustomId(customId) {
+  if (typeof customId !== 'string') return customId;
+  const pairs = [
+    ['otto-agent-pick:', 'openchamber-agent-pick:'],
+    ['otto-agent-scope:', 'openchamber-agent-scope:'],
+    ['otto-', 'openchamber-agent-'],
+  ];
+  for (const [from, to] of pairs) {
+    if (customId.startsWith(from)) {
+      return `${to}${customId.slice(from.length)}`;
+    }
+  }
+  return customId;
+}
+
+export function normalizeLegacyDiscordSelectValue(value) {
+  if (typeof value !== 'string') return value;
+  if (value.startsWith('__otto_')) {
+    return `__openchamber_agent_${value.slice('__otto_'.length)}`;
+  }
+  return value;
+}
 
 /**
  * Build a paged set of Discord select options from `items`.

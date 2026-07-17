@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import { toast } from '@/components/ui/toast';
 import {
-  useOttoEventsStore,
-  type OttoUiRealtimeEvent,
-} from '@/stores/useOttoEventsStore';
+  useOpenChamberAgentEventsStore,
+  type OpenChamberAgentUiRealtimeEvent,
+} from '@/stores/useOpenChamberAgentEventsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMessengerStore } from '@/stores/useMessengerStore';
@@ -42,10 +42,10 @@ function openProjectByPath(projectPath: string) {
 }
 
 export function useMessengerBridgeToasts() {
-  const subscribeToEvents = useOttoEventsStore((s) => s.subscribeToEvents);
+  const subscribeToEvents = useOpenChamberAgentEventsStore((s) => s.subscribeToEvents);
 
   useEffect(() => {
-    const handler = (event: OttoUiRealtimeEvent) => {
+    const handler = (event: OpenChamberAgentUiRealtimeEvent) => {
       if (event.eventType === 'messenger.bridge.session_bound') {
         const data = event.data as SessionBoundPayload | undefined;
         if (!data || !data.sessionId) return;

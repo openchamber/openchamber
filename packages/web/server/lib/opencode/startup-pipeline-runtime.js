@@ -2,7 +2,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
   const {
     createTerminalRuntime,
     createMessageStreamWsRuntime,
-    createOttoEventsWebSocketRuntime,
+    createOpenChamberAgentEventsWebSocketRuntime,
     createServerStartupRuntime,
   } = dependencies;
 
@@ -86,7 +86,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       upstreamStallTimeoutMs,
     });
 
-    const ottoEventsWebSocketRuntime = createOttoEventsWebSocketRuntime({
+    const openChamberAgentEventsWebSocketRuntime = createOpenChamberAgentEventsWebSocketRuntime({
       server,
       uiAuthController,
       isRequestOriginAllowed,
@@ -134,7 +134,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
     return {
       terminalRuntime,
       messageStreamRuntime,
-      ottoEventsWebSocketRuntime,
+      openChamberAgentEventsWebSocketRuntime,
     };
   };
 

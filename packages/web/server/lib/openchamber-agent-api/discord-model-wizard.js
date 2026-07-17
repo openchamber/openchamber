@@ -37,14 +37,14 @@ import {
 // Re-exported for callers/tests that import the paging helpers from here.
 export { WIZARD_TTL_MS, PAGE_SIZE, buildPagedOptions };
 
-const PROVIDER_PREFIX = 'otto-model-provider:';
-const MODEL_PREFIX = 'otto-model-model:';
-const EFFORT_PREFIX = 'otto-model-effort:';
-const SCOPE_PREFIX = 'otto-model-scope:';
-const RESEND_PREFIX = 'otto-model-resend:';
+const PROVIDER_PREFIX = 'openchamber-agent-model-provider:';
+const MODEL_PREFIX = 'openchamber-agent-model-model:';
+const EFFORT_PREFIX = 'openchamber-agent-model-effort:';
+const SCOPE_PREFIX = 'openchamber-agent-model-scope:';
+const RESEND_PREFIX = 'openchamber-agent-model-resend:';
 
-const FAVORITES_ID = '__otto_favorites';
-const EFFORT_NONE = '__otto_effort_none';
+const FAVORITES_ID = '__openchamber_agent_favorites';
+const EFFORT_NONE = '__openchamber_agent_effort_none';
 
 /** Normalise a provider's `models` (array or map) into a flat array. */
 export function modelsOf(provider) {

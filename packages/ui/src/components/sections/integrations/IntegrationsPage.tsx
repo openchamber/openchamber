@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessengerSection } from '@/components/sections/otto-settings/MessengerSection';
+import { MessengerSection } from '@/components/sections/openchamber-agent-settings/MessengerSection';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /**

@@ -165,13 +165,13 @@ describe('createDiscordModelWizard flow', () => {
     const modelPage0 = calls.at(-1);
     const modelCustomId = lastCustomId(modelPage0);
     expect(lastSelectValues(modelPage0)).toContain('m0');
-    expect(lastSelectValues(modelPage0)).toContain('__otto_next');
+    expect(lastSelectValues(modelPage0)).toContain('__openchamber_agent_next');
     expect(lastSelectValues(modelPage0)).not.toContain(`m${PAGE_SIZE}`);
 
     // page forward → second page reveals models past the first 23
-    await wizard.handleComponent(state, { id: 'i3', token: 't3', data: { values: ['__otto_next'] } }, modelCustomId);
+    await wizard.handleComponent(state, { id: 'i3', token: 't3', data: { values: ['__openchamber_agent_next'] } }, modelCustomId);
     expect(lastSelectValues(calls.at(-1))).toContain(`m${PAGE_SIZE}`);
-    expect(lastSelectValues(calls.at(-1))).toContain('__otto_prev');
+    expect(lastSelectValues(calls.at(-1))).toContain('__openchamber_agent_prev');
 
     // pick a model with no variants → scope picker (conversation/project/system)
     await wizard.handleComponent(state, { id: 'i4', token: 't4', data: { values: ['m30'] } }, modelCustomId);
@@ -203,7 +203,7 @@ describe('createDiscordModelWizard flow', () => {
     const effortSelect = calls.at(-1);
     expect(effortSelect.body.data.content).toContain('thinking effort');
     const effortCustomId = lastCustomId(effortSelect);
-    expect(lastSelectValues(effortSelect)).toEqual(['__otto_effort_none', 'low', 'high']);
+    expect(lastSelectValues(effortSelect)).toEqual(['__openchamber_agent_effort_none', 'low', 'high']);
 
     await wizard.handleComponent(state, { id: 'i4', token: 't4', data: { values: ['high'] } }, effortCustomId);
     const scopeCustomId = lastCustomId(calls.at(-1));
@@ -249,10 +249,10 @@ describe('createDiscordModelWizard flow', () => {
     });
     await wizard.start(state, { id: 'i1', token: 't1', channel_id: 'chan', application_id: 'app' });
     const provSelect = calls.at(-1);
-    expect(lastSelectValues(provSelect)).toContain('__otto_favorites');
+    expect(lastSelectValues(provSelect)).toContain('__openchamber_agent_favorites');
     const provCustomId = lastCustomId(provSelect);
 
-    await wizard.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['__otto_favorites'] } }, provCustomId);
+    await wizard.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['__openchamber_agent_favorites'] } }, provCustomId);
     const modelSelect = calls.at(-1);
     expect(lastSelectValues(modelSelect)).toEqual(['anthropic/m5']);
     const modelCustomId = lastCustomId(modelSelect);
@@ -305,7 +305,7 @@ describe('createDiscordModelWizard flow', () => {
     });
     await wizard.start(state, { id: 'i1', token: 't1', channel_id: 'chan', application_id: 'app' });
     const provCustomId = lastCustomId(calls.at(-1));
-    await wizard.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['__otto_favorites'] } }, provCustomId);
+    await wizard.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['__openchamber_agent_favorites'] } }, provCustomId);
     // Only the non-hidden favourite survives.
     expect(lastSelectValues(calls.at(-1))).toEqual(['anthropic/m5']);
   });

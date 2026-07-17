@@ -1886,13 +1886,13 @@ export function createMessengerSyncRouter({
               type: 2, // BUTTON
               style: 3, // SUCCESS (green)
               label: 'Approve',
-              custom_id: `otto-approve:${id}`,
+              custom_id: `openchamber-agent-approve:${id}`,
             },
             {
               type: 2,
               style: 4, // DANGER (red)
               label: 'Deny',
-              custom_id: `otto-deny:${id}`,
+              custom_id: `openchamber-agent-deny:${id}`,
             },
           ],
         },

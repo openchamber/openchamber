@@ -10,7 +10,7 @@ describe('MessengerBridgeStore — permission mode persistence', () => {
   let store;
 
   beforeEach(() => {
-    dbPath = path.join(os.tmpdir(), `otto-store-${crypto.randomBytes(6).toString('hex')}.sqlite`);
+    dbPath = path.join(os.tmpdir(), `openchamber-agent-store-${crypto.randomBytes(6).toString('hex')}.sqlite`);
     store = new MessengerBridgeStore({ dbPath });
   });
 

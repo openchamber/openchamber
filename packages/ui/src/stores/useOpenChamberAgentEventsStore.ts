@@ -1,21 +1,21 @@
 import { create } from 'zustand';
 
-export const OTTO_UI_EVENTS_WS_PATH = '/ws/otto/events';
+export const OPENCHAMBER_AGENT_UI_EVENTS_WS_PATH = '/ws/openchamber-agent/events';
 
-export const OTTO_UI_EVENTS_BUFFER_LIMIT = 100;
+export const OPENCHAMBER_AGENT_UI_EVENTS_BUFFER_LIMIT = 100;
 
-export type OttoWsConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
+export type OpenChamberAgentWsConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
-export type OttoUiRealtimeEvent = {
+export type OpenChamberAgentUiRealtimeEvent = {
   eventId: string;
   eventType: string;
   data: unknown;
   timestamp: number;
 };
 
-const eventListeners = new Set<(event: OttoUiRealtimeEvent) => void>();
+const eventListeners = new Set<(event: OpenChamberAgentUiRealtimeEvent) => void>();
 
-const notifyRealtimeListeners = (event: OttoUiRealtimeEvent) => {
+const notifyRealtimeListeners = (event: OpenChamberAgentUiRealtimeEvent) => {
   for (const listener of Array.from(eventListeners)) {
     try {
       listener(event);
@@ -25,20 +25,20 @@ const notifyRealtimeListeners = (event: OttoUiRealtimeEvent) => {
   }
 };
 
-type OttoEventsState = {
-  connectionStatus: OttoWsConnectionStatus;
+type OpenChamberAgentEventsState = {
+  connectionStatus: OpenChamberAgentWsConnectionStatus;
   lastDisconnectReason: string | null;
   lastEventId: string | null;
   patterns: string[];
-  events: OttoUiRealtimeEvent[];
-  setConnectionStatus: (status: OttoWsConnectionStatus, hint?: string | null) => void;
+  events: OpenChamberAgentUiRealtimeEvent[];
+  setConnectionStatus: (status: OpenChamberAgentWsConnectionStatus, hint?: string | null) => void;
   setPatterns: (patterns: string[]) => void;
-  ingestServerEvent: (event: OttoUiRealtimeEvent) => void;
+  ingestServerEvent: (event: OpenChamberAgentUiRealtimeEvent) => void;
   resetLocalEvents: () => void;
-  subscribeToEvents: (listener: (event: OttoUiRealtimeEvent) => void) => () => void;
+  subscribeToEvents: (listener: (event: OpenChamberAgentUiRealtimeEvent) => void) => () => void;
 };
 
-export const useOttoEventsStore = create<OttoEventsState>((set) => ({
+export const useOpenChamberAgentEventsStore = create<OpenChamberAgentEventsState>((set) => ({
   connectionStatus: 'idle',
   lastDisconnectReason: null,
   lastEventId: null,
@@ -75,8 +75,8 @@ export const useOttoEventsStore = create<OttoEventsState>((set) => ({
 
     set((state) => {
       const events = [...state.events, event];
-      if (events.length > OTTO_UI_EVENTS_BUFFER_LIMIT) {
-        events.splice(0, events.length - OTTO_UI_EVENTS_BUFFER_LIMIT);
+      if (events.length > OPENCHAMBER_AGENT_UI_EVENTS_BUFFER_LIMIT) {
+        events.splice(0, events.length - OPENCHAMBER_AGENT_UI_EVENTS_BUFFER_LIMIT);
       }
 
       return {

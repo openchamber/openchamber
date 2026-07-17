@@ -274,9 +274,9 @@ async function sendApprovalToSurface({ type, token, channelId, threadId, permiss
   if (type === 'discord') {
     // Build Discord buttons: Approve, Always Allow, Deny
     const buttons = [
-      { type: 2, style: 3, label: '✅ Allow Once', custom_id: `otto-approve:${approvalId}` },
-      { type: 2, style: 2, label: alwaysStr ? `Always: ${alwaysStr}` : '♻️ Always Allow', custom_id: `otto-approve-always:${approvalId}` },
-      { type: 2, style: 4, label: '❌ Deny', custom_id: `otto-deny:${approvalId}` },
+      { type: 2, style: 3, label: '✅ Allow Once', custom_id: `openchamber-agent-approve:${approvalId}` },
+      { type: 2, style: 2, label: alwaysStr ? `Always: ${alwaysStr}` : '♻️ Always Allow', custom_id: `openchamber-agent-approve-always:${approvalId}` },
+      { type: 2, style: 4, label: '❌ Deny', custom_id: `openchamber-agent-deny:${approvalId}` },
     ];
 
     const ch = threadId ?? channelId;
@@ -332,7 +332,7 @@ function buildQuestionComponents({ questionId, questionIndex, question }) {
           type: 2,
           style: 2,
           label: clipBlock(`${i + 1}. ${typeof opt?.label === 'string' && opt.label.trim() ? opt.label.trim() : `Option ${i + 1}`}`, 80),
-          custom_id: `otto-question:${questionId}:${questionIndex}:${i}`,
+          custom_id: `openchamber-agent-question:${questionId}:${questionIndex}:${i}`,
         })),
       },
     ];
@@ -353,7 +353,7 @@ function buildQuestionComponents({ questionId, questionIndex, question }) {
       components: [
         {
           type: 3,
-          custom_id: `otto-question-select:${questionId}:${questionIndex}`,
+          custom_id: `openchamber-agent-question-select:${questionId}:${questionIndex}`,
           options: selectOptions,
           min_values: 1,
           max_values: multiple ? selectOptions.length : 1,
@@ -1989,7 +1989,7 @@ export function createMessengerOpencodeBridge({
       return null;
     }
     if (!settings?.discord?.botToken) return null;
-    const api = `${base}/api/otto/messenger/agent`;
+    const api = `${base}/api/openchamber-agent/messenger/agent`;
     return [
       '<discord>',
       'This OpenChamber server is connected to Discord. You can post messages to Discord channels and threads via the local API using bash curl — the bot token is resolved server-side, so never ask for or pass it. Useful for status updates, sharing results, or pinging another project/thread.',

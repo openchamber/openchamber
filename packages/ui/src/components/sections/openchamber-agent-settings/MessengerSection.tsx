@@ -24,7 +24,7 @@ import {
   type MessengerDiagnosisCheck,
   type MessengerInboundMessage,
 } from '@/stores/useMessengerStore';
-import { useOttoEventsStore, type OttoUiRealtimeEvent } from '@/stores/useOttoEventsStore';
+import { useOpenChamberAgentEventsStore, type OpenChamberAgentUiRealtimeEvent } from '@/stores/useOpenChamberAgentEventsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
@@ -176,12 +176,12 @@ function DiscordListenerPanel({
   const running = Boolean(conn.discordListenerRunning);
   const connected = Boolean(conn.discordListenerConnected);
   const autoReply = conn.discordListenerAutoReply !== false;
-  const subscribeToEvents = useOttoEventsStore((s) => s.subscribeToEvents);
+  const subscribeToEvents = useOpenChamberAgentEventsStore((s) => s.subscribeToEvents);
   const ingestDiscordInbound = useMessengerStore((s) => s.ingestDiscordInbound);
 
   useEffect(() => {
     if (!running) return;
-    const handler = (event: OttoUiRealtimeEvent) => {
+    const handler = (event: OpenChamberAgentUiRealtimeEvent) => {
       if (event.eventType !== 'messenger.discord.message_received') return;
       const data = event.data as MessengerInboundMessage | undefined;
       if (data && typeof data === 'object' && 'updateId' in data) {

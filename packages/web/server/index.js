@@ -84,12 +84,12 @@ import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
-import { createMessengerSyncRouter } from './lib/otto-api/messenger-sync.js';
+import { createMessengerSyncRouter } from './lib/openchamber-agent-api/messenger-sync.js';
 import { syncSystemSkills } from './lib/opencode/system-skills.js';
 import {
-  createOttoEventsWebSocketRuntime,
-  broadcast as ottoEventsBroadcast,
-} from './lib/otto-api/websocket.js';
+  createOpenChamberAgentEventsWebSocketRuntime,
+  broadcast as openChamberAgentEventsBroadcast,
+} from './lib/openchamber-agent-api/websocket.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
@@ -502,7 +502,7 @@ let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
 let messageStreamRuntime = null;
-let ottoEventsWebSocketRuntime = null;
+let openChamberAgentEventsWebSocketRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
   hmrState,
@@ -906,7 +906,7 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
   createMessageStreamWsRuntime,
-  createOttoEventsWebSocketRuntime,
+  createOpenChamberAgentEventsWebSocketRuntime,
   createServerStartupRuntime,
 });
 
@@ -1053,9 +1053,9 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setMessageStreamRuntime: (value) => {
     messageStreamRuntime = value;
   },
-  getOttoEventsWebSocketRuntime: () => ottoEventsWebSocketRuntime,
-  setOttoEventsWebSocketRuntime: (value) => {
-    ottoEventsWebSocketRuntime = value;
+  getOpenChamberAgentEventsWebSocketRuntime: () => openChamberAgentEventsWebSocketRuntime,
+  setOpenChamberAgentEventsWebSocketRuntime: (value) => {
+    openChamberAgentEventsWebSocketRuntime = value;
   },
   shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode,
   getOpenCodePort: () => openCodePort,
@@ -1315,7 +1315,7 @@ async function main(options = {}) {
     // the global event hub (so the bridge's initApprovalListener can
     // respond to OpenCode).
     broadcastEvent: (type, data) => {
-      try { ottoEventsBroadcast(type, data); } catch {}
+      try { openChamberAgentEventsBroadcast(type, data); } catch {}
       try { globalMessageStreamHub?.publishEvent?.(type, data); } catch {}
     },
     globalEventHub: globalMessageStreamHub,
@@ -1339,6 +1339,8 @@ async function main(options = {}) {
     // headless server doesn't depend on a browser client connecting first.
     ensureEventStream: () => ensureGlobalWatcherStarted(),
   });
+  app.use('/api/openchamber-agent/messenger', messengerRouter);
+  // Legacy alias — same router, kept for in-flight clients / system skills.
   app.use('/api/otto/messenger', messengerRouter);
 
   const previewProxyRuntime = createPreviewProxyRuntime({
@@ -1406,7 +1408,7 @@ async function main(options = {}) {
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
-  ottoEventsWebSocketRuntime = startupPipelineResult.ottoEventsWebSocketRuntime;
+  openChamberAgentEventsWebSocketRuntime = startupPipelineResult.openChamberAgentEventsWebSocketRuntime;
 
   try {
     await scheduledTasksRuntime.start();

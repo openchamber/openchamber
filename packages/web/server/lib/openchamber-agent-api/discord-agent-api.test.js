@@ -67,7 +67,7 @@ function createApp({
   const app = express();
   app.use(express.json());
   app.use(
-    '/api/otto/messenger/agent',
+    '/api/openchamber-agent/messenger/agent',
     createDiscordAgentRouter({
       readSettings,
       bridge,
@@ -141,7 +141,7 @@ describe('discord-agent-api — routes', () => {
 
   it('GET /help describes the endpoints', async () => {
     const app = createApp({ readSettings: async () => makeSettings() });
-    const res = await request(app).get('/api/otto/messenger/agent/help');
+    const res = await request(app).get('/api/openchamber-agent/messenger/agent/help');
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.endpoints).toHaveProperty('POST /agent/post');
@@ -149,7 +149,7 @@ describe('discord-agent-api — routes', () => {
 
   it('GET /targets returns 503 when Discord is not configured', async () => {
     const app = createApp({ readSettings: async () => ({}) });
-    const res = await request(app).get('/api/otto/messenger/agent/targets');
+    const res = await request(app).get('/api/openchamber-agent/messenger/agent/targets');
     expect(res.status).toBe(503);
     expect(res.body.ok).toBe(false);
   });
@@ -167,7 +167,7 @@ describe('discord-agent-api — routes', () => {
       { sessionId: '', targetKey: '999', projectPath: '/x' },
     ]);
     const app = createApp({ readSettings: async () => makeSettings(), bridge });
-    const res = await request(app).get('/api/otto/messenger/agent/targets');
+    const res = await request(app).get('/api/openchamber-agent/messenger/agent/targets');
     expect(res.status).toBe(200);
     expect(res.body.guildId).toBe(GUILD);
     expect(res.body.projects).toHaveLength(1);
@@ -184,7 +184,7 @@ describe('discord-agent-api — routes', () => {
   it('POST /resolve resolves by project label', async () => {
     const app = createApp({ readSettings: async () => makeSettings() });
     const res = await request(app)
-      .post('/api/otto/messenger/agent/resolve')
+      .post('/api/openchamber-agent/messenger/agent/resolve')
       .send({ project: 'My App' });
     expect(res.status).toBe(200);
     expect(res.body.target.channelId).toBe(PROJECT_CHANNEL);
@@ -199,7 +199,7 @@ describe('discord-agent-api — routes', () => {
     ]);
     const app = createApp({ readSettings: async () => makeSettings(), bridge });
     const res = await request(app)
-      .post('/api/otto/messenger/agent/resolve')
+      .post('/api/openchamber-agent/messenger/agent/resolve')
       .send({ session: 'ses_abc' });
     expect(res.status).toBe(200);
     expect(res.body.target.kind).toBe('session');
@@ -210,13 +210,13 @@ describe('discord-agent-api — routes', () => {
     const app = createApp({ readSettings: async () => makeSettings() });
 
     const byId = await request(app)
-      .post('/api/otto/messenger/agent/resolve')
+      .post('/api/openchamber-agent/messenger/agent/resolve')
       .send({ channel: PROJECT_CHANNEL });
     expect(byId.status).toBe(200);
     expect(byId.body.target.channelId).toBe(PROJECT_CHANNEL);
 
     const byUrl = await request(app)
-      .post('/api/otto/messenger/agent/resolve')
+      .post('/api/openchamber-agent/messenger/agent/resolve')
       .send({ channel: `https://discord.com/channels/${GUILD}/${SESSION_THREAD}` });
     expect(byUrl.status).toBe(200);
     expect(byUrl.body.target.channelId).toBe(SESSION_THREAD);
@@ -226,11 +226,11 @@ describe('discord-agent-api — routes', () => {
   it('POST /resolve errors when nothing matches or nothing is provided', async () => {
     const app = createApp({ readSettings: async () => makeSettings() });
 
-    const none = await request(app).post('/api/otto/messenger/agent/resolve').send({});
+    const none = await request(app).post('/api/openchamber-agent/messenger/agent/resolve').send({});
     expect(none.status).toBe(400);
 
     const missing = await request(app)
-      .post('/api/otto/messenger/agent/resolve')
+      .post('/api/openchamber-agent/messenger/agent/resolve')
       .send({ project: 'does-not-exist' });
     expect(missing.status).toBe(400);
     expect(missing.body.error).toContain('No Discord channel');
@@ -245,7 +245,7 @@ describe('discord-agent-api — routes', () => {
     const app = createApp({ readSettings: async () => makeSettings(), broadcastEvent });
 
     const res = await request(app)
-      .post('/api/otto/messenger/agent/post')
+      .post('/api/openchamber-agent/messenger/agent/post')
       .send({ project: 'my-app', text: 'Build is green' });
 
     expect(res.status).toBe(200);
@@ -270,7 +270,7 @@ describe('discord-agent-api — routes', () => {
   it('POST /post requires non-empty text', async () => {
     const app = createApp({ readSettings: async () => makeSettings() });
     const res = await request(app)
-      .post('/api/otto/messenger/agent/post')
+      .post('/api/openchamber-agent/messenger/agent/post')
       .send({ project: 'my-app', text: '   ' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('text is required');
@@ -284,7 +284,7 @@ describe('discord-agent-api — routes', () => {
     });
     const app = createApp({ readSettings: async () => makeSettings() });
     const res = await request(app)
-      .post('/api/otto/messenger/agent/post')
+      .post('/api/openchamber-agent/messenger/agent/post')
       .send({ channel: PROJECT_CHANNEL, text: 'hi' });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(false);
@@ -307,7 +307,7 @@ describe('discord-agent-api — routes', () => {
 
     const app = createApp({ readSettings: async () => settings });
     const res = await request(app)
-      .post('/api/otto/messenger/agent/post')
+      .post('/api/openchamber-agent/messenger/agent/post')
       .send({ project: 'my-app', text: 'hello' });
 
     expect(res.status).toBe(200);
@@ -324,7 +324,7 @@ describe('discord-agent-api — POST /create-project', () => {
   it('returns 503 when project bootstrap is not wired', async () => {
     const app = createApp({ readSettings: async () => makeSettings() });
     const res = await request(app)
-      .post('/api/otto/messenger/agent/create-project')
+      .post('/api/openchamber-agent/messenger/agent/create-project')
       .send({ action: 'new', label: 'New App' });
     expect(res.status).toBe(503);
     expect(res.body.ok).toBe(false);
@@ -336,7 +336,7 @@ describe('discord-agent-api — POST /create-project', () => {
       bootstrapProject: vi.fn(),
     });
     const res = await request(app)
-      .post('/api/otto/messenger/agent/create-project')
+      .post('/api/openchamber-agent/messenger/agent/create-project')
       .send({ action: 'destroy' });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("'new' | 'clone' | 'path'");
@@ -354,7 +354,7 @@ describe('discord-agent-api — POST /create-project', () => {
     });
 
     const res = await request(app)
-      .post('/api/otto/messenger/agent/create-project')
+      .post('/api/openchamber-agent/messenger/agent/create-project')
       .send({ action: 'path', path: '/home/me/new-app', label: 'New App' });
 
     expect(res.status).toBe(200);
@@ -386,7 +386,7 @@ describe('discord-agent-api — POST /create-project', () => {
     });
 
     const res = await request(app)
-      .post('/api/otto/messenger/agent/create-project')
+      .post('/api/openchamber-agent/messenger/agent/create-project')
       .send({ action: 'new', label: 'New App' });
 
     expect(res.status).toBe(200);
@@ -408,7 +408,7 @@ describe('discord-agent-api — POST /create-project', () => {
     });
 
     const res = await request(app)
-      .post('/api/otto/messenger/agent/create-project')
+      .post('/api/openchamber-agent/messenger/agent/create-project')
       .send({ action: 'new', label: 'New App' });
 
     expect(res.status).toBe(200);
@@ -428,7 +428,7 @@ describe('discord-agent-api — POST /create-project', () => {
     });
 
     const res = await request(app)
-      .post('/api/otto/messenger/agent/create-project')
+      .post('/api/openchamber-agent/messenger/agent/create-project')
       .send({ action: 'path', path: '/x' });
 
     expect(res.status).toBe(200);
@@ -439,7 +439,7 @@ describe('discord-agent-api — POST /create-project', () => {
 
   it('GET /help documents the create-project endpoint', async () => {
     const app = createApp({ readSettings: async () => makeSettings() });
-    const res = await request(app).get('/api/otto/messenger/agent/help');
+    const res = await request(app).get('/api/openchamber-agent/messenger/agent/help');
     expect(res.status).toBe(200);
     expect(res.body.endpoints).toHaveProperty('POST /agent/create-project');
     expect(res.body.endpoints).toHaveProperty('POST /agent/read-session');
@@ -479,7 +479,7 @@ describe('discord-agent-api — POST /create-project', () => {
     });
 
     const res = await request(app)
-      .post('/api/otto/messenger/agent/read-session')
+      .post('/api/openchamber-agent/messenger/agent/read-session')
       .send({ reference: 'ses_a' });
 
     expect(res.status).toBe(200);
@@ -513,7 +513,7 @@ describe('discord-agent-api — POST /create-project', () => {
       opencodeFetch,
     });
 
-    const res = await request(app).get('/api/otto/messenger/agent/session-reference/ses_a');
+    const res = await request(app).get('/api/openchamber-agent/messenger/agent/session-reference/ses_a');
     expect(res.status).toBe(200);
     expect(res.body.reference).toContain(SESSION_THREAD);
     expect(res.body.sessionId).toBe('ses_a');

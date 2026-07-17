@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { toast } from '@/components/ui/toast';
 import {
-  useOttoEventsStore,
-  type OttoUiRealtimeEvent,
-} from '@/stores/useOttoEventsStore';
+  useOpenChamberAgentEventsStore,
+  type OpenChamberAgentUiRealtimeEvent,
+} from '@/stores/useOpenChamberAgentEventsStore';
 import { usePendingDiscordStore } from '@/stores/usePendingDiscordStore';
 
 type SupersedeIncomingPayload = {
@@ -30,14 +30,14 @@ type SupersedeIncomingPayload = {
  */
 export function useDiscordSupersedeMessages() {
   const setPending = usePendingDiscordStore((s) => s.setPending);
-  const subscribeToEvents = useOttoEventsStore((s) => s.subscribeToEvents);
+  const subscribeToEvents = useOpenChamberAgentEventsStore((s) => s.subscribeToEvents);
 
   // Track recently-seen session IDs to avoid duplicate toasts.
   const recentSessionsRef = useRef<Set<string>>(new Set());
   const recentCleanupTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const handler = (event: OttoUiRealtimeEvent) => {
+    const handler = (event: OpenChamberAgentUiRealtimeEvent) => {
       if (event.eventType !== 'messenger.discord.supersede_incoming') return;
       const data = event.data as SupersedeIncomingPayload | undefined;
       if (!data || !data.sessionId || !data.text) return;

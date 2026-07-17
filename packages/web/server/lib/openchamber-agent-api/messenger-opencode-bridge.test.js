@@ -267,7 +267,7 @@ describe('discord project sync persistence', () => {
         broadcastEvent: () => {},
         readSettings: async () => ({
           discord: { botToken: 'old-token', guildId: 'guild-1', defaultChannelId: 'general' },
-          projects: [{ id: 'proj-1', path: '/data/projects/otto-ui', label: 'Demo Ui' }],
+          projects: [{ id: 'proj-1', path: '/data/projects/openchamber-agent-ui', label: 'Demo Ui' }],
         }),
         persistSettings,
         sanitizeProjects: (projects) => projects,
@@ -288,7 +288,7 @@ describe('discord project sync persistence', () => {
     expect(res.body.ok).toBe(true);
     expect(res.body.channels[0]).toMatchObject({
       projectId: 'proj-1',
-      projectPath: '/data/projects/otto-ui',
+      projectPath: '/data/projects/openchamber-agent-ui',
       channelId: 'chan-demo-ui',
     });
     expect(persistSettings).toHaveBeenCalledWith({
@@ -297,7 +297,7 @@ describe('discord project sync persistence', () => {
         guildId: 'guild-1',
         defaultChannelId: 'general',
         projectBindings: [
-          { channelId: 'chan-demo-ui', projectPath: '/data/projects/otto-ui', projectLabel: 'Demo Ui' },
+          { channelId: 'chan-demo-ui', projectPath: '/data/projects/openchamber-agent-ui', projectLabel: 'Demo Ui' },
         ],
       }),
     });
@@ -1214,8 +1214,8 @@ describe('question flow — interactive questions in Discord', () => {
     expect(body.content).toContain('Option A');
     const buttons = body.components[0].components;
     expect(buttons).toHaveLength(2);
-    expect(buttons[0].custom_id).toMatch(/^otto-question:[0-9a-f]+:0:0$/);
-    expect(buttons[1].custom_id).toMatch(/^otto-question:[0-9a-f]+:0:1$/);
+    expect(buttons[0].custom_id).toMatch(/^openchamber-agent-question:[0-9a-f]+:0:0$/);
+    expect(buttons[1].custom_id).toMatch(/^openchamber-agent-question:[0-9a-f]+:0:1$/);
   });
 
   it('uses a select menu for multi-select questions', async () => {
@@ -1236,7 +1236,7 @@ describe('question flow — interactive questions in Discord', () => {
     const post = calls.find((c) => c.url.includes('/channels/chan-123/messages') && c.method === 'POST');
     const select = JSON.parse(post.body).components[0].components[0];
     expect(select.type).toBe(3);
-    expect(select.custom_id).toMatch(/^otto-question-select:[0-9a-f]+:0$/);
+    expect(select.custom_id).toMatch(/^openchamber-agent-question-select:[0-9a-f]+:0$/);
     expect(select.options.map((o) => o.label)).toEqual(['a.ts', 'b.ts', 'c.ts']);
     expect(select.max_values).toBe(3);
   });

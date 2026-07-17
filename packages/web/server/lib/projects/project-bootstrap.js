@@ -127,7 +127,7 @@ export async function bootstrapProject({
       if (!stat.isDirectory()) return { ok: false, error: `not a directory: ${resolved}` };
       finalPath = resolved;
     } else if (action === 'new') {
-      const name = (label && deriveRepoName(label)) || deriveRepoName(explicitPath) || 'otto-project';
+      const name = (label && deriveRepoName(label)) || deriveRepoName(explicitPath) || 'openchamber-agent-project';
       const dest = explicitPath
         ? path.resolve(explicitPath)
         : await ensureUniqueDir(projectsRoot, name);

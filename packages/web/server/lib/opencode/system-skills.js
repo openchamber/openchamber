@@ -28,7 +28,7 @@ const MANAGED_BY_VALUE = 'openchamber';
  * channel the user can immediately chat in.
  */
 function buildCreateProjectSkill({ apiBaseUrl }) {
-  const api = `${apiBaseUrl}/api/otto/messenger/agent`;
+  const api = `${apiBaseUrl}/api/openchamber-agent/messenger/agent`;
   const body = [
     '# Create a new OpenChamber project',
     '',
@@ -109,7 +109,7 @@ function buildCreateProjectSkill({ apiBaseUrl }) {
 }
 
 function buildReadSessionSkill({ apiBaseUrl }) {
-  const api = `${apiBaseUrl}/api/otto/messenger/agent`;
+  const api = `${apiBaseUrl}/api/openchamber-agent/messenger/agent`;
   const body = [
     '# Read another OpenChamber session',
     '',

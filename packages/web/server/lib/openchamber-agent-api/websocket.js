@@ -2,9 +2,11 @@ import { WebSocketServer } from 'ws';
 import { parseRequestPathname } from '../terminal/terminal-ws-protocol.js';
 import { sendMessageStreamWsFrame } from '../event-stream/protocol.js';
 
-export const OTTO_EVENTS_WS_PATH = '/ws/otto/events';
-export const OTTO_EVENTS_WS_HEARTBEAT_MS = 30_000;
-export const OTTO_EVENTS_REPLAY_LIMIT = 100;
+export const OPENCHAMBER_AGENT_EVENTS_WS_PATH = '/ws/openchamber-agent/events';
+/** @deprecated Legacy path kept so already-open clients can finish reconnecting. */
+export const OPENCHAMBER_AGENT_EVENTS_WS_PATH_LEGACY = '/ws/otto/events';
+export const OPENCHAMBER_AGENT_EVENTS_WS_HEARTBEAT_MS = 30_000;
+export const OPENCHAMBER_AGENT_EVENTS_REPLAY_LIMIT = 100;
 
 let hubBroadcastFn = null;
 
@@ -61,13 +63,13 @@ function sendJson(socket, payload) {
   return sendMessageStreamWsFrame(socket, payload);
 }
 
-export function createOttoEventsWebSocketRuntime({
+export function createOpenChamberAgentEventsWebSocketRuntime({
   server,
   uiAuthController,
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
-  heartbeatIntervalMs = OTTO_EVENTS_WS_HEARTBEAT_MS,
-  replayLimit = OTTO_EVENTS_REPLAY_LIMIT,
+  heartbeatIntervalMs = OPENCHAMBER_AGENT_EVENTS_WS_HEARTBEAT_MS,
+  replayLimit = OPENCHAMBER_AGENT_EVENTS_REPLAY_LIMIT,
 }) {
   const wsServer = new WebSocketServer({
     noServer: true,
@@ -225,7 +227,7 @@ export function createOttoEventsWebSocketRuntime({
   };
 
   wsServer.on('connection', (socket, req) => {
-    const rawUrl = typeof req?.url === 'string' ? req.url : OTTO_EVENTS_WS_PATH;
+    const rawUrl = typeof req?.url === 'string' ? req.url : OPENCHAMBER_AGENT_EVENTS_WS_PATH;
     const requestUrl = new URL(rawUrl, 'http://127.0.0.1');
     const requestedLastEventId = requestUrl.searchParams.get('lastEventId')?.trim() ?? '';
     acceptSocket(socket, {
@@ -235,7 +237,10 @@ export function createOttoEventsWebSocketRuntime({
 
   const upgradeHandler = (req, socket, head) => {
     const pathname = parseRequestPathname(req.url);
-    if (pathname !== OTTO_EVENTS_WS_PATH) {
+    if (
+      pathname !== OPENCHAMBER_AGENT_EVENTS_WS_PATH
+      && pathname !== OPENCHAMBER_AGENT_EVENTS_WS_PATH_LEGACY
+    ) {
       return;
     }
 

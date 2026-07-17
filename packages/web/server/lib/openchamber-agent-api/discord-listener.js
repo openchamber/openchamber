@@ -5,6 +5,10 @@ import { createDiscordCommandWizards } from './discord-command-wizards.js';
 import { registerApplicationCommands } from './discord-commands.js';
 import { resolveDiscordMentions } from './messenger-attachments.js';
 import { parseLeadingCommand, COMMAND_HELP } from './messenger-commands.js';
+import {
+  normalizeLegacyDiscordCustomId,
+  normalizeLegacyDiscordSelectValue,
+} from './discord-wizard-shared.js';
 
 // Console commands that can be triggered from chat with a `!` prefix. Discord
 // reserves `/` for its native slash-command UI, so `!cmd` is the natural
@@ -23,7 +27,7 @@ const MESSENGER_COMMAND_NAMES = new Set(COMMAND_HELP.map((c) => c.name));
  *    MESSAGE_CONTENT  (and we receive INTERACTION_CREATE without any intent)
  *  - DISPATCH events:
  *      READY        — capture session_id + resume_gateway_url
- *      MESSAGE_CREATE — broadcast over /ws/otto/events + push into ring buffer
+ *      MESSAGE_CREATE — broadcast over /ws/openchamber-agent/events + push into ring buffer
  *                      + (optional) auto-reply via REST
  *      INTERACTION_CREATE — for button clicks on approval messages: broadcast
  *                      a structured event + ACK the interaction
@@ -472,7 +476,7 @@ async function handleApplicationCommand(state, interaction, broadcastEvent, brid
  * the message to show the chosen answer with the components removed.
  */
 async function handleQuestionComponent(state, interaction, customId, broadcastEvent, bridge) {
-  const isSelect = customId.startsWith('otto-question-select:');
+  const isSelect = customId.startsWith('openchamber-agent-question-select:');
   const segments = customId.split(':');
   const questionId = segments[1] ?? '';
   const questionIndex = Number(segments[2] ?? '0');
@@ -555,34 +559,53 @@ async function dispatchInteractionCreate(state, interaction, broadcastEvent, bri
   // We only care about MESSAGE_COMPONENT (type 3) interactions.
   if (interaction.type !== 3) return;
 
-  const customId = interaction.data?.custom_id ?? '';
+  const rawCustomId = interaction.data?.custom_id ?? '';
+  const customId = normalizeLegacyDiscordCustomId(rawCustomId);
+  const rawValues = interaction.data?.values;
+  const normalizedValues = Array.isArray(rawValues)
+    ? rawValues.map(normalizeLegacyDiscordSelectValue)
+    : rawValues;
+  const normalizedInteraction =
+    customId !== rawCustomId || normalizedValues !== rawValues
+      ? {
+          ...interaction,
+          data: {
+            ...interaction.data,
+            custom_id: customId,
+            ...(Array.isArray(normalizedValues) ? { values: normalizedValues } : {}),
+          },
+        }
+      : interaction;
 
   // ── Model wizard select menus (provider → model → scope, paged) ────
   if (state.modelWizard?.ownsComponent(customId)) {
-    await state.modelWizard.handleComponent(state, interaction, customId);
+    await state.modelWizard.handleComponent(state, normalizedInteraction, customId);
     return;
   }
 
   // ── Verbosity / agent / skill wizard select menus ──────────────────
   if (state.commandWizards?.ownsComponent(customId)) {
-    await state.commandWizards.handleComponent(state, interaction, customId);
+    await state.commandWizards.handleComponent(state, normalizedInteraction, customId);
     return;
   }
 
   // ── Question option buttons / select menus ─────────────────────────
-  // Parse: otto-question:{questionId}:{questionIndex}:{optionIndex} (button)
-  //        otto-question-select:{questionId}:{questionIndex} (select menu)
-  if (customId.startsWith('otto-question:') || customId.startsWith('otto-question-select:')) {
-    await handleQuestionComponent(state, interaction, customId, broadcastEvent, bridge);
+  // Parse: openchamber-agent-question:{questionId}:{questionIndex}:{optionIndex} (button)
+  //        openchamber-agent-question-select:{questionId}:{questionIndex} (select menu)
+  if (
+    customId.startsWith('openchamber-agent-question:')
+    || customId.startsWith('openchamber-agent-question-select:')
+  ) {
+    await handleQuestionComponent(state, normalizedInteraction, customId, broadcastEvent, bridge);
     return;
   }
 
   // ── Approval buttons ──────────────────────────────────────────────
-  // Parse: otto-approve:{id} (once), otto-approve-always:{id}, otto-deny:{id}
+  // Parse: openchamber-agent-approve:{id} (once), openchamber-agent-approve-always:{id}, openchamber-agent-deny:{id}
   const value =
-    customId.startsWith('otto-approve-always:') ? 'approve-always' :
-    customId.startsWith('otto-approve:') ? 'approve' :
-    customId.startsWith('otto-deny:') ? 'deny' :
+    customId.startsWith('openchamber-agent-approve-always:') ? 'approve-always' :
+    customId.startsWith('openchamber-agent-approve:') ? 'approve' :
+    customId.startsWith('openchamber-agent-deny:') ? 'deny' :
     null;
   if (!value) return;
 
@@ -744,7 +767,7 @@ function startSession(state, broadcastEvent, bridge) {
           d: {
             token: state.token,
             intents: state.intents,
-            properties: { os: 'linux', browser: 'otto-ui', device: 'otto-ui' },
+            properties: { os: 'linux', browser: 'openchamber-agent-ui', device: 'openchamber-agent-ui' },
             presence: {
               status: 'online',
               activities: [{ name: 'OpenChamber agent sync', type: 0 }],
