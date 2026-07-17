@@ -352,6 +352,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['delete', 'confirmation'],
   },
   {
+    id: 'sessions.scroll-behavior',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.scrollBehavior.title',
+    descriptionKey: 'settings.openchamber.scrollBehavior.description',
+    keywords: ['scroll', 'position', 'restore', 'jump', 'session switch'],
+  },
+  {
     id: 'sessions.small-model',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.smallModel.title',
