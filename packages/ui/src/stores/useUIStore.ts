@@ -8,6 +8,22 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import {
+  closeTile,
+  createSingleGroup,
+  focusedGroupLeaf,
+  migrate,
+  moveTileToGroup,
+  reorderWithinGroup,
+  setActiveTile,
+  setFocusedGroup,
+  splitLeaf,
+  syncLayoutWithTabs,
+  type PanelLayout,
+  type SplitAnchor,
+  type SplitNode,
+} from '@/components/layout/tiling/splitTree';
+import { allotmentSizesToFractions, applyBranchSizes } from '@/components/layout/tiling/layoutToAllotment';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
@@ -27,7 +43,7 @@ function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
   return value === 'vim' ? 'vim' : 'default';
 }
 
-type ContextPanelTab = {
+export type ContextPanelTab = {
   id: string;
   mode: ContextPanelMode;
   targetPath: string | null;
@@ -58,6 +74,7 @@ type ContextPanelDirectoryState = {
   activeTabId: string | null;
   width: number;
   touchedAt: number;
+  layout?: PanelLayout;
 };
 
 type PendingFileNavigation = {
@@ -331,12 +348,11 @@ const resolveActiveContextPanelTabID = (tabs: ContextPanelTab[], activeTabId: st
 
 const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanelDirectoryState => {
   if (prev) {
-    const tabs = sanitizeContextPanelTabs(prev.tabs);
-    const activeTabId = resolveActiveContextPanelTabID(tabs, prev.activeTabId);
+    // Preserve existing tab object references on runtime actions — re-sanitizing
+    // here would recreate every tab object, re-firing iframe theme/visibility
+    // effects across every region. Sanitization belongs at hydration only.
     return {
       ...prev,
-      tabs,
-      activeTabId,
       touchedAt: Date.now(),
     };
   }
@@ -349,6 +365,19 @@ const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanel
     width: CONTEXT_PANEL_DEFAULT_WIDTH,
     touchedAt: Date.now(),
   };
+};
+
+const findContextPanelTileGroupID = (node: SplitNode, tileID: string): string | null => {
+  switch (node.kind) {
+    case 'group':
+      return node.tileIds.includes(tileID) ? node.id : null;
+    case 'split':
+      for (const child of node.children) {
+        const groupID = findContextPanelTileGroupID(child, tileID);
+        if (groupID) return groupID;
+      }
+      return null;
+  }
 };
 
 const upsertContextPanelTab = (
@@ -376,6 +405,16 @@ const upsertContextPanelTab = (
 
   const activeTabId = nextTab.id;
   const clampedTabs = clampContextPanelTabs(tabs, CONTEXT_PANEL_MAX_TABS, activeTabId);
+  const tabIDs = clampedTabs.map((tab) => tab.id);
+  const syncedLayout = current.layout
+    ? syncLayoutWithTabs(current.layout, tabIDs, current.layout.focusedGroupId)
+    : createSingleGroup(tabIDs, activeTabId);
+  const activatedLayout = setActiveTile(syncedLayout, activeTabId);
+  // Reveal the opened tab: focus the region that actually holds it (whether it was
+  // just added to the focused group or already lived in another region), so opening
+  // an already-tiled session brings its region forward instead of being a no-op.
+  const owningGroupID = findContextPanelTileGroupID(activatedLayout.root, activeTabId);
+  const layout = owningGroupID ? setFocusedGroup(activatedLayout, owningGroupID) : activatedLayout;
 
   return {
     ...current,
@@ -383,6 +422,7 @@ const upsertContextPanelTab = (
     tabs: clampedTabs,
     activeTabId: resolveActiveContextPanelTabID(clampedTabs, activeTabId),
     touchedAt: Date.now(),
+    layout,
   };
 };
 
@@ -391,9 +431,29 @@ const closeContextPanelTab = (
   tabID: string,
 ): ContextPanelDirectoryState => {
   const nextTabs = current.tabs.filter((tab) => tab.id !== tabID);
-  const nextActiveTabId = current.activeTabId === tabID
-    ? (nextTabs[nextTabs.length - 1]?.id ?? null)
-    : resolveActiveContextPanelTabID(nextTabs, current.activeTabId);
+  const currentLayout = current.layout ?? createSingleGroup(current.tabs.map((tab) => tab.id), current.activeTabId ?? tabID);
+  const layout = closeTile(currentLayout, tabID);
+
+  if (!layout) {
+    const withoutLayout = { ...current };
+    delete withoutLayout.layout;
+    return {
+      ...withoutLayout,
+      tabs: [],
+      activeTabId: null,
+      isOpen: false,
+      touchedAt: Date.now(),
+    };
+  }
+
+  // Keep the global activeTabId in agreement with the layout's focused-group
+  // result, so switching to a non-tiling runtime shows the same tile the tiled
+  // layout activated after the close (rather than an unrelated last tab).
+  const focusedGroup = focusedGroupLeaf(layout);
+  const layoutActiveTabId = focusedGroup?.activeTileId ?? null;
+  const nextActiveTabId = layoutActiveTabId && nextTabs.some((tab) => tab.id === layoutActiveTabId)
+    ? layoutActiveTabId
+    : resolveActiveContextPanelTabID(nextTabs, current.activeTabId === tabID ? null : current.activeTabId);
 
   return {
     ...current,
@@ -401,6 +461,7 @@ const closeContextPanelTab = (
     activeTabId: nextActiveTabId,
     isOpen: nextTabs.length > 0 ? current.isOpen : false,
     touchedAt: Date.now(),
+    layout,
   };
 };
 
@@ -426,11 +487,18 @@ const reorderContextPanelTabs = (
   }
 
   tabs.splice(toIndex, 0, moved);
+  const currentLayout = current.layout ?? createSingleGroup(current.tabs.map((tab) => tab.id), current.activeTabId ?? current.tabs[0]?.id ?? activeTabID);
+  const activeGroupID = findContextPanelTileGroupID(currentLayout.root, activeTabID);
+  const overGroupID = findContextPanelTileGroupID(currentLayout.root, overTabID);
+  const layout = activeGroupID && activeGroupID === overGroupID
+    ? reorderWithinGroup(currentLayout, activeGroupID, activeTabID, overTabID)
+    : currentLayout;
 
   return {
     ...current,
     tabs,
     touchedAt: Date.now(),
+    layout,
   };
 };
 
@@ -472,6 +540,7 @@ const sanitizeContextPanelByDirectory = (
       targetPath?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
+      layout?: unknown;
     };
 
     let tabs = sanitizeContextPanelTabs(candidate.tabs);
@@ -489,9 +558,11 @@ const sanitizeContextPanelByDirectory = (
 
     const resolvedActiveTabId = resolveActiveContextPanelTabID(tabs, activeTabId);
     const clampedTabs = clampContextPanelTabs(tabs, CONTEXT_PANEL_MAX_TABS, resolvedActiveTabId);
+    const tabIDs = clampedTabs.map((tab) => tab.id);
+    const layout = tabIDs.length > 0 ? migrate(candidate.layout, tabIDs) : undefined;
 
     next[directory] = {
-      isOpen: candidate.isOpen === true,
+      isOpen: tabIDs.length > 0 && candidate.isOpen === true,
       expanded: candidate.expanded === true,
       tabs: clampedTabs,
       activeTabId: resolveActiveContextPanelTabID(clampedTabs, resolvedActiveTabId),
@@ -499,6 +570,7 @@ const sanitizeContextPanelByDirectory = (
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
+      ...(layout ? { layout } : {}),
     };
   }
 
@@ -687,10 +759,14 @@ interface UIStore {
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
+  splitTileIntoNewRegion: (directory: string, groupID: string, tileID: string, anchor: SplitAnchor) => void;
+  moveTileToRegion: (directory: string, tileID: string, targetGroupID: string, index?: number) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
+  setFocusedContextPanelRegion: (directory: string, groupID: string) => void;
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
   setContextPanelWidth: (directory: string, width: number) => void;
+  setContextPanelLayoutSizes: (directory: string, branchPath: number[], sizes: number[]) => void;
   toggleBottomTerminal: () => void;
   setBottomTerminalOpen: (open: boolean) => void;
   setBottomTerminalExpanded: (expanded: boolean) => void;
@@ -1213,7 +1289,13 @@ export const useUIStore = create<UIStore>()(
               return state;
             }
 
-            if (current.activeTabId === normalizedTabID && current.isOpen) {
+            const currentLayout = current.layout
+              ?? createSingleGroup(current.tabs.map((tab) => tab.id), current.activeTabId ?? normalizedTabID);
+            const owningGroupID = findContextPanelTileGroupID(currentLayout.root, normalizedTabID);
+            const activeLayout = setActiveTile(currentLayout, normalizedTabID);
+            const layout = owningGroupID ? setFocusedGroup(activeLayout, owningGroupID) : activeLayout;
+
+            if (current.activeTabId === normalizedTabID && current.isOpen && layout === current.layout) {
               return state;
             }
 
@@ -1227,6 +1309,7 @@ export const useUIStore = create<UIStore>()(
                 tabs: current.tabs.map((tab) => (tab.id === normalizedTabID
                   ? { ...tab, touchedAt: Date.now() }
                   : tab)),
+                layout,
               },
             };
 
@@ -1263,6 +1346,83 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        splitTileIntoNewRegion: (directory, groupID, tileID, anchor) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedGroupID = (groupID || '').trim();
+          const normalizedTileID = (tileID || '').trim();
+          if (!normalizedDirectory || !normalizedGroupID || !normalizedTileID) {
+            return;
+          }
+
+          set((state) => {
+            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const current = touchContextPanelState(prev);
+            if (!current.tabs.some((tab) => tab.id === normalizedTileID)) {
+              return state;
+            }
+
+            const currentLayout = current.layout
+              ?? createSingleGroup(current.tabs.map((tab) => tab.id), current.activeTabId ?? current.tabs[0]?.id ?? normalizedTileID);
+            // splitLeaf enforces the soft cap of 6 regions internally: past 6 it
+            // falls back to moveTileToGroup, so the tile simply moves instead of
+            // creating a 7th region. No cap logic lives here.
+            const layout = splitLeaf(currentLayout, normalizedGroupID, normalizedTileID, anchor);
+            if (layout === currentLayout && current.layout) {
+              return state;
+            }
+
+            const byDirectory = {
+              ...state.contextPanelByDirectory,
+              [normalizedDirectory]: {
+                ...current,
+                isOpen: true,
+                activeTabId: normalizedTileID,
+                layout,
+                touchedAt: Date.now(),
+              },
+            };
+
+            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        moveTileToRegion: (directory, tileID, targetGroupID, index) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedTileID = (tileID || '').trim();
+          const normalizedTargetGroupID = (targetGroupID || '').trim();
+          if (!normalizedDirectory || !normalizedTileID || !normalizedTargetGroupID) {
+            return;
+          }
+
+          set((state) => {
+            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const current = touchContextPanelState(prev);
+            if (!current.tabs.some((tab) => tab.id === normalizedTileID)) {
+              return state;
+            }
+
+            const currentLayout = current.layout
+              ?? createSingleGroup(current.tabs.map((tab) => tab.id), current.activeTabId ?? current.tabs[0]?.id ?? normalizedTileID);
+            const layout = moveTileToGroup(currentLayout, normalizedTileID, normalizedTargetGroupID, index);
+            if (layout === currentLayout && current.layout) {
+              return state;
+            }
+
+            const byDirectory = {
+              ...state.contextPanelByDirectory,
+              [normalizedDirectory]: {
+                ...current,
+                isOpen: true,
+                activeTabId: normalizedTileID,
+                layout,
+                touchedAt: Date.now(),
+              },
+            };
+
+            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
         closeContextPanelTab: (directory, tabID) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedTabID = (tabID || '').trim();
@@ -1283,6 +1443,33 @@ export const useUIStore = create<UIStore>()(
             };
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        setFocusedContextPanelRegion: (directory, groupID) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const normalizedGroupID = (groupID || '').trim();
+          if (!normalizedDirectory || !normalizedGroupID) {
+            return;
+          }
+
+          set((state) => {
+            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            if (!prev || !prev.layout) {
+              return state;
+            }
+
+            const layout = setFocusedGroup(prev.layout, normalizedGroupID);
+            if (layout === prev.layout) {
+              return state;
+            }
+
+            return {
+              contextPanelByDirectory: {
+                ...state.contextPanelByDirectory,
+                [normalizedDirectory]: { ...prev, layout },
+              },
+            };
           });
         },
 
@@ -1349,6 +1536,36 @@ export const useUIStore = create<UIStore>()(
             };
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        setContextPanelLayoutSizes: (directory, branchPath, sizes) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory || sizes.length === 0) {
+            return;
+          }
+
+          set((state) => {
+            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            if (!prev || !prev.layout) {
+              return state;
+            }
+
+            const nextRoot = applyBranchSizes(prev.layout.root, branchPath, allotmentSizesToFractions(sizes));
+            if (nextRoot === prev.layout.root) {
+              return state;
+            }
+
+            return {
+              contextPanelByDirectory: {
+                ...state.contextPanelByDirectory,
+                [normalizedDirectory]: {
+                  ...prev,
+                  layout: { ...prev.layout, root: nextRoot },
+                  touchedAt: Date.now(),
+                },
+              },
+            };
           });
         },
 

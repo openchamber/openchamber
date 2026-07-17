@@ -513,11 +513,12 @@ class OpencodeService {
   }
 
   // Session Management
-  async listSessions(): Promise<Session[]> {
+  async listSessions(directory?: string | null): Promise<Session[]> {
+    const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.list(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+      requestDirectory ? { directory: requestDirectory } : undefined
     );
-    return Array.isArray(response.data) ? response.data : [];
+    return unwrapSdkData(response, 'session.list');
   }
 
   async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown> }, directory?: string | null): Promise<Session> {

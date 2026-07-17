@@ -8,6 +8,8 @@ import { setOptimisticRefs } from '@/sync/session-actions';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
+import { usePruneRestoredLayouts } from '@/components/layout/tiling/usePruneRestoredLayouts';
+import { useConfigStore } from '@/stores/useConfigStore';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
 
@@ -74,9 +76,11 @@ export function SyncRuntimeEffects({ embeddedBackgroundWorkEnabled }: {
 export function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
   embeddedBackgroundWorkEnabled: boolean;
 }) {
+  const isConnected = useConfigStore((state) => state.isConnected);
   usePwaManifestSync();
   useWindowControlsOverlayLayout();
   useKeyboardShortcuts();
+  usePruneRestoredLayouts({ enabled: isConnected });
 
   return (
     <>

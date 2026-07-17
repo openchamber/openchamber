@@ -8,6 +8,10 @@ import { TitlebarLeftControls } from './TitlebarLeftControls';
 import { RightSidebar } from './RightSidebar';
 import { ProjectContextPanel, RightSidebarTabs } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
+import { normalizeDirectoryKey } from './contextPanelShared';
+import { TiledPanel } from './tiling/TiledPanel';
+import { useTilingCapability } from './tiling/useTilingCapability';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
@@ -38,6 +42,18 @@ const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/Sett
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 const MultiRunWindow = lazyWithChunkRecovery(() => import('@/components/views/MultiRunWindow').then(m => ({ default: m.MultiRunWindow })));
 
+// Owns the narrow layout-presence subscription so MainLayout itself is not re-rendered by it.
+const ContextPanelSurface: React.FC = () => {
+    const tilingCapable = useTilingCapability();
+    const effectiveDirectory = useEffectiveDirectory() ?? '';
+    const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
+    const hasLayout = useUIStore((state) => (directoryKey ? Boolean(state.contextPanelByDirectory[directoryKey]?.layout) : false));
+
+    if (tilingCapable && hasLayout) {
+        return <TiledPanel />;
+    }
+    return <ContextPanel />;
+};
 export const MainLayout: React.FC = () => {
     const RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH = 1140;
     const RIGHT_SIDEBAR_AUTO_OPEN_WIDTH = 1220;
@@ -536,7 +552,7 @@ export const MainLayout: React.FC = () => {
                                                     </div>
                                                 )}
                                             </main>
-                                            <ContextPanel />
+                                            <ContextPanelSurface />
                                         </div>
                                     </div>
                                     <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>

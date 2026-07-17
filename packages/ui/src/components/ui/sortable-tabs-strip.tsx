@@ -37,6 +37,8 @@ type SortableTabsStripProps = {
   onSelect: (id: string) => void;
   onClose?: (id: string) => void;
   onReorder?: (activeId: string, overId: string) => void;
+  dndMode?: 'internal' | 'shared';
+  groupId?: string;
   layoutMode?: 'scrollable' | 'fit';
   variant?: 'default' | 'active-pill' | 'animated';
   activePillInsetClassName?: string;
@@ -53,7 +55,15 @@ const restrictToXAxis: Modifier = ({ transform }) => ({
   y: 0,
 });
 
-const SortableTabWrapper: React.FC<{ id: string; children: React.ReactNode; className?: string }> = ({ id, children, className }) => {
+type TabWrapperProps = {
+  id: string;
+  children: React.ReactNode;
+  className?: string;
+  data?: Record<string, unknown>;
+  translate?: boolean;
+};
+
+const SortableTabWrapper: React.FC<TabWrapperProps> = ({ id, children, className, data, translate }) => {
   const {
     attributes,
     listeners,
@@ -61,17 +71,19 @@ const SortableTabWrapper: React.FC<{ id: string; children: React.ReactNode; clas
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, data });
 
   return (
     <div
       ref={setNodeRef}
       data-sortable-tab-id={id}
       style={{
-        transform: DndCSS.Transform.toString(transform),
+        // Shared (header-drag) mode translates only so a lifted tile keeps its
+        // own width instead of scaling to the target slot.
+        transform: (translate ? DndCSS.Translate : DndCSS.Transform).toString(transform),
         transition,
       }}
-      className={cn('h-full rounded-md', className, isDragging && 'opacity-50')}
+      className={cn('h-full rounded-md', translate && 'touch-none select-none', className, isDragging && 'opacity-50')}
       {...attributes}
       {...listeners}
     >
@@ -80,7 +92,7 @@ const SortableTabWrapper: React.FC<{ id: string; children: React.ReactNode; clas
   );
 };
 
-const StaticTabWrapper: React.FC<{ id: string; children: React.ReactNode; className?: string }> = ({ id, children, className }) => (
+const StaticTabWrapper: React.FC<TabWrapperProps> = ({ id, children, className }) => (
   <div className={cn('h-full', className)} data-sortable-tab-id={id}>{children}</div>
 );
 
@@ -90,6 +102,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   onSelect,
   onClose,
   onReorder,
+  dndMode = 'internal',
+  groupId,
   layoutMode = 'scrollable',
   variant = 'default',
   activePillInsetClassName,
@@ -117,8 +131,10 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   const useIntrinsicPillSizing = isActivePillVariant && isScrollable;
   const showPillTrackBackground = usesActivePillIndicator;
   const shouldAnimateActivePill = animateActivePill ?? isAnimatedVariant;
+  const isShared = dndMode === 'shared';
   const reorderEnabled = typeof onReorder === 'function';
-  const Wrapper = reorderEnabled ? SortableTabWrapper : StaticTabWrapper;
+  const useSortableWrappers = isShared || reorderEnabled;
+  const Wrapper = useSortableWrappers ? SortableTabWrapper : StaticTabWrapper;
   const tabRefs = React.useRef<Map<string, HTMLElement>>(new Map());
   const [pillRect, setPillRect] = React.useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
@@ -362,7 +378,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
             aria-hidden
           />
         ) : null}
-        {items.map((item) => {
+        {items.map((item, itemIndex) => {
           const isActive = item.id === activeId;
           const showInactiveIconOnly = inactiveTabsIconOnly && usesActivePillIndicator && !isActive && Boolean(item.icon);
           const shouldShowLabel = !showInactiveIconOnly;
@@ -397,7 +413,13 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
               }
             : undefined;
           return (
-            <Wrapper key={item.id} id={item.id} className={wrapperClassName}>
+            <Wrapper
+              key={item.id}
+              id={item.id}
+              className={wrapperClassName}
+              translate={isShared}
+              data={isShared ? { type: 'tab', groupId, tileId: item.id, index: itemIndex } : undefined}
+            >
               <div
                 ref={(element) => setTabRef(item.id, element)}
                 onAuxClick={handleAuxClick}
@@ -552,6 +574,14 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
       </div>
     </div>
   );
+
+  if (isShared) {
+    return (
+      <SortableContext items={itemIDs} strategy={horizontalListSortingStrategy}>
+        {list}
+      </SortableContext>
+    );
+  }
 
   if (!reorderEnabled) {
     return list;

@@ -410,8 +410,8 @@ export const ContextPanelContent: React.FC = () => {
   ];
 
   return (
-    <div className="h-full overflow-y-auto bg-background">
-      <div className="mx-auto w-full max-w-[52rem] px-5 py-6">
+    <div data-testid="context-tile-content" className="h-full min-w-0 w-full overflow-y-auto bg-background">
+      <div className="mx-auto w-full min-w-0 max-w-[52rem] px-4 py-6 sm:px-5">
 
         {/* ── Session header ── */}
         <div className="mb-6">
