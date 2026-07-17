@@ -3,7 +3,7 @@
 ## Status
 
 - Completed phases: Phase 1 — bounded process-local execution; Phase 2 — web/server migration plus verification/review closure; Phase 3 — VS Code extension-host Git execution parity.
-- Active phase: Phase 4 — final harness hardening is locally complete after independent target and corrected-soak PASS artifacts. Only independent target and five-minute corrected-soak reruns against the final child-runner code remain.
+- Active phase: none. Phase 5 completed the exact pre-architecture/current web Git service comparison. The proposed shared web/VS Code production module remains intentionally unstarted until the user requests the next task.
 - Branch context supplied by the orchestrator: `feat/2233-git-execution`, based on PR #2232 head.
 - Publication, Git commands, dependency changes, UI changes, and `../opencode` are outside this work package.
 
@@ -124,6 +124,18 @@ Independent testing first passed the schema-v2 target and corrected default soak
 Final-code full-profile evidence passes. Target reports 30,962 API submissions, 1,262 scheduled operations, 2,876 Git commands, 30,000/300 fan-out waiter/underlying samples, generation movement 1,324, zero child timeouts, zero unexpected errors, and successful cleanup. The corrected default soak reports 6,000 API submissions, 4,590 scheduled operations, 4,754 Git commands, 3,279 status callers in 1,869 groups, generation movement 3,116, zero child timeouts, zero unexpected errors, and successful cleanup. Generated reports remain local, non-durable, and uncommitted; their evidence paths are recorded only in the handover. The earlier failed soak remains non-passing, is superseded by the final corrected soak, and is excluded from PR evidence.
 
 The focused harness passes 12/12, and harness type-check/lint pass. `pr-real`, the short topology/idle soak, docs validation, and dead-code inspection also pass. Production scheduler/service behavior remains unchanged.
+
+### Phase 5 — complete: before/after service comparison
+
+- Run the exported web Git service from `4c2f8946b`, the direct parent of the architecture commit, and the current service through one deterministic public-operation workload.
+- Model 30,000 session entities, 200 common directories, 100 linked worktrees, and 300 worktree identities without treating entity mapping as 30,000 simultaneous Git callers.
+- Verify status identity and final staged state before interpreting performance results.
+- Measure end-to-end latency and exact top-level Git launches with the same lightweight PATH shim for both implementations. Keep fixture/setup and oracle Git outside the measured workload.
+- Keep the pathological 30,000-caller workload a separate explicit profile with isolated timeout/failure reporting. Submit it in reviewed 600-caller waves so the legacy source cannot create one unsafe 30,000-process burst; do not present it as equivalent to the current-only simultaneous fan-out guard.
+- Use the same installed dependency tree for both service sources so the comparison isolates the architecture/source change. Record that this is controlled approximate evidence, not a historical-machine reconstruction.
+- Add no production hook, scheduler behavior change, dependency, CI workflow, committed generated report, or machine-specific pass/fail threshold.
+
+Phase 5 completed on 2026-07-18. Both representative run orders passed with 1,066 correctness checks per implementation, exact topology/cardinality, zero unclassified launches, and cleanup. The current path used 3,960 versus 5,220 top-level Git launches (24.138% fewer) but completed the one-call-per-identity workload 43.227–46.759% more slowly on this machine because its bounds replace the historical broad burst parallelism. The separately labeled 30,000-caller/600-caller-wave profile passed 61,067 correctness checks per implementation; current versus historical was 27,888.368ms versus 906,456.058ms, 5,760 versus 215,220 Git launches, and 236.470ms versus 17,073.159ms fan-out p95. Raw reports remain local and uncommitted.
 
 ## Stop conditions
 

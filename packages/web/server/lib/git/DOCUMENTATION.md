@@ -321,6 +321,28 @@ Every direct spawn must declare one closed category: `environment`, `fixture-set
 
 Normal root/focused discovery uses `runFocusedGitExecutionProfile`, which rejects full `target-real` and any soak longer than 30 seconds before fixture creation. The focused suite also inventories root package scripts: `perf:git:target-real` and `perf:git:soak` are the only reviewed full-profile script entrypoints, and no test script invokes either.
 
+### Historical/current service comparison
+
+`scripts/perf/git-service-comparison.ts` complements the coordinator-focused harness with an architecture-neutral comparison through exports shared by the historical and current web Git services: light status, stage, and local fetch.
+
+```bash
+bun run test:perf:git:comparison
+bun run perf:git:compare:smoke
+bun run perf:git:compare:target
+bun run perf:git:compare:target -- --order after-first
+bun run perf:git:compare:pathological
+```
+
+- The historical source is `4c2f8946b`, machine-verified at runtime as the direct parent of architecture commit `57c297527`. The harness materializes only that `service.js` beneath a unique OS temporary root.
+- Historical and current services run in separate child processes, with separate disposable fixtures and the same current installed dependency tree. This controls dependency drift while remaining an approximate architecture comparison rather than a historical-machine reconstruction.
+- `target` maps exactly 30,000 session entities onto 200 common directories plus 100 linked worktrees (300 identities). Mapping performs zero Git work. Its representative workload calls status once per identity, stages 600 files, and performs 60 local fetches.
+- `pathological-fanout` adds 30,000 status callers, evenly grouped by worktree and submitted in fixed 600-caller waves. This protects the host from one legacy 30,000-process burst and is deliberately not described as equivalent to the current-only simultaneous fan-out guard.
+- Each worktree has a unique identity file. Status must return the requested identity; direct oracle Git verifies every final staged path. Timing and process comparisons are invalid unless both implementations pass these correctness checks.
+- On POSIX, one temporary PATH shim logs each top-level service-started `git` and then `exec`s the real binary. Fixture setup, direct correctness-oracle commands, Git helpers, and external processes are excluded. Mapping/status/mixed launch counts are exact; absolute latency remains machine-specific.
+- Reported workload duration sums only measured service scenarios. CPU/memory fields describe the benchmark worker process and exclude child Git CPU.
+- The comparison normally runs historical first. `--order after-first` provides the reverse-order check. `--output` follows the existing artifact policy and must name one new file outside the workspace.
+- Full target and pathological comparison commands are manual only. No normal test script invokes them, and raw reports remain local and uncommitted.
+
 PR bodies for harness changes should include:
 
 ```md

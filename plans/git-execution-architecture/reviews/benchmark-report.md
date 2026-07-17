@@ -136,3 +136,67 @@ The full soak is manual and takes about five minutes.
 ## Evidence policy
 
 The raw JSON artifacts remain local and uncommitted. This Markdown report is a curated evidence snapshot, not a portable latency baseline. Superseded or non-passing evidence is excluded.
+
+## Historical/current web service comparison
+
+### Purpose and provenance
+
+Phase 5 adds a separate architecture-neutral service benchmark. It invokes exported light-status, stage, and local-fetch operations rather than coordinator internals.
+
+- Before source: `4c2f8946b37315835cba55c88c5faaa829c32254`, runtime-verified as the direct parent of architecture commit `57c2975270369987fbde0b4bb578dceaa1f59aba`.
+- Before `service.js` SHA-256: `d530b09950f1b3643c4b64bdb365247b5abb3e7dfb8e4bbc3bf4047996c4575a`.
+- After `service.js` SHA-256: `7e34f26d6ab6a040b129538cf1e2977ae3c5148a11a29db6eefe480a003c4af5`.
+- Environment: Linux x64, Git 2.52.0, Bun 1.3.14, Node 24.3.0.
+- Both sources used the same current installed dependency tree. This isolates source architecture but is not a reconstruction of historical dependencies or hardware.
+- A POSIX PATH shim logged each top-level service-started Git executable and immediately `exec`ed the real binary. Fixture setup, direct correctness-oracle Git, and Git helpers are excluded.
+- Absolute latency is advisory. Correctness, cardinality, launch accounting, and cleanup are blocking.
+
+### Representative 30,000 / 200 / 100 target
+
+This profile maps 30,000 session entities to 200 common directories plus 100 linked worktrees (300 identities), then runs 300 status calls, 600 stage operations, and 60 local fetches. Entity mapping starts no Git process. Both run orders passed all 1,066 correctness checks for each implementation, including authoritative common-directory/top-level topology checks, produced zero unclassified launches, and cleaned their fixtures.
+
+| Run order | Before duration | After duration | Before Git | After Git | Duration change | Git reduction |
+|---|---:|---:|---:|---:|---:|---:|
+| Before → after | 11,548.750 ms | 16,540.896 ms | 5,220 | 3,960 | after 43.227% longer | 24.138% |
+| After → before | 10,596.833 ms | 15,551.758 ms | 5,220 | 3,960 | after 46.759% longer | 24.138% |
+
+Advisory p95 ranges across the two orders:
+
+| Operation | Before p95 | After p95 |
+|---|---:|---:|
+| Startup status | 4,581.188–4,803.168 ms | 5,670.701–6,432.429 ms |
+| Stage mutation | 5,915.716–6,663.972 ms | 9,011.120–9,173.991 ms |
+| Local fetch | 2,447.418–2,867.017 ms | 9,370.659–9,441.419 ms |
+
+Interpretation: this representative profile has only one status caller per worktree identity, so it does not exercise same-identity status coalescing. The historical path permits much broader burst parallelism across 200 repositories; the current architecture deliberately enforces global/read/network bounds. On this machine that trade reduced top-level Git launches by 1,260 but increased completion and queue-observed latency. This is evidence of the bounded-throughput trade, not a portable latency threshold.
+
+### Batched 30,000-caller fan-out
+
+The explicit pathological profile retains the same 30,000 entities and topology, then adds 30,000 status callers. For host safety and legacy comparability, callers are grouped evenly by worktree and submitted in fixed 600-caller waves. It is not equivalent to the current-only simultaneous 30,000-caller guard.
+
+The final-code reverse-order run passed all 61,067 correctness checks per implementation, including authoritative topology checks, had zero unclassified launches, and cleaned both fixtures.
+
+| Metric | Before | After | Change |
+|---|---:|---:|---:|
+| Whole measured workload | 906,456.058 ms | 27,888.368 ms | 32.503× faster after |
+| Total top-level Git launches | 215,220 | 5,760 | 97.324% fewer after |
+| Fan-out scenario duration | 895,880.638 ms | 11,608.410 ms | 77.175× faster after |
+| Fan-out Git launches | 210,000 | 1,800 | 99.143% fewer after |
+| Fan-out caller latency p50 | 9,716.253 ms | 203.438 ms | 47.760× lower after |
+| Fan-out caller latency p95 | 17,073.159 ms | 236.470 ms | 72.200× lower after |
+| Fan-out caller latency p99 | 17,815.126 ms | 249.649 ms | 71.361× lower after |
+| Fan-out caller latency max | 18,616.131 ms | 285.076 ms | 65.302× lower after |
+
+Interpretation: when many callers ask the same worktree/generation question, the current service performs bounded generation-aware in-flight sharing. The historical total common-directory FIFO repeats the full service Git sequence per caller. The comparison therefore shows both sides of the architecture: lower unconstrained completion time for a one-call-per-identity burst in the old path, versus dramatically lower work and latency under repeated same-identity fan-out in the current path.
+
+### Comparison reproduction
+
+```bash
+bun run test:perf:git:comparison
+bun run perf:git:compare:smoke
+bun run perf:git:compare:target
+bun run perf:git:compare:target -- --order after-first
+bun run perf:git:compare:pathological -- --order after-first
+```
+
+Raw comparison JSON remains local and uncommitted. The report does not enable or measure `core.fsmonitor`, claim cross-process serialization, count Git helpers, or make machine-specific latency blocking.

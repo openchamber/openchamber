@@ -158,6 +158,16 @@ Local hardening validation:
 - Harness type-check/lint passed. Docs validation passed for 387 pages and 43 sidebar links. Root no-install Knip retained 184 unused files, 303 unused exports, 175 unused exported types, and five hints with no harness finding.
 - [x] Add executable web/VS Code `core.fsmonitor` pass-through coverage and document the manual-config/no-mutation contract.
 
+## Phase 5 — before/after service comparison
+
+- [x] Confirm the baseline as `4c2f8946b`, the direct parent of `57c297527`, rather than the earlier `0afe61976` single-flight revision.
+- [x] Define one architecture-neutral workload over exported web Git service operations and separate 30,000 entities from concurrent callers.
+- [x] Add baseline materialization, isolated worker execution, disposable real-Git topology, correctness oracles, latency distributions, and exact top-level Git-launch counting.
+- [x] Add focused comparison tests that cannot invoke the full target or pathological fan-out implicitly.
+- [x] Run focused smoke/static validation, then both run orders of the representative 30,000/200/100 comparison.
+- [x] Run the separately labeled 30,000-caller comparison in reviewed 600-caller waves only after the representative target is stable; keep the exact simultaneous current-only fan-out guard distinct.
+- [x] Record exact before/after evidence, caveats, cleanup state, and validation without committing raw reports.
+
 ## Blocked ideas
 
 - [ ] Completed-result caching/SnapshotStore remains blocked until authoritative external Git invalidation exists.
