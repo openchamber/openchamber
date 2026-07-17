@@ -254,7 +254,7 @@ export const AgentsPage: React.FC = () => {
   const [pendingRuleName, setPendingRuleName] = React.useState('');
   const [pendingRulePattern, setPendingRulePattern] = React.useState('*');
   const [showPermissionEditor, setShowPermissionEditor] = React.useState(false);
-  const [isSaving, setIsSaving] = React.useState(false);
+  const [saveState, setSaveState] = React.useState<'idle' | 'saving'>('idle');
   const initialStateRef = React.useRef<{
     draftName: string;
     draftScope: AgentScope;
@@ -615,7 +615,7 @@ export const AgentsPage: React.FC = () => {
       return;
     }
 
-    setIsSaving(true);
+    setSaveState('saving');
 
     try {
       const trimmedModel = model.trim();
@@ -646,20 +646,21 @@ export const AgentsPage: React.FC = () => {
       }
 
       if (result.ok) {
+        setSaveState('idle');
         if (result.requiresManualRestart) {
           toast.warning(t('settings.agents.page.toast.savedManualRestart'));
         } else {
           toast.success(isNewAgent ? t('settings.agents.page.toast.created') : t('settings.agents.page.toast.updated'));
         }
       } else {
+        setSaveState('idle');
         toast.error(isNewAgent ? t('settings.agents.page.toast.createFailed') : t('settings.agents.page.toast.updateFailed'));
       }
     } catch (error) {
+      setSaveState('idle');
       console.error('Error saving agent:', error);
       const message = error instanceof Error && error.message ? error.message : t('settings.agents.page.toast.saveUnexpectedError');
       toast.error(message);
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -1213,11 +1214,15 @@ export const AgentsPage: React.FC = () => {
         <div className="px-2 py-1">
           <Button
             onClick={handleSave}
-            disabled={isSaving || !isDirty}
+            disabled={saveState !== 'idle' || !isDirty}
             size="xs"
             className="!font-normal"
           >
-            {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
+            {saveState === 'saving' ? (
+              <><Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" /> {t('settings.common.actions.saving')}</>
+            ) : (
+              t('settings.common.actions.saveChanges')
+            )}
           </Button>
         </div>
 

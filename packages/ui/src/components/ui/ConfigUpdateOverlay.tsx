@@ -3,10 +3,10 @@ import {
   getConfigUpdateSnapshot,
   subscribeConfigUpdate,
 } from "@/lib/configUpdate";
-import { OpenChamberLogo } from "./OpenChamberLogo";
+import { Icon } from "@/components/icon/Icon";
 
 export const ConfigUpdateOverlay: React.FC = () => {
-  const [{ isUpdating }, setState] = React.useState(() => getConfigUpdateSnapshot());
+  const [{ isUpdating, message }, setState] = React.useState(() => getConfigUpdateSnapshot());
 
   React.useEffect(() => {
     return subscribeConfigUpdate(setState);
@@ -16,11 +16,10 @@ export const ConfigUpdateOverlay: React.FC = () => {
     return null;
   }
 
-  // No status text — the update message is internal jargon and reads as noise.
-  // The animated logo alone signals "working".
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-background/90">
-      <OpenChamberLogo width={80} height={80} isAnimated />
+    <div className="fixed top-3 right-3 z-[9999] flex items-center gap-2 rounded-lg border border-border/40 bg-[var(--surface-elevated)] px-3 py-1.5 shadow-lg">
+      <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+      <span className="typography-micro text-muted-foreground max-w-48 truncate">{message}</span>
     </div>
   );
 };
