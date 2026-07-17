@@ -83,13 +83,15 @@ interface SettingsViewProps {
 }
 
 const pageOrder: SettingsPageSlug[] = [
-  // 'general' group — Interface
+  // 'general' group — OpenChamber
+  'general',
   'appearance',
   'chat',
   'notifications',
   'sessions',
   'shortcuts',
   'voice',
+  'usage',
   'about',
   // 'projects' group — Workspace
   'projects',
@@ -98,13 +100,12 @@ const pageOrder: SettingsPageSlug[] = [
   'git',
   // 'opencode' group — OpenCode
   'providers',
-  'usage',
   'agents',
   'behavior',
   'commands',
   'mcp',
   'plugins',
-  // 'content' group — Content
+  // 'content' group — Library
   'magic-prompts',
   'snippets',
   'skills.installed',
@@ -174,6 +175,8 @@ function getCurrentHistoryState(): Record<string, unknown> {
 // eslint-disable-next-line react-refresh/only-export-components
 export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
   switch (slug) {
+    case 'general':
+      return 'settings-3';
     case 'projects':
       return 'folders';
     case 'remote-instances':
@@ -416,6 +419,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   // Nav is always open (collapsed state removed)
 
   const openChamberSectionBySlug: Partial<Record<SettingsPageSlug, OpenChamberSection>> = React.useMemo(() => ({
+    general: 'general',
     appearance: 'visual',
     chat: 'chat',
     shortcuts: 'shortcuts',
@@ -427,6 +431,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const getPageTitle = React.useCallback((slug: SettingsPageSlug): string => {
     switch (slug) {
+      case 'general':
+        return t('settings.page.general.title');
       case 'projects':
         return t('settings.page.projects.title');
       case 'remote-instances':
@@ -756,6 +762,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <SnippetsPage />;
       case 'git':
         return <GitPage />;
+      case 'general':
       case 'appearance':
       case 'chat':
       case 'shortcuts':

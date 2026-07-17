@@ -1664,14 +1664,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                         )}
 
                         {showBehaviorFeatureCheckboxes && (
-                            <SettingsSection
-                                title={t('settings.openchamber.visual.section.chatFeatures')}
-                                divider={showBehaviorDisplaySettings || showTransportSection || showBehaviorMessageOptions || behaviorSectionDivider}
-                                contentClassName="space-y-5"
-                            >
+                            <>
                                 {shouldShow('expandedTools') && (
-                                    <SettingsControlGroup
+                                    <SettingsSection
                                         title={t('settings.openchamber.visual.section.showToolsOpenedByDefault')}
+                                        divider={showBehaviorDisplaySettings || showTransportSection || showBehaviorMessageOptions || behaviorSectionDivider}
                                         contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                     >
                                         <SettingsCheckboxRow
@@ -1686,13 +1683,13 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             label={t('settings.openchamber.visual.field.editTools')}
                                             ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
                                         />
-                                    </SettingsControlGroup>
+                                    </SettingsSection>
                                 )}
                                 {(shouldShow('sessionAssist') || shouldShow('subagentReadOnlyBanner')) && (
-                                    <SettingsControlGroup
+                                    <SettingsSection
                                         title={t('settings.openchamber.visual.section.sessionAssistance')}
                                         settingsItem="chat.session-assistance"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                     >
                                         {shouldShow('sessionAssist') && (
                                             <>
@@ -1721,24 +1718,22 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 settingsItem="chat.subagent-read-only-banner"
                                             />
                                         )}
-                                    </SettingsControlGroup>
+                                    </SettingsSection>
                                 )}
                                 {/* The goal loop runs in the web server — VS Code only renders
                                     goal state, so the settings section is hidden there too. */}
                                 {shouldShow('sessionGoal') && !isVSCode && (
-                                    <SettingsControlGroup
-                                        title={(
-                                            <span className="inline-flex items-center gap-1.5">
-                                                {t('settings.openchamber.visual.goal.sectionTitle')}
-                                                <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                        <Icon name="information" className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
-                                                    </TooltipTrigger>
-                                                    <TooltipContent sideOffset={8} className="max-w-sm">
-                                                        {t('settings.openchamber.visual.goal.description')}
-                                                    </TooltipContent>
-                                                </Tooltip>
-                                            </span>
+                                    <SettingsSection
+                                        title={t('settings.openchamber.visual.goal.sectionTitle')}
+                                        titleAccessory={(
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <Icon name="information" className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
+                                                </TooltipTrigger>
+                                                <TooltipContent sideOffset={8} className="max-w-sm">
+                                                    {t('settings.openchamber.visual.goal.description')}
+                                                </TooltipContent>
+                                            </Tooltip>
                                         )}
                                         contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                     >
@@ -1771,13 +1766,13 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 />
                                             ) : null}
                                         </div>
-                                    </SettingsControlGroup>
+                                    </SettingsSection>
                                 )}
                                 {shouldShow('reasoning') && (
-                                    <SettingsControlGroup
+                                    <SettingsSection
                                         title={t('settings.openchamber.visual.section.reasoning')}
                                         settingsItem="chat.reasoning"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                     >
                                         <SettingsCheckboxRow
                                             checked={showReasoningTraces}
@@ -1794,11 +1789,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
                                             />
                                         )}
-                                    </SettingsControlGroup>
+                                    </SettingsSection>
                                 )}
 
                                 {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
-                                <SettingsControlGroup
+                                <SettingsSection
                                     title={t('settings.openchamber.visual.section.messageAppearance')}
                                     settingsItem="chat.message-appearance"
                                     contentClassName={SETTINGS_OPTION_STACK_CLASS}
@@ -1872,11 +1867,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         settingsItem="chat.code-block-line-wrap"
                                     />
                                 )}
-                                </SettingsControlGroup>
+                                </SettingsSection>
                                 )}
 
                                 {(shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (shouldShow('dotfiles') && !isVSCodeRuntime()) || shouldShow('fileViewerPreview')) && (
-                                <SettingsControlGroup
+                                <SettingsSection
                                     title={t('settings.openchamber.visual.section.toolsAndFiles')}
                                     settingsItem="chat.tools-and-files"
                                     contentClassName={SETTINGS_OPTION_STACK_CLASS}
@@ -1919,11 +1914,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         ariaLabel={t('settings.openchamber.defaults.field.openFilesPreviewAria')}
                                     />
                                 )}
-                                </SettingsControlGroup>
+                                </SettingsSection>
                                 )}
 
                                 {(shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck'))) && (
-                                <SettingsControlGroup
+                                <SettingsSection
                                     title={t('settings.openchamber.visual.section.composer')}
                                     settingsItem="chat.composer"
                                     contentClassName={SETTINGS_OPTION_STACK_CLASS}
@@ -1947,9 +1942,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         settingsItem="chat.spellcheck"
                                     />
                                 )}
-                                </SettingsControlGroup>
+                                </SettingsSection>
                                 )}
-                            </SettingsSection>
+                            </>
                         )}
                     </>
                 )}

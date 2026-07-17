@@ -20,7 +20,7 @@ export const SETTINGS_CUSTOM_TRIGGER_CLASS =
   'h-9 min-h-9 w-full min-w-40 @xl:w-56 rounded-md px-3';
 
 /** Shared width for stacked control clusters (select/input + reset). */
-export const SETTINGS_CONTROL_CLUSTER_CLASS = 'w-full max-w-[28rem]';
+export const SETTINGS_CONTROL_CLUSTER_CLASS = 'w-full max-w-[24rem]';
 
 /** Fill a control cluster the same way as a full-width select. */
 export const SETTINGS_CLUSTER_CONTROL_CLASS = 'min-w-0 flex-1';
@@ -245,7 +245,7 @@ export const SettingsStackedField: React.FC<SettingsStackedFieldProps> = ({
         <div className={SETTINGS_FIELD_LABEL_CLASS}>{label}</div>
         {descriptionPlacement === 'before' ? descriptionNode : null}
       </div>
-      <div className={cn('flex min-w-0 items-center gap-2', controlClassName)}>{children}</div>
+      <div className={cn('flex min-w-0 max-w-[24rem] items-center gap-2', controlClassName)}>{children}</div>
       {descriptionPlacement === 'after' ? descriptionNode : null}
     </div>
   );

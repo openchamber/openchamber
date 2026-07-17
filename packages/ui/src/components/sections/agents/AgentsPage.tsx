@@ -732,7 +732,7 @@ export const AgentsPage: React.FC = () => {
 
         <SettingsStackedField
           label={t('settings.common.field.description')}
-          controlClassName="w-full"
+          controlClassName="w-full max-w-none"
         >
           <Textarea
             value={description}

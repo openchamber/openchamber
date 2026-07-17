@@ -2,6 +2,7 @@ import type { SidebarSection } from '@/constants/sidebar';
 
 export type SettingsPageSlug =
   | 'home'
+  | 'general'
   | 'projects'
   | 'remote-instances'
   | 'providers'
@@ -58,6 +59,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['search', 'settings'],
   },
   {
+    slug: 'general',
+    title: 'General',
+    group: 'general',
+    kind: 'single',
+    keywords: ['general', 'startup', 'launch at login', 'autostart', 'tray', 'password', 'passkey', 'security', 'privacy', 'telemetry', 'transport', 'network', 'lan', 'binary', 'cli'],
+  },
+  {
     slug: 'projects',
     title: 'Projects',
     group: 'projects',
@@ -82,7 +90,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   {
     slug: 'usage',
     title: 'Usage',
-    group: 'opencode',
+    group: 'general',
     kind: 'split',
     keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'],
   },

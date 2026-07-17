@@ -61,6 +61,8 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
     // Show specific section content
     const renderSectionContent = () => {
         switch (section) {
+            case 'general':
+                return <GeneralSectionContent />;
             case 'visual':
                 return <VisualSectionContent />;
             case 'chat':
@@ -85,6 +87,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
     };
 
     const pageTitle = {
+        general: t('settings.page.general.title'),
         visual: t('settings.page.appearance.title'),
         chat: t('settings.page.chat.title'),
         sessions: t('settings.page.sessions.title'),
@@ -97,6 +100,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
     }[section];
 
     const pageDescription = {
+        general: t('settings.page.general.description'),
         visual: t('settings.page.appearance.description'),
         chat: t('settings.page.chat.description'),
         sessions: t('settings.page.sessions.description'),
@@ -124,6 +128,23 @@ const ShortcutsSectionContent: React.FC = () => {
     return <KeyboardShortcutsSettings />;
 };
 
+// General section: app-level settings — startup/tray/network, access password,
+// passkeys, OpenCode CLI binary, message stream transport, privacy.
+const GeneralSectionContent: React.FC = () => {
+    const isVSCode = isVSCodeRuntime();
+    const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
+    void runtimeEndpointEpoch;
+    const showDesktopNetworkSettings = isDesktopShell() && (isDesktopLocalOriginActive() || usesFramelessElectronChrome());
+    return (
+        <>
+            {showDesktopNetworkSettings && <DesktopNetworkSettings />}
+            <PasskeySettings />
+            {!isVSCode && <OpenCodeCliSettings />}
+            <OpenChamberVisualSettings visibleSettings={['messageTransport', 'reportUsage']} />
+        </>
+    );
+};
+
 // Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
@@ -142,7 +163,6 @@ const VisualSectionContent: React.FC = () => {
         'inputBarOffset',
         'expandedEditorToolbar',
         ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
-        'reportUsage',
     ]} />;
 };
 
@@ -155,7 +175,6 @@ const ChatSectionContent: React.FC = () => {
                 'sessionGoal',
                 'sessionAssist',
                 'chatRenderMode',
-                'messageTransport',
                 'activityRenderMode',
                 'userMessageRendering',
                 'mermaidRendering',
@@ -183,17 +202,10 @@ const ChatSectionContent: React.FC = () => {
 
 // Sessions section: Default model & agent, Session retention
 const SessionsSectionContent: React.FC = () => {
-    const isVSCode = isVSCodeRuntime();
-    const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
-    void runtimeEndpointEpoch;
-    const showDesktopNetworkSettings = isDesktopShell() && (isDesktopLocalOriginActive() || usesFramelessElectronChrome());
     return (
         <>
             <DefaultsSettings />
-            {showDesktopNetworkSettings && <DesktopNetworkSettings />}
-            {!isVSCode && <OpenCodeCliSettings />}
             <SessionRetentionSettings />
-            <PasskeySettings />
         </>
     );
 };

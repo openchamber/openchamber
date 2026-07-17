@@ -70,7 +70,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder={t('settings.projects.page.field.projectNamePlaceholder')}
-          className={cn('h-7', PROJECT_SETTINGS_CONTROL_WIDTH)}
+          className={cn('h-9 rounded-md px-3', PROJECT_SETTINGS_CONTROL_WIDTH)}
         />
       </ProjectSettingsSubsection>
 

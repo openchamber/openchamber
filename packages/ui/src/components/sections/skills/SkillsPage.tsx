@@ -585,7 +585,7 @@ const SkillsInstalledPage: React.FC = () => {
                 </>
               )}
               description={t('settings.skills.page.field.descriptionHint')}
-              controlClassName="w-full"
+              controlClassName="w-full max-w-none"
             >
               <Textarea
                 value={description}
