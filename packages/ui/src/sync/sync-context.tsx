@@ -30,7 +30,7 @@ import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
-import { useConfigStore } from "@/stores/useConfigStore"
+import { useConfigStore, type RuntimeTransportPhase } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
@@ -568,6 +568,16 @@ export function needsSnapshotAfterStatusPoll(
   if (incoming && incoming.type !== "idle") return false
   const currentStatus = state.session_status?.[sessionId]
   return Boolean(currentStatus && currentStatus.type !== "idle")
+}
+
+export function shouldUseDisconnectedTransportPhase(reason: string | null): boolean {
+  if (!reason) return false
+  if (reason === "ws_closed_before_ready") return true
+  return reason.includes("auth")
+    || reason === "401"
+    || reason === "403"
+    || reason === "unauthorized"
+    || reason === "forbidden"
 }
 
 // Decide whether the event stream is genuinely stale and warrants a full
@@ -1733,6 +1743,7 @@ export function SyncProvider(props: {
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
   const pipelineHasConnectedRef = useRef(false)
   const pipelineDisconnectedBeforeFirstConnectRef = useRef(false)
+  const preOfflinePhaseRef = useRef<RuntimeTransportPhase | null>(null)
 
   const system = useMemo<SyncSystem>(
     () => ({
@@ -1936,6 +1947,11 @@ export function SyncProvider(props: {
           hasEverConnected: true,
           connectionPhase: "connected",
         })
+        useConfigStore.getState().setRuntimeTransportState({
+          phase: "connected",
+          reason: null,
+          updatedAt: Date.now(),
+        })
         const isFirstConnect = !pipelineHasConnectedRef.current
         pipelineHasConnectedRef.current = true
         if (isFirstConnect && !pipelineDisconnectedBeforeFirstConnectRef.current) {
@@ -1953,10 +1969,16 @@ export function SyncProvider(props: {
           pipelineDisconnectedBeforeFirstConnectRef.current = true
         }
         const { hasEverConnected } = useConfigStore.getState()
+        const connectionPhase = hasEverConnected ? "reconnecting" : "connecting"
         useConfigStore.setState({
           isConnected: false,
-          connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
+          connectionPhase,
           lastDisconnectReason: reason,
+        })
+        useConfigStore.getState().setRuntimeTransportState({
+          phase: shouldUseDisconnectedTransportPhase(reason) ? "disconnected" : connectionPhase,
+          reason,
+          updatedAt: Date.now(),
         })
       },
       onTransportSwitch: () => {
@@ -1966,6 +1988,11 @@ export function SyncProvider(props: {
           isConnected: true,
           hasEverConnected: true,
           connectionPhase: "connected",
+        })
+        useConfigStore.getState().setRuntimeTransportState({
+          phase: "connected",
+          reason: null,
+          updatedAt: Date.now(),
         })
         for (const dir of childStores.children.keys()) {
           triggerDirectoryResync(dir, "transport-switch")
@@ -1980,6 +2007,39 @@ export function SyncProvider(props: {
       pipeline.cleanup()
     }
   }, [props.sdk, childStores, routingIndex, messageStreamTransport, triggerDirectoryResync])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const handleOffline = () => {
+      const current = useConfigStore.getState().runtimeTransportState.phase
+      if (current === "offline") return
+      preOfflinePhaseRef.current = current
+      useConfigStore.getState().setRuntimeTransportState({
+        phase: "offline",
+        reason: "offline",
+        updatedAt: Date.now(),
+      })
+    }
+
+    const handleOnline = () => {
+      const restored = preOfflinePhaseRef.current
+      preOfflinePhaseRef.current = null
+      if (!restored || restored === "offline") return
+      useConfigStore.getState().setRuntimeTransportState({
+        phase: restored,
+        reason: null,
+        updatedAt: Date.now(),
+      })
+    }
+
+    window.addEventListener("offline", handleOffline)
+    window.addEventListener("online", handleOnline)
+    return () => {
+      window.removeEventListener("offline", handleOffline)
+      window.removeEventListener("online", handleOnline)
+    }
+  }, [])
 
   useEffect(() => {
     let stopped = false

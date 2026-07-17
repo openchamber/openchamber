@@ -64,6 +64,7 @@ import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
+import { ConnectionStatusIndicator } from '@/components/layout/ConnectionStatusIndicator';
 import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
@@ -2045,6 +2046,13 @@ export const Header: React.FC<HeaderProps> = ({
           </Tooltip>
       )}
       <OpenInAppButton directory={actionDirectory} className="mr-1" />
+      {/* ConnectionStatusIndicator subscribes to its own narrow fields
+          (runtimeTransportState, openCodeRuntimeState) on useConfigStore via
+          leaf selectors inside the component. Do NOT hoist a
+          `useConfigStore` selector here — that would defeat the purpose of
+          the narrow leaf selector pattern and force the entire Header to
+          re-render on every connection-state transition. */}
+      <ConnectionStatusIndicator />
       <DesktopServicesMenu
         isDesktopApp={isDesktopApp}
         currentInstanceLabel={currentInstanceLabel}
