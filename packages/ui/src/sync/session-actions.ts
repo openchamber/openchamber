@@ -10,9 +10,13 @@ import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { opencodeClient } from "@/lib/opencode/client"
-import { mergeSessionDirectoryMetadata, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import {
+  mergeSessionDirectoryMetadata,
+  refreshGlobalSessionsAfterPending,
+  useGlobalSessionsStore,
+} from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
-import { registerSessionDirectory } from "./sync-refs"
+import { getAllSyncSessions, registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { retry } from "./retry"
@@ -20,6 +24,9 @@ import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
+import { resolveProjectsWithNoActiveSessions } from "@/lib/projectResolution"
+import { useProjectsStore } from "@/stores/useProjectsStore"
+import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
 import {
   getOriginalSessionID,
   getSessionMetadata,
@@ -553,8 +560,34 @@ function cleanupSessionWorktreeMetadata(sessionId: string): void {
   useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
+export async function closeProjectsWithoutActiveSessionsForDirectories(
+  directories: Iterable<string | null | undefined>,
+): Promise<void> {
+  if (!useSessionDisplayStore.getState().autoCloseEmptyProjects) return
+  const changedDirectories = [...directories].filter((directory): directory is string => Boolean(directory))
+  if (changedDirectories.length === 0) return
+
+  await refreshGlobalSessionsAfterPending(getAllSyncSessions())
+  const globalSessions = useGlobalSessionsStore.getState()
+  if (!globalSessions.hasLoaded || globalSessions.status !== "ready") return
+
+  const projectsState = useProjectsStore.getState()
+  const emptyProjects = resolveProjectsWithNoActiveSessions(
+    projectsState.projects,
+    useSessionUIStore.getState().availableWorktreesByProject,
+    globalSessions.activeSessions,
+    changedDirectories,
+  )
+  for (const project of emptyProjects) {
+    projectsState.removeProject(project.id)
+  }
+}
+
+type SessionRemovalOptions = Record<string, unknown> & {
+  deferProjectAutoClose?: boolean
+}
+
+export async function deleteSession(sessionId: string, options?: SessionRemovalOptions): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
   const snapshots = optimisticRemoveSession(sessionId, sessionDirectory)
   const globalSnapshot = getGlobalSessionSnapshot(sessionId)
@@ -572,6 +605,9 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     cleanupSessionWorktreeMetadata(sessionId)
+    if (!options?.deferProjectAutoClose) {
+      await closeProjectsWithoutActiveSessionsForDirectories([sessionDirectory])
+    }
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
@@ -580,6 +616,9 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     // success since the session was already deleted by the cascade.
     if ((error as { status?: number })?.status === 404) {
       cleanupSessionWorktreeMetadata(sessionId)
+      if (!options?.deferProjectAutoClose) {
+        await closeProjectsWithoutActiveSessionsForDirectories([sessionDirectory])
+      }
       return true
     }
     restoreSessionListSnapshots(snapshots)
@@ -604,11 +643,13 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
     }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     cleanupSessionWorktreeMetadata(sessionId)
+    await closeProjectsWithoutActiveSessionsForDirectories([directory])
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
     if ((error as { status?: number })?.status === 404) {
       cleanupSessionWorktreeMetadata(sessionId)
+      await closeProjectsWithoutActiveSessionsForDirectories([directory])
       return true
     }
     restoreSessionListSnapshots(snapshots)
@@ -617,7 +658,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   }
 }
 
-export async function archiveSession(sessionId: string): Promise<boolean> {
+export async function archiveSession(sessionId: string, options?: SessionRemovalOptions): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
   const snapshots = optimisticRemoveSession(sessionId, sessionDirectory)
   const globalSnapshot = getGlobalSessionSnapshot(sessionId)
@@ -634,6 +675,9 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
       throw new Error("session.update failed: server did not return the archived session")
     }
     useGlobalSessionsStore.getState().upsertSession(archived)
+    if (!options?.deferProjectAutoClose) {
+      await closeProjectsWithoutActiveSessionsForDirectories([sessionDirectory])
+    }
     return true
   } catch (error) {
     console.error("[session-actions] archiveSession failed", error)

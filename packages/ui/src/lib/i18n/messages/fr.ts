@@ -230,6 +230,8 @@ export const dict = {
   'sessions.sidebar.header.displayMode.default': 'Défaut',
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showRecent': 'Afficher la section récente',
+  'sessions.sidebar.header.displayMode.preserveProjectNameCasing': 'Préserver la casse des noms de dossiers',
+  'sessions.sidebar.header.displayMode.autoCloseEmptyProjects': 'Fermer les projets sans session active',
   'sessions.sidebar.header.displayMode.collapseAll': 'Tout réduire',
   'sessions.sidebar.header.displayMode.expandAll': 'Tout développer',
   'sessions.sidebar.header.projectSort.manual': 'Manuel',

@@ -65,9 +65,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
+  const preserveProjectNameCasing = useSessionDisplayStore((state) => state.preserveProjectNameCasing);
+  const autoCloseEmptyProjects = useSessionDisplayStore((state) => state.autoCloseEmptyProjects);
   const setDisplayMode = useSessionDisplayStore((state) => state.setDisplayMode);
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
+  const togglePreserveProjectNameCasing = useSessionDisplayStore((state) => state.togglePreserveProjectNameCasing);
+  const toggleAutoCloseEmptyProjects = useSessionDisplayStore((state) => state.toggleAutoCloseEmptyProjects);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   // VS Code forces the expanded layout, so the mode toggle is meaningless there.
@@ -284,6 +288,21 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     </DropdownMenuItem>
                   </>
                 ) : null}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={togglePreserveProjectNameCasing}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.displayMode.preserveProjectNameCasing')}</span>
+                  {preserveProjectNameCasing ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={toggleAutoCloseEmptyProjects}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.displayMode.autoCloseEmptyProjects')}</span>
+                  {autoCloseEmptyProjects ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
                   <Icon name="contract-up-down" className="h-4 w-4" />

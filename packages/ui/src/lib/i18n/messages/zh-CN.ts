@@ -388,6 +388,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': '精简',
   'sessions.sidebar.header.displayMode.showRecent': '显示最近部分',
   'sessions.sidebar.header.displayMode.showArchived': '显示已归档会话',
+  'sessions.sidebar.header.displayMode.preserveProjectNameCasing': '保留文件夹名称大小写',
+  'sessions.sidebar.header.displayMode.autoCloseEmptyProjects': '关闭没有活动会话的项目',
   'sessions.sidebar.header.displayMode.collapseAll': '全部折叠',
   'sessions.sidebar.header.displayMode.expandAll': '全部展开',
   'sessions.sidebar.header.projectSort.manual': '手动',

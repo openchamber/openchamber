@@ -24,7 +24,7 @@
 
 ### Components
 
-- `SidebarHeader.tsx`: Top header UI for add-project, session search, and display mode.
+- `SidebarHeader.tsx`: Top header UI for add-project, session search, display mode, project-name casing, and automatic empty-project closure.
 - `SidebarActivitySections.tsx`: Global top section renderer; currently used for the `recent` section only.
 - `SidebarFooter.tsx`: Static footer with icon-only settings, shortcuts, and about actions.
 - `SidebarProjectsList.tsx`: Main scrollable tree renderer for projects, root sessions, worktrees/groups, and empty/search states.
@@ -56,3 +56,9 @@
 - `types.ts`: Shared sidebar types (`SessionNode`, `SessionGroup`, summary/search metadata).
 - `activitySections.ts`: Persisted top-section storage/helpers for the current `recent` session list.
 - `utils.tsx`: Shared sidebar utilities (path normalization, sorting, dedupe, archived scope keys, project relation checks, text highlight, labels, compact/default date formatting).
+
+## Project preferences
+
+- Sidebar display preferences are local and persisted by `useSessionDisplayStore`.
+- Preserving folder-name casing affects labels generated for newly added projects; existing and manually edited labels remain unchanged.
+- Automatic project closure runs only after a confirmed archive/delete and only when the global active-session snapshot is complete. Archived sessions do not keep a project open.

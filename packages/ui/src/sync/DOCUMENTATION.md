@@ -111,6 +111,7 @@ Rules:
 1. If an action mutates session list membership or visible session metadata, update `useGlobalSessionsStore` there.
 2. If an action targets a session by ID, resolve the **session's own directory**. Do not assume the current directory is correct.
 3. `session-ui-store.ts` should delegate to `session-actions.ts` for these mutations instead of duplicating SDK calls.
+4. When automatic empty-project closure is enabled, evaluate it only after a confirmed mutation and a fresh complete global session load. Batch operations coalesce that refresh and close only projects affected by successful items.
 
 Examples of global-store updates performed in `session-actions.ts`:
 

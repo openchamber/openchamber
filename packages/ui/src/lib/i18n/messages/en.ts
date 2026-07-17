@@ -387,6 +387,8 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showRecent': 'Show recent section',
   'sessions.sidebar.header.displayMode.showArchived': 'Show archived sessions',
+  'sessions.sidebar.header.displayMode.preserveProjectNameCasing': 'Preserve folder name casing',
+  'sessions.sidebar.header.displayMode.autoCloseEmptyProjects': 'Close projects with no active sessions',
   'sessions.sidebar.header.displayMode.collapseAll': 'Collapse all',
   'sessions.sidebar.header.displayMode.expandAll': 'Expand all',
   'sessions.sidebar.header.projectSort.manual': 'Manual',

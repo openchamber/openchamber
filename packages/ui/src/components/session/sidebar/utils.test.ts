@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isPathWithinProject } from './utils';
+import { formatProjectLabel, isPathWithinProject } from './utils';
 
 describe('isPathWithinProject', () => {
   test('matches child directories for root projects', () => {
@@ -24,5 +24,11 @@ describe('isPathWithinProject', () => {
 
   test('matches deep child directories', () => {
     expect(isPathWithinProject('/workspace/app/sub/dir', '/workspace/app')).toBe(true);
+  });
+});
+
+describe('formatProjectLabel', () => {
+  test('keeps stored project labels unchanged', () => {
+    expect(formatProjectLabel('my_PROJECT')).toBe('my_PROJECT');
   });
 });

@@ -388,6 +388,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.minimal": "Mínimo",
   "sessions.sidebar.header.displayMode.showRecent": "Mostrar recientes",
   "sessions.sidebar.header.displayMode.showArchived": "Mostrar sesiones archivadas",
+  "sessions.sidebar.header.displayMode.preserveProjectNameCasing": "Conservar mayúsculas y minúsculas del nombre de carpeta",
+  "sessions.sidebar.header.displayMode.autoCloseEmptyProjects": "Cerrar proyectos sin sesiones activas",
   "sessions.sidebar.header.displayMode.collapseAll": "Colapsar todo",
   "sessions.sidebar.header.displayMode.expandAll": "Expandir todo",
   "sessions.sidebar.header.projectSort.manual": "Manual",
