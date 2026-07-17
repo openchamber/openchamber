@@ -41,6 +41,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['clock', '12h', '24h'],
   },
   {
+    id: 'chat.message-timestamp-format',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.messageTimestampFormat',
+    descriptionKey: 'settings.openchamber.visual.field.messageTimestampFormat',
+    keywords: ['message', 'time', 'timestamp', 'date', 'relative', 'ago', 'per-message'],
+  },
+  {
     id: 'appearance.week-start',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.weekStartsOn',

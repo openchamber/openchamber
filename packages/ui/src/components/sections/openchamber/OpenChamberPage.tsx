@@ -157,6 +157,7 @@ const ChatSectionContent: React.FC = () => {
                 'messageTransport',
                 'activityRenderMode',
                 'userMessageRendering',
+                'messageTimestampFormat',
                 'mermaidRendering',
                 'reasoning',
                 'showToolFileIcons',

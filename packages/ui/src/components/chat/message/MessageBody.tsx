@@ -2214,7 +2214,6 @@ const AssistantMessageBody = React.memo(({
 });
 
 const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
-
     if (isUser) {
         return (
             <UserMessageBody
