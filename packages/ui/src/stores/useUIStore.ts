@@ -8,6 +8,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { TerminalShell } from '@/lib/api/types';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
@@ -600,6 +601,8 @@ interface UIStore {
   // Global draft welcome starters; null = unset (use the default built-in set).
   globalDraftStarters: DraftStarterRef[] | null;
   terminalFontSize: number;
+  terminalShell: TerminalShell;
+  terminalLoginShells: TerminalShell[];
   editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
@@ -759,6 +762,8 @@ interface UIStore {
   setFontSize: (size: number) => void;
   setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
   setTerminalFontSize: (size: number) => void;
+  setTerminalShell: (shell: TerminalShell) => void;
+  setTerminalLoginShells: (shells: TerminalShell[]) => void;
   setEditorFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
@@ -916,7 +921,9 @@ export const useUIStore = create<UIStore>()(
         messageLimit: 200,
         fontSize: 100,
         globalDraftStarters: null,
-        terminalFontSize: 13,
+        terminalFontSize: 14,
+        terminalShell: 'auto',
+        terminalLoginShells: [],
         editorFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
@@ -1686,6 +1693,14 @@ export const useUIStore = create<UIStore>()(
           set({ terminalFontSize: clamped });
         },
 
+        setTerminalShell: (shell) => {
+          set({ terminalShell: shell });
+        },
+
+        setTerminalLoginShells: (shells) => {
+          set({ terminalLoginShells: [...new Set(shells)] });
+        },
+
         setEditorFontSize: (size) => {
           const rounded = Math.round(size);
           const clamped = Math.max(9, Math.min(32, rounded));
@@ -2229,12 +2244,17 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 10,
+        version: 11,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v10 -> v11: move the previous terminal font default forward.
+          if (version < 11 && state.terminalFontSize === 13) {
+            state.terminalFontSize = 14;
+          }
 
           // v9 -> v10: remove obsolete single-file diff view mode setting
           if (version < 10) {
@@ -2366,6 +2386,8 @@ export const useUIStore = create<UIStore>()(
           fontSize: state.fontSize,
           globalDraftStarters: state.globalDraftStarters,
           terminalFontSize: state.terminalFontSize,
+          terminalShell: state.terminalShell,
+          terminalLoginShells: state.terminalLoginShells,
           editorFontSize: state.editorFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,

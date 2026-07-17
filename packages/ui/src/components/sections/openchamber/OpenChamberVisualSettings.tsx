@@ -33,6 +33,10 @@ import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
 } from '@/lib/directoryShowHidden';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import type { TerminalShellOption } from '@/lib/api/types';
+import { isTerminalShell } from '@/lib/terminalShell';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
 interface Option<T extends string> {
     id: T;
@@ -329,7 +333,7 @@ const DurationInput: React.FC<{
     );
 };
 
-export type VisibleSetting = 'sessionGoal' | 'sessionAssist' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'messageTimestampFormat' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+export type VisibleSetting = 'sessionGoal' | 'sessionAssist' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'messageTimestampFormat' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -340,6 +344,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const { locale, locales, setLocale, label, t } = useI18n();
     const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
     const { isMobile } = useDeviceInfo();
+    const { terminal } = useRuntimeAPIs();
     const { browserTab } = usePwaDetection();
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
@@ -381,6 +386,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setFontSize = useUIStore(state => state.setFontSize);
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
     const setTerminalFontSize = useUIStore(state => state.setTerminalFontSize);
+    const terminalShell = useUIStore(state => state.terminalShell);
+    const setTerminalShell = useUIStore(state => state.setTerminalShell);
+    const terminalLoginShells = useUIStore(state => state.terminalLoginShells);
+    const setTerminalLoginShells = useUIStore(state => state.setTerminalLoginShells);
     const editorFontSize = useUIStore(state => state.editorFontSize);
     const setEditorFontSize = useUIStore(state => state.setEditorFontSize);
     const uiFont = useUIStore(state => state.uiFont);
@@ -669,7 +678,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         ? hasLocalizationSettings
         : (shouldShow('theme') || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap') || shouldShow('expandedEditorToolbar');
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('expandedEditorToolbar');
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
@@ -696,6 +705,41 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const showMobileKeyboardModeSetting = shouldShow('mobileKeyboardMode') && isWebRuntime() && !isDesktopShell() && !isVSCode && supportsMobileKeyboardResizeContent();
+    const showTerminalShellSetting = (shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode;
+    const [availableTerminalShells, setAvailableTerminalShells] = React.useState<TerminalShellOption[]>([]);
+    const [terminalShellRuntimeEpoch, setTerminalShellRuntimeEpoch] = React.useState(0);
+    React.useEffect(() => subscribeRuntimeEndpointChanged(() => {
+        setAvailableTerminalShells([]);
+        setTerminalShellRuntimeEpoch((epoch) => epoch + 1);
+    }), []);
+    React.useEffect(() => {
+        let cancelled = false;
+        if (!showTerminalShellSetting || !terminal.listShells) return;
+        void terminal.listShells()
+            .then((shells) => {
+                if (!cancelled) setAvailableTerminalShells(shells);
+            })
+            .catch(() => {
+                if (!cancelled) setAvailableTerminalShells([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [showTerminalShellSetting, terminal, terminalShellRuntimeEpoch]);
+    const terminalShellOptions = React.useMemo(() => {
+        const explicitShells = availableTerminalShells.filter((shell) => shell.id !== 'auto');
+        if (terminalShell === 'auto' || explicitShells.some((shell) => shell.id === terminalShell)) {
+            return explicitShells;
+        }
+        return [{ id: terminalShell, name: terminalShell, supportsLogin: false }, ...explicitShells];
+    }, [availableTerminalShells, terminalShell]);
+    const terminalShellSupportsLogin = availableTerminalShells.find((shell) => shell.id === terminalShell)?.supportsLogin === true;
+    const terminalLoginShellEnabled = terminalLoginShells.includes(terminalShell);
+    const setTerminalLoginShellEnabled = (enabled: boolean) => {
+        setTerminalLoginShells(enabled
+            ? [...terminalLoginShells.filter((shell) => shell !== terminalShell), terminalShell]
+            : terminalLoginShells.filter((shell) => shell !== terminalShell));
+    };
     const [mobileLayoutPreference, setMobileLayoutPreference] = React.useState<MobileLayoutPreference>(() => getStoredMobileLayoutPreference());
     const [pwaInstallName, setPwaInstallName] = React.useState('');
     const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
@@ -1363,8 +1407,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         <Button size="sm"
                                             type="button"
                                             variant="ghost"
-                                            onClick={() => setTerminalFontSize(13)}
-                                            disabled={terminalFontSize === 13}
+                                            onClick={() => setTerminalFontSize(14)}
+                                            disabled={terminalFontSize === 14}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
                                             aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
                                             title={t('settings.common.actions.reset')}
@@ -1579,6 +1623,52 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </TooltipContent>
                                         </Tooltip>
                                     </div>
+                                </div>
+                            )}
+                            {showTerminalShellSetting && (
+                                <div data-settings-item="appearance.terminal-shell" className="grid grid-cols-1 gap-y-1 py-1.5 sm:grid-cols-[14rem_minmax(0,1fr)] sm:gap-x-8">
+                                    <span className="typography-ui-label text-foreground">
+                                        {t('settings.openchamber.visual.field.terminalShell')}
+                                    </span>
+                                    <Select value={terminalShell} onValueChange={(value) => { if (isTerminalShell(value)) setTerminalShell(value); }}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.terminalShellAria')} className="w-[13rem]">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="auto">{t('settings.openchamber.visual.option.terminalShell.auto')}</SelectItem>
+                                            {terminalShellOptions.map((shell) => (
+                                                <SelectItem key={shell.id} value={shell.id}>{shell.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <span className="max-w-[26rem] typography-meta text-muted-foreground sm:col-start-2">
+                                        {t('settings.openchamber.visual.field.terminalShellHint')}
+                                    </span>
+                                    {terminalShellSupportsLogin && (
+                                        <div
+                                            data-settings-item="appearance.terminal-login-shell"
+                                            className="group flex cursor-pointer items-center gap-2 pt-1 sm:col-start-2"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={terminalLoginShellEnabled}
+                                            onClick={() => setTerminalLoginShellEnabled(!terminalLoginShellEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setTerminalLoginShellEnabled(!terminalLoginShellEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={terminalLoginShellEnabled}
+                                                onChange={setTerminalLoginShellEnabled}
+                                                ariaLabel={t('settings.openchamber.visual.field.terminalLoginShell')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">
+                                                {t('settings.openchamber.visual.field.terminalLoginShell')}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </section>

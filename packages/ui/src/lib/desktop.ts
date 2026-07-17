@@ -1,4 +1,4 @@
-import type { ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -165,6 +165,8 @@ export type DesktopSettings = {
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  terminalShell?: TerminalShell;
+  terminalLoginShells?: TerminalShell[];
   editorFontSize?: number;
   uiFont?: string;
   monoFont?: string;

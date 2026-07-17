@@ -13,6 +13,7 @@ import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ChatView } from '@/components/views/ChatView';
 import { SettingsView } from '@/components/views/SettingsView';
+import { TerminalView } from '@/components/views/TerminalView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
@@ -658,7 +659,7 @@ const getProjectLabel = (path: string): string => {
 };
 
 type OverflowItem = {
-  key: 'files' | 'changes' | 'mcp' | 'instances' | 'update' | 'settings';
+  key: 'files' | 'changes' | 'terminal' | 'mcp' | 'instances' | 'update' | 'settings';
   icon?: IconName;
   iconNode?: React.ReactNode;
   label: string;
@@ -2064,6 +2065,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [sessionsSheetOpen, setSessionsSheetOpen] = React.useState(false);
   const [filesOpen, setFilesOpen] = React.useState(false);
   const [changesOpen, setChangesOpen] = React.useState(false);
+  const [terminalOpen, setTerminalOpen] = React.useState(false);
   const [mcpOpen, setMcpOpen] = React.useState(false);
   const [instancesOpen, setInstancesOpen] = React.useState(false);
   const [isMcpRefreshing, setIsMcpRefreshing] = React.useState(false);
@@ -2341,6 +2343,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         );
       }
       items.push({
+        key: 'terminal',
+        icon: 'terminal',
+        label: t('mobile.menu.terminal'),
+        onSelect: () => setTerminalOpen(true),
+      });
+      items.push({
         key: 'mcp',
         iconNode: <McpIcon className="size-5 shrink-0 text-muted-foreground" />,
         label: t('mobile.menu.mcp'),
@@ -2556,6 +2564,21 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 initialDiffPath={pendingChangesDiff?.path ?? null}
                 initialDiffStaged={pendingChangesDiff?.staged === true}
               />
+            </ErrorBoundary>
+          </MobileSurfaceShell>
+        ) : null}
+
+        {terminalOpen ? (
+          <MobileSurfaceShell
+            open
+            onClose={() => setTerminalOpen(false)}
+            ariaLabel={t('mobile.menu.terminal')}
+            title={t('mobile.menu.terminal')}
+            disableSwipeDismiss
+            disableEscapeDismiss
+          >
+            <ErrorBoundary>
+              <TerminalView visible />
             </ErrorBoundary>
           </MobileSurfaceShell>
         ) : null}
