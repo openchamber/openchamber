@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
 import type { Session } from "@opencode-ai/sdk/v2/client"
+import type { ProjectEntry } from "@/lib/api/types"
+import type { WorktreeMetadata } from "@/types/worktree"
+import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
 
 // Recorded call info
 const setCurrentSessionCalls: Array<{ id: string | null; directoryHint: string | null | undefined }> = []
@@ -207,6 +210,53 @@ describe("issue #2270 — nested Git projects: child directory wins when overrid
     expect(registerSessionDirectoryCalls).toEqual([
       { sessionID: "ses_2270_child", directory: childProjectDir },
     ])
+  })
+})
+
+describe("issue #2270 — registered child project wins over a leaked ancestor worktree", () => {
+  test("resolves a nested child repository directly instead of through a sibling project's ancestor worktree", () => {
+    const projects = [
+      { id: "project-a", path: "/workspace/project-a" },
+      { id: "project-b", path: "/workspace/project-b" },
+      { id: "project-c", path: "/workspace/project-c" },
+    ] as ProjectEntry[]
+    const leakedParentWorktree = {
+      path: "/workspace",
+      projectDirectory: "/workspace",
+    } as WorktreeMetadata
+    const availableWorktreesByProject = new Map<string, WorktreeMetadata[]>([
+      ["/workspace/project-a", [leakedParentWorktree]],
+    ])
+
+    const resolved = resolveProjectForSessionDirectory(
+      projects,
+      availableWorktreesByProject,
+      "/workspace/project-b/src",
+    )
+
+    expect(resolved?.id).toBe("project-b")
+  })
+
+  test("still resolves an external worktree through its owning project", () => {
+    const projects = [
+      { id: "project-a", path: "/workspace/project-a" },
+      { id: "project-b", path: "/workspace/project-b" },
+    ] as ProjectEntry[]
+    const externalWorktree = {
+      path: "/worktrees/project-b-feature",
+      projectDirectory: "/workspace/project-b",
+    } as WorktreeMetadata
+    const availableWorktreesByProject = new Map<string, WorktreeMetadata[]>([
+      ["/workspace/project-b", [externalWorktree]],
+    ])
+
+    const resolved = resolveProjectForSessionDirectory(
+      projects,
+      availableWorktreesByProject,
+      "/worktrees/project-b-feature/src",
+    )
+
+    expect(resolved?.id).toBe("project-b")
   })
 })
 
