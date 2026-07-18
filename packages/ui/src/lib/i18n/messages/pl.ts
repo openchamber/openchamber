@@ -2494,6 +2494,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.chooseBranch': 'Wybierz gałąź...',
   'session.newWorktree.error.branchNameRequired': 'Nazwa gałęzi jest wymagana',
   'session.newWorktree.error.createWorktreeFailed': 'Nie udało się utworzyć drzewa pracy',
+  'session.newWorktree.error.fetchBranchesFailed': 'Nie udało się pobrać gałęzi',
   'session.newWorktree.error.noActiveProject': 'Brak aktywnego projektu',
   'session.newWorktree.error.noModelSelected': 'Nie wybrano modelu',
   'session.newWorktree.error.sendGitHubContextFailed': 'Nie udało się wysłać kontekstu GitHub',

@@ -1699,6 +1699,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.error.worktreeDirectoryRequired': '워크트리 디렉터리 필수',
   'session.newWorktree.error.sendGitHubContextFailed': 'GitHub 컨텍스트 전송에 실패했습니다',
   'session.newWorktree.error.createWorktreeFailed': '워크트리 생성에 실패했습니다',
+  'session.newWorktree.error.fetchBranchesFailed': '브랜치를 가져오지 못했습니다',
   'session.newWorktree.toast.sessionFromIssue': '이슈에서 세션을 생성했습니다',
   'session.newWorktree.toast.sessionFromPr': 'PR에서 세션을 생성했습니다',
   'session.newWorktree.toast.worktreeCreated': '워크트리를 생성했습니다',

@@ -357,12 +357,15 @@ export function NewWorktreeDialog({
   const hasSourceBranchMatches = sourceBranchRankedGroups.matching.length > 0;
   const canFetchBranches = Boolean(projectDirectory && git);
 
-  const handleFetchBranches = React.useCallback(() => {
+  const handleFetchBranches = React.useCallback(async () => {
     if (!projectDirectory || !git) {
       return;
     }
-    void fetchBranches(projectDirectory, git);
-  }, [projectDirectory, git, fetchBranches]);
+    const success = await fetchBranches(projectDirectory, git);
+    if (!success) {
+      toast.error(t('session.newWorktree.error.fetchBranchesFailed'));
+    }
+  }, [projectDirectory, git, fetchBranches, t]);
 
   React.useEffect(() => {
     if (!open || !projectDirectory || !git) return;

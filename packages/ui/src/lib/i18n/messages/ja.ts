@@ -1693,6 +1693,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.error.worktreeDirectoryRequired': 'ワークツリーディレクトリが必要です',
   'session.newWorktree.error.sendGitHubContextFailed': 'GitHubコンテキストの送信に失敗しました',
   'session.newWorktree.error.createWorktreeFailed': 'ワークツリーの作成に失敗しました',
+  'session.newWorktree.error.fetchBranchesFailed': 'ブランチの取得に失敗しました',
   'session.newWorktree.toast.sessionFromIssue': 'Issueからセッションを作成しました',
   'session.newWorktree.toast.sessionFromPr': 'PRからセッションを作成しました',
   'session.newWorktree.toast.worktreeCreated': 'ワークツリーを作成しました',

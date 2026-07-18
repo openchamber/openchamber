@@ -1675,6 +1675,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.error.worktreeDirectoryRequired": "Потрібен каталог worktree",
   "session.newWorktree.error.sendGitHubContextFailed": "Не вдалося надіслати контекст GitHub",
   "session.newWorktree.error.createWorktreeFailed": "Не вдалося створити worktree",
+  "session.newWorktree.error.fetchBranchesFailed": "Не вдалося отримати гілки",
   "session.newWorktree.toast.sessionFromIssue": "Сесію створено з issue",
   "session.newWorktree.toast.sessionFromPr": "Сесію створено з PR",
   "session.newWorktree.toast.worktreeCreated": "Створено worktree",

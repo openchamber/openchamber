@@ -607,6 +607,53 @@ export interface GitBranchResult {
   branches: Record<string, GitBranchDetails>;
 }
 
+async function getActiveRemoteBranches(directory: string): Promise<string[]> {
+  const remotesResult = await execGit(['remote'], directory);
+  if (remotesResult.exitCode !== 0) {
+    throw new Error('Failed to fetch remote branches');
+  }
+
+  const remotes = remotesResult.stdout.split('\n').map((remote) => remote.trim()).filter(Boolean);
+  const branchesByRemote = await Promise.all(remotes.map(async (remote) => {
+    const result = await execGit(['ls-remote', '--heads', remote], directory);
+    if (result.exitCode !== 0) {
+      return null;
+    }
+
+    return result.stdout.split('\n').flatMap((line) => {
+      const marker = '\trefs/heads/';
+      const markerIndex = line.indexOf(marker);
+      if (markerIndex < 0) {
+        return [];
+      }
+      const branchName = line.slice(markerIndex + marker.length);
+      return branchName ? [`remotes/${remote}/${branchName}`] : [];
+    });
+  }));
+
+  if (remotes.length > 0 && branchesByRemote.every((branches) => branches === null)) {
+    throw new Error('Failed to fetch remote branches');
+  }
+
+  return branchesByRemote.flatMap((branches) => branches ?? []);
+}
+
+function appendActiveRemoteBranches(
+  all: string[],
+  branches: Record<string, GitBranchDetails>,
+  activeRemoteBranches: readonly string[],
+): void {
+  for (const branchName of activeRemoteBranches) {
+    all.push(branchName);
+    branches[branchName] ??= {
+      current: false,
+      name: branchName,
+      commit: '',
+      label: branchName.replace(/^remotes\//, ''),
+    };
+  }
+}
+
 /**
  * Get all branches for a directory
  */
@@ -641,7 +688,6 @@ export async function getGitBranches(directory: string): Promise<GitBranchResult
   for (const ref of remoteRefs) {
     if (ref.name) {
       const remoteBranchName = `remotes/${ref.name}`;
-      all.push(remoteBranchName);
       branches[remoteBranchName] = {
         current: false,
         name: remoteBranchName,
@@ -650,6 +696,7 @@ export async function getGitBranches(directory: string): Promise<GitBranchResult
       };
     }
   }
+  appendActiveRemoteBranches(all, branches, await getActiveRemoteBranches(directory));
 
   // Add upstream info for HEAD
   if (state.HEAD?.name && state.HEAD?.upstream) {
@@ -668,7 +715,7 @@ export async function getGitBranches(directory: string): Promise<GitBranchResult
  * Fallback: Get branches using raw git commands
  */
 async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
-  const result = await execGit(['branch', '-a', '-v', '--format=%(refname:short)|%(objectname:short)|%(upstream:short)|%(HEAD)'], directory);
+  const result = await execGit(['branch', '-a', '-v', '--format=%(refname)|%(objectname:short)|%(upstream:short)|%(HEAD)'], directory);
   
   if (result.exitCode !== 0) {
     return { all: [], current: '', branches: {} };
@@ -680,9 +727,20 @@ async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
   let current = '';
 
   for (const line of lines) {
-    const [name, commit, tracking, head] = line.split('|');
+    const [refName, commit, tracking, head] = line.split('|');
+    const localPrefix = 'refs/heads/';
+    const remotePrefix = 'refs/remotes/';
+    let name = '';
+    if (refName?.startsWith(localPrefix)) {
+      name = refName.slice(localPrefix.length);
+    } else if (refName?.startsWith(remotePrefix)) {
+      name = `remotes/${refName.slice(remotePrefix.length)}`;
+    }
     if (name) {
-      all.push(name);
+      const isRemote = name.startsWith('remotes/');
+      if (!isRemote) {
+        all.push(name);
+      }
       const isCurrent = head === '*';
       if (isCurrent) current = name;
       
@@ -695,6 +753,7 @@ async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
       };
     }
   }
+  appendActiveRemoteBranches(all, branches, await getActiveRemoteBranches(directory));
 
   return { all, current, branches };
 }

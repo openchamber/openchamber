@@ -56,7 +56,7 @@ interface GitStore {
   getDirectoryState: (directory: string) => DirectoryGitState | null;
 
   fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean; mode?: 'light' }) => Promise<boolean>;
-  fetchBranches: (directory: string, git: GitAPI) => Promise<void>;
+  fetchBranches: (directory: string, git: GitAPI) => Promise<boolean>;
   fetchLog: (directory: string, git: GitAPI, maxCount?: number) => Promise<void>;
   fetchIdentity: (directory: string, git: GitAPI) => Promise<void>;
   fetchAll: (directory: string, git: GitAPI, options?: { force?: boolean; silentIfCached?: boolean }) => Promise<void>;
@@ -699,12 +699,14 @@ export const useGitStore = create<GitStore>()(
           newDirectories.set(directory, { ...dirState, branches, isLoadingBranches: false, lastBranchesFetch: Date.now() });
           set({ directories: newDirectories });
           writeCachedBranches(directory, branches);
+          return true;
         } catch (error) {
           console.error('Failed to fetch git branches:', error);
           const newDirectories = new Map(get().directories);
           const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, { ...d, isLoadingBranches: false });
           set({ directories: newDirectories });
+          return false;
         }
       },
 
@@ -978,7 +980,7 @@ export const useGitStore = create<GitStore>()(
           const updatedState = get().directories.get(directory);
           if (!updatedState?.isGitRepo) return;
 
-          const fetches: Promise<void>[] = [];
+          const fetches: Promise<unknown>[] = [];
 
           if (!updatedState.branches || now - updatedState.lastBranchesFetch >= BRANCHES_STALE_THRESHOLD) {
             fetches.push(get().fetchBranches(directory, git));

@@ -9,6 +9,7 @@ import {
   checkoutCommit,
   cherryPick,
   createWorktree,
+  getBranches,
   getStatus,
   removeWorktree,
   resolvePrimaryWorktreeRoot,
@@ -279,6 +280,75 @@ describe('getStatus', () => {
     runGit(repo, ['commit', '-m', 'Initial commit']);
 
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+  });
+});
+
+describe('getBranches', () => {
+  it('returns live remote branches that do not have local tracking refs', async () => {
+    if (!canRunGit()) return;
+
+    const remote = createTempDir();
+    const repo = createTempDir();
+    runGit(remote, ['init', '--bare']);
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    runGit(repo, ['remote', 'add', 'origin', remote]);
+    runGit(repo, ['push', '-u', 'origin', 'main']);
+
+    const head = runGit(repo, ['rev-parse', 'HEAD']).trim();
+    runGit(remote, ['update-ref', 'refs/heads/remote-only', head]);
+    runGit(repo, ['update-ref', 'refs/remotes/origin/stale', head]);
+
+    const result = await getBranches(repo);
+
+    expect(result.all).toContain('remotes/origin/remote-only');
+    expect(result.all).not.toContain('remotes/origin/stale');
+    expect(result.branches['remotes/origin/remote-only']).toEqual({
+      current: false,
+      name: 'remotes/origin/remote-only',
+      commit: '',
+      label: 'origin/remote-only',
+    });
+  });
+
+  it('returns reachable remote branches when another remote cannot be reached', async () => {
+    if (!canRunGit()) return;
+
+    const remote = createTempDir();
+    const repo = createTempDir();
+    runGit(remote, ['init', '--bare']);
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    runGit(repo, ['remote', 'add', 'origin', remote]);
+    runGit(repo, ['push', '-u', 'origin', 'main']);
+    runGit(repo, ['remote', 'add', 'broken', path.join(repo, 'missing.git')]);
+
+    const result = await getBranches(repo);
+
+    expect(result.all).toContain('remotes/origin/main');
+  });
+
+  it('rejects when a remote cannot be reached', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    runGit(repo, ['remote', 'add', 'broken', path.join(repo, 'missing.git')]);
+
+    await expect(getBranches(repo)).rejects.toThrow('Failed to fetch remote branches');
   });
 });
 

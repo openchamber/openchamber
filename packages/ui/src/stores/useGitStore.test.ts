@@ -250,4 +250,28 @@ describe('useGitStore', () => {
 
     expect(useGitStore.getState().getDirectoryState('/repo')?.status).toBe(initialStatus);
   });
+
+  test('reports branch fetch failure and preserves cached branches', async () => {
+    const previousBranches = { all: ['main'], current: 'main', branches: {} };
+    const directoryState = {
+      ...createDirectoryState(createStatus()),
+      branches: previousBranches,
+    };
+    useGitStore.setState({
+      directories: new Map([['/repo', directoryState]]),
+      activeDirectory: '/repo',
+    });
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitBranches: async () => {
+        throw new Error('remote unavailable');
+      },
+    };
+
+    const result = await useGitStore.getState().fetchBranches('/repo', git);
+
+    expect(result).toBe(false);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches).toBe(previousBranches);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.isLoadingBranches).toBe(false);
+  });
 });

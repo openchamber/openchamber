@@ -1516,6 +1516,7 @@ export const dict = {
   'session.newWorktree.error.worktreeDirectoryRequired': 'Le répertoire du worktree est requis',
   'session.newWorktree.error.sendGitHubContextFailed': 'Échec de l\'envoi du contexte GitHub',
   'session.newWorktree.error.createWorktreeFailed': 'Échec de la création du worktree',
+  'session.newWorktree.error.fetchBranchesFailed': 'Échec de la récupération des branches',
   'session.newWorktree.toast.sessionFromIssue': 'Session créée à partir du problème',
   'session.newWorktree.toast.sessionFromPr': 'Session créée à partir de PR',
   'session.newWorktree.toast.worktreeCreated': 'Worktree créé',
