@@ -395,7 +395,7 @@ export function GitHubIssuePickerDialog({
 
       const sessionTitle = `#${issue.number} ${issue.title}`.trim();
 
-      const { sessionId } = await (async () => {
+      const { sessionId, sessionDirectory } = await (async () => {
         if (createInWorktree) {
           const preferred = `issue-${issue.number}-${generateBranchSlug()}`;
           const created = await createWorktreeSessionForNewBranch(
@@ -428,6 +428,10 @@ export function GitHubIssuePickerDialog({
 
       // Close modal immediately after session exists (don't wait for message send).
       onOpenChange(false);
+
+      // Navigate to the newly created session. Must happen so the user lands
+      // on the session whose message is about to be sent (see PR #1925).
+      useSessionUIStore.getState().setCurrentSession(sessionId, sessionDirectory);
 
       const configState = useConfigStore.getState();
       const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
