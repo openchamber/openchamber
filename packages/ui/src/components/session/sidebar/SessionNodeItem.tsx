@@ -21,7 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Icon } from "@/components/icon/Icon";
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionPermissions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useScopedBlockingPermissions, useSessionPermissions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
@@ -354,7 +354,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     React.useCallback((state) => Boolean(state.sessionMemoryState.get(viewportSessionKey(session.id))?.isZombie), [session.id]),
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
-  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
+  // Own pending permissions vs. the full subagent subtree. Collapsed rows show the
+  // aggregated subtree count so the approval shield surfaces on the parent when a
+  // descendant needs approval (#2247); expanded rows show only this session's own count.
+  const ownPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
+  const scopedPermissions = useScopedBlockingPermissions(session.id, sessionDirectory ?? undefined);
   const sessionGoal = getSessionGoal(resolvedSession);
   const sessionGoalGlyph = sessionGoal ? (
     <span
@@ -577,7 +581,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
-  const pendingPermissionCount = sessionPermissions.length;
+  // When expanded, each descendant is shown by its own row, so avoid double-counting
+  // by showing only this session's own pending approvals; when collapsed, roll up the subtree.
+  const pendingPermissionCount = hasChildren && isExpanded ? ownPermissions.length : scopedPermissions.length;
   const showUnreadStatus = !isStreaming && needsAttention && !isActive;
   const showStatusMarker = isStreaming || showUnreadStatus;
   const statusMarkerContent = isStreaming

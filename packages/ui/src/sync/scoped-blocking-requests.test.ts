@@ -36,6 +36,30 @@ describe("scoped blocking requests", () => {
     expect(result).toEqual([rootRequest, childRequest, grandchildRequest])
   })
 
+  test("aggregates subagent permissions onto the parent when the parent has none (#2247)", () => {
+    const childRequest = { id: "perm_child" }
+    const siblingRequestA = { id: "perm_sibling_a" }
+    const siblingRequestB = { id: "perm_sibling_b" }
+    const empty: Array<{ id: string }> = []
+
+    const result = collectScopedBlockingRequests(
+      [
+        session("ses_parent"),
+        session("ses_child", "ses_parent"),
+        session("ses_sibling", "ses_parent"),
+      ],
+      {
+        // Parent has no pending permission of its own; only the subagents do.
+        ses_child: [childRequest],
+        ses_sibling: [siblingRequestA, siblingRequestB],
+      },
+      "ses_parent",
+      empty,
+    )
+
+    expect(result).toEqual([childRequest, siblingRequestA, siblingRequestB])
+  })
+
   test("returns the provided empty array when no scoped requests exist", () => {
     const empty: Array<{ id: string }> = []
 
