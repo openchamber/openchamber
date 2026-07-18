@@ -478,6 +478,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.unread': '未読の更新',
   'sessions.sidebar.session.status.pinned': 'ピン留めされたセッション',
   'sessions.sidebar.session.status.permissionRequired': '権限が必要です',
+  'sessions.sidebar.session.status.questionPending': '回答が必要です',
   'sessions.sidebar.session.subsessions.collapse': 'サブセッションを折りたたむ',
   'sessions.sidebar.session.subsessions.expand': 'サブセッションを展開',
   'sessions.sidebar.dialogs.deleteSession.title': 'セッションを削除しますか？',
