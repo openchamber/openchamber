@@ -522,7 +522,10 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (error) {
         return res.status(400).json({ error });
       }
-      const discoveredSkill = (await fetchOpenCodeDiscoveredSkills(directory))
+      const discoveredSkill = mergeDiscoveredSkills(
+          await fetchOpenCodeDiscoveredSkills(directory),
+          discoverSkills(directory),
+        )
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
 
@@ -551,7 +554,10 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = (await fetchOpenCodeDiscoveredSkills(directory))
+      const discoveredSkill = mergeDiscoveredSkills(
+          await fetchOpenCodeDiscoveredSkills(directory),
+          discoverSkills(directory),
+        )
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
@@ -642,7 +648,10 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = (await fetchOpenCodeDiscoveredSkills(directory))
+      const discoveredSkill = mergeDiscoveredSkills(
+          await fetchOpenCodeDiscoveredSkills(directory),
+          discoverSkills(directory),
+        )
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
@@ -676,7 +685,10 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = (await fetchOpenCodeDiscoveredSkills(directory))
+      const discoveredSkill = mergeDiscoveredSkills(
+          await fetchOpenCodeDiscoveredSkills(directory),
+          discoverSkills(directory),
+        )
         .find((skill) => skill.name === skillName) || null;
       const sources = getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
