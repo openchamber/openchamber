@@ -182,10 +182,13 @@ type CoordinatorModule = {
     COMMON_WRITE: OperationKind;
     TOPOLOGY_WRITE: OperationKind;
   };
+  GIT_READ_ONLY_ENV: Readonly<{ GIT_OPTIONAL_LOCKS: '0' }>;
+  GitExecutionCoordinator: unknown;
   createGitExecutionCoordinator: (options?: Record<string, unknown>) => CoordinatorLike;
 };
 
 type ResolverModule = {
+  GitContextResolver: unknown;
   createGitContextResolver: (options: {
     runGit: (cwd: string, args: string[]) => Promise<{
       success: boolean;
@@ -195,6 +198,36 @@ type ResolverModule = {
     }>;
     realpath?: (value: string) => Promise<string>;
   }) => ResolverLike;
+};
+
+type ExecutionErrorsModule = {
+  GIT_EXECUTION_ERROR_CODES: Readonly<Record<string, string>>;
+  GitExecutionCancelledError: unknown;
+  GitExecutionOverloadedError: unknown;
+  GitExecutionQueueTimeoutError: unknown;
+  GitExecutionReentrancyError: unknown;
+  isGitExecutionError: unknown;
+};
+
+type ExecutionCoreModules = {
+  coordinator: CoordinatorModule;
+  resolver: ResolverModule;
+  errors: ExecutionErrorsModule;
+};
+
+type SharedCoreIdentity = {
+  coordinatorClass: boolean;
+  coordinatorFactory: boolean;
+  operationKinds: boolean;
+  readOnlyEnvironment: boolean;
+  resolverClass: boolean;
+  resolverFactory: boolean;
+  errorCodes: boolean;
+  errorGuard: boolean;
+  cancelledError: boolean;
+  overloadedError: boolean;
+  queueTimeoutError: boolean;
+  reentrancyError: boolean;
 };
 
 type TimingSample = {
@@ -1531,16 +1564,18 @@ const createRealTopology = async (
   fixture.allWorktrees = [...fixture.primaryWorktrees, ...fixture.linkedWorktrees];
 };
 
-const loadWebModules = async (): Promise<{ coordinator: CoordinatorModule; resolver: ResolverModule }> => {
+const loadWebModules = async (): Promise<ExecutionCoreModules> => {
   const coordinator = await import('../../packages/web/server/lib/git/execution-coordinator.js') as unknown as CoordinatorModule;
   const resolver = await import('../../packages/web/server/lib/git/context-resolver.js') as unknown as ResolverModule;
-  return { coordinator, resolver };
+  const errors = await import('../../packages/web/server/lib/git/execution-errors.js') as unknown as ExecutionErrorsModule;
+  return { coordinator, resolver, errors };
 };
 
-const loadVsCodeModules = async (): Promise<{ coordinator: CoordinatorModule; resolver: ResolverModule }> => {
+const loadVsCodeModules = async (): Promise<ExecutionCoreModules> => {
   const coordinator = await import('../../packages/vscode/src/git-execution-coordinator.ts') as unknown as CoordinatorModule;
   const resolver = await import('../../packages/vscode/src/git-context-resolver.ts') as unknown as ResolverModule;
-  return { coordinator, resolver };
+  const errors = await import('../../packages/vscode/src/git-execution-errors.ts') as unknown as ExecutionErrorsModule;
+  return { coordinator, resolver, errors };
 };
 
 const resolveFixtureContexts = async (
@@ -1911,7 +1946,7 @@ const runPrReal = async (
   );
 
   const parity = await runCoordinatorParityAssertions();
-  assertions.truthy('web and VS Code deterministic coordinator parity', parity.equal);
+  assertions.truthy('web-direct and VS Code adapter share one deterministic execution core', parity.equal);
   const generation = generationTotal(coordinator, contexts);
   assertions.truthy('PR mutations move generations', generation > 0);
   assertions.atMost('global active cap respected', metrics.peakTopLevel, coordinator.getStats().limits.globalConcurrency);
@@ -2822,15 +2857,36 @@ const deterministicModuleFixture = async (
 
 export const runCoordinatorParityAssertions = async (): Promise<{
   equal: boolean;
+  sharedImplementation: SharedCoreIdentity;
   web: Record<string, unknown>;
   vscode: Record<string, unknown>;
 }> => {
   const [webModules, vscodeModules] = await Promise.all([loadWebModules(), loadVsCodeModules()]);
+  const sharedImplementation: SharedCoreIdentity = {
+    coordinatorClass: webModules.coordinator.GitExecutionCoordinator === vscodeModules.coordinator.GitExecutionCoordinator,
+    coordinatorFactory: webModules.coordinator.createGitExecutionCoordinator === vscodeModules.coordinator.createGitExecutionCoordinator,
+    operationKinds: webModules.coordinator.GIT_OPERATION_KIND === vscodeModules.coordinator.GIT_OPERATION_KIND,
+    readOnlyEnvironment: webModules.coordinator.GIT_READ_ONLY_ENV === vscodeModules.coordinator.GIT_READ_ONLY_ENV,
+    resolverClass: webModules.resolver.GitContextResolver === vscodeModules.resolver.GitContextResolver,
+    resolverFactory: webModules.resolver.createGitContextResolver === vscodeModules.resolver.createGitContextResolver,
+    errorCodes: webModules.errors.GIT_EXECUTION_ERROR_CODES === vscodeModules.errors.GIT_EXECUTION_ERROR_CODES,
+    errorGuard: webModules.errors.isGitExecutionError === vscodeModules.errors.isGitExecutionError,
+    cancelledError: webModules.errors.GitExecutionCancelledError === vscodeModules.errors.GitExecutionCancelledError,
+    overloadedError: webModules.errors.GitExecutionOverloadedError === vscodeModules.errors.GitExecutionOverloadedError,
+    queueTimeoutError: webModules.errors.GitExecutionQueueTimeoutError === vscodeModules.errors.GitExecutionQueueTimeoutError,
+    reentrancyError: webModules.errors.GitExecutionReentrancyError === vscodeModules.errors.GitExecutionReentrancyError,
+  };
   const [web, vscode] = await Promise.all([
     deterministicModuleFixture(webModules),
     deterministicModuleFixture(vscodeModules),
   ]);
-  return { equal: JSON.stringify(web) === JSON.stringify(vscode), web, vscode };
+  const sharedRuntime = Object.values(sharedImplementation).every(Boolean);
+  return {
+    equal: sharedRuntime && JSON.stringify(web) === JSON.stringify(vscode),
+    sharedImplementation,
+    web,
+    vscode,
+  };
 };
 
 const resolveConfig = (profile: GitExecutionProfile, options: GitExecutionRunOptions): ProfileConfig => {

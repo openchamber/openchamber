@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import * as childProcess from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execCalls = [];
 const execMock = mock(() => {
   throw new Error('exec should be called through promisify');
-});
-const unusedChildProcessMock = mock(() => {
-  throw new Error('unexpected child process invocation');
 });
 
 execMock[promisify.custom] = (command, options) => {
@@ -19,9 +17,8 @@ execMock[promisify.custom] = (command, options) => {
 };
 
 mock.module('child_process', () => ({
+  ...childProcess,
   exec: execMock,
-  execFile: unusedChildProcessMock,
-  spawn: unusedChildProcessMock,
 }));
 
 mock.module('vscode', () => ({

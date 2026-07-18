@@ -170,7 +170,7 @@ const parseDiscoveryOutput = (stdout) => {
   };
 };
 
-class GitContextResolver {
+export class GitContextResolver {
   constructor({
     runGit,
     realpath = fs.promises.realpath,

@@ -172,6 +172,31 @@ Local hardening validation:
 - [x] Run both smoke/representative orders and the reverse-order 30,000-caller wave profile with all three targets.
 - [x] Supersede two-target evidence with three-column Markdown tables and explicit shell-hook/tiny-fixture caveats.
 
+## Phase 6 — shared web/VS Code Git execution core
+
+### Planning closure
+
+- [x] Re-read repository rules, change-discipline skill, package/module documentation, canonical plans, latest handover, manifests, TypeScript configs, and current consumers.
+- [x] Inventory both resolver/coordinator/error implementations, package-local classification tables, runtime/service adapters, tests, performance loaders, and Electron/mobile/UI boundaries.
+- [x] Identify implementation drift: falsy-rejection settlement, runtime validation/type differences, error recognition/details shape, internal idle representation, and unequal test coverage.
+- [x] Select the smallest package-safe ownership: canonical ESM under the existing published web server paths, sidecar declarations, and bundled VS Code re-export facades with no dependency or generated copy.
+- [x] Keep service/owner operation classifications runtime-specific because their operation names, profile domains, fallbacks, and background ownership differ.
+- [x] Define behavioral compatibility, work packages, exact expected files, cumulative validation, stop conditions, and the separate implementation/publication boundary in Phase 6 artifacts.
+- [x] Correct the stale canonical status that described shared-core planning as unrequested/unstarted.
+
+### Source implementation — complete locally
+
+- [x] Reconfirm existing-PR provenance and run unchanged focused web/VS Code/shared-harness baselines.
+- [x] Add sidecar declarations and explicit class exports for canonical web errors/resolver/coordinator modules.
+- [x] Reconcile canonical settlement with an explicit success sentinel and add falsy-rejection cleanup regressions without changing scheduler defaults or public contracts.
+- [x] Replace the three VS Code implementation copies with explicit typed re-export facades.
+- [x] Preserve package-local runtime/service adapters, operation inventories, fallbacks, and direct-owner checks.
+- [x] Update execution-harness provenance terminology/assertions while retaining both loader paths and real-Git contracts.
+- [x] Update web/VS Code owning documentation to implemented shared-core truth.
+- [x] Run focused tests, real-Git smoke, syntax/type/lint, affected builds, package-content inspection, docs validation, dead-code inspection, and diff checks.
+- [x] Record exact results and remaining risks in canonical Phase 6 state.
+- [ ] Commit/push/update PR #2276 only under separate explicit publication authorization and after final provenance/PR-body sync.
+
 ## Blocked ideas
 
 - [ ] Completed-result caching/SnapshotStore remains blocked until authoritative external Git invalidation exists.

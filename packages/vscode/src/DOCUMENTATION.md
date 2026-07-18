@@ -23,10 +23,15 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - It is called directly only by context discovery and by tasks that already own a classified lease.
 
 - `git-context-resolver.ts`
-  - Resolves canonical Git common/worktree identities through bounded, dependency-injected raw discovery.
+  - Thin typed facade over the canonical web-owned runtime-neutral resolver.
+  - Preserves the extension's existing import path while esbuild bundles the shared implementation.
 
 - `git-execution-coordinator.ts`
-  - Owns process-local read/write/topology conflicts, fairness, network capacity, clone reservations, generations, status coalescing, bounds, and cleanup.
+  - Thin typed facade over the canonical web-owned runtime-neutral coordinator.
+  - Each extension host still creates its own process-local state, limits, queues, generations, and clone reservations.
+
+- `git-execution-errors.ts`
+  - Thin typed facade over canonical stable-code execution errors and guards.
 
 - `git-operation-classification.ts`
   - Closed machine-checked inventory for every imported function export from `gitService.ts` and every direct extension-host Git owner/bypass.
@@ -91,7 +96,7 @@ When adding new bridge route families:
 
 ### Ownership and identity
 
-The VS Code bridge does not import web-server Git modules. Its execution boundary is package-local because the extension host is a distinct runtime.
+The VS Code bridge does not import web Git services, routes, command primitives, or runtime adapters. The three `git-context-resolver.ts`, `git-execution-coordinator.ts`, and `git-execution-errors.ts` facades explicitly re-export only the runtime-neutral canonical core from `packages/web/server/lib/git/`. The existing extension build bundles that source into `dist/extension.js`; there is no runtime `@openchamber/web` dependency. The extension host remains a distinct process-local execution boundary with package-local service/classification/fallback ownership.
 
 `bridge-git-runtime.ts` reaches Git only through `git-execution-service.ts`. The facade resolves identity and acquires a lease before calling the existing service core. The core may then use VS Code's built-in Repository API or raw Git fallback without leaving that lease. Validation, fallback, recovery, and cleanup are therefore one compound operation rather than separately admitted subprocesses.
 
@@ -130,6 +135,7 @@ Only raw subprocesses inside classified reads receive operation-local `GIT_OPTIO
 Both extension-host built-in Repository operations and raw Git subprocesses inherit Git's system, global, and repository-local configuration unchanged, including a manually configured `core.fsmonitor`. OpenChamber does not read, write, override, cache, probe, or expose that value, inject `-c core.fsmonitor`, or run `git fsmonitor--daemon` lifecycle or health commands. Git itself handles `core.fsmonitor=true` or invokes the configured pathname as an fsmonitor hook. The raw production-path regression uses `runRawObservation` with a real repository and hook to cover discovery, scheduling, `GIT_OPTIONAL_LOCKS=0`, invocation, unchanged configuration, and drained runtime state.
 
 Queued work can be cancelled or time out before admission. A running built-in VS Code Repository API promise cannot be reliably cancelled; once admitted, its lease remains held until the promise settles. Cancelling one status waiter does not cancel shared work or other waiters.
+Operation and clone settlement preserves every Promise rejection reason, including falsy values, while releasing all owned queue/network/destination capacity.
 
 ### Background worktree work
 
@@ -150,7 +156,7 @@ The closed operation inventory is executable: every real imported `gitService.ts
 
 Seeded coordinator coverage drives a pathological 30,000-caller fan-out across 200 common contexts and 300 worktrees. It is a correctness/coalescing guard, not a model of 30,000 simultaneously active session entities. It asserts exact completion, mutation, and network counts; generation movement; resolver/coordinator cleanup; every configured bound; and the absence of session-derived identities. Deterministic writer and topology-barrier fairness remain independently tested so scale coverage does not substitute for ordering guarantees.
 
-Phase 4 schema v2 models the requested 30,000 session entities, zero-work entity mapping, startup callers, pathological fan-out waiters, coordinator API submissions, underlying scheduled operations, and Git commands as distinct dimensions. It records every waiter's observed total latency separately from underlying task queue/service/total latency. Real Git runs through the web coordinator/resolver against executable disposable-fixture safety guards; the VS Code modules receive identical deterministic parity assertions only. The harness never imports the built-in VS Code Git API outside Extension Host.
+Phase 4 schema v2 models the requested 30,000 session entities, zero-work entity mapping, startup callers, pathological fan-out waiters, coordinator API submissions, underlying scheduled operations, and Git commands as distinct dimensions. It records every waiter's observed total latency separately from underlying task queue/service/total latency. Real Git runs through the canonical web coordinator/resolver against executable disposable-fixture safety guards. Deterministic checks load the same core through web-direct and VS Code-adapter paths, assert shared runtime identity, and replay the pure fixture through both. The harness never imports the built-in VS Code Git API outside Extension Host.
 
 ### Compatibility
 

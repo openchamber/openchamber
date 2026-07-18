@@ -264,9 +264,23 @@ test('reduced target preserves entity mapping, scenario, waiter, and command dim
   assert.equal(report.safety.evidence.childEnvironmentChecksEqualGitCommands, true);
 });
 
-test('web and VS Code pure coordinator fixtures remain deterministic peers', async () => {
+test('VS Code adapters re-export the canonical web execution core', async () => {
   const parity = await runCoordinatorParityAssertions();
   assert.equal(parity.equal, true);
+  assert.deepEqual(parity.sharedImplementation, {
+    coordinatorClass: true,
+    coordinatorFactory: true,
+    operationKinds: true,
+    readOnlyEnvironment: true,
+    resolverClass: true,
+    resolverFactory: true,
+    errorCodes: true,
+    errorGuard: true,
+    cancelledError: true,
+    overloadedError: true,
+    queueTimeoutError: true,
+    reentrancyError: true,
+  });
   assert.deepEqual(parity.web, parity.vscode);
 });
 

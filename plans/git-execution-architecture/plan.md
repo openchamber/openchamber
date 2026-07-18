@@ -2,10 +2,10 @@
 
 ## Status
 
-- Completed phases: Phase 1 — bounded process-local execution; Phase 2 — web/server migration plus verification/review closure; Phase 3 — VS Code extension-host Git execution parity.
-- Active phase: none. Phase 5 completed the exact pre-architecture/current/current+fsmonitor web Git service comparison. The proposed shared web/VS Code production module remains intentionally unstarted until the user requests the next task.
+- Completed phases: Phase 1 — bounded process-local execution; Phase 2 — web/server migration plus verification/review closure; Phase 3 — VS Code extension-host Git execution parity; Phase 4 — real-Git execution harness; Phase 5 — exact pre-architecture/current/current+fsmonitor web Git service comparison.
+- Active phase: none. Phase 6 shared web/VS Code Git execution core consolidation is locally complete and validated; publication has not started.
 - Branch context supplied by the orchestrator: `feat/2233-git-execution`, based on PR #2232 head.
-- Production source, dependencies, UI changes, conflict resolution, and `../opencode` remain outside this work package. The user separately authorized publication of the benchmark follow-up on the existing PR branch.
+- Phase 6 changes only the approved shared core, VS Code facades, focused tests/harness, owning docs, and canonical plan state. Dependencies, package manifests, UI/public API behavior, conflict resolution, commits, pushes, PR mutation, and `../opencode` remain outside this work package.
 
 ## Why the original issue design was rejected
 
@@ -138,12 +138,26 @@ The focused harness passes 12/12, and harness type-check/lint pass. `pr-real`, t
 
 Phase 5 completed on 2026-07-18 and its three-way follow-up supersedes the earlier two-target evidence. Both representative run orders passed with 1,667 correctness checks before/after and 1,874 after+fsmonitor, exact topology/cardinality, zero unclassified launches, and cleanup. Top-level Git launches were 7,320 before versus 5,760 after and after+fsmonitor (21.311% fewer); measured duration ranges were 15,988.804–16,281.249ms, 22,563.860–22,643.539ms, and 23,655.630–24,087.816ms respectively. The third target preserved manual config and recorded exactly 1,860 protocol-v2 hook invocations in each order. The separately labeled 30,000-caller/600-caller-wave profile passed 61,668 checks before/after and 61,875 after+fsmonitor: 919,602.404ms / 34,040.489ms / 37,616.044ms, 217,320 / 7,560 / 7,560 top-level Git launches, and 17,221.023ms / 236.764ms / 247.857ms fan-out p95. The deterministic shell hook adds process overhead on this tiny-per-repository fixture, so no universal fsmonitor speedup is claimed. Raw reports remain local and uncommitted.
 
+### Phase 6 — complete: shared web/VS Code Git execution core
+
+- Keep the existing web ESM resolver, coordinator, and structured-error paths as the canonical runtime-neutral implementation so the unbundled published web server continues to include and execute them directly.
+- Add sidecar TypeScript declarations and replace the three VS Code implementation copies with thin explicit re-export facades. The existing VS Code esbuild step bundles the canonical source; no package dependency, generated copy, or server build step is added.
+- Preserve package-local service adapters, operation/owner inventories, built-in/raw fallback behavior, background worktree scheduling, command primitives, route/bridge envelopes, and compatibility fallbacks.
+- Reconcile known implementation drift before deleting a copy. In particular, canonical settlement must preserve every Promise rejection reason, including falsy values, while retaining the web runtime's argument and identity validation.
+- Update deterministic harness terminology from independent web/VS Code parity to web-direct/VS Code-adapter provenance while retaining both loader paths and all existing real-Git safety/accounting contracts.
+- Keep duplicate package tests for the first extraction as cross-runtime adapter/build evidence even though production resolver/coordinator/error logic becomes singular.
+
+Phase 6 completed locally on 2026-07-18. The existing web ESM files are now the single resolver/coordinator/error implementation with strict declaration sidecars; the VS Code paths are explicit typed re-export facades bundled into the extension. Runtime-specific adapters/classifications remain separate. Canonical settlement now preserves falsy rejection reasons, and the harness blocks on shared class/factory/constant/error identity before replaying both import paths. Web focused tests passed 108/108 plus 5/5 routes; VS Code focused tests passed 42/42 and its full suite passed 89/89 with 865 expectations; the performance harness passed 12/12 and `pr-real` passed with 31 Git commands, zero unexpected errors/timeouts, and cleanup. Workspace type-check/lint, affected builds, package inspection, docs validation, syntax/diff checks, and non-blocking dead-code inspection passed or matched the documented result. No dependency, manifest, UI/public API, generated source, commit, push, or PR body changed.
+
+The detailed scope, implementation, and exact validation are in [`phases/phase-6.md`](./phases/phase-6.md), [`implementation/phase-6-impl.md`](./implementation/phase-6-impl.md), and the latest handover.
+
 ## Stop conditions
 
 - Do not claim cross-process serialization.
 - Do not add completed-result caching without an authoritative external invalidation source.
 - Block the next phase if deterministic cleanup, fairness, route compatibility, or focused service tests are not green.
 - Do not change production scheduler/service behavior, add telemetry hooks, or make single-host absolute latency PR-blocking in Phase 4.
+- Do not introduce a new workspace package, package dependency, generated source copy, or public execution API to share the Phase 6 core without separately approved scope.
 
 ## Phase 2 entry conditions (satisfied)
 

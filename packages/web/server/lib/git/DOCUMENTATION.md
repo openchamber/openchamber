@@ -8,10 +8,11 @@ This module provides Git repository operations for the web server runtime, inclu
   - `index.js`: Public API entry point imported by `packages/web/server/index.js`.
   - `routes.js`: Express route registration for `/api/git/*` endpoints.
   - `service.js`: Core Git operations (repository, branch, worktree, commit, merge/rebase, status/diff, log).
-  - `context-resolver.js`: Canonical, injected, bounded repository/worktree identity discovery.
-  - `execution-coordinator.js`: Bounded process-local conflict scheduling and in-flight status coalescing.
-  - `execution-errors.js`: Structured internal overload, cancellation, queue-timeout, and re-entry errors.
-  - `operation-classification.js`: Closed resource and runtime-owner classification for every exported service operation and owned web-server Git path.
+  - `context-resolver.js`: Canonical, injected, bounded repository/worktree identity discovery shared with the VS Code extension host.
+  - `execution-coordinator.js`: Canonical bounded process-local conflict scheduling and in-flight status coalescing shared with the VS Code extension host.
+  - `execution-errors.js`: Canonical structured internal overload, cancellation, queue-timeout, and re-entry errors.
+  - matching `.d.ts` files: Strict shared contracts consumed by the VS Code TypeScript build without adding a web-server compilation step.
+  - `operation-classification.js`: Web-local closed resource and runtime-owner classification for every exported service operation and owned web-server Git path.
   - `credentials.js`: Git credentials management.
   - `identity-storage.js`: Git identity (user.name, user.email) storage.
 
@@ -107,6 +108,8 @@ The following functions are internal helpers used by exported functions:
 
 This is a **process-local** coordinator. It prevents unsafe overlap among calls handled by one OpenChamber server process, while Git's own lock files remain authoritative across other processes. It does not claim cross-process serialization.
 
+The resolver, coordinator, and execution-error implementations in this directory are the runtime-neutral canonical core for both web/Electron and VS Code. VS Code keeps thin typed modules at its existing import paths that explicitly re-export these files; esbuild embeds the shared code in the extension bundle. The extension does not import web services or routes, and each runtime still creates its own process-local resolver/coordinator instances. Service adapters, operation/owner classifications, raw command ownership, fallbacks, and compatibility behavior remain runtime-specific.
+
 Every exported `service.js` operation appears exactly once in `GIT_SERVICE_OPERATION_CLASSIFICATION`; a test compares the table with the source exports. The current closed classification is:
 
 - **Bootstrap discovery:** `resolvePrimaryWorktreeRoot`, `resolveWorktreeTopLevel`, `isGitRepository`, and `validateWorktreeDirectory`.
@@ -174,6 +177,7 @@ No map or queue is keyed by session identity. Active/pending entries clean up on
 - Full work may satisfy a light waiter using a light response projection. Light work never satisfies a full waiter.
 - Failed work is removed and never cached. Cancelling one status waiter rejects only that waiter and does not cancel shared work.
 - General execution cancellation can remove queued work. Once a mutation starts, the coordinator lets it settle and reports its real result rather than pretending an abort stopped Git safely.
+- Operation and clone settlement distinguishes success with an internal sentinel rather than error truthiness, so even a falsy Promise rejection reason remains a rejection and all owned capacity is released.
 - Successful topology cleanup selectively evicts only retained worktree identities that became stale.
 - There is deliberately no completed-result `SnapshotStore` or watcher. A process-local completed cache cannot safely detect Git changes made by another process.
 
@@ -285,6 +289,7 @@ No new public route error mapping was added. Existing routes keep their existing
 
 ### Testing
 - Resolver/coordinator tests use injected deferred operations so concurrency, fairness, cancellation, operation counts, and map cleanup are deterministic.
+- The web suite is the canonical behavioral suite; the retained VS Code suites execute the same core through its typed adapter paths to cover extension-host type and bundle integration.
 - The synthetic scale tests model a pathological 30,000-caller fan-out across 200 common contexts and 300 worktree identities without spawning 30,000 Git processes. They are correctness/coalescing guards, not a claim that 30,000 session entities are simultaneously active callers.
 - Run focused Git tests and syntax checks, then the package checks required for the touched executable surface.
 - Consider edge cases: non-Git directories, missing remotes, conflict states, concurrent worktree operations.
@@ -311,7 +316,7 @@ bun run test:perf:git
 
 At seed 8755, the default soak plan is fixed at 6,000 logical callers/API submissions. Its 3,279 status callers form 1,869 groups, yielding 4,590 total scheduled operations and 4,754 Git commands. The reviewed command equation is `1 environment + 39 fixture-setup + 6 discovery + 4649 workload + 0 lock-recovery + 59 cleanup = 4754`.
 
-Real Git uses the web coordinator/resolver against disposable local repositories and bare remotes. Deterministic parity uses the same pure fixture against the VS Code coordinator/resolver; the harness never imports the VS Code built-in Git API outside Extension Host.
+Real Git uses the canonical web coordinator/resolver against disposable local repositories and bare remotes. The deterministic shared-core check loads those modules directly and through the VS Code adapter paths, asserts class/factory/constant/error-constructor identity, and then runs the same pure fixture through both paths. The harness never imports the VS Code built-in Git API outside Extension Host.
 
 Reports include seed/profile/config/versions, entity mapping, scenario counters, API/scheduled/Git counts, the immutable soak-plan summary, scheduler and direct-child peaks, CPU/memory/FD/event-loop metrics, generations/errors, child timeout/termination/reap counts, final state, and cleanup. `latency.underlyingScheduledOperations` has queue/service/total samples only for tasks that start; `latency.allWaitersObservedTotalMs` has one exact total sample for every API waiter, including grouped soak callers and all 30,000 pathological callers. Exact plan/runtime sample and cardinality counts, zero normal-profile timeouts, timeout/reap balance, caps, fairness/conflicts, generations, expected errors, drain, bounds/eviction, FD tolerance, submission/direct-child cleanup, and fixture cleanup are blocking.
 
@@ -401,6 +406,6 @@ The full contract and generated-artifact policy live in `plans/git-execution-arc
 ## Explicitly deferred work
 
 1. **Completed-result caching:** remains blocked until an authoritative source can invalidate external Git mutations.
-2. **Additional runtime parity decisions:** VS Code parity is implemented package-locally; any future runtime must either coordinate locally or intentionally delegate to the web server. Shared UI must not gain server execution internals.
+2. **Additional runtime parity decisions:** VS Code shares the runtime-neutral resolver/coordinator/error implementation but retains package-local execution adapters and classifications. Any future runtime must either instantiate the canonical core locally or intentionally delegate to the web server. Shared UI must not gain server execution internals.
 
 Do not claim cross-process ordering and do not add completed-result status caching without authoritative external invalidation.

@@ -30,6 +30,19 @@ const flushMicrotasks = async () => {
   await Promise.resolve();
 };
 
+const expectExactRejection = async (promise, expectedReason) => {
+  let rejected = false;
+  let actualReason;
+  try {
+    await promise;
+  } catch (error) {
+    rejected = true;
+    actualReason = error;
+  }
+  expect(rejected).toBe(true);
+  expect(actualReason).toBe(expectedReason);
+};
+
 describe('GitExecutionCoordinator conflicts and fairness', () => {
   it('blocks same-worktree read/write overlap while unrelated worktrees progress', async () => {
     const coordinator = createGitExecutionCoordinator({ globalConcurrency: 3 });
@@ -265,6 +278,33 @@ describe('GitExecutionCoordinator network resources', () => {
 });
 
 describe('GitExecutionCoordinator bounds and lifecycle', () => {
+  it('preserves falsy rejection reasons and releases operation and clone capacity', async () => {
+    const coordinator = createGitExecutionCoordinator({
+      canonicalizeCloneDestination: async (destination) => destination,
+    });
+    const worktree = context('shared', 'falsy-rejection');
+    const reasons = [undefined, null, false, 0, ''];
+
+    for (const [index, reason] of reasons.entries()) {
+      await expectExactRejection(coordinator.run({
+        context: worktree,
+        kind: GIT_OPERATION_KIND.WORKTREE_WRITE,
+      }, () => Promise.reject(reason)), reason);
+      await expectExactRejection(coordinator.runClone({
+        destination: `/tmp/falsy-rejection-${index}`,
+      }, () => Promise.reject(reason)), reason);
+    }
+
+    expect(coordinator.getStats()).toMatchObject({
+      active: 0,
+      pending: 0,
+      activeNetwork: 0,
+      statusInFlight: 0,
+      clonePending: 0,
+      cloneDestinations: 0,
+    });
+  });
+
   it('rejects a falsy worktree identity at the internal state boundary', () => {
     const coordinator = createGitExecutionCoordinator();
     const state = coordinator.ensureContext('/repos/shared/.git');

@@ -42,6 +42,8 @@ const DEFAULT_GIT_EXECUTION_LIMITS = Object.freeze({
   idlePruneIntervalMs: 1_000,
 });
 
+const NO_EXECUTION_ERROR = Symbol('no-execution-error');
+
 const asPositiveInteger = (value, fallback, name) => {
   const resolved = value ?? fallback;
   if (!Number.isInteger(resolved) || resolved <= 0) {
@@ -163,7 +165,7 @@ const createCloneDestinationState = (destinationId, now) => ({
   lastUsedAt: now,
 });
 
-class GitExecutionCoordinator {
+export class GitExecutionCoordinator {
   constructor({
     globalConcurrency = DEFAULT_GIT_EXECUTION_LIMITS.globalConcurrency,
     readsPerCommonContext = DEFAULT_GIT_EXECUTION_LIMITS.readsPerCommonContext,
@@ -859,7 +861,7 @@ class GitExecutionCoordinator {
     Promise.resolve()
       .then(() => operation.task(lease))
       .then(
-        (value) => this.finishOperation(operation, lease, null, value),
+        (value) => this.finishOperation(operation, lease, NO_EXECUTION_ERROR, value),
         (error) => this.finishOperation(operation, lease, error),
       );
   }
@@ -902,7 +904,7 @@ class GitExecutionCoordinator {
     }
 
     this.bumpGeneration(operation.state, operation.worktree, operation.kind);
-    if (error) {
+    if (error !== NO_EXECUTION_ERROR) {
       operation.reject(error);
     } else {
       operation.resolve(value);
@@ -1107,7 +1109,7 @@ class GitExecutionCoordinator {
     Promise.resolve()
       .then(() => operation.task(lease))
       .then(
-        (value) => this.finishCloneOperation(operation, lease, null, value),
+        (value) => this.finishCloneOperation(operation, lease, NO_EXECUTION_ERROR, value),
         (error) => this.finishCloneOperation(operation, lease, error),
       );
   }
@@ -1125,7 +1127,7 @@ class GitExecutionCoordinator {
     }
     operation.destinationState.activeCount -= 1;
     operation.destinationState.lastUsedAt = this.now();
-    if (error) {
+    if (error !== NO_EXECUTION_ERROR) {
       operation.reject(error);
     } else {
       operation.resolve(value);
