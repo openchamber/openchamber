@@ -13,6 +13,15 @@ let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?:
 let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
 const globalUpsertedSessions: unknown[] = []
+// Default undefined = simulate the server omitting a session from the
+// /session/status response (i.e. authoritative "idle"). `null` simulates a
+// fetch failure (network/HTTP error). A populated object simulates a
+// busy/retry entry.
+let sessionStatusResult:
+  | Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
+  | null
+  | undefined
+  = undefined
 
 const mockScopedClient = {
   permission: {
@@ -102,6 +111,10 @@ mock.module("@/lib/opencode/client", () => ({
       return mockScopedClient
     },
     getDirectory: () => "/test/project",
+    getSessionStatusForDirectory: () => {
+      if (sessionStatusResult === null) return Promise.resolve(null)
+      return Promise.resolve(sessionStatusResult ?? {})
+    },
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -195,6 +208,22 @@ mock.module("./sync-refs", () => ({
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
   },
+  setSyncRefs: () => {},
+  getAllSyncSessions: () => [],
+  getDirectoryState: () => undefined,
+  getSyncChildStores: () => ({ children: new Map(), ensureChild: () => undefined, getChild: () => undefined }),
+  getSyncConfig: () => undefined,
+  subscribeToSyncConfigChanges: () => () => {},
+  emitSyncConfigChanged: () => {},
+  getSyncSessions: () => [],
+  getSyncMessages: () => [],
+  getSyncSessionMaterializationStatus: () => ({
+    hasMessages: false,
+    renderable: false,
+    missingPartMessageIDs: [],
+  }),
+  getSyncParts: () => [],
+  getSyncSessionStatus: () => undefined,
 }))
 
 import { create, type StoreApi } from "zustand"
@@ -890,5 +919,418 @@ describe("dismissOpenQuestionsForSession", () => {
     expect(rejectCalls[0].params.requestID).toBe("q-stale")
     // The stale entry is cleared from the store even though the server reported not-found.
     expect(store.getState().question["session-a"]).toBe(undefined)
+  })
+})
+
+describe("optimisticSend busy-status self-heal watchdog (#2072)", () => {
+  beforeEach(() => {
+    sessionStatusResult = undefined
+  })
+
+  // Mirror the watchdog body without the 4s setTimeout. The watchdog in
+  // `session-actions` does three things and exits:
+  //   1. early-return if the local status is no longer `busy`
+  //   2. fetch the status snapshot (null = preserve)
+  //   3. delegate reconciliation to `applySessionStatusSnapshot` (authoritative)
+  // We replicate those steps directly with the public helper, since the
+  // helper is the single source of truth for the snapshot reconciliation.
+  async function runWatchdog(
+    store: StoreApi<DirectoryStore>,
+    sessionId: string,
+  ): Promise<void> {
+    const current = store.getState().session_status?.[sessionId]
+    if (!current || current.type !== "busy") return
+
+    const { opencodeClient } = await import("@/lib/opencode/client")
+    const snapshot = await opencodeClient.getSessionStatusForDirectory("/test/project")
+    if (snapshot === null) return
+
+    const { applySessionStatusSnapshot } = await import("./sync-context")
+    applySessionStatusSnapshot(
+      store,
+      snapshot as Parameters<typeof applySessionStatusSnapshot>[1],
+      [sessionId],
+      "authoritative",
+    )
+  }
+
+  test("clears wedged busy status when the server reports the session idle (absent from snapshot)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // Simulate the wedge: optimisticSend finished, but the SSE idle event
+    // never landed so the local store is stuck on `busy`.
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    // Server snapshot: empty (no active sessions) — the missing entry means
+    // "session-watchdog is idle per the server".
+    sessionStatusResult = {}
+
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("busy")
+    await runWatchdog(targetStore, "session-watchdog")
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("idle")
+  })
+
+  test("clears wedged busy status when the server explicitly returns { type: 'idle' }", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = { "session-watchdog": { type: "idle" } }
+
+    await runWatchdog(targetStore, "session-watchdog")
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("idle")
+  })
+
+  test("preserves busy when the server reports the session is still busy", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = { "session-watchdog": { type: "busy" } }
+
+    await runWatchdog(targetStore, "session-watchdog")
+    // AI is genuinely still working — must NOT clobber busy with idle.
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("busy")
+  })
+
+  test("raises busy to retry when the server reports the session is in retry", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = {
+      "session-watchdog": { type: "retry", attempt: 2, message: "rate limited", next: 30 },
+    }
+
+    await runWatchdog(targetStore, "session-watchdog")
+    // The helper confirms the active retry state and RAISES the local entry
+    // from busy → retry (the snapshot is authoritative). The important
+    // invariant is that we never lower to `idle` while the AI is still
+    // working — so the new status must remain a non-idle active state.
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("retry")
+  })
+
+  test("preserves busy when the fetch fails (getSessionStatusForDirectory returns null)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = null
+
+    await runWatchdog(targetStore, "session-watchdog")
+    // Network blip during a long send must not flip us to idle while the
+    // AI is genuinely still working.
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("busy")
+  })
+
+  test("is a no-op when the SSE has already moved status out of busy (e.g. idle)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // SSE idle event landed within the grace window.
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "idle" } },
+    })
+    sessionStatusResult = {}
+    const statusBefore = targetStore.getState().session_status["session-watchdog"]
+
+    await runWatchdog(targetStore, "session-watchdog")
+    // The watchdog early-returns because the current status is not `busy`;
+    // the store entry must be unchanged (referential equality on the slice).
+    expect(targetStore.getState().session_status["session-watchdog"]).toBe(statusBefore)
+  })
+
+  test("is a no-op when the SSE has already moved status out of busy (e.g. retry)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // SSE retry event landed within the grace window. The local store now
+    // reflects an authoritative non-idle state from the server, so the
+    // watchdog should not touch it.
+    targetStore.setState({
+      session_status: {
+        "session-watchdog": { type: "retry", attempt: 1, message: "backing off", next: 5 },
+      },
+    })
+    sessionStatusResult = {}
+    const statusBefore = targetStore.getState().session_status["session-watchdog"]
+
+    await runWatchdog(targetStore, "session-watchdog")
+    expect(targetStore.getState().session_status["session-watchdog"]).toBe(statusBefore)
+  })
+
+  // ---------------------------------------------------------------------
+  // Production-ref-path coverage (#2072 follow-ups)
+  //
+  // The tests above re-implement the watchdog body inline. That guards the
+  // snapshot reconciliation, but it does NOT exercise the production
+  // `_applySessionStatusSnapshot` module-level ref — a regression in
+  // `setApplySessionStatusSnapshot` wiring would slip through. The
+  // following tests use the production `__testRunOptimisticStatusWatchdog`
+  // export and inject a spy via `setApplySessionStatusSnapshot` so the
+  // ref path is covered end-to-end.
+  //
+  // Test-helper design: `__testRunOptimisticStatusWatchdog` is a
+  // test-only export (prefixed `__test`) that calls the same body the
+  // 4s setTimeout would. We choose this over `bun:test`'s fake timers
+  // because the watchdog body is async and re-orders events on the
+  // microtask queue; a 4s setSystemTime jump adds brittleness without
+  // exercising anything the direct call doesn't already cover.
+  // ---------------------------------------------------------------------
+
+  test("invokes the production applySessionStatusSnapshot ref wired by setApplySessionStatusSnapshot", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs, setApplySessionStatusSnapshot, __testRunOptimisticStatusWatchdog } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // Wedged busy so the watchdog will actually try to reconcile.
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = { "session-watchdog": { type: "idle" } }
+
+    // Manual call-recording spy (matches the file's `replyCalls` pattern —
+    // bun:test's `mock` return type does not expose `mock.calls` /
+    // `toHaveBeenCalledTimes` to TypeScript here, and a plain array keeps
+    // the assertion style uniform with the rest of the file).
+    type SnapshotCall = {
+      store: unknown
+      snapshot: Record<string, unknown>
+      candidateSessionIds: string[]
+      mode: "monotonic" | "authoritative"
+    }
+    const calls: SnapshotCall[] = []
+    const spy: Parameters<typeof setApplySessionStatusSnapshot>[0] = (
+      store,
+      snapshot,
+      candidateSessionIds,
+      mode,
+    ) => {
+      calls.push({ store, snapshot, candidateSessionIds, mode })
+      return true
+    }
+    setApplySessionStatusSnapshot(spy)
+
+    try {
+      await __testRunOptimisticStatusWatchdog(targetStore, "session-watchdog", "/target/project")
+    } finally {
+      // Always clear the ref, even on failure, so other test blocks run
+      // in the same module are not contaminated.
+      setApplySessionStatusSnapshot(null)
+    }
+
+    // The production ref MUST have been called with the snapshot, the
+    // candidate list (only this session), and the authoritative mode.
+    expect(calls).toHaveLength(1)
+    const call = calls[0]
+    expect(call.snapshot).toEqual({ "session-watchdog": { type: "idle" } })
+    expect(call.candidateSessionIds).toEqual(["session-watchdog"])
+    expect(call.mode).toBe("authoritative")
+  })
+
+  test("no-ops gracefully when the production applySessionStatusSnapshot ref is null", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs, setApplySessionStatusSnapshot, __testRunOptimisticStatusWatchdog } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    targetStore.setState({
+      session_status: { "session-watchdog": { type: "busy" } },
+    })
+    sessionStatusResult = {}
+
+    // Ensure the ref is null (a previous test may have set it).
+    setApplySessionStatusSnapshot(null)
+
+    // The watchdog body must early-return without throwing when the ref
+    // is null (this is the SyncProvider-unmounted edge case). The
+    // `busy` status is preserved — the next SSE event / poll will recover.
+    await __testRunOptimisticStatusWatchdog(targetStore, "session-watchdog", "/target/project")
+    expect(targetStore.getState().session_status["session-watchdog"]?.type).toBe("busy")
+  })
+
+  test("lowers busy to idle when the candidate is absent from a populated snapshot, without touching other sessions", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs, setApplySessionStatusSnapshot, __testRunOptimisticStatusWatchdog } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // Local state: our candidate is wedged busy, but a *different* session
+    // already has an authoritative busy entry.
+    targetStore.setState({
+      session_status: {
+        "session-watchdog": { type: "busy" },
+        "session-other": { type: "busy" },
+      },
+    })
+    // Server snapshot: only `session-other` is reported (still busy).
+    // `session-watchdog` is absent — i.e. authoritative idle.
+    sessionStatusResult = { "session-other": { type: "busy" } }
+
+    type SnapshotCall = {
+      snapshot: Record<string, unknown>
+      candidateSessionIds: string[]
+    }
+    const calls: SnapshotCall[] = []
+    const spy: Parameters<typeof setApplySessionStatusSnapshot>[0] = (
+      _store,
+      snapshot,
+      candidateSessionIds,
+      // mode is forwarded by the production code; we don't need to assert
+      // it here (the first test in this block already covers that).
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      _mode,
+    ) => {
+      calls.push({ snapshot, candidateSessionIds })
+      return true
+    }
+    setApplySessionStatusSnapshot(spy)
+
+    try {
+      await __testRunOptimisticStatusWatchdog(targetStore, "session-watchdog", "/target/project")
+    } finally {
+      setApplySessionStatusSnapshot(null)
+    }
+
+    // The watchdog targets only `session-watchdog` (the candidate). The
+    // helper is given the full server snapshot and a 1-element candidate
+    // list, so `session-other` is not part of the reconciliation surface.
+    expect(calls).toHaveLength(1)
+    const call = calls[0]
+    expect(call.candidateSessionIds).toEqual(["session-watchdog"])
+    // The snapshot forwarded to the helper still carries `session-other`
+    // — reconciliation decides what to do per candidate, the helper does
+    // not pre-filter.
+    expect(call.snapshot).toEqual({ "session-other": { type: "busy" } })
+  })
+
+  // ---------------------------------------------------------------------
+  // Concurrent watchdog guard (#2072 follow-up)
+  //
+  // A burst of `optimisticSend` calls on the same session must not pile
+  // up pending watchdog timers. We assert the observable signal: the
+  // second send must `clearTimeout` the first one's pending timer so
+  // only one reconciliation fires. The body itself also clears the Map
+  // entry on entry, so we do NOT inspect the Map directly — we use the
+  // `clearTimeout` global as the witness.
+  // ---------------------------------------------------------------------
+
+  test("replaces a pending watchdog instead of stacking when optimisticSend fires twice on the same session", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const { setActionRefs, setOptimisticRefs, optimisticSend } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // Spy on `clearTimeout` so we can observe the replacement. We can't
+    // easily count the watchdogs scheduled without intercepting
+    // `setTimeout` (which the optimistic path also uses internally), so
+    // the presence of a `clearTimeout` call from the watchdog path
+    // between the two sends is the witness.
+    //
+    // We also capture the most recently created watchdog handle via
+    // `setTimeout` spying so we can clean it up in `finally` — otherwise
+    // the 4s timer would fire during teardown and could affect
+    // subsequent tests in the file.
+    const realClearTimeout = globalThis.clearTimeout
+    const realSetTimeout = globalThis.setTimeout
+    const clearedHandles: ReturnType<typeof setTimeout>[] = []
+    let pendingWatchdogHandle: ReturnType<typeof setTimeout> | null = null
+    globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
+      clearedHandles.push(handle)
+      if (handle === pendingWatchdogHandle) pendingWatchdogHandle = null
+      return realClearTimeout(handle)
+    }) as typeof clearTimeout
+    globalThis.setTimeout = ((
+      handler: Parameters<typeof setTimeout>[0],
+      ms?: number,
+      ...args: Parameters<typeof setTimeout> extends [unknown, ...infer Rest] ? Rest : never[]
+    ) => {
+      const handle = realSetTimeout(handler as never, ms as never, ...(args as never))
+      // The watchdog uses OPTIMISTIC_STATUS_WATCHDOG_MS (4_000). Other
+      // setTimeouts in the optimistic path are ms-scale (<= 200). Treat
+      // >= 1000ms as the watchdog.
+      if (typeof ms === "number" && ms >= 1_000) {
+        pendingWatchdogHandle = handle as ReturnType<typeof setTimeout>
+      }
+      return handle as ReturnType<typeof setTimeout>
+    }) as typeof setTimeout
+
+    try {
+      // First send: schedules watchdog #1.
+      await optimisticSend({
+        sessionId: "session-burst",
+        directory: "/target/project",
+        content: "first",
+        providerID: "p",
+        modelID: "m",
+        send: async () => {},
+      })
+      const clearCountAfterFirst = clearedHandles.length
+      const firstHandle = pendingWatchdogHandle
+
+      // Second send: the watchdog guard MUST clearTimeout the first
+      // timer before scheduling the second one.
+      await optimisticSend({
+        sessionId: "session-burst",
+        directory: "/target/project",
+        content: "second",
+        providerID: "p",
+        modelID: "m",
+        send: async () => {},
+      })
+
+      // Exactly one `clearTimeout` for the previous watchdog handle.
+      expect(clearedHandles.length - clearCountAfterFirst).toBe(1)
+      // And it cleared the first watchdog's handle.
+      expect(clearedHandles[clearedHandles.length - 1]).toBe(firstHandle)
+      // The replacement timer is a different handle.
+      expect(pendingWatchdogHandle).not.toBe(firstHandle)
+      expect(targetStore.getState().session_status["session-burst"]?.type).toBe("busy")
+    } finally {
+      // Clean up the still-pending replacement timer so the 4s watchdog
+      // body does not fire during teardown.
+      if (pendingWatchdogHandle) {
+        realClearTimeout(pendingWatchdogHandle)
+        pendingWatchdogHandle = null
+      }
+      globalThis.clearTimeout = realClearTimeout
+      globalThis.setTimeout = realSetTimeout
+    }
   })
 })
