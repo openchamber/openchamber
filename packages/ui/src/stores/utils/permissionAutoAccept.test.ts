@@ -9,6 +9,7 @@ function makeSession(id: string, parentID?: string): Session {
 describe("autoRespondsPermission", () => {
   test("returns false when autoAccept is empty", () => {
     expect(autoRespondsPermission({
+      defaultEnabled: false,
       autoAccept: {},
       sessions: [makeSession("s1")],
       sessionID: "s1",
@@ -18,6 +19,7 @@ describe("autoRespondsPermission", () => {
   test("returns true when session has autoAccept enabled", () => {
     const autoAccept: PermissionAutoAcceptMap = { s1: true }
     expect(autoRespondsPermission({
+      defaultEnabled: false,
       autoAccept,
       sessions: [makeSession("s1")],
       sessionID: "s1",
@@ -27,6 +29,7 @@ describe("autoRespondsPermission", () => {
   test("returns false when session has autoAccept disabled", () => {
     const autoAccept: PermissionAutoAcceptMap = { s1: false }
     expect(autoRespondsPermission({
+      defaultEnabled: false,
       autoAccept,
       sessions: [makeSession("s1")],
       sessionID: "s1",
@@ -40,6 +43,7 @@ describe("autoRespondsPermission", () => {
       makeSession("child", "parent"),
     ]
     expect(autoRespondsPermission({
+      defaultEnabled: false,
       autoAccept,
       sessions,
       sessionID: "child",
@@ -54,6 +58,7 @@ describe("autoRespondsPermission", () => {
       makeSession("child", "parent"),
     ]
     expect(autoRespondsPermission({
+      defaultEnabled: false,
       autoAccept,
       sessions,
       sessionID: "child",
@@ -64,6 +69,7 @@ describe("autoRespondsPermission", () => {
     const parent = makeSession("parent")
     const child = makeSession("child", "parent")
     expect(autoRespondsPermission({
+      defaultEnabled: false,
       autoAccept: { parent: true },
       sessions: [],
       sessionById: new Map([[parent.id, parent], [child.id, child]]),
@@ -79,6 +85,7 @@ describe("autoRespondsPermission", () => {
       makeSession("child", "parent"),
     ]
     expect(autoRespondsPermission({
+      defaultEnabled: false,
       autoAccept,
       sessions,
       sessionID: "child",
@@ -92,18 +99,76 @@ describe("autoRespondsPermission", () => {
       makeSession("child", "parent"),
     ]
     expect(autoRespondsPermission({
+      defaultEnabled: false,
       autoAccept,
       sessions,
       sessionID: "child",
     })).toBe(false)
   })
 
-  test("returns false for unknown session", () => {
-    const autoAccept: PermissionAutoAcceptMap = { s1: true }
+  test("falls back to the global default after a fully resolved lineage with no explicit policy", () => {
     expect(autoRespondsPermission({
-      autoAccept,
+      defaultEnabled: true,
+      autoAccept: {},
+      sessions: [makeSession("root"), makeSession("child", "root")],
+      sessionID: "child",
+    })).toBe(true)
+  })
+
+  test("explicit child disable overrides a true global default", () => {
+    expect(autoRespondsPermission({
+      defaultEnabled: true,
+      autoAccept: { child: false },
+      sessions: [makeSession("root"), makeSession("child", "root")],
+      sessionID: "child",
+    })).toBe(false)
+  })
+
+  test("explicit child enable overrides a false global default", () => {
+    expect(autoRespondsPermission({
+      defaultEnabled: false,
+      autoAccept: { child: true },
+      sessions: [makeSession("root"), makeSession("child", "root")],
+      sessionID: "child",
+    })).toBe(true)
+  })
+
+  test("returns false for an unknown session even when the global default is enabled", () => {
+    expect(autoRespondsPermission({
+      defaultEnabled: true,
+      autoAccept: {},
       sessions: [],
       sessionID: "unknown",
+    })).toBe(false)
+  })
+
+  test("fails closed under a true global default when a cached lineage node is null", () => {
+    expect(autoRespondsPermission({
+      defaultEnabled: true,
+      autoAccept: {},
+      sessions: [],
+      sessionById: new Map([["child", null as unknown as Session]]),
+      sessionID: "child",
+    })).toBe(false)
+  })
+
+  test("fails closed under a true global default when a cached lineage node is an empty object", () => {
+    expect(autoRespondsPermission({
+      defaultEnabled: true,
+      autoAccept: {},
+      sessions: [],
+      sessionById: new Map([["child", {} as Session]]),
+      sessionID: "child",
+    })).toBe(false)
+  })
+
+  test("fails closed under a true global default when a cached lineage node has a mismatched id", () => {
+    expect(autoRespondsPermission({
+      defaultEnabled: true,
+      autoAccept: {},
+      sessions: [],
+      sessionById: new Map([["child", makeSession("other", "root")]]),
+      sessionID: "child",
     })).toBe(false)
   })
 })

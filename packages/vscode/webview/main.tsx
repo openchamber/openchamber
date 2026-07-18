@@ -419,11 +419,23 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     });
   }
 
+  if (normalizedPathname === '/api/permission-auto-accept/default' && method === 'PUT') {
+    const bodyText = await extractBodyText(url, init, method);
+    const body = bodyText ? JSON.parse(bodyText) as { enabled?: unknown } : {};
+    const snapshot = await sendBridgeMessage('api:permission-auto-accept:set-default', {
+      enabled: body.enabled,
+    });
+    return new Response(JSON.stringify(snapshot), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   const permissionPolicyMatch = normalizedPathname.match(/^\/api\/permission-auto-accept\/sessions\/([^/]+)$/);
   if (permissionPolicyMatch && method === 'PUT') {
     const bodyText = await extractBodyText(url, init, method);
     const body = bodyText ? JSON.parse(bodyText) as { enabled?: unknown } : {};
-    const snapshot = await sendBridgeMessage('api:permission-auto-accept:set', {
+    const snapshot = await sendBridgeMessage('api:permission-auto-accept:set-session', {
       sessionId: decodeURIComponent(permissionPolicyMatch[1]),
       enabled: body.enabled,
     });
@@ -1808,9 +1820,13 @@ onCommand('settingsSynced', () => {
 
 onCommand('permissionAutoAcceptSynced', (payload) => {
   if (!payload || typeof payload !== 'object') return;
-  const sessions = (payload as { sessions?: unknown }).sessions;
-  if (!sessions || typeof sessions !== 'object') return;
-  usePermissionStore.getState().applySnapshot({ sessions: sessions as Record<string, boolean> });
+  const snapshot = payload as { default?: unknown; sessions?: unknown };
+  usePermissionStore.getState().applySnapshot({
+    default: snapshot.default === true,
+    sessions: snapshot.sessions && typeof snapshot.sessions === 'object'
+      ? snapshot.sessions as Record<string, boolean>
+      : {},
+  });
 });
 
 // Listen for active editor file changes from the extension

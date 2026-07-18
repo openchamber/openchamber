@@ -129,11 +129,25 @@ describe('settings helpers', () => {
 
     expect(helpers.sanitizeSettingsUpdate({
       permissionAutoAccept: {
+        default: true,
         sessions: { root: true, child: false, invalid: 'true' },
       },
     })).toEqual({
       permissionAutoAccept: {
+        default: true,
         sessions: { root: true, child: false },
+      },
+    });
+
+    expect(helpers.sanitizeSettingsUpdate({
+      permissionAutoAccept: {
+        default: 'yes',
+        sessions: { root: true },
+      },
+    })).toEqual({
+      permissionAutoAccept: {
+        default: false,
+        sessions: { root: true },
       },
     });
   });

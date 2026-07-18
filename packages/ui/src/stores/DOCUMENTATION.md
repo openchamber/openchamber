@@ -50,6 +50,16 @@ Examples:
 
 These stores coordinate persistent project/session metadata across multiple views.
 
+### Runtime policy projection stores
+
+`permissionStore.ts` is a runtime-policy projection, not an authority.
+
+- It mirrors the authoritative permission auto-accept snapshot from the active runtime.
+- It keeps `defaultEnabled` alongside explicit per-session overrides so shared UI can resolve current-session -> ancestor -> global default -> false without writing policy logic into components.
+- It may keep legacy local session overrides only long enough to migrate them into the runtime when the server snapshot is empty.
+- It must not persist a client-owned global `default: true`; hydration and runtime switches must fail closed until the authoritative runtime snapshot arrives.
+- It guards async hydration and mutation writes with runtime identity + generation so an older runtime response cannot restore stale policy after a runtime switch reset.
+
 ## Git / PR Stores
 
 The Git and PR stores are the most important stores to understand before editing this directory.

@@ -178,7 +178,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Sessions',
     group: 'general',
     kind: 'single',
-    keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
+    keywords: ['defaults', 'default agent', 'default model', 'retention', 'permissions', 'auto accept', 'memory', 'limits', 'zen'],
   },
   {
     slug: 'magic-prompts',

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { type OpenCodeManager } from './opencode';
+import { resolvePermissionAutoAcceptStorageIdentity } from './permission-auto-accept-storage-identity';
 import { handleStandardGitBridgeMessage } from './bridge-git-runtime';
 import { handleSpecialGitBridgeMessage } from './bridge-git-special-runtime';
 import { handleFsBridgeMessage } from './bridge-fs-runtime';
@@ -59,6 +60,11 @@ const CLIENT_RELOAD_DELAY_MS = 800;
 const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
 const GITHUB_BACKEND_DISABLED_ERROR = 'OpenChamber VS Code backend GitHub integration is disabled. Use native VS Code GitHub integrations.';
 
+const getPermissionAutoAcceptStorageIdentity = (manager?: OpenCodeManager): string => resolvePermissionAutoAcceptStorageIdentity({
+  manager,
+  configuredApiUrl: vscode.workspace.getConfiguration('openchamber').get<string>('apiUrl') || '',
+});
+
 
 export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeContext): Promise<BridgeResponse> {
   const { id, type, payload } = message;
@@ -72,6 +78,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
           'openchamber.internal.permissionAutoAcceptSynced',
           snapshot,
         ),
+        getStorageIdentity: () => getPermissionAutoAcceptStorageIdentity(ctx?.manager),
       },
     );
     if (permissionAutoAcceptResponse) return permissionAutoAcceptResponse;
