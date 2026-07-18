@@ -118,3 +118,49 @@ export const resolveMenuOpenSessionId = (
   nodes.forEach((node) => visit(node));
   return result;
 };
+
+/**
+ * Right padding reserved on the row button so the absolute hover/focus action
+ * icons (quick-archive, open-in-editor, menu — anchored `right-0`) don't overlap
+ * the row's in-flow content.
+ *
+ * Minimal non-VS Code rows normally reserve only `pr-2`: the inline date/goal
+ * label fades out on hover, so the actions take its place and the title barely
+ * shifts. A pending-permission badge, however, stays opaque at the row's right
+ * edge, so `pr-2` lets the actions overlap it (#2284). When the badge is present,
+ * reserve the room the VS Code minimal two-action layout already uses (`pr-14`)
+ * so the title shrinks and the badge shifts clear of the icons.
+ */
+export const resolveRevealPaddingClass = ({
+  isMinimalMode,
+  isVSCode,
+  showQuickArchiveAction,
+  showOpenInEditorAction,
+  hasPendingPermissionBadge,
+}: {
+  isMinimalMode: boolean;
+  isVSCode: boolean;
+  showQuickArchiveAction: boolean;
+  showOpenInEditorAction: boolean;
+  hasPendingPermissionBadge: boolean;
+}): string => {
+  if (isMinimalMode) {
+    // VS Code minimal rows reveal up to three actions (open-in-editor +
+    // quick-archive + menu, each h-4); open-in-editor is always present there.
+    if (isVSCode) {
+      if (showQuickArchiveAction && showOpenInEditorAction) return 'group-hover:pr-18';
+      if (showQuickArchiveAction || showOpenInEditorAction) return 'group-hover:pr-14';
+      return 'group-hover:pr-8';
+    }
+    if (hasPendingPermissionBadge) return 'group-hover:pr-14 group-focus-within:pr-14';
+    return 'group-hover:pr-2 group-focus-within:pr-2';
+  }
+  if (isVSCode) {
+    if (showQuickArchiveAction && showOpenInEditorAction) return 'group-hover:pr-18';
+    if (showQuickArchiveAction || showOpenInEditorAction) return 'group-hover:pr-12';
+    return 'group-hover:pr-5';
+  }
+  return showQuickArchiveAction
+    ? 'group-hover:pr-12 group-focus-within:pr-12'
+    : 'group-hover:pr-5 group-focus-within:pr-5';
+};
