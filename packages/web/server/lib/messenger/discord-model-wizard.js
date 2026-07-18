@@ -87,16 +87,71 @@ function formatCostPerMillion(value) {
   return `$${rounded}`;
 }
 
+/** Discord-friendly modality icons (select descriptions can't render custom SVGs). */
+const MODALITY_EMOJI = {
+  text: '📝',
+  image: '🖼️',
+  video: '🎬',
+  audio: '🔊',
+  pdf: '📄',
+};
+const MODALITY_ORDER = ['text', 'image', 'video', 'audio', 'pdf'];
+/** Prefer richer modalities for the select-option badge when several are present. */
+const MODALITY_BADGE_PRIORITY = ['image', 'video', 'audio', 'pdf', 'text'];
+
+function normalizeModalityList(values) {
+  if (!Array.isArray(values)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of values) {
+    const key = String(entry ?? '').trim().toLowerCase();
+    if (!key || !MODALITY_EMOJI[key] || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
 /**
- * Build the Discord select-option description for a model: its context window
- * and (when available) per-million-token input/output price — e.g.
- * `200K ctx · in $3/out $15 /Mtok`. Returns '' when the model exposes no
- * usable metadata. Replaces the old `release_date` formatting that showed a
- * confusing bare date under every model name.
+ * Input modalities the model accepts, as emoji icons (📝🖼️🎬🔊📄).
+ * Falls back to image when only the legacy `attachment` flag is set.
+ */
+export function formatModelModalities(model) {
+  if (!model || typeof model !== 'object') return '';
+  const keys = normalizeModalityList(model?.modalities?.input);
+  if (keys.length === 0 && model.attachment === true) {
+    keys.push('image');
+  }
+  return MODALITY_ORDER.filter((key) => keys.includes(key))
+    .map((key) => MODALITY_EMOJI[key])
+    .join('');
+}
+
+/** Single emoji for the Discord select-option `emoji` field (left of the label). */
+export function primaryModalityEmoji(model) {
+  if (!model || typeof model !== 'object') return null;
+  const keys = normalizeModalityList(model?.modalities?.input);
+  if (keys.length === 0 && model.attachment === true) {
+    keys.push('image');
+  }
+  for (const key of MODALITY_BADGE_PRIORITY) {
+    if (keys.includes(key)) return MODALITY_EMOJI[key];
+  }
+  return null;
+}
+
+/**
+ * Build the Discord select-option description for a model: input modalities
+ * (emoji), context window, and (when available) per-million-token input/output
+ * price — e.g. `📝🖼️ · 200K ctx · in $3/out $15 /Mtok`. Returns '' when the
+ * model exposes no usable metadata. Replaces the old `release_date` formatting
+ * that showed a confusing bare date under every model name.
  */
 export function formatModelMeta(model) {
   if (!model || typeof model !== 'object') return '';
   const parts = [];
+  const modalities = formatModelModalities(model);
+  if (modalities) parts.push(modalities);
   const ctx = formatTokensCompact(model?.limit?.context);
   if (ctx) parts.push(`${ctx} ctx`);
   const input = formatCostPerMillion(model?.cost?.input);
@@ -200,13 +255,19 @@ export function createDiscordModelWizard({ restCall, bridge }) {
   }
 
   function modelOptions(models) {
-    return models.map((m) => ({
-      label: (m.label ?? m.name ?? m.id ?? String(m)).slice(0, 100),
-      value: m.value ?? m.id ?? m.name ?? String(m),
-      // Show context window + pricing under the model name (falling back to an
-      // explicit `description` when one is provided, e.g. favourites).
-      description: ((m.description || formatModelMeta(m)) || ' ').slice(0, 100),
-    }));
+    return models.map((m) => {
+      const emojiName = primaryModalityEmoji(m);
+      return {
+        label: (m.label ?? m.name ?? m.id ?? String(m)).slice(0, 100),
+        value: m.value ?? m.id ?? m.name ?? String(m),
+        // Modalities (emoji) + context window + pricing under the model name
+        // (falling back to an explicit `description` when one is provided,
+        // e.g. favourites that already baked provider context in).
+        description: ((m.description || formatModelMeta(m)) || ' ').slice(0, 100),
+        // Discord select options support a single unicode emoji badge.
+        ...(emojiName ? { emoji: { name: emojiName } } : {}),
+      };
+    });
   }
 
   function renderModelSelect(hash, models, page) {
@@ -519,8 +580,11 @@ export function createDiscordModelWizard({ restCall, bridge }) {
         return {
           value: `${providerID}/${modelID}`,
           label: modelID,
-          // Prefer context/pricing, fall back to the provider id for context.
+          // Prefer context/pricing/modalities, fall back to the provider id.
           description: meta || providerID,
+          // Keep modality fields so the select option can show an emoji badge.
+          modalities: model?.modalities,
+          attachment: model?.attachment,
         };
       });
     } else {

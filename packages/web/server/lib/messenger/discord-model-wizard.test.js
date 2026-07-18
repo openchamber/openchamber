@@ -3,6 +3,8 @@ import {
   buildPagedOptions,
   modelsOf,
   formatModelMeta,
+  formatModelModalities,
+  primaryModalityEmoji,
   PAGE_SIZE,
   PAGE_SIZE_WITH_BUTTON_NAV,
   createDiscordModelWizard,
@@ -30,10 +32,38 @@ describe('formatModelMeta', () => {
     );
   });
 
+  it('prefixes modality icons before context and pricing', () => {
+    expect(
+      formatModelMeta({
+        modalities: { input: ['text', 'image'] },
+        limit: { context: 200000 },
+        cost: { input: 3, output: 15 },
+      }),
+    ).toBe('📝🖼️ · 200K ctx · in $3/out $15 /Mtok');
+  });
+
   it('never renders a date and returns empty when no metadata exists', () => {
     expect(formatModelMeta({ release_date: '2024-01-01' })).toBe('');
     expect(formatModelMeta({})).toBe('');
     expect(formatModelMeta(null)).toBe('');
+  });
+});
+
+describe('formatModelModalities / primaryModalityEmoji', () => {
+  it('renders ordered modality emoji for known inputs', () => {
+    expect(formatModelModalities({ modalities: { input: ['pdf', 'text', 'image'] } })).toBe('📝🖼️📄');
+    expect(formatModelModalities({ modalities: { input: ['audio', 'video'] } })).toBe('🎬🔊');
+  });
+
+  it('falls back to image when only the legacy attachment flag is set', () => {
+    expect(formatModelModalities({ attachment: true })).toBe('🖼️');
+    expect(primaryModalityEmoji({ attachment: true })).toBe('🖼️');
+  });
+
+  it('prefers image/video/audio/pdf over text for the select badge', () => {
+    expect(primaryModalityEmoji({ modalities: { input: ['text', 'image'] } })).toBe('🖼️');
+    expect(primaryModalityEmoji({ modalities: { input: ['text'] } })).toBe('📝');
+    expect(primaryModalityEmoji({})).toBe(null);
   });
 });
 
@@ -364,13 +394,19 @@ describe('createDiscordModelWizard flow', () => {
     expect(resends[0]).toMatchObject({ type: 'discord', channelId: 'chan' });
   });
 
-  it('hides models the UI hid and shows context/pricing in the description', async () => {
+  it('hides models the UI hid and shows modalities/context/pricing in the description', async () => {
     const richProviders = [
       {
         id: 'anthropic',
         name: 'Anthropic',
         models: [
-          { id: 'sonnet', name: 'Sonnet', limit: { context: 200000 }, cost: { input: 3, output: 15 } },
+          {
+            id: 'sonnet',
+            name: 'Sonnet',
+            modalities: { input: ['text', 'image'], output: ['text'] },
+            limit: { context: 200000 },
+            cost: { input: 3, output: 15 },
+          },
           { id: 'legacy', name: 'Legacy' },
         ],
       },
@@ -386,9 +422,10 @@ describe('createDiscordModelWizard flow', () => {
 
     await wizard.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['anthropic'] } }, provCustomId);
     const modelOpts = lastSelectOptions(calls.at(-1));
-    // The hidden model is gone; the visible one carries context + pricing.
+    // The hidden model is gone; the visible one carries modalities + context + pricing.
     expect(modelOpts.map((o) => o.value)).toEqual(['sonnet']);
-    expect(modelOpts[0].description).toBe('200K ctx · in $3/out $15 /Mtok');
+    expect(modelOpts[0].description).toBe('📝🖼️ · 200K ctx · in $3/out $15 /Mtok');
+    expect(modelOpts[0].emoji).toEqual({ name: '🖼️' });
   });
 
   it('drops a favourite that the UI hid', async () => {
