@@ -3,16 +3,14 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// readConfig reads merged opencode config layers from disk; mock it so each
-// test controls the provider config without touching the filesystem. call.js
-// imports only readConfig from shared.js, so the rest of that module is left
-// untouched for this file.
+// These helpers read merged OpenCode config layers from disk; mock them so
+// each test controls provider config without touching real configuration.
 vi.mock('../opencode/shared.js', () => ({
   readConfig: vi.fn(),
   readConfigLayers: vi.fn(),
 }));
 
-const { callSmallModel } = await import('./call.js');
+const { callSmallModel, listConfiguredProviderAuthIds } = await import('./call.js');
 const { readConfig, readConfigLayers } = await import('../opencode/shared.js');
 
 // Minimal catalog fragment used by the catalog-based base URL resolution case.
@@ -61,9 +59,40 @@ describe('callSmallModel — custom provider config', () => {
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
     delete process.env.OPENCHAMBER_TEST_PROVIDER_KEY;
+    delete process.env.OPENCHAMBER_MISSING_PROVIDER_KEY;
   });
 
   describe('config-supplied credentials (no auth.json entry)', () => {
+    it('lists only providers whose configured API keys resolve', () => {
+      const secretPath = path.join(os.homedir(), '.provider-key');
+      const originalReadFileSync = fs.readFileSync;
+      vi.spyOn(fs, 'readFileSync').mockImplementation((filePath, ...args) => {
+        if (filePath === secretPath) return 'file-key\n';
+        if (filePath === path.join(os.homedir(), '.missing-provider-key')) {
+          throw new Error('missing');
+        }
+        return originalReadFileSync(filePath, ...args);
+      });
+      process.env.OPENCHAMBER_TEST_PROVIDER_KEY = 'environment-key';
+      delete process.env.OPENCHAMBER_MISSING_PROVIDER_KEY;
+      readConfig.mockReturnValue({
+        provider: {
+          literal: { options: { apiKey: 'literal-key' } },
+          environment: { options: { apiKey: '{env:OPENCHAMBER_TEST_PROVIDER_KEY}' } },
+          file: { options: { apiKey: '{file:~/.provider-key}' } },
+          blank: { options: { apiKey: '   ' } },
+          unresolvedEnvironment: { options: { apiKey: '{env:OPENCHAMBER_MISSING_PROVIDER_KEY}' } },
+          unresolvedFile: { options: { apiKey: '{file:~/.missing-provider-key}' } },
+        },
+      });
+
+      expect(listConfiguredProviderAuthIds('/proj')).toEqual([
+        'literal',
+        'environment',
+        'file',
+      ]);
+    });
+
     it('resolves an OpenCode file variable before sending the API key', async () => {
       const secretPath = path.join(os.homedir(), '.secret');
       const originalReadFileSync = fs.readFileSync;
