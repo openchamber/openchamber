@@ -94,9 +94,12 @@ Packaged Desktop builds include the official OpenCode CLI that matches the pinne
 
 Managed local Desktop startup prefers OpenCode binaries in this order:
 
-1. Explicit overrides: `settings.opencodeBinary`, `OPENCODE_BINARY`, `OPENCODE_PATH`, `OPENCHAMBER_OPENCODE_PATH`, or `OPENCHAMBER_OPENCODE_BIN`.
-2. The bundled Desktop CLI in `process.resourcesPath/opencode-cli`.
-3. System installs discovered from PATH and known npm/Bun/Scoop/Chocolatey locations.
+1. `settings.opencodeBinary`.
+2. Environment overrides: `OPENCODE_BINARY`, `OPENCODE_PATH`, `OPENCHAMBER_OPENCODE_PATH`, or `OPENCHAMBER_OPENCODE_BIN`.
+3. The bundled Desktop CLI in `process.resourcesPath/opencode-cli`.
+4. System installs discovered from PATH.
+5. Known npm/Bun/Homebrew/Scoop/Chocolatey and other standard install locations.
+6. Platform discovery through `where opencode` on Windows or a login shell on macOS/Linux.
 
 Use an explicit override when testing a different OpenCode CLI build or when a user needs to point Desktop at a custom binary. The configured path must point to the standalone CLI, not the OpenCode Desktop app executable.
 
