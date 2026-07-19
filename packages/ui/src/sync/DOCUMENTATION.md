@@ -35,13 +35,15 @@ So:
 
 - Use the **directory sync stores** for per-directory live session/message state
 - Use the **global sessions store** for cold/global session coverage (especially archived pages and unopened directories)
-- Use **aggregated child-store snapshots** for live session/status truth across already initialized directories
+- Use **aggregated child-store sessions and the global live status index** for live truth across initialized directories
 
 ## Ownership map
 
 | Layer / Store | Owns | Scope |
 |---|---|---|
-| child directory stores in `sync-context.tsx` | `session`, `message`, `part`, `permission`, `question`, etc. | One directory |
+| `ChildStoreManager` and child directory stores | Priority-scheduled directory bootstrap plus `session`, `message`, `part`, `permission`, `question`, etc. | One runtime and one store per directory |
+| `SessionMessageLoader` | Initial message loading, pagination, prefetch, retries, load state, and optimistic reconciliation | One runtime, directory, and session ID |
+| `global-session-status.ts` | Incremental non-idle session status index reconciled from events and authoritative directory snapshots | All known directories in the active runtime |
 | `session-ui-store.ts` | Session selection, draft lifecycle, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
 | `useGlobalSessionsStore.ts` | Global active sessions, global archived sessions, `sessionsByDirectory` | All opened project/worktree session lists |
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
@@ -50,6 +52,22 @@ So:
 | `voice-store.ts` | Voice state | App UI state |
 
 ## Session list rules
+
+### Directory bootstrap scheduling
+
+`ChildStoreManager` is the single owner of directory bootstrap scheduling. Consumers publish demand; they must not start bootstrap from row mount effects.
+
+- The scheduler runs at most two directory bootstraps concurrently.
+- Selected session/current directory demand outranks active-project, expanded, visible, and background demand.
+- Demand is deduplicated by normalized directory and can be promoted while queued.
+- The complete known project/worktree set is always published. Collapsed and off-screen directories remain background demand, so they refresh eventually rather than waiting for expansion.
+- A bootstrap holds its scheduler slot through all bootstrap phases and the directory session-list fetch.
+- Reconfiguration and runtime switching invalidate stale generations. A stale completion must not publish state into the new runtime.
+- Failure is recorded as `failed`; it is not converted into a successful empty snapshot. Forced demand can retry failed or completed work.
+
+Bootstrap remains stale-while-revalidate: a directory store may paint persisted sessions immediately, but only a successful authoritative fetch may replace that cached list.
+
+The persisted session snapshot keeps up to 50 sessions selected by `time.updated`/`time.created`, not ID ordering. Successful empty results persist an empty v2 tombstone so legacy data cannot reappear on restart. If localStorage quota prevents the full snapshot, persistence retries with progressively smaller recent snapshots and removes stale current/legacy values rather than leaving an old list indefinitely.
 
 ### Directory-scoped session list
 
@@ -84,7 +102,7 @@ Current consumers:
 - `Header.tsx`
 - agent/session activity surfaces using `useGlobalSessionStatus()` / `useAllSessionStatuses()`
 
-Cross-directory selectors subscribe to the narrow child-store field they aggregate. Session aggregation listens to `state.session`; per-session status listens only to that session's `state.session_status` entry. Unrelated streaming events such as `message.part.delta` must not trigger global session/status scans.
+Cross-directory selectors subscribe to the narrow child-store field they aggregate. Session aggregation listens to `state.session`. Live busy/retry state is also maintained in `global-session-status.ts`, where each row subscribes to one session ID instead of scanning every child store. Events update the index incrementally; authoritative per-directory status snapshots seed it, clear sessions omitted as idle, and reconcile missed events. Unrelated streaming events such as `message.part.delta` must not trigger global session/status scans.
 
 Imperative cross-directory session lookups use the cached ID index from `getAllSyncSessionMap()`. The index is rebuilt only when a child store's `state.session` reference changes; permission lineage checks must reuse it instead of rebuilding a full session map per call.
 
@@ -107,7 +125,28 @@ VS Code does not run the server permission-auto-accept runtime. The extension ho
 
 This keeps cold/global lists responsive without requiring a refetch after every change.
 
-Live activity/status indicators must not depend on this cache. They must derive from aggregated child-store state.
+Live activity/status indicators must not depend on this cache. They must use the event/snapshot-reconciled global live status index.
+
+## Session message loading
+
+`SessionMessageLoader` is the shared authority for session message requests. Navigation, reactive chat loading, sidebar prefetch, pagination, reconnect/recovery, and optimistic reconciliation must delegate to it rather than issuing parallel initial requests.
+
+Rules:
+
+1. Request identity is runtime key + normalized directory + session ID. Session IDs alone are not globally unique across runtimes or directories.
+2. One in-flight request is shared by all callers. Foreground demand may promote the visible load kind of an existing prefetch without starting another request.
+3. Load state is explicit per session: `idle`, `loading`, `ready`, or `error`. Fetch failure preserves prior materialized records and exposes retry; it never becomes authoritative empty success.
+4. Async commits are generation-checked. Runtime switches, forced refreshes, eviction, and disposal must reject stale completion.
+5. Prefetch coverage and persisted directory data are runtime-scoped. Legacy persisted directory entries may seed startup continuity, but they are not live truth.
+6. Message and part materialization preserves references for unchanged records and maintains direct message-to-parts lookup. Consumers subscribe to the selected session's records rather than broad message/part containers.
+
+Initial loads use smaller pages on constrained VS Code/mobile surfaces. Older pages are fetched through the same loader and merged with optimistic records before publication.
+
+## Loading diagnostics
+
+Session loading instrumentation is disabled by default. Set `localStorage.openchamber_session_load_perf` to `"1"`, reproduce the interaction, then inspect `window.__openchamberSessionLoadPerformance.events`.
+
+The bounded event buffer records bootstrap, message, and global-list operations with queue/duration, caller, outcome, retry count, and record count where applicable. Instrumentation is diagnostic only; unit/type/lint checks do not replace production runtime profiling at representative project/session scale.
 
 ## Session action rules
 

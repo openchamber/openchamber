@@ -36,6 +36,7 @@ import { useStreamingStore } from '@/sync/streaming';
 import {
     useSessionMessageCount,
     useSessionMessageRecords,
+    useSessionMessageLoadState,
     useSyncDirectory,
     useDirectorySync,
     useSessionStatus,
@@ -44,7 +45,6 @@ import {
     useParentSession,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
-import { getSessionPrefetch, subscribeSessionPrefetch } from '@/sync/session-prefetch-cache';
 import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
@@ -488,11 +488,12 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
 };
 
 type ChatContainerProps = {
+    active?: boolean;
     autoOpenDraft?: boolean;
     readOnly?: boolean;
 };
 
-export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = true, readOnly = false }) => {
+export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, autoOpenDraft = true, readOnly = false }) => {
     const { t } = useI18n();
     // Session UI state
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -551,22 +552,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     );
     // Messages from sync system
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', effectiveSessionDirectory, {
+        enabled: active,
         suspendPartUpdates: Boolean(streamingMessageId),
         suspendPartUpdatesForMessageId: streamingMessageId,
     });
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
-    const sessionPrefetchInfo = React.useSyncExternalStore(
-        React.useCallback(
-            (notify) => currentSessionId
-                ? subscribeSessionPrefetch(effectiveSessionDirectory, currentSessionId, notify)
-                : () => undefined,
-            [currentSessionId, effectiveSessionDirectory],
-        ),
-        React.useCallback(
-            () => currentSessionId ? getSessionPrefetch(effectiveSessionDirectory, currentSessionId) : undefined,
-            [currentSessionId, effectiveSessionDirectory],
-        ),
-        React.useCallback(() => undefined, []),
+    const sessionMessageLoadState = useSessionMessageLoadState(
+        currentSessionId ?? '',
+        effectiveSessionDirectory,
     );
 
     // Plan detection - watches messages for plan creation and signals store
@@ -643,20 +636,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // History metadata — use sync's hasMore/isLoading
     const historyMeta = React.useMemo(() => {
         if (!currentSessionId) return null;
-        // Sync's meta is authoritative once a fetch has confirmed the history
-        // is fully loaded — a stale prefetch-cache entry (cursor recorded at
-        // the initial page) must not keep the "load older" affordance alive
-        // after the user has already reached the top.
-        const syncComplete = sync.isComplete(currentSessionId);
-        const prefetchHasMore = !syncComplete
-            && Boolean(sessionPrefetchInfo?.cursor)
-            && sessionPrefetchInfo?.complete !== true;
         return {
             limit: sessionMessages.length,
-            complete: syncComplete || !(sync.hasMore(currentSessionId) || prefetchHasMore),
-            loading: sync.isLoading(currentSessionId),
+            complete: sessionMessageLoadState.complete || !sessionMessageLoadState.cursor,
+            loading: sessionMessageLoadState.status === 'loading',
         };
-    }, [currentSessionId, sessionMessages.length, sessionPrefetchInfo, sync]);
+    }, [currentSessionId, sessionMessageLoadState.complete, sessionMessageLoadState.cursor, sessionMessageLoadState.status, sessionMessages.length]);
 
     const { isMobile } = useDeviceInfo();
     const isVSCode = isVSCodeRuntime();
@@ -937,9 +922,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const isSessionHydrating =
         Boolean(currentSessionId)
         && !hasRenderableSessionSnapshot;
+    const retrySessionLoad = React.useCallback(() => {
+        if (!active || !currentSessionId) return;
+        void sync.ensureSessionRenderable(currentSessionId, true, effectiveSessionDirectory);
+    }, [active, currentSessionId, effectiveSessionDirectory, sync]);
 
     React.useEffect(() => {
-        if (!currentSessionId) return;
+        if (!active || !currentSessionId) return;
         if (lastScrolledSessionRef.current === currentSessionId) return;
 
         const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
@@ -958,14 +947,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         } else {
             window.requestAnimationFrame(run);
         }
-    }, [currentSessionId, releaseAutoFollow, restoreSnapshot]);
+    }, [active, currentSessionId, releaseAutoFollow, restoreSnapshot]);
 
     React.useEffect(() => {
-        if (!currentSessionId) return;
+        if (!active || !currentSessionId) return;
         if (hasRenderableSessionSnapshot) return;
         if (effectiveSessionDirectory !== syncDirectory) return;
         void ensureSessionRenderable(currentSessionId);
-    }, [currentSessionId, effectiveSessionDirectory, ensureSessionRenderable, hasRenderableSessionSnapshot, syncDirectory]);
+    }, [active, currentSessionId, effectiveSessionDirectory, ensureSessionRenderable, hasRenderableSessionSnapshot, syncDirectory]);
 
 	if (!currentSessionId && !draftOpen) {
 		// With auto-open, the draft welcome opens on the next tick (effect below),
@@ -1025,6 +1014,28 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }
 
 	if (isSessionHydrating && sessionMessages.length === 0 && !sessionIsWorking) {
+		if (sessionMessageLoadState.status === 'error') {
+			return (
+				<div className="relative flex h-full flex-col bg-background">
+					{returnToParentButton}
+					<div className="flex min-h-0 flex-1 items-center justify-center px-6">
+						<div className="max-w-sm text-center">
+							<div className="mx-auto mb-3 flex size-9 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--status-error)_10%,transparent)] text-[var(--status-error)]">
+								<Icon name="error-warning" className="size-4" />
+							</div>
+							<p className="typography-ui-label font-medium text-foreground">{t('chat.container.sessionLoadError.title')}</p>
+							<p className="typography-meta mt-1 text-muted-foreground">{t('chat.container.sessionLoadError.description')}</p>
+							<Button variant="outline" size="sm" className="mt-4" onClick={retrySessionLoad}>
+								{t('chat.container.sessionLoadError.retry')}
+							</Button>
+						</div>
+					</div>
+					<div className="relative z-10 bg-background">
+						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+					</div>
+				</div>
+			);
+		}
 		return (
 			<div className="relative flex flex-col h-full bg-background">
 				{returnToParentButton}

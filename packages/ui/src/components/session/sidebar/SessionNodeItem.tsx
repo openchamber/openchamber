@@ -319,13 +319,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionDirectory =
     normalizePath((session as Session & { directory?: string | null }).directory ?? null)
     ?? normalizePath(groupDirectory ?? null);
-  // Archived rows are historical and never need live state, yet they point at
-  // dozens of (often deleted) worktrees — bootstrapping each from the sidebar
-  // triggers a pointless session-list fetch + 6×2s empty-retry storm on startup.
-  // Skip bootstrap for archived rows; the store ref is only read on-demand via
-  // getState() in the export handlers (never subscribed). Active rows keep
-  // bootstrapping so live cross-directory session/status still aggregates.
-  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined, { bootstrap: !archivedBucket });
+  // Directory bootstrap is scheduled once at sidebar level. A row only needs
+  // the lightweight store reference for scoped state and export actions.
+  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined, { bootstrap: false });
   const sync = useSync();
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
@@ -368,7 +364,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
-  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
+  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined, { bootstrap: false });
   const sessionGoal = getSessionGoal(resolvedSession);
   const sessionGoalGlyph = sessionGoal ? (
     <span
@@ -409,7 +405,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     let skipped = 0;
     for (const child of children) {
       try {
-        await sync.ensureSessionRenderable(child.session.id);
+        await sync.ensureSessionRenderable(child.session.id, false, sessionDirectory ?? undefined);
         const childRecords = buildSessionMessageRecordsSnapshot(directoryStore.getState(), child.session.id).list;
         const childTitle = child.session.title || t('sessions.sidebar.session.export.untitledSubagent');
         const childAgent = (child.session as Session & { agent?: string }).agent;
@@ -426,7 +422,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       }
     }
     return { children: results, skipped };
-  }, [collectNodeDescendantIds, directoryStore, sync, t]);
+  }, [collectNodeDescendantIds, directoryStore, sessionDirectory, sync, t]);
 
   const showSkippedSubtasksWarning = React.useCallback((count: number) => {
     if (count <= 0) return;
@@ -441,7 +437,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       return;
     }
 
-    await sync.ensureSessionRenderable(session.id);
+    await sync.ensureSessionRenderable(session.id, false, sessionDirectory);
 
     const records = buildSessionMessageRecordsSnapshot(directoryStore.getState(), session.id).list;
     if (records.length === 0) {

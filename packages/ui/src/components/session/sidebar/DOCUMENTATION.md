@@ -10,6 +10,7 @@
 - Archived groups are collapsed by default and support bulk deletion at group/folder level.
 - Session rows support compact inline dates in minimal mode and simplified metadata in default mode.
 - Root session menus can quickly create a worktree from the session directory's current branch and move the full session subtree there while idle.
+- Directory loading is demand-driven: the sidebar publishes one complete priority plan for all known project/worktree directories, while the sync layer owns bounded execution.
 - New extractions in latest pass reduced local effect/callback bulk further:
   - project session list builders
   - folder cleanup sync
@@ -29,8 +30,8 @@
 - `SidebarActivitySections.tsx`: Global top section renderer; currently used for the `recent` section only.
 - `SidebarFooter.tsx`: Static footer with icon-only settings, shortcuts, and about actions.
 - `SidebarProjectsList.tsx`: Main scrollable tree renderer for projects, root sessions, worktrees/groups, and empty/search states.
-- `SessionGroupSection.tsx`: Renders a single worktree/archived group, collapse/expand, folder subtree, and group-level controls.
-- `SessionNodeItem.tsx`: Renders one session row/tree node with inline metadata, menu actions, minimal/default variants, and nested children.
+- `SessionGroupSection.tsx`: Renders a single worktree/archived group, collapse/expand, folder subtree, group-level controls, and explicit loading/error/retry state for empty groups.
+- `SessionNodeItem.tsx`: Renders one session row/tree node with inline metadata, menu actions, minimal/default variants, and nested children. Rows do not initiate directory bootstrap on mount.
 - `ConfirmDialogs.tsx`: Shared confirm dialog wrappers for session delete and folder delete flows.
 - `sortableItems.tsx`: DnD sortable wrappers for project and group ordering plus project-row action affordances.
 - `sessionFolderDnd.tsx`: Folder/session DnD scope and wrappers for dropping/moving sessions into folders.
@@ -40,7 +41,7 @@
 
 - `hooks/useSessionActions.ts`: Centralizes session row actions (select/open, rename, share/unshare, archive/delete, confirmations).
 - `hooks/useSessionSearchEffects.ts`: Handles search open/close UX and input focus behavior.
-- `hooks/useSessionPrefetch.ts`: Prefetches messages for nearby/active sessions to improve perceived load speed.
+- `hooks/useSessionPrefetch.ts`: Publishes directory-aware nearby/active session prefetch demand to the shared message loader. Recent may prefetch across projects without substituting the current directory.
 - `hooks/useSessionGrouping.ts`: Builds grouped session structures and search text/filter helpers.
 - `hooks/useSessionSidebarSections.ts`: Composes final per-project sections and group search metadata for rendering.
 - `hooks/useProjectSessionSelection.ts`: Resolves active/current project-session selection logic and session-directory context.
@@ -56,4 +57,14 @@
 
 - `types.ts`: Shared sidebar types (`SessionNode`, `SessionGroup`, summary/search metadata).
 - `activitySections.ts`: Persisted top-section storage/helpers for the current `recent` session list.
+- `sessionBootstrapDemands.ts`: Builds the deduplicated directory demand plan. Selected directories rank above active projects, expanded groups, visible collapsed groups, and background/collapsed projects.
 - `utils.tsx`: Shared sidebar utilities (path normalization, sorting, dedupe, archived scope keys, project relation checks, text highlight, labels, compact/default date formatting).
+
+## Loading rules
+
+- Always publish every known project root and worktree directory. Collapse/visibility changes priority only; they do not opt a directory out of authoritative refresh.
+- Current directory and selected-session directory are `selected` demand and therefore run first.
+- Expanded projects/worktrees outrank merely visible and background groups.
+- The sync scheduler deduplicates, promotes, retries, and limits work. Sidebar components must not reproduce that lifecycle with mount effects.
+- Hide speculative work when the sidebar/chat surface is hidden: message prefetch and Git/PR enrichment stop, while authoritative directory refresh continues.
+- Empty successful lists, unresolved loads, and failed loads are separate UI states. Failed groups expose Retry and retain prior data.

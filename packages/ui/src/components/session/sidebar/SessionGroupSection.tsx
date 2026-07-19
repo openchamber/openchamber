@@ -36,6 +36,7 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { openExternalUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { useChildStoreManager } from '@/sync/sync-context';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -379,6 +380,19 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   // VS Code always uses the expanded layout (see SessionNodeItem).
   const isMinimalMode = displayMode === 'minimal' && !isVSCodeRuntime();
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
+  const childStores = useChildStoreManager();
+  const bootstrapDirectory = normalizePath(group.directory ?? null);
+  const bootstrapState = React.useSyncExternalStore(
+    React.useCallback(
+      (notify) => bootstrapDirectory ? childStores.subscribeBootstrap(notify) : () => undefined,
+      [bootstrapDirectory, childStores],
+    ),
+    React.useCallback(
+      () => bootstrapDirectory ? childStores.getBootstrapState(bootstrapDirectory) : undefined,
+      [bootstrapDirectory, childStores],
+    ),
+    React.useCallback(() => undefined, []),
+  );
   const maxVisible = hideDirectoryControls ? 10 : 5;
   const nonArchivedVisibleCount = Math.max(maxVisible, visibleSessionCount ?? maxVisible);
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
@@ -1005,6 +1019,31 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         <div className="py-1 text-left typography-micro text-muted-foreground">
           {group.isArchivedBucket
             ? t('sessions.sidebar.group.empty.noArchivedSessions')
+            : bootstrapState === 'queued' || bootstrapState === 'running'
+              ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon name="loader-4" className="size-3 animate-spin" />
+                  {t('sessions.sidebar.group.empty.loadingSessions')}
+                </span>
+              )
+              : bootstrapState === 'failed' && bootstrapDirectory
+                ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    {t('sessions.sidebar.group.empty.loadFailed')}
+                    <button
+                      type="button"
+                      className="text-foreground hover:underline"
+                      onClick={() => childStores.requestBootstrap({
+                        directory: bootstrapDirectory,
+                        priority: isCollapsed ? 'visible' : 'expanded',
+                        reason: group.isMain ? 'project-expanded' : 'worktree-expanded',
+                        force: true,
+                      })}
+                    >
+                      {t('sessions.sidebar.group.empty.retry')}
+                    </button>
+                  </span>
+                )
             : t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
         </div>
       ) : null}

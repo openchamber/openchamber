@@ -48,12 +48,13 @@ export const useTurnRecords = (
 
     const projection = React.useMemo(() => {
         const sessionKey = options.sessionKey ?? '';
-        const cached = getCachedProjection(
+        const cacheKey = buildProjectionCacheKey(
             sessionKey,
             messages,
             options.showTextJustificationActivity,
             options.showTurnChangedFiles,
         );
+        const cached = getCachedProjection(cacheKey);
         if (cached) {
             previousProjectionRef.current = cached;
             return cached;
@@ -67,12 +68,6 @@ export const useTurnRecords = (
             });
             previousProjectionRef.current = nextProjection;
 
-            const cacheKey = buildProjectionCacheKey(
-                sessionKey,
-                messages,
-                options.showTextJustificationActivity,
-                options.showTurnChangedFiles,
-            );
             setCachedProjection(cacheKey, nextProjection);
 
             return nextProjection;

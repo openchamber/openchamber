@@ -1,17 +1,18 @@
 /**
  * Persisted child-store metadata caches.
  *
- * VCS info, project metadata, and icons are cached to localStorage
- * per directory so they survive page reloads.
- * Only metadata is persisted — session/message/part data is always fresh
- * from the server via SSE bootstrap.
+ * VCS info, project metadata, icons, and a bounded session-list snapshot are
+ * cached to localStorage per runtime and directory so they survive reloads.
+ * Message/part data is always loaded from the server.
  */
 
 import type { Session, VcsInfo } from "@opencode-ai/sdk/v2/client"
 import type { ProjectMeta } from "./types"
+import { getRuntimeKey } from "@/lib/runtime-switch"
 
 /** Cap persisted session lists so localStorage stays bounded per directory. */
 const PERSISTED_SESSION_LIMIT = 50
+const SESSION_CACHE_FALLBACK_LIMITS = [PERSISTED_SESSION_LIMIT, 25, 10, 5, 1] as const
 
 // ---------------------------------------------------------------------------
 // Storage key generation
@@ -27,9 +28,15 @@ function hashCode(str: string): string {
   return Math.abs(hash).toString(36)
 }
 
-function storagePrefix(directory: string): string {
+function legacyStoragePrefix(directory: string): string {
   const head = directory.slice(0, 12).replace(/[^a-zA-Z0-9]/g, "_")
   return `oc.dir.${head}.${hashCode(directory)}`
+}
+
+function storagePrefix(directory: string): string {
+  const runtimeKey = getRuntimeKey() || "local"
+  const head = directory.slice(0, 12).replace(/[^a-zA-Z0-9]/g, "_")
+  return `oc.dir.v2.${head}.${hashCode(`${runtimeKey}\0${directory}`)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -42,9 +49,14 @@ function cacheKey(directory: string, key: CacheKey): string {
   return `${storagePrefix(directory)}.${key}`
 }
 
+function legacyCacheKey(directory: string, key: CacheKey): string {
+  return `${legacyStoragePrefix(directory)}.${key}`
+}
+
 function readCache<T>(directory: string, key: CacheKey): T | undefined {
   try {
     const raw = localStorage.getItem(cacheKey(directory, key))
+      ?? localStorage.getItem(legacyCacheKey(directory, key))
     if (!raw) return undefined
     return JSON.parse(raw) as T
   } catch {
@@ -57,12 +69,66 @@ function writeCache<T>(directory: string, key: CacheKey, value: T | undefined): 
     const k = cacheKey(directory, key)
     if (value === undefined) {
       localStorage.removeItem(k)
+      localStorage.removeItem(legacyCacheKey(directory, key))
     } else {
       localStorage.setItem(k, JSON.stringify(value))
+      localStorage.removeItem(legacyCacheKey(directory, key))
     }
   } catch {
     // localStorage quota exceeded — ignore
   }
+}
+
+function sessionRecencyTimestamp(session: Session): number {
+  const updated = session.time?.updated
+  if (typeof updated === "number" && Number.isFinite(updated)) return updated
+  const created = session.time?.created
+  return typeof created === "number" && Number.isFinite(created) ? created : 0
+}
+
+function selectRecentSessions(sessions: Session[], limit: number): Session[] {
+  if (sessions.length <= limit) return sessions
+  const recentIds = new Set(
+    [...sessions]
+      .sort((left, right) => sessionRecencyTimestamp(right) - sessionRecencyTimestamp(left) || right.id.localeCompare(left.id))
+      .slice(0, limit)
+      .map((session) => session.id),
+  )
+  return sessions.filter((session) => recentIds.has(session.id))
+}
+
+function tryWriteCacheValue<T>(key: string, legacyKey: string, value: T): boolean {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+    localStorage.removeItem(legacyKey)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function writeSessionCache(directory: string, sessions: Session[]): void {
+  const key = cacheKey(directory, "sessions")
+  const legacyKey = legacyCacheKey(directory, "sessions")
+  const recentSessions = selectRecentSessions(sessions, PERSISTED_SESSION_LIMIT)
+  if (tryWriteCacheValue(key, legacyKey, recentSessions)) return
+
+  // Replacing a stale value can fail when unrelated localStorage data has
+  // grown. Remove that value and retain as much recent history as still fits.
+  try {
+    localStorage.removeItem(key)
+    localStorage.removeItem(legacyKey)
+  } catch {
+    return
+  }
+
+  for (const limit of SESSION_CACHE_FALLBACK_LIMITS) {
+    const candidate = selectRecentSessions(recentSessions, limit)
+    if (tryWriteCacheValue(key, legacyKey, candidate)) return
+  }
+
+  // An empty v2 value is a tombstone: never resurrect stale legacy sessions.
+  tryWriteCacheValue(key, legacyKey, [])
 }
 
 // ---------------------------------------------------------------------------
@@ -91,15 +157,11 @@ export function readDirCache(directory: string): PersistedDirCache {
  * can paint chats instantly on cold start. Refreshed by bootstrap loadSessions.
  */
 export function persistSessions(directory: string, sessions: Session[] | undefined): void {
-  if (!sessions || sessions.length === 0) {
+  if (!sessions) {
     writeCache(directory, "sessions", undefined)
     return
   }
-  // Keep the most recent N by id (ids are time-ordered hex) to bound storage.
-  const capped = sessions.length > PERSISTED_SESSION_LIMIT
-    ? [...sessions].sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)).slice(0, PERSISTED_SESSION_LIMIT)
-    : sessions
-  writeCache(directory, "sessions", capped)
+  writeSessionCache(directory, sessions)
 }
 
 /** Write vcs info to cache */

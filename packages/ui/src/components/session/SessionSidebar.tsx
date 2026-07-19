@@ -7,7 +7,7 @@ import { isDesktopShell } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useAllLiveSessions } from '@/sync/sync-context';
+import { useAllLiveSessions, useChildStoreManager } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
 import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
@@ -80,6 +80,7 @@ import {
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { buildSessionBootstrapDemands } from './sidebar/sessionBootstrapDemands';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -165,6 +166,7 @@ const useStableRenderCallback = <Args extends unknown[], Return>(handler: (...ar
 };
 
 interface SessionSidebarProps {
+  isVisible?: boolean;
   mobileVariant?: boolean;
   onSessionSelected?: (sessionId: string) => void;
   allowReselect?: boolean;
@@ -173,6 +175,7 @@ interface SessionSidebarProps {
 }
 
 export const SessionSidebar: React.FC<SessionSidebarProps> = ({
+  isVisible = true,
   mobileVariant = false,
   onSessionSelected,
   allowReselect = false,
@@ -315,12 +318,15 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const gitBranches = useGitAllBranches();
 
   const sync = useSync();
+  const childStores = useChildStoreManager();
+  const bootstrapDemandOwner = `session-sidebar:${React.useId()}`;
   const liveSessions = useAllLiveSessions();
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
@@ -970,6 +976,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const refreshPrStatusTargets = useGitHubPrStatusStore((state) => state.refreshTargets);
 
   useProjectRepoStatus({
+    enabled: isVisible,
     normalizedProjects,
     gitRepoStatus,
     setProjectRepoStatus,
@@ -1078,6 +1085,31 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     buildGroupSearchText,
     foldersMap,
   });
+
+  React.useEffect(() => {
+    childStores.setBootstrapDemand(bootstrapDemandOwner, buildSessionBootstrapDemands({
+      projectSections,
+      activeProjectId,
+      collapsedProjects,
+      collapsedGroups,
+      currentDirectory,
+      currentSessionDirectory,
+    }));
+  }, [
+    activeProjectId,
+    bootstrapDemandOwner,
+    childStores,
+    collapsedGroups,
+    collapsedProjects,
+    currentDirectory,
+    currentSessionDirectory,
+    projectSections,
+  ]);
+
+  React.useEffect(
+    () => () => childStores.clearBootstrapDemand(bootstrapDemandOwner),
+    [bootstrapDemandOwner, childStores],
+  );
 
   const searchEmptyState = (
     <div className="py-6 text-center text-muted-foreground">
@@ -1231,17 +1263,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   );
 
 
-  const recentSessionIds = React.useMemo(() => {
-    return new Set(activeNowSessions.map((session) => session.id));
-  }, [activeNowSessions]);
-
-  const recentSessionIdsList = React.useMemo(() => [...recentSessionIds], [recentSessionIds]);
-
   useSessionPrefetch({
+    enabled: isVisible,
     currentSessionId,
     sortedSessions,
-    recentSessionIds: recentSessionIdsList,
-    ensureSessionRenderable: sync.ensureSessionRenderable,
+    recentSessions: activeNowSessions,
+    prefetchSession: sync.prefetchSession,
   });
 
   const sectionsForSidebarRender = React.useMemo(() => {
@@ -1271,7 +1298,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const prVisualSummaryMap = usePrVisualSummaryByKeys(prLookupKeys);
 
   React.useEffect(() => {
-    if (!githubAuthChecked || !githubAuthStatus?.connected || !github) {
+    if (!isVisible || !githubAuthChecked || !githubAuthStatus?.connected || !github) {
       return;
     }
 
@@ -1347,6 +1374,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     github,
     githubAuthChecked,
     githubAuthStatus?.connected,
+    isVisible,
     gitBranches,
     refreshPrStatusTargets,
     sectionsForSidebarRender,

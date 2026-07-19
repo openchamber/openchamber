@@ -7,6 +7,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 type Project = { id: string; path: string; normalizedPath: string };
 
 type Args = {
+  enabled?: boolean;
   normalizedProjects: Project[];
   gitRepoStatus: Map<string, { isGitRepo: boolean | null; branch: string | null }>;
   setProjectRepoStatus: React.Dispatch<React.SetStateAction<Map<string, boolean | null>>>;
@@ -16,6 +17,7 @@ type Args = {
 export const useProjectRepoStatus = (args: Args): void => {
   const {
     normalizedProjects,
+    enabled = true,
     gitRepoStatus,
     setProjectRepoStatus,
     setProjectRootBranches,
@@ -26,7 +28,7 @@ export const useProjectRepoStatus = (args: Args): void => {
 
   // Derive repo status from centralized Git store
   React.useEffect(() => {
-    if (!git || normalizedProjects.length === 0) {
+    if (!enabled || !git || normalizedProjects.length === 0) {
       setProjectRepoStatus(new Map());
       return;
     }
@@ -35,7 +37,7 @@ export const useProjectRepoStatus = (args: Args): void => {
     normalizedProjects.forEach((project) => {
       void ensureStatus(project.normalizedPath, git);
     });
-  }, [normalizedProjects, git, ensureStatus, setProjectRepoStatus]);
+  }, [enabled, normalizedProjects, git, ensureStatus, setProjectRepoStatus]);
 
   // Read isGitRepo from the store-populated state
   React.useEffect(() => {
@@ -77,6 +79,7 @@ export const useProjectRepoStatus = (args: Args): void => {
     // Debounce so the initial burst of per-project `ensureStatus` updates
     // settles into a single resolution pass instead of one pass per project.
     const timer = setTimeout(() => {
+      if (!enabled) return;
       const run = async () => {
         const validIds = new Set(normalizedProjects.map((project) => project.id));
         // Drop bookkeeping for projects that are no longer present.
@@ -168,5 +171,5 @@ export const useProjectRepoStatus = (args: Args): void => {
     // in the deps array since it never changes during the component
     // lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [normalizedProjects, projectGitBranchesKey, gitRepoStatus, setProjectRootBranches]);
+  }, [enabled, normalizedProjects, projectGitBranchesKey, gitRepoStatus, setProjectRootBranches]);
 };

@@ -5,6 +5,7 @@ import { listGlobalSessionPages } from '@/stores/globalSessions';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 import { normalizePath } from '@/lib/pathNormalization';
+import { mapWithConcurrency } from '@/lib/concurrency';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -32,6 +33,24 @@ type GlobalSessionsState = {
 };
 
 const PAGE_SIZE = 500;
+const DIRECTORY_SESSION_REFRESH_CONCURRENCY = 2;
+let directorySessionRefreshActive = 0;
+const directorySessionRefreshWaiters: Array<() => void> = [];
+
+const withDirectorySessionRefreshSlot = async <T>(task: () => Promise<T>): Promise<T> => {
+  if (directorySessionRefreshActive >= DIRECTORY_SESSION_REFRESH_CONCURRENCY) {
+    await new Promise<void>((resolve) => directorySessionRefreshWaiters.push(resolve));
+  } else {
+    directorySessionRefreshActive += 1;
+  }
+  try {
+    return await task();
+  } finally {
+    const next = directorySessionRefreshWaiters.shift();
+    if (next) next();
+    else directorySessionRefreshActive = Math.max(0, directorySessionRefreshActive - 1);
+  }
+};
 
 let inflightLoad: Promise<LoadResult> | null = null;
 // Bumped on runtime switch: an in-flight load from the previous instance must
@@ -211,12 +230,27 @@ const fetchDirectoryPages = async (
   directories: Set<string>,
   archived: boolean,
 ): Promise<DirectoryPageResult> => {
-  const results = await Promise.allSettled(
-    [...directories].map(async (directory) => ({
-      directory,
-      sessions: await listGlobalSessionPages(sdk, { directory, archived, pageSize: PAGE_SIZE }),
-    })),
-  );
+  const currentDirectory = normalizePath(opencodeClient.getDirectory());
+  const orderedDirectories = [...directories].sort((left, right) => {
+    if (left === currentDirectory) return -1;
+    if (right === currentDirectory) return 1;
+    return left.localeCompare(right);
+  });
+  const results = await mapWithConcurrency(orderedDirectories, DIRECTORY_SESSION_REFRESH_CONCURRENCY, async (directory) => {
+    try {
+      return {
+        status: 'fulfilled' as const,
+        value: {
+          directory,
+          sessions: await withDirectorySessionRefreshSlot(() => (
+            listGlobalSessionPages(sdk, { directory, archived, pageSize: PAGE_SIZE })
+          )),
+        },
+      };
+    } catch (reason) {
+      return { status: 'rejected' as const, reason };
+    }
+  });
 
   const fulfilledDirectories = new Set<string>();
   const sessions: Session[] = [];
@@ -376,7 +410,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
 
     const generation = loadGeneration;
-    inflightLoad = (async () => {
+    const loadPromise = (async () => {
       const current = get();
 
       try {
@@ -420,12 +454,17 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
         set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'error'));
         return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
-      } finally {
-        inflightLoad = null;
       }
     })();
 
-    return inflightLoad;
+    inflightLoad = loadPromise;
+    const clearInflightLoad = () => {
+      if (inflightLoad === loadPromise) {
+        inflightLoad = null;
+      }
+    };
+    void loadPromise.then(clearInflightLoad, clearInflightLoad);
+    return loadPromise;
   },
 
   refreshSessionsForDirectories: async (directories, fallbackActive) => {
@@ -435,11 +474,17 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
 
+    const generation = loadGeneration;
     const sdk = opencodeClient.getSdkClient();
     const [active, archived] = await Promise.all([
       fetchDirectoryPages(sdk, directorySet, false),
       fetchDirectoryPages(sdk, directorySet, true),
     ]);
+
+    if (generation !== loadGeneration) {
+      const state = get();
+      return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+    }
 
     if (active.errors.length > 0) {
       console.warn('[GlobalSessions] Failed to refresh active sessions for some directories:', active.errors[0]);

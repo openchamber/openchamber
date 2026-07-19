@@ -50,6 +50,7 @@ function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): b
     const leftPart = left[index]
     const rightPart = right[index]
     if (!leftPart || !rightPart) return false
+    if (leftPart === rightPart) continue
     if (leftPart.id !== rightPart.id) return false
     if (JSON.stringify(leftPart) !== JSON.stringify(rightPart)) return false
   }
@@ -171,7 +172,7 @@ export function materializeSessionSnapshots(
   const messagesChanged = messages !== currentMessages || (existingMessages === undefined && snapshots.length === 0)
 
   let partsChanged = false
-  const nextPartState = { ...state.part }
+  let nextPartState = state.part
   const isPrepend = options.mode === "prepend"
 
   for (const record of snapshots) {
@@ -193,6 +194,8 @@ export function materializeSessionSnapshots(
       ? haveEquivalentPartSnapshots(existing, nextParts)
       : nextParts.length === 0 && !isAssistant
     if (equivalent) continue
+
+    if (nextPartState === state.part) nextPartState = { ...state.part }
 
     if (nextParts.length === 0 && !isAssistant) {
       delete nextPartState[messageID]

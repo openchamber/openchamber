@@ -50,6 +50,16 @@ Examples:
 
 These stores coordinate persistent project/session metadata across multiple views.
 
+`useGlobalSessionsStore.ts` owns cold/global active and archived session coverage, including `sessionsByDirectory`. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
+
+Global refresh rules:
+
+- Per-directory refresh is bounded to two requests across callers and prioritizes the current directory.
+- Each directory is an independent completeness scope. A failed directory preserves its previous sessions while successful directories reconcile normally.
+- Fetch failure must remain distinguishable from a successful empty list; failed scopes cannot destructively clear cached sessions.
+- Runtime switch increments the load generation and clears the previous runtime's snapshot so stale in-flight work cannot commit.
+- Live session mutations update the cache directly after successful SDK actions; they preserve stable directory metadata when lighter event payloads omit it.
+
 ## Git / PR Stores
 
 The Git and PR stores are the most important stores to understand before editing this directory.
@@ -114,6 +124,8 @@ These rules are important. Breaking them tends to reintroduce idle CPU churn, st
 6. Header should not depend on PR store.
 7. Closed sidebar should not create live PR work.
 8. File tree Git status should update only when the file tree is visible.
+9. Global session refresh must remain bounded and failure-isolated per directory.
+10. Global session cache must not drive live activity indicators or message-loading state.
 
 ## Selector Rules
 
