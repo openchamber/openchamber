@@ -19,6 +19,8 @@ const worktreeBootstrapState = new Map<string, { status: 'pending' | 'ready' | '
 const WORKTREE_BOOTSTRAP_PENDING = 'pending' as const;
 const WORKTREE_BOOTSTRAP_READY = 'ready' as const;
 const WORKTREE_BOOTSTRAP_FAILED = 'failed' as const;
+const WORKTREE_INDEX_LOCK_RETRY_DELAY_MS = 250;
+const WORKTREE_INDEX_LOCK_STALE_DELAY_MS = 750;
 
 const toBootstrapStateKey = (directory: string): string => {
   const normalized = normalizeDirectoryPath(directory);
@@ -1025,6 +1027,72 @@ const runGitCommandOrThrow = async (cwd: string, args: string[], fallbackMessage
   return result;
 };
 
+const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const isIndexLockError = (result: GitCommandResult): boolean => {
+  const message = [result?.message, result?.stderr, result?.stdout].filter(Boolean).join('\n');
+  return /index\.lock['"]?: File exists|another git process seems to be running/i.test(message);
+};
+
+const getWorktreeIndexLockPath = async (directory: string): Promise<string | null> => {
+  const result = await runGitCommand(directory, ['rev-parse', '--git-path', 'index.lock']);
+  if (!result.success) {
+    return null;
+  }
+  const value = String(result.stdout || '').trim();
+  return value ? (path.isAbsolute(value) ? value : path.resolve(directory, value)) : null;
+};
+
+const getFileIdentity = async (filePath: string): Promise<string | null> => {
+  try {
+    const stat = await fs.promises.stat(filePath);
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+};
+
+const populateWorktreeWithLockRecovery = async (directory: string): Promise<void> => {
+  let result = await runGitCommand(directory, ['reset', '--hard']);
+  if (result.success) {
+    return;
+  }
+  if (!isIndexLockError(result)) {
+    throw new Error(result.message || 'Failed to populate worktree');
+  }
+
+  await wait(WORKTREE_INDEX_LOCK_RETRY_DELAY_MS);
+  result = await runGitCommand(directory, ['reset', '--hard']);
+  if (result.success) {
+    return;
+  }
+  if (!isIndexLockError(result)) {
+    throw new Error(result.message || 'Failed to populate worktree');
+  }
+
+  const lockPath = await getWorktreeIndexLockPath(directory);
+  const identity = lockPath ? await getFileIdentity(lockPath) : null;
+  await wait(WORKTREE_INDEX_LOCK_STALE_DELAY_MS);
+
+  result = await runGitCommand(directory, ['reset', '--hard']);
+  if (result.success) {
+    return;
+  }
+  if (!isIndexLockError(result) || !lockPath || !identity || await getFileIdentity(lockPath) !== identity) {
+    throw new Error(result.message || 'Failed to populate worktree');
+  }
+
+  await fs.promises.unlink(lockPath).catch((error) => {
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      throw error;
+    }
+  });
+  await runGitCommandOrThrow(directory, ['reset', '--hard'], 'Failed to populate worktree');
+};
+
 const ensureOpenCodeProjectId = async (primaryWorktree: string): Promise<string> => {
   const gitDir = path.join(primaryWorktree, '.git');
   const idFile = path.join(gitDir, 'opencode');
@@ -1419,7 +1487,7 @@ const queueWorktreeBootstrap = (args: {
   } = args;
   setTimeout(() => {
     const run = async () => {
-      await runGitCommandOrThrow(directory, ['reset', '--hard'], 'Failed to populate worktree');
+      await populateWorktreeWithLockRecovery(directory);
       if (setUpstream) {
         await applyUpstreamConfiguration({
           primaryWorktree,

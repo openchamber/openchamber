@@ -24,6 +24,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -1584,12 +1585,15 @@ export function NewWorktreeDialog({
                   <div className="flex items-center gap-2">
                     <DropdownMenu open={existingBranchDropdownOpen} onOpenChange={setExistingBranchDropdownOpen}>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" className="h-9 min-w-[220px] max-w-full justify-between gap-2">
+                        <button
+                          type="button"
+                          className={cn(dropdownTriggerVariants({ size: 'default' }), 'min-w-[220px] max-w-full')}
+                        >
                           <span className={cn('truncate', existingBranchState.selectedBranch ? 'text-foreground' : 'text-muted-foreground')}>
                             {existingBranchState.selectedBranch || t('session.newWorktree.chooseBranch')}
                           </span>
                           <Icon name="arrow-down-s" className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        </Button>
+                        </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start" sideOffset={6} portalToBody className="w-[min(42rem,calc(100vw-2rem))] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden" ref={existingBranchDropdownContentRef}>
                         <Command shouldFilter={false}>
@@ -1825,12 +1829,15 @@ export function NewWorktreeDialog({
                 </label>
                   <DropdownMenu open={sourceBranchDropdownOpen} onOpenChange={setSourceBranchDropdownOpen}>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="h-9 min-w-[220px] max-w-full justify-between gap-2">
+                      <button
+                        type="button"
+                        className={cn(dropdownTriggerVariants({ size: 'default' }), 'min-w-[220px] max-w-full')}
+                      >
                         <span className={cn('truncate', newBranchState.sourceBranch ? 'text-foreground' : 'text-muted-foreground')}>
                             {newBranchState.sourceBranch || t('session.newWorktree.selectSourceBranchPlaceholder')}
                         </span>
                         <Icon name="arrow-down-s" className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      </Button>
+                      </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" portalToBody className="w-[min(42rem,calc(100vw-2rem))] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden" ref={sourceBranchDropdownContentRef}>
                       <Command shouldFilter={false}>

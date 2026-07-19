@@ -27,7 +27,7 @@ These are normal authenticated OpenChamber runtime routes. They must not be adde
 
 `packages/ui/src/stores/permissionStore.ts` is a projection of server policy and does not persist an independent policy. The server is the sole responder and the UI renders pending requests until the authoritative `permission.replied` event arrives.
 
-VS Code retains its foreground-only implementation because it does not run the web server runtime.
+VS Code retains its foreground-only responder because it does not run the web server runtime. Its extension host persists and broadcasts the authoritative policy across webviews, while the active UI handles live events plus startup, reconnect, and enablement reconciliation. With all OpenChamber webviews closed or suspended, permissions are not auto-accepted; this is an intentional VS Code limitation.
 
 ## Tests
 

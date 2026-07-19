@@ -61,6 +61,10 @@ Examples:
 - per-directory session/message bootstrap
 - session/message/part SSE updates
 
+Directory bootstrap must publish a closed session hierarchy: when a child is
+returned before the roots query catches up during cold startup, retain or
+recover its referenced parent instead of exposing an orphan-only snapshot.
+
 ### Global session list
 
 Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
@@ -83,6 +87,8 @@ Current consumers:
 Cross-directory selectors subscribe to the narrow child-store field they aggregate. Session aggregation listens to `state.session`; per-session status listens only to that session's `state.session_status` entry. Unrelated streaming events such as `message.part.delta` must not trigger global session/status scans.
 
 Imperative cross-directory session lookups use the cached ID index from `getAllSyncSessionMap()`. The index is rebuilt only when a child store's `state.session` reference changes; permission lineage checks must reuse it instead of rebuilding a full session map per call.
+
+VS Code does not run the server permission-auto-accept runtime. The extension host persists and broadcasts authoritative policy, while its foreground UI runtime resolves missing child-session lineage through the OpenCode API before deciding whether to suppress and answer a `permission.asked` event. Enabling the policy and reconnect/bootstrap both reconcile pending requests in the session directory, including requests inherited by child sessions. Unknown lineage and exhausted reply retries fail closed and leave the request available for manual action. With every OpenChamber webview closed or suspended no responder runs; this is an intentional VS Code limitation. Other runtimes remain fully server-owned.
 
 ### Mutation responsibility
 

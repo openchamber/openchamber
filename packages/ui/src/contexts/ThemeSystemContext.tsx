@@ -662,16 +662,22 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   );
 
   const setThemeModeHandler = useCallback((mode: ThemeMode) => {
-    setPreferences((prev) => {
-      if (prev.themeMode === mode) {
-        return prev;
-      }
-      return {
-        ...prev,
-        themeMode: mode,
-      };
-    });
-  }, []);
+    if (preferences.themeMode === mode) {
+      return;
+    }
+
+    setPreferences((prev) => ({
+      ...prev,
+      themeMode: mode,
+    }));
+
+    if (!receivesParentThemeSync) {
+      void updateDesktopSettings({
+        themeVariant: mode === 'system' ? currentTheme.metadata.variant : mode,
+        useSystemTheme: mode === 'system',
+      });
+    }
+  }, [currentTheme.metadata.variant, preferences.themeMode, receivesParentThemeSync]);
 
   const setSystemPreferenceHandler = useCallback(
     (use: boolean) => {

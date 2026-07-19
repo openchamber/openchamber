@@ -19,6 +19,46 @@ type ReconnectCandidateOptions = {
   viewedSession?: ViewedSessionMaterializationTarget | null
 }
 
+export function mergeBootstrapSessions(
+  rootSessions: Session[],
+  allSessions: Session[],
+  existingSessions: Session[],
+): { sessions: Session[]; rootCount: number } {
+  const rootIds = new Set(rootSessions.map((session) => session.id))
+  const sessionsById = new Map(existingSessions.map((session) => [session.id, session]))
+  for (const session of allSessions) sessionsById.set(session.id, session)
+  for (const session of rootSessions) sessionsById.set(session.id, session)
+
+  const includedIds = new Set(rootIds)
+  const pendingParentIds: string[] = []
+  for (const session of allSessions) {
+    const parentId = (session as Session & { parentID?: string | null }).parentID
+    if (!parentId) continue
+    includedIds.add(session.id)
+    pendingParentIds.push(parentId)
+  }
+
+  while (pendingParentIds.length > 0) {
+    const parentId = pendingParentIds.pop()
+    if (!parentId || includedIds.has(parentId)) continue
+    const parent = sessionsById.get(parentId)
+    if (!parent) continue
+    includedIds.add(parentId)
+    const ancestorId = (parent as Session & { parentID?: string | null }).parentID
+    if (ancestorId) pendingParentIds.push(ancestorId)
+  }
+
+  const sessions = [...includedIds]
+    .map((id) => sessionsById.get(id))
+    .filter((session): session is Session => Boolean(session))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const rootCount = sessions.reduce((count, session) => (
+    (session as Session & { parentID?: string | null }).parentID ? count : count + 1
+  ), 0)
+
+  return { sessions, rootCount }
+}
+
 export function getReconnectCandidateSessionIds(state: ReconnectMaterializationState, options?: ReconnectCandidateOptions) {
   const ids = new Set<string>()
 

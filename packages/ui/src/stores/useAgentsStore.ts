@@ -39,7 +39,7 @@ const getCurrentDirectory = (): string | null => {
   return null;
 };
 
-const getConfigDirectory = (): string | null => {
+export const getConfigDirectory = (): string | null => {
   try {
     const projectsStore = useProjectsStore.getState();
     const activeProject = projectsStore.getActiveProject?.();

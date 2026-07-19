@@ -52,6 +52,10 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`).
   - Includes Zen utility model parity handler used by shared notification settings (`/api/zen/models`).
 
+- `bridge-permission-auto-accept-runtime.ts`
+  - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
+  - Broadcasts policy snapshots to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.
+
 ## Extension guideline
 
 When adding new bridge route families:

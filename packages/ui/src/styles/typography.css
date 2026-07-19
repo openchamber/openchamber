@@ -10,18 +10,74 @@
 
   .typography-ui-header {
     font-size: var(--text-ui-header);
+    line-height: 1.45;
   }
 
   .typography-ui-label {
     font-size: var(--text-ui-label);
+    line-height: 1.45;
   }
 
   .typography-meta {
     font-size: var(--text-meta);
+    line-height: 1.45;
   }
 
   .typography-micro {
     font-size: var(--text-micro);
+    line-height: 1.45;
+  }
+
+  /*
+   * Settings heading scale (by context):
+   * L1 page title  → typography-settings-page-title (+ text-muted-foreground)
+   * L2 section     → typography-settings-section-title (+ text-foreground)
+   * L3 group       → typography-settings-group-title (+ text-foreground)
+   * L4 field label → typography-settings-field-label (+ text-foreground)
+   * typography-settings-title remains as L2 alias for older call sites.
+   */
+  .typography-settings-page-title {
+    font-size: var(--text-settings-page-title);
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+  }
+
+  .typography-settings-section-title,
+  .typography-settings-title {
+    font-size: var(--text-ui-header);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .typography-settings-group-title {
+    font-size: var(--text-ui-label);
+    font-weight: 500;
+    line-height: 1.2;
+  }
+
+  .typography-settings-field-label {
+    font-size: var(--text-ui-label);
+    font-weight: 400;
+    line-height: 1.2;
+  }
+
+  .typography-settings-description {
+    font-size: var(--text-meta);
+    font-weight: 400;
+    line-height: 1.5;
+  }
+
+  .typography-settings-link {
+    font-size: 0.8125rem; /* 13px */
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--primary-base);
+    transition: color var(--transition-fast, 150ms ease-in-out);
+  }
+
+  .typography-settings-link:hover {
+    text-decoration: underline;
   }
 
   .chat-column {

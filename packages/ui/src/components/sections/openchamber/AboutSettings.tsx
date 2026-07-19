@@ -9,6 +9,11 @@ import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import {
+  SettingsSection,
+  SETTINGS_BRAND_TITLE_CLASS,
+  SETTINGS_FIELD_LABEL_CLASS,
+} from '@/components/sections/shared/SettingsSection';
 
 const GITHUB_URL = 'https://github.com/openchamber/openchamber';
 const DISCORD_URL = 'https://discord.gg/ZYRSdnwwKA';
@@ -125,7 +130,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       <div className="w-full space-y-6 pb-2">
         <div className="flex flex-col items-center text-center">
           <OpenChamberLogo width={72} height={72} />
-          <h2 className="mt-4 typography-ui-header font-semibold text-foreground">OpenChamber</h2>
+          <h2 className={`mt-4 ${SETTINGS_BRAND_TITLE_CLASS}`}>OpenChamber</h2>
           <div className="mt-2 space-y-1 typography-ui text-muted-foreground">
             <p>{t('aboutDialog.openChamberVersionLabel', { version: currentVersion })}</p>
             <p>{t('aboutDialog.openCodeVersionLabel', { version: openCodeVersion || t('settings.openchamber.about.state.unknown') })}</p>
@@ -221,23 +226,17 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     );
   }
 
-  // Desktop layout (redesigned)
+  // Desktop layout
   return (
-    <div className="mb-8">
-      <div className="mb-3 px-1">
-        <h3 className="typography-ui-header font-semibold text-foreground">
-          {t('settings.openchamber.about.title')}
-        </h3>
-      </div>
-
+    <SettingsSection divider={false}>
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
+        <div className="flex flex-col @xl:flex-row @xl:items-center justify-between gap-4 px-4 py-3 border-b border-border/40">
           <div className="flex min-w-0 flex-col">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.about.field.version')}</span>
+            <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.version')}</span>
             <span className="typography-meta text-muted-foreground font-mono">{currentVersion}</span>
           </div>
           <div className="flex min-w-0 flex-col">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.about.field.openCodeVersion')}</span>
+            <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.openCodeVersion')}</span>
             <span className="typography-meta text-muted-foreground font-mono">{openCodeVersion || t('settings.openchamber.about.state.unknown')}</span>
           </div>
           
@@ -274,7 +273,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         </div>
         
         {updateStore.error && (
-          <div className="px-3 py-2 border-b border-[var(--surface-subtle)]">
+          <div className="px-3 py-2 border-b border-border/40">
             <p className="typography-meta text-[var(--status-error)]">{updateStore.error}</p>
           </div>
         )}
@@ -314,6 +313,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         onRestart={updateStore.restartToUpdate}
         runtimeType={updateStore.runtimeType}
       />
-    </div>
+    </SettingsSection>
   );
 };

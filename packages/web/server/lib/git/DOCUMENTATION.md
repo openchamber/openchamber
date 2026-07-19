@@ -122,6 +122,7 @@ The following functions are internal helpers used by exported functions:
 - `directoryCreated`: Present when create returned after the target directory exists while background Git/bootstrap work continues.
 - `bootstrapStatus`: Background setup status, with `pending`, `ready`, or `failed`.
 - Fast-create background failures remove OpenCode sandbox metadata for directories that never became Git worktrees, and remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
+- Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains byte-for-byte and metadata-identical across the retry window, it is treated as stale, removed, and population continues automatically; changing locks are left untouched and reported as failures.
 
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.

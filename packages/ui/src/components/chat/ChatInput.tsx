@@ -1520,12 +1520,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 let previewConsole = 0;
                 let previewAnnotation = 0;
                 let review = 0;
+                let terminal = 0;
                 for (const draft of drafts) {
                     if (draft.source === 'preview-console') previewConsole += 1;
                     else if (draft.source === 'preview-annotation') previewAnnotation += 1;
+                    else if (draft.source === 'terminal') terminal += 1;
                     else review += 1;
                 }
-                return `${previewConsole}:${previewAnnotation}:${review}`;
+                return `${previewConsole}:${previewAnnotation}:${review}:${terminal}`;
             },
             [currentSessionId, newSessionDraftOpen]
         )
@@ -1533,7 +1535,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const removeInlineCommentDraft = useInlineCommentDraftStore((state) => state.removeDraft);
     const hasDrafts = draftCount > 0;
-    const [previewConsoleCount, previewAnnotationCount, reviewCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const [previewConsoleCount, previewAnnotationCount, reviewCount, terminalContextCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const terminalContextDrafts = terminalContextCount > 0
+        ? (useInlineCommentDraftStore.getState().drafts[currentSessionId ?? (newSessionDraftOpen ? 'draft' : '')] ?? []).filter((draft) => draft.source === 'terminal')
+        : [];
     const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation') => {
         const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
         if (!sessionKey) return;
@@ -1550,7 +1555,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!sessionKey) return;
         const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
         for (const draft of drafts) {
-            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation') {
+            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation' && draft.source !== 'terminal') {
                 removeInlineCommentDraft(sessionKey, draft.id);
             }
         }
@@ -2327,6 +2332,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             inputMode,
             sendMessageOptions,
         );
+        const restoreConsumedDrafts = () => {
+            if (sessionKey && drafts.length > 0) {
+                useInlineCommentDraftStore.getState().restoreDrafts(sessionKey, drafts);
+            }
+        };
 
         if (typeof window === 'undefined') {
             scrollToBottom?.();
@@ -2354,6 +2364,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const normalized = rawMessage.toLowerCase();
 
             console.error('Message send failed:', rawMessage || error);
+            restoreConsumedDrafts();
+
+            const currentInput = textareaRef.current?.value ?? messageRef.current;
+            if (newSessionDraftOpen && inputSnapshot.message && (!currentInput || currentInput === inputSnapshot.message)) {
+                setMessage(inputSnapshot.message);
+                saveStoredDraft(null, inputSnapshot.message);
+            }
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
@@ -4644,6 +4661,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
+                        {terminalContextDrafts.map((draft) => (
+                            <div key={draft.id} className="inline-flex max-w-full items-center gap-1.5 rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2.5 py-1" title={draft.code}>
+                                <Icon name="terminal" className="h-3.5 w-3.5" />
+                                <span className="truncate text-xs font-medium text-[var(--surface-mutedForeground)]">
+                                    {t('chat.chatInput.terminalContext', { terminal: draft.fileLabel, start: draft.startLine, end: draft.endLine })}
+                                </span>
+                                <button type="button" className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]" onClick={() => removeInlineCommentDraft(draft.sessionKey, draft.id)} aria-label={t('chat.chatInput.terminalContextRemove')} title={t('chat.chatInput.terminalContextRemove')}>
+                                    <Icon name="close" className="h-3 w-3" />
+                                </button>
+                            </div>
+                        ))}
                         {reviewCount > 0 ? (
                             <div
                                 className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
@@ -4948,7 +4976,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     />
                     <div className="flex items-center gap-2">
                         <div
-                            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1"
+                            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                             style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
                         >
                             <MobileSessionPanelTrigger
@@ -5001,13 +5029,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             already open, letting the pill expand into its place. */}
                         <div
                             className={cn(
-                                'flex-shrink-0 overflow-hidden transition-all duration-200 ease-out',
-                                newSessionDraftOpen ? 'w-0 opacity-0' : 'w-11 opacity-100',
+                                'flex-shrink-0 transition-all duration-200 ease-out',
+                                newSessionDraftOpen ? 'w-0 opacity-0 overflow-hidden' : 'w-11 opacity-100',
                             )}
                         >
                             <button
                                 type="button"
-                                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground"
+                                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                                 style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
                                 onClick={handleMobileNewSession}
                                 disabled={newSessionDraftOpen}
@@ -5038,6 +5066,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         "flex flex-col relative overflow-visible",
                         isComposerExpanded && 'flex-1 min-h-0',
                         "border border-border/80",
+                        "shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]",
                         "focus-within:ring-1",
                         inputMode === 'shell'
                             ? 'focus-within:ring-[var(--status-info)]'

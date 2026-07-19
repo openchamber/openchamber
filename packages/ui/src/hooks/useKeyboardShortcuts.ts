@@ -1,4 +1,5 @@
 import React from 'react';
+import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
@@ -62,17 +63,6 @@ export const useKeyboardShortcuts = () => {
 
   React.useEffect(() => {
     const combo = (actionId: string) => getEffectiveShortcutCombo(actionId, shortcutOverrides);
-    const isTerminalEventTarget = (target: EventTarget | null) => {
-      if (!(target instanceof Element)) {
-        return false;
-      }
-
-      return Boolean(
-        target.closest('.terminal-viewport-container') ||
-        target.getAttribute('data-terminal-hidden-input') === 'true'
-      );
-    };
-
     const dropdownTargetSelector = [
       '[data-slot="dropdown-menu-content"]',
       '[data-slot="select-content"]',
@@ -528,10 +518,7 @@ export const useKeyboardShortcuts = () => {
         const target = e.target as Element | null;
         const isInsideDialog = Boolean(target?.closest('[role="dialog"]'));
         const isSettingsMounted = Boolean(document.querySelector('[data-settings-view="true"]'));
-        const isInsideTerminal = Boolean(
-          target?.closest('.terminal-viewport-container') ||
-          target?.getAttribute('data-terminal-hidden-input') === 'true'
-        );
+        const isInsideTerminal = isTerminalEventTarget(target);
         const hasDropdownInteraction = isDropdownEventTarget(target) || hasOpenDropdown();
 
         const {

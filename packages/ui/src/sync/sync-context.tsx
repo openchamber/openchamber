@@ -27,9 +27,10 @@ import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { applySessionEventToGlobalSessions } from "./session-event-router"
 import { syncDebug } from "./debug"
-import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
+import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { processVSCodePermissionAutoAccept } from "./vscode-permission-auto-accept"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
@@ -39,7 +40,6 @@ import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
-import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { openSessionFromToast } from "./session-navigation"
 import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
@@ -1159,61 +1159,21 @@ export async function resyncBlockingRequestsForDirectory(
       grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     }
 
-    const permissionStore = usePermissionStore.getState()
-    const autoAcceptingSessionIds = isVSCodeRuntime()
-      ? Object.keys(grouped).filter((sessionId) => permissionStore.isSessionAutoAccepting(sessionId))
-      : []
-
-    if (autoAcceptingSessionIds.length > 0) {
+    if (isVSCodeRuntime()) {
       const acceptedIdsBySession = new Map<string, Set<string>>()
-      // Track server-confirmed resolved permissions separately so we can
-      // remove them from `grouped` below — the V1 listPendingPermissions
-      // snapshot can still contain entries the server has already answered,
-      // and leaving them in place produces a spurious "Permission needed"
-      // toast for a permission the user has already resolved.
-      const resolvedIdsBySession = new Map<string, Set<string>>()
-      await Promise.all(autoAcceptingSessionIds.flatMap((sessionId) =>
-        (grouped[sessionId] ?? []).map(async (permission) => {
-          try {
-            // Verify the permission is still pending before auto-accepting.
-            // - state: "ok"        → still pending, safe to auto-accept
-            // - state: "resolved"  → server returned 404, drop from grouped
-            // - state: "unknown"   → network error / pre-1.17.12 server,
-            //                        keep in grouped for the user to act on
-            //
-            // On a pre-v1.17.12 server without the V2 endpoint, every call
-            // returns "unknown". This permanently disables auto-accept
-            // (acknowledged scope tradeoff — project requires SDK 1.17.12)
-            // but does not falsely report permissions as resolved.
-            const outcome = await opencodeClient.fetchPermission(
-              permission.sessionID,
-              permission.id,
-            )
-            if (outcome.state === "ok") {
-              await sessionActions.respondToPermission(permission.sessionID, permission.id, "once")
-              const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
-              accepted.add(permission.id)
-              acceptedIdsBySession.set(sessionId, accepted)
-            } else if (outcome.state === "resolved") {
-              const resolved = resolvedIdsBySession.get(sessionId) ?? new Set<string>()
-              resolved.add(permission.id)
-              resolvedIdsBySession.set(sessionId, resolved)
-            }
-            // state: "unknown" → keep the permission in grouped; user can
-            // answer manually.
-          } catch {
-            // Keep failed auto-accept permissions in UI state so the user can act.
-          }
+      await Promise.all(Object.entries(grouped).flatMap(([sessionId, permissions]) =>
+        permissions.map(async (permission) => {
+          if (!(await processVSCodePermissionAutoAccept(permission, directory))) return
+          const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
+          accepted.add(permission.id)
+          acceptedIdsBySession.set(sessionId, accepted)
         }),
       ))
 
-      for (const sessionId of autoAcceptingSessionIds) {
+      for (const sessionId of Object.keys(grouped)) {
         const acceptedIds = acceptedIdsBySession.get(sessionId)
-        const resolvedIds = resolvedIdsBySession.get(sessionId)
-        if (!acceptedIds && !resolvedIds) continue
-        const drop = (id: string) =>
-          acceptedIds?.has(id) || resolvedIds?.has(id) || false
-        const remaining = (grouped[sessionId] ?? []).filter((permission) => !drop(permission.id))
+        if (!acceptedIds) continue
+        const remaining = (grouped[sessionId] ?? []).filter((permission) => !acceptedIds.has(permission.id))
         if (remaining.length > 0) grouped[sessionId] = remaining
         else delete grouped[sessionId]
       }
@@ -1356,6 +1316,7 @@ function handleEvent(
   payload: Event,
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
+  skipVSCodeAutoAccept = false,
 ) {
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
@@ -1452,12 +1413,15 @@ function handleEvent(
 
   if (payload.type === "permission.asked") {
     const permission = payload.properties as PermissionRequest
-    const permissionStore = usePermissionStore.getState()
-    if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
+    if (isVSCodeRuntime() && !skipVSCodeAutoAccept) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
-      if (isVSCodeRuntime()) {
-        void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
-      }
+      void processVSCodePermissionAutoAccept(permission, resolvedDirectory).then((accepted) => {
+        if (!accepted) handleEvent(rawDirectory, payload, childStores, routingIndex, true)
+      })
+      return
+    }
+    if (!isVSCodeRuntime() && usePermissionStore.getState().isSessionAutoAccepting(permission.sessionID)) {
+      updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       return
     }
 
@@ -1762,7 +1726,6 @@ export function SyncProvider(props: {
 
   // Configure child store manager
   useEffect(() => {
-    if (isVSCodeRuntime()) return
     void usePermissionStore.getState().hydrate().catch(() => undefined)
   }, [props.sdk])
 
@@ -1817,24 +1780,22 @@ export function SyncProvider(props: {
                 // Child load is best-effort; fall back to roots only.
               }
 
-              // Merge: keep root sessions from the first query (for accurate
-              // sessionTotal), plus any child sessions from the broader query.
-              const rootIds = new Set(rootSessions.map((s: { id: string }) => s.id))
-              const childSessions = allSessions.filter((s: { id: string; parentID?: string | null }) => s?.id && !rootIds.has(s.id) && s.parentID)
-
-              const sessions = rootSessions.concat(childSessions)
+              // A cold OpenCode process can briefly return children before its
+              // roots query catches up. Recover referenced parents from the
+              // broader response or cache instead of publishing orphan rows.
+              const currentSessions = store.getState().session
+              const { sessions, rootCount } = mergeBootstrapSessions(rootSessions, allSessions, currentSessions)
               // Race guard: if the list came back empty but event pipeline
               // already populated the store, don't clobber. OpenCode can
               // answer HTTP with empty sessions while WS delivers session
               // events for the same data (disk warmup race on app launch).
-              const currentSessions = store.getState().session
               if (sessions.length === 0 && currentSessions.length > 0) {
                 console.warn(
                   `[bootstrap] experimental.session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
                 )
                 return
               }
-              store.setState({ session: sessions, sessionTotal: rootSessions.length, limit: Math.max(sessions.length, 50) })
+              store.setState({ session: sessions, sessionTotal: rootCount, limit: Math.max(sessions.length, 50) })
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })

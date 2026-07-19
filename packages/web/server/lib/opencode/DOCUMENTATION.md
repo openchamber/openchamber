@@ -123,7 +123,7 @@ This module provides OpenCode server integration utilities for the web server ru
   - `resolveWslExecutablePath()`
   - `buildWslExecArgs(execArgs, distroOverride?)`
   - `isExecutable(filePath)`
-  - `searchPathFor(binaryName)`
+  - `searchPathFor(binaryName, searchPath?)`: resolves an executable from the supplied PATH value, defaulting to the process PATH.
   - `clearResolvedOpenCodeBinary()`
 
 ## Public exports (env-config.js)
