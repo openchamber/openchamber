@@ -81,6 +81,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { buildSessionBootstrapDemands } from './sidebar/sessionBootstrapDemands';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -415,11 +416,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     [liveSessions],
   );
 
+  const runtimeKey = getRuntimeKey();
   const projectWorktreeDiscoveryKey = React.useMemo(
-    () => projects
+    () => `${runtimeKey}|${projects
       .map((project) => `${project.id}:${normalizePath(project.path) ?? ''}`)
-      .join('|'),
-    [projects],
+      .join('|')}`,
+    [projects, runtimeKey],
   );
   const [resolvedWorktreeTopologyKey, setResolvedWorktreeTopologyKey] = React.useState<string | null>(
     isVSCode ? projectWorktreeDiscoveryKey : null,
@@ -440,6 +442,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     let cancelled = false;
 
     const discoverWorktrees = async () => {
+      const discoveryRuntimeKey = runtimeKey;
       const projectEntries = useProjectsStore.getState().projects;
       if (projectEntries.length === 0 || isVSCode) {
         if (!cancelled) {
@@ -494,7 +497,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       });
       await Promise.all(workers);
 
-      if (cancelled) return;
+      if (cancelled || getRuntimeKey() !== discoveryRuntimeKey) return;
 
       const activeProjectPaths = new Set(projectEntries.map((project) => normalizePath(project.path)).filter(Boolean));
       for (const projectPath of worktreesByProject.keys()) {
@@ -520,7 +523,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isVSCode, projectWorktreeDiscoveryKey]);
+  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;

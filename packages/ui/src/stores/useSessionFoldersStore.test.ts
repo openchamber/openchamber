@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 const storage = new Map<string, string>();
 let storageSetCount = 0;
+let runtimeKey = 'runtime-a';
 
 const safeStorage = {
   getItem: (key: string) => storage.get(key) ?? null,
@@ -33,6 +34,7 @@ mock.module('@/lib/desktop', () => ({
 mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: mock(async () => new Response('{}', { headers: { 'Content-Type': 'application/json' } })),
 }));
+mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
 
 const { useSessionFoldersStore } = await import('./useSessionFoldersStore');
 
@@ -42,6 +44,8 @@ describe('useSessionFoldersStore folder assignments', () => {
   beforeEach(() => {
     storage.clear();
     storageSetCount = 0;
+    runtimeKey = 'runtime-a';
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
     useSessionFoldersStore.setState({
       foldersMap: {},
       collapsedFolderIds: new Set<string>(),
@@ -76,5 +80,20 @@ describe('useSessionFoldersStore folder assignments', () => {
 
     expect(useSessionFoldersStore.getState().foldersMap).toBe(before);
     expect(storageSetCount).toBe(0);
+  });
+
+  test('restores independent folder snapshots across runtime switches', async () => {
+    useSessionFoldersStore.getState().createFolder('/workspace/project', 'Runtime A');
+    await waitForPersist();
+
+    runtimeKey = 'runtime-b';
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+    expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project')).toEqual([]);
+    useSessionFoldersStore.getState().createFolder('/workspace/project', 'Runtime B');
+    await waitForPersist();
+
+    runtimeKey = 'runtime-a';
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+    expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project').map((folder) => folder.name)).toEqual(['Runtime A']);
   });
 });
