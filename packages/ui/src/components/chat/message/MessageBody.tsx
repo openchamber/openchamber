@@ -57,7 +57,18 @@ import {
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 
-const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
+// Keep transform: translateZ(0) on the user wrapper: it gives the message body
+// its own GPU compositing layer and confines the trapped z-10 action menus
+// (UserTextPart.tsx, MessageBody.tsx action row) inside a self-contained
+// stacking context where they don't need to escape.
+const USER_CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
+
+// The assistant wrapper must NOT create a stacking context: the action button
+// containers inside it (relative z-30) need to compete with the next turn's
+// sticky user header (z-20) in the shared parent stacking context. Adding
+// `transform: translateZ(0)` here would trap z-30 inside this wrapper and the
+// buttons would be covered by the sticky header again.
+const ASSISTANT_CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const };
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
 const INLINE_MESSAGE_ACTIONS_CLASS_NAME = 'mt-2 mb-1 flex items-center justify-start gap-1.5';
 
@@ -707,7 +718,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
     return (
         <div
             className="relative w-full group/message"
-            style={CONTAIN_LAYOUT_STYLE}
+            style={USER_CONTAIN_LAYOUT_STYLE}
             onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
         >
             <div
@@ -1812,7 +1823,7 @@ const AssistantMessageBody = React.memo(({
                 );
                 if (shouldShowStandaloneMessageActions && i === lastRenderableTextPartIndex) {
                     rendered.push(
-                        <div key={`message-actions-${messageId}`} className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
+                        <div key={`message-actions-${messageId}`} className={cn(INLINE_MESSAGE_ACTIONS_CLASS_NAME, 'relative z-30')} data-message-actions="true">
                             <div className="flex items-center gap-1.5" data-message-action-group="true">
                                 {messageActionButtons}
                             </div>
@@ -2101,7 +2112,7 @@ const AssistantMessageBody = React.memo(({
               className={cn(
                  'relative w-full group/message'
              )}
-              style={CONTAIN_LAYOUT_STYLE}
+              style={ASSISTANT_CONTAIN_LAYOUT_STYLE}
           >
               <TextSelectionMenu containerRef={messageContentRef} />
              {canUseProjectPlanActions ? (
@@ -2156,7 +2167,7 @@ const AssistantMessageBody = React.memo(({
                 </div>
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
                 {shouldRenderStandaloneActionsAfterContent && (
-                    <div className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
+                    <div className={cn(INLINE_MESSAGE_ACTIONS_CLASS_NAME, 'relative z-30')} data-message-actions="true">
                         <div className="flex items-center gap-1.5" data-message-action-group="true">
                             {messageActionButtons}
                         </div>
@@ -2164,7 +2175,7 @@ const AssistantMessageBody = React.memo(({
                 )}
                 {shouldShowTurnFooter && (
                     <div
-                        className="mt-2 mb-1 flex flex-wrap items-center justify-start gap-1.5"
+                        className="mt-2 mb-1 flex flex-wrap items-center justify-start gap-1.5 relative z-30"
                         style={MESSAGE_FOOTER_CONTAINER_STYLE}
                     >
                         <div className="flex items-center gap-1.5" data-message-action-group="true">
