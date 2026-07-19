@@ -18,7 +18,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
+import { useAgentsStore, isAgentBuiltIn, isAgentManageable, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import type { Agent } from '@opencode-ai/sdk/v2';
@@ -324,8 +324,10 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     }
   };
 
-  // Filter out hidden agents (internal agents like title, compaction, summary)
-  const visibleAgents = agents.filter((agent) => !isAgentHidden(agent));
+  // Show agents manageable in Settings: excludes only native internal agents
+  // (title, summary, compaction). User-defined agents are shown even when
+  // `hidden: true` keeps them out of the composer picker (issue #2305).
+  const visibleAgents = agents.filter(isAgentManageable);
   const builtInAgents = visibleAgents.filter(isAgentBuiltIn);
   const customAgents = visibleAgents.filter((agent) => !isAgentBuiltIn(agent));
 

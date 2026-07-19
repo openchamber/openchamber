@@ -168,6 +168,14 @@ export const isAgentHidden = (agent: Agent): boolean => {
 export const filterVisibleAgents = (agents: Agent[]): Agent[] =>
   agents.filter((agent) => !isAgentHidden(agent));
 
+// Helper to check if an agent belongs in the Settings management UI.
+// Unlike the composer picker (which uses filterVisibleAgents), Settings must
+// surface user-defined agents even when they set `hidden: true` to stay out of
+// the picker — a common pattern for task-only subagents (issue #2305). Native
+// internal agents (title, summary, compaction) stay hidden.
+export const isAgentManageable = (agent: Agent): boolean =>
+  !isAgentHidden(agent) || !isAgentBuiltIn(agent);
+
 const CONFIG_EVENT_SOURCE = "useAgentsStore";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const MAX_HEALTH_WAIT_MS = 20000;
