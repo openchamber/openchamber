@@ -2166,7 +2166,14 @@ export function useDirectoryStore(
 ): StoreApi<DirectoryStore> {
   const system = useSyncSystem()
   const dir = directory ?? system.directory
-  return system.childStores.ensureChild(dir, options)
+  const store = system.childStores.ensureChild(dir, options)
+
+  useEffect(() => {
+    system.childStores.pin(dir)
+    return () => system.childStores.unpin(dir)
+  }, [dir, system.childStores])
+
+  return store
 }
 
 export function useSessionMessageLoader(): SessionMessageLoader {

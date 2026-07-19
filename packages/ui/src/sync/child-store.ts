@@ -163,24 +163,27 @@ export class ChildStoreManager {
   }
 
   pin(directory: string) {
-    if (!directory) return
-    this.pins.set(directory, (this.pins.get(directory) ?? 0) + 1)
-    this.mark(directory)
+    const normalizedDirectory = normalizePath(directory)
+    if (!normalizedDirectory) return
+    this.pins.set(normalizedDirectory, (this.pins.get(normalizedDirectory) ?? 0) + 1)
+    this.mark(normalizedDirectory)
   }
 
   unpin(directory: string) {
-    if (!directory) return
-    const next = (this.pins.get(directory) ?? 0) - 1
+    const normalizedDirectory = normalizePath(directory)
+    if (!normalizedDirectory) return
+    const next = (this.pins.get(normalizedDirectory) ?? 0) - 1
     if (next > 0) {
-      this.pins.set(directory, next)
+      this.pins.set(normalizedDirectory, next)
       return
     }
-    this.pins.delete(directory)
+    this.pins.delete(normalizedDirectory)
     this.runEviction()
   }
 
   pinned(directory: string) {
-    return (this.pins.get(directory) ?? 0) > 0
+    const normalizedDirectory = normalizePath(directory)
+    return normalizedDirectory ? (this.pins.get(normalizedDirectory) ?? 0) > 0 : false
   }
 
   ensureChild(

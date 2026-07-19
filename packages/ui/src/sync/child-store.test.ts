@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ChildStoreManager } from './child-store';
+import { DIR_IDLE_TTL_MS } from './types';
 
 const deferred = () => {
   let resolve!: () => void;
@@ -46,6 +47,37 @@ describe('ChildStoreManager.subscribeAllSelected', () => {
 
     unsubscribe();
     manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager directory lifecycle', () => {
+  test('keeps an idle directory alive until its final consumer releases it', () => {
+    const manager = new ChildStoreManager();
+    const now = 10_000;
+    const originalDateNow = Date.now;
+    let currentTime = now;
+    Date.now = () => currentTime;
+
+    try {
+      const child = manager.ensureChild('/workspace', { bootstrap: false });
+      manager.pin('/workspace/');
+      manager.pin('/workspace');
+      manager.unpin('/workspace');
+      currentTime = now + DIR_IDLE_TTL_MS + 1;
+
+      manager.runEviction();
+
+      expect(manager.pinned('/workspace')).toBe(true);
+      expect(manager.getChild('/workspace')).toBe(child);
+
+      manager.unpin('/workspace/');
+
+      expect(manager.pinned('/workspace')).toBe(false);
+      expect(manager.getChild('/workspace')).toBe(undefined);
+    } finally {
+      Date.now = originalDateNow;
+      manager.disposeAll();
+    }
   });
 });
 
