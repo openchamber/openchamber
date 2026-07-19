@@ -133,7 +133,7 @@ const applyStateAction = <T,>(current: T, next: StateAction<T>): T => (
   typeof next === 'function' ? (next as (previous: T) => T)(current) : next
 );
 
-const createPersistence = (initial: Partial<PersistenceState> = {}) => {
+const usePersistenceHarness = (initial: Partial<PersistenceState> = {}) => {
   const state: PersistenceState = {
     expandedParents: initial.expandedParents ?? new Set(),
     collapsedProjects: initial.collapsedProjects ?? new Set(),
@@ -274,7 +274,7 @@ describe('sidebar runtime persistence', () => {
     storageValues.set(scopedKey(ACTIVE_SESSION_KEY, 'runtime-b'), JSON.stringify({ [projectId]: 'session-b' }));
     storageValues.set(scopedKey(GROUP_COLLAPSE_KEY, 'runtime-b'), JSON.stringify(['group-b']));
 
-    const { state } = createPersistence({
+    const { state } = usePersistenceHarness({
       expandedParents: new Set(['project:active:session-a']),
       collapsedProjects: new Set([projectId]),
       groupOrderByProject: new Map([[projectId, ['group-a']]]),
@@ -299,7 +299,7 @@ describe('sidebar runtime persistence', () => {
     storageValues.set(ACTIVE_SESSION_KEY, JSON.stringify({ 'local-project': 'local-session' }));
     storageValues.set(GROUP_COLLAPSE_KEY, JSON.stringify(['local-group']));
 
-    const { state } = createPersistence();
+    const { state } = usePersistenceHarness();
 
     expect(state.expandedParents).toEqual(new Set(['project:active:local-session']));
     expect(state.collapsedProjects).toEqual(new Set(['local-project']));
@@ -318,7 +318,7 @@ describe('sidebar runtime persistence', () => {
 
   test('applies authoritative project collapse metadata for the active runtime', () => {
     runtimeKey = 'remote-runtime';
-    const { state } = createPersistence();
+    const { state } = usePersistenceHarness();
 
     runtimeWindow.dispatchEvent(new CustomEvent('openchamber:settings-synced', {
       detail: {
@@ -334,7 +334,7 @@ describe('sidebar runtime persistence', () => {
   });
 
   test('does not send a local collapsed-project update after switching to a remote runtime', () => {
-    const { scheduleCollapsedProjectsPersist } = createPersistence();
+    const { scheduleCollapsedProjectsPersist } = usePersistenceHarness();
     scheduleCollapsedProjectsPersist(new Set(['local-project']));
 
     runtimeKey = 'remote-runtime';
@@ -346,7 +346,7 @@ describe('sidebar runtime persistence', () => {
   test('rejects an old A callback after an A-to-B-to-A switch', () => {
     runtimeKey = 'runtime-a';
     projects = [{ id: 'shared-project', path: '/workspace/a' }];
-    const { scheduleCollapsedProjectsPersist } = createPersistence();
+    const { scheduleCollapsedProjectsPersist } = usePersistenceHarness();
     scheduleCollapsedProjectsPersist(new Set(['old-a']));
 
     emitRuntimeEndpointChanged('runtime-b', 'runtime-a');
@@ -369,7 +369,7 @@ describe('sidebar runtime persistence', () => {
   test('keeps collapsed-project persistence for updates scheduled on the active remote runtime', () => {
     runtimeKey = 'remote-runtime';
     projects = [{ id: 'remote-project', path: '/home/remote-user/project' }];
-    const { scheduleCollapsedProjectsPersist } = createPersistence();
+    const { scheduleCollapsedProjectsPersist } = usePersistenceHarness();
     scheduleCollapsedProjectsPersist(new Set(['remote-project']));
 
     runTimer(1);

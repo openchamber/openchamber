@@ -198,6 +198,8 @@ export const useSidebarPersistence = (args: Args) => {
     context.generation === runtimeGeneration.current && context.runtimeKey === getRuntimeKey()
   ), []);
   const runtimeContextAtRender = captureRuntimeContext();
+  const runtimeKeyAtRender = runtimeContextAtRender.runtimeKey;
+  const runtimeGenerationAtRender = runtimeContextAtRender.generation;
 
   const reloadRuntimeState = React.useCallback((runtimeContext: SidebarRuntimeContext): void => {
     if (!isRuntimeContextCurrent(runtimeContext)) {
@@ -353,12 +355,15 @@ export const useSidebarPersistence = (args: Args) => {
   }, [hasAuthoritativeGlobalSessions, sessions, setPinnedSessionIds]);
 
   React.useEffect(() => {
-    if (!isRuntimeContextCurrent(runtimeContextAtRender)) {
+    if (!isRuntimeContextCurrent({
+      runtimeKey: runtimeKeyAtRender,
+      generation: runtimeGenerationAtRender,
+    })) {
       return;
     }
     try {
       const serialized = Object.fromEntries(groupOrderByProject.entries());
-      writeRuntimeScopedStorage(safeStorage, keys.groupOrder, JSON.stringify(serialized), runtimeContextAtRender.runtimeKey);
+      writeRuntimeScopedStorage(safeStorage, keys.groupOrder, JSON.stringify(serialized), runtimeKeyAtRender);
     } catch {
       // ignored
     }
@@ -366,18 +371,21 @@ export const useSidebarPersistence = (args: Args) => {
     groupOrderByProject,
     isRuntimeContextCurrent,
     keys.groupOrder,
-    runtimeContextAtRender.generation,
-    runtimeContextAtRender.runtimeKey,
+    runtimeGenerationAtRender,
+    runtimeKeyAtRender,
     safeStorage,
   ]);
 
   React.useEffect(() => {
-    if (!isRuntimeContextCurrent(runtimeContextAtRender)) {
+    if (!isRuntimeContextCurrent({
+      runtimeKey: runtimeKeyAtRender,
+      generation: runtimeGenerationAtRender,
+    })) {
       return;
     }
     try {
       const serialized = Object.fromEntries(activeSessionByProject.entries());
-      writeRuntimeScopedStorage(safeStorage, keys.projectActiveSession, JSON.stringify(serialized), runtimeContextAtRender.runtimeKey);
+      writeRuntimeScopedStorage(safeStorage, keys.projectActiveSession, JSON.stringify(serialized), runtimeKeyAtRender);
     } catch {
       // ignored
     }
@@ -385,13 +393,16 @@ export const useSidebarPersistence = (args: Args) => {
     activeSessionByProject,
     isRuntimeContextCurrent,
     keys.projectActiveSession,
-    runtimeContextAtRender.generation,
-    runtimeContextAtRender.runtimeKey,
+    runtimeGenerationAtRender,
+    runtimeKeyAtRender,
     safeStorage,
   ]);
 
   React.useEffect(() => {
-    if (!isRuntimeContextCurrent(runtimeContextAtRender)) {
+    if (!isRuntimeContextCurrent({
+      runtimeKey: runtimeKeyAtRender,
+      generation: runtimeGenerationAtRender,
+    })) {
       return;
     }
     try {
@@ -399,7 +410,7 @@ export const useSidebarPersistence = (args: Args) => {
         safeStorage,
         keys.groupCollapse,
         JSON.stringify(Array.from(collapsedGroups)),
-        runtimeContextAtRender.runtimeKey,
+        runtimeKeyAtRender,
       );
     } catch {
       // ignored
@@ -408,8 +419,8 @@ export const useSidebarPersistence = (args: Args) => {
     collapsedGroups,
     isRuntimeContextCurrent,
     keys.groupCollapse,
-    runtimeContextAtRender.generation,
-    runtimeContextAtRender.runtimeKey,
+    runtimeGenerationAtRender,
+    runtimeKeyAtRender,
     safeStorage,
   ]);
 
