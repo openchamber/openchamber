@@ -6,7 +6,7 @@ import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -1487,14 +1487,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     } | null>(null);
 
     // Message queue
+    const messageQueueTarget = currentSessionId
+        ? createMessageQueueTarget(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory)
+        : null;
+    const messageQueueKey = messageQueueTarget ? getMessageQueueKey(messageQueueTarget) : null;
     const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
-                if (!currentSessionId) return EMPTY_QUEUE;
-                return state.queuedMessages[currentSessionId] ?? EMPTY_QUEUE;
+                if (!messageQueueKey) return EMPTY_QUEUE;
+                return state.queuedMessages[messageQueueKey] ?? EMPTY_QUEUE;
             },
-            [currentSessionId]
+            [messageQueueKey]
         )
     );
     const addToQueue = useMessageQueueStore((state) => state.addToQueue);
@@ -1782,7 +1786,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        if (!inputSnapshot.hasContent || !currentSessionId) return;
+        if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
         const drafts = consumeDrafts(currentSessionId);
 
@@ -1792,7 +1796,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
         const attachmentsToQueue = sanitizeAttachmentsForSend(sendableAttachedFiles);
 
-        addToQueue(currentSessionId, {
+        addToQueue(messageQueueTarget, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
             sendConfig: currentProviderId && currentModelId ? {
@@ -1815,7 +1819,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             textareaRef.current?.focus();
         }
-    }, [getCurrentInputSnapshot, currentSessionId, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);
@@ -2032,10 +2036,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
 
         // Clear queue and input
-        if (currentSessionId && queuedMessageId) {
-            removeFromQueue(currentSessionId, queuedMessageId);
-        } else if (currentSessionId && hasQueuedMessages) {
-            clearQueue(currentSessionId);
+        if (messageQueueTarget && queuedMessageId) {
+            removeFromQueue(messageQueueTarget, queuedMessageId);
+        } else if (messageQueueTarget && hasQueuedMessages) {
+            clearQueue(messageQueueTarget);
         }
         if (!queuedOnly) {
             setMessage('');

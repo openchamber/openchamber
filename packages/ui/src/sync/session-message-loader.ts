@@ -5,7 +5,13 @@ import { retry } from "./retry"
 import { mergeOptimisticPage, type OptimisticItem } from "./optimistic"
 import { stripMessageDiffSnapshots } from "./sanitize"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
-import { clearSessionPrefetch, getSessionPrefetch, setSessionPrefetch } from "./session-prefetch-cache"
+import {
+  clearDirectorySessionPrefetch,
+  clearRuntimeSessionPrefetch,
+  clearSessionPrefetch,
+  getSessionPrefetch,
+  setSessionPrefetch,
+} from "./session-prefetch-cache"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -129,6 +135,7 @@ export class SessionMessageLoader {
   configure(configuration: LoaderConfiguration): void {
     if (this.sdk === configuration.sdk && this.runtimeKey === configuration.runtimeKey) return
     const runtimeChanged = this.runtimeKey !== configuration.runtimeKey
+    const previousRuntimeKey = this.runtimeKey
     this.sdk = configuration.sdk
     this.runtimeKey = configuration.runtimeKey
     this.sdkEpoch += 1
@@ -145,6 +152,7 @@ export class SessionMessageLoader {
     }
     if (runtimeChanged) {
       this.entries.clear()
+      clearRuntimeSessionPrefetch(previousRuntimeKey)
     }
   }
 
@@ -306,7 +314,7 @@ export class SessionMessageLoader {
     entry.inflight = null
     entry.optimistic.clear()
     entry.snapshot = createDefaultState(entry.snapshot.generation)
-    clearSessionPrefetch(normalized.directory, [normalized.sessionID])
+    clearSessionPrefetch(normalized.directory, [normalized.sessionID], this.runtimeKey)
     this.notify(entry)
   }
 
@@ -314,6 +322,7 @@ export class SessionMessageLoader {
     const normalizedDirectory = normalizePath(directory)
     if (!normalizedDirectory) return
     const prefix = `${this.runtimeKey}\n${normalizedDirectory}\n`
+    clearDirectorySessionPrefetch(normalizedDirectory, this.runtimeKey)
     for (const [key, entry] of this.entries) {
       if (!key.startsWith(prefix)) continue
       this.bumpGeneration(entry)
@@ -334,6 +343,7 @@ export class SessionMessageLoader {
       this.notify(entry)
     }
     this.entries.clear()
+    clearRuntimeSessionPrefetch(this.runtimeKey)
   }
 
   private normalizeTarget(target: SessionMessageTarget): SessionMessageTarget | null {
@@ -350,7 +360,7 @@ export class SessionMessageLoader {
     const key = this.keyFor(target)
     const existing = this.entries.get(key)
     if (existing) return existing
-    const prefetched = getSessionPrefetch(target.directory, target.sessionID)
+    const prefetched = getSessionPrefetch(target.directory, target.sessionID, this.runtimeKey)
     const entry: LoaderEntry = {
       snapshot: prefetched
         ? {
@@ -557,6 +567,7 @@ export class SessionMessageLoader {
       cursor: state.cursor,
       complete: state.complete,
       at: state.updatedAt,
+      runtimeKey: this.runtimeKey,
     })
   }
 }

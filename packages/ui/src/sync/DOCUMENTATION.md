@@ -67,6 +67,10 @@ So:
 
 Bootstrap remains stale-while-revalidate: a directory store may paint persisted sessions immediately, but only a successful authoritative fetch may replace that cached list.
 
+Directory session lists record whether their current snapshot is empty, persisted, live-event-derived, or authoritative. Bootstrap captures a mutation revision before starting its requests. Its completion replaces persisted data, including with a successful empty response, then overlays only session events and direct move/archive/delete mutations newer than that revision. It must not preserve the entire cached list as a race fallback because that would retain stale persisted sessions.
+
+The roots request is authoritative for root completeness. The broader child-session request has independent completeness: a successful empty response clears stale children, while a failed request preserves known children and their required ancestors without turning the failure into an empty snapshot.
+
 The persisted session snapshot keeps up to 50 sessions selected by `time.updated`/`time.created`, not ID ordering. Successful empty results persist an empty v2 tombstone so legacy data cannot reappear on restart. If localStorage quota prevents the full snapshot, persistence retries with progressively smaller recent snapshots and removes stale current/legacy values rather than leaving an old list indefinitely.
 
 ### Directory-scoped session list
@@ -82,6 +86,12 @@ Examples:
 Directory bootstrap must publish a closed session hierarchy: when a child is
 returned before the roots query catches up during cold startup, retain or
 recover its referenced parent instead of exposing an orphan-only snapshot.
+
+Session message loads use runtime, normalized directory, session ID, SDK epoch, and loader generation as commit authority. Eviction, archive, delete, move, directory disposal, and runtime switching invalidate the applicable loader generation before stale in-flight work can publish. A move invalidates both source and destination loader targets.
+
+An authoritative `session.deleted` event also clears persisted UI state before routing metadata can be removed. Cleanup is identity-owned by runtime, normalized directory, and session ID: queued messages and persisted todos clear only that tuple, while the active runtime's folder store removes the session from every active or archived folder scope. Stale-runtime events and unresolved/global directory identities do not mutate persisted state.
+
+Session materialization recency is keyed by runtime and directory. Foreground loads and successful prefetches participate in the same bounded per-directory session LRU. Prefetch pagination metadata has a global count ceiling and is removed with session eviction, directory disposal, loader runtime reconfiguration, and loader disposal.
 
 ### Global session list
 

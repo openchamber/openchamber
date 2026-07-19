@@ -69,8 +69,8 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
   const cached = readDirCache(directory)
 
   // Stale-while-revalidate: seed the session list from cache so the sidebar
-  // paints chats instantly. Bootstrap phase-3 loadSessions overwrites with the
-  // fresh list (its empty-list race guard preserves these until then).
+  // paints chats instantly. Bootstrap replaces it with the authoritative list
+  // while preserving session mutations that happened after the request began.
   const cachedSessions = cached.sessions ?? INITIAL_STATE.session
 
   const store = create<DirectoryStore>()((set) => ({
@@ -80,6 +80,7 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
     icon: cached.icon ?? INITIAL_STATE.icon,
     session: cachedSessions,
     sessionTotal: cachedSessions.length,
+    sessionListSource: cachedSessions.length > 0 ? "persisted" : "empty",
     limit: Math.max(cachedSessions.length, INITIAL_STATE.limit),
     patch: (partial) => set(partial),
     replace: (next) => set(next),

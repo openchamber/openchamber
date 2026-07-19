@@ -155,6 +155,12 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   const { t } = useI18n();
   const [isExpanded, setIsExpanded] = React.useState(false);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionDirectory = useSessionUIStore(
+    React.useCallback(
+      (state) => (currentSessionId ? state.getDirectoryForSession(currentSessionId) : null),
+      [currentSessionId],
+    ),
+  );
   const liveTodos = useDirectorySync(
     React.useCallback(
       (state) => {
@@ -166,8 +172,10 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   );
   const persistedSessionTodos = useTodosPersistStore(
     React.useCallback(
-      (state) => (showTodos && currentSessionId ? state.sessions[currentSessionId]?.todos : undefined),
-      [currentSessionId, showTodos],
+      (state) => (showTodos && currentSessionId && currentSessionDirectory
+        ? state.getSessionTodos(currentSessionDirectory, currentSessionId)
+        : undefined),
+      [currentSessionDirectory, currentSessionId, showTodos],
     ),
   );
   const todos: TodoItem[] = React.useMemo(() => {

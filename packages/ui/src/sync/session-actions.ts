@@ -47,6 +47,37 @@ let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 let _optimisticConfirm: ((input: OptimisticConfirmInput) => void) | null = null
 
+function sessionMutationPatch(
+  state: ReturnType<DirectoryStoreApi["getState"]>,
+  sessionId: string,
+  deleted: boolean,
+) {
+  const revision = (state.sessionRevision ?? 0) + 1
+  const sessionEventRevision = { ...(state.sessionEventRevision ?? {}) }
+  const sessionDeletedRevision = { ...(state.sessionDeletedRevision ?? {}) }
+  if (deleted) {
+    sessionDeletedRevision[sessionId] = revision
+    delete sessionEventRevision[sessionId]
+  } else {
+    sessionEventRevision[sessionId] = revision
+    delete sessionDeletedRevision[sessionId]
+  }
+  return {
+    sessionListSource: "live" as const,
+    sessionRevision: revision,
+    sessionEventRevision,
+    sessionDeletedRevision,
+  }
+}
+
+function invalidateSessionLoads(sessionId: string, directories: Iterable<string | null | undefined>): void {
+  const loader = getImperativeSessionMessageLoader()
+  if (!loader) return
+  for (const directory of new Set(directories)) {
+    if (directory) loader.invalidateSession({ directory, sessionID: sessionId })
+  }
+}
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 type SdkResult<T> = {
@@ -261,6 +292,7 @@ function reconcileSessionMove(
     question: questions.source,
     message: messages.source,
     part: parts.source,
+    ...sessionMutationPatch(sourceState, session.id, true),
   })
   destinationStore.setState({
     session: destinationSessions,
@@ -274,6 +306,7 @@ function reconcileSessionMove(
     question: questions.destination,
     message: messages.destination,
     part: parts.destination,
+    ...sessionMutationPatch(destinationState, session.id, false),
   })
 
   return movedSession
@@ -291,6 +324,8 @@ export async function moveSessionToDirectory(
     moveChanges,
   })
   assertSdkSuccess(result, "Move session")
+
+  invalidateSessionLoads(session.id, [sourceDirectory, destinationDirectory])
 
   const moved = reconcileSessionMove(session, sourceDirectory, destinationDirectory)
 
@@ -647,18 +682,22 @@ function optimisticRemoveSession(sessionId: string, preferredDirectory?: string)
       continue
     }
     snapshots.push({ directory, sessions: current.session })
-    store.setState({ session: current.session.filter((session) => session.id !== sessionId) })
+    store.setState({
+      session: current.session.filter((session) => session.id !== sessionId),
+      ...sessionMutationPatch(current, sessionId, true),
+    })
   }
 
   return snapshots
 }
 
-function restoreSessionListSnapshots(snapshots: SessionListSnapshot[]): void {
+function restoreSessionListSnapshots(snapshots: SessionListSnapshot[], sessionId: string): void {
   if (!_childStores) return
   for (const snapshot of snapshots) {
     const store = _childStores.children.get(snapshot.directory)
     if (!store) continue
-    store.setState({ session: snapshot.sessions })
+    const current = store.getState()
+    store.setState({ session: snapshot.sessions, ...sessionMutationPatch(current, sessionId, false) })
   }
 }
 
@@ -670,6 +709,7 @@ function cleanupSessionWorktreeMetadata(sessionId: string): void {
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
   const snapshots = optimisticRemoveSession(sessionId, sessionDirectory)
+  invalidateSessionLoads(sessionId, [...snapshots.map((snapshot) => snapshot.directory), sessionDirectory])
   const globalSnapshot = getGlobalSessionSnapshot(sessionId)
   useGlobalSessionsStore.getState().removeSessions([sessionId])
 
@@ -695,7 +735,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
       cleanupSessionWorktreeMetadata(sessionId)
       return true
     }
-    restoreSessionListSnapshots(snapshots)
+    restoreSessionListSnapshots(snapshots, sessionId)
     restoreGlobalSessionSnapshot(globalSnapshot)
     return false
   }
@@ -705,6 +745,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
 export async function deleteSessionInDirectory(sessionId: string, directory: string): Promise<boolean> {
   if (!_childStores) return false
   const snapshots = optimisticRemoveSession(sessionId, directory)
+  invalidateSessionLoads(sessionId, snapshots.map((snapshot) => snapshot.directory).concat(directory))
   const globalSnapshot = getGlobalSessionSnapshot(sessionId)
   useGlobalSessionsStore.getState().removeSessions([sessionId])
   const ui = useSessionUIStore.getState()
@@ -724,7 +765,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
       cleanupSessionWorktreeMetadata(sessionId)
       return true
     }
-    restoreSessionListSnapshots(snapshots)
+    restoreSessionListSnapshots(snapshots, sessionId)
     restoreGlobalSessionSnapshot(globalSnapshot)
     return false
   }
@@ -733,6 +774,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
 export async function archiveSession(sessionId: string): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
   const snapshots = optimisticRemoveSession(sessionId, sessionDirectory)
+  invalidateSessionLoads(sessionId, [...snapshots.map((snapshot) => snapshot.directory), sessionDirectory])
   const globalSnapshot = getGlobalSessionSnapshot(sessionId)
   const archivedAt = Date.now()
   useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
@@ -750,7 +792,7 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
     return true
   } catch (error) {
     console.error("[session-actions] archiveSession failed", error)
-    restoreSessionListSnapshots(snapshots)
+    restoreSessionListSnapshots(snapshots, sessionId)
     restoreGlobalSessionSnapshot(globalSnapshot)
     return false
   }

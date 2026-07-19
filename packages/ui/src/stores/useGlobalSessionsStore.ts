@@ -19,6 +19,8 @@ type GlobalSessionsState = {
   archivedSessions: Session[];
   sessionsByDirectory: Map<string, Session[]>;
   reviewTransferBySessionId: Map<string, ReviewTransferDirection>;
+  mutationRevision: number;
+  mutationRevisionBySessionId: Map<string, number>;
   hasLoaded: boolean;
   status: GlobalSessionsStatus;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
@@ -362,6 +364,38 @@ const applySnapshot = (
   };
 };
 
+const overlayMutationsSince = (
+  state: GlobalSessionsState,
+  activeSessions: Session[],
+  archivedSessions: Session[],
+  baselineRevision: number,
+): LoadResult => {
+  const affectedIds = new Set<string>();
+  for (const [sessionId, revision] of state.mutationRevisionBySessionId) {
+    if (revision > baselineRevision) affectedIds.add(sessionId);
+  }
+  if (affectedIds.size === 0) return { activeSessions, archivedSessions };
+
+  const currentActive = new Map(state.activeSessions.map((session) => [session.id, session]));
+  const currentArchived = new Map(state.archivedSessions.map((session) => [session.id, session]));
+  let nextActive = activeSessions.filter((session) => !affectedIds.has(session.id));
+  let nextArchived = archivedSessions.filter((session) => !affectedIds.has(session.id));
+  for (const sessionId of affectedIds) {
+    const active = currentActive.get(sessionId);
+    const archived = currentArchived.get(sessionId);
+    if (active) nextActive = upsertSessionIntoList(nextActive, active);
+    else if (archived) nextArchived = upsertSessionIntoList(nextArchived, archived);
+  }
+  return { activeSessions: nextActive, archivedSessions: nextArchived };
+};
+
+const mutationRevisionPatch = (state: GlobalSessionsState, ids: Iterable<string>) => {
+  const mutationRevision = state.mutationRevision + 1;
+  const mutationRevisionBySessionId = new Map(state.mutationRevisionBySessionId);
+  for (const id of ids) mutationRevisionBySessionId.set(id, mutationRevision);
+  return { mutationRevision, mutationRevisionBySessionId };
+};
+
 const buildReviewTransferMap = (sessions: Session[]): Map<string, ReviewTransferDirection> => {
   const next = new Map<string, ReviewTransferDirection>()
   const activeIds = new Set(sessions.map((s) => s.id))
@@ -382,6 +416,8 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   archivedSessions: [],
   sessionsByDirectory: new Map(),
   reviewTransferBySessionId: new Map(),
+  mutationRevision: 0,
+  mutationRevisionBySessionId: new Map(),
   hasLoaded: false,
   status: 'idle',
 
@@ -397,6 +433,8 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       archivedSessions: [],
       sessionsByDirectory: new Map(),
       reviewTransferBySessionId: new Map(),
+      mutationRevision: 0,
+      mutationRevisionBySessionId: new Map(),
       hasLoaded: false,
       status: 'idle',
     });
@@ -410,23 +448,14 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
 
     const generation = loadGeneration;
+    const baselineRevision = get().mutationRevision;
     const loadPromise = (async () => {
-      const current = get();
-
       try {
         const sdk = opencodeClient.getSdkClient();
         const [activeResult, archivedResult] = await Promise.allSettled([
           listGlobalSessionPages(sdk, { archived: false, pageSize: PAGE_SIZE }),
           listGlobalSessionPages(sdk, { archived: true, pageSize: PAGE_SIZE }),
         ]);
-
-        const fallbackSnapshot = mergeSessionLists(current.activeSessions, fallbackActive);
-        const nextActiveSessions = activeResult.status === 'fulfilled'
-          ? activeResult.value
-          : fallbackSnapshot;
-        const nextArchivedSessions = archivedResult.status === 'fulfilled'
-          ? archivedResult.value
-          : current.archivedSessions;
 
         if (activeResult.status === 'rejected') {
           console.warn('[GlobalSessions] Failed to load active sessions, preserving existing snapshot with fallback merge:', activeResult.reason);
@@ -443,17 +472,34 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         const status = activeResult.status === 'fulfilled' && archivedResult.status === 'fulfilled'
           ? 'ready'
           : 'error';
-        set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, status));
-        return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
+        set((state) => {
+          const fetchedActive = activeResult.status === 'fulfilled'
+            ? activeResult.value
+            : mergeSessionLists(state.activeSessions, fallbackActive);
+          const fetchedArchived = archivedResult.status === 'fulfilled'
+            ? archivedResult.value
+            : state.archivedSessions;
+          const reconciled = overlayMutationsSince(state, fetchedActive, fetchedArchived, baselineRevision);
+          return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, status);
+        });
+        const committed = get();
+        return { activeSessions: committed.activeSessions, archivedSessions: committed.archivedSessions };
       } catch (error) {
         if (generation !== loadGeneration) {
           return { activeSessions: [], archivedSessions: [] };
         }
-        const nextActiveSessions = mergeSessionLists(current.activeSessions, fallbackActive);
-        const nextArchivedSessions = current.archivedSessions;
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
-        set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'error'));
-        return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
+        set((state) => {
+          const reconciled = overlayMutationsSince(
+            state,
+            mergeSessionLists(state.activeSessions, fallbackActive),
+            state.archivedSessions,
+            baselineRevision,
+          );
+          return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, 'error');
+        });
+        const committed = get();
+        return { activeSessions: committed.activeSessions, archivedSessions: committed.archivedSessions };
       }
     })();
 
@@ -475,6 +521,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
 
     const generation = loadGeneration;
+    const baselineRevision = get().mutationRevision;
     const sdk = opencodeClient.getSdkClient();
     const [active, archived] = await Promise.all([
       fetchDirectoryPages(sdk, directorySet, false),
@@ -505,6 +552,10 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         nextArchivedSessions = state.archivedSessions;
       }
 
+      const reconciled = overlayMutationsSince(state, nextActiveSessions, nextArchivedSessions, baselineRevision);
+      nextActiveSessions = reconciled.activeSessions;
+      nextArchivedSessions = reconciled.archivedSessions;
+
       const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
         ? state.sessionsByDirectory
         : buildSessionsByDirectory(nextActiveSessions);
@@ -533,6 +584,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
   upsertSession: (session) => {
     set((state) => {
+      const revisionPatch = mutationRevisionPatch(state, [session.id]);
       const existingSession = state.activeSessions.find((candidate) => candidate.id === session.id)
         ?? state.archivedSessions.find((candidate) => candidate.id === session.id)
         ?? null;
@@ -549,7 +601,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         nextActiveSessions === state.activeSessions
         && nextArchivedSessions === state.archivedSessions
       ) {
-        return state;
+        return revisionPatch;
       }
 
       return {
@@ -561,6 +613,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         reviewTransferBySessionId: nextActiveSessions === state.activeSessions
           ? state.reviewTransferBySessionId
           : buildReviewTransferMap(nextActiveSessions),
+        ...revisionPatch,
       };
     });
   },
@@ -572,6 +625,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
 
     set((state) => {
+      const revisionPatch = mutationRevisionPatch(state, idSet);
       const nextActiveSessions = state.activeSessions.filter((session) => !idSet.has(session.id));
       const nextArchivedSessions = state.archivedSessions.filter((session) => !idSet.has(session.id));
 
@@ -579,7 +633,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         nextActiveSessions.length === state.activeSessions.length
         && nextArchivedSessions.length === state.archivedSessions.length
       ) {
-        return state;
+        return revisionPatch;
       }
 
       return {
@@ -587,6 +641,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         archivedSessions: nextArchivedSessions,
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
         reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
+        ...revisionPatch,
       };
     });
   },
@@ -598,6 +653,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
 
     set((state) => {
+      const revisionPatch = mutationRevisionPatch(state, idSet);
       const movedSessions: Session[] = [];
       const nextActiveSessions = state.activeSessions.filter((session) => {
         if (!idSet.has(session.id)) {
@@ -615,7 +671,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       });
 
       if (movedSessions.length === 0) {
-        return state;
+        return revisionPatch;
       }
 
       const remainingArchivedSessions = state.archivedSessions.filter((session) => !idSet.has(session.id));
@@ -625,6 +681,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         archivedSessions: [...movedSessions, ...remainingArchivedSessions],
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
         reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
+        ...revisionPatch,
       };
     });
   },

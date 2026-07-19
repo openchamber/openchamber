@@ -38,6 +38,7 @@ import { usePermissionStore } from "@/stores/permissionStore"
 import { processVSCodePermissionAutoAccept } from "./vscode-permission-auto-accept"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
+import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
 import { applyGlobalSessionStatusEvent, applyGlobalSessionStatusSnapshot, useGlobalSessionStatusStore } from "./global-session-status"
@@ -626,10 +627,17 @@ const getSessionIdFromPayload = (event: Event): string | null => {
     || event.type === "question.asked"
     || event.type === "question.replied"
     || event.type === "question.rejected"
-    || event.type === "session.deleted"
   ) {
     const sessionID = props.sessionID
     return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : null
+  }
+
+  if (event.type === "session.deleted") {
+    const sessionID = props.sessionID
+    if (typeof sessionID === "string" && sessionID.length > 0) return sessionID
+    const info = props.info
+    const id = info && typeof info === "object" ? (info as { id?: unknown }).id : undefined
+    return typeof id === "string" && id.length > 0 ? id : null
   }
 
   if (event.type === "message.part.updated") {
@@ -1266,22 +1274,31 @@ function handleEvent(
   payload: Event,
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
+  expectedRuntimeKey: string,
   skipVSCodeAutoAccept = false,
 ) {
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
     if (properties && typeof properties === "object") {
-      const snapshot = properties as { sessions?: unknown }
+      const snapshot = properties as { sessions?: unknown; revision?: unknown }
       if (snapshot.sessions && typeof snapshot.sessions === "object") {
         usePermissionStore.getState().applySnapshot({
           sessions: snapshot.sessions as Record<string, boolean>,
-        })
+          revision: typeof snapshot.revision === "number" ? snapshot.revision : undefined,
+        }, expectedRuntimeKey)
       }
     }
     return
   }
 
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
+
+  if (payload.type === "session.deleted" && expectedRuntimeKey === getRuntimeKey()) {
+    const sessionID = getSessionIdFromPayload(payload)
+    if (sessionID && directory && directory !== "global") {
+      cleanupPersistedSessionState({ runtimeKey: expectedRuntimeKey, directory, sessionId: sessionID })
+    }
+  }
 
   if (handleUiNotificationEvent(payload, directory)) {
     return
@@ -1369,7 +1386,7 @@ function handleEvent(
     if (isVSCodeRuntime() && !skipVSCodeAutoAccept) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       void processVSCodePermissionAutoAccept(permission, resolvedDirectory).then((accepted) => {
-        if (!accepted) handleEvent(rawDirectory, payload, childStores, routingIndex, true)
+        if (!accepted) handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true)
       })
       return
     }
@@ -1483,6 +1500,8 @@ function handleEvent(
       draft.permission = { ...current.permission }
       draft.todo = { ...current.todo }
       draft.part = { ...current.part }
+      draft.sessionEventRevision = { ...(current.sessionEventRevision ?? {}) }
+      draft.sessionDeletedRevision = { ...(current.sessionDeletedRevision ?? {}) }
       break
     case "session.diff":
       draft.session_diff = { ...current.session_diff }
@@ -1527,7 +1546,7 @@ function handleEvent(
 
   const reducerResult = applyDirectoryEvent(draft, payload, {
     onSetSessionTodo: (sessionID, todos) => {
-      useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
+      useTodosPersistStore.getState().setSessionTodos(resolvedDirectory, sessionID, todos)
     },
   })
   const reducerChanged = typeof reducerResult === "boolean" ? reducerResult : reducerResult.changed
@@ -1537,6 +1556,11 @@ function handleEvent(
     store.setState(draft)
     const sessionID = getSessionIdFromPayload(payload) ?? undefined
     const messageID = getMessageIdFromPayload(payload) ?? undefined
+    const archived = payload.type === "session.updated"
+      && Boolean(((payload.properties as { info?: Session }).info)?.time.archived)
+    if (sessionID && (payload.type === "session.deleted" || archived)) {
+      getImperativeSessionMessageLoader()?.invalidateSession({ directory: resolvedDirectory, sessionID })
+    }
     syncDebug.dispatch.eventApplied(payload.type, sessionID, messageID)
 
     // Snapshot materialization on message.updated: if the message was inserted or
@@ -1726,6 +1750,7 @@ export function SyncProvider(props: {
             },
             loadSessions: (dir) => retry(async () => {
               if (!context.isCurrent()) return
+              const baselineRevision = store.getState().sessionRevision ?? 0
               const rootSessions = (await listGlobalSessionPages(props.sdk, {
                 directory: dir,
                 archived: false,
@@ -1737,7 +1762,7 @@ export function SyncProvider(props: {
 
               // Also load child sessions (sub-agent delegations) with pagination
               // so pending questions can scope to them immediately after restart.
-              let allSessions: typeof rootSessions = []
+              let allSessions: typeof rootSessions | null = null
               try {
                 allSessions = await listGlobalSessionPages(props.sdk, {
                   directory: dir,
@@ -1753,19 +1778,18 @@ export function SyncProvider(props: {
               // A cold OpenCode process can briefly return children before its
               // roots query catches up. Recover referenced parents from the
               // broader response or cache instead of publishing orphan rows.
-              const currentSessions = store.getState().session
-              const { sessions, rootCount } = mergeBootstrapSessions(rootSessions, allSessions, currentSessions)
-              // Race guard: if the list came back empty but event pipeline
-              // already populated the store, don't clobber. OpenCode can
-              // answer HTTP with empty sessions while WS delivers session
-              // events for the same data (disk warmup race on app launch).
-              if (sessions.length === 0 && currentSessions.length > 0) {
-                console.warn(
-                  `[bootstrap] experimental.session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
-                )
-                return
-              }
-              store.setState({ session: sessions, sessionTotal: rootCount, limit: Math.max(sessions.length, 50) })
+              const current = store.getState()
+              const { sessions, rootCount } = mergeBootstrapSessions(rootSessions, allSessions, current.session, {
+                baselineRevision,
+                eventRevision: current.sessionEventRevision,
+                deletedRevision: current.sessionDeletedRevision,
+              })
+              store.setState({
+                session: sessions,
+                sessionTotal: rootCount,
+                sessionListSource: "authoritative",
+                limit: Math.max(sessions.length, 50),
+              })
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })
@@ -1863,7 +1887,7 @@ export function SyncProvider(props: {
             dispatchOpenCodeUpdateAvailableUnlessBundled({ version })
           }
         }
-        handleEvent(directory, payload, childStores, routingIndex)
+        handleEvent(directory, payload, childStores, routingIndex, runtimeKey)
       },
       onReconnect: () => {
         useConfigStore.setState({
@@ -1914,7 +1938,7 @@ export function SyncProvider(props: {
       }
       pipeline.cleanup()
     }
-  }, [props.sdk, childStores, routingIndex, messageStreamTransport, triggerDirectoryResync])
+  }, [props.sdk, childStores, routingIndex, messageStreamTransport, runtimeKey, triggerDirectoryResync])
 
   useEffect(() => {
     let stopped = false
