@@ -4,8 +4,15 @@ type ReadableStorage = Pick<Storage, 'getItem'>;
 type WritableStorage = Pick<Storage, 'setItem'>;
 
 const normalizeRuntimeStorageKey = (value?: string | null): string => {
-  const key = (value ?? getRuntimeKey()).trim();
-  return key || 'default';
+  if (value === undefined || value === null) {
+    return getRuntimeKey().trim() || 'default';
+  }
+
+  const key = value.trim();
+  if (!key) {
+    throw new Error('Runtime storage key must be non-empty when explicitly provided');
+  }
+  return key;
 };
 
 export const getRuntimeScopedStorageKey = (key: string, runtimeKey?: string | null): string => {
