@@ -14,6 +14,7 @@ import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
 import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
+import { createOpenCodeProjectCommandRuntime } from './project-commands-runtime.js';
 import { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';
 import { registerOpenCodeRoutes } from './routes.js';
 import { getProviderSources, removeProviderConfig } from './providers.js';
@@ -243,7 +244,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerSmallModelRoutes(app, { getSmallModelService });
     registerSessionGoalRoutes(app);
     registerGitHubRoutes(app);
-    registerGitRoutes(app);
+    const projectCommandRuntime = createOpenCodeProjectCommandRuntime({
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      getOpenCodePort,
+    });
+    registerGitRoutes(app, { projectCommandRuntime });
     registerMagicPromptRoutes(app, {
       fsPromises,
       path,
