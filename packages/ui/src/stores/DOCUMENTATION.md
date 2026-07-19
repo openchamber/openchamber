@@ -65,7 +65,7 @@ Permission auto-accept policy is authoritative in the active Web server or VS Co
 
 Shared safe storage treats durable failures per key. A quota or access failure creates an ephemeral override or tombstone for that key without disabling reads and writes for unrelated keys; later writes retry the durable backend. Deferred adapters retain failed operations for a later flush, and malformed Zustand JSON is removed and treated as missing so hydration can recover.
 
-Project settings use successful settings synchronization as authority, including an explicit or omitted empty project list. Transport or settings-load failure dispatches no synchronization event and therefore preserves the current runtime's namespaced cache.
+Project and UI settings use successful settings synchronization as authority. Omitted fields in a complete snapshot reset to canonical client defaults, including an omitted project list becoming empty; transport or settings-load failure dispatches no synchronization event and preserves current state. Settings save responses are partial patches and must not clear unrelated in-memory preferences or local mirrors.
 
 Session folders persist in bounded runtime-specific v2 browser keys. A runtime switch restores that namespace synchronously, cancels old-runtime writes, and starts a generation-owned disk hydration. Disk data may replace browser state only when no newer local folder mutation occurred; failure leaves hydration retryable. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
 

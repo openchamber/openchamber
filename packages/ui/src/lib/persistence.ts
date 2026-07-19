@@ -2,7 +2,13 @@ import type { DesktopSettings } from '@/lib/desktop';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
-import { isFollowUpBehavior, normalizeFollowUpBehavior, useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
+import {
+  DEFAULT_FOLLOW_UP_BEHAVIOR,
+  isFollowUpBehavior,
+  normalizeFollowUpBehavior,
+  useMessageQueueStore,
+  type FollowUpBehavior,
+} from '@/stores/messageQueueStore';
 import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
@@ -12,6 +18,8 @@ import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
+import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -506,6 +514,91 @@ const getPersistApi = (): PersistApi | undefined => {
 };
 
 const getRuntimeSettingsAPI = () => getRegisteredRuntimeAPIs()?.settings ?? null;
+
+const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopSettings => {
+  const defaults = useUIStore.getInitialState();
+
+  return {
+    useSystemTheme: true,
+    lightThemeId: DEFAULT_LIGHT_THEME_ID,
+    darkThemeId: DEFAULT_DARK_THEME_ID,
+    openInAppId: DEFAULT_OPEN_IN_APP_ID,
+    showReasoningTraces: defaults.showReasoningTraces,
+    sessionRecapEnabled: defaults.sessionRecapEnabled,
+    sessionSuggestionEnabled: defaults.sessionSuggestionEnabled,
+    sessionGoalEnabled: defaults.sessionGoalEnabled,
+    sessionGoalDefaultBudgetEnabled: defaults.sessionGoalDefaultBudgetEnabled,
+    sessionGoalDefaultBudget: defaults.sessionGoalDefaultBudget,
+    collapsibleThinkingBlocks: defaults.collapsibleThinkingBlocks,
+    autoDeleteEnabled: defaults.autoDeleteEnabled,
+    autoDeleteAfterDays: defaults.autoDeleteAfterDays,
+    sessionRetentionAction: defaults.sessionRetentionAction,
+    followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
+    showDeletionDialog: defaults.showDeletionDialog,
+    nativeNotificationsEnabled: defaults.nativeNotificationsEnabled,
+    notificationMode: defaults.notificationMode,
+    notifyOnSubtasks: defaults.notifyOnSubtasks,
+    notifyOnCompletion: defaults.notifyOnCompletion,
+    notifyOnError: defaults.notifyOnError,
+    notifyOnQuestion: defaults.notifyOnQuestion,
+    notificationTemplates: defaults.notificationTemplates,
+    summarizeLastMessage: defaults.summarizeLastMessage,
+    summaryThreshold: defaults.summaryThreshold,
+    summaryLength: defaults.summaryLength,
+    maxLastMessageLength: defaults.maxLastMessageLength,
+    inputSpellcheckEnabled: defaults.inputSpellcheckEnabled,
+    showOpenCodeUpdateNotifications: defaults.showOpenCodeUpdateNotifications,
+    showToolFileIcons: defaults.showToolFileIcons,
+    codeBlockLineWrap: defaults.codeBlockLineWrap,
+    showTurnChangedFiles: defaults.showTurnChangedFiles,
+    showExpandedBashTools: defaults.showExpandedBashTools,
+    showExpandedEditTools: defaults.showExpandedEditTools,
+    timeFormatPreference: defaults.timeFormatPreference,
+    weekStartPreference: defaults.weekStartPreference,
+    desktopWindowControlsPosition: defaults.desktopWindowControlsPosition,
+    chatRenderMode: defaults.chatRenderMode,
+    activityRenderMode: defaults.activityRenderMode,
+    mermaidRenderingMode: defaults.mermaidRenderingMode,
+    userMessageRenderingMode: defaults.userMessageRenderingMode,
+    collapsibleUserMessages: defaults.collapsibleUserMessages,
+    messageStreamTransport: 'auto',
+    stickyUserHeader: defaults.stickyUserHeader,
+    promptNavigatorEnabled: defaults.promptNavigatorEnabled,
+    expandedEditorToolbar: defaults.expandedEditorToolbar,
+    wideChatLayoutEnabled: defaults.wideChatLayoutEnabled,
+    showSplitAssistantMessageActions: defaults.showSplitAssistantMessageActions,
+    reportUsage: defaults.reportUsage,
+    fontSize: defaults.fontSize,
+    terminalFontSize: defaults.terminalFontSize,
+    terminalShell: defaults.terminalShell,
+    terminalLoginShells: defaults.terminalLoginShells,
+    editorFontSize: defaults.editorFontSize,
+    uiFont: defaults.uiFont,
+    monoFont: defaults.monoFont,
+    padding: defaults.padding,
+    cornerRadius: defaults.cornerRadius,
+    inputBarOffset: defaults.inputBarOffset,
+    shortcutOverrides: defaults.shortcutOverrides,
+    mobileKeyboardMode: 'resize-content',
+    favoriteModels: defaults.favoriteModels,
+    hiddenModels: defaults.hiddenModels,
+    collapsedModelProviders: defaults.collapsedModelProviders,
+    recentModels: defaults.recentModels,
+    recentAgents: defaults.recentAgents,
+    recentEfforts: defaults.recentEfforts,
+    diffLayoutPreference: defaults.diffLayoutPreference,
+    gitChangesViewMode: defaults.gitChangesViewMode,
+    directoryShowHidden: true,
+    filesViewShowGitignored: false,
+    dictationEnabled: true,
+    sttProvider: 'local',
+    sttServerUrl: 'http://localhost:8001/v1',
+    sttModel: 'deepdml/faster-whisper-large-v3-turbo-ct2',
+    sttLocalModel: 'parakeet-tdt-0.6b-v2-int8',
+    sttLanguage: '',
+    ...settings,
+  };
+};
 
 const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   const store = useUIStore.getState();
@@ -1265,6 +1358,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.promptNavigatorEnabled === 'boolean') {
     result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
   }
+  if (typeof candidate.expandedEditorToolbar === 'boolean') {
+    result.expandedEditorToolbar = candidate.expandedEditorToolbar;
+  }
   if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
     result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
   }
@@ -1574,6 +1670,7 @@ export const syncDesktopSettings = async (): Promise<void> => {
   const applySettings = async (settings: DesktopSettings) => {
     if (!isSettingsRuntimeContextCurrent(context)) return;
     const shouldPersistCraftGoalMigration = settings.draftStartersCraftGoalAdded !== true;
+    const authoritativeSettings = materializeAuthoritativeUiSettings(settings);
     try {
       persistToLocalStorage(settings);
     } catch (error) {
@@ -1581,20 +1678,23 @@ export const syncDesktopSettings = async (): Promise<void> => {
     }
     await waitForHydration();
     if (!isSettingsRuntimeContextCurrent(context)) return;
+    if (settings.draftStarters === undefined) {
+      useUIStore.setState({ globalDraftStarters: null });
+    }
     try {
-      applyDesktopUiPreferences(settings);
+      applyDesktopUiPreferences(authoritativeSettings);
     } catch (error) {
       console.warn('applyDesktopUiPreferences failed:', error);
     }
     if (shouldPersistCraftGoalMigration) {
       await updateDesktopSettings({
-        ...(settings.draftStarters ? { draftStarters: settings.draftStarters } : {}),
+        ...(authoritativeSettings.draftStarters ? { draftStarters: authoritativeSettings.draftStarters } : {}),
         draftStartersCraftGoalAdded: true,
       });
       if (!isSettingsRuntimeContextCurrent(context)) return;
     }
 
-    dispatchSettingsSynced(settings);
+    dispatchSettingsSynced(authoritativeSettings);
   };
 
   try {
@@ -1629,7 +1729,6 @@ async function _flushSettingsUpdate(): Promise<void> {
         const updated = await runtimeSettings.save(changes);
         if (!isSettingsRuntimeContextCurrent(context)) return;
         if (updated) {
-          persistToLocalStorage(updated);
           applyDesktopUiPreferences(updated);
           dispatchSettingsSynced(updated);
           _settingsCache = null;
@@ -1663,7 +1762,6 @@ async function _flushSettingsUpdate(): Promise<void> {
       const updated = (await response.json().catch(() => null)) as DesktopSettings | null;
       if (!isSettingsRuntimeContextCurrent(context)) return;
       if (updated) {
-        persistToLocalStorage(updated);
         applyDesktopUiPreferences(updated);
         dispatchSettingsSynced(updated);
         dispatchSettingsSaveState('saved');

@@ -5,6 +5,7 @@ import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
 import { useUIStore } from '@/stores/useUIStore';
+import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import {
   applyPersistedHomeDirectoryToWindow,
   getRuntimeSettingsMirrorStorageKey,
@@ -347,6 +348,55 @@ describe('updateDesktopSettings', () => {
       sttModel: 'model-a',
     });
     expect(JSON.parse(localStorage.getItem(getRuntimeSettingsMirrorStorageKey('mirror-b')) ?? '{}')).toEqual({});
+  });
+
+  test('resets in-memory preferences omitted by an authoritative runtime snapshot', async () => {
+    getWindow();
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-a.example', runtimeKey: 'preferences-a' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        showReasoningTraces: false,
+        terminalShell: 'fish',
+        favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
+        followUpBehavior: 'steer',
+        draftStarters: [{ type: 'command', name: 'runtime-a' }],
+        draftStartersCraftGoalAdded: true,
+      },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+    expect(useUIStore.getState().favoriteModels).toHaveLength(1);
+    expect(useUIStore.getState().globalDraftStarters).toEqual([{ type: 'command', name: 'runtime-a' }]);
+    expect(useMessageQueueStore.getState().followUpBehavior).toBe('steer');
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-b.example', runtimeKey: 'preferences-b' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { draftStartersCraftGoalAdded: true },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(true);
+    expect(useUIStore.getState().terminalShell).toBe('auto');
+    expect(useUIStore.getState().favoriteModels).toEqual([]);
+    expect(useUIStore.getState().globalDraftStarters).toBeNull();
+    expect(useMessageQueueStore.getState().followUpBehavior).toBe('queue');
+  });
+
+  test('treats settings save responses as partial patches', async () => {
+    getWindow();
+    localStorage.setItem('selectedThemeId', 'existing-theme');
+    useUIStore.getState().setTerminalShell('fish');
+    registerSettingsSave(async () => ({ showReasoningTraces: false }));
+
+    await updateDesktopSettings({ showReasoningTraces: false });
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+    expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
   });
 
   test('applies model selector settings from server settings', async () => {
