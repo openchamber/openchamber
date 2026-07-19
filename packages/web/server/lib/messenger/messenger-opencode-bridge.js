@@ -312,9 +312,26 @@ async function sendApprovalToSurface({ type, token, channelId, threadId, permiss
 // Maps questionId → { sessionID, requestID, directory, questions, answers,
 // surface } so option clicks (and typed replies) can be routed back to
 // OpenCode's question.reply API. Mirrors the permission approvalContexts.
+//
+// Contexts are NOT TTL-expired. A question stays answerable until OpenCode
+// reports it replied/rejected (or reconcile confirms it is no longer pending).
+// Auto-deleting the map left Discord buttons clickable but dead ("question
+// expired") and made typed replies fall through as a new prompt that aborted
+// the blocked turn ("Stopped the current turn…").
 export const questionContexts = new Map();
 
-const QUESTION_CONTEXT_TTL_MS = 30 * 60 * 1000;
+/**
+ * True when a Discord question message for this OpenCode request id is still
+ * live (posted, not yet decided). Mirrors hasLiveApprovalForRequest — keeps
+ * reconcile from pruning/re-forwarding while buttons are still actionable.
+ */
+function hasLiveQuestionForRequest(requestID) {
+  if (!requestID) return false;
+  for (const ctx of questionContexts.values()) {
+    if (ctx && typeof ctx === 'object' && ctx.requestID === requestID) return true;
+  }
+  return false;
+}
 
 /** Build the interactive Discord components for one question. */
 function buildQuestionComponents({ questionId, questionIndex, question }) {
@@ -1564,7 +1581,6 @@ export function createMessengerOpencodeBridge({
       surface: { type, token, messages },
       createdAt: Date.now(),
     });
-    setTimeout(() => questionContexts.delete(questionId), QUESTION_CONTEXT_TTL_MS).unref();
     return { ok: true, questionId };
   }
 
@@ -1631,32 +1647,90 @@ export function createMessengerOpencodeBridge({
   }
 
   /**
+   * Look up a still-pending OpenCode question for this session when the local
+   * Discord context map has nothing (listener restart, process recycle, etc.).
+   * Returns `{ id, questions, directory }` or null. Distinguishes fetch failure
+   * from empty success so a transient blip never pretends "no question".
+   */
+  async function fetchPendingQuestionForSession(sessionId, directory) {
+    if (!sessionId) return null;
+    const directories = [];
+    if (directory) directories.push(directory);
+    directories.push(''); // unscoped backstop
+    let sawSuccess = false;
+    for (const dir of directories) {
+      const list = await listPendingInteractions('question', dir);
+      if (list === null) continue;
+      sawSuccess = true;
+      const match = list.find((item) => item && item.sessionID === sessionId && typeof item.id === 'string' && item.id);
+      if (match) {
+        return {
+          id: match.id,
+          questions: Array.isArray(match.questions) ? match.questions : [],
+          directory: dir || directory || null,
+        };
+      }
+    }
+    if (!sawSuccess) {
+      console.warn('[BRIDGE] Could not list pending questions for typed answer recovery');
+    }
+    return null;
+  }
+
+  /**
    * Treat a typed Discord reply as the (custom) answer to the session's
    * pending question — exactly what the web UI's free-text answer does.
    * Already-picked options on a multi-question request are kept; the text
    * fills every still-unanswered question. Returns true when the reply was
    * consumed as an answer (the caller must NOT also send it as a prompt).
+   *
+   * When the local Discord context is missing but OpenCode still has the
+   * question pending, recover via the pending-question API so a late typed
+   * reply answers the blocked turn instead of aborting it as a supersede.
    */
-  async function answerPendingQuestionWithText(sessionId, text) {
+  async function answerPendingQuestionWithText(sessionId, text, { directory } = {}) {
     const found = findPendingQuestionForSession(sessionId);
-    if (!found) return false;
-    const [questionId, qctx] = found;
-    const answers = qctx.questions.map((_, i) =>
-      Array.isArray(qctx.answers[i]) && qctx.answers[i].length > 0 ? qctx.answers[i] : [text],
-    );
-    questionContexts.delete(questionId);
-    stripQuestionComponents(qctx);
+    if (found) {
+      const [questionId, qctx] = found;
+      const answers = qctx.questions.map((_, i) =>
+        Array.isArray(qctx.answers[i]) && qctx.answers[i].length > 0 ? qctx.answers[i] : [text],
+      );
+      questionContexts.delete(questionId);
+      stripQuestionComponents(qctx);
+      try {
+        await replyQuestionToOpenCode({
+          requestID: qctx.requestID,
+          answers,
+          directory: qctx.directory,
+        });
+        return true;
+      } catch (err) {
+        // The request may have been answered/dismissed elsewhere — fall back
+        // to sending the text as a normal prompt instead of swallowing it.
+        console.warn('[BRIDGE] Typed question answer failed, sending as prompt:', err?.message ?? err);
+        return false;
+      }
+    }
+
+    // No local context — recover from OpenCode so a late reply still answers
+    // the blocked question instead of superseding the turn.
+    const pending = await fetchPendingQuestionForSession(sessionId, directory);
+    if (!pending?.id) return false;
+    const questionCount = pending.questions.length > 0 ? pending.questions.length : 1;
+    const answers = Array.from({ length: questionCount }, () => [text]);
     try {
       await replyQuestionToOpenCode({
-        requestID: qctx.requestID,
+        requestID: pending.id,
         answers,
-        directory: qctx.directory,
+        directory: pending.directory,
+      });
+      console.log('[BRIDGE] Typed answer recovered via OpenCode pending question:', {
+        sessionId,
+        requestID: pending.id,
       });
       return true;
     } catch (err) {
-      // The request may have been answered/dismissed elsewhere — fall back
-      // to sending the text as a normal prompt instead of swallowing it.
-      console.warn('[BRIDGE] Typed question answer failed, sending as prompt:', err?.message ?? err);
+      console.warn('[BRIDGE] Recovered typed question answer failed, sending as prompt:', err?.message ?? err);
       return false;
     }
   }
@@ -2852,6 +2926,9 @@ export function createMessengerOpencodeBridge({
       if (!request.id || request.questions.length === 0) return;
 
       // Dedupe against the reconciliation safety net (see permission.asked).
+      // Hard stop while a Discord question message for this request is still
+      // actionable — same pattern as hasLiveApprovalForRequest.
+      if (hasLiveQuestionForRequest(request.id)) return;
       if (forwardedQuestionIds.has(request.id)) return;
       forwardedQuestionIds.add(request.id);
 
@@ -3021,10 +3098,16 @@ export function createMessengerOpencodeBridge({
       }
       if (questionFetchOk) {
         for (const id of [...forwardedQuestionIds]) {
-          if (!pendingQuestions.has(id)) forwardedQuestionIds.delete(id);
+          // Keep the dedupe slot while a question message is still live for
+          // it, even if this snapshot momentarily doesn't list it — otherwise
+          // the next snapshot that does list it re-forwards a duplicate with
+          // a new questionId, leaving the old buttons as "expired".
+          if (!pendingQuestions.has(id) && !hasLiveQuestionForRequest(id)) {
+            forwardedQuestionIds.delete(id);
+          }
         }
         for (const [id, { item, directory }] of pendingQuestions) {
-          if (forwardedQuestionIds.has(id)) continue;
+          if (forwardedQuestionIds.has(id) || hasLiveQuestionForRequest(id)) continue;
           try {
             console.log('[RECONCILE]', `forwarding missed question ${id} session=${item?.sessionID ?? 'unknown'}`);
             await handleGlobalEvent({
@@ -3950,8 +4033,9 @@ export function createMessengerOpencodeBridge({
 
     // The agent asked a question and the user typed a reply instead of
     // clicking an option → the text IS the (custom) answer. Send it through
-    // question.reply so the blocked turn resumes; never as a second prompt.
-    if (await answerPendingQuestionWithText(sessionId, text)) {
+    // question.reply so the blocked turn resumes; never as a second prompt
+    // (which would abort the waiting turn as a supersede).
+    if (await answerPendingQuestionWithText(sessionId, text, { directory: effectiveProjectPath })) {
       void postToSurface(ctx, '✅ _Reply sent as the answer to the question above._');
       broadcastEvent?.('messenger.bridge.question_answered', {
         type,

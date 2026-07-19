@@ -1342,6 +1342,75 @@ describe('question flow — interactive questions in Discord', () => {
     expect(calls.some((c) => c.url.includes('/prompt_async'))).toBe(false);
     expect(questionContexts.size).toBe(0);
   });
+
+  it('recovers a typed reply via OpenCode pending questions when local context is gone', async () => {
+    // Simulates listener restart / lost Map: Discord buttons show "expired",
+    // user types instead — must answer the still-pending OpenCode question,
+    // not abort the blocked turn as a supersede.
+    const bound = { sessionId: 'ses-q1', projectPath: '/proj', projectLabel: 'Proj' };
+    const pendingQuestion = {
+      id: 'req-q1',
+      sessionID: 'ses-q1',
+      questions: [{ question: 'Which name?', header: 'Name', options: [{ label: 'auto' }] }],
+    };
+    let pendingList = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      const u = String(url);
+      calls.push({ url: u, method: init.method ?? 'GET', body: init.body ?? null });
+      if (u.includes('/question/') && u.includes('/reply')) {
+        return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+      }
+      if (u.includes('/question') && (init.method ?? 'GET') === 'GET') {
+        return { ok: true, status: 200, json: async () => pendingList, text: async () => '[]' };
+      }
+      return { ok: true, status: 200, json: async () => ({ id: 'discord-msg-q' }), text: async () => '' };
+    });
+
+    const bridge = makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: ({ targetKey }) => (targetKey === 'chan-123' ? bound : null),
+      },
+    });
+
+    // Mark the session busy the way an in-flight ask-tool turn is (no pending
+    // question yet, so this is a normal prompt).
+    await bridge.routeInbound({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-123',
+      threadId: null,
+      text: 'start work',
+      from: { id: 'user-1', username: 'alice' },
+    });
+
+    // OpenCode still has the question; local Discord context was lost.
+    pendingList = [pendingQuestion];
+    questionContexts.clear();
+    calls.length = 0;
+
+    const routed = await bridge.routeInbound({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-123',
+      threadId: null,
+      text: 'call it add-user-table',
+      from: { id: 'user-1', username: 'alice' },
+    });
+
+    expect(routed.ok).toBe(true);
+    expect(routed.answeredQuestion).toBe(true);
+    expect(routed.superseded).toBeFalsy();
+    const reply = calls.find((c) => c.url.includes('/question/req-q1/reply'));
+    expect(reply).toBeTruthy();
+    expect(JSON.parse(reply.body)).toEqual({ answers: [['call it add-user-table']] });
+    expect(calls.some((c) => c.url.includes('/abort'))).toBe(false);
+    const notices = calls
+      .filter((c) => c.method === 'POST' && c.url.includes('/channels/chan-123/messages'))
+      .map((c) => JSON.parse(c.body).content);
+    expect(notices.some((n) => /stopped the current turn/i.test(n))).toBe(false);
+    expect(notices.some((n) => /Reply sent as the answer/i.test(n))).toBe(true);
+  });
 });
 
 describe('todo/plan mirroring', () => {
@@ -1575,6 +1644,55 @@ describe('pending interaction reconciliation (missed SSE recovery)', () => {
     for (let i = 0; i < 8; i += 1) await flush();
 
     expect(messageCount()).toBe(1);
+  });
+
+  it('does not re-surface a still-live question after a prune/reconcile cycle', async () => {
+    questionContexts.clear();
+    let pendingQuestionList = [
+      {
+        id: 'req-q-flip',
+        sessionID: 'ses-1',
+        questions: [{ question: 'Pick one?', header: 'Pick', options: [{ label: 'A' }] }],
+      },
+    ];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      const u = String(url);
+      calls.push({ url: u, method: init.method ?? 'GET', body: init.body ?? null });
+      if (u.includes('/permission') && !u.includes('/reply')) {
+        return { ok: true, status: 200, text: async () => '[]', json: async () => [] };
+      }
+      if (u.includes('/question') && !u.includes('/reply')) {
+        return { ok: true, status: 200, text: async () => '[]', json: async () => pendingQuestionList };
+      }
+      return { ok: true, status: 200, text: async () => '', json: async () => ({ id: 'discord-msg-q' }) };
+    });
+
+    const hub = makeHubWithStatus();
+    const bridge = makeBridge({ globalEventHub: hub, store: makeBoundStore() });
+    const messageCount = () =>
+      calls.filter((c) => c.method === 'POST' && c.url.includes('/messages')).length;
+
+    bridge.ensureSubscribed();
+    for (let i = 0; i < 8; i += 1) await flush();
+    expect(messageCount()).toBe(1);
+    expect([...questionContexts.values()].some((v) => v.requestID === 'req-q-flip')).toBe(true);
+
+    pendingQuestionList = [];
+    hub._emitStatus({ type: 'connect' });
+    for (let i = 0; i < 8; i += 1) await flush();
+
+    pendingQuestionList = [
+      {
+        id: 'req-q-flip',
+        sessionID: 'ses-1',
+        questions: [{ question: 'Pick one?', header: 'Pick', options: [{ label: 'A' }] }],
+      },
+    ];
+    hub._emitStatus({ type: 'connect' });
+    for (let i = 0; i < 8; i += 1) await flush();
+
+    expect(messageCount()).toBe(1);
+    questionContexts.clear();
   });
 });
 
