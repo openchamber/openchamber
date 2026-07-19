@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { prunePinnedSessionIds } from './pinnedSessionCleanup';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type SafeStorageLike = {
   getItem: (key: string) => string | null;
@@ -155,9 +156,7 @@ export const useSidebarPersistence = (args: Args) => {
       return;
     }
 
-    setPinnedSessionIds((prev) => {
-      return prunePinnedSessionIds(sessions, prev);
-    });
+    setPinnedSessionIds((prev) => prunePinnedSessionIds(getRuntimeKey(), sessions, prev));
   }, [hasAuthoritativeGlobalSessions, sessions, setPinnedSessionIds]);
 
   React.useEffect(() => {

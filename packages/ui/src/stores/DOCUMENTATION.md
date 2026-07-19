@@ -71,6 +71,8 @@ Session folders persist in bounded runtime-specific v2 browser keys. A runtime s
 
 Persisted session todos use a bounded composite key of runtime, normalized directory, and session ID. Ambiguous legacy todo entries are discarded rather than claimed by whichever runtime starts first. Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone.
 
+Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sessions use the same runtime/directory/session ownership rule. Chat drafts use a bounded shared envelope and notify mounted composers when authoritative deletion clears their identity, preventing unmount autosave from resurrecting deleted text. Inline drafts enforce per-session, global-session, and serialized-byte bounds. Pins retain composite keys across runtimes, while authoritative reconciliation prunes only the runtime whose complete session list arrived. Ambiguous session-only legacy drafts and pins are not claimed.
+
 ## Git / PR Stores
 
 The Git and PR stores are the most important stores to understand before editing this directory.

@@ -1,5 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { isSessionPinned } from '@/stores/useSessionPinnedStore';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 
@@ -132,8 +134,8 @@ export const compareSessionsByPinnedAndTime = (
   b: Session,
   pinnedSessionIds: Set<string>,
 ): number => {
-  const aPinned = pinnedSessionIds.has(a.id);
-  const bPinned = pinnedSessionIds.has(b.id);
+  const aPinned = isSessionPinned(pinnedSessionIds, resolveGlobalSessionDirectory(a), a.id);
+  const bPinned = isSessionPinned(pinnedSessionIds, resolveGlobalSessionDirectory(b), b.id);
   if (aPinned !== bPinned) {
     return aPinned ? -1 : 1;
   }

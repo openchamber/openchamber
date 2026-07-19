@@ -3,6 +3,7 @@ import { toast } from '@/components/ui';
 import { useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentSource } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 
 type LineRangeBase = {
   start: number;
@@ -52,25 +53,36 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
+  const effectiveDirectory = useEffectiveDirectory();
+  const sessionDirectory = useSessionUIStore(
+    React.useCallback(
+      (state) => currentSessionId ? state.getDirectoryForSession(currentSessionId) : null,
+      [currentSessionId],
+    ),
+  );
 
   const addDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const updateDraft = useInlineCommentDraftStore((state) => state.updateDraft);
   const removeDraft = useInlineCommentDraftStore((state) => state.removeDraft);
-  const allDrafts = useInlineCommentDraftStore((state) => state.drafts);
 
   const [selection, setSelection] = React.useState<TRange | null>(null);
   const [commentText, setCommentText] = React.useState('');
   const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
 
-  const sessionKey = React.useMemo(() => {
-    return currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-  }, [currentSessionId, newSessionDraftOpen]);
+  const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+  const draftDirectory = sessionDirectory ?? effectiveDirectory;
+  const target = React.useMemo(() => {
+    if (!sessionKey || !draftDirectory) return null;
+    return { directory: draftDirectory, sessionKey };
+  }, [draftDirectory, sessionKey]);
+  const sessionDrafts = useInlineCommentDraftStore(
+    React.useCallback((state) => target ? state.getDrafts(target) : [], [target]),
+  );
 
   const drafts = React.useMemo(() => {
-    if (!sessionKey || !fileLabel) return [];
-    const sessionDrafts = allDrafts[sessionKey] ?? [];
+    if (!target || !fileLabel) return [];
     return sessionDrafts.filter((draft) => draft.source === source && draft.fileLabel === fileLabel);
-  }, [allDrafts, fileLabel, sessionKey, source]);
+  }, [fileLabel, sessionDrafts, source, target]);
 
   const reset = React.useCallback(() => {
     setSelection(null);
@@ -90,18 +102,19 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   }, [fromDraftRange]);
 
   const deleteDraft = React.useCallback((draft: InlineCommentDraft) => {
-    removeDraft(draft.sessionKey, draft.id);
+    if (!target) return;
+    removeDraft(target, draft.id);
     if (editingDraftId === draft.id) {
       reset();
     }
-  }, [editingDraftId, removeDraft, reset]);
+  }, [editingDraftId, removeDraft, reset, target]);
 
   const saveComment = React.useCallback((textToSave: string, rangeOverride?: TRange) => {
     const targetRange = rangeOverride ?? selection;
     const trimmedText = textToSave.trim();
     if (!targetRange || !trimmedText || !fileLabel) return;
 
-    if (!sessionKey) {
+    if (!target) {
       toast.error(t('inlineComment.toast.selectSessionToSave'));
       return;
     }
@@ -111,7 +124,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     const code = getCodeForRange(normalizedRange);
 
     if (editingDraftId) {
-      updateDraft(sessionKey, editingDraftId, {
+      updateDraft(target, editingDraftId, {
         fileLabel,
         startLine: normalizedStoreRange.startLine,
         endLine: normalizedStoreRange.endLine,
@@ -121,8 +134,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
         text: trimmedText,
       });
     } else {
-      addDraft({
-        sessionKey,
+      addDraft(target, {
         source,
         fileLabel,
         startLine: normalizedStoreRange.startLine,
@@ -135,7 +147,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     }
 
     reset();
-  }, [addDraft, editingDraftId, fileLabel, getCodeForRange, language, reset, selection, sessionKey, source, t, toStoreRange, updateDraft]);
+  }, [addDraft, editingDraftId, fileLabel, getCodeForRange, language, reset, selection, source, t, target, toStoreRange, updateDraft]);
 
   return {
     sessionKey,
