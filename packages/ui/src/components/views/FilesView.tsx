@@ -810,7 +810,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const openPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.openPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
   const selectedPath = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.selectedPath ?? null) : null));
   const expandedPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.expandedPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
-  const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
   const removeOpenPath = useFilesViewTabsStore((state) => state.removeOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
   const removeExpandedPathsByPrefix = useFilesViewTabsStore((state) => state.removeExpandedPathsByPrefix);
@@ -922,6 +921,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const diagramEditorRef = React.useRef<React.ComponentRef<typeof DiagramEditor>>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
+  const loadingFilePathRef = React.useRef<string | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
   const [diagramSaved, setDiagramSaved] = React.useState(false);
   const [autoSaveEnabled, setAutoSaveEnabled] = React.useState(getInitialAutoSaveEnabled);
@@ -1952,7 +1952,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     if (root) {
       setSelectedPath(root, node.path);
-      addOpenPath(root, node.path);
       void ensurePathVisible(node.path, false);
     }
 
@@ -1966,7 +1965,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (isMobile) {
       setShowMobilePageContent(true);
     }
-  }, [addOpenPath, ensurePathVisible, isDirty, isMobile, root, setSelectedPath]);
+  }, [ensurePathVisible, isDirty, isMobile, root, setSelectedPath]);
 
   React.useEffect(() => {
     if (!selectedFile?.path) {
@@ -1979,16 +1978,23 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   React.useEffect(() => {
     if (!selectedFile) {
       activeFileLoadIdRef.current += 1;
+      loadingFilePathRef.current = null;
       setFileLoading(false);
       return;
     }
 
-    if (loadedFilePath === selectedFile.path) {
+    if (loadedFilePath === selectedFile.path || loadingFilePathRef.current === selectedFile.path) {
       return;
     }
 
     // Selection changes are guarded; this effect is also what restores persisted tabs on mount.
-    void loadSelectedFile(selectedFile);
+    const loadingPath = selectedFile.path;
+    loadingFilePathRef.current = loadingPath;
+    void loadSelectedFile(selectedFile).finally(() => {
+      if (loadingFilePathRef.current === loadingPath) {
+        loadingFilePathRef.current = null;
+      }
+    });
   }, [loadSelectedFile, loadedFilePath, selectedFile]);
 
   // Sync isDirty to a ref so the polling interval can read the latest value
