@@ -1,9 +1,16 @@
 import React from 'react';
 import { toast } from '@/components/ui';
-import { useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentSource } from '@/stores/useInlineCommentDraftStore';
+import {
+  EMPTY_INLINE_COMMENT_DRAFTS,
+  getInlineCommentDraftKey,
+  useInlineCommentDraftStore,
+  type InlineCommentDraft,
+  type InlineCommentSource,
+} from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type LineRangeBase = {
   start: number;
@@ -75,8 +82,14 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     if (!sessionKey || !draftDirectory) return null;
     return { directory: draftDirectory, sessionKey };
   }, [draftDirectory, sessionKey]);
+  const targetKey = target
+    ? getInlineCommentDraftKey(getRuntimeKey(), target.directory, target.sessionKey)
+    : null;
   const sessionDrafts = useInlineCommentDraftStore(
-    React.useCallback((state) => target ? state.getDrafts(target) : [], [target]),
+    React.useCallback(
+      (state) => targetKey ? state.drafts[targetKey] ?? EMPTY_INLINE_COMMENT_DRAFTS : EMPTY_INLINE_COMMENT_DRAFTS,
+      [targetKey],
+    ),
   );
 
   const drafts = React.useMemo(() => {

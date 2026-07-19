@@ -25,6 +25,8 @@ export interface InlineCommentDraft {
   createdAt: number;
 }
 
+export const EMPTY_INLINE_COMMENT_DRAFTS: InlineCommentDraft[] = [];
+
 interface InlineCommentDraftState {
   drafts: Record<string, InlineCommentDraft[]>;
   touchedAt: Record<string, number>;
@@ -161,7 +163,7 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
         },
         getDrafts: (target) => {
           const key = getCurrentKey(target);
-          return key ? get().drafts[key] ?? [] : [];
+          return key ? get().drafts[key] ?? EMPTY_INLINE_COMMENT_DRAFTS : EMPTY_INLINE_COMMENT_DRAFTS;
         },
         consumeDrafts: (target) => {
           const key = getCurrentKey(target);

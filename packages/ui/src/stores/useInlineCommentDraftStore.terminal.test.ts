@@ -50,4 +50,11 @@ describe('terminal context drafts', () => {
     expect(useInlineCommentDraftStore.getState().getDrafts(target)).toEqual([]);
     expect(useInlineCommentDraftStore.getState().getDrafts(otherTarget)).toHaveLength(1);
   });
+
+  test('returns a stable empty snapshot for absent draft buckets', () => {
+    const first = useInlineCommentDraftStore.getState().getDrafts(target);
+    const second = useInlineCommentDraftStore.getState().getDrafts(target);
+
+    expect(first).toBe(second);
+  });
 });
