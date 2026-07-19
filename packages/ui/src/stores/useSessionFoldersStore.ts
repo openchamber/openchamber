@@ -3,6 +3,8 @@ import { devtools } from 'zustand/middleware';
 import { getDeferredSafeStorage } from './utils/safeStorage';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { readRuntimeScopedStorage, writeRuntimeScopedStorage } from './utils/runtimeScopedStorage';
 
 // --- Types ---
 
@@ -46,14 +48,31 @@ const SESSION_FOLDERS_API_PATH = '/api/session-folders';
 const DISK_WRITE_DEBOUNCE_MS = 250;
 const ARCHIVED_SCOPE_PREFIX = '__archived__:';
 
+type FoldersRuntimeContext = {
+  runtimeKey: string;
+  generation: number;
+};
+
+let foldersRuntimeGeneration = 0;
+const captureFoldersRuntimeContext = (): FoldersRuntimeContext => ({
+  runtimeKey: getRuntimeKey(),
+  generation: foldersRuntimeGeneration,
+});
+const isSameFoldersRuntimeContext = (left: FoldersRuntimeContext, right: FoldersRuntimeContext): boolean => (
+  left.runtimeKey === right.runtimeKey && left.generation === right.generation
+);
+const isFoldersRuntimeContextCurrent = (context: FoldersRuntimeContext): boolean => (
+  context.generation === foldersRuntimeGeneration && context.runtimeKey === getRuntimeKey()
+);
+
 const safeStorage = getDeferredSafeStorage();
 let diskWriteTimer: ReturnType<typeof setTimeout> | null = null;
-let diskHydrated = false;
-let diskHydrationInFlight = false;
+let diskHydratedContext: FoldersRuntimeContext | null = null;
+let diskHydrationInFlight: FoldersRuntimeContext | null = null;
 let persistFoldersTimer: ReturnType<typeof setTimeout> | undefined;
 let persistCollapsedTimer: ReturnType<typeof setTimeout> | undefined;
-let pendingFoldersMap: SessionFoldersMap | null = null;
-let pendingCollapsedIds: Set<string> | null = null;
+let pendingFoldersMap: { foldersMap: SessionFoldersMap; context: FoldersRuntimeContext } | null = null;
+let pendingCollapsedIds: { ids: Set<string>; context: FoldersRuntimeContext } | null = null;
 
 const isVSCodeWebview = (): boolean => {
   if (typeof window === 'undefined') {
@@ -67,7 +86,11 @@ const isVSCodeWebview = (): boolean => {
   return (window as { __VSCODE_CONFIG__?: unknown }).__VSCODE_CONFIG__ !== undefined;
 };
 
-const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): void => {
+const schedulePersistToDisk = (
+  foldersMap: SessionFoldersMap,
+  collapsedFolderIds: Set<string>,
+  context = captureFoldersRuntimeContext(),
+): void => {
   if (typeof window === 'undefined') {
     return;
   }
@@ -85,6 +108,9 @@ const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds
 
   diskWriteTimer = setTimeout(() => {
     diskWriteTimer = null;
+    if (!isFoldersRuntimeContextCurrent(context)) {
+      return;
+    }
     const payload = {
       version: 1,
       foldersMap: foldersSnapshot,
@@ -99,9 +125,9 @@ const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds
   }, DISK_WRITE_DEBOUNCE_MS);
 };
 
-const readPersistedFolders = (): SessionFoldersMap => {
+const readPersistedFolders = (runtimeKey = getRuntimeKey()): SessionFoldersMap => {
   try {
-    const raw = safeStorage.getItem(FOLDERS_STORAGE_KEY);
+    const raw = readRuntimeScopedStorage(safeStorage, FOLDERS_STORAGE_KEY, runtimeKey);
     if (!raw) {
       return {};
     }
@@ -138,9 +164,9 @@ const readPersistedFolders = (): SessionFoldersMap => {
   }
 };
 
-const readPersistedCollapsed = (): Set<string> => {
+const readPersistedCollapsed = (runtimeKey = getRuntimeKey()): Set<string> => {
   try {
-    const raw = safeStorage.getItem(COLLAPSED_STORAGE_KEY);
+    const raw = readRuntimeScopedStorage(safeStorage, COLLAPSED_STORAGE_KEY, runtimeKey);
     if (!raw) {
       return new Set();
     }
@@ -154,26 +180,52 @@ const readPersistedCollapsed = (): Set<string> => {
   }
 };
 
-const persistFolders = (foldersMap: SessionFoldersMap): void => {
-  pendingFoldersMap = foldersMap;
+const persistFolders = (foldersMap: SessionFoldersMap, context = captureFoldersRuntimeContext()): void => {
+  pendingFoldersMap = { foldersMap, context };
   clearTimeout(persistFoldersTimer);
   persistFoldersTimer = setTimeout(() => {
+    const pending = pendingFoldersMap;
+    if (
+      !pending
+      || !isSameFoldersRuntimeContext(pending.context, context)
+      || !isFoldersRuntimeContextCurrent(pending.context)
+    ) {
+      return;
+    }
+    pendingFoldersMap = null;
     try {
-      safeStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(foldersMap));
-      pendingFoldersMap = null;
+      writeRuntimeScopedStorage(
+        safeStorage,
+        FOLDERS_STORAGE_KEY,
+        JSON.stringify(pending.foldersMap),
+        pending.context.runtimeKey,
+      );
     } catch {
       // ignored
     }
   }, 300);
 };
 
-const persistCollapsed = (collapsedFolderIds: Set<string>): void => {
-  pendingCollapsedIds = collapsedFolderIds;
+const persistCollapsed = (collapsedFolderIds: Set<string>, context = captureFoldersRuntimeContext()): void => {
+  pendingCollapsedIds = { ids: collapsedFolderIds, context };
   clearTimeout(persistCollapsedTimer);
   persistCollapsedTimer = setTimeout(() => {
+    const pending = pendingCollapsedIds;
+    if (
+      !pending
+      || !isSameFoldersRuntimeContext(pending.context, context)
+      || !isFoldersRuntimeContextCurrent(pending.context)
+    ) {
+      return;
+    }
+    pendingCollapsedIds = null;
     try {
-      safeStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(collapsedFolderIds)));
-      pendingCollapsedIds = null;
+      writeRuntimeScopedStorage(
+        safeStorage,
+        COLLAPSED_STORAGE_KEY,
+        JSON.stringify(Array.from(pending.ids)),
+        pending.context.runtimeKey,
+      );
     } catch {
       // ignored
     }
@@ -184,25 +236,40 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () => {
     if (pendingFoldersMap !== null) {
       clearTimeout(persistFoldersTimer);
-      try {
-        safeStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(pendingFoldersMap));
-      } catch { /* ignored */ }
+      if (isFoldersRuntimeContextCurrent(pendingFoldersMap.context)) {
+        try {
+          writeRuntimeScopedStorage(
+            safeStorage,
+            FOLDERS_STORAGE_KEY,
+            JSON.stringify(pendingFoldersMap.foldersMap),
+            pendingFoldersMap.context.runtimeKey,
+          );
+        } catch { /* ignored */ }
+      }
       pendingFoldersMap = null;
     }
     if (pendingCollapsedIds !== null) {
       clearTimeout(persistCollapsedTimer);
-      try {
-        safeStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(pendingCollapsedIds)));
-      } catch { /* ignored */ }
+      if (isFoldersRuntimeContextCurrent(pendingCollapsedIds.context)) {
+        try {
+          writeRuntimeScopedStorage(
+            safeStorage,
+            COLLAPSED_STORAGE_KEY,
+            JSON.stringify(Array.from(pendingCollapsedIds.ids)),
+            pendingCollapsedIds.context.runtimeKey,
+          );
+        } catch { /* ignored */ }
+      }
       pendingCollapsedIds = null;
     }
   });
 }
 
 const persistState = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): void => {
-  persistFolders(foldersMap);
-  persistCollapsed(collapsedFolderIds);
-  schedulePersistToDisk(foldersMap, collapsedFolderIds);
+  const context = captureFoldersRuntimeContext();
+  persistFolders(foldersMap, context);
+  persistCollapsed(collapsedFolderIds, context);
+  schedulePersistToDisk(foldersMap, collapsedFolderIds, context);
 };
 
 const createFolderId = (): string => {
@@ -525,21 +592,28 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
   ),
 );
 
-const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
-  if (diskHydrated || diskHydrationInFlight || typeof window === 'undefined') {
+const hydrateSessionFoldersFromDisk = async (
+  context = captureFoldersRuntimeContext(),
+): Promise<void> => {
+  if (
+    typeof window === 'undefined'
+    || !isFoldersRuntimeContextCurrent(context)
+    || (diskHydratedContext && isSameFoldersRuntimeContext(diskHydratedContext, context))
+    || (diskHydrationInFlight && isSameFoldersRuntimeContext(diskHydrationInFlight, context))
+  ) {
     return;
   }
 
   if (isVSCodeWebview()) {
-    diskHydrated = true;
+    diskHydratedContext = context;
     return;
   }
 
-  diskHydrationInFlight = true;
+  diskHydrationInFlight = context;
 
   try {
     const response = await runtimeFetch(SESSION_FOLDERS_API_PATH).catch(() => null);
-    if (!response || !response.ok) {
+    if (!isFoldersRuntimeContextCurrent(context) || !response || !response.ok) {
       return;
     }
 
@@ -548,7 +622,7 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
       collapsedFolderIds?: string[];
     } | null;
 
-    if (!parsed) {
+    if (!isFoldersRuntimeContextCurrent(context) || !parsed) {
       return;
     }
 
@@ -560,7 +634,7 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
       : new Set<string>();
 
     const hasDiskData = Object.keys(diskFolders).length > 0 || diskCollapsed.size > 0;
-    if (!hasDiskData) {
+    if (!isFoldersRuntimeContextCurrent(context) || !hasDiskData) {
       return;
     }
 
@@ -569,13 +643,17 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
       collapsedFolderIds: diskCollapsed,
     });
 
-    persistFolders(diskFolders);
-    persistCollapsed(diskCollapsed);
+    persistFolders(diskFolders, context);
+    persistCollapsed(diskCollapsed, context);
   } catch {
     // ignored
   } finally {
-    diskHydrationInFlight = false;
-    diskHydrated = true;
+    if (diskHydrationInFlight && isSameFoldersRuntimeContext(diskHydrationInFlight, context)) {
+      diskHydrationInFlight = null;
+    }
+    if (isFoldersRuntimeContextCurrent(context)) {
+      diskHydratedContext = context;
+    }
   }
 };
 
@@ -588,3 +666,30 @@ const bootstrapSessionFoldersDiskHydration = (): void => {
 };
 
 bootstrapSessionFoldersDiskHydration();
+
+if (typeof window !== 'undefined') {
+  subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey) {
+      return;
+    }
+    foldersRuntimeGeneration += 1;
+    if (diskWriteTimer) {
+      clearTimeout(diskWriteTimer);
+      diskWriteTimer = null;
+    }
+    clearTimeout(persistFoldersTimer);
+    clearTimeout(persistCollapsedTimer);
+    persistFoldersTimer = undefined;
+    persistCollapsedTimer = undefined;
+    pendingFoldersMap = null;
+    pendingCollapsedIds = null;
+    diskHydratedContext = null;
+
+    const context = captureFoldersRuntimeContext();
+    useSessionFoldersStore.setState({
+      foldersMap: readPersistedFolders(context.runtimeKey),
+      collapsedFolderIds: readPersistedCollapsed(context.runtimeKey),
+    });
+    void hydrateSessionFoldersFromDisk(context);
+  });
+}

@@ -5,6 +5,7 @@ import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
 import { useUIStore } from '@/stores/useUIStore';
+import { createProjectIdFromPath } from './projectId';
 import {
   applyPersistedHomeDirectoryToWindow,
   getSettingsSaveState,
@@ -149,6 +150,7 @@ describe('applyPersistedHomeDirectoryToWindow', () => {
 describe('updateDesktopSettings', () => {
   beforeEach(() => {
     getWindow();
+    localStorage.clear();
     registerRuntimeAPIs(null);
     invalidateSettingsCache();
     resetModelPrefsState();
@@ -353,6 +355,86 @@ describe('updateDesktopSettings', () => {
 
     expect(useUIStore.getState().terminalShell).toBe('zsh');
     expect(useUIStore.getState().terminalLoginShells).toEqual(['zsh', 'fish']);
+  });
+
+  test('does not copy remote path and project settings into unscoped browser storage', async () => {
+    const localProjects = JSON.stringify([{ id: 'local-project', path: '/Users/local-user/projects/app' }]);
+    const settings = {
+      homeDirectory: '/home/remote-user',
+      lastDirectory: '/home/remote-user/projects/app',
+      projects: [{ id: 'remote-project', path: '/home/remote-user/projects/app' }],
+      activeProjectId: 'remote-project',
+      draftStartersCraftGoalAdded: true,
+    } satisfies SettingsPayload;
+    const synced: SettingsPayload[] = [];
+    const listener = (event: Event) => {
+      synced.push((event as CustomEvent<SettingsPayload>).detail);
+    };
+    delete getWindow().__OPENCHAMBER_HOME__;
+    localStorage.setItem('homeDirectory', '/Users/local-user');
+    localStorage.setItem('lastDirectory', '/Users/local-user/projects/app');
+    localStorage.setItem('projects', localProjects);
+    localStorage.setItem('activeProjectId', 'local-project');
+    getWindow().addEventListener('openchamber:settings-synced', listener);
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://remote-storage.example', runtimeKey: 'remote-storage' });
+    registerSettingsApi(async () => ({}), async () => ({ settings, source: 'web' }));
+
+    try {
+      await syncDesktopSettings();
+
+      expect(localStorage.getItem('homeDirectory')).toBe('/Users/local-user');
+      expect(localStorage.getItem('lastDirectory')).toBe('/Users/local-user/projects/app');
+      expect(localStorage.getItem('projects')).toBe(localProjects);
+      expect(localStorage.getItem('activeProjectId')).toBe('local-project');
+      expect(getWindow().__OPENCHAMBER_HOME__).toBeUndefined();
+      expect(synced).toHaveLength(1);
+      expect(synced[0]?.homeDirectory).toBe('/home/remote-user');
+    } finally {
+      getWindow().removeEventListener('openchamber:settings-synced', listener);
+    }
+  });
+
+  test('migrates local project collapse metadata to its runtime-scoped browser key', async () => {
+    localStorage.setItem('oc.sessions.projectCollapse', JSON.stringify(['stale-project']));
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://local-settings.example', runtimeKey: 'local' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        projects: [
+          { id: 'local-project', path: '/Users/local-user/projects/app', sidebarCollapsed: true },
+        ],
+        draftStartersCraftGoalAdded: true,
+      },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(localStorage.getItem('oc.sessions.projectCollapse:local')).toBe(JSON.stringify([
+      createProjectIdFromPath('/Users/local-user/projects/app'),
+    ]));
+    expect(localStorage.getItem('oc.sessions.projectCollapse')).toBeNull();
+  });
+
+  test('preserves an authoritative empty remote project list for runtime hydration', async () => {
+    const synced: SettingsPayload[] = [];
+    const listener = (event: Event) => {
+      synced.push((event as CustomEvent<SettingsPayload>).detail);
+    };
+    getWindow().addEventListener('openchamber:settings-synced', listener);
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://remote-empty-projects.example', runtimeKey: 'remote-empty-projects' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { projects: [], draftStartersCraftGoalAdded: true },
+      source: 'web',
+    }));
+
+    try {
+      await syncDesktopSettings();
+
+      expect(synced).toHaveLength(1);
+      expect(synced[0]?.projects).toEqual([]);
+    } finally {
+      getWindow().removeEventListener('openchamber:settings-synced', listener);
+    }
   });
 
   test('autosaves all model selector settings fields', async () => {

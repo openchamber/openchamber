@@ -429,6 +429,7 @@ class OpencodeService {
   // Get system information including home directory
   async getSystemInfo(): Promise<{ homeDirectory: string; username?: string }> {
     const candidates = new Set<string>();
+    const allowLocalFallback = getRuntimeKey() === 'local';
     const addCandidate = (value?: string | null) => {
       const normalized = this.normalizeCandidatePath(value);
       if (normalized) {
@@ -470,19 +471,21 @@ class OpencodeService {
       }
     }
 
-    addCandidate(this.currentDirectory);
+    if (allowLocalFallback) {
+      addCandidate(this.currentDirectory);
 
-    if (typeof window !== 'undefined') {
-      try {
-        addCandidate(window.localStorage.getItem('lastDirectory'));
-        addCandidate(window.localStorage.getItem('homeDirectory'));
-      } catch {
-        // Access to storage failed (e.g. privacy mode)
+      if (typeof window !== 'undefined') {
+        try {
+          addCandidate(window.localStorage.getItem('lastDirectory'));
+          addCandidate(window.localStorage.getItem('homeDirectory'));
+        } catch {
+          // Access to storage failed (e.g. privacy mode)
+        }
       }
-    }
 
-    if (!candidates.size && typeof process !== 'undefined' && typeof process.cwd === 'function') {
-      addCandidate(process.cwd());
+      if (!candidates.size && typeof process !== 'undefined' && typeof process.cwd === 'function') {
+        addCandidate(process.cwd());
+      }
     }
 
     if (!candidates.size) {

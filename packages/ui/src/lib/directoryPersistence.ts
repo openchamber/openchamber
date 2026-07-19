@@ -1,8 +1,13 @@
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 export const applyPersistedDirectoryPreferences = async (): Promise<void> => {
   if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (getRuntimeKey() !== 'local' || isVSCodeRuntime()) {
     return;
   }
 
@@ -21,7 +26,7 @@ export const applyPersistedDirectoryPreferences = async (): Promise<void> => {
   // desktop settings, overriding the authoritative resolution
   // (initializeHomeDirectory → /api/fs/home) that runs on every startup.
 
-  if (savedDirectory && !isVSCodeRuntime()) {
+  if (savedDirectory) {
     useDirectoryStore.getState().setDirectory(savedDirectory, { showOverlay: false });
   }
 };

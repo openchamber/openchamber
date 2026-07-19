@@ -27,7 +27,12 @@ import { useGroupOrdering } from './sidebar/hooks/useGroupOrdering';
 import { useSessionGrouping } from './sidebar/hooks/useSessionGrouping';
 import { useSessionSearchEffects } from './sidebar/hooks/useSessionSearchEffects';
 import { useSessionActions } from './sidebar/hooks/useSessionActions';
-import { useSidebarPersistence } from './sidebar/hooks/useSidebarPersistence';
+import {
+  readSidebarActiveSessions,
+  readSidebarGroupOrder,
+  readSidebarStringSet,
+  useSidebarPersistence,
+} from './sidebar/hooks/useSidebarPersistence';
 import { useProjectRepoStatus } from './sidebar/hooks/useProjectRepoStatus';
 import { useProjectSessionLists } from './sidebar/hooks/useProjectSessionLists';
 import { useSessionFolderCleanup } from './sidebar/hooks/useSessionFolderCleanup';
@@ -64,7 +69,7 @@ import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
   deriveRecentSessions,
 } from './sidebar/activitySections';
-import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { SESSION_PINNED_STORAGE_KEY, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
   compareSessionsByPinnedAndTime,
   formatProjectLabel,
@@ -80,6 +85,7 @@ import {
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { writeRuntimeScopedStorage } from '@/stores/utils/runtimeScopedStorage';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -92,7 +98,6 @@ const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 // id into all four context combinations.
 const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents.v2';
 const LEGACY_SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
-const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
@@ -206,54 +211,15 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
   const setPinnedSessionIds = useSessionPinnedStore((state) => state.setIds);
   const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
-  const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => {
-    try {
-      const raw = getDeferredSafeStorage().getItem(GROUP_COLLAPSE_STORAGE_KEY);
-      if (!raw) {
-        return new Set();
-      }
-      const parsed = JSON.parse(raw) as string[];
-      return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : []);
-    } catch {
-      return new Set();
-    }
-  });
-  const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => {
-    try {
-      const raw = getDeferredSafeStorage().getItem(GROUP_ORDER_STORAGE_KEY);
-      if (!raw) {
-        return new Map();
-      }
-      const parsed = JSON.parse(raw) as Record<string, string[]>;
-      const next = new Map<string, string[]>();
-      Object.entries(parsed).forEach(([projectId, order]) => {
-        if (Array.isArray(order)) {
-          next.set(projectId, order.filter((item) => typeof item === 'string'));
-        }
-      });
-      return next;
-    } catch {
-      return new Map();
-    }
-  });
-  const [activeSessionByProject, setActiveSessionByProject] = React.useState<Map<string, string>>(() => {
-    try {
-      const raw = getDeferredSafeStorage().getItem(PROJECT_ACTIVE_SESSION_STORAGE_KEY);
-      if (!raw) {
-        return new Map();
-      }
-      const parsed = JSON.parse(raw) as Record<string, string>;
-      const next = new Map<string, string>();
-      Object.entries(parsed).forEach(([projectId, sessionId]) => {
-        if (typeof sessionId === 'string' && sessionId.length > 0) {
-          next.set(projectId, sessionId);
-        }
-      });
-      return next;
-    } catch {
-      return new Map();
-    }
-  });
+  const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => (
+    readSidebarStringSet(safeStorage, GROUP_COLLAPSE_STORAGE_KEY)
+  ));
+  const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => (
+    readSidebarGroupOrder(safeStorage, GROUP_ORDER_STORAGE_KEY)
+  ));
+  const [activeSessionByProject, setActiveSessionByProject] = React.useState<Map<string, string>>(() => (
+    readSidebarActiveSessions(safeStorage, PROJECT_ACTIVE_SESSION_STORAGE_KEY)
+  ));
 
   const [projectRootBranches, setProjectRootBranches] = React.useState<Map<string, string>>(new Map());
   const projectHeaderSentinelRefs = React.useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -571,8 +537,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     pinnedSessionIds,
     setPinnedSessionIds,
     groupOrderByProject,
+    setGroupOrderByProject,
     activeSessionByProject,
+    setActiveSessionByProject,
     collapsedGroups,
+    setCollapsedGroups,
     setExpandedParents,
     setCollapsedProjects,
   });
@@ -766,7 +735,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       const next = new Set(prev);
       keysToAdd.forEach((k) => next.add(k));
       try {
-        safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
+        writeRuntimeScopedStorage(safeStorage, SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
       } catch { /* ignored */ }
       return next;
     });
@@ -781,7 +750,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         next.add(expansionKey);
       }
       try {
-        safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
+        writeRuntimeScopedStorage(safeStorage, SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
       } catch { /* ignored */ }
       return next;
     });
@@ -855,7 +824,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     setCollapsedProjects(() => {
       const allIds = new Set(projects.map((p) => p.id));
       try {
-        safeStorage.setItem(PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(allIds)));
+        writeRuntimeScopedStorage(safeStorage, PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(allIds)));
       } catch { /* ignored */ }
       if (!isVSCode) {
         scheduleCollapsedProjectsPersist(allIds);
@@ -870,7 +839,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     setCollapsedProjects(() => {
       const empty = new Set<string>();
       try {
-        safeStorage.setItem(PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify([]));
+        writeRuntimeScopedStorage(safeStorage, PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify([]));
       } catch { /* ignored */ }
       if (!isVSCode) {
         scheduleCollapsedProjectsPersist(empty);
@@ -891,7 +860,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         next.add(projectId);
       }
       try {
-        safeStorage.setItem(PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(next)));
+        writeRuntimeScopedStorage(safeStorage, PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(next)));
       } catch { /* ignored */ }
 
       // Persist collapse state to server settings (web + desktop local/remote).

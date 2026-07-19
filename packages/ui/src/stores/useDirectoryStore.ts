@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getDesktopHomeDirectory, isVSCodeRuntime } from '@/lib/desktop';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
@@ -23,13 +23,32 @@ interface DirectoryStore {
   goForward: () => void;
   goToParent: () => void;
   goHome: () => Promise<void>;
-  synchronizeHomeDirectory: (path: string) => void;
+  synchronizeHomeDirectory: (path: string, options?: { persistDirectory?: boolean; runtimeContext?: HomeResolutionContext }) => void;
 }
+
+type HomeResolutionContext = { runtimeKey: string; generation: number };
 
 let cachedHomeDirectory: string | null = null;
 let homeResolveGeneration = 0;
 const safeStorage = getDeferredSafeStorage();
-const persistedLastDirectory = safeStorage.getItem('lastDirectory');
+const captureHomeResolutionContext = (): HomeResolutionContext => ({
+  runtimeKey: getRuntimeKey(),
+  generation: homeResolveGeneration,
+});
+const isHomeResolutionContextCurrent = (context: HomeResolutionContext): boolean => (
+  context.runtimeKey === getRuntimeKey() && context.generation === homeResolveGeneration
+);
+const persistLocalHomeDirectory = (value: string, context?: HomeResolutionContext): void => {
+  if (getRuntimeKey() === 'local' && (!context || isHomeResolutionContextCurrent(context))) {
+    safeStorage.setItem('homeDirectory', value);
+  }
+};
+const persistLocalLastDirectory = (value: string): void => {
+  if (getRuntimeKey() === 'local') {
+    safeStorage.setItem('lastDirectory', value);
+  }
+};
+const persistedLastDirectory = getRuntimeKey() === 'local' ? safeStorage.getItem('lastDirectory') : null;
 const initialHasPersistedDirectory =
   typeof persistedLastDirectory === 'string' && persistedLastDirectory.length > 0;
 
@@ -114,9 +133,13 @@ const getProcessHomeDirectory = (): string | null => {
   return null;
 };
 
-const getHomeDirectory = () => {
+const getHomeDirectory = (context?: HomeResolutionContext) => {
+  if (context && !isHomeResolutionContextCurrent(context)) {
+    return '/';
+  }
+  const isLocalRuntime = getRuntimeKey() === 'local';
 
-  if (typeof window !== 'undefined') {
+  if (isLocalRuntime && typeof window !== 'undefined') {
     if (cachedHomeDirectory) return cachedHomeDirectory;
 
     const desktopHome =
@@ -125,21 +148,29 @@ const getHomeDirectory = () => {
         : null);
 
     if (desktopHome && desktopHome.length > 0) {
+      if (context && !isHomeResolutionContextCurrent(context)) {
+        return '/';
+      }
       cachedHomeDirectory = desktopHome;
-      safeStorage.setItem('homeDirectory', desktopHome);
+      persistLocalHomeDirectory(desktopHome, context);
       return desktopHome;
     }
 
     const storedHome = getStoredHomeDirectory();
     if (storedHome && !isVSCodeRuntime()) {
+      if (context && !isHomeResolutionContextCurrent(context)) {
+        return '/';
+      }
       cachedHomeDirectory = storedHome;
       return storedHome;
     }
   }
 
-  const processHome = getProcessHomeDirectory();
-  if (processHome) {
-    return processHome;
+  if (isLocalRuntime) {
+    const processHome = getProcessHomeDirectory();
+    if (processHome) {
+      return processHome;
+    }
   }
   return '/';
 };
@@ -169,23 +200,35 @@ const normalizeHomeCandidate = (value?: string | null) => {
   return normalized;
 };
 
-const persistResolvedHome = (resolved: string) => {
-  cachedHomeDirectory = resolved;
-  if (typeof window !== 'undefined') {
-    safeStorage.setItem('homeDirectory', resolved);
+const persistResolvedHome = (resolved: string, context: HomeResolutionContext): string | null => {
+  if (!isHomeResolutionContextCurrent(context)) {
+    return null;
   }
-  void updateDesktopSettings({ homeDirectory: resolved });
-  return resolved;
+  cachedHomeDirectory = resolved;
+  if (typeof window !== 'undefined' && isHomeResolutionContextCurrent(context)) {
+    persistLocalHomeDirectory(resolved, context);
+  }
+  if (isHomeResolutionContextCurrent(context)) {
+    void updateDesktopSettings({ homeDirectory: resolved });
+  }
+  return isHomeResolutionContextCurrent(context) ? resolved : null;
 };
 
-const initializeHomeDirectory = async () => {
+const initializeHomeDirectory = async (
+  context = captureHomeResolutionContext(),
+): Promise<string | null> => {
+  const isCurrentRuntime = () => isHomeResolutionContextCurrent(context);
   const acceptCandidate = (candidate?: string | null) => {
+    if (!isCurrentRuntime()) {
+      return null;
+    }
     const normalized = normalizeHomeCandidate(candidate);
-    return normalized ? persistResolvedHome(normalized) : null;
+    return normalized ? persistResolvedHome(normalized, context) : null;
   };
 
   try {
     const fsHome = await opencodeClient.getFilesystemHome();
+    if (!isCurrentRuntime()) return null;
     const resolved = acceptCandidate(fsHome);
     if (resolved) {
       return resolved;
@@ -193,9 +236,11 @@ const initializeHomeDirectory = async () => {
   } catch (filesystemError) {
     console.warn('Failed to obtain filesystem home directory:', filesystemError);
   }
+  if (!isCurrentRuntime()) return null;
 
   try {
     const info = await opencodeClient.getSystemInfo();
+    if (!isCurrentRuntime()) return null;
     const resolved = acceptCandidate(info?.homeDirectory);
     if (resolved) {
       return resolved;
@@ -203,24 +248,30 @@ const initializeHomeDirectory = async () => {
   } catch (error) {
     console.warn('Failed to get home directory from system info:', error);
   }
+  if (!isCurrentRuntime()) return null;
 
-  try {
-    const desktopHome = await getDesktopHomeDirectory();
-    const resolved = acceptCandidate(desktopHome);
-    if (resolved) {
-      return resolved;
+  if (context.runtimeKey === 'local') {
+    try {
+      const desktopHome = await getDesktopHomeDirectory();
+      if (!isCurrentRuntime()) return null;
+      const resolved = acceptCandidate(desktopHome);
+      if (resolved) {
+        return resolved;
+      }
+    } catch (desktopError) {
+      console.warn('Failed to obtain desktop-integrated home directory:', desktopError);
     }
-  } catch (desktopError) {
-    console.warn('Failed to obtain desktop-integrated home directory:', desktopError);
+
+    const fallback = getHomeDirectory(context);
+    const resolvedFallback = acceptCandidate(fallback);
+    if (resolvedFallback) {
+      return resolvedFallback;
+    }
+
+    return fallback;
   }
 
-  const fallback = getHomeDirectory();
-  const resolvedFallback = acceptCandidate(fallback);
-  if (resolvedFallback) {
-    return resolvedFallback;
-  }
-
-  return fallback;
+  return null;
 };
 
 const getVsCodeWorkspaceFolder = (): string | null => {
@@ -237,7 +288,7 @@ const getVsCodeWorkspaceFolder = (): string | null => {
 
 const initialHomeDirectory = getVsCodeWorkspaceFolder() || getHomeDirectory();
 const initialCurrentDirectory = (() => {
-  const persisted = getStoredLastDirectory();
+  const persisted = getRuntimeKey() === 'local' ? getStoredLastDirectory() : null;
   if (persisted && !isVSCodeRuntime()) {
     return resolveDirectoryPath(persisted, initialHomeDirectory);
   }
@@ -263,7 +314,8 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
       setDirectory: (path: string, options?: { showOverlay?: boolean }) => {
         void options;
-        const homeDir = cachedHomeDirectory || get().homeDirectory || safeStorage.getItem('homeDirectory');
+        const storedHomeDirectory = getRuntimeKey() === 'local' ? safeStorage.getItem('homeDirectory') : null;
+        const homeDir = cachedHomeDirectory || get().homeDirectory || storedHomeDirectory;
         const resolvedPath = resolveDirectoryPath(path, homeDir);
         if (streamDebugEnabled()) {
           console.log('[DirectoryStore] setDirectory called with path:', resolvedPath);
@@ -275,7 +327,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
         set((state) => {
           const newHistory = [...state.directoryHistory.slice(0, state.historyIndex + 1), resolvedPath];
 
-          safeStorage.setItem('lastDirectory', resolvedPath);
+          persistLocalLastDirectory(resolvedPath);
           void updateDesktopSettings({ lastDirectory: resolvedPath });
 
           return {
@@ -298,7 +350,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
           opencodeClient.setDirectory(newDirectory);
           invalidateFileSearchCache();
 
-          safeStorage.setItem('lastDirectory', newDirectory);
+          persistLocalLastDirectory(newDirectory);
 
           void updateDesktopSettings({ lastDirectory: newDirectory });
 
@@ -321,7 +373,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
           opencodeClient.setDirectory(newDirectory);
           invalidateFileSearchCache();
 
-          safeStorage.setItem('lastDirectory', newDirectory);
+          persistLocalLastDirectory(newDirectory);
 
           void updateDesktopSettings({ lastDirectory: newDirectory });
 
@@ -363,15 +415,23 @@ export const useDirectoryStore = create<DirectoryStore>()(
           cachedHomeDirectory ||
           get().homeDirectory ||
           (await initializeHomeDirectory());
-        get().setDirectory(homeDir);
+        if (homeDir) {
+          get().setDirectory(homeDir);
+        }
       },
 
-      synchronizeHomeDirectory: (homePath: string) => {
+      synchronizeHomeDirectory: (homePath: string, options?: { persistDirectory?: boolean; runtimeContext?: HomeResolutionContext }) => {
+        const isCurrentResolution = () => (
+          !options?.runtimeContext || isHomeResolutionContextCurrent(options.runtimeContext)
+        );
+        if (!isCurrentResolution()) {
+          return;
+        }
         const state = get();
         const resolvedHome = homePath;
         cachedHomeDirectory = resolvedHome;
         const needsUpdate = state.homeDirectory !== resolvedHome;
-        const savedLastDirectory = safeStorage.getItem('lastDirectory');
+        const savedLastDirectory = getRuntimeKey() === 'local' ? safeStorage.getItem('lastDirectory') : null;
         const hasSavedLastDirectory = typeof savedLastDirectory === 'string' && savedLastDirectory.length > 0;
         const shouldReplaceCurrent =
           !hasSavedLastDirectory &&
@@ -382,7 +442,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
           );
 
         if (!needsUpdate && !shouldReplaceCurrent) {
-          if (!state.isHomeReady) {
+          if (!state.isHomeReady && isCurrentResolution()) {
             set({ isHomeReady: true });
           }
           return;
@@ -415,18 +475,27 @@ export const useDirectoryStore = create<DirectoryStore>()(
           updates.isSwitchingDirectory = false;
         }
 
+        if (!isCurrentResolution()) {
+          return;
+        }
         set(() => updates as Partial<DirectoryStore>);
 
-        if ((shouldReplaceCurrent || currentChanged) && resolvedReady) {
+        if ((shouldReplaceCurrent || currentChanged) && resolvedReady && isCurrentResolution()) {
           const nextDirectory = shouldReplaceCurrent ? resolvedHome : (resolvedCurrent as string);
           opencodeClient.setDirectory(nextDirectory);
           invalidateFileSearchCache();
-          safeStorage.setItem('lastDirectory', nextDirectory);
-          void updateDesktopSettings({ lastDirectory: nextDirectory });
+          if (options?.persistDirectory !== false) {
+            persistLocalLastDirectory(nextDirectory);
+            if (isCurrentResolution()) {
+              void updateDesktopSettings({ lastDirectory: nextDirectory });
+            }
+          }
 
         }
 
-        void updateDesktopSettings({ homeDirectory: resolvedHome });
+        if (resolvedReady && isCurrentResolution()) {
+          void updateDesktopSettings({ homeDirectory: resolvedHome });
+        }
       }
     }),
     {
@@ -436,19 +505,62 @@ export const useDirectoryStore = create<DirectoryStore>()(
 );
 
 if (typeof window !== 'undefined') {
-  initializeHomeDirectory().then((home) => {
-    useDirectoryStore.getState().synchronizeHomeDirectory(home);
+  const initialResolutionContext = captureHomeResolutionContext();
+  initializeHomeDirectory(initialResolutionContext).then((home) => {
+    if (home && isHomeResolutionContextCurrent(initialResolutionContext)) {
+      useDirectoryStore.getState().synchronizeHomeDirectory(home, { runtimeContext: initialResolutionContext });
+    }
   });
 
   // Host switches happen in place (no page reload), so the home directory
   // must be re-resolved from the new runtime's authoritative source instead
   // of keeping the previous host's value cached.
-  subscribeRuntimeEndpointChanged(() => {
+  subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey) {
+      return;
+    }
     cachedHomeDirectory = null;
-    const generation = ++homeResolveGeneration;
-    initializeHomeDirectory().then((home) => {
-      if (generation !== homeResolveGeneration) return;
-      useDirectoryStore.getState().synchronizeHomeDirectory(home);
+    homeResolveGeneration += 1;
+    const context = captureHomeResolutionContext();
+    useDirectoryStore.setState({
+      currentDirectory: '/',
+      directoryHistory: ['/'],
+      historyIndex: 0,
+      homeDirectory: '/',
+      hasPersistedDirectory: false,
+      isHomeReady: false,
+      isSwitchingDirectory: true,
     });
+    opencodeClient.setDirectory(undefined);
+    initializeHomeDirectory(context).then((home) => {
+      if (!isHomeResolutionContextCurrent(context)) return;
+      if (!home) {
+        if (useDirectoryStore.getState().isSwitchingDirectory) {
+          useDirectoryStore.setState({ isSwitchingDirectory: false, isHomeReady: false });
+        }
+        return;
+      }
+      useDirectoryStore.getState().synchronizeHomeDirectory(home, {
+        persistDirectory: false,
+        runtimeContext: context,
+      });
+    });
+  });
+
+  window.addEventListener('openchamber:settings-synced', (event: Event) => {
+    const settings = (event as CustomEvent<{ homeDirectory?: unknown; lastDirectory?: unknown }>).detail;
+    if (!settings || typeof settings !== 'object') {
+      return;
+    }
+
+    const homeDirectory = typeof settings.homeDirectory === 'string' ? settings.homeDirectory : null;
+    if (homeDirectory) {
+      useDirectoryStore.getState().synchronizeHomeDirectory(homeDirectory);
+    }
+
+    const lastDirectory = typeof settings.lastDirectory === 'string' ? settings.lastDirectory : null;
+    if (lastDirectory && lastDirectory !== useDirectoryStore.getState().currentDirectory) {
+      useDirectoryStore.getState().setDirectory(lastDirectory, { showOverlay: false });
+    }
   });
 }

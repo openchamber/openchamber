@@ -1,6 +1,8 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { readRuntimeScopedStorage, writeRuntimeScopedStorage } from '@/stores/utils/runtimeScopedStorage';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { prunePinnedSessionIds } from './pinnedSessionCleanup';
 
@@ -24,12 +26,127 @@ type Keys = {
   groupCollapse: string;
 };
 
+type SidebarRuntimeContext = {
+  runtimeKey: string;
+  generation: number;
+};
+
 const LEGACY_EXPANSION_CONTEXT_PREFIXES = [
   'project:active:',
   'project:archived:',
   'recent:active:',
   'recent:archived:',
 ];
+
+const parseStringSet = (raw: string | null): Set<string> => {
+  if (!raw) {
+    return new Set();
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []);
+  } catch {
+    return new Set();
+  }
+};
+
+export const readSidebarStringSet = (
+  safeStorage: SafeStorageLike,
+  key: string,
+  runtimeKey = getRuntimeKey(),
+): Set<string> => {
+  return parseStringSet(readRuntimeScopedStorage(safeStorage, key, runtimeKey));
+};
+
+export const readSidebarGroupOrder = (
+  safeStorage: SafeStorageLike,
+  key: string,
+  runtimeKey = getRuntimeKey(),
+): Map<string, string[]> => {
+  try {
+    const raw = readRuntimeScopedStorage(safeStorage, key, runtimeKey);
+    if (!raw) {
+      return new Map();
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return new Map();
+    }
+    const next = new Map<string, string[]>();
+    Object.entries(parsed).forEach(([projectId, order]) => {
+      if (Array.isArray(order)) {
+        next.set(projectId, order.filter((item): item is string => typeof item === 'string'));
+      }
+    });
+    return next;
+  } catch {
+    return new Map();
+  }
+};
+
+export const readSidebarActiveSessions = (
+  safeStorage: SafeStorageLike,
+  key: string,
+  runtimeKey = getRuntimeKey(),
+): Map<string, string> => {
+  try {
+    const raw = readRuntimeScopedStorage(safeStorage, key, runtimeKey);
+    if (!raw) {
+      return new Map();
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return new Map();
+    }
+    const next = new Map<string, string>();
+    Object.entries(parsed).forEach(([projectId, sessionId]) => {
+      if (typeof sessionId === 'string' && sessionId.length > 0) {
+        next.set(projectId, sessionId);
+      }
+    });
+    return next;
+  } catch {
+    return new Map();
+  }
+};
+
+const readExpandedParents = (
+  safeStorage: SafeStorageLike,
+  sessionExpandedKey: string,
+  sessionExpandedLegacyKey: string,
+  runtimeKey: string,
+): Set<string> => {
+  const storedParents = readRuntimeScopedStorage(safeStorage, sessionExpandedKey, runtimeKey);
+  if (storedParents !== null) {
+    return parseStringSet(storedParents);
+  }
+
+  const legacyRaw = readRuntimeScopedStorage(safeStorage, sessionExpandedLegacyKey, runtimeKey);
+  if (legacyRaw === null) {
+    return new Set();
+  }
+
+  const legacyParents = parseStringSet(legacyRaw);
+  const migrated = new Set<string>();
+  legacyParents.forEach((item) => {
+    LEGACY_EXPANSION_CONTEXT_PREFIXES.forEach((prefix) => migrated.add(`${prefix}${item}`));
+  });
+  if (migrated.size > 0) {
+    try {
+      writeRuntimeScopedStorage(safeStorage, sessionExpandedKey, JSON.stringify(Array.from(migrated)), runtimeKey);
+    } catch {
+      // ignored
+    }
+  }
+  if (runtimeKey === 'local') {
+    try {
+      safeStorage.removeItem?.(sessionExpandedLegacyKey);
+    } catch {
+      // ignored
+    }
+  }
+  return migrated;
+};
 
 type Args = {
   isVSCode: boolean;
@@ -40,8 +157,11 @@ type Args = {
   pinnedSessionIds: Set<string>;
   setPinnedSessionIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   groupOrderByProject: Map<string, string[]>;
+  setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   activeSessionByProject: Map<string, string>;
+  setActiveSessionByProject: React.Dispatch<React.SetStateAction<Map<string, string>>>;
   collapsedGroups: Set<string>;
+  setCollapsedGroups: React.Dispatch<React.SetStateAction<Set<string>>>;
   setExpandedParents: React.Dispatch<React.SetStateAction<Set<string>>>;
   setCollapsedProjects: React.Dispatch<React.SetStateAction<Set<string>>>;
 };
@@ -55,47 +175,121 @@ export const useSidebarPersistence = (args: Args) => {
     sessions,
     setPinnedSessionIds,
     groupOrderByProject,
+    setGroupOrderByProject,
     activeSessionByProject,
+    setActiveSessionByProject,
     collapsedGroups,
+    setCollapsedGroups,
     setExpandedParents,
     setCollapsedProjects,
   } = args;
 
   const persistCollapsedProjectsTimer = React.useRef<number | null>(null);
-  const pendingCollapsedProjects = React.useRef<Set<string> | null>(null);
+  const pendingCollapsedProjects = React.useRef<{
+    collapsed: Set<string>;
+    runtimeContext: SidebarRuntimeContext;
+  } | null>(null);
+  const runtimeGeneration = React.useRef(0);
+  const captureRuntimeContext = React.useCallback((): SidebarRuntimeContext => ({
+    runtimeKey: getRuntimeKey(),
+    generation: runtimeGeneration.current,
+  }), []);
+  const isRuntimeContextCurrent = React.useCallback((context: SidebarRuntimeContext): boolean => (
+    context.generation === runtimeGeneration.current && context.runtimeKey === getRuntimeKey()
+  ), []);
+  const runtimeContextAtRender = captureRuntimeContext();
 
-  const flushCollapsedProjectsPersist = React.useCallback(() => {
+  const reloadRuntimeState = React.useCallback((runtimeContext: SidebarRuntimeContext): void => {
+    if (!isRuntimeContextCurrent(runtimeContext)) {
+      return;
+    }
+
+    setExpandedParents(readExpandedParents(
+      safeStorage,
+      keys.sessionExpanded,
+      keys.sessionExpandedLegacy,
+      runtimeContext.runtimeKey,
+    ));
+    setCollapsedProjects(readSidebarStringSet(safeStorage, keys.projectCollapse, runtimeContext.runtimeKey));
+    setGroupOrderByProject(readSidebarGroupOrder(safeStorage, keys.groupOrder, runtimeContext.runtimeKey));
+    setActiveSessionByProject(readSidebarActiveSessions(safeStorage, keys.projectActiveSession, runtimeContext.runtimeKey));
+    setCollapsedGroups(readSidebarStringSet(safeStorage, keys.groupCollapse, runtimeContext.runtimeKey));
+  }, [
+    isRuntimeContextCurrent,
+    keys.groupCollapse,
+    keys.groupOrder,
+    keys.projectActiveSession,
+    keys.projectCollapse,
+    keys.sessionExpanded,
+    keys.sessionExpandedLegacy,
+    safeStorage,
+    setActiveSessionByProject,
+    setCollapsedGroups,
+    setCollapsedProjects,
+    setExpandedParents,
+    setGroupOrderByProject,
+  ]);
+
+  const flushCollapsedProjectsPersist = React.useCallback((expectedRuntimeContext: SidebarRuntimeContext) => {
     if (isVSCode) {
       return;
     }
-    const collapsed = pendingCollapsedProjects.current;
-    pendingCollapsedProjects.current = null;
-    persistCollapsedProjectsTimer.current = null;
-    if (!collapsed) {
+    const pending = pendingCollapsedProjects.current;
+    if (
+      !pending
+      || pending.runtimeContext.runtimeKey !== expectedRuntimeContext.runtimeKey
+      || pending.runtimeContext.generation !== expectedRuntimeContext.generation
+      || !isRuntimeContextCurrent(pending.runtimeContext)
+    ) {
       return;
     }
+    pendingCollapsedProjects.current = null;
+    persistCollapsedProjectsTimer.current = null;
 
+    const { collapsed } = pending;
     const { projects } = useProjectsStore.getState();
     const updatedProjects = projects.map((project) => ({
       ...project,
       sidebarCollapsed: collapsed.has(project.id),
     }));
     void updateDesktopSettings({ projects: updatedProjects }).catch(() => {});
-  }, [isVSCode]);
+  }, [isRuntimeContextCurrent, isVSCode]);
 
   const scheduleCollapsedProjectsPersist = React.useCallback((collapsed: Set<string>) => {
     if (typeof window === 'undefined' || isVSCode) {
       return;
     }
 
-    pendingCollapsedProjects.current = collapsed;
+    const runtimeContext = captureRuntimeContext();
+    pendingCollapsedProjects.current = {
+      collapsed: new Set(collapsed),
+      runtimeContext,
+    };
     if (persistCollapsedProjectsTimer.current !== null) {
       window.clearTimeout(persistCollapsedProjectsTimer.current);
     }
     persistCollapsedProjectsTimer.current = window.setTimeout(() => {
-      flushCollapsedProjectsPersist();
+      flushCollapsedProjectsPersist(runtimeContext);
     }, 700);
-  }, [isVSCode, flushCollapsedProjectsPersist]);
+  }, [captureRuntimeContext, isVSCode, flushCollapsedProjectsPersist]);
+
+  React.useEffect(() => {
+    const initialContext = captureRuntimeContext();
+    reloadRuntimeState(initialContext);
+
+    return subscribeRuntimeEndpointChanged((detail) => {
+      if (detail.runtimeKey === detail.previousRuntimeKey) {
+        return;
+      }
+      runtimeGeneration.current += 1;
+      if (typeof window !== 'undefined' && persistCollapsedProjectsTimer.current !== null) {
+        window.clearTimeout(persistCollapsedProjectsTimer.current);
+      }
+      persistCollapsedProjectsTimer.current = null;
+      pendingCollapsedProjects.current = null;
+      reloadRuntimeState(captureRuntimeContext());
+    });
+  }, [captureRuntimeContext, reloadRuntimeState]);
 
   React.useEffect(() => {
     return () => {
@@ -108,47 +302,45 @@ export const useSidebarPersistence = (args: Args) => {
   }, []);
 
   React.useEffect(() => {
-    try {
-      const storedParents = safeStorage.getItem(keys.sessionExpanded);
-      if (storedParents) {
-        const parsed = JSON.parse(storedParents);
-        if (Array.isArray(parsed)) {
-          setExpandedParents(new Set(parsed.filter((item) => typeof item === 'string')));
-        }
-      } else {
-        // No v2 data — migrate from v1 (bare session ids) if present.
-        const legacyRaw = safeStorage.getItem(keys.sessionExpandedLegacy);
-        if (legacyRaw) {
-          try {
-            const parsedLegacy = JSON.parse(legacyRaw);
-            if (Array.isArray(parsedLegacy)) {
-              const migrated = new Set<string>();
-              parsedLegacy.forEach((item) => {
-                if (typeof item !== 'string' || item.length === 0) return;
-                LEGACY_EXPANSION_CONTEXT_PREFIXES.forEach((prefix) => migrated.add(`${prefix}${item}`));
-              });
-              if (migrated.size > 0) {
-                setExpandedParents(migrated);
-                try { safeStorage.setItem(keys.sessionExpanded, JSON.stringify(Array.from(migrated))); } catch { /* ignored */ }
-              }
-            }
-          } catch {
-            // legacy data was malformed; ignore and let it expire
-          }
-          try { safeStorage.removeItem?.(keys.sessionExpandedLegacy); } catch { /* ignored */ }
-        }
-      }
-      const storedProjects = safeStorage.getItem(keys.projectCollapse);
-      if (storedProjects) {
-        const parsed = JSON.parse(storedProjects);
-        if (Array.isArray(parsed)) {
-          setCollapsedProjects(new Set(parsed.filter((item) => typeof item === 'string')));
-        }
-      }
-    } catch {
-      // ignored
+    if (typeof window === 'undefined') {
+      return;
     }
-  }, [keys.projectCollapse, keys.sessionExpanded, keys.sessionExpandedLegacy, safeStorage, setCollapsedProjects, setExpandedParents]);
+
+    const onSettingsSynced = (event: Event) => {
+      const settings = (event as CustomEvent<{ projects?: unknown }>).detail;
+      if (!settings || !Array.isArray(settings.projects)) {
+        return;
+      }
+      const runtimeContext = captureRuntimeContext();
+      if (!isRuntimeContextCurrent(runtimeContext)) {
+        return;
+      }
+      const collapsed = new Set(
+        settings.projects
+          .filter((project): project is { id: string; sidebarCollapsed?: boolean } => (
+            Boolean(project)
+            && typeof project === 'object'
+            && typeof (project as { id?: unknown }).id === 'string'
+          ))
+          .filter((project) => project.sidebarCollapsed === true)
+          .map((project) => project.id),
+      );
+      setCollapsedProjects(collapsed);
+      try {
+        writeRuntimeScopedStorage(
+          safeStorage,
+          keys.projectCollapse,
+          JSON.stringify(Array.from(collapsed)),
+          runtimeContext.runtimeKey,
+        );
+      } catch {
+        // ignored
+      }
+    };
+
+    window.addEventListener('openchamber:settings-synced', onSettingsSynced);
+    return () => window.removeEventListener('openchamber:settings-synced', onSettingsSynced);
+  }, [captureRuntimeContext, isRuntimeContextCurrent, keys.projectCollapse, safeStorage, setCollapsedProjects]);
 
   React.useEffect(() => {
     if (!hasAuthoritativeGlobalSessions) {
@@ -161,30 +353,65 @@ export const useSidebarPersistence = (args: Args) => {
   }, [hasAuthoritativeGlobalSessions, sessions, setPinnedSessionIds]);
 
   React.useEffect(() => {
+    if (!isRuntimeContextCurrent(runtimeContextAtRender)) {
+      return;
+    }
     try {
       const serialized = Object.fromEntries(groupOrderByProject.entries());
-      safeStorage.setItem(keys.groupOrder, JSON.stringify(serialized));
+      writeRuntimeScopedStorage(safeStorage, keys.groupOrder, JSON.stringify(serialized), runtimeContextAtRender.runtimeKey);
     } catch {
       // ignored
     }
-  }, [groupOrderByProject, keys.groupOrder, safeStorage]);
+  }, [
+    groupOrderByProject,
+    isRuntimeContextCurrent,
+    keys.groupOrder,
+    runtimeContextAtRender.generation,
+    runtimeContextAtRender.runtimeKey,
+    safeStorage,
+  ]);
 
   React.useEffect(() => {
+    if (!isRuntimeContextCurrent(runtimeContextAtRender)) {
+      return;
+    }
     try {
       const serialized = Object.fromEntries(activeSessionByProject.entries());
-      safeStorage.setItem(keys.projectActiveSession, JSON.stringify(serialized));
+      writeRuntimeScopedStorage(safeStorage, keys.projectActiveSession, JSON.stringify(serialized), runtimeContextAtRender.runtimeKey);
     } catch {
       // ignored
     }
-  }, [activeSessionByProject, keys.projectActiveSession, safeStorage]);
+  }, [
+    activeSessionByProject,
+    isRuntimeContextCurrent,
+    keys.projectActiveSession,
+    runtimeContextAtRender.generation,
+    runtimeContextAtRender.runtimeKey,
+    safeStorage,
+  ]);
 
   React.useEffect(() => {
+    if (!isRuntimeContextCurrent(runtimeContextAtRender)) {
+      return;
+    }
     try {
-      safeStorage.setItem(keys.groupCollapse, JSON.stringify(Array.from(collapsedGroups)));
+      writeRuntimeScopedStorage(
+        safeStorage,
+        keys.groupCollapse,
+        JSON.stringify(Array.from(collapsedGroups)),
+        runtimeContextAtRender.runtimeKey,
+      );
     } catch {
       // ignored
     }
-  }, [collapsedGroups, keys.groupCollapse, safeStorage]);
+  }, [
+    collapsedGroups,
+    isRuntimeContextCurrent,
+    keys.groupCollapse,
+    runtimeContextAtRender.generation,
+    runtimeContextAtRender.runtimeKey,
+    safeStorage,
+  ]);
 
   return { scheduleCollapsedProjectsPersist };
 };

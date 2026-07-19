@@ -1,6 +1,7 @@
 import React from 'react';
 import { getArchivedScopeKey, normalizePath } from '../utils';
 import type { SessionOwnershipIndex } from '../sessionOwnership';
+import { captureSidebarRuntimeContext, isSidebarRuntimeContextCurrent } from './sidebarRuntimeContext';
 
 type WorktreeMeta = { path: string };
 
@@ -31,8 +32,18 @@ export const useSessionFolderCleanup = (args: Args): void => {
     unresolvedWorktreeProjectPaths,
     cleanupSessions,
   } = args;
+  const runtimeContextAtRender = captureSidebarRuntimeContext();
+  const runtimeKeyAtRender = runtimeContextAtRender.runtimeKey;
+  const runtimeGenerationAtRender = runtimeContextAtRender.generation;
 
   React.useEffect(() => {
+    const isRuntimeContextCurrent = () => isSidebarRuntimeContextCurrent({
+      runtimeKey: runtimeKeyAtRender,
+      generation: runtimeGenerationAtRender,
+    });
+    if (!isRuntimeContextCurrent()) {
+      return;
+    }
     if (isSessionsLoading || !hasAuthoritativeGlobalSessions || isWorktreeTopologyLoading) {
       return;
     }
@@ -65,6 +76,9 @@ export const useSessionFolderCleanup = (args: Args): void => {
     });
 
     idsByScope.forEach((sessionIds, scopeKey) => {
+      if (!isRuntimeContextCurrent()) {
+        return;
+      }
       cleanupSessions(scopeKey, sessionIds);
     });
   }, [
@@ -75,6 +89,8 @@ export const useSessionFolderCleanup = (args: Args): void => {
     isSessionsLoading,
     normalizedProjects,
     ownership,
+    runtimeGenerationAtRender,
+    runtimeKeyAtRender,
     unresolvedWorktreeProjectPaths,
   ]);
 };
