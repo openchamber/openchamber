@@ -1597,7 +1597,7 @@ const runWorktreeStartCommand = async (directory, command) => {
   return result;
 };
 
-const loadProjectStartCommand = async (projectID) => {
+const loadLegacyProjectStartCommand = async (projectID) => {
   const storagePath = path.join(getOpenCodeDataPath(), 'storage', 'project', `${projectID}.json`);
   try {
     const raw = await fsp.readFile(storagePath, 'utf8');
@@ -1607,6 +1607,17 @@ const loadProjectStartCommand = async (projectID) => {
   } catch {
     return '';
   }
+};
+
+const loadProjectStartCommand = async (projectID, primaryWorktree, runtime) => {
+  if (typeof runtime?.loadStartCommand === 'function') {
+    const result = await runtime.loadStartCommand(projectID, primaryWorktree);
+    if (result?.available === true) {
+      return typeof result.command === 'string' ? result.command.trim() : '';
+    }
+  }
+
+  return loadLegacyProjectStartCommand(projectID);
 };
 
 const getProjectStoragePath = (projectID) => {
@@ -1737,8 +1748,8 @@ const cleanupFailedFastWorktreeCreate = async (context, candidate) => {
   }
 };
 
-const runWorktreeStartScripts = async (directory, projectID, startCommand) => {
-  const projectStart = await loadProjectStartCommand(projectID);
+const runWorktreeStartScripts = async (directory, projectID, primaryWorktree, startCommand, runtime) => {
+  const projectStart = await loadProjectStartCommand(projectID, primaryWorktree, runtime);
   if (projectStart) {
     const projectResult = await runWorktreeStartCommand(directory, projectStart);
     if (!projectResult.success) {
@@ -1769,6 +1780,7 @@ const queueWorktreeBootstrap = (args) => {
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand,
+    projectCommandRuntime,
   } = args;
   const task = new Promise((resolve) => setTimeout(resolve, 0))
     .then(async () => {
@@ -1792,7 +1804,7 @@ const queueWorktreeBootstrap = (args) => {
         WORKTREE_BOOTSTRAP_PENDING,
         WORKTREE_BOOTSTRAP_PHASE_GIT_READY
       );
-      await runWorktreeStartScripts(directory, projectID, startCommand).catch((error) => {
+      await runWorktreeStartScripts(directory, projectID, primaryWorktree, startCommand, projectCommandRuntime).catch((error) => {
         console.warn('Worktree start script task failed:', error instanceof Error ? error.message : String(error));
       });
       setWorktreeBootstrapState(
@@ -3715,7 +3727,7 @@ export async function previewWorktreeCreate(directory, input = {}) {
   };
 }
 
-async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
+async function attachGitWorktreeToCandidate(context, candidate, input = {}, runtime = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
   const startRef = normalizeStartRef(input?.startRef);
@@ -3823,6 +3835,7 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand: input?.startCommand,
+    projectCommandRuntime: runtime.projectCommandRuntime,
   });
 
   const headResult = await runGitCommand(candidate.directory, ['rev-parse', 'HEAD']);
@@ -3838,7 +3851,7 @@ async function attachGitWorktreeToCandidate(context, candidate, input = {}) {
   };
 }
 
-export async function createWorktree(directory, input = {}) {
+export async function createWorktree(directory, input = {}, runtime = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
 
@@ -3876,7 +3889,7 @@ export async function createWorktree(directory, input = {}) {
       ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
       : candidate.branch;
 
-    const task = attachGitWorktreeToCandidate(context, candidate, input).catch(async (error) => {
+    const task = attachGitWorktreeToCandidate(context, candidate, input, runtime).catch(async (error) => {
       setWorktreeBootstrapState(
         candidate.directory,
         WORKTREE_BOOTSTRAP_FAILED,
@@ -3898,7 +3911,7 @@ export async function createWorktree(directory, input = {}) {
     };
   }
 
-  return attachGitWorktreeToCandidate(context, candidate, input);
+  return attachGitWorktreeToCandidate(context, candidate, input, runtime);
 }
 
 export async function getWorktreeBootstrapStatus(directory) {

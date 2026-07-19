@@ -514,6 +514,177 @@ describe('createWorktree', () => {
       }
     }
   });
+
+  it('runs authoritative project command before the extra start command', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    const orderFile = path.join(dataHome, 'start-order.txt');
+    const projectScript = path.join(dataHome, 'project-start.cjs');
+    const extraScript = path.join(dataHome, 'extra-start.cjs');
+    process.env.XDG_DATA_HOME = dataHome;
+
+    fs.writeFileSync(
+      projectScript,
+      `require('node:fs').appendFileSync(${JSON.stringify(orderFile)}, 'project\\n');\n`,
+    );
+    fs.writeFileSync(
+      extraScript,
+      `require('node:fs').appendFileSync(${JSON.stringify(orderFile)}, 'extra\\n');\n`,
+    );
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      const projectID = runGit(repo, ['rev-list', '--max-parents=0', '--all']).trim();
+      const loaderCalls = [];
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/api-project-start',
+        worktreeName: 'api-project-start',
+        returnAfterDirectoryCreated: true,
+        startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(extraScript)}`,
+      }, {
+        projectCommandRuntime: {
+          loadStartCommand: async (...args) => {
+            loaderCalls.push(args);
+            return {
+              available: true,
+              command: `${JSON.stringify(process.execPath)} ${JSON.stringify(projectScript)}`,
+            };
+          },
+        },
+      });
+
+      await expect.poll(
+        async () => fs.existsSync(orderFile) ? fs.readFileSync(orderFile, 'utf8') : '',
+        { timeout: 5_000 },
+      ).toBe('project\nextra\n');
+      await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({
+        status: 'ready',
+        phase: 'setup-ready',
+      });
+      expect(loaderCalls[0]).toEqual([projectID, fs.realpathSync(repo)]);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('does not fall back to legacy JSON when the API authoritatively returns an empty start command', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    const marker = path.join(dataHome, 'legacy-started');
+    const legacyScript = path.join(dataHome, 'legacy-start.cjs');
+    process.env.XDG_DATA_HOME = dataHome;
+
+    fs.writeFileSync(
+      legacyScript,
+      `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started');\n`,
+    );
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      const projectID = runGit(repo, ['rev-list', '--max-parents=0', '--all']).trim();
+      const storagePath = path.join(dataHome, 'opencode', 'storage', 'project', `${projectID}.json`);
+      fs.mkdirSync(path.dirname(storagePath), { recursive: true });
+      fs.writeFileSync(storagePath, JSON.stringify({ commands: { start: `${JSON.stringify(process.execPath)} ${JSON.stringify(legacyScript)}` } }));
+      const loaderCalls = [];
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/empty-project-start',
+        worktreeName: 'empty-project-start',
+        returnAfterDirectoryCreated: true,
+      }, {
+        projectCommandRuntime: {
+          loadStartCommand: async (...args) => {
+            loaderCalls.push(args);
+            return { available: true, command: '' };
+          },
+        },
+      });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 5_000 },
+      ).toBe('setup-ready');
+      expect(fs.existsSync(marker)).toBe(false);
+      expect(loaderCalls[0]).toEqual([projectID, fs.realpathSync(repo)]);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
+  it('falls back to legacy JSON when the API is unavailable', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    const marker = path.join(dataHome, 'legacy-fallback-started');
+    const legacyScript = path.join(dataHome, 'legacy-fallback.cjs');
+    process.env.XDG_DATA_HOME = dataHome;
+
+    fs.writeFileSync(
+      legacyScript,
+      `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started');\n`,
+    );
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      const projectID = runGit(repo, ['rev-list', '--max-parents=0', '--all']).trim();
+      const storagePath = path.join(dataHome, 'opencode', 'storage', 'project', `${projectID}.json`);
+      fs.mkdirSync(path.dirname(storagePath), { recursive: true });
+      fs.writeFileSync(storagePath, JSON.stringify({ commands: { start: `${JSON.stringify(process.execPath)} ${JSON.stringify(legacyScript)}` } }));
+
+      await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/legacy-fallback',
+        worktreeName: 'legacy-fallback',
+        returnAfterDirectoryCreated: true,
+      }, {
+        projectCommandRuntime: {
+          loadStartCommand: async () => ({ available: false, command: '' }),
+        },
+      });
+
+      await expect.poll(() => fs.existsSync(marker), { timeout: 5_000 }).toBe(true);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
