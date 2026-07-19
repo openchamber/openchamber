@@ -28,32 +28,80 @@ export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void
   }
 };
 
+const SETTINGS_MIRROR_INDEX_KEY = 'openchamber.settingsMirror.v2.index';
+const SETTINGS_MIRROR_KEY_PREFIX = 'openchamber.settingsMirror.v2:';
+const MAX_SETTINGS_MIRROR_RUNTIMES = 5;
+
+export const getRuntimeSettingsMirrorStorageKey = (runtimeKey: string): string =>
+  `${SETTINGS_MIRROR_KEY_PREFIX}${encodeURIComponent(runtimeKey)}`;
+
+const setOrRemoveLocalStorage = (key: string, value: string | null): void => {
+  if (value === null) {
+    localStorage.removeItem(key);
+  } else {
+    localStorage.setItem(key, value);
+  }
+};
+
+const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: string): void => {
+  const mirror = {
+    themeId: settings.themeId,
+    themeVariant: settings.themeVariant,
+    lightThemeId: settings.lightThemeId,
+    darkThemeId: settings.darkThemeId,
+    useSystemTheme: settings.useSystemTheme,
+    lastDirectory: settings.lastDirectory,
+    homeDirectory: settings.homeDirectory,
+    projects: settings.projects,
+    activeProjectId: settings.activeProjectId,
+    pinnedDirectories: settings.pinnedDirectories,
+    gitmojiEnabled: settings.gitmojiEnabled,
+    directoryShowHidden: settings.directoryShowHidden,
+    filesViewShowGitignored: settings.filesViewShowGitignored,
+    openInAppId: settings.openInAppId,
+    pwaAppName: settings.pwaAppName,
+    mobileKeyboardMode: settings.mobileKeyboardMode,
+    openCodeUpdateToastDismissedVersion: settings.openCodeUpdateToastDismissedVersion,
+    dictationEnabled: settings.dictationEnabled,
+    sttProvider: settings.sttProvider,
+    sttServerUrl: settings.sttServerUrl,
+    sttModel: settings.sttModel,
+    sttLocalModel: settings.sttLocalModel,
+    sttLanguage: settings.sttLanguage,
+  };
+  localStorage.setItem(getRuntimeSettingsMirrorStorageKey(runtimeKey), JSON.stringify(mirror));
+
+  let previous: string[] = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SETTINGS_MIRROR_INDEX_KEY) ?? '[]') as unknown;
+    if (Array.isArray(parsed)) previous = parsed.filter((entry): entry is string => typeof entry === 'string');
+  } catch {
+    previous = [];
+  }
+  const runtimes = [runtimeKey, ...previous.filter((entry) => entry !== runtimeKey)].slice(0, MAX_SETTINGS_MIRROR_RUNTIMES);
+  for (const staleRuntime of previous) {
+    if (!runtimes.includes(staleRuntime)) localStorage.removeItem(getRuntimeSettingsMirrorStorageKey(staleRuntime));
+  }
+  localStorage.setItem(SETTINGS_MIRROR_INDEX_KEY, JSON.stringify(runtimes));
+};
+
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
     return;
   }
 
-  if (settings.themeId) {
-    localStorage.setItem('selectedThemeId', settings.themeId);
-  }
-  if (settings.themeVariant) {
-    localStorage.setItem('selectedThemeVariant', settings.themeVariant);
-  }
-  if (settings.lightThemeId) {
-    localStorage.setItem('lightThemeId', settings.lightThemeId);
-  }
-  if (settings.darkThemeId) {
-    localStorage.setItem('darkThemeId', settings.darkThemeId);
-  }
-  if (typeof settings.useSystemTheme === 'boolean') {
-    localStorage.setItem('useSystemTheme', String(settings.useSystemTheme));
-  }
-  if (settings.lastDirectory) {
-    localStorage.setItem('lastDirectory', settings.lastDirectory);
-  }
+  persistRuntimeSettingsMirror(settings, getRuntimeKey());
+  setOrRemoveLocalStorage('selectedThemeId', settings.themeId || null);
+  setOrRemoveLocalStorage('selectedThemeVariant', settings.themeVariant || null);
+  setOrRemoveLocalStorage('lightThemeId', settings.lightThemeId || null);
+  setOrRemoveLocalStorage('darkThemeId', settings.darkThemeId || null);
+  setOrRemoveLocalStorage('useSystemTheme', typeof settings.useSystemTheme === 'boolean' ? String(settings.useSystemTheme) : null);
+  setOrRemoveLocalStorage('lastDirectory', settings.lastDirectory || null);
   if (settings.homeDirectory) {
     localStorage.setItem('homeDirectory', settings.homeDirectory);
     applyPersistedHomeDirectoryToWindow(settings.homeDirectory);
+  } else {
+    localStorage.removeItem('homeDirectory');
   }
   if (Array.isArray(settings.projects) && settings.projects.length > 0) {
     localStorage.setItem('projects', JSON.stringify(settings.projects));
@@ -81,6 +129,8 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
     } else {
       localStorage.removeItem('oc.sessions.projectCollapse');
     }
+  } else {
+    localStorage.removeItem('oc.sessions.projectCollapse');
   }
   if (typeof settings.gitmojiEnabled === 'boolean') {
     localStorage.setItem('gitmojiEnabled', String(settings.gitmojiEnabled));
@@ -89,13 +139,15 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   if (typeof settings.directoryShowHidden === 'boolean') {
     localStorage.setItem('directoryTreeShowHidden', settings.directoryShowHidden ? 'true' : 'false');
+  } else {
+    localStorage.removeItem('directoryTreeShowHidden');
   }
   if (typeof settings.filesViewShowGitignored === 'boolean') {
     localStorage.setItem('filesViewShowGitignored', settings.filesViewShowGitignored ? 'true' : 'false');
+  } else {
+    localStorage.removeItem('filesViewShowGitignored');
   }
-  if (typeof settings.openInAppId === 'string' && settings.openInAppId.length > 0) {
-    localStorage.setItem('openInAppId', settings.openInAppId);
-  }
+  setOrRemoveLocalStorage('openInAppId', typeof settings.openInAppId === 'string' && settings.openInAppId.length > 0 ? settings.openInAppId : null);
   if (typeof settings.pwaAppName === 'string') {
     const normalized = settings.pwaAppName.trim().replace(/\s+/g, ' ').slice(0, 64);
     if (normalized.length > 0) {
@@ -103,10 +155,10 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
     } else {
       localStorage.removeItem('openchamber.pwaName');
     }
+  } else {
+    localStorage.removeItem('openchamber.pwaName');
   }
-  if (typeof settings.mobileKeyboardMode === 'string') {
-    setStoredMobileKeyboardMode(settings.mobileKeyboardMode);
-  }
+  setStoredMobileKeyboardMode(settings.mobileKeyboardMode);
   if (typeof settings.openCodeUpdateToastDismissedVersion === 'string') {
     const version = settings.openCodeUpdateToastDismissedVersion.trim();
     if (version) {
@@ -114,25 +166,23 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
     } else {
       localStorage.removeItem('opencode-update-toast-dismissed-version');
     }
+  } else {
+    localStorage.removeItem('opencode-update-toast-dismissed-version');
   }
   if (typeof settings.dictationEnabled === 'boolean') {
     localStorage.setItem('dictationEnabled', String(settings.dictationEnabled));
+  } else {
+    localStorage.removeItem('dictationEnabled');
   }
   if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
     localStorage.setItem('sttProvider', settings.sttProvider);
+  } else {
+    localStorage.removeItem('sttProvider');
   }
-  if (typeof settings.sttServerUrl === 'string') {
-    localStorage.setItem('sttServerUrl', settings.sttServerUrl);
-  }
-  if (typeof settings.sttModel === 'string') {
-    localStorage.setItem('sttModel', settings.sttModel);
-  }
-  if (typeof settings.sttLocalModel === 'string') {
-    localStorage.setItem('sttLocalModel', settings.sttLocalModel);
-  }
-  if (typeof settings.sttLanguage === 'string') {
-    localStorage.setItem('sttLanguage', settings.sttLanguage);
-  }
+  setOrRemoveLocalStorage('sttServerUrl', typeof settings.sttServerUrl === 'string' ? settings.sttServerUrl : null);
+  setOrRemoveLocalStorage('sttModel', typeof settings.sttModel === 'string' ? settings.sttModel : null);
+  setOrRemoveLocalStorage('sttLocalModel', typeof settings.sttLocalModel === 'string' ? settings.sttLocalModel : null);
+  setOrRemoveLocalStorage('sttLanguage', typeof settings.sttLanguage === 'string' ? settings.sttLanguage : null);
 };
 
 const dispatchSettingsSynced = (settings: DesktopSettings): void => {

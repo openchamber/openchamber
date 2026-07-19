@@ -64,6 +64,7 @@ const createDeferredJSONStorage = <S>(
                 storage.setItem(name, JSON.stringify(value, options?.replacer));
             } catch (error) {
                 console.error('Failed to persist deferred storage value', error);
+                if (!pendingWrites.has(name) && !pendingDeletes.has(name)) pendingWrites.set(name, value);
             }
         }
         for (const name of deletes) {
@@ -71,6 +72,7 @@ const createDeferredJSONStorage = <S>(
                 storage.removeItem(name);
             } catch (error) {
                 console.error('Failed to remove deferred storage value', error);
+                if (!pendingWrites.has(name)) pendingDeletes.add(name);
             }
         }
     };
@@ -93,7 +95,16 @@ const createDeferredJSONStorage = <S>(
 
             const parse = (value: string | null): StorageValue<S> | null => {
                 if (value === null) return null;
-                return JSON.parse(value, options?.reviver) as StorageValue<S>;
+                try {
+                    return JSON.parse(value, options?.reviver) as StorageValue<S>;
+                } catch {
+                    try {
+                        storage.removeItem(name);
+                    } catch {
+                        // A later hydration can retry cleanup.
+                    }
+                    return null;
+                }
             };
             const value = storage.getItem(name);
             if (value instanceof Promise) {
@@ -137,6 +148,7 @@ const createDeferredStorage = (storage: Storage): Storage => {
                 storage.setItem(key, value);
             } catch (error) {
                 console.error('Failed to persist deferred storage value', error);
+                if (!pendingWrites.has(key) && !pendingDeletes.has(key)) pendingWrites.set(key, value);
             }
         }
         for (const key of deletes) {
@@ -144,6 +156,7 @@ const createDeferredStorage = (storage: Storage): Storage => {
                 storage.removeItem(key);
             } catch (error) {
                 console.error('Failed to remove deferred storage value', error);
+                if (!pendingWrites.has(key)) pendingDeletes.add(key);
             }
         }
     };
@@ -219,80 +232,84 @@ const createInMemoryStorage = (): Storage => {
     } as Storage;
 };
 
-const createSafeStorage = (): Storage => {
-    const baseStorage = getWindowStorage('localStorage');
-
-    if (!baseStorage) {
-        return createInMemoryStorage();
-    }
-
+const createSafeStorageAdapter = (baseStorage: Storage): Storage => {
     const fallback = createInMemoryStorage();
-    let storageAvailable = true;
-
-    const disableStorage = () => {
-        storageAvailable = false;
-    };
+    const fallbackKeys = new Set<string>();
+    const deletedKeys = new Set<string>();
 
     const safeGet = (key: string): string | null => {
-        if (storageAvailable) {
-            try {
-                const value = baseStorage.getItem(key);
-                if (value !== null) {
-                    return value;
-                }
-            } catch {
-                disableStorage();
-            }
+        if (deletedKeys.has(key)) return null;
+        if (fallbackKeys.has(key)) return fallback.getItem(key);
+        try {
+            return baseStorage.getItem(key);
+        } catch {
+            return null;
         }
-        return fallback.getItem(key);
     };
 
     const safeSet = (key: string, value: string) => {
-        if (storageAvailable) {
+        try {
+            baseStorage.setItem(key, value);
+            fallback.removeItem(key);
+            fallbackKeys.delete(key);
+            deletedKeys.delete(key);
+            return;
+        } catch {
+            // Hide an older durable value even when quota or storage policy blocks replacement.
             try {
-                baseStorage.setItem(key, value);
-                fallback.removeItem(key);
-                return;
+                baseStorage.removeItem(key);
             } catch {
-                disableStorage();
-                // Prevent stale previous value from surviving when writes fail (e.g. quota).
-                try {
-                    baseStorage.removeItem(key);
-                } catch {
-                    // noop
-                }
+                // The ephemeral override remains authoritative for this adapter.
             }
         }
         fallback.setItem(key, value);
+        fallbackKeys.add(key);
+        deletedKeys.delete(key);
     };
 
     const safeRemove = (key: string) => {
         try {
             baseStorage.removeItem(key);
+            deletedKeys.delete(key);
         } catch {
-            disableStorage();
+            deletedKeys.add(key);
         }
         fallback.removeItem(key);
+        fallbackKeys.delete(key);
     };
 
     const safeClear = () => {
+        const knownKeys: string[] = [];
+        try {
+            for (let index = 0; index < baseStorage.length; index += 1) {
+                const key = baseStorage.key(index);
+                if (key) knownKeys.push(key);
+            }
+        } catch {
+            // Best-effort tombstones cover keys that could be enumerated.
+        }
         try {
             baseStorage.clear();
+            deletedKeys.clear();
         } catch {
-            disableStorage();
+            for (const key of knownKeys) deletedKeys.add(key);
         }
         fallback.clear();
+        fallbackKeys.clear();
     };
 
-    const safeKey = (index: number): string | null => {
-        if (storageAvailable) {
-            try {
-                return baseStorage.key(index);
-            } catch {
-                disableStorage();
+    const visibleKeys = (): string[] => {
+        const keys = new Set<string>();
+        try {
+            for (let index = 0; index < baseStorage.length; index += 1) {
+                const key = baseStorage.key(index);
+                if (key && !deletedKeys.has(key) && !fallbackKeys.has(key)) keys.add(key);
             }
+        } catch {
+            // Ephemeral keys remain available when durable enumeration fails.
         }
-        return fallback.key(index);
+        for (const key of fallbackKeys) keys.add(key);
+        return [...keys];
     };
 
     return {
@@ -300,18 +317,16 @@ const createSafeStorage = (): Storage => {
         setItem: safeSet,
         removeItem: safeRemove,
         clear: safeClear,
-        key: safeKey,
+        key: (index) => visibleKeys()[index] ?? null,
         get length() {
-            if (storageAvailable) {
-                try {
-                    return baseStorage.length + fallback.length;
-                } catch {
-                    disableStorage();
-                }
-            }
-            return fallback.length;
+            return visibleKeys().length;
         },
     } as Storage;
+};
+
+const createSafeStorage = (): Storage => {
+    const baseStorage = getWindowStorage('localStorage');
+    return baseStorage ? createSafeStorageAdapter(baseStorage) : createInMemoryStorage();
 };
 
 export const getSafeStorage = (): Storage => {
@@ -330,97 +345,7 @@ export const getDeferredSafeStorage = (): Storage => {
 
 const createSafeSessionStorage = (): Storage => {
     const baseStorage = getWindowStorage('sessionStorage');
-
-    if (!baseStorage) {
-        return createInMemoryStorage();
-    }
-
-    const fallback = createInMemoryStorage();
-    let storageAvailable = true;
-
-    const disableStorage = () => {
-        storageAvailable = false;
-    };
-
-    const safeGet = (key: string): string | null => {
-        if (storageAvailable) {
-            try {
-                const value = baseStorage.getItem(key);
-                if (value !== null) {
-                    return value;
-                }
-            } catch {
-                disableStorage();
-            }
-        }
-        return fallback.getItem(key);
-    };
-
-    const safeSet = (key: string, value: string) => {
-        if (storageAvailable) {
-            try {
-                baseStorage.setItem(key, value);
-                fallback.removeItem(key);
-                return;
-            } catch {
-                disableStorage();
-                // Prevent stale previous value from surviving when writes fail (e.g. quota).
-                try {
-                    baseStorage.removeItem(key);
-                } catch {
-                    // noop
-                }
-            }
-        }
-        fallback.setItem(key, value);
-    };
-
-    const safeRemove = (key: string) => {
-        try {
-            baseStorage.removeItem(key);
-        } catch {
-            disableStorage();
-        }
-        fallback.removeItem(key);
-    };
-
-    const safeClear = () => {
-        try {
-            baseStorage.clear();
-        } catch {
-            disableStorage();
-        }
-        fallback.clear();
-    };
-
-    const safeKey = (index: number): string | null => {
-        if (storageAvailable) {
-            try {
-                return baseStorage.key(index);
-            } catch {
-                disableStorage();
-            }
-        }
-        return fallback.key(index);
-    };
-
-    return {
-        getItem: safeGet,
-        setItem: safeSet,
-        removeItem: safeRemove,
-        clear: safeClear,
-        key: safeKey,
-        get length() {
-            if (storageAvailable) {
-                try {
-                    return baseStorage.length + fallback.length;
-                } catch {
-                    disableStorage();
-                }
-            }
-            return fallback.length;
-        },
-    } as Storage;
+    return baseStorage ? createSafeStorageAdapter(baseStorage) : createInMemoryStorage();
 };
 
 export const getSafeSessionStorage = (): Storage => {
