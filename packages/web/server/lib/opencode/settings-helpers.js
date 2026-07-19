@@ -201,6 +201,10 @@ export const createSettingsHelpers = (dependencies) => {
       }
       result.permissionAutoAccept = {
         sessions,
+        revision: Number.isSafeInteger(candidate.permissionAutoAccept.revision)
+          && candidate.permissionAutoAccept.revision >= 0
+          ? candidate.permissionAutoAccept.revision
+          : 0,
       };
     }
     if (typeof candidate.desktopUiPassword === 'string') {
