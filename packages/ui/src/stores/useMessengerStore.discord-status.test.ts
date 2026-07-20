@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, test } from 'bun:test';
 import { deriveDiscordDisplayStatus } from './useMessengerStore';
 
 describe('deriveDiscordDisplayStatus', () => {
-  it('prefers a live gateway over persisted disconnected verify status', () => {
+  test('prefers a live gateway over persisted disconnected verify status', () => {
     expect(
       deriveDiscordDisplayStatus({
         status: 'disconnected',
@@ -12,7 +12,7 @@ describe('deriveDiscordDisplayStatus', () => {
     ).toBe('connected');
   });
 
-  it('shows connecting while the gateway is running but not yet READY', () => {
+  test('shows connecting while the gateway is running but not yet READY', () => {
     expect(
       deriveDiscordDisplayStatus({
         status: 'disconnected',
@@ -22,7 +22,7 @@ describe('deriveDiscordDisplayStatus', () => {
     ).toBe('connecting');
   });
 
-  it('keeps an in-flight token verify as connecting', () => {
+  test('keeps an in-flight token verify as connecting', () => {
     expect(
       deriveDiscordDisplayStatus({
         status: 'connecting',
@@ -32,7 +32,7 @@ describe('deriveDiscordDisplayStatus', () => {
     ).toBe('connecting');
   });
 
-  it('falls back to the last token-verify result when the listener is off', () => {
+  test('falls back to the last token-verify result when the listener is off', () => {
     expect(
       deriveDiscordDisplayStatus({
         status: 'connected',
