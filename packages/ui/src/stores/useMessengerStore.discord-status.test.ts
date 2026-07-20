@@ -6,6 +6,7 @@ describe('deriveDiscordDisplayStatus', () => {
     expect(
       deriveDiscordDisplayStatus({
         status: 'disconnected',
+        botToken: 'tok',
         discordListenerRunning: true,
         discordListenerConnected: true,
       }),
@@ -16,7 +17,19 @@ describe('deriveDiscordDisplayStatus', () => {
     expect(
       deriveDiscordDisplayStatus({
         status: 'disconnected',
+        botToken: 'tok',
         discordListenerRunning: true,
+        discordListenerConnected: false,
+      }),
+    ).toBe('connecting');
+  });
+
+  test('shows connecting when a token exists but live state is not reconciled yet', () => {
+    expect(
+      deriveDiscordDisplayStatus({
+        status: 'disconnected',
+        botToken: 'tok',
+        discordListenerRunning: false,
         discordListenerConnected: false,
       }),
     ).toBe('connecting');
@@ -26,6 +39,7 @@ describe('deriveDiscordDisplayStatus', () => {
     expect(
       deriveDiscordDisplayStatus({
         status: 'connecting',
+        botToken: 'tok',
         discordListenerRunning: false,
         discordListenerConnected: false,
       }),
@@ -36,6 +50,7 @@ describe('deriveDiscordDisplayStatus', () => {
     expect(
       deriveDiscordDisplayStatus({
         status: 'connected',
+        botToken: 'tok',
         discordListenerRunning: false,
         discordListenerConnected: false,
       }),
@@ -43,6 +58,7 @@ describe('deriveDiscordDisplayStatus', () => {
     expect(
       deriveDiscordDisplayStatus({
         status: 'error',
+        botToken: 'tok',
         discordListenerRunning: false,
         discordListenerConnected: false,
       }),
@@ -50,6 +66,7 @@ describe('deriveDiscordDisplayStatus', () => {
     expect(
       deriveDiscordDisplayStatus({
         status: 'disconnected',
+        botToken: undefined,
         discordListenerRunning: false,
         discordListenerConnected: false,
       }),

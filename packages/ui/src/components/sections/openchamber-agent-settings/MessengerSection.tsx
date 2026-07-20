@@ -210,14 +210,11 @@ function DiscordListenerPanel({
     };
   }, [running, refreshStatus, loadRecent]);
 
-  // Reconcile with the live server whenever a bot token is present. Mount-only
-  // effects raced Zustand persist hydration (empty token → early return) and
-  // left the panel stuck on "off" after a server rebuild even when the gateway
-  // was already live.
+  // Reconcile with the live server (settings.json auto-start). Re-run when the
+  // hydrated token appears so we don't race Zustand persist.
   useEffect(() => {
-    if (!conn.botToken) return;
     void useMessengerStore.getState().resyncDiscordStatus();
-    void loadRecent();
+    if (conn.botToken) void loadRecent();
   }, [conn.botToken, loadRecent]);
 
   const historyTarget = conn.defaultChannelId;
@@ -1364,10 +1361,8 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
   const hasTarget = Boolean(target);
 
   // Reconcile badge + listener with the live server when this card opens.
-  // Depends on botToken so we still run after Zustand persist hydration (a
-  // mount-only effect previously raced hydration and skipped the resync).
+  // Depends on botToken so we still run after Zustand persist hydration.
   useEffect(() => {
-    if (!conn.botToken) return;
     void useMessengerStore.getState().resyncDiscordStatus();
   }, [conn.botToken]);
 

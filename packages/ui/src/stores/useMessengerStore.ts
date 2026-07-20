@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { getSafeStorage } from './utils/safeStorage';
 import { useProjectsStore } from './useProjectsStore';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import type { ProjectEntry } from '@/lib/api/types';
 
 export type MessengerType = 'discord';
@@ -372,17 +373,65 @@ const DEFAULT_CONNECTION: Omit<MessengerConnection, 'type'> = {
   autoCreateThreads: true,
 };
 
+async function parseRuntimeJson<T>(res: Response, url: string): Promise<T> {
+  let data: T;
+  try {
+    data = (await res.json()) as T;
+  } catch {
+    throw new Error(`Invalid JSON from ${url} (HTTP ${res.status})`);
+  }
+  if (!res.ok) {
+    const error =
+      data &&
+      typeof data === 'object' &&
+      'error' in data &&
+      typeof (data as { error: unknown }).error === 'string'
+        ? (data as { error: string }).error
+        : `HTTP ${res.status}`;
+    throw new Error(error);
+  }
+  return data;
+}
+
+/** Messenger routes must use runtimeFetch so desktop/auth base URL + bearer apply. */
 async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
+  const res = await runtimeFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  return (await res.json()) as T;
+  return parseRuntimeJson<T>(res, url);
+}
+
+async function getJson<T>(url: string): Promise<T> {
+  const res = await runtimeFetch(url);
+  return parseRuntimeJson<T>(res, url);
 }
 
 /** Dedupes concurrent resync calls from hydration + reconnect + settings mount. */
 let discordStatusResyncInFlight: Promise<void> | null = null;
+
+type DiscordListenerStatusPayload = {
+  ok: boolean;
+  configured?: boolean;
+  running?: boolean;
+  connected?: boolean;
+  autoReply?: boolean;
+  scopeToGuild?: boolean;
+  guildId?: string | null;
+  botId?: string | null;
+  botUsername?: string | null;
+  startedAt?: number;
+  lastUpdateAt?: number | null;
+  totalReceived?: number;
+  totalReplied?: number;
+  totalRawMessages?: number;
+  lastRawMessageAt?: number | null;
+  lastRawMessageGuildId?: string | null;
+  filteredOutCount?: number;
+  lastFilteredGuildId?: string | null;
+  lastError?: string | null;
+};
 
 /**
  * Derive the Discord settings badge from live listener state first, then the
@@ -393,7 +442,7 @@ let discordStatusResyncInFlight: Promise<void> | null = null;
 export function deriveDiscordDisplayStatus(
   conn: Pick<
     MessengerConnection,
-    'status' | 'discordListenerRunning' | 'discordListenerConnected'
+    'status' | 'botToken' | 'discordListenerRunning' | 'discordListenerConnected'
   >,
 ): MessengerConnection['status'] {
   if (conn.discordListenerConnected) return 'connected';
@@ -401,6 +450,9 @@ export function deriveDiscordDisplayStatus(
   if (conn.discordListenerRunning) return 'connecting';
   if (conn.status === 'connected') return 'connected';
   if (conn.status === 'error') return 'error';
+  // Token is configured but live state has not reconciled yet (reload /
+  // rebuild). Never flash "disconnected" for a bot that is still working.
+  if (conn.botToken) return 'connecting';
   return 'disconnected';
 }
 
@@ -1105,28 +1157,27 @@ export const useMessengerStore = create<MessengerState>()(
 
       refreshDiscordListenerStatus: async () => {
         const conn = get().connections.find((c) => c.type === 'discord');
-        if (!conn?.botToken) return;
         try {
-          const data = await postJson<{
-            ok: boolean;
-            running?: boolean;
-            connected?: boolean;
-            autoReply?: boolean;
-            scopeToGuild?: boolean;
-            guildId?: string | null;
-            startedAt?: number;
-            lastUpdateAt?: number | null;
-            totalReceived?: number;
-            totalReplied?: number;
-            totalRawMessages?: number;
-            lastRawMessageAt?: number | null;
-            lastRawMessageGuildId?: string | null;
-            filteredOutCount?: number;
-            lastFilteredGuildId?: string | null;
-            lastError?: string | null;
-          }>('/api/messenger/discord/listener/status', { token: conn.botToken });
-          if (!data.ok) return;
-          get().updateConnection('discord', {
+          // Prefer the server-saved config probe. After rebuild the gateway is
+          // keyed by settings.json; this does not require the UI token body to
+          // match, and works through runtimeFetch auth/base URL.
+          let data: DiscordListenerStatusPayload | null = null;
+          try {
+            data = await getJson<DiscordListenerStatusPayload>(
+              '/api/messenger/discord/runtime-status',
+            );
+          } catch {
+            data = null;
+          }
+          if ((!data || !data.ok || data.configured === false) && conn?.botToken) {
+            data = await postJson<DiscordListenerStatusPayload>(
+              '/api/messenger/discord/listener/status',
+              { token: conn.botToken },
+            );
+          }
+          if (!data?.ok) return;
+
+          const updates: Partial<MessengerConnection> = {
             discordListenerRunning: data.running ?? false,
             discordListenerConnected: data.connected ?? false,
             discordListenerStartedAt: data.startedAt ?? null,
@@ -1141,7 +1192,20 @@ export const useMessengerStore = create<MessengerState>()(
             discordListenerError: data.lastError ?? null,
             discordListenerAutoReply: data.autoReply ?? true,
             discordListenerScopeToGuild: data.scopeToGuild ?? false,
-          });
+          };
+          if (data.botId) updates.discordBotId = data.botId;
+          if (data.botUsername) updates.discordBotUsername = data.botUsername;
+          // Authoritative live gateway → keep the header badge in sync even
+          // when the separate token-verify call has not completed yet.
+          if (data.connected) {
+            updates.status = 'connected';
+            updates.error = null;
+            updates.lastConnectedAt = Date.now();
+          } else if (data.running && conn?.status === 'disconnected') {
+            updates.status = 'connecting';
+            updates.error = null;
+          }
+          get().updateConnection('discord', updates);
         } catch {
           // ignore — keep prior listener fields; a failed probe must not look
           // like an authoritative "listener stopped" result.
@@ -1151,26 +1215,24 @@ export const useMessengerStore = create<MessengerState>()(
       resyncDiscordStatus: async () => {
         if (discordStatusResyncInFlight) return discordStatusResyncInFlight;
         discordStatusResyncInFlight = (async () => {
-          const conn = get().connections.find((c) => c.type === 'discord');
-          if (!conn?.botToken) return;
-
-          // Best-effort: keep server-side settings.json in sync so auto-start
-          // after the next rebuild still has the token/bindings.
-          void get().saveDiscordConfig();
-
-          // Authoritative listener snapshot first — after a server rebuild the
-          // gateway is often already live via auto-start while the UI still
-          // shows persisted "disconnected" / listener-off.
+          // Always probe server runtime status first (settings.json auto-start).
+          // Do not require a hydrated UI token — that raced rebuild/reload and
+          // left the badge stuck on disconnected while Discord kept working.
           await get().refreshDiscordListenerStatus();
 
           const afterRefresh = get().connections.find((c) => c.type === 'discord');
           if (!afterRefresh?.botToken) return;
 
-          // Re-verify the bot token when the persisted badge was cleared.
-          // Skip when already connected/connecting to avoid Discord API churn.
+          // Best-effort: keep server-side settings.json in sync so auto-start
+          // after the next rebuild still has the token/bindings.
+          void get().saveDiscordConfig();
+
+          // Re-verify the bot token when the badge still isn't live/connected.
+          // Skip when the gateway already marked us connected/connecting.
           if (
             afterRefresh.status !== 'connected' &&
-            afterRefresh.status !== 'connecting'
+            afterRefresh.status !== 'connecting' &&
+            !afterRefresh.discordListenerConnected
           ) {
             await get().testConnection('discord');
           }

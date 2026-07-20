@@ -1849,6 +1849,33 @@ export function createMessengerSyncRouter({
     res.json(discordListener.status(token));
   });
 
+  /**
+   * Live Discord gateway status from the server-saved settings.json token.
+   * Used by the UI after rebuild/reload so the badge can reflect the
+   * auto-started listener without requiring a matching client token body.
+   */
+  router.get('/discord/runtime-status', async (req, res) => {
+    try {
+      const settings = readSettings ? await readSettings() : null;
+      const token = settings?.discord?.botToken;
+      if (!token) {
+        return res.json({
+          ok: true,
+          configured: false,
+          running: false,
+          connected: false,
+        });
+      }
+      return res.json({
+        ok: true,
+        configured: true,
+        ...discordListener.status(token),
+      });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err?.message ?? 'status failed' });
+    }
+  });
+
   router.post('/discord/listener/recent', (req, res) => {
     const token = req.body?.token;
     if (!token) return res.status(400).json({ error: 'token required' });
