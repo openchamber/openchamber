@@ -23,6 +23,8 @@ the web server and survives UI disconnects.
   auditFailStreak,         // consecutive failed/unavailable audit calls
   note,                    // latest audit progress note, <= 280 chars
   statusReason,            // why settled; 'resumed' is a kickoff signal from UI
+  evaluationProviderID,    // provider used by the latest successful audit
+  evaluationModelID,       // model used by the latest successful audit
   lastAccountedMessageID,  // incremental accounting cursor
   createdAt, updatedAt
 }

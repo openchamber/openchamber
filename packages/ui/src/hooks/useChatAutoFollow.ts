@@ -346,13 +346,19 @@ export const useChatAutoFollow = ({
         const el = scrollRef.current;
         if (!el) return;
         markAuto(el);
+        // `scrollHeight` is rounded to an integer while the real content height
+        // is fractional (prose line-heights), so `scrollTop = scrollHeight`
+        // leaves a 0–1px remainder that oscillates per streamed token and makes
+        // bottom-anchored rows jitter vertically. An over-large target clamps to
+        // the exact fractional maximum instead, pinning content to the bottom.
+        const overshootTarget = el.scrollHeight + 4096;
         if (behavior === 'smooth') {
-            el.scrollTo({ top: el.scrollHeight, behavior });
+            el.scrollTo({ top: overshootTarget, behavior });
             return;
         }
         // Direct `scrollTop` assignment bypasses any CSS `scroll-behavior: smooth`
         // and lands in the same frame — no visible catch-up animation.
-        el.scrollTop = el.scrollHeight;
+        el.scrollTop = overshootTarget;
     }, [markAuto]);
 
     // `force` true = user-intent jump (clears released and always scrolls).
@@ -370,15 +376,14 @@ export const useChatAutoFollow = ({
         if (!el) return;
         if (!force && stateRef.current !== 'following') return;
 
-        const distance = distanceFromBottom(el);
-        if (distance < AUTO_MATCH_TOLERANCE_PX) {
-            // Already at the bottom; just refresh the auto marker so the next
-            // scroll event is recognised as ours.
-            markAuto(el);
-            return;
-        }
+        // Always re-pin, even when already within tolerance of the bottom.
+        // Sub-tolerance growth (fractional line-height remainders) would
+        // otherwise leave the bottom drifting by up to ±AUTO_MATCH_TOLERANCE_PX
+        // between full re-pins, which reads as 1px vertical jitter on
+        // bottom-anchored rows during streaming. The write happens pre-paint
+        // (ResizeObserver) and is a no-op when the position is unchanged.
         scrollToBottomNow(force ? behavior : 'auto');
-    }, [isActive, markAuto, scrollToBottomNow, setStateValue]);
+    }, [isActive, scrollToBottomNow, setStateValue]);
 
     // User left the bottom — release auto-follow.
     const stop = React.useCallback(() => {

@@ -13,6 +13,7 @@ let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?:
 let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
 const globalUpsertedSessions: unknown[] = []
+const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 
 const mockScopedClient = {
   permission: {
@@ -40,6 +41,14 @@ const mockScopedClient = {
 }
 
 const mockSdk = {
+  experimental: {
+    controlPlane: {
+      moveSession: mock((params: Record<string, unknown>) => {
+        replyCalls.push({ method: "controlPlane.moveSession", params })
+        return Promise.resolve({})
+      }),
+    },
+  },
   session: {
     messages: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "session.messages", params })
@@ -102,6 +111,7 @@ mock.module("@/lib/opencode/client", () => ({
       return mockScopedClient
     },
     getDirectory: () => "/test/project",
+    getSdkClient: () => mockSdk,
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -146,6 +156,9 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-a") return "/test/project"
         if (sessionId === "session-b") return "/other/project"
         return null
+      },
+      setSessionDirectory: (sessionID: string, directory: string) => {
+        movedSessionDirectories.push({ sessionID, directory })
       },
     }),
   },
@@ -233,6 +246,87 @@ function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
     getChild: (dir: string) => new Map(entries).get(dir),
   } as unknown as import("./child-store").ChildStoreManager
 }
+
+describe("moveSessionToDirectory", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    registeredSessionDirectories.length = 0
+    movedSessionDirectories.length = 0
+    globalUpsertedSessions.length = 0
+  })
+
+  test("moves through the control plane and reconciles directory stores", async () => {
+    const message = {
+      id: "message-a",
+      sessionID: "session-a",
+      role: "user",
+      time: { created: 1 },
+    } as Message
+    const part = {
+      id: "part-a",
+      messageID: "message-a",
+      type: "text",
+      text: "hello",
+    } as Part
+    const source = createStore({ "session-a": [{ id: "permission-a" }] as never }, {
+      session: [{ id: "session-a", title: "Move me", directory: "/source" } as Session],
+      sessionTotal: 1,
+      session_status: { "session-a": { type: "idle" } },
+      session_diff: { "session-a": [{ file: "changed.ts", additions: 1, deletions: 0 }] },
+      todo: { "session-a": [{ id: "todo-a", content: "Check move", status: "pending", priority: "medium" }] as never },
+      question: { "session-a": [{ id: "question-a" }] as never },
+      message: { "session-a": [message] },
+      part: { "message-a": [part] },
+    })
+    const destination = createStore({})
+    const childStores = createChildStores([["/source", source], ["/destination", destination]])
+    const { moveSessionToDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/source")
+
+    await moveSessionToDirectory(source.getState().session[0], "/source", "/destination", true)
+
+    expect(replyCalls.filter((call) => call.method === "controlPlane.moveSession")).toEqual([{
+      method: "controlPlane.moveSession",
+      params: {
+        sessionID: "session-a",
+        destination: { directory: "/destination" },
+        moveChanges: true,
+      },
+    }])
+    expect(source.getState().session).toHaveLength(0)
+    expect(source.getState().sessionTotal).toBe(0)
+    expect(source.getState().session_status["session-a"]).toBe(undefined)
+    expect(source.getState().session_diff["session-a"]).toBe(undefined)
+    expect(source.getState().todo["session-a"]).toBe(undefined)
+    expect(source.getState().permission["session-a"]).toBe(undefined)
+    expect(source.getState().question["session-a"]).toBe(undefined)
+    expect(source.getState().message["session-a"]).toBe(undefined)
+    expect(source.getState().part["message-a"]).toBe(undefined)
+    expect(destination.getState().session[0]?.id).toBe("session-a")
+    expect(destination.getState().sessionTotal).toBe(1)
+    expect((destination.getState().session[0] as SessionWithDirectory)?.directory).toBe("/destination")
+    expect(destination.getState().session_status["session-a"]?.type).toBe("idle")
+    expect(destination.getState().session_diff["session-a"]?.[0]?.file).toBe("changed.ts")
+    expect(destination.getState().todo["session-a"]?.[0]?.content).toBe("Check move")
+    expect(destination.getState().permission["session-a"]?.[0]?.id).toBe("permission-a")
+    expect(destination.getState().question["session-a"]?.[0]?.id).toBe("question-a")
+    expect(destination.getState().message["session-a"]?.[0]?.id).toBe("message-a")
+    expect(destination.getState().part["message-a"]?.[0]?.id).toBe("part-a")
+    expect(registeredSessionDirectories).toEqual([{ sessionID: "session-a", directory: "/destination" }])
+    expect(movedSessionDirectories).toEqual([{ sessionID: "session-a", directory: "/destination" }])
+    expect((globalUpsertedSessions[0] as SessionWithDirectory).directory).toBe("/destination")
+
+    await moveSessionToDirectory(destination.getState().session[0], "/destination", "/source", true)
+
+    expect(replyCalls.filter((call) => call.method === "controlPlane.moveSession")[1]?.params.moveChanges).toBe(true)
+    expect(source.getState().session[0]?.id).toBe("session-a")
+    expect(source.getState().message["session-a"]?.[0]?.id).toBe("message-a")
+    expect(source.getState().part["message-a"]?.[0]?.id).toBe("part-a")
+    expect(destination.getState().session).toHaveLength(0)
+    expect(destination.getState().message["session-a"]).toBe(undefined)
+    expect(destination.getState().part["message-a"]).toBe(undefined)
+  })
+})
 
 describe("fetchMessagesForSession startup race", () => {
   test("does not reject before sync action refs are initialized", async () => {

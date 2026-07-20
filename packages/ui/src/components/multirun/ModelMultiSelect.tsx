@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from "@/components/icon/Icon";
@@ -229,14 +229,13 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
       <div className="flex flex-wrap gap-1.5 items-center">
         {/* Add model button (dropdown trigger) */}
         <div className={cn('relative', containerClassName)} ref={dropdownRef}>
-          <Button
+          <button
             ref={triggerRef}
             type="button"
-            variant="outline"
-            size="sm"
+            data-popup-open={isOpen ? '' : undefined}
             className={cn(
-              CHIP_HEIGHT_CLASS,
-              '!border-border/80 !bg-[var(--surface-subtle)] hover:!bg-[var(--interactive-hover)]/70',
+              dropdownTriggerVariants({ size: 'default' }),
+              'w-fit',
               addButtonClassName,
             )}
             disabled={!canAddModel}
@@ -246,7 +245,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
           >
             {triggerIcon ?? <Icon name="add" className="h-3.5 w-3.5 mr-1" />}
             {addButtonLabel ?? t('multirun.modelMultiSelect.actions.addModel')}
-          </Button>
+          </button>
 
           {isOpen ? (
             <div
@@ -324,8 +323,8 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                       }}
                     >
                       <SelectTrigger
-                        size="chip"
-                        className="px-2 gap-1.5 rounded-md !border-border/80 !bg-[var(--surface-subtle)] hover:!bg-[var(--interactive-hover)]/70 typography-meta font-medium text-foreground"
+                        size="sm"
+                        className="gap-1.5"
                       >
                         <Icon name="brain-ai-3"
                           className={cn(

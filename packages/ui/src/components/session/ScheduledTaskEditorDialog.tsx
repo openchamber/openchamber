@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -701,7 +702,7 @@ const CronScheduleSection: React.FC<{
             }));
           }}
         >
-          <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+          <SelectTrigger size="lg" className="w-fit max-w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
             {TIMEZONE_OPTIONS.map((timezone) => (
               <SelectItem key={timezone} value={timezone}>{timezone}</SelectItem>
@@ -1226,7 +1227,7 @@ export function ScheduledTaskEditorDialog(props: {
                         }));
                       }}
                     >
-                      <SelectTrigger className="w-fit max-w-full">
+                      <SelectTrigger size="lg" className="w-fit max-w-full">
                         <SelectValue>
                           {(value) => value === 'daily'
                             ? t('sessions.scheduledTasks.editor.scheduleType.daily')
@@ -1257,7 +1258,7 @@ export function ScheduledTaskEditorDialog(props: {
                 <div className="relative">
                   <button
                     type="button"
-                    className="inline-flex h-9 w-fit max-w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-3 text-left hover:bg-interactive-hover"
+                    className={cn(dropdownTriggerVariants({ size: 'default' }), 'w-fit max-w-full')}
                     onClick={() => setIsDatePickerOpen((prev) => !prev)}
                   >
                     <span className="inline-flex items-center gap-2">
@@ -1386,7 +1387,7 @@ export function ScheduledTaskEditorDialog(props: {
                       }));
                     }}
                   >
-                    <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                    <SelectTrigger size="lg" className="w-fit max-w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {TIMEZONE_OPTIONS.map((timezone) => (
                         <SelectItem key={timezone} value={timezone}>{timezone}</SelectItem>
@@ -1474,7 +1475,7 @@ export function ScheduledTaskEditorDialog(props: {
                     }));
                   }}
                 >
-                  <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                  <SelectTrigger size="lg" className="w-fit max-w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {TIMEZONE_OPTIONS.map((timezone) => (
                       <SelectItem key={timezone} value={timezone}>{timezone}</SelectItem>
@@ -1520,7 +1521,7 @@ export function ScheduledTaskEditorDialog(props: {
                   }));
                 }}
               >
-                <SelectTrigger className="w-fit max-w-full">
+                <SelectTrigger size="lg" className="w-fit max-w-full">
                   <SelectValue>
                     {(value) => value === '__default'
                       ? t('sessions.scheduledTasks.editor.thinkingLevel.default')

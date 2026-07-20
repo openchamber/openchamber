@@ -283,6 +283,35 @@ describe('openNewSessionDraft project binding', () => {
   });
 });
 
+describe('createSession draft lifecycle', () => {
+  let originalCreateSession;
+
+  beforeEach(() => {
+    originalCreateSession = opencodeClient.createSession;
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: { open: true, directoryOverride: '/projects/alpha', parentID: null, title: 'Draft title' },
+    });
+  });
+
+  afterEach(() => {
+    opencodeClient.createSession = originalCreateSession;
+  });
+
+  test('keeps the draft open when session creation fails', async () => {
+    opencodeClient.createSession = async () => {
+      throw new Error('offline');
+    };
+
+    const session = await useSessionUIStore.getState().createSession('Draft title', '/projects/alpha');
+
+    expect(session).toBeNull();
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true);
+    expect(useSessionUIStore.getState().newSessionDraft.title).toBe('Draft title');
+  });
+});
+
 describe('routeMessage skill invocation', () => {
   // OpenCode registers every skill as a command (source: "skill"), so a skill
   // selected from the slash menu must be dispatched via session.command so its

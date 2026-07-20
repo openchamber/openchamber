@@ -10,6 +10,8 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isTerminalShell } from '@/lib/terminalShell';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -138,6 +140,51 @@ const dispatchSettingsSynced = (settings: DesktopSettings): void => {
     return;
   }
   window.dispatchEvent(new CustomEvent<DesktopSettings>('openchamber:settings-synced', { detail: settings }));
+};
+
+type SettingsSaveState = 'idle' | 'saving' | 'error';
+
+let _settingsSaveState: SettingsSaveState = 'idle';
+let _settingsSaveStateResetTimer: ReturnType<typeof setTimeout> | null = null;
+const _settingsSaveStateListeners = new Set<() => void>();
+
+export const getSettingsSaveState = (): SettingsSaveState => _settingsSaveState;
+
+export const subscribeToSettingsSaveState = (listener: () => void): (() => void) => {
+  _settingsSaveStateListeners.add(listener);
+  return () => _settingsSaveStateListeners.delete(listener);
+};
+
+/**
+ * Drive the shared settings save indicator from pages that persist through
+ * their own APIs instead of updateDesktopSettings. 'error' resets to idle.
+ */
+export const reportSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void => {
+  dispatchSettingsSaveState(state);
+};
+
+const dispatchSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void => {
+  if (_settingsSaveStateResetTimer) {
+    clearTimeout(_settingsSaveStateResetTimer);
+    _settingsSaveStateResetTimer = null;
+  }
+
+  // Quiet indicator: success is the normal case and renders nothing ('saved' → idle);
+  // only in-flight saves and failures surface in the UI.
+  const nextState: SettingsSaveState = state === 'saved' ? 'idle' : state;
+  if (nextState !== _settingsSaveState) {
+    _settingsSaveState = nextState;
+    _settingsSaveStateListeners.forEach((listener) => listener());
+  }
+
+  if (nextState === 'error') {
+    _settingsSaveStateResetTimer = setTimeout(() => dispatchSettingsSaveState('saved'), 6000);
+  }
+
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent<'saving' | 'saved' | 'error'>('openchamber:settings-save-state', { detail: state }));
 };
 
 type PersistApi = {
@@ -631,6 +678,18 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.terminalFontSize === 'number' && Number.isFinite(settings.terminalFontSize) && settings.terminalFontSize !== store.terminalFontSize) {
     store.setTerminalFontSize(settings.terminalFontSize);
+  }
+  if (isTerminalShell(settings.terminalShell) && settings.terminalShell !== store.terminalShell) {
+    store.setTerminalShell(settings.terminalShell);
+  }
+  if (
+    Array.isArray(settings.terminalLoginShells)
+    && (
+      settings.terminalLoginShells.length !== store.terminalLoginShells.length
+      || settings.terminalLoginShells.some((shell, index) => shell !== store.terminalLoginShells[index])
+    )
+  ) {
+    store.setTerminalLoginShells(settings.terminalLoginShells);
   }
   if (typeof settings.editorFontSize === 'number' && Number.isFinite(settings.editorFontSize) && settings.editorFontSize !== store.editorFontSize) {
     store.setEditorFontSize(settings.editorFontSize);
@@ -1174,6 +1233,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
     result.terminalFontSize = candidate.terminalFontSize;
   }
+  if (isTerminalShell(candidate.terminalShell)) {
+    result.terminalShell = candidate.terminalShell;
+  }
+  if (Array.isArray(candidate.terminalLoginShells)) {
+    result.terminalLoginShells = [...new Set(candidate.terminalLoginShells.filter(isTerminalShell))];
+  }
   if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
     result.editorFontSize = candidate.editorFontSize;
   }
@@ -1317,52 +1382,105 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   return result;
 };
 
-// Short-lived cache + in-flight dedup for settings fetches to avoid repeated GET calls during startup
-let _settingsCache: { value: DesktopSettings | null; at: number } | null = null;
-let _settingsInflight: Promise<DesktopSettings | null> | null = null;
-const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
+type SettingsRuntimeContext = { runtimeKey: string; generation: number };
 
-const fetchWebSettings = async (): Promise<DesktopSettings | null> => {
+// Short-lived cache + in-flight dedup for settings fetches to avoid repeated GET calls during startup
+let _settingsRuntimeGeneration = 0;
+let _settingsCache: { value: DesktopSettings | null; at: number; context: SettingsRuntimeContext } | null = null;
+let _settingsInflight: { promise: Promise<DesktopSettings | null>; context: SettingsRuntimeContext } | null = null;
+let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
+let _pendingSettingsContext: SettingsRuntimeContext | null = null;
+let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let _settingsFlushWaiters: Array<() => void> = [];
+let _settingsLifecycleInitialized = false;
+const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
+const SETTINGS_DEBOUNCE_MS = 200;
+
+const captureSettingsRuntimeContext = (): SettingsRuntimeContext => ({
+  runtimeKey: getRuntimeKey(),
+  generation: _settingsRuntimeGeneration,
+});
+
+const isSameSettingsRuntimeContext = (left: SettingsRuntimeContext, right: SettingsRuntimeContext): boolean => (
+  left.runtimeKey === right.runtimeKey && left.generation === right.generation
+);
+
+const isSettingsRuntimeContextCurrent = (context: SettingsRuntimeContext): boolean => (
+  context.generation === _settingsRuntimeGeneration && context.runtimeKey === getRuntimeKey()
+);
+
+const ensureSettingsRuntimeLifecycle = (): void => {
+  if (_settingsLifecycleInitialized || typeof window === 'undefined') return;
+  _settingsLifecycleInitialized = true;
+
+  subscribeRuntimeEndpointWillChange((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey) return;
+    if (_settingsFlushTimer) clearTimeout(_settingsFlushTimer);
+    if (_pendingSettingsChanges) void _flushSettingsUpdate();
+  });
+  subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey) return;
+    _settingsRuntimeGeneration += 1;
+    _settingsCache = null;
+    _settingsInflight = null;
+  });
+};
+
+const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Promise<DesktopSettings | null> => {
+  ensureSettingsRuntimeLifecycle();
   // Return cached if fresh
-  if (_settingsCache && Date.now() - _settingsCache.at < SETTINGS_CACHE_TTL) {
+  if (_settingsCache && isSameSettingsRuntimeContext(_settingsCache.context, context) && Date.now() - _settingsCache.at < SETTINGS_CACHE_TTL) {
     return _settingsCache.value;
   }
 
   // Dedup concurrent calls
-  if (_settingsInflight) return _settingsInflight;
+  if (_settingsInflight && isSameSettingsRuntimeContext(_settingsInflight.context, context)) return _settingsInflight.promise;
 
-  _settingsInflight = (async (): Promise<DesktopSettings | null> => {
-    const runtimeSettings = getRuntimeSettingsAPI();
-    if (runtimeSettings) {
+  const inflight = {
+    context,
+    promise: (async (): Promise<DesktopSettings | null> => {
+      const runtimeSettings = getRuntimeSettingsAPI();
+      if (runtimeSettings) {
+        try {
+          const result = await runtimeSettings.load();
+          if (!isSettingsRuntimeContextCurrent(context)) return null;
+          const settings = sanitizeWebSettings(result.settings);
+          _settingsCache = { value: settings, at: Date.now(), context };
+          return settings;
+        } catch (error) {
+          if (!isSettingsRuntimeContextCurrent(context)) return null;
+          console.warn('Failed to load shared settings from runtime settings API:', error);
+        }
+      }
+
+      if (!isSettingsRuntimeContextCurrent(context)) return null;
       try {
-        const result = await runtimeSettings.load();
-        const settings = sanitizeWebSettings(result.settings);
-        _settingsCache = { value: settings, at: Date.now() };
+        const response = await runtimeFetch('/api/config/settings', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        if (!isSettingsRuntimeContextCurrent(context)) return null;
+        if (!response.ok) {
+          return null;
+        }
+        const data = await response.json().catch(() => null);
+        if (!isSettingsRuntimeContextCurrent(context)) return null;
+        const settings = sanitizeWebSettings(data);
+        _settingsCache = { value: settings, at: Date.now(), context };
         return settings;
       } catch (error) {
-        console.warn('Failed to load shared settings from runtime settings API:', error);
-      }
-    }
-
-    try {
-      const response = await runtimeFetch('/api/config/settings', {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      if (!response.ok) {
+        if (!isSettingsRuntimeContextCurrent(context)) return null;
+        console.warn('Failed to load shared settings from server:', error);
         return null;
       }
-      const data = await response.json().catch(() => null);
-      const settings = sanitizeWebSettings(data);
-      _settingsCache = { value: settings, at: Date.now() };
-      return settings;
-    } catch (error) {
-      console.warn('Failed to load shared settings from server:', error);
-      return null;
-    }
-  })().finally(() => { _settingsInflight = null; });
+    })(),
+  };
+  _settingsInflight = inflight;
+  void inflight.promise.finally(() => {
+    if (_settingsInflight === inflight) _settingsInflight = null;
+  });
 
-  return _settingsInflight;
+  return inflight.promise;
 };
 
 /** Invalidate cached settings (call after a successful PUT) */
@@ -1374,6 +1492,8 @@ export const syncDesktopSettings = async (): Promise<void> => {
   if (typeof window === 'undefined') {
     return;
   }
+  ensureSettingsRuntimeLifecycle();
+  const context = captureSettingsRuntimeContext();
 
   const persistApi = getPersistApi();
 
@@ -1408,6 +1528,7 @@ export const syncDesktopSettings = async (): Promise<void> => {
   // a TypeError from writing to a contextBridge-protected global) doesn't
   // prevent server settings from reaching the Zustand store.
   const applySettings = async (settings: DesktopSettings) => {
+    if (!isSettingsRuntimeContextCurrent(context)) return;
     const shouldPersistCraftGoalMigration = settings.draftStartersCraftGoalAdded !== true;
     try {
       persistToLocalStorage(settings);
@@ -1415,6 +1536,7 @@ export const syncDesktopSettings = async (): Promise<void> => {
       console.warn('persistToLocalStorage failed:', error);
     }
     await waitForHydration();
+    if (!isSettingsRuntimeContextCurrent(context)) return;
     try {
       applyDesktopUiPreferences(settings);
     } catch (error) {
@@ -1425,14 +1547,15 @@ export const syncDesktopSettings = async (): Promise<void> => {
         ...(settings.draftStarters ? { draftStarters: settings.draftStarters } : {}),
         draftStartersCraftGoalAdded: true,
       });
+      if (!isSettingsRuntimeContextCurrent(context)) return;
     }
 
     dispatchSettingsSynced(settings);
   };
 
   try {
-    const webSettings = await fetchWebSettings();
-    if (webSettings) {
+    const webSettings = await fetchWebSettings(context);
+    if (webSettings && isSettingsRuntimeContextCurrent(context)) {
       await applySettings(webSettings);
     }
   } catch (error) {
@@ -1441,75 +1564,96 @@ export const syncDesktopSettings = async (): Promise<void> => {
 };
 
 // Coalesce rapid updateDesktopSettings calls into a single PUT
-let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
-let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
-let _settingsFlushWaiters: Array<() => void> = [];
-const SETTINGS_DEBOUNCE_MS = 200;
-
-const _flushSettingsUpdate = async (): Promise<void> => {
+async function _flushSettingsUpdate(): Promise<void> {
   const changes = _pendingSettingsChanges;
+  const context = _pendingSettingsContext;
   const waiters = _settingsFlushWaiters;
   _pendingSettingsChanges = null;
+  _pendingSettingsContext = null;
   _settingsFlushTimer = null;
   _settingsFlushWaiters = [];
-  if (!changes || Object.keys(changes).length === 0) {
-    waiters.forEach((resolve) => resolve());
-    return;
-  }
+  try {
+    if (!changes || !context || Object.keys(changes).length === 0 || !isSettingsRuntimeContextCurrent(context)) {
+      // Nothing will be written — clear any pending "Saving…" indicator.
+      dispatchSettingsSaveState('saved');
+      return;
+    }
 
-  const runtimeSettings = getRuntimeSettingsAPI();
-  if (runtimeSettings) {
+    const runtimeSettings = getRuntimeSettingsAPI();
+    if (runtimeSettings) {
+      try {
+        const updated = await runtimeSettings.save(changes);
+        if (!isSettingsRuntimeContextCurrent(context)) return;
+        if (updated) {
+          persistToLocalStorage(updated);
+          applyDesktopUiPreferences(updated);
+          dispatchSettingsSynced(updated);
+          _settingsCache = null;
+        }
+        dispatchSettingsSaveState(updated ? 'saved' : 'error');
+        return;
+      } catch (error) {
+        if (!isSettingsRuntimeContextCurrent(context)) return;
+        console.warn('Failed to update settings via runtime settings API:', error);
+      }
+    }
+
+    if (!isSettingsRuntimeContextCurrent(context)) return;
     try {
-      const updated = await runtimeSettings.save(changes);
+      const response = await runtimeFetch('/api/config/settings', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(changes),
+      });
+
+      if (!isSettingsRuntimeContextCurrent(context)) return;
+      if (!response.ok) {
+        console.warn('Failed to update shared settings via API:', response.status, response.statusText);
+        dispatchSettingsSaveState('error');
+        return;
+      }
+
+      const updated = (await response.json().catch(() => null)) as DesktopSettings | null;
+      if (!isSettingsRuntimeContextCurrent(context)) return;
       if (updated) {
         persistToLocalStorage(updated);
         applyDesktopUiPreferences(updated);
         dispatchSettingsSynced(updated);
+        dispatchSettingsSaveState('saved');
+        // Invalidate GET cache so next read sees the fresh data
         _settingsCache = null;
+      } else {
+        dispatchSettingsSaveState('error');
       }
-      waiters.forEach((resolve) => resolve());
-      return;
     } catch (error) {
-      console.warn('Failed to update settings via runtime settings API:', error);
+      if (isSettingsRuntimeContextCurrent(context)) {
+        console.warn('Failed to update shared settings via API:', error);
+        dispatchSettingsSaveState('error');
+      }
     }
-  }
-
-  try {
-    const response = await runtimeFetch('/api/config/settings', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(changes),
-    });
-
-    if (!response.ok) {
-      console.warn('Failed to update shared settings via API:', response.status, response.statusText);
-      return;
-    }
-
-    const updated = (await response.json().catch(() => null)) as DesktopSettings | null;
-    if (updated) {
-      persistToLocalStorage(updated);
-      applyDesktopUiPreferences(updated);
-      dispatchSettingsSynced(updated);
-      // Invalidate GET cache so next read sees the fresh data
-      _settingsCache = null;
-    }
-  } catch (error) {
-    console.warn('Failed to update shared settings via API:', error);
   } finally {
     waiters.forEach((resolve) => resolve());
   }
-};
+}
 
 export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<void> => {
   if (typeof window === 'undefined') {
     return;
   }
+  ensureSettingsRuntimeLifecycle();
+  const context = captureSettingsRuntimeContext();
+
+  if (_pendingSettingsContext && !isSameSettingsRuntimeContext(_pendingSettingsContext, context)) {
+    if (_settingsFlushTimer) clearTimeout(_settingsFlushTimer);
+    void _flushSettingsUpdate();
+  }
 
   _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...changes };
+  _pendingSettingsContext = context;
+  dispatchSettingsSaveState('saving');
 
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);

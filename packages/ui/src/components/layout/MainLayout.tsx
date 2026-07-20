@@ -16,6 +16,7 @@ import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { MultiRunLauncher } from '@/components/multirun';
+import { TerminalView } from '@/components/views/TerminalView';
 import { DrawerProvider } from '@/contexts/DrawerContext';
 
 import { useUIStore } from '@/stores/useUIStore';
@@ -31,8 +32,9 @@ import { FilesView } from '@/components/views/FilesView';
 import { GitView } from '@/components/views/GitView';
 import { PlanView } from '@/components/views/PlanView';
 
-// Heavy views loaded on-demand to reduce initial bundle parse time.
-const TerminalView = lazyWithChunkRecovery(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
+// Keep TerminalView eager: the bottom dock reserves its height immediately, so
+// suspending here leaves a large blank panel on slower machines.
+// Other heavy views stay on-demand to reduce initial bundle parse time.
 const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
@@ -365,7 +367,7 @@ export const MainLayout: React.FC = () => {
             case 'diff':
                 return <React.Suspense fallback={null}><DiffView /></React.Suspense>;
             case 'terminal':
-                return <React.Suspense fallback={null}><TerminalView /></React.Suspense>;
+                return <TerminalView />;
             case 'files':
                 return <React.Suspense fallback={null}><FilesView /></React.Suspense>;
             case 'context':
@@ -539,12 +541,10 @@ export const MainLayout: React.FC = () => {
                                             <ContextPanel />
                                         </div>
                                     </div>
-                                    <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>
-                                        {isBottomTerminalOpen ? (
+                                    <BottomTerminalDock isOpen={isBottomTerminalOpen && activeMainTab !== 'terminal'} isMobile={isMobile}>
+                                        {isBottomTerminalOpen && activeMainTab !== 'terminal' ? (
                                             <ErrorBoundary>
-                                                <React.Suspense fallback={null}>
-                                                    <TerminalView />
-                                                </React.Suspense>
+                                                <TerminalView />
                                             </ErrorBoundary>
                                         ) : null}
                                     </BottomTerminalDock>

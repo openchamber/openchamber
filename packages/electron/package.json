@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.16.1",
+  "version": "1.16.2",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -17,6 +17,9 @@
     "electron": "^41.2.1",
     "electron-builder": "^26.0.0"
   },
+  "trustedDependencies": [
+    "electron"
+  ],
   "desktopPrerequisites": [
     "Electron runtime dependencies installed via bun install",
     "Bun available for sidecar compilation",

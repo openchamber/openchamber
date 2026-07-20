@@ -125,9 +125,10 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     const appType = normalizeAppType(options.appType);
     const hostPlatform = mapPlatform(process.platform);
     const hostArch = mapArch(process.arch);
-    const shouldTrustClientPlatform = appType === 'vscode' || appType === 'mobile-capacitor';
+    const shouldTrustClientPlatform = appType === 'desktop-electron' || appType === 'vscode' || appType === 'mobile-capacitor';
     const platform = shouldTrustClientPlatform ? normalizePlatform(options.platform) : hostPlatform;
     const arch = shouldTrustClientPlatform ? normalizeArch(options.arch) : hostArch;
+    const reportUsage = options.reportUsage !== false;
     const payload = {
       appType,
       deviceClass: normalizeDeviceClass(options.deviceClass),
@@ -135,9 +136,9 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
       arch,
       channel: 'stable',
       currentVersion,
-      installId: getOrCreateInstallId(appType),
+      installId: reportUsage ? (options.installId || getOrCreateInstallId(appType)) : undefined,
       instanceMode: options.instanceMode || 'unknown',
-      reportUsage: options.reportUsage !== false,
+      reportUsage,
     };
 
     const response = await fetch(UPDATE_CHECK_URL, {

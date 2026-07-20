@@ -59,5 +59,5 @@ export const resolveProjectForSessionDirectory = (
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
   directory: string | null,
 ): ProjectEntry | null =>
-  resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory) ??
-  resolveProjectForDirectory(projects, directory);
+  resolveProjectForDirectory(projects, directory) ??
+  resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory);

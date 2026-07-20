@@ -123,7 +123,7 @@ describe('session goal live activity gate', () => {
     const requests = [];
     const fetchImpl = vi.fn(async (input, init = {}) => {
       const pathname = requestPath(input);
-      requests.push({ pathname, method: init.method ?? 'GET' });
+      requests.push({ pathname, method: init.method ?? 'GET', body: init.body });
       if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(session);
       if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
       if (pathname === '/session/status') return jsonResponse({});
@@ -147,6 +147,8 @@ describe('session goal live activity gate', () => {
     const service = {
       generateSmallModelText: vi.fn(async () => ({
         text: '{"verdict":"complete","note":"Task verified complete"}',
+        providerID: 'provider',
+        modelID: 'model',
       })),
     };
     vi.stubGlobal('fetch', fetchImpl);
@@ -164,7 +166,14 @@ describe('session goal live activity gate', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(service.generateSmallModelText).toHaveBeenCalledOnce();
-    expect(requests).toContainEqual({ pathname: `/session/${SESSION_ID}`, method: 'PATCH' });
+    const patch = requests.find((request) => request.pathname === `/session/${SESSION_ID}` && request.method === 'PATCH');
+    expect(patch).toBeDefined();
+    const writtenGoal = JSON.parse(patch.body).metadata.openchamber.goal;
+    expect(writtenGoal).toMatchObject({
+      status: 'complete',
+      evaluationProviderID: 'provider',
+      evaluationModelID: 'model',
+    });
     runtime.stop();
   });
 });

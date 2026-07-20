@@ -199,6 +199,16 @@ export class SessionEditorPanelProvider {
     }
   }
 
+  public notifyPermissionAutoAcceptSynced(snapshot: unknown): void {
+    for (const entry of this._panels.values()) {
+      entry.panel.webview.postMessage({
+        type: 'command',
+        command: 'permissionAutoAcceptSynced',
+        payload: snapshot,
+      });
+    }
+  }
+
   public notifyWindowFocusChanged(focused: boolean): void {
     for (const entry of this._panels.values()) {
       entry.panel.webview.postMessage({
