@@ -17,14 +17,22 @@ with `--chrome /path/to/executable`.
 
 The generated `artifacts/browser-profile-*/` directory contains:
 
-- `summary.json`: long-task, memory, network, and OpenChamber operation counts;
+- `summary.json`: long-task, memory, network, sync-operation, and UI streaming/render metrics. `failedRequests` includes transport failures and HTTP 4xx/5xx responses, while `httpErrorResponses` isolates HTTP errors;
 - `trace.json`: import into Chrome DevTools Performance with **Load profile**;
 - `network.har`: import into Chrome DevTools Network with **Import HAR**.
+
+Chrome trace finalization is allowed up to two minutes for large captures. If
+Chrome still does not emit its completion event, the command preserves the
+summary, HAR, and all trace events received so far instead of discarding the
+entire recording. In that case `summary.json` sets `traceComplete` to `false`,
+and trace-derived long-task totals should be treated as lower bounds.
 
 The HAR omits response bodies and redacts cookies, authorization headers, and
 sensitive URL parameters. The trace applies the same key and URL-parameter
 redaction, but profiling artifacts can still reveal project paths and endpoint
 names. Do not publish them without review.
+
+The capture bypasses the PWA service worker and reloads without the browser cache before recording, so repeated optimization runs execute the current local build instead of a previously cached bundle. Network recording begins after that reload, so startup asset downloads are not included in the HAR totals.
 
 Useful options:
 

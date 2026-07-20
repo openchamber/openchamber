@@ -44,6 +44,7 @@ import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog
 import { FusionIcon } from '@/components/icons/FusionIcon';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
+import { streamPerfCount } from '@/stores/utils/streamDebug';
 
 type Folder = { id: string; name: string; sessionIds: string[] };
 
@@ -207,6 +208,7 @@ const QuickSessionAction = React.memo(function QuickSessionAction({
 });
 
 function SessionNodeItemComponent(props: Props): React.ReactNode {
+  streamPerfCount('ui.sidebar_session_node.render');
   const { t } = useI18n();
   const {
     node,

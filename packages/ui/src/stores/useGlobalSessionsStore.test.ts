@@ -78,6 +78,44 @@ describe('useGlobalSessionsStore', () => {
     expect(useGlobalSessionsStore.getState().activeSessions).toEqual([]);
     expect(resolveGlobalSessionDirectory(useGlobalSessionsStore.getState().archivedSessions[0])).toBe('/repo/app');
   });
+
+  test('preserves the opposite session-list reference during an upsert', () => {
+    const active = buildSession('https://share.example/active');
+    const archived = buildSession('https://share.example/archived', {
+      id: 'ses_archived',
+      time: { created: 1, updated: 2, archived: 3 },
+    });
+    useGlobalSessionsStore.getState().applySnapshot([active], [archived]);
+
+    const archivedSessions = useGlobalSessionsStore.getState().archivedSessions;
+    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/active-updated', {
+      time: { created: 1, updated: 3 },
+    }));
+    expect(useGlobalSessionsStore.getState().archivedSessions).toBe(archivedSessions);
+
+    const activeSessions = useGlobalSessionsStore.getState().activeSessions;
+    useGlobalSessionsStore.getState().upsertSession({
+      ...archived,
+      time: { created: 1, updated: 4, archived: 3 },
+    });
+    expect(useGlobalSessionsStore.getState().activeSessions).toBe(activeSessions);
+  });
+
+  test('applies a batch of session upserts in one store publication', () => {
+    let publications = 0;
+    const unsubscribe = useGlobalSessionsStore.subscribe(() => {
+      publications += 1;
+    });
+
+    useGlobalSessionsStore.getState().upsertSessions([
+      buildSession('https://share.example/a'),
+      buildSession('https://share.example/b', { id: 'ses_2' }),
+    ]);
+
+    unsubscribe();
+    expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id)).toEqual(['ses_2', 'ses_1']);
+    expect(publications).toBe(1);
+  });
 });
 
 describe('mergeLiveSessionWithGlobalSession', () => {

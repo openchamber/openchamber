@@ -50,7 +50,11 @@ import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
-import { getSessionMaterializationStatus } from "./materialization"
+import {
+  getSessionMaterializationStatus,
+  isSessionMaterializationStillNeeded,
+  type SessionMaterializationRequest,
+} from "./materialization"
 import { openSessionFromToast } from "./session-navigation"
 import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
@@ -158,10 +162,36 @@ function useLiveSyncSelector<T>(
 }
 
 // ---------------------------------------------------------------------------
-// Event handler — applies one SSE event at a time to the live store.
-// Each event reads live state, creates a shallow draft, applies, writes back.
-// React 18 batches synchronous setState calls automatically.
+// Event handler — applies ordered SSE events to a cumulative per-flush draft.
+// Per-event side effects remain ordered, while each directory store publishes
+// once and each touched top-level slice is cloned at most once per flush.
 // ---------------------------------------------------------------------------
+
+type DirectoryEventBatch = {
+  states: Map<StoreApi<DirectoryStore>, DirectoryStore>
+  clonedFields: Map<StoreApi<DirectoryStore>, Set<keyof State>>
+  changedStores: Set<StoreApi<DirectoryStore>>
+}
+
+const createDirectoryEventBatch = (): DirectoryEventBatch => ({
+  states: new Map(),
+  clonedFields: new Map(),
+  changedStores: new Set(),
+})
+
+const getDirectoryEventState = (
+  store: StoreApi<DirectoryStore>,
+  batch?: DirectoryEventBatch,
+): DirectoryStore => batch?.states.get(store) ?? store.getState()
+
+const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
+  for (const store of batch.changedStores) {
+    const state = batch.states.get(store)
+    if (!state) continue
+    countSyncPerformance("directoryStorePublications")
+    store.setState(state)
+  }
+}
 
 /** Read status for a session across all directories */
 export function useGlobalSessionStatus(sessionId: string): SessionStatus | undefined {
@@ -185,7 +215,7 @@ export function useAllSessionStatuses(): Record<string, SessionStatus> {
   )
 }
 
-export function useAllLiveSessions(): Session[] {
+export function useAllLiveSessions(notificationIntervalMs = 0): Session[] {
   return useLiveSyncSelector(
     useCallback((states) => aggregateLiveSessions(states), []),
     areSessionListsEquivalent,
@@ -193,8 +223,9 @@ export function useAllLiveSessions(): Session[] {
       (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
         (state: State) => state.session,
         notify,
+        notificationIntervalMs,
       ),
-      [],
+      [notificationIntervalMs],
     ),
   )
 }
@@ -240,12 +271,6 @@ type PendingSessionMaterialization = {
   request: SessionMaterializationRequest
 }
 
-type SessionMaterializationRequest = {
-  reason: SessionMaterializationReason
-  messageID?: string
-  partID?: string
-}
-
 const SESSION_MATERIALIZATION_COOLDOWN_MS = 5_000
 const pendingSessionMaterializations = new Map<string, PendingSessionMaterialization>() // key: directory:sessionID
 
@@ -262,23 +287,55 @@ function enqueueSessionMaterialization(
   const existing = pendingSessionMaterializations.get(k)
   if (existing && Date.now() - existing.enqueuedAt < SESSION_MATERIALIZATION_COOLDOWN_MS) return
 
-  pendingSessionMaterializations.set(k, { sessionID, directory, enqueuedAt: Date.now(), request })
+  const pending = { sessionID, directory, enqueuedAt: Date.now(), request }
+  pendingSessionMaterializations.set(k, pending)
+  countSyncPerformance("materializationEnqueues")
+  if (request.reason === "empty-assistant-message") {
+    countSyncPerformance("materializationEmptyAssistantEnqueues")
+  } else if (request.reason === "missing-owning-message") {
+    countSyncPerformance("materializationMissingMessageEnqueues")
+  } else if (request.reason === "orphan-delta" || request.reason === "missing-delta-part") {
+    countSyncPerformance("materializationMissingPartEnqueues")
+  } else {
+    countSyncPerformance("materializationLifecycleEnqueues")
+  }
 
-  // Defer to next microtask so we don't hold up the current event batch
-  void Promise.resolve().then(async () => {
+  const run = async () => {
     const store = childStores.getChild(directory)
     if (!store) {
-      pendingSessionMaterializations.delete(k)
+      if (pendingSessionMaterializations.get(k) === pending) {
+        pendingSessionMaterializations.delete(k)
+      }
       return
     }
     try {
+      if (!isSessionMaterializationStillNeeded(store.getState(), sessionID, request)) {
+        countSyncPerformance("materializationPreflightSkips")
+        return
+      }
+      countSyncPerformance("materializationRequests")
       await materializeSessionFromServer(directory, sessionID, store, request)
     } catch {
       // Transient failure — next SSE event or reconnect will catch up.
     } finally {
-      pendingSessionMaterializations.delete(k)
+      const remainingCooldown = SESSION_MATERIALIZATION_COOLDOWN_MS - (Date.now() - pending.enqueuedAt)
+      if (remainingCooldown <= 0) {
+        if (pendingSessionMaterializations.get(k) === pending) {
+          pendingSessionMaterializations.delete(k)
+        }
+      } else {
+        setTimeout(() => {
+          if (pendingSessionMaterializations.get(k) === pending) {
+            pendingSessionMaterializations.delete(k)
+          }
+        }, remainingCooldown)
+      }
     }
-  })
+  }
+
+  // Start after the current ordered event batch, then recheck local state
+  // before issuing HTTP in case another event in the batch repaired it.
+  void Promise.resolve().then(run)
 }
 
 async function materializeSessionFromServer(
@@ -325,6 +382,17 @@ function pruneExternallyViewedSessions(now = Date.now()) {
 }
 const pendingQuestionToastIds = new Set<string>()
 const pendingPermissionToastIds = new Set<string>()
+const pendingVSCodePermissionEvents = new Map<string, symbol>()
+
+const getVSCodePermissionEventKey = (
+  runtimeKey: string,
+  directory: string,
+  sessionID?: string,
+  requestID?: string,
+): string | null => {
+  const requestKey = getPermissionToastKey(sessionID, requestID)
+  return requestKey ? JSON.stringify([runtimeKey, directory, requestKey]) : null
+}
 
 const getQuestionToastKey = (sessionID?: string, requestID?: string) => {
   if (!sessionID || !requestID) return null
@@ -848,9 +916,10 @@ const findSessionInChildStores = (
   sessionID: string,
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
+  batch?: DirectoryEventBatch,
 ): string | null => {
   for (const [dir, store] of childStores.children) {
-    const state = store.getState()
+    const state = getDirectoryEventState(store, batch)
     if (
       state.session.some((s) => s.id === sessionID)
       || Object.prototype.hasOwnProperty.call(state.message, sessionID)
@@ -868,10 +937,11 @@ const childStoreHasSessionState = (
   childStores: ChildStoreManager,
   directory: string,
   sessionID: string,
+  batch?: DirectoryEventBatch,
 ): boolean => {
   const store = childStores.getChild(directory)
   if (!store) return false
-  const state = store.getState()
+  const state = getDirectoryEventState(store, batch)
   return state.session.some((session) => session.id === sessionID)
     || Object.prototype.hasOwnProperty.call(state.message, sessionID)
     || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionID)
@@ -881,10 +951,11 @@ const childStoreHasMessagePartState = (
   childStores: ChildStoreManager,
   directory: string,
   messageID: string,
+  batch?: DirectoryEventBatch,
 ): boolean => {
   const store = childStores.getChild(directory)
   if (!store) return false
-  return Object.prototype.hasOwnProperty.call(store.getState().part, messageID)
+  return Object.prototype.hasOwnProperty.call(getDirectoryEventState(store, batch).part, messageID)
 }
 
 const getActiveDirectoryFallback = (childStores: ChildStoreManager): string | null => {
@@ -897,12 +968,13 @@ const resolveDirectoryFromRoutingIndex = (
   rawDirectory: string,
   payload: Event,
   childStores: ChildStoreManager,
+  batch?: DirectoryEventBatch,
 ): string => {
   const normalizedDirectory = normalizeEventDirectory(rawDirectory)
 
   const sessionID = getSessionIdFromPayload(payload)
   if (sessionID) {
-    if (normalizedDirectory && normalizedDirectory !== "global" && childStoreHasSessionState(childStores, normalizedDirectory, sessionID)) {
+    if (normalizedDirectory && normalizedDirectory !== "global" && childStoreHasSessionState(childStores, normalizedDirectory, sessionID, batch)) {
       setIndexedSessionDirectory(routingIndex, sessionID, normalizedDirectory)
       return normalizedDirectory
     }
@@ -914,7 +986,7 @@ const resolveDirectoryFromRoutingIndex = (
 
     // Routing index miss — scan child stores for this session.
     // Covers optimistic sessions not yet indexed and events with wrong/empty directory.
-    const found = findSessionInChildStores(sessionID, childStores, routingIndex)
+    const found = findSessionInChildStores(sessionID, childStores, routingIndex, batch)
     if (found) {
       return found
     }
@@ -922,7 +994,7 @@ const resolveDirectoryFromRoutingIndex = (
 
   const messageID = getMessageIdFromPayload(payload)
   if (messageID) {
-    if (normalizedDirectory && normalizedDirectory !== "global" && childStoreHasMessagePartState(childStores, normalizedDirectory, messageID)) {
+    if (normalizedDirectory && normalizedDirectory !== "global" && childStoreHasMessagePartState(childStores, normalizedDirectory, messageID, batch)) {
       return normalizedDirectory
     }
 
@@ -936,7 +1008,7 @@ const resolveDirectoryFromRoutingIndex = (
 
     // Scan child stores for a store that has parts for this message
     for (const [dir, store] of childStores.children) {
-      if (Object.prototype.hasOwnProperty.call(store.getState().part, messageID)) {
+      if (Object.prototype.hasOwnProperty.call(getDirectoryEventState(store, batch).part, messageID)) {
         return dir
       }
     }
@@ -1281,6 +1353,7 @@ function handleEvent(
   expectedRuntimeKey: string,
   skipVSCodeAutoAccept = false,
   streamingDirectory?: string,
+  batch?: DirectoryEventBatch,
 ) {
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
@@ -1296,7 +1369,7 @@ function handleEvent(
     return
   }
 
-  const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
+  const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores, batch)
 
   if (payload.type === "session.deleted" && expectedRuntimeKey === getRuntimeKey()) {
     const sessionID = getSessionIdFromPayload(payload)
@@ -1362,7 +1435,7 @@ function handleEvent(
     // (trailing slashes, case differences, events with wrong directory).
     const sessionID = getSessionIdFromPayload(payload)
     if (sessionID) {
-      const fallbackDir = findSessionInChildStores(sessionID, childStores, routingIndex)
+      const fallbackDir = findSessionInChildStores(sessionID, childStores, routingIndex, batch)
       if (fallbackDir) {
         store = childStores.getChild(fallbackDir)
         resolvedDirectory = fallbackDir
@@ -1389,10 +1462,20 @@ function handleEvent(
   if (payload.type === "permission.asked") {
     const permission = payload.properties as PermissionRequest
     if (isVSCodeRuntime() && !skipVSCodeAutoAccept) {
+      const eventKey = getVSCodePermissionEventKey(expectedRuntimeKey, resolvedDirectory, permission.sessionID, permission.id)
+      const eventToken = Symbol(eventKey ?? permission.id)
+      if (eventKey) pendingVSCodePermissionEvents.set(eventKey, eventToken)
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
-      void processVSCodePermissionAutoAccept(permission, resolvedDirectory).then((accepted) => {
+      const completePermissionCheck = (accepted: boolean) => {
+        if (eventKey && pendingVSCodePermissionEvents.get(eventKey) !== eventToken) return
+        if (eventKey) pendingVSCodePermissionEvents.delete(eventKey)
+        if (expectedRuntimeKey !== getRuntimeKey()) return
         if (!accepted) handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true, streamingDirectory)
-      })
+      }
+      void processVSCodePermissionAutoAccept(permission, resolvedDirectory).then(
+        completePermissionCheck,
+        () => completePermissionCheck(false),
+      )
       return
     }
     if (!isVSCodeRuntime() && usePermissionStore.getState().isSessionAutoAccepting(permission.sessionID)) {
@@ -1414,6 +1497,8 @@ function handleEvent(
   if (payload.type === "permission.replied") {
     const props = payload.properties as { sessionID?: string; requestID?: string }
     const toastKey = getPermissionToastKey(props.sessionID, props.requestID)
+    const eventKey = getVSCodePermissionEventKey(expectedRuntimeKey, resolvedDirectory, props.sessionID, props.requestID)
+    if (eventKey) pendingVSCodePermissionEvents.delete(eventKey)
     if (toastKey) {
       pendingPermissionToastIds.delete(toastKey)
       toast.dismiss(`permission-${toastKey}`)
@@ -1456,7 +1541,7 @@ function handleEvent(
     const props = payload.properties as { sessionID?: string; error?: { message?: string; code?: string } }
     const sessionID = props.sessionID
     // Skip subtask sessions — only top-level sessions generate notifications
-    const storeState = store.getState()
+    const storeState = getDirectoryEventState(store, batch)
     const session = storeState.session.find((s) => s.id === sessionID)
     if (session && (session as { parentID?: string }).parentID) {
       // subtask — skip notification
@@ -1480,7 +1565,7 @@ function handleEvent(
   if (payload.type === "session.idle") {
     const idleSessionId = getSessionIdFromPayload(payload)
     if (idleSessionId && resolvedDirectory && resolvedDirectory !== "global") {
-      const sessionState = store.getState()
+      const sessionState = getDirectoryEventState(store, batch)
       const idleSession = sessionState.session.find((s) => s.id === idleSessionId)
       const parentID = idleSession
         ? (idleSession as Session & { parentID?: string | null }).parentID
@@ -1494,56 +1579,63 @@ function handleEvent(
   // Read live state, create targeted draft cloning ONLY fields that event
   // type will mutate. This preserves reference identity for untouched slices
   // so Zustand selectors skip re-renders for unrelated subscribers.
-  const current = store.getState()
+  const current = getDirectoryEventState(store, batch)
   const draft: State = { ...current }
+  const clonedFields = batch?.clonedFields.get(store) ?? new Set<keyof State>()
+  const newlyClonedFields: Array<keyof State> = []
+  const cloneField = <K extends keyof State>(field: K, clone: (value: State[K]) => State[K]) => {
+    if (clonedFields.has(field)) return
+    Object.assign(draft, { [field]: clone(current[field]) })
+    newlyClonedFields.push(field)
+  }
 
   switch (payload.type) {
     case "session.created":
     case "session.updated":
     case "session.deleted":
-      draft.session = [...current.session]
-      draft.permission = { ...current.permission }
-      draft.todo = { ...current.todo }
-      draft.part = { ...current.part }
-      draft.sessionEventRevision = { ...(current.sessionEventRevision ?? {}) }
-      draft.sessionDeletedRevision = { ...(current.sessionDeletedRevision ?? {}) }
+      cloneField("session", (value) => [...value])
+      cloneField("permission", (value) => ({ ...value }))
+      cloneField("todo", (value) => ({ ...value }))
+      cloneField("part", (value) => ({ ...value }))
+      cloneField("sessionEventRevision", (value) => ({ ...(value ?? {}) }))
+      cloneField("sessionDeletedRevision", (value) => ({ ...(value ?? {}) }))
       break
     case "session.diff":
-      draft.session_diff = { ...current.session_diff }
+      cloneField("session_diff", (value) => ({ ...value }))
       break
     case "session.status":
     case "session.idle":
     case "session.error":
-      draft.session_status = { ...(current.session_status ?? {}) }
+      cloneField("session_status", (value) => ({ ...(value ?? {}) }))
       break
     case "todo.updated":
-      draft.todo = { ...current.todo }
+      cloneField("todo", (value) => ({ ...value }))
       break
     case "message.updated":
-      draft.message = { ...current.message }
+      cloneField("message", (value) => ({ ...value }))
       break
     case "message.removed":
-      draft.message = { ...current.message }
-      draft.part = { ...current.part }
+      cloneField("message", (value) => ({ ...value }))
+      cloneField("part", (value) => ({ ...value }))
       break
     case "message.part.updated":
     case "message.part.removed":
     case "message.part.delta":
-      draft.part = { ...current.part }
+      cloneField("part", (value) => ({ ...value }))
       break
     case "vcs.branch.updated":
       break
     case "permission.asked":
     case "permission.replied":
-      draft.permission = { ...current.permission }
+      cloneField("permission", (value) => ({ ...value }))
       break
     case "question.asked":
     case "question.replied":
     case "question.rejected":
-      draft.question = { ...current.question }
+      cloneField("question", (value) => ({ ...value }))
       break
     case "lsp.updated":
-      draft.lsp = [...current.lsp]
+      cloneField("lsp", (value) => [...value])
       break
     default:
       break
@@ -1560,14 +1652,23 @@ function handleEvent(
 
   if (reducerChanged) {
     countSyncPerformance("reducerChangedEvents")
-    countSyncPerformance("directoryStorePublications")
     const eventSessionID = getSessionIdFromPayload(payload) ?? undefined
     const eventMessageID = getMessageIdFromPayload(payload) ?? undefined
     if (payload.type.startsWith("message.part.") && eventMessageID) {
       const partSessionID = eventSessionID ?? routingIndex.messageSessionById.get(eventMessageID)
       if (partSessionID) markDirectorySessionPartChanged(store, partSessionID, eventMessageID)
     }
-    store.setState(draft)
+    if (batch) {
+      batch.states.set(store, draft as DirectoryStore)
+      batch.changedStores.add(store)
+      if (newlyClonedFields.length > 0) {
+        newlyClonedFields.forEach((field) => clonedFields.add(field))
+        batch.clonedFields.set(store, clonedFields)
+      }
+    } else {
+      countSyncPerformance("directoryStorePublications")
+      store.setState(draft)
+    }
     const sessionID = eventSessionID
     const messageID = eventMessageID
     if (
@@ -1588,9 +1689,9 @@ function handleEvent(
     // replaced but draft.part[messageID] is empty, the parts were lost or
     // never arrived. Recover the session so the UI doesn't render a blank bubble.
     if (sessionID && messageID && payload.type === "message.updated") {
-      const after = store.getState()
+      const after = getDirectoryEventState(store, batch)
       const info = (payload.properties as { info: Message }).info
-      if (info.role === "assistant" && (!after.part[messageID] || after.part[messageID].length === 0)) {
+      if (info.role === "assistant" && !Object.prototype.hasOwnProperty.call(after.part, messageID)) {
         enqueueSessionMaterialization(resolvedDirectory, sessionID, childStores, {
           reason: "empty-assistant-message",
           messageID,
@@ -1893,7 +1994,7 @@ export function SyncProvider(props: {
       routeDirectory: (directory, payload) => {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
-      onEvent: (directory, payload) => {
+      onEvents: (directory, payloads) => {
         // Track ALL stream activity (including heartbeats) as proof of
         // connection health. The watchdog stale check uses this to distinguish
         // a genuinely dead stream (no heartbeats for 20s) from a quiet-but-
@@ -1901,16 +2002,23 @@ export function SyncProvider(props: {
         // heartbeats here caused issue #1656: the stale timer fired for any
         // quiet session, triggering redundant full resyncs every ~15s.
         lastStreamActivityAtRef.current = Date.now()
-        dispatchVSCodeRuntimeNotificationEvent(directory, payload)
-        if (payload.type === "installation.update-available") {
-          const version = typeof (payload.properties as { version?: unknown })?.version === "string"
-            ? (payload.properties as { version: string }).version
-            : ""
-          if (version) {
-            dispatchOpenCodeUpdateAvailableUnlessBundled({ version })
+        const batch = createDirectoryEventBatch()
+        try {
+          for (const payload of payloads) {
+            dispatchVSCodeRuntimeNotificationEvent(directory, payload)
+            if (payload.type === "installation.update-available") {
+              const version = typeof (payload.properties as { version?: unknown })?.version === "string"
+                ? (payload.properties as { version: string }).version
+                : ""
+              if (version) {
+                dispatchOpenCodeUpdateAvailableUnlessBundled({ version })
+              }
+            }
+            handleEvent(directory, payload, childStores, routingIndex, runtimeKey, false, currentDirectoryRef.current, batch)
           }
+        } finally {
+          publishDirectoryEventBatch(batch)
         }
-        handleEvent(directory, payload, childStores, routingIndex, runtimeKey, false, currentDirectoryRef.current)
       },
       onReconnect: () => {
         useConfigStore.setState({
@@ -2704,13 +2812,31 @@ export function useSessionMessageCount(sessionID: string, directory?: string): n
 
 export function useSessionRenderable(sessionID: string, directory?: string): boolean {
   const store = useDirectoryStore(directory)
-  const getSnapshot = useCallback(
-    () => Boolean(sessionID && getSessionMaterializationStatus(store.getState(), sessionID).renderable),
-    [sessionID, store],
-  )
+  const renderableRef = useRef(false)
+  const getSnapshot = useCallback(() => {
+    const renderable = Boolean(sessionID && getSessionMaterializationStatus(store.getState(), sessionID).renderable)
+    renderableRef.current = renderable
+    return renderable
+  }, [sessionID, store])
   const subscribe = useCallback(
     (notify: () => void) => sessionID
-      ? subscribeDirectorySessionMessages(store, sessionID, notify)
+      ? subscribeDirectorySessionMessages(store, sessionID, (change) => {
+          const state = store.getState()
+          const remainsRenderable = change.partMessageIDs.every((messageID) => (
+            Object.prototype.hasOwnProperty.call(state.part, messageID)
+          ))
+          if (
+            !change.messagesChanged
+            && !change.reset
+            && change.partMessageIDs.length > 0
+            && renderableRef.current
+            && remainsRenderable
+          ) {
+            countSyncPerformance("sessionRenderableNotificationSkips")
+            return
+          }
+          notify()
+        })
       : () => undefined,
     [sessionID, store],
   )
@@ -2742,7 +2868,19 @@ export function useUserMessageHistory(sessionID: string, directory?: string): st
 
   const subscribe = useCallback((notify: () => void) => {
     if (!sessionID) return () => undefined
-    const unsubscribeMessages = subscribeDirectorySessionMessages(store, sessionID, notify)
+    const unsubscribeMessages = subscribeDirectorySessionMessages(store, sessionID, (change) => {
+      if (!change.messagesChanged && !change.reset && change.partMessageIDs.length > 0) {
+        const records = snapshotRef.current.sessionID === sessionID ? snapshotRef.current.records : []
+        const affectsUserHistory = change.partMessageIDs.some((messageID) => (
+          records.some((record) => record.message.id === messageID)
+        ))
+        if (!affectsUserHistory) {
+          countSyncPerformance("userMessageHistoryNotificationSkips")
+          return
+        }
+      }
+      notify()
+    })
     const unsubscribeSession = store.subscribe((state, previous) => {
       if (state.session === previous.session) return
       const currentRevert = state.session.find((session) => session.id === sessionID)?.revert?.messageID
@@ -2823,7 +2961,24 @@ export function useSessionMessageRecords(
 
   const subscribe = useCallback((notify: () => void) => {
     if (!sessionID || options?.enabled === false) return () => undefined
-    const unsubscribeMessages = subscribeDirectorySessionMessages(store, sessionID, notify)
+    const unsubscribeMessages = subscribeDirectorySessionMessages(store, sessionID, (change) => {
+      const suspendPartUpdates = Boolean(options?.suspendPartUpdates)
+      const suspendedPartUpdatesMessageID = options?.suspendPartUpdatesForMessageId ?? undefined
+      if (!change.messagesChanged && !change.reset && suspendPartUpdates && change.partMessageIDs.length > 0) {
+        const state = store.getState()
+        const snapshot = snapshotRef.current.sessionID === sessionID ? snapshotRef.current : undefined
+        const allChangesSuspended = change.partMessageIDs.every((messageID) => {
+          if (suspendedPartUpdatesMessageID && messageID !== suspendedPartUpdatesMessageID) return false
+          const message = snapshot?.byId.get(messageID)?.info
+          return Boolean(message && !isSuspendExemptShellBridge(state, message, state.part[messageID]))
+        })
+        if (allChangesSuspended) {
+          countSyncPerformance("sessionMessageRecordNotificationSkips")
+          return
+        }
+      }
+      notify()
+    })
     const unsubscribeSession = store.subscribe((state, previous) => {
       if (state.session === previous.session) return
       const currentRevert = state.session.find((session) => session.id === sessionID)?.revert?.messageID
@@ -2834,7 +2989,7 @@ export function useSessionMessageRecords(
       unsubscribeMessages()
       unsubscribeSession()
     }
-  }, [options?.enabled, sessionID, store])
+  }, [options?.enabled, options?.suspendPartUpdates, options?.suspendPartUpdatesForMessageId, sessionID, store])
 
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }

@@ -70,4 +70,70 @@ describe("GitHub PR status cache ownership", () => {
     expect(useGitHubPrStatusStore.getState().entries[key]?.status).toBe(null)
     expect(useGitHubPrStatusStore.getState().activeRequestCount).toBe(0)
   })
+
+  test("throttles repeated non-forced refreshes after a failure", async () => {
+    let requestCount = 0
+    const github = {
+      prStatus: async () => {
+        requestCount += 1
+        throw new Error("GitHub rate limited")
+      },
+    } as unknown as RuntimeAPIs["github"]
+    const key = getGitHubPrStatusKey("/repo", "main", "origin")
+    useGitHubPrStatusStore.getState().ensureEntry(key)
+    useGitHubPrStatusStore.getState().setParams(key, params(github))
+
+    await useGitHubPrStatusStore.getState().refresh(key)
+    await useGitHubPrStatusStore.getState().refresh(key)
+
+    expect(requestCount).toBe(1)
+    expect(useGitHubPrStatusStore.getState().entries[key]?.error).toBe("GitHub rate limited")
+  })
+
+  test("does not throttle replacement params when a queued request becomes stale", async () => {
+    const first = deferred<GitHubPullRequestStatus>()
+    const second = deferred<GitHubPullRequestStatus>()
+    let staleRequestCount = 0
+    let replacementRequestCount = 0
+    const firstGitHub = { prStatus: () => first.promise } as unknown as RuntimeAPIs["github"]
+    const secondGitHub = { prStatus: () => second.promise } as unknown as RuntimeAPIs["github"]
+    const staleGitHub = {
+      prStatus: async () => {
+        staleRequestCount += 1
+        return { connected: true, pr: null }
+      },
+    } as unknown as RuntimeAPIs["github"]
+    const replacementGitHub = {
+      prStatus: async () => {
+        replacementRequestCount += 1
+        return { connected: true, pr: null }
+      },
+    } as unknown as RuntimeAPIs["github"]
+    const firstKey = getGitHubPrStatusKey("/repo", "first", "origin")
+    const secondKey = getGitHubPrStatusKey("/repo", "second", "origin")
+    const queuedKey = getGitHubPrStatusKey("/repo", "queued", "origin")
+
+    for (const [key, github, branch] of [
+      [firstKey, firstGitHub, "first"],
+      [secondKey, secondGitHub, "second"],
+      [queuedKey, staleGitHub, "queued"],
+    ] as const) {
+      useGitHubPrStatusStore.getState().ensureEntry(key)
+      useGitHubPrStatusStore.getState().setParams(key, params(github, branch))
+    }
+
+    const firstRefresh = useGitHubPrStatusStore.getState().refresh(firstKey, { force: true })
+    const secondRefresh = useGitHubPrStatusStore.getState().refresh(secondKey, { force: true })
+    const staleRefresh = useGitHubPrStatusStore.getState().refresh(queuedKey, { force: true })
+    await Promise.resolve()
+    useGitHubPrStatusStore.getState().setParams(queuedKey, params(replacementGitHub, "queued"))
+    first.resolve({ connected: true, pr: null })
+    second.resolve({ connected: true, pr: null })
+    await Promise.all([firstRefresh, secondRefresh, staleRefresh])
+
+    await useGitHubPrStatusStore.getState().refresh(queuedKey)
+
+    expect(staleRequestCount).toBe(0)
+    expect(replacementRequestCount).toBe(1)
+  })
 })

@@ -885,6 +885,7 @@ const MessageListEntry = React.memo(({
     activeStreamingPhase,
     reviewTransferDirection,
 }: MessageListEntryProps) => {
+    streamPerfCount('ui.message_list_entry.render');
     if (entry.kind === 'ungrouped') {
         return (
             <UngroupedMessageRow

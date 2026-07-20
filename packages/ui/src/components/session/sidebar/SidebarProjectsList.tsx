@@ -18,6 +18,7 @@ import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
 import type { MainTab } from '@/stores/useUIStore';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
+import { streamPerfCount } from '@/stores/utils/streamDebug';
 
 type ProjectSection = {
   project: {
@@ -79,6 +80,7 @@ type Props = {
 };
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
+  streamPerfCount('ui.sidebar_projects_list.render');
   const { t } = useI18n();
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),

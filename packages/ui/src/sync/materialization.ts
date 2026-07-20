@@ -1,5 +1,6 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { mergeMessages } from "./optimistic"
+import type { SessionMaterializationReason } from "./event-reducer"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const STREAMING_PART_FIELDS = ["text", "output"] as const
@@ -31,6 +32,34 @@ export type SessionMaterializationStatus = {
   hasMessages: boolean
   renderable: boolean
   missingPartMessageIDs: string[]
+}
+
+export type SessionMaterializationRequest = {
+  reason: SessionMaterializationReason
+  messageID?: string
+  partID?: string
+}
+
+export function isSessionMaterializationStillNeeded(
+  state: MaterializedState,
+  sessionID: string,
+  request: SessionMaterializationRequest,
+): boolean {
+  if (request.reason === "empty-assistant-message") {
+    return !request.messageID || !Object.prototype.hasOwnProperty.call(state.part, request.messageID)
+  }
+
+  if (request.reason === "missing-owning-message") {
+    if (!request.messageID) return true
+    return !(state.message[sessionID] ?? []).some((message) => message.id === request.messageID)
+  }
+
+  if (request.reason === "orphan-delta" || request.reason === "missing-delta-part") {
+    if (!request.messageID || !request.partID) return true
+    return !(state.part[request.messageID] ?? []).some((part) => part.id === request.partID)
+  }
+
+  return true
 }
 
 function sortParts(parts: Part[], skipPartTypes: ReadonlySet<string>) {

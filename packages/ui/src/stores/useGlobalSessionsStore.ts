@@ -27,6 +27,7 @@ type GlobalSessionsState = {
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
   upsertSession: (session: Session) => void;
+  upsertSessions: (sessions: Session[]) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
   /** Drop every session from the previous runtime instance and go back to the
@@ -284,6 +285,14 @@ const upsertSessionIntoList = (sessions: Session[], session: Session): Session[]
   return next;
 };
 
+const removeSessionFromList = (sessions: Session[], sessionId: string): Session[] => {
+  const index = sessions.findIndex((session) => session.id === sessionId);
+  if (index === -1) {
+    return sessions;
+  }
+  return [...sessions.slice(0, index), ...sessions.slice(index + 1)];
+};
+
 const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[] => {
   if (!incoming || incoming.length === 0) {
     return existing;
@@ -394,6 +403,45 @@ const mutationRevisionPatch = (state: GlobalSessionsState, ids: Iterable<string>
   const mutationRevisionBySessionId = new Map(state.mutationRevisionBySessionId);
   for (const id of ids) mutationRevisionBySessionId.set(id, mutationRevision);
   return { mutationRevision, mutationRevisionBySessionId };
+};
+
+const applySessionUpserts = (state: GlobalSessionsState, sessions: Session[]): Partial<GlobalSessionsState> => {
+  const revisionPatch = mutationRevisionPatch(state, sessions.map((session) => session.id));
+  let nextActiveSessions = state.activeSessions;
+  let nextArchivedSessions = state.archivedSessions;
+
+  for (const session of sessions) {
+    const existingSession = nextActiveSessions.find((candidate) => candidate.id === session.id)
+      ?? nextArchivedSessions.find((candidate) => candidate.id === session.id)
+      ?? null;
+    const sessionWithMetadata = mergeSessionDirectoryMetadata(session, existingSession);
+    const isArchived = Boolean(sessionWithMetadata.time?.archived);
+    nextActiveSessions = isArchived
+      ? removeSessionFromList(nextActiveSessions, session.id)
+      : upsertSessionIntoList(nextActiveSessions, sessionWithMetadata);
+    nextArchivedSessions = isArchived
+      ? upsertSessionIntoList(nextArchivedSessions, sessionWithMetadata)
+      : removeSessionFromList(nextArchivedSessions, session.id);
+  }
+
+  if (
+    nextActiveSessions === state.activeSessions
+    && nextArchivedSessions === state.archivedSessions
+  ) {
+    return revisionPatch;
+  }
+
+  return {
+    activeSessions: nextActiveSessions,
+    archivedSessions: nextArchivedSessions,
+    sessionsByDirectory: nextActiveSessions === state.activeSessions
+      ? state.sessionsByDirectory
+      : buildSessionsByDirectory(nextActiveSessions),
+    reviewTransferBySessionId: nextActiveSessions === state.activeSessions
+      ? state.reviewTransferBySessionId
+      : buildReviewTransferMap(nextActiveSessions),
+    ...revisionPatch,
+  };
 };
 
 const buildReviewTransferMap = (sessions: Session[]): Map<string, ReviewTransferDirection> => {
@@ -583,39 +631,12 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 
   upsertSession: (session) => {
-    set((state) => {
-      const revisionPatch = mutationRevisionPatch(state, [session.id]);
-      const existingSession = state.activeSessions.find((candidate) => candidate.id === session.id)
-        ?? state.archivedSessions.find((candidate) => candidate.id === session.id)
-        ?? null;
-      const sessionWithMetadata = mergeSessionDirectoryMetadata(session, existingSession);
-      const isArchived = Boolean(sessionWithMetadata.time?.archived);
-      const nextActiveSessions = isArchived
-        ? state.activeSessions.filter((candidate) => candidate.id !== session.id)
-        : upsertSessionIntoList(state.activeSessions, sessionWithMetadata);
-      const nextArchivedSessions = isArchived
-        ? upsertSessionIntoList(state.archivedSessions, sessionWithMetadata)
-        : state.archivedSessions.filter((candidate) => candidate.id !== session.id);
+    set((state) => applySessionUpserts(state, [session]));
+  },
 
-      if (
-        nextActiveSessions === state.activeSessions
-        && nextArchivedSessions === state.archivedSessions
-      ) {
-        return revisionPatch;
-      }
-
-      return {
-        activeSessions: nextActiveSessions,
-        archivedSessions: nextArchivedSessions,
-        sessionsByDirectory: nextActiveSessions === state.activeSessions
-          ? state.sessionsByDirectory
-          : buildSessionsByDirectory(nextActiveSessions),
-        reviewTransferBySessionId: nextActiveSessions === state.activeSessions
-          ? state.reviewTransferBySessionId
-          : buildReviewTransferMap(nextActiveSessions),
-        ...revisionPatch,
-      };
-    });
+  upsertSessions: (sessions) => {
+    if (sessions.length === 0) return;
+    set((state) => applySessionUpserts(state, sessions));
   },
 
   removeSessions: (ids) => {

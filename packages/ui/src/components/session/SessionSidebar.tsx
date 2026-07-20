@@ -82,6 +82,7 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { buildSessionBootstrapDemands } from './sidebar/sessionBootstrapDemands';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { streamPerfCount } from '@/stores/utils/streamDebug';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -157,6 +158,7 @@ const isKnownActiveSessionDirectory = (
 };
 
 const SIDEBAR_PR_NO_PR_RETRY_MS = 5 * 60_000;
+const SIDEBAR_LIVE_SESSION_UPDATE_INTERVAL_MS = 1_000;
 
 const EMPTY_SUBTREE_SET: Set<string> = new Set();
 const EMPTY_STRING_ARRAY: string[] = [];
@@ -176,7 +178,7 @@ interface SessionSidebarProps {
   showOnlyMainWorkspace?: boolean;
 }
 
-export const SessionSidebar: React.FC<SessionSidebarProps> = ({
+const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   isVisible = true,
   mobileVariant = false,
   onSessionSelected,
@@ -184,6 +186,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   hideDirectoryControls = false,
   showOnlyMainWorkspace = false,
 }) => {
+  streamPerfCount('ui.session_sidebar.render');
+  streamPerfCount(`ui.session_sidebar.render.${mobileVariant ? 'mobile' : 'desktop'}`);
+  streamPerfCount(`ui.session_sidebar.render.${isVisible ? 'visible' : 'hidden'}`);
   const { t } = useI18n();
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
@@ -323,7 +328,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const sync = useSync();
   const childStores = useChildStoreManager();
   const bootstrapDemandOwner = `session-sidebar:${React.useId()}`;
-  const liveSessions = useAllLiveSessions();
+  const liveSessions = useAllLiveSessions(SIDEBAR_LIVE_SESSION_UPDATE_INTERVAL_MS);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
@@ -1023,6 +1028,77 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
+
+  const sidebarRenderSources = {
+    isVisible,
+    mobileVariant,
+    onSessionSelected,
+    allowReselect,
+    hideDirectoryControls,
+    showOnlyMainWorkspace,
+    t,
+    isTablet,
+    liveSessions,
+    globalActiveSessions,
+    archivedSessions,
+    projects,
+    activeProjectId,
+    manualProjectOrder,
+    currentDirectory,
+    currentSessionId,
+    currentSessionDirectory,
+    newSessionDraftOpen,
+    worktreeMetadata,
+    availableWorktreesByProject,
+    pinnedSessionIds,
+    foldersMap,
+    collapsedFolderIds,
+    gitBranches,
+    gitRepoStatus,
+    githubAuthStatus,
+    githubAuthChecked,
+    updateStore,
+    showRecentSection,
+    showArchivedSessions,
+    projectSortOrder,
+    projectRepoStatus,
+    projectRootBranches,
+    resolvedWorktreeTopologyKey,
+    unresolvedWorktreeProjectPaths,
+    isSessionSearchOpen,
+    sessionSearchQuery,
+    editingId,
+    editTitle,
+    editingProjectDialogId,
+    expandedParents,
+    collapsedProjects,
+    visibleSessionCountByGroup,
+    updateDialogOpen,
+    openSidebarMenuKey,
+    renamingFolderId,
+    renameFolderDraft,
+    deleteSessionConfirm,
+    deleteFolderConfirm,
+    bulkDeleteConfirm,
+    collapsedGroups,
+    groupOrderByProject,
+    activeSessionByProject,
+  };
+  const previousSidebarRenderSourcesRef = React.useRef<typeof sidebarRenderSources | null>(null);
+  const previousSidebarRenderSources = previousSidebarRenderSourcesRef.current;
+  if (previousSidebarRenderSources) {
+    let attributed = false;
+    for (const source of Object.keys(sidebarRenderSources) as Array<keyof typeof sidebarRenderSources>) {
+      if (!Object.is(previousSidebarRenderSources[source], sidebarRenderSources[source])) {
+        streamPerfCount(`ui.session_sidebar.source.${source}`);
+        attributed = true;
+      }
+    }
+    if (!attributed) {
+      streamPerfCount('ui.session_sidebar.source.parent_or_context');
+    }
+  }
+  previousSidebarRenderSourcesRef.current = sidebarRenderSources;
 
   const sortedProjects = React.useMemo(() => {
     const list = [...normalizedProjects];
@@ -1791,3 +1867,5 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     </div>
   );
 };
+
+export const SessionSidebar = React.memo(SessionSidebarComponent);

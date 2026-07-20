@@ -598,12 +598,15 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
           let next: GitHubPullRequestStatus;
           try {
             if (!isCurrent()) return;
+            // Failed requests need the same non-forced cooldown as successful
+            // refreshes. Record only work that reaches the network slot so a
+            // stale queued request cannot suppress its replacement.
+            lastRefreshBySignature.set(signature, Date.now());
             next = await params.github.prStatus(params.directory, params.branch, params.remoteName ?? undefined, { force: options?.force });
           } finally {
             releasePrStatusNetworkSlot();
           }
           if (!isCurrent()) return;
-          lastRefreshBySignature.set(signature, Date.now());
           set((prev) => {
             const nextEntries = { ...prev.entries };
             signatureKeys.forEach((signatureKey) => {

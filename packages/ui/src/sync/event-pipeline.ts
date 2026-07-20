@@ -6,7 +6,7 @@
  * snapshot belongs in the reducer, which has access to the current state.
  *
  * Plain closure API:
- *   const { cleanup } = createEventPipeline({ sdk, onEvent })
+ *   const { cleanup } = createEventPipeline({ sdk, onEvents })
  *
  * No class, no start/stop lifecycle. One pipeline per mount.
  * Abort controller created once at init, cleaned up via returned cleanup fn.
@@ -39,9 +39,16 @@ const RETRY_BACKOFF_BASE_MS = 250
 const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
 const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
 const RETRY_BACKOFF_MAX_EXPONENT = 8
+type EventPipelineDelivery = {
+  onEvent: (directory: string, payload: Event) => void
+  onEvents?: never
+} | {
+  onEvent?: never
+  onEvents: (directory: string, payloads: readonly Event[]) => void
+}
+
 export type EventPipelineInput = {
   sdk: OpencodeClient
-  onEvent: (directory: string, payload: Event) => void
   routeDirectory?: (directory: string, payload: Event) => string
   /** Called after stream reconnects (visibility restore or heartbeat timeout). */
   onReconnect?: () => void
@@ -53,7 +60,7 @@ export type EventPipelineInput = {
   heartbeatTimeoutMs?: number
   reconnectDelayMs?: number
   wsReadyTimeoutMs?: number
-}
+} & EventPipelineDelivery
 
 export type EventPipeline = {
   cleanup: () => void
@@ -243,6 +250,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const {
     sdk,
     onEvent,
+    onEvents,
     onReconnect,
     onDisconnect,
     onTransportSwitch,
@@ -309,9 +317,13 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
     d.last = Date.now()
     syncDebug.pipeline.flush(events.length)
-    for (const payload of events) {
+    for (let index = 0; index < events.length; index += 1) {
       countSyncPerformance("pipelineDeliveredEvents")
-      onEvent(directory, payload)
+    }
+    if (onEvents) {
+      onEvents(directory, events)
+    } else if (onEvent) {
+      for (const payload of events) onEvent(directory, payload)
     }
 
     d.buffer.length = 0
@@ -472,6 +484,29 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           if (coalesceKey.startsWith(deltaPrefix)) {
             d.coalesced.delete(coalesceKey)
           }
+        }
+      }
+    }
+
+    if (
+      normalizedPayload.type === "session.idle"
+      || normalizedPayload.type === "session.error"
+      || normalizedPayload.type === "session.created"
+      || normalizedPayload.type === "session.deleted"
+    ) {
+      const properties = normalizedPayload.properties as {
+        sessionID?: unknown
+        info?: { id?: unknown }
+      }
+      const sessionID = typeof properties.sessionID === "string"
+        ? properties.sessionID
+        : typeof properties.info?.id === "string"
+          ? properties.info.id
+          : undefined
+      if (sessionID) {
+        d.coalesced.delete(`session.status:${sessionID}`)
+        if (normalizedPayload.type === "session.created" || normalizedPayload.type === "session.deleted") {
+          d.coalesced.delete(`session.updated:${sessionID}`)
         }
       }
     }

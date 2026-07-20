@@ -313,13 +313,19 @@ const main = async () => {
       client.send("Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }),
       client.send("Performance.enable"),
     ])
+    // Profile the current local build rather than a service-worker-cached
+    // bundle from an earlier optimization run.
+    await client.send("Network.setBypassServiceWorker", { bypass: true })
 
     const loaded = client.once("Page.loadEventFired", 30_000)
     await client.send("Page.navigate", { url: options.url })
     await loaded
-    await evaluateValue(client, `localStorage.setItem("openchamber_sync_perf", "1")`)
+    await evaluateValue(client, `
+      localStorage.setItem("openchamber_sync_perf", "1")
+      localStorage.setItem("openchamber_stream_perf", "1")
+    `)
     const reloaded = client.once("Page.loadEventFired", 30_000)
-    await client.send("Page.reload", { ignoreCache: false })
+    await client.send("Page.reload", { ignoreCache: true })
     await reloaded
 
     if (options.prompt && !options.headless && process.stdin.isTTY) {
@@ -333,6 +339,8 @@ const main = async () => {
     }
 
     await evaluateValue(client, `window.__openchamberSyncPerformance?.reset()`)
+    await evaluateValue(client, `window.__openchamberStreamPerformance?.setEnabled(true)`)
+    await evaluateValue(client, `window.__openchamberStreamPerformance?.reset()`)
     const records = new Map()
     const traceEvents = []
     const startedAt = new Date().toISOString()
@@ -385,18 +393,33 @@ const main = async () => {
     const afterMetrics = metricMap((await client.send("Performance.getMetrics")).metrics)
     const afterHeap = await client.send("Runtime.getHeapUsage")
     const syncCounters = await evaluateValue(client, `window.__openchamberSyncPerformance?.getSnapshot() ?? null`)
-    const traceComplete = client.once("Tracing.tracingComplete", 30_000)
-    await client.send("Tracing.end")
-    await traceComplete
+    const streamPerformance = await evaluateValue(client, `window.__openchamberStreamPerformance?.getSnapshot() ?? null`)
+    const traceCompleteEvent = client.once("Tracing.tracingComplete", 120_000)
+    let traceComplete = true
+    try {
+      await client.send("Tracing.end")
+      await traceCompleteEvent
+    } catch (error) {
+      traceComplete = false
+      void traceCompleteEvent.catch(() => undefined)
+      console.warn(`Chrome did not confirm trace completion; saving the collected partial trace: ${error.message}`)
+      // Allow already-buffered Tracing.dataCollected events a final turn before writing.
+      await wait(2_000)
+    }
     for (const unsubscribe of unsubscribers) unsubscribe()
 
     const longTasks = traceEvents.filter((event) => event.name === "RunTask" && Number(event.dur) >= 50_000)
+    const failedRequests = [...records.values()].filter((record) => (
+      record.failed || Number(record.response?.status) >= 400
+    )).length
+    const httpErrorResponses = [...records.values()].filter((record) => Number(record.response?.status) >= 400).length
     const summary = {
       recordedAt: startedAt,
       url: redactUrl(options.url),
       durationSeconds: options.duration,
       requests: records.size,
-      failedRequests: [...records.values()].filter((record) => record.failed).length,
+      failedRequests,
+      httpErrorResponses,
       transferredBytes: [...records.values()].reduce((total, record) => total + (record.encodedDataLength ?? 0), 0),
       longTasksOver50ms: longTasks.length,
       longestTaskMs: longTasks.reduce((max, event) => Math.max(max, Number(event.dur) / 1000), 0),
@@ -405,6 +428,8 @@ const main = async () => {
       heapBefore: beforeHeap,
       heapAfter: afterHeap,
       syncCounters,
+      streamPerformance,
+      traceComplete,
       privacy: "Headers and sensitive URL parameters are redacted. Response bodies are not captured.",
     }
 
@@ -414,6 +439,7 @@ const main = async () => {
       writeFile(join(output, "summary.json"), JSON.stringify(summary, null, 2)),
     ])
     console.log(`\nProfile saved to ${output}`)
+    if (!traceComplete) console.log("Trace completion was not confirmed; summary, HAR, and the collected partial trace were preserved.")
     console.log(`Long tasks over 50 ms: ${summary.longTasksOver50ms}; requests: ${summary.requests}`)
   } finally {
     client?.close()

@@ -25,6 +25,16 @@ export type SyncPerformanceCounters = {
   streamingHeartbeatCommits: number
   permissionChangeCallbacks: number
   sessionMessageChangeCallbacks: number
+  sessionRenderableNotificationSkips: number
+  userMessageHistoryNotificationSkips: number
+  sessionMessageRecordNotificationSkips: number
+  materializationEnqueues: number
+  materializationEmptyAssistantEnqueues: number
+  materializationMissingMessageEnqueues: number
+  materializationMissingPartEnqueues: number
+  materializationLifecycleEnqueues: number
+  materializationPreflightSkips: number
+  materializationRequests: number
   statusAggregationSessionEntries: number
   statusAggregationCandidates: number
   persistenceSerializations: number
@@ -48,6 +58,16 @@ const createCounters = (): SyncPerformanceCounters => ({
   streamingHeartbeatCommits: 0,
   permissionChangeCallbacks: 0,
   sessionMessageChangeCallbacks: 0,
+  sessionRenderableNotificationSkips: 0,
+  userMessageHistoryNotificationSkips: 0,
+  sessionMessageRecordNotificationSkips: 0,
+  materializationEnqueues: 0,
+  materializationEmptyAssistantEnqueues: 0,
+  materializationMissingMessageEnqueues: 0,
+  materializationMissingPartEnqueues: 0,
+  materializationLifecycleEnqueues: 0,
+  materializationPreflightSkips: 0,
+  materializationRequests: 0,
   statusAggregationSessionEntries: 0,
   statusAggregationCandidates: 0,
   persistenceSerializations: 0,

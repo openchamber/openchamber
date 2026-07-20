@@ -67,4 +67,5 @@
 - Expanded projects/worktrees outrank merely visible and background groups.
 - The sync scheduler deduplicates, promotes, retries, and limits work. Sidebar components must not reproduce that lifecycle with mount effects.
 - Hide speculative work when the sidebar/chat surface is hidden: message prefetch, Git/PR enrichment and subscriptions, search listeners, sticky-header observation, and folder reconciliation stop. The session row tree unmounts so row-owned status, permission, unseen, and viewport subscriptions do no background work. The outer sidebar remains mounted, preserving UI state and authoritative directory refresh for an immediate reopen; deferred derived work reruns from current state when visibility returns.
+- The sidebar coalesces cross-directory live-session aggregate notifications to one trailing update per second. Global create/delete mutations remain immediate, row activity comes from the session-keyed live status index, and other `useAllLiveSessions` consumers retain immediate notifications.
 - Empty successful lists, unresolved loads, and failed loads are separate UI states. Failed groups expose Retry and retain prior data.
