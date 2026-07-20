@@ -38,8 +38,8 @@ export const QuotaCredentials: React.FC<{ providerId: ProviderId; providerName: 
       {providerId === 'opencode-go' && field('workspaceId', t('settings.providers.page.openCodeGo.workspaceId'), 'wrk_...')}
       {providerId === 'opencode-go' && field('authCookie', t('settings.providers.page.openCodeGo.authCookie'), 'auth=...')}
       {providerId === 'ollama-cloud' && field('cookie', t('settings.providers.page.openCodeGo.authCookie'), 'session=...')}
-      {providerId === 'cursor' && field('accessToken', t('settings.providers.page.auth.apiKeyLabel'), t('settings.providers.page.auth.apiKeyPlaceholder'))}
-      {providerId === 'cursor' && field('refreshToken', t('settings.providers.page.auth.apiKeyLabel'), t('settings.providers.page.auth.apiKeyPlaceholder'))}
+      {providerId === 'cursor' && field('accessToken', t('settings.providers.page.quotaCredentials.accessToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
+      {providerId === 'cursor' && field('refreshToken', t('settings.providers.page.quotaCredentials.refreshToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       <div className="flex flex-wrap gap-2">
         <Button size="xs" disabled={busy} onClick={() => request(route, 'PUT', values)}>{status?.configured ? t('settings.providers.page.openCodeGo.replace') : t('settings.providers.page.openCodeGo.save')}</Button>
         {status?.configured && <Button variant="outline" size="xs" disabled={busy} onClick={() => request(`${route}/validate`, 'POST')}>{t('settings.providers.page.openCodeGo.validate')}</Button>}

@@ -1763,6 +1763,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': '低优先级',
   'chat.statusRow.actions.stopGeneratingAria': '停止生成',
   'chat.statusRow.tasksTitle': '任务',
+  'chat.statusRow.modelStatus': '{model} · {status}',
   'chat.statusRow.summary.activeLeft': '{active} 个活跃 · 剩余 {left} 个',
   'chat.statusRow.aborted': '已中止',
   'chat.revertIndicator.redo': '重做',

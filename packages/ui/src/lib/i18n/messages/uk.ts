@@ -1775,6 +1775,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.statusRow.todo.priority.low": "Низький пріоритет",
   "chat.statusRow.actions.stopGeneratingAria": "Припинити генерацію",
   "chat.statusRow.tasksTitle": "завдання",
+  "chat.statusRow.modelStatus": "{model} · {status}",
   "chat.statusRow.summary.activeLeft": "Активних: {active} · залишилось: {left}",
   "chat.statusRow.aborted": "Перервано",
   "chat.revertIndicator.redo": "Повторити",

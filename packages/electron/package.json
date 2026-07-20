@@ -17,6 +17,9 @@
     "electron": "^41.2.1",
     "electron-builder": "^26.0.0"
   },
+  "trustedDependencies": [
+    "electron"
+  ],
   "desktopPrerequisites": [
     "Electron runtime dependencies installed via bun install",
     "Bun available for sidecar compilation",

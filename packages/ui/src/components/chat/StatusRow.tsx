@@ -133,6 +133,8 @@ interface StatusRowProps {
   showAssistantStatus?: boolean;
   showTodos?: boolean;
   agentName?: string;
+  modelName?: string | null;
+  providerId?: string | null;
   leftAccessory?: React.ReactNode;
 }
 
@@ -150,6 +152,8 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   showAssistantStatus = true,
   showTodos = true,
   agentName,
+  modelName,
+  providerId,
   leftAccessory,
 }) => {
   const { t } = useI18n();
@@ -321,6 +325,8 @@ export const StatusRow: React.FC<StatusRowProps> = ({
               isWaitingForPermission={isWaitingForPermission}
               retryInfo={retryInfo}
               agentName={agentName}
+              modelName={modelName}
+              providerId={providerId}
             />
           ) : leftAccessory ? (
             leftAccessory

@@ -39,6 +39,7 @@ export const buildProjectionCacheKey = (
   messages: ChatMessageEntry[],
   showTextJustificationActivity: boolean,
   showTurnChangedFiles: boolean,
+  mergeHiddenUserTurnsKey: string,
 ): string => {
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
   const lastMessageId = lastMessage?.info?.id ?? '';
@@ -51,6 +52,7 @@ export const buildProjectionCacheKey = (
     buildMessagesVersionSignature(messages),
     showTextJustificationActivity ? '1' : '0',
     showTurnChangedFiles ? '1' : '0',
+    mergeHiddenUserTurnsKey,
   ].join('|');
 };
 

@@ -1601,6 +1601,7 @@ export const dict = {
   'chat.statusRow.todo.priority.low': 'Faible priorité',
   'chat.statusRow.actions.stopGeneratingAria': 'Arrêter de générer',
   'chat.statusRow.tasksTitle': 'Tâches',
+  'chat.statusRow.modelStatus': '{model} · {status}',
   'chat.statusRow.summary.activeLeft': '{active} actif · {left} gauche',
   'chat.statusRow.aborted': 'Avorté',
   'chat.revertIndicator.redo': 'Refaire',

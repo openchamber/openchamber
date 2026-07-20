@@ -687,6 +687,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': 'Niski priorytet',
   'chat.statusRow.actions.stopGeneratingAria': 'Zatrzymaj generowanie',
   'chat.statusRow.tasksTitle': 'Zadania',
+  'chat.statusRow.modelStatus': '{model} · {status}',
   'chat.statusRow.summary.activeLeft': '{active} aktywne · {left} pozostało',
   'chat.statusRow.aborted': 'Przerwane',
   'chat.revertIndicator.redo': 'Ponów',

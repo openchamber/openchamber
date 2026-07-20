@@ -1799,6 +1799,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': '낮은 우선순위',
   'chat.statusRow.actions.stopGeneratingAria': '생성 중지',
   'chat.statusRow.tasksTitle': '작업',
+  'chat.statusRow.modelStatus': '{model} · {status}',
   'chat.statusRow.summary.activeLeft': '{active}개 활성 · {left}개 남음',
   'chat.statusRow.aborted': '중단됨',
   'chat.revertIndicator.redo': '다시 실행',

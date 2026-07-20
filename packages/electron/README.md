@@ -38,6 +38,8 @@ bun run electron:dev
 
 `bun run electron:dev` starts the web dev server with HMR, then launches Electron against `packages/electron/main.mjs`.
 
+The Electron workspace package trusts Electron's install script so `bun install` downloads the platform runtime in fresh checkouts and worktrees.
+
 Useful variants:
 
 ```bash

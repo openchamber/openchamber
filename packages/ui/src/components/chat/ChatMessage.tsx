@@ -14,13 +14,13 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
-import MessageHeader from './message/MessageHeader';
 import MessageBody from './message/MessageBody';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
 import { filterVisibleParts, normalizeParts } from './message/partUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
+import { isHiddenUserMessage } from './message/hiddenUserMessage';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
 import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/lib/messages/providerAuthError';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
@@ -593,6 +593,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const hasTurnGrouping = Boolean(turnGroupingContext);
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
 
+    const previousIsHiddenUserMessage = React.useMemo(
+        () => !isUser && isHiddenUserMessage(previousMessage, { planModeEnabled }),
+        [isUser, planModeEnabled, previousMessage]
+    );
+
+    const nextIsHiddenUserMessage = React.useMemo(
+        () => !isUser && isHiddenUserMessage(nextMessage, { planModeEnabled }),
+        [isUser, planModeEnabled, nextMessage]
+    );
+
     const isFollowedByAssistant = React.useMemo(() => {
         if (isUser) return false;
         if (hasTurnGrouping) {
@@ -1006,7 +1016,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return null;
     }
 
-    const assistantTopPaddingClass = !isUser && shouldShowHeader
+    const assistantTopPaddingClass = !isUser && shouldShowHeader && !previousIsHiddenUserMessage
         ? (stickyUserHeader ? (isMobile ? 'pt-4' : 'pt-6') : 'pt-0')
         : 'pt-0';
     const userMessageRadius = 'var(--radius-xl)';
@@ -1016,8 +1026,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             <div
                 className={cn(
                     'group w-full',
-                    isUser ? (isMobile ? 'pt-2' : 'pt-6') : assistantTopPaddingClass,
-                    isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : 'pb-8'
+                    isUser ? (isMobile ? 'pt-2' : 'pt-4') : assistantTopPaddingClass,
+                    isUser ? 'pb-0' : (isFollowedByAssistant || nextIsHiddenUserMessage) ? 'pb-0' : 'pb-2'
                 )}
                 id={`message-${message.info.id}`}
                 data-message-id={message.info.id}
@@ -1121,17 +1131,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                         )
                     ) : (
                         <div className="relative">
-                            {shouldShowHeader && (
-                                <MessageHeader
-                                    isUser={isUser}
-                                    providerID={headerProviderID}
-                                    agentName={headerAgentName}
-                                    modelName={headerModelName}
-                                    variant={headerVariant}
-                                    isDarkTheme={isDarkTheme}
-                                />
-                            )}
-
                             <MessageBody
                                 sessionId={message.info.sessionID}
                                 messageId={message.info.id}
@@ -1166,6 +1165,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 errorMessage={assistantErrorText}
                                 errorVariant={assistantErrorVariant}
                                 reviewTransferDirection={reviewTransferDirection}
+                                footerProviderID={headerProviderID}
+                                footerModelName={headerModelName}
+                                footerAgentName={headerAgentName}
+                                footerVariant={headerVariant}
+                                isDarkTheme={isDarkTheme}
                             />
 
                         </div>

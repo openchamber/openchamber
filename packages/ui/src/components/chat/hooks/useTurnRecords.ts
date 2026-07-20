@@ -8,6 +8,7 @@ interface UseTurnRecordsOptions {
     sessionKey?: string;
     showTextJustificationActivity: boolean;
     showTurnChangedFiles: boolean;
+    planModeEnabled: boolean;
 }
 
 export interface TurnRecordsResult {
@@ -26,15 +27,18 @@ export const useTurnRecords = (
     const previousSessionKeyRef = React.useRef<string | undefined>(options.sessionKey);
     const previousShowTextJustificationActivityRef = React.useRef(options.showTextJustificationActivity);
     const previousShowTurnChangedFilesRef = React.useRef(options.showTurnChangedFiles);
+    const previousPlanModeEnabledRef = React.useRef(options.planModeEnabled);
 
     if (
         previousSessionKeyRef.current !== options.sessionKey
         || previousShowTextJustificationActivityRef.current !== options.showTextJustificationActivity
         || previousShowTurnChangedFilesRef.current !== options.showTurnChangedFiles
+        || previousPlanModeEnabledRef.current !== options.planModeEnabled
     ) {
         previousSessionKeyRef.current = options.sessionKey;
         previousShowTextJustificationActivityRef.current = options.showTextJustificationActivity;
         previousShowTurnChangedFilesRef.current = options.showTurnChangedFiles;
+        previousPlanModeEnabledRef.current = options.planModeEnabled;
         previousProjectionRef.current = null;
         staticTurnsRef.current = [];
         streamingTurnRef.current = undefined;
@@ -44,15 +48,17 @@ export const useTurnRecords = (
         previousProjectionRef.current = null;
         staticTurnsRef.current = [];
         streamingTurnRef.current = undefined;
-    }, [options.sessionKey, options.showTextJustificationActivity, options.showTurnChangedFiles]);
+    }, [options.sessionKey, options.showTextJustificationActivity, options.showTurnChangedFiles, options.planModeEnabled]);
 
     const projection = React.useMemo(() => {
         const sessionKey = options.sessionKey ?? '';
+        const mergeKey = options.planModeEnabled ? 'merge:plan' : 'merge';
         const cacheKey = buildProjectionCacheKey(
             sessionKey,
             messages,
             options.showTextJustificationActivity,
             options.showTurnChangedFiles,
+            mergeKey,
         );
         const cached = getCachedProjection(cacheKey);
         if (cached) {
@@ -65,6 +71,7 @@ export const useTurnRecords = (
                 previousProjection: previousProjectionRef.current,
                 showTextJustificationActivity: options.showTextJustificationActivity,
                 showTurnChangedFiles: options.showTurnChangedFiles,
+                mergeHiddenUserTurns: { planModeEnabled: options.planModeEnabled },
             });
             previousProjectionRef.current = nextProjection;
 
@@ -72,7 +79,7 @@ export const useTurnRecords = (
 
             return nextProjection;
         });
-    }, [messages, options.showTextJustificationActivity, options.showTurnChangedFiles, options.sessionKey]);
+    }, [messages, options.showTextJustificationActivity, options.showTurnChangedFiles, options.sessionKey, options.planModeEnabled]);
 
     const staticTurns = React.useMemo(() => {
         const nextStatic = projection.turns.length <= 1
