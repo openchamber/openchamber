@@ -19,6 +19,7 @@ import {
   MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS,
   MESSENGER_INTERRUPT_TIMEOUT_MAX_MS,
   MESSENGER_INTERRUPT_TIMEOUT_MIN_MS,
+  deriveDiscordDisplayStatus,
   useMessengerStore,
   type MessengerType,
   type MessengerConnection,
@@ -209,33 +210,15 @@ function DiscordListenerPanel({
     };
   }, [running, refreshStatus, loadRecent]);
 
+  // Reconcile with the live server whenever a bot token is present. Mount-only
+  // effects raced Zustand persist hydration (empty token → early return) and
+  // left the panel stuck on "off" after a server rebuild even when the gateway
+  // was already live.
   useEffect(() => {
-    refreshStatus();
-    loadRecent();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Auto-save Discord config to server-side settings.json on mount so that
-  // the server-side auto-start on reboot picks it up. This handles the case
-  // where the user configured Discord (localStorage) but never triggered
-  // saveDiscordConfig (e.g. first visit after a server restart).
-  useEffect(() => {
-    if (conn.botToken) {
-      useMessengerStore.getState().saveDiscordConfig();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Auto-start the Discord listener on mount if it's configured but not running.
-  // Server auto-starts on boot (from saved config), but this handles first-time
-  // setup so the user doesn't need to click "Start listening" manually.
-  useEffect(() => {
-    if (!running && conn.botToken && (conn.discordGuildId || conn.defaultChannelId)) {
-      startListener();
-    }
-    // Only run once on mount — user can manually stop/start after that.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!conn.botToken) return;
+    void useMessengerStore.getState().resyncDiscordStatus();
+    void loadRecent();
+  }, [conn.botToken, loadRecent]);
 
   const historyTarget = conn.defaultChannelId;
 
@@ -1367,6 +1350,7 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
 
   const meta = MESSENGER_META[conn.type];
   const Icon = meta.icon;
+  const displayStatus = deriveDiscordDisplayStatus(conn);
 
   const [showToken, setShowToken] = useState(false);
   const [tokenInput, setTokenInput] = useState('');
@@ -1379,22 +1363,13 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
   const hasToken = Boolean(token);
   const hasTarget = Boolean(target);
 
-  // Auto-save Discord config to server-side settings.json on mount so that
-  // the server-side auto-start on reboot picks it up. Runs when the
-  // ConnectionCard first renders (user visits Messenger settings page).
-  //
-  // Also re-verify the saved token so the working status reflects reality on
-  // open. The persisted store resets `status` to 'disconnected' on every reload
-  // (the token is the only durable signal), which otherwise made the page show
-  // the integration as "not working" until the user manually clicked Verify.
+  // Reconcile badge + listener with the live server when this card opens.
+  // Depends on botToken so we still run after Zustand persist hydration (a
+  // mount-only effect previously raced hydration and skipped the resync).
   useEffect(() => {
     if (!conn.botToken) return;
-    saveDiscordConfig();
-    if (conn.status !== 'connected' && conn.status !== 'connecting') {
-      testConnection('discord');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void useMessengerStore.getState().resyncDiscordStatus();
+  }, [conn.botToken]);
 
   const handleSaveToken = () => {
     if (!tokenInput.trim()) return;
@@ -1436,7 +1411,7 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
         <div className="flex items-center gap-2">
           <Icon className={cn('size-5', meta.color)} />
           <span className="text-sm font-medium text-foreground">{meta.name}</span>
-          <StatusBadge status={conn.status} />
+          <StatusBadge status={displayStatus} />
           {conn.discordBotUsername && (
             <span className="text-[10px] text-muted-foreground">
               {conn.discordBotUsername}
@@ -1450,7 +1425,7 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
           <div data-settings-item="integrations.discord.commands">
             <DiscordCommandsButton />
           </div>
-          {conn.status !== 'disconnected' && (
+          {hasToken && (
             <>
               <Button
                 type="button"

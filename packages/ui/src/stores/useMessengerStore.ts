@@ -307,6 +307,12 @@ interface MessengerState {
   startDiscordListener: () => Promise<boolean>;
   stopDiscordListener: () => Promise<boolean>;
   refreshDiscordListenerStatus: () => Promise<void>;
+  /**
+   * Reconcile UI Discord status with the live server after reload / server
+   * rebuild. Persisted store fields intentionally reset listener + verify
+   * status to "disconnected"; this pulls authoritative state back.
+   */
+  resyncDiscordStatus: () => Promise<void>;
   loadRecentDiscordMessages: () => Promise<void>;
   ingestDiscordInbound: (msg: MessengerInboundMessage) => void;
   loadDiscordHistory: (channelId: string, limit?: number) => Promise<boolean>;
@@ -373,6 +379,29 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   return (await res.json()) as T;
+}
+
+/** Dedupes concurrent resync calls from hydration + reconnect + settings mount. */
+let discordStatusResyncInFlight: Promise<void> | null = null;
+
+/**
+ * Derive the Discord settings badge from live listener state first, then the
+ * last token-verify result. Persisted verify status is forced to
+ * `disconnected` on every reload, while the server-side gateway may already be
+ * live after auto-start — prefer that stronger signal.
+ */
+export function deriveDiscordDisplayStatus(
+  conn: Pick<
+    MessengerConnection,
+    'status' | 'discordListenerRunning' | 'discordListenerConnected'
+  >,
+): MessengerConnection['status'] {
+  if (conn.discordListenerConnected) return 'connected';
+  if (conn.status === 'connecting') return 'connecting';
+  if (conn.discordListenerRunning) return 'connecting';
+  if (conn.status === 'connected') return 'connected';
+  if (conn.status === 'error') return 'error';
+  return 'disconnected';
 }
 
 export const useMessengerStore = create<MessengerState>()(
@@ -1114,8 +1143,50 @@ export const useMessengerStore = create<MessengerState>()(
             discordListenerScopeToGuild: data.scopeToGuild ?? false,
           });
         } catch {
-          // ignore
+          // ignore — keep prior listener fields; a failed probe must not look
+          // like an authoritative "listener stopped" result.
         }
+      },
+
+      resyncDiscordStatus: async () => {
+        if (discordStatusResyncInFlight) return discordStatusResyncInFlight;
+        discordStatusResyncInFlight = (async () => {
+          const conn = get().connections.find((c) => c.type === 'discord');
+          if (!conn?.botToken) return;
+
+          // Best-effort: keep server-side settings.json in sync so auto-start
+          // after the next rebuild still has the token/bindings.
+          void get().saveDiscordConfig();
+
+          // Authoritative listener snapshot first — after a server rebuild the
+          // gateway is often already live via auto-start while the UI still
+          // shows persisted "disconnected" / listener-off.
+          await get().refreshDiscordListenerStatus();
+
+          const afterRefresh = get().connections.find((c) => c.type === 'discord');
+          if (!afterRefresh?.botToken) return;
+
+          // Re-verify the bot token when the persisted badge was cleared.
+          // Skip when already connected/connecting to avoid Discord API churn.
+          if (
+            afterRefresh.status !== 'connected' &&
+            afterRefresh.status !== 'connecting'
+          ) {
+            await get().testConnection('discord');
+          }
+
+          const latest = get().connections.find((c) => c.type === 'discord');
+          if (
+            latest?.botToken &&
+            !latest.discordListenerRunning &&
+            (latest.discordGuildId || latest.defaultChannelId)
+          ) {
+            await get().startDiscordListener();
+          }
+        })().finally(() => {
+          discordStatusResyncInFlight = null;
+        });
+        return discordStatusResyncInFlight;
       },
 
       loadRecentDiscordMessages: async () => {
@@ -1454,6 +1525,14 @@ export const useMessengerStore = create<MessengerState>()(
         })),
         projectMappings: state.projectMappings,
       }),
+      onRehydrateStorage: () => (_state, error) => {
+        if (error) return;
+        // After localStorage rehydrate, pull live listener + token status from
+        // the server. Defer so the store API is fully wired before we call in.
+        queueMicrotask(() => {
+          void useMessengerStore.getState().resyncDiscordStatus();
+        });
+      },
     },
   ),
 );
