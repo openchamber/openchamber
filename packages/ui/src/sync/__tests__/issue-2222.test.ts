@@ -12,9 +12,13 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 // -- Mocks ------------------------------------------------------------------
 
-const optimisticSendCalls: Array<{ sessionId: string }> = [];
+const optimisticSendCalls: Array<{ sessionId: string; directory?: string }> = [];
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null }> = [];
 const folderAssignmentCalls: Array<{ directory: string; folderId: string; sessionId: string }> = [];
+let pendingCreateSession: {
+  completion: Promise<void>;
+  signalStarted: () => void;
+} | null = null;
 
 mock.module("zustand", () => ({
   create:
@@ -262,6 +266,11 @@ mock.module("../session-actions", () => ({
       parentID: string | null,
     ) => {
       createSessionCalls.push({ title, directory, parentID });
+      const pending = pendingCreateSession;
+      if (pending) {
+        pending.signalStarted();
+        await pending.completion;
+      }
       return { id: "ses_materialized_2222", directory };
     },
   ),
@@ -270,8 +279,8 @@ mock.module("../session-actions", () => ({
   updateSessionTitle: mock(async () => undefined),
   shareSession: mock(async () => undefined),
   unshareSession: mock(async () => undefined),
-  optimisticSend: mock(async (params: { sessionId: string }) => {
-    optimisticSendCalls.push({ sessionId: params.sessionId });
+  optimisticSend: mock(async (params: { sessionId: string; directory?: string }) => {
+    optimisticSendCalls.push({ sessionId: params.sessionId, directory: params.directory });
     return;
   }),
   refetchSessionMessages: mock(async () => undefined),
@@ -330,6 +339,7 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
     optimisticSendCalls.length = 0;
     createSessionCalls.length = 0;
     folderAssignmentCalls.length = 0;
+    pendingCreateSession = null;
 
     useSessionUIStore.setState({
       currentSessionId: null,
@@ -562,6 +572,64 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
     expect(useSessionUIStore.getState().currentSessionId).toBe(
       "session-old",
     );
+  });
+
+  test("captured draft send stays in its directory when another session is selected during materialization", async () => {
+    let markCreateSessionStarted!: () => void;
+    let resumeCreateSession!: () => void;
+    const createSessionStarted = new Promise<void>((resolve) => {
+      markCreateSessionStarted = resolve;
+    });
+    const createSessionPaused = new Promise<void>((resolve) => {
+      resumeCreateSession = resolve;
+    });
+    pendingCreateSession = {
+      completion: createSessionPaused,
+      signalStarted: markCreateSessionStarted,
+    };
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: "/projects/alpha",
+    });
+    const draftSnapshot = { ...useSessionUIStore.getState().newSessionDraft };
+
+    const draftSend = useSessionUIStore.getState().sendMessage(
+      "hello from project A",
+      "provider-x",
+      "model-y",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "normal",
+      { draftSnapshot },
+    );
+
+    await createSessionStarted;
+    expect(createSessionCalls).toHaveLength(1);
+    expect(createSessionCalls[0].directory).toBe("/projects/alpha");
+
+    useSessionUIStore.getState().setCurrentSession(
+      "session-b",
+      "/projects/beta",
+    );
+    expect(useSessionUIStore.getState().currentSessionId).toBe("session-b");
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe("/projects/beta");
+
+    resumeCreateSession();
+    await draftSend;
+    pendingCreateSession = null;
+
+    expect(optimisticSendCalls).toEqual([
+      {
+        sessionId: "ses_materialized_2222",
+        directory: "/projects/alpha",
+      },
+    ]);
+    expect(optimisticSendCalls.some((call) => call.sessionId === "session-b")).toBe(false);
+    expect(useSessionUIStore.getState().currentSessionId).toBe("session-b");
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe("/projects/beta");
   });
 
   test("draftSnapshot materialization preserves an unrelated newer draft", async () => {
