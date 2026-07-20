@@ -567,9 +567,9 @@ const FileRow: React.FC<FileRowProps> = ({
             onOpenChange={(open) => setContextMenuPath(open ? node.path : null)}
           >
             <DropdownMenuTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
+              <Button
+                variant="ghost"
+                size="icon"
                 className="size-6"
                 onClick={handleMenuButtonClick}
               >
@@ -2198,7 +2198,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const getFileStatus = React.useCallback((path: string): FileStatus | null => {
     // Check open status
     if (openPaths.includes(path)) return 'open';
-    
+
     // Check git status
     if (gitStatus?.files) {
       const relative = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
@@ -2216,7 +2216,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (!gitStatus?.files) return null;
     const relativeDir = dirPath.startsWith(root + '/') ? dirPath.slice(root.length + 1) : dirPath;
     const prefix = relativeDir ? `${relativeDir}/` : '';
-    
+
     let modified = 0, added = 0;
     for (const f of gitStatus.files) {
       if (f.path.startsWith(prefix)) {
@@ -2768,32 +2768,30 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     if (selectedFile?.path !== targetPath) {
-      if (confirmDiscardOpen) {
-        return;
-      }
-      void handleSelectFile(toFileNode(targetPath));
+      // Selection is owned by the tab sync / user. A pending focus request must
+      // not steal selection back (e.g. after the user switched to another tab
+      // while this file was still loading). Wait; clear once it loads or the
+      // request is superseded.
       return;
     }
 
-    if (fileLoading || loadedFilePath !== targetPath || fileError || isSelectedImage || isSelectedPdf) {
+    if (fileLoading || loadedFilePath !== targetPath) {
       return;
     }
 
-    if (canEdit && textViewMode === 'edit') {
-      const view = editorViewRef.current;
-      if (!view) {
-        return;
-      }
-      view.focus();
+    // Best-effort focus: preview renderers (markdown/html preview, drawio,
+    // JSON tree, images, PDFs) never mount a CodeMirror editor, so the request
+    // must clear regardless — otherwise it lingers and replays on every
+    // dependency change.
+    if (!fileError && !isSelectedImage && !isSelectedPdf && canEdit && textViewMode === 'edit') {
+      editorViewRef.current?.focus();
     }
 
     setPendingFileFocusPath(null);
   }, [
     canEdit,
-    confirmDiscardOpen,
     fileError,
     fileLoading,
-    handleSelectFile,
     isSelectedImage,
     isSelectedPdf,
     loadedFilePath,
@@ -2802,7 +2800,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     selectedFile?.path,
     setPendingFileFocusPath,
     textViewMode,
-    toFileNode,
   ]);
 
   const nudgeEditorSelectionAboveKeyboard = React.useCallback((view: EditorView | null) => {
