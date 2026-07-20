@@ -1,5 +1,14 @@
 const STORAGE_KEY = "openchamber_sync_perf"
 
+declare global {
+  interface Window {
+    __openchamberSyncPerformance?: {
+      getSnapshot: () => SyncPerformanceCounters | null
+      reset: () => void
+    }
+  }
+}
+
 export type SyncPerformanceCounters = {
   pipelineRawEvents: number
   pipelineCoalescedEvents: number
@@ -87,4 +96,11 @@ export function countSyncPersistenceSerialization(serialized: string): void {
 
 export function countSyncPersistenceStorageWrite(): void {
   if (activeCounters) activeCounters.persistenceStorageWrites += 1
+}
+
+if (typeof window !== "undefined") {
+  window.__openchamberSyncPerformance = {
+    getSnapshot: getSyncPerformanceDiagnostics,
+    reset: resetSyncPerformanceDiagnostics,
+  }
 }
