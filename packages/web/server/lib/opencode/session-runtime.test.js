@@ -12,7 +12,7 @@ describe('session runtime', () => {
     runtimes.length = 0;
   });
 
-  it('broadcasts attention clears through the shared broadcaster', () => {
+  it('broadcasts dedicated session attention updates when a session is viewed', () => {
     const events = [];
     const runtime = createSessionRuntime({
       writeSseEvent() {
@@ -53,6 +53,26 @@ describe('session runtime', () => {
         status: 'idle',
         needsAttention: true,
       }),
+    });
+    expect(events).toContainEqual({
+      type: 'openchamber:session-attention',
+      properties: {
+        sessionID: 'session-1',
+        needsAttention: true,
+        lastReadAt: null,
+        lastActivityAt: expect.any(Number),
+        timestamp: expect.any(Number),
+      },
+    });
+    expect(events.at(-2)).toEqual({
+      type: 'openchamber:session-attention',
+      properties: {
+        sessionID: 'session-1',
+        needsAttention: false,
+        lastReadAt: expect.any(Number),
+        lastActivityAt: expect.any(Number),
+        timestamp: expect.any(Number),
+      },
     });
     expect(events.at(-1)).toEqual({
       type: 'openchamber:session-status',

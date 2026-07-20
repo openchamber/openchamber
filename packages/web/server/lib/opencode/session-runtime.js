@@ -66,6 +66,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       state = {
         needsAttention: false,
         lastUserMessageAt: null,
+        lastReadAt: null,
         lastStatusChangeAt: Date.now(),
         viewedByClients: new Set(),
         status: 'idle',
@@ -73,6 +74,35 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       sessionAttentionStates.set(sessionId, state);
     }
     return state;
+  };
+
+  const emitSyntheticEvent = (payload) => {
+    if (typeof broadcastEvent === 'function') {
+      broadcastEvent(payload);
+      return;
+    }
+
+    const clients = getNotificationClients();
+    for (const res of clients) {
+      try {
+        writeSseEvent(res, payload);
+      } catch {
+      }
+    }
+  };
+
+  const broadcastSessionAttention = (sessionId, state, timestamp = Date.now()) => {
+    if (!state) return;
+    emitSyntheticEvent({
+      type: 'openchamber:session-attention',
+      properties: {
+        sessionID: sessionId,
+        needsAttention: state.needsAttention,
+        lastReadAt: state.lastReadAt,
+        lastActivityAt: state.lastStatusChangeAt,
+        timestamp,
+      },
+    });
   };
 
   const setSessionActivityPhase = (sessionId, phase) => {
@@ -119,9 +149,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
 
   const updateSessionAttentionStatus = (sessionId, status) => {
     const state = getOrCreateAttentionState(sessionId);
-    if (!state) return;
+    if (!state) return null;
 
     const prevStatus = state.status;
+    const prevNeedsAttention = state.needsAttention;
     state.status = status;
     state.lastStatusChangeAt = Date.now();
 
@@ -130,6 +161,12 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
         state.needsAttention = true;
       }
     }
+
+    return {
+      state,
+      changed: prevNeedsAttention !== state.needsAttention,
+      timestamp: state.lastStatusChangeAt,
+    };
   };
 
   const updateSessionState = (sessionId, status, eventId, metadata = {}) => {
@@ -137,7 +174,6 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
 
     const now = Date.now();
     const existing = sessionStates.get(sessionId);
-    const existingAttentionState = sessionAttentionStates.get(sessionId);
     if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status) {
       return;
     }
@@ -149,10 +185,9 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       metadata: { ...existing?.metadata, ...metadata },
     });
 
-    updateSessionAttentionStatus(sessionId, status);
-    const attentionState = sessionAttentionStates.get(sessionId);
-    const attentionChanged = !!attentionState && existingAttentionState?.needsAttention !== attentionState.needsAttention;
-    const clients = getNotificationClients();
+    const attentionUpdate = updateSessionAttentionStatus(sessionId, status);
+    const attentionState = attentionUpdate?.state ?? sessionAttentionStates.get(sessionId);
+    const attentionChanged = attentionUpdate?.changed === true;
     if (!existing || existing.status !== status || attentionChanged) {
       const state = sessionStates.get(sessionId);
       const syntheticPayload = {
@@ -166,16 +201,11 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
         },
       };
 
-      if (typeof broadcastEvent === 'function') {
-        broadcastEvent(syntheticPayload);
-      } else if (clients.size > 0) {
-        for (const res of clients) {
-          try {
-            writeSseEvent(res, syntheticPayload);
-          } catch {
-          }
-        }
-      }
+      emitSyntheticEvent(syntheticPayload);
+    }
+
+    if (attentionChanged) {
+      broadcastSessionAttention(sessionId, attentionState, attentionUpdate?.timestamp);
     }
 
     const phase = status === 'busy' || status === 'retry' ? 'busy' : 'idle';
@@ -207,34 +237,27 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     const state = getOrCreateAttentionState(sessionId);
     if (!state) return;
 
+    const timestamp = Date.now();
     const wasNeedsAttention = state.needsAttention;
     state.viewedByClients.add(clientId);
+    state.lastReadAt = timestamp;
+    state.needsAttention = false;
+
+    broadcastSessionAttention(sessionId, state, timestamp);
 
     if (wasNeedsAttention) {
-      state.needsAttention = false;
-
       const syntheticPayload = {
         type: 'openchamber:session-status',
         properties: {
           sessionID: sessionId,
           status: state.status,
-          timestamp: Date.now(),
+          timestamp,
           metadata: {},
           needsAttention: false,
         },
       };
 
-      if (typeof broadcastEvent === 'function') {
-        broadcastEvent(syntheticPayload);
-      } else {
-        const clients = getNotificationClients();
-        for (const res of clients) {
-          try {
-            writeSseEvent(res, syntheticPayload);
-          } catch {
-          }
-        }
-      }
+      emitSyntheticEvent(syntheticPayload);
     }
   };
 
@@ -242,6 +265,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     const state = sessionAttentionStates.get(sessionId);
     if (!state) return;
     state.viewedByClients.delete(clientId);
+    broadcastSessionAttention(sessionId, state, Date.now());
   };
 
   const markUserMessageSent = (sessionId) => {
@@ -257,7 +281,9 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       if (now - state.lastStatusChangeAt > SESSION_ATTENTION_MAX_AGE_MS) continue;
       result[sessionId] = {
         needsAttention: state.needsAttention,
+        lastReadAt: state.lastReadAt,
         lastUserMessageAt: state.lastUserMessageAt,
+        lastActivityAt: state.lastStatusChangeAt,
         lastStatusChangeAt: state.lastStatusChangeAt,
         status: state.status,
         isViewed: state.viewedByClients.size > 0,
@@ -272,7 +298,9 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     if (!state) return null;
     return {
       needsAttention: state.needsAttention,
+      lastReadAt: state.lastReadAt,
       lastUserMessageAt: state.lastUserMessageAt,
+      lastActivityAt: state.lastStatusChangeAt,
       lastStatusChangeAt: state.lastStatusChangeAt,
       status: state.status,
       isViewed: state.viewedByClients.size > 0,

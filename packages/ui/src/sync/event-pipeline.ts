@@ -273,9 +273,20 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const key = (payload: Event): string | undefined => {
+    const rawType = (payload as { type?: unknown }).type
     if (payload.type === "session.status") {
       const props = payload.properties as { sessionID: string }
       return `session.status:${props.sessionID}`
+    }
+    if (rawType === "openchamber:session-attention") {
+      const props = (payload as { properties?: unknown }).properties as { sessionID?: string; sessionId?: string } | undefined
+      if (!props) return undefined
+      const sessionID = typeof props.sessionID === "string" && props.sessionID.length > 0
+        ? props.sessionID
+        : typeof props.sessionId === "string" && props.sessionId.length > 0
+          ? props.sessionId
+          : undefined
+      return sessionID ? `session.attention:${sessionID}` : undefined
     }
     if (payload.type === "session.updated") {
       const props = payload.properties as { info?: { id?: string } }
