@@ -1431,11 +1431,13 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div data-settings-item="integrations.discord.commands">
             <DiscordCommandsButton />
           </div>
-          {hasToken && (
+          {/* Setup-only header actions. When connected, Disconnect lives with
+              Change token / Advanced below so it stays visible. */}
+          {hasToken && !isConnectedView && (
             <>
               <Button
                 type="button"
@@ -1478,7 +1480,7 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
 
       {isConnectedView ? (
         <>
-          {/* Connected: no setup chrome — change token + advanced entry points. */}
+          {/* Connected: change token, advanced, and disconnect — always visible. */}
           <div ref={tokenSectionRef} className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
@@ -1499,6 +1501,15 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
               onClick={() => setAdvancedOpen((open) => !open)}
             >
               {t('settings.integrations.discord.actions.advancedSettings')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
+              onClick={() => setDisconnectConfirmOpen(true)}
+            >
+              {t('settings.integrations.discord.disconnect.button')}
             </Button>
           </div>
 
