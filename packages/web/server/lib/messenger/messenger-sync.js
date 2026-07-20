@@ -1815,6 +1815,10 @@ export function createMessengerSyncRouter({
             autoReply: autoReply !== false,
             scopeToGuild: Boolean(scopeToGuild),
             bridgeEnabled: bridgeEnabled !== false,
+            // Explicit start always re-enables listening for future boots /
+            // health-check recovery. Stop persists `false` and must not be
+            // undone by a later start-config merge that omitted the flag.
+            listenerEnabled: true,
             defaultChannelId: defaultChannelId || prev.defaultChannelId || undefined,
             defaultUserId: defaultUserId || prev.defaultUserId || undefined,
             trustedBotIds: hasTrustedBotIds
@@ -1837,10 +1841,46 @@ export function createMessengerSyncRouter({
     res.json(result);
   });
 
-  router.post('/discord/listener/stop', (req, res) => {
-    const { token } = req.body ?? {};
-    if (!token) return res.status(400).json({ error: 'token required' });
-    res.json(discordListener.stop(token));
+  router.post('/discord/listener/stop', async (req, res) => {
+    try {
+      const bodyToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+      let token = bodyToken;
+      let prevDiscord = {};
+      if (readSettings) {
+        const settings = await readSettings();
+        prevDiscord = settings?.discord ?? {};
+        if (!token) {
+          token = typeof prevDiscord.botToken === 'string' ? prevDiscord.botToken : '';
+        }
+      }
+      if (!token) return res.status(400).json({ error: 'token required' });
+
+      const result = discordListener.stop(token);
+
+      // Persist sticky stop so boot auto-start + health checks do not restart
+      // the gateway until the user explicitly starts listening again.
+      if (persistSettings) {
+        try {
+          const latest = readSettings ? await readSettings() : null;
+          const prev = latest?.discord ?? prevDiscord ?? {};
+          if (prev.botToken || token) {
+            await persistSettings({
+              discord: {
+                ...prev,
+                botToken: prev.botToken || token,
+                listenerEnabled: false,
+              },
+            });
+          }
+        } catch {
+          // best-effort — stop still succeeded in-process
+        }
+      }
+
+      return res.json(result);
+    } catch (err) {
+      return res.status(500).json({ error: err?.message ?? 'stop failed' });
+    }
   });
 
   router.post('/discord/listener/status', (req, res) => {
@@ -1857,11 +1897,13 @@ export function createMessengerSyncRouter({
   router.get('/discord/runtime-status', async (req, res) => {
     try {
       const settings = readSettings ? await readSettings() : null;
-      const token = settings?.discord?.botToken;
+      const discord = settings?.discord ?? null;
+      const token = discord?.botToken;
       if (!token) {
         return res.json({
           ok: true,
           configured: false,
+          listenerEnabled: false,
           running: false,
           connected: false,
         });
@@ -1869,10 +1911,47 @@ export function createMessengerSyncRouter({
       return res.json({
         ok: true,
         configured: true,
+        // Absent means start-by-default; only explicit false is sticky-stopped.
+        listenerEnabled: discord.listenerEnabled !== false,
         ...discordListener.status(token),
       });
     } catch (err) {
       return res.status(500).json({ ok: false, error: err?.message ?? 'status failed' });
+    }
+  });
+
+  /**
+   * Full Discord teardown: stop the live gateway and clear saved config.
+   * Unlike /listener/stop, this removes the bot token so reconnect requires
+   * adding credentials again.
+   */
+  router.post('/discord/disconnect', async (req, res) => {
+    try {
+      const bodyToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+      let token = bodyToken;
+      if (readSettings) {
+        try {
+          const settings = await readSettings();
+          if (!token && settings?.discord?.botToken) {
+            token = settings.discord.botToken;
+          }
+        } catch {
+          // ignore — still try body token / clear settings
+        }
+      }
+      if (token) {
+        try {
+          discordListener.stop(token);
+        } catch {
+          // ignore — clearing settings is the source of truth for disconnect
+        }
+      }
+      if (persistSettings) {
+        await persistSettings({ discord: null });
+      }
+      return res.json({ ok: true });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err?.message ?? 'disconnect failed' });
     }
   });
 
@@ -1979,6 +2058,9 @@ export function createMessengerSyncRouter({
       const discord = settings?.discord;
       if (!discord?.botToken) {
         return res.json({ ok: false, reason: 'not-configured' });
+      }
+      if (discord.listenerEnabled === false) {
+        return res.json({ ok: false, reason: 'listener-disabled' });
       }
       const result = discordListener.start(discord.botToken, {
         guildId: discord.guildId || undefined,

@@ -142,6 +142,37 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts discord config and clears it with null', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      discord: {
+        botToken: ' tok ',
+        guildId: '123',
+        listenerEnabled: false,
+        autoReply: true,
+        projectBindings: [{ channelId: 'c1', projectPath: '/p', projectLabel: 'P' }],
+      },
+    })).toEqual({
+      discord: {
+        botToken: 'tok',
+        guildId: '123',
+        listenerEnabled: false,
+        autoReply: true,
+        projectBindings: [{ channelId: 'c1', projectPath: '/p', projectLabel: 'P' }],
+      },
+    });
+
+    expect(helpers.sanitizeSettingsUpdate({ discord: null })).toEqual({ discord: null });
+
+    const merged = helpers.mergePersistedSettings(
+      { themeId: 'default', discord: { botToken: 'tok' } },
+      { discord: null },
+    );
+    expect(merged.discord).toBeUndefined();
+    expect(merged.themeId).toBe('default');
+  });
+
   it('accepts shortcut overrides as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 

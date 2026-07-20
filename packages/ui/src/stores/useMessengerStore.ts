@@ -95,6 +95,12 @@ export interface MessengerConnection {
   }[];
 
   // Discord Gateway listener state.
+  /**
+   * Whether the server should keep the gateway listening.
+   * Default/absent = true (start on boot). Explicit false is sticky until
+   * the user starts listening again — health checks must not auto-restart.
+   */
+  discordListenerEnabled?: boolean;
   discordListenerRunning?: boolean;
   discordListenerConnected?: boolean;
   discordListenerStartedAt?: number | null;
@@ -279,6 +285,8 @@ interface MessengerState {
   addConnection: (type: MessengerType) => void;
   updateConnection: (type: MessengerType, updates: Partial<MessengerConnection>) => void;
   removeConnection: (type: MessengerType) => void;
+  /** Stop the live gateway, clear server Discord config, and drop local connection. */
+  disconnectDiscord: () => Promise<void>;
   testConnection: (type: MessengerType) => Promise<boolean>;
   resolveDiscordChannel: () => Promise<boolean>;
   resolveDiscordGuild: () => Promise<boolean>;
@@ -414,6 +422,7 @@ let discordStatusResyncInFlight: Promise<void> | null = null;
 type DiscordListenerStatusPayload = {
   ok: boolean;
   configured?: boolean;
+  listenerEnabled?: boolean;
   running?: boolean;
   connected?: boolean;
   autoReply?: boolean;
@@ -497,6 +506,27 @@ export const useMessengerStore = create<MessengerState>()(
             return next;
           }),
         });
+      },
+
+      disconnectDiscord: async () => {
+        const conn = get().connections.find((c) => c.type === 'discord');
+        try {
+          await postJson<{ ok: boolean }>('/api/messenger/discord/disconnect', {
+            token: conn?.botToken,
+          });
+        } catch {
+          // Fallback: at least stop the in-process gateway before clearing UI.
+          if (conn?.botToken) {
+            try {
+              await postJson('/api/messenger/discord/listener/stop', {
+                token: conn.botToken,
+              });
+            } catch {
+              // ignore — local clear still proceeds
+            }
+          }
+        }
+        get().removeConnection('discord');
       },
 
       testConnection: async (type) => {
@@ -1098,6 +1128,7 @@ export const useMessengerStore = create<MessengerState>()(
           });
           if (!data.ok) return false;
           get().updateConnection('discord', {
+            discordListenerEnabled: true,
             discordListenerRunning: data.running ?? true,
             discordListenerConnected: data.connected ?? false,
             discordListenerStartedAt: data.startedAt ?? Date.now(),
@@ -1143,6 +1174,7 @@ export const useMessengerStore = create<MessengerState>()(
             token: conn.botToken,
           });
           get().updateConnection('discord', {
+            discordListenerEnabled: false,
             discordListenerRunning: false,
             discordListenerConnected: false,
           });
@@ -1169,7 +1201,20 @@ export const useMessengerStore = create<MessengerState>()(
           } catch {
             data = null;
           }
-          if ((!data || !data.ok || data.configured === false) && conn?.botToken) {
+          // After Disconnect the server has no config. Do not fall back to a
+          // client-token probe that could resurrect a stale "connected" view
+          // from a gateway that should already be stopped.
+          if (data?.ok && data.configured === false) {
+            if (!conn) return;
+            get().updateConnection('discord', {
+              discordListenerEnabled: false,
+              discordListenerRunning: false,
+              discordListenerConnected: false,
+              discordListenerError: null,
+            });
+            return;
+          }
+          if ((!data || !data.ok) && conn?.botToken) {
             data = await postJson<DiscordListenerStatusPayload>(
               '/api/messenger/discord/listener/status',
               { token: conn.botToken },
@@ -1178,6 +1223,10 @@ export const useMessengerStore = create<MessengerState>()(
           if (!data?.ok) return;
 
           const updates: Partial<MessengerConnection> = {
+            discordListenerEnabled:
+              typeof data.listenerEnabled === 'boolean'
+                ? data.listenerEnabled
+                : conn?.discordListenerEnabled,
             discordListenerRunning: data.running ?? false,
             discordListenerConnected: data.connected ?? false,
             discordListenerStartedAt: data.startedAt ?? null,
@@ -1238,8 +1287,11 @@ export const useMessengerStore = create<MessengerState>()(
           }
 
           const latest = get().connections.find((c) => c.type === 'discord');
+          // Respect sticky stop — never auto-restart after the user stopped
+          // listening (listenerEnabled === false).
           if (
             latest?.botToken &&
+            latest.discordListenerEnabled !== false &&
             !latest.discordListenerRunning &&
             (latest.discordGuildId || latest.defaultChannelId)
           ) {
@@ -1577,8 +1629,10 @@ export const useMessengerStore = create<MessengerState>()(
           error: null,
           lastSyncStatus: 'idle' as const,
           lastSyncMessage: null,
-          // Listener state lives on the server — clear it on persist so the
-          // UI always re-syncs from the server after reload (via auto-start).
+          // Live gateway fields live on the server — clear them on persist so
+          // the UI re-syncs after reload. Keep discordListenerEnabled: a sticky
+          // local stop must not look like "unset → auto-start" before the
+          // server probe returns.
           discordListenerRunning: false,
           discordListenerConnected: false,
           discordListenerStartedAt: null,

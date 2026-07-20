@@ -1466,12 +1466,15 @@ async function main(options = {}) {
     };
 
     // Try auto-start with retries
-    let discordConfig = null;
     for (let attempt = 1; attempt <= AUTO_START_RETRIES; attempt++) {
       try {
         const settings = await readSettingsFromDiskMigrated();
-        discordConfig = settings?.discord;
+        const discordConfig = settings?.discord;
         if (discordConfig?.botToken) {
+          if (discordConfig.listenerEnabled === false) {
+            console.log('[Discord] Listener disabled in saved config — skipping auto-start');
+            break;
+          }
           const result = discordListener.start(discordConfig.botToken, {
             guildId: discordConfig.guildId || undefined,
             autoReply: discordConfig.autoReply !== false,
@@ -1507,41 +1510,50 @@ async function main(options = {}) {
       }
     }
 
-    // Periodic health check — reconnects the listener if it became disconnected.
-    // This handles cases where:
-    //   - The gateway connection drops and the built-in reconnect fails
-    //   - The process recovers from a suspend/resume cycle
-    //   - The listener process crashes and the state is stale
-    if (discordConfig?.botToken) {
-      const healthCheckTimer = setInterval(async () => {
-        try {
-          const status = discordListener.status(discordConfig.botToken);
-          if (!status.running || !status.connected) {
-            console.log(
-              '[Discord] Health check: listener not connected (running=' + status.running +
-              ', connected=' + status.connected + ') — restarting...'
-            );
-            discordListener.stop(discordConfig.botToken);
-            const startResult = discordListener.start(discordConfig.botToken, {
-              guildId: discordConfig.guildId || undefined,
-              autoReply: discordConfig.autoReply !== false,
-              scopeToGuild: Boolean(discordConfig.scopeToGuild),
-              bridgeEnabled: true,
-              resolveProject,
-              trustedBotIds: discordConfig.trustedBotIds,
-              registerDynamicSlashCommands: Boolean(discordConfig.registerDynamicSlashCommands),
-            });
-            console.log(
-              '[Discord] Health check: restart result — running=' + startResult.running +
-              ', connected=' + startResult.connected
-            );
+    // Periodic health check — re-reads settings each tick so Disconnect /
+    // Stop listening are respected (never restart from a stale boot-time
+    // closed-over config). Recovers only when listening is still enabled.
+    const healthCheckTimer = setInterval(async () => {
+      try {
+        const settings = await readSettingsFromDiskMigrated();
+        const cfg = settings?.discord;
+        if (!cfg?.botToken) return;
+
+        if (cfg.listenerEnabled === false) {
+          const status = discordListener.status(cfg.botToken);
+          if (status.running) {
+            console.log('[Discord] Health check: listener disabled in settings — stopping');
+            discordListener.stop(cfg.botToken);
           }
-        } catch (err) {
-          console.warn('[Discord] Health check error:', err?.message ?? err);
+          return;
         }
-      }, HEALTH_CHECK_INTERVAL_MS);
-      healthCheckTimer.unref();
-    }
+
+        const status = discordListener.status(cfg.botToken);
+        if (!status.running || !status.connected) {
+          console.log(
+            '[Discord] Health check: listener not connected (running=' + status.running +
+            ', connected=' + status.connected + ') — restarting...'
+          );
+          discordListener.stop(cfg.botToken);
+          const startResult = discordListener.start(cfg.botToken, {
+            guildId: cfg.guildId || undefined,
+            autoReply: cfg.autoReply !== false,
+            scopeToGuild: Boolean(cfg.scopeToGuild),
+            bridgeEnabled: true,
+            resolveProject,
+            trustedBotIds: cfg.trustedBotIds,
+            registerDynamicSlashCommands: Boolean(cfg.registerDynamicSlashCommands),
+          });
+          console.log(
+            '[Discord] Health check: restart result — running=' + startResult.running +
+            ', connected=' + startResult.connected
+          );
+        }
+      } catch (err) {
+        console.warn('[Discord] Health check error:', err?.message ?? err);
+      }
+    }, HEALTH_CHECK_INTERVAL_MS);
+    healthCheckTimer.unref();
   })();
 
   return {

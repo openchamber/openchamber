@@ -177,6 +177,7 @@ function DiscordListenerPanel({
   loadHistory: (channelId: string, limit?: number) => Promise<boolean>;
   onToggleAutoReply: (v: boolean) => void;
 }) {
+  const { t } = useI18n();
   const running = Boolean(conn.discordListenerRunning);
   const connected = Boolean(conn.discordListenerConnected);
   const autoReply = conn.discordListenerAutoReply !== false;
@@ -224,39 +225,47 @@ function DiscordListenerPanel({
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2 text-xs font-medium text-foreground">
           <RiChatSmile3Line className="size-4 text-primary" />
-          Listen for incoming messages
+          {t('settings.integrations.discord.listener.title')}
           <span
             className={cn(
               'rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide',
               connected
-                ? 'bg-green-500/20 text-green-600 dark:text-green-400'
+                ? 'bg-[var(--status-success)]/20 text-[var(--status-success)]'
                 : running
-                  ? 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400'
+                  ? 'bg-[var(--status-warning)]/20 text-[var(--status-warning)]'
                   : 'bg-muted text-muted-foreground',
             )}
           >
-            {connected ? 'live' : running ? 'connecting…' : 'off'}
+            {connected
+              ? t('settings.integrations.discord.listener.status.live')
+              : running
+                ? t('settings.integrations.discord.listener.status.connecting')
+                : t('settings.integrations.discord.listener.status.off')}
           </span>
         </div>
         <div className="flex items-center gap-2">
           {!running ? (
-            <button
+            <Button
               type="button"
-              onClick={() => startListener()}
-              className="inline-flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
+              variant="default"
+              size="xs"
+              className="!font-normal"
+              onClick={() => void startListener()}
             >
               <RiPlayCircleLine className="size-3.5" />
-              Start listening
-            </button>
+              {t('settings.integrations.discord.listener.start')}
+            </Button>
           ) : (
-            <button
+            <Button
               type="button"
-              onClick={() => stopListener()}
-              className="inline-flex items-center gap-1 rounded border border-destructive/40 px-2.5 py-1 text-[11px] font-medium text-destructive hover:bg-destructive/10"
+              variant="outline"
+              size="xs"
+              className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
+              onClick={() => void stopListener()}
             >
               <RiStopCircleLine className="size-3.5" />
-              Stop
-            </button>
+              {t('settings.integrations.discord.listener.stop')}
+            </Button>
           )}
           <label className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-pointer">
             <input
@@ -1325,12 +1334,15 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
 
   const updateConnection = useMessengerStore((s) => s.updateConnection);
   const testConnection = useMessengerStore((s) => s.testConnection);
-  const removeConnection = useMessengerStore((s) => s.removeConnection);
+  const disconnectDiscord = useMessengerStore((s) => s.disconnectDiscord);
+  const startDiscordListener = useMessengerStore((s) => s.startDiscordListener);
+  const stopDiscordListener = useMessengerStore((s) => s.stopDiscordListener);
   const syncDiscordGuildProjects = useMessengerStore((s) => s.syncDiscordGuildProjects);
   const sendTestMessage = useMessengerStore((s) => s.sendTestMessage);
   const sendSyncSummary = useMessengerStore((s) => s.sendSyncSummary);
   const saveDiscordConfig = useMessengerStore((s) => s.saveDiscordConfig);
   const projects = useProjectsStore((s) => s.projects);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const tokenSectionRef = useRef<HTMLDivElement>(null);
   const guildSectionRef = useRef<HTMLDivElement>(null);
@@ -1511,6 +1523,40 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
             >
               {t('settings.integrations.discord.disconnect.button')}
             </Button>
+          </div>
+
+          {/* Default connected controls: start/stop listening (sticky stop). */}
+          <div className="flex flex-wrap items-center gap-2">
+            {conn.discordListenerRunning ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
+                onClick={() => void stopDiscordListener()}
+              >
+                <RiStopCircleLine className="size-3.5" />
+                {t('settings.integrations.discord.listener.stop')}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="default"
+                size="xs"
+                className="!font-normal"
+                onClick={() => void startDiscordListener()}
+              >
+                <RiPlayCircleLine className="size-3.5" />
+                {t('settings.integrations.discord.listener.start')}
+              </Button>
+            )}
+            <span className="typography-meta text-muted-foreground">
+              {conn.discordListenerConnected
+                ? t('settings.integrations.discord.listener.status.live')
+                : conn.discordListenerRunning
+                  ? t('settings.integrations.discord.listener.status.connecting')
+                  : t('settings.integrations.discord.listener.status.off')}
+            </span>
           </div>
 
           {showToken && (
@@ -1789,9 +1835,13 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
               type="button"
               variant="destructive"
               size="sm"
+              disabled={disconnecting}
               onClick={() => {
-                removeConnection(conn.type);
-                setDisconnectConfirmOpen(false);
+                setDisconnecting(true);
+                void disconnectDiscord().finally(() => {
+                  setDisconnecting(false);
+                  setDisconnectConfirmOpen(false);
+                });
               }}
             >
               {t('settings.integrations.discord.disconnect.dialog.confirm')}
