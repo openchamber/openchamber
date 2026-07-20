@@ -118,6 +118,26 @@ const waitForJson = async (url, timeoutMs = 15_000) => {
   throw new Error(`Chrome debugging endpoint did not start: ${lastError?.message ?? url}`)
 }
 
+const createPageTarget = async (port) => {
+  const baseUrl = `http://127.0.0.1:${port}`
+  await waitForJson(`${baseUrl}/json/version`)
+
+  try {
+    const response = await fetch(`${baseUrl}/json/new?${encodeURIComponent("about:blank")}`, { method: "PUT" })
+    if (response.ok) {
+      const target = await response.json()
+      if (target?.type === "page" && target.webSocketDebuggerUrl) return target
+    }
+  } catch {
+    // Some Chromium variants do not expose /json/new; use their startup page.
+  }
+
+  const targets = await waitForJson(`${baseUrl}/json`)
+  const target = targets.find((entry) => entry.type === "page" && entry.webSocketDebuggerUrl)
+  if (!target) throw new Error("Chrome did not expose or create a page target")
+  return target
+}
+
 class CdpClient {
   constructor(url) {
     this.socket = new WebSocket(url)
@@ -286,9 +306,8 @@ const main = async () => {
   const chromeProcess = spawn(chrome, chromeArgs, { stdio: "ignore" })
   let client
   try {
-    const targets = await waitForJson(`http://127.0.0.1:${port}/json`)
-    const target = targets.find((entry) => entry.type === "page")
-    if (!target?.webSocketDebuggerUrl) throw new Error("Chrome page target was not found")
+    console.log(`Using browser: ${chrome}`)
+    const target = await createPageTarget(port)
     client = new CdpClient(target.webSocketDebuggerUrl)
     await client.connect()
     await Promise.all([
