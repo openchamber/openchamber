@@ -514,10 +514,10 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Scenario 5 — Draft snapshot in sendMessage options bypasses live draft state
+  // Scenario 5 — Issue #2245: cross-project draft snapshot bypasses live selection
   // ---------------------------------------------------------------------------
-  test("draftSnapshot in sendMessage options routes to materialized session when draft was closed during async gap", async () => {
-    // Step 1: Open a draft
+  test("Issue #2245: captured draft A materializes and sends to A after live selection switches to B", async () => {
+    // Step 1: Open and capture draft A before the async preparation gap.
     useSessionUIStore.getState().openNewSessionDraft({
       directoryOverride: "/projects/alpha",
       targetFolderId: "folder-alpha",
@@ -527,15 +527,16 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
     // Step 2: Capture the draft state before the async gap
     const capturedDraft = { ...useSessionUIStore.getState().newSessionDraft };
 
-    // Step 3: Simulate the async gap — user clicks an existing session in the
-    // sidebar, which closes the draft and activates session-old
+    // Step 3: During the gap, a cross-project sidebar selection closes the
+    // draft and switches the live selection to session B in directory B.
     useSessionUIStore.getState().closeNewSessionDraft();
     useSessionUIStore.getState().setCurrentSession(
-      "session-old",
-      "/projects/alpha",
+      "session-b",
+      "/projects/beta",
     );
     expect(useSessionUIStore.getState().newSessionDraft.open).toBe(false);
-    expect(useSessionUIStore.getState().currentSessionId).toBe("session-old");
+    expect(useSessionUIStore.getState().currentSessionId).toBe("session-b");
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe("/projects/beta");
 
     // Step 4: Call sendMessage with draftSnapshot in options — the draft
     // materialization path should be taken using the captured snapshot,
@@ -556,9 +557,9 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
     // Assert: draft was materialized (createSession was called with the right directory)
     expect(createSessionCalls.some(c => c.directory === "/projects/alpha")).toBe(true);
 
-    // Assert: message was routed to the materialized session, NOT to session-old
+    // Assert: message was routed to the materialized session, not session B.
     expect(optimisticSendCalls.some(c => c.sessionId === "ses_materialized_2222")).toBe(true);
-    expect(optimisticSendCalls.some(c => c.sessionId === "session-old")).toBe(false);
+    expect(optimisticSendCalls.some(c => c.sessionId === "session-b")).toBe(false);
 
     // The captured draft owns its folder target as well, even though the live
     // draft was closed before sendMessage materialized the new session.
@@ -568,10 +569,11 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
       && call.sessionId === "ses_materialized_2222"
     ))).toBe(true);
 
-    // Assert: the newer session selection remains untouched.
+    // Assert: the newer cross-project selection remains untouched.
     expect(useSessionUIStore.getState().currentSessionId).toBe(
-      "session-old",
+      "session-b",
     );
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe("/projects/beta");
   });
 
   test("captured draft send stays in its directory when another session is selected during materialization", async () => {
