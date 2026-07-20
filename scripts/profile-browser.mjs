@@ -30,7 +30,7 @@ const parseArgs = (argv) => {
     duration: 60,
     output: null,
     chrome: null,
-    profileDir: join(homedir(), ".openchamber", "browser-profile"),
+    profileDir: join(homedir(), ".openchamber", "browser-profile-google-chrome"),
     headless: false,
     prompt: true,
   }
@@ -59,9 +59,6 @@ const chromeCandidates = () => {
       "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
       "/Applications/Chromium.app/Contents/MacOS/Chromium",
-      "/Applications/Comet.app/Contents/MacOS/Comet",
-      "/Applications/Dia.app/Contents/MacOS/Dia",
-      "/Applications/Helium.app/Contents/MacOS/Helium",
     ]
   }
   if (platform() === "win32") {

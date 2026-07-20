@@ -11,8 +11,9 @@ login or setup in that window, prepare the sessions and screen you want to
 measure, then return to the terminal and press Enter. Use OpenChamber normally
 for the next 60 seconds.
 
-Chrome, Chromium, Comet, Dia, and Helium are auto-detected on macOS. Other
-Chromium-based browsers can be selected with `--chrome /path/to/executable`.
+Google Chrome is selected first on macOS, with Chrome Canary and Chromium as
+fallbacks. Other Chromium-based browsers are used only when explicitly selected
+with `--chrome /path/to/executable`.
 
 The generated `artifacts/browser-profile-*/` directory contains:
 
