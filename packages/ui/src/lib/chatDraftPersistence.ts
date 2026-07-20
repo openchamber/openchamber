@@ -1,5 +1,6 @@
 import { normalizePath } from '@/lib/pathNormalization';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
+import { countSyncPersistenceSerialization } from '@/sync/performance-diagnostics';
 
 export type ChatDraftIdentity = {
   runtimeKey: string;
@@ -27,6 +28,8 @@ const STORAGE_KEY = 'openchamber.chatDrafts.v2';
 const MAX_DRAFTS = 50;
 const storage = getDeferredSafeStorage();
 const deletionListeners = new Set<(identity: ChatDraftIdentity) => void>();
+let cachedRawEnvelope: string | null | undefined;
+let cachedEnvelope: PersistedChatDraftEnvelope | undefined;
 
 export const createChatDraftIdentity = (
   runtimeKey: string,
@@ -42,10 +45,14 @@ export const getChatDraftIdentityKey = (identity: ChatDraftIdentity): string =>
   JSON.stringify([identity.runtimeKey, identity.directory, identity.sessionId]);
 
 const readEnvelope = (): PersistedChatDraftEnvelope => {
+  const raw = storage.getItem(STORAGE_KEY);
+  if (raw === cachedRawEnvelope && cachedEnvelope) return cachedEnvelope;
   try {
-    const parsed = JSON.parse(storage.getItem(STORAGE_KEY) ?? '') as Partial<PersistedChatDraftEnvelope>;
+    const parsed = JSON.parse(raw ?? '') as Partial<PersistedChatDraftEnvelope>;
     if (parsed.version !== 2 || !parsed.drafts || typeof parsed.drafts !== 'object' || Array.isArray(parsed.drafts)) {
-      return { version: 2, drafts: {} };
+      cachedRawEnvelope = raw;
+      cachedEnvelope = { version: 2, drafts: {} };
+      return cachedEnvelope;
     }
     const drafts: Record<string, PersistedChatDraft> = {};
     for (const [key, value] of Object.entries(parsed.drafts)) {
@@ -58,15 +65,23 @@ const readEnvelope = (): PersistedChatDraftEnvelope => {
         touchedAt: draft.touchedAt,
       };
     }
-    return { version: 2, drafts };
+    cachedRawEnvelope = raw;
+    cachedEnvelope = { version: 2, drafts };
+    return cachedEnvelope;
   } catch {
     storage.removeItem(STORAGE_KEY);
-    return { version: 2, drafts: {} };
+    cachedRawEnvelope = null;
+    cachedEnvelope = { version: 2, drafts: {} };
+    return cachedEnvelope;
   }
 };
 
 const writeEnvelope = (envelope: PersistedChatDraftEnvelope): void => {
-  storage.setItem(STORAGE_KEY, JSON.stringify(envelope));
+  const serialized = JSON.stringify(envelope);
+  cachedRawEnvelope = serialized;
+  cachedEnvelope = envelope;
+  countSyncPersistenceSerialization(serialized);
+  storage.setItem(STORAGE_KEY, serialized);
 };
 
 export const readChatDraft = (identity: ChatDraftIdentity | null): ChatDraftSnapshot => {

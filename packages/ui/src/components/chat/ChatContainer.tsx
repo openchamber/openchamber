@@ -38,14 +38,13 @@ import {
     useSessionMessageRecords,
     useSessionMessageLoadState,
     useSyncDirectory,
-    useDirectorySync,
+    useSessionRenderable,
     useSessionStatus,
     useScopedBlockingPermissions,
     useScopedBlockingQuestions,
     useParentSession,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
-import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -543,13 +542,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
         ),
     );
     const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '', effectiveSessionDirectory);
-    const hasRenderableSessionSnapshot = useDirectorySync(
-        React.useCallback(
-            (state) => (currentSessionId ? getSessionMaterializationStatus(state, currentSessionId).renderable : false),
-            [currentSessionId],
-        ),
-        effectiveSessionDirectory,
-    );
+    const hasRenderableSessionSnapshot = useSessionRenderable(currentSessionId ?? '', effectiveSessionDirectory);
     // Messages from sync system
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', effectiveSessionDirectory, {
         enabled: active,

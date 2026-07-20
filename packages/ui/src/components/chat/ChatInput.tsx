@@ -120,6 +120,9 @@ const FILE_MENTION_TOKEN = /^@[^\s]+$/;
 const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
 const INLINE_SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
 const CHAT_DRAFT_PERSIST_DEBOUNCE_MS = 500;
+const getChatDraftSnapshotSignature = (text: string, confirmedMentions: Iterable<string>): string => (
+    `${text}\u0000${[...confirmedMentions].sort().join('\u0000')}`
+);
 const COMPACT_CHAT_PLACEHOLDER_MAX_WIDTH = 560;
 const VS_CODE_DROP_DATA_TYPES = [
     'CodeFiles',
@@ -1557,11 +1560,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const persistDraftImmediately = React.useCallback((identity: ChatDraftIdentity | null, draft: string) => {
         if (!identity) return;
         const key = getChatDraftIdentityKey(identity);
-        const lastPersisted = lastPersistedDraftRef.current.get(key);
-        if (lastPersisted === draft) {
-            return;
-        }
-
         // Only persist confirmed mentions that are actually present in the draft text
         const activeMentions = new Set<string>();
         for (const mention of confirmedMentionsRef.current) {
@@ -1570,8 +1568,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
         confirmedMentionsRef.current = activeMentions;
+        const signature = getChatDraftSnapshotSignature(draft, activeMentions);
+        const lastPersisted = lastPersistedDraftRef.current.get(key);
+        if (lastPersisted === signature) {
+            return;
+        }
         writeChatDraft(identity, draft, activeMentions);
-        lastPersistedDraftRef.current.set(key, draft);
+        lastPersistedDraftRef.current.set(key, signature);
     }, []);
 
     const clearPendingDraftPersist = React.useCallback(() => {
@@ -1635,7 +1638,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     React.useEffect(() => subscribeChatDraftDeletion((deletedIdentity) => {
         const deletedKey = getChatDraftIdentityKey(deletedIdentity);
-        lastPersistedDraftRef.current.set(deletedKey, '');
+        lastPersistedDraftRef.current.set(deletedKey, getChatDraftSnapshotSignature('', []));
         const currentIdentity = currentChatDraftIdentityRef.current;
         if (!currentIdentity || getChatDraftIdentityKey(currentIdentity) !== deletedKey) return;
         clearPendingDraftPersist();
@@ -1689,11 +1692,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [chatDraftIdentity, clearPendingDraftPersist, message, persistChatDraft, persistDraftImmediately]);
 
     React.useEffect(() => {
-        return () => {
+        const flushCurrentDraft = () => {
             clearPendingDraftPersist();
             if (persistChatDraft) {
                 persistDraftImmediately(currentChatDraftIdentityRef.current, messageRef.current);
             }
+        };
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') flushCurrentDraft();
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        document.addEventListener('freeze', flushCurrentDraft);
+        window.addEventListener('pagehide', flushCurrentDraft);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            document.removeEventListener('freeze', flushCurrentDraft);
+            window.removeEventListener('pagehide', flushCurrentDraft);
+            flushCurrentDraft();
         };
     }, [clearPendingDraftPersist, persistChatDraft, persistDraftImmediately]);
 

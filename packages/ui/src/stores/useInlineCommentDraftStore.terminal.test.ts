@@ -57,4 +57,25 @@ describe('terminal context drafts', () => {
 
     expect(first).toBe(second);
   });
+
+  test('updates one draft without serializing the complete envelope on the mutation path', () => {
+    useInlineCommentDraftStore.getState().addDraft(target, selection);
+    const draft = useInlineCommentDraftStore.getState().getDrafts(target)[0];
+    const originalStringify = JSON.stringify;
+    let envelopeSerializations = 0;
+    JSON.stringify = ((value: unknown, ...rest: unknown[]) => {
+      if (value && typeof value === 'object' && 'drafts' in value && 'touchedAt' in value) {
+        envelopeSerializations += 1;
+      }
+      return originalStringify(value, ...(rest as [Parameters<typeof JSON.stringify>[1], Parameters<typeof JSON.stringify>[2]]));
+    }) as typeof JSON.stringify;
+
+    try {
+      useInlineCommentDraftStore.getState().updateDraft(target, draft.id, { text: 'edited' });
+      expect(envelopeSerializations).toBe(0);
+      expect(useInlineCommentDraftStore.getState().getDrafts(target)[0]?.text).toBe('edited');
+    } finally {
+      JSON.stringify = originalStringify;
+    }
+  });
 });

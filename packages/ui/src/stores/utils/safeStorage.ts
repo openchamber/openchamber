@@ -26,10 +26,12 @@ const registerDeferredFlusher = (flush: () => void) => {
     try {
         window.addEventListener('pagehide', flushAll, { capture: true });
         window.addEventListener('beforeunload', flushAll, { capture: true });
-        window.addEventListener('visibilitychange', () => {
-            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') flushAll();
-        });
-        window.addEventListener('freeze', flushAll);
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'hidden') flushAll();
+            });
+            document.addEventListener('freeze', flushAll);
+        }
     } catch {
         // Restricted environments can reject listeners; timers still flush.
     }

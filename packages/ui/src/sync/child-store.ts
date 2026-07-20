@@ -5,12 +5,159 @@ import { pickDirectoriesToEvict, canDisposeDirectory, hasPendingBlockingRequests
 import { readDirCache, persistVcs, persistProjectMeta, persistIcon, persistSessions } from "./persist-cache"
 import { normalizePath } from "@/lib/pathNormalization"
 import { startSessionLoadPerformanceEvent } from "./session-load-performance"
+import { countSyncPerformance } from "./performance-diagnostics"
 
 export type DirectoryStore = State & {
   /** Apply a partial state update */
   patch: (partial: Partial<State>) => void
   /** Replace state wholesale (used during bootstrap) */
   replace: (next: State) => void
+}
+
+type PermissionSubscriber = () => void
+const permissionSubscribersByStore = new WeakMap<StoreApi<DirectoryStore>, Map<string, Set<PermissionSubscriber>>>()
+
+type SessionMessageChange = {
+  messagesChanged: boolean
+  reset: boolean
+  partMessageIDs: readonly string[]
+}
+
+type SessionMessageSubscriber = (change: SessionMessageChange) => void
+const messageSubscribersByStore = new WeakMap<StoreApi<DirectoryStore>, Map<string, Set<SessionMessageSubscriber>>>()
+const pendingPartChangesByStore = new WeakMap<StoreApi<DirectoryStore>, Map<string, Set<string>>>()
+
+export function subscribeDirectorySessionMessages(
+  store: StoreApi<DirectoryStore>,
+  sessionID: string,
+  listener: SessionMessageSubscriber,
+): () => void {
+  let bySession = messageSubscribersByStore.get(store)
+  if (!bySession) {
+    bySession = new Map()
+    messageSubscribersByStore.set(store, bySession)
+  }
+  let listeners = bySession.get(sessionID)
+  if (!listeners) {
+    listeners = new Set()
+    bySession.set(sessionID, listeners)
+  }
+  listeners.add(listener)
+  return () => {
+    listeners?.delete(listener)
+    if (listeners?.size === 0) bySession?.delete(sessionID)
+    if (bySession?.size === 0) messageSubscribersByStore.delete(store)
+  }
+}
+
+export function markDirectorySessionPartChanged(
+  store: StoreApi<DirectoryStore>,
+  sessionID: string,
+  messageID: string,
+): void {
+  if (!sessionID || !messageID) return
+  let bySession = pendingPartChangesByStore.get(store)
+  if (!bySession) {
+    bySession = new Map()
+    pendingPartChangesByStore.set(store, bySession)
+  }
+  let messageIDs = bySession.get(sessionID)
+  if (!messageIDs) {
+    messageIDs = new Set()
+    bySession.set(sessionID, messageIDs)
+  }
+  messageIDs.add(messageID)
+}
+
+export function subscribeDirectoryPermission(
+  store: StoreApi<DirectoryStore>,
+  sessionID: string,
+  listener: PermissionSubscriber,
+): () => void {
+  let bySession = permissionSubscribersByStore.get(store)
+  if (!bySession) {
+    bySession = new Map()
+    permissionSubscribersByStore.set(store, bySession)
+  }
+  let listeners = bySession.get(sessionID)
+  if (!listeners) {
+    listeners = new Set()
+    bySession.set(sessionID, listeners)
+  }
+  listeners.add(listener)
+  return () => {
+    listeners?.delete(listener)
+    if (listeners?.size === 0) bySession?.delete(sessionID)
+    if (bySession?.size === 0) permissionSubscribersByStore.delete(store)
+  }
+}
+
+const notifyChangedPermissions = (
+  store: StoreApi<DirectoryStore>,
+  current: State["permission"],
+  previous: State["permission"],
+): void => {
+  if (current === previous) return
+  const subscribers = permissionSubscribersByStore.get(store)
+  if (!subscribers || subscribers.size === 0) return
+  for (const [sessionID, listeners] of subscribers) {
+    if (current[sessionID] === previous[sessionID]) continue
+    for (const listener of listeners) {
+      countSyncPerformance("permissionChangeCallbacks")
+      listener()
+    }
+  }
+}
+
+const notifyChangedSessionMessages = (
+  store: StoreApi<DirectoryStore>,
+  current: State,
+  previous: State,
+): void => {
+  const subscribers = messageSubscribersByStore.get(store)
+  const pendingParts = pendingPartChangesByStore.get(store)
+  pendingPartChangesByStore.delete(store)
+  if (!subscribers || subscribers.size === 0) return
+
+  const notifications = new Map<string, SessionMessageChange>()
+  if (current.message !== previous.message) {
+    for (const sessionID of subscribers.keys()) {
+      if (current.message[sessionID] === previous.message[sessionID]) continue
+      notifications.set(sessionID, { messagesChanged: true, reset: false, partMessageIDs: [] })
+    }
+  }
+
+  if (current.part !== previous.part) {
+    if (pendingParts && pendingParts.size > 0) {
+      for (const [sessionID, messageIDs] of pendingParts) {
+        if (!subscribers.has(sessionID)) continue
+        const existing = notifications.get(sessionID)
+        notifications.set(sessionID, {
+          messagesChanged: existing?.messagesChanged ?? false,
+          reset: existing?.reset ?? false,
+          partMessageIDs: [...messageIDs],
+        })
+      }
+    } else {
+      for (const sessionID of subscribers.keys()) {
+        const existing = notifications.get(sessionID)
+        notifications.set(sessionID, {
+          messagesChanged: existing?.messagesChanged ?? false,
+          reset: true,
+          partMessageIDs: existing?.partMessageIDs ?? [],
+        })
+      }
+    }
+  }
+
+  for (const [sessionID, change] of notifications) {
+    const listeners = subscribers.get(sessionID)
+    if (!listeners) continue
+    for (const listener of listeners) {
+      countSyncPerformance("sessionMessageChangeCallbacks")
+      listener(change)
+    }
+  }
 }
 
 export type DirectoryBootstrapPriority = "selected" | "active-project" | "expanded" | "visible" | "background"
@@ -92,6 +239,8 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
     if (state.projectMeta !== prev.projectMeta) persistProjectMeta(directory, state.projectMeta)
     if (state.icon !== prev.icon) persistIcon(directory, state.icon)
     if (state.session !== prev.session) persistSessions(directory, state.session)
+    notifyChangedPermissions(store, state.permission, prev.permission)
+    notifyChangedSessionMessages(store, state, prev)
   })
 
   return store

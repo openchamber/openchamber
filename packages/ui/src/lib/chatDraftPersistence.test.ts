@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   clearChatDraft,
   createChatDraftIdentity,
+  getChatDraftIdentityKey,
   readChatDraft,
   subscribeChatDraftDeletion,
   writeChatDraft,
@@ -64,5 +65,28 @@ describe('chatDraftPersistence', () => {
 
     const envelope = JSON.parse(storage.getItem('openchamber.chatDrafts.v2') ?? '{}') as { drafts?: object };
     expect(Object.keys(envelope.drafts ?? {})).toHaveLength(50);
+  });
+
+  test('reuses a parsed envelope while the stored value is unchanged', () => {
+    const identity = createChatDraftIdentity('runtime-cache', '/repo', 'session-1')!;
+    const key = getChatDraftIdentityKey(identity);
+    storage.setItem('openchamber.chatDrafts.v2', JSON.stringify({
+      version: 2,
+      drafts: { [key]: { text: 'cached', confirmedMentions: [], touchedAt: 1 } },
+    }));
+    const originalParse = JSON.parse;
+    let parseCalls = 0;
+    JSON.parse = ((...args: Parameters<typeof JSON.parse>) => {
+      parseCalls += 1;
+      return originalParse(...args);
+    }) as typeof JSON.parse;
+
+    try {
+      expect(readChatDraft(identity).text).toBe('cached');
+      expect(readChatDraft(identity).text).toBe('cached');
+      expect(parseCalls).toBe(1);
+    } finally {
+      JSON.parse = originalParse;
+    }
   });
 });

@@ -12,6 +12,9 @@ import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent, type Sessio
 import { useGlobalSyncStore } from "./global-sync-store"
 import {
   ChildStoreManager,
+  markDirectorySessionPartChanged,
+  subscribeDirectoryPermission,
+  subscribeDirectorySessionMessages,
   type DirectoryBootstrapContext,
   type DirectoryBootstrapReason,
   type DirectoryBootstrapPriority,
@@ -26,7 +29,8 @@ import {
 } from "./live-aggregate"
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
-import { updateStreamingState } from "./streaming"
+import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
+import { countSyncPerformance } from "./performance-diagnostics"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
 import { stripSessionDiffSnapshots } from "./sanitize"
@@ -1276,6 +1280,7 @@ function handleEvent(
   routingIndex: EventRoutingIndex,
   expectedRuntimeKey: string,
   skipVSCodeAutoAccept = false,
+  streamingDirectory?: string,
 ) {
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
@@ -1386,7 +1391,7 @@ function handleEvent(
     if (isVSCodeRuntime() && !skipVSCodeAutoAccept) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       void processVSCodePermissionAutoAccept(permission, resolvedDirectory).then((accepted) => {
-        if (!accepted) handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true)
+        if (!accepted) handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true, streamingDirectory)
       })
       return
     }
@@ -1544,6 +1549,7 @@ function handleEvent(
       break
   }
 
+  countSyncPerformance("reducerEvents")
   const reducerResult = applyDirectoryEvent(draft, payload, {
     onSetSessionTodo: (sessionID, todos) => {
       useTodosPersistStore.getState().setSessionTodos(resolvedDirectory, sessionID, todos)
@@ -1553,9 +1559,24 @@ function handleEvent(
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization
 
   if (reducerChanged) {
+    countSyncPerformance("reducerChangedEvents")
+    countSyncPerformance("directoryStorePublications")
+    const eventSessionID = getSessionIdFromPayload(payload) ?? undefined
+    const eventMessageID = getMessageIdFromPayload(payload) ?? undefined
+    if (payload.type.startsWith("message.part.") && eventMessageID) {
+      const partSessionID = eventSessionID ?? routingIndex.messageSessionById.get(eventMessageID)
+      if (partSessionID) markDirectorySessionPartChanged(store, partSessionID, eventMessageID)
+    }
     store.setState(draft)
-    const sessionID = getSessionIdFromPayload(payload) ?? undefined
-    const messageID = getMessageIdFromPayload(payload) ?? undefined
+    const sessionID = eventSessionID
+    const messageID = eventMessageID
+    if (
+      payload.type.startsWith("message.part.")
+      && normalizeEventDirectory(resolvedDirectory) === normalizeEventDirectory(streamingDirectory ?? "")
+    ) {
+      const heartbeatSessionID = sessionID ?? (messageID ? routingIndex.messageSessionById.get(messageID) : undefined)
+      if (heartbeatSessionID) touchStreamingSession(heartbeatSessionID)
+    }
     const archived = payload.type === "session.updated"
       && Boolean(((payload.properties as { info?: Session }).info)?.time.archived)
     if (sessionID && (payload.type === "session.deleted" || archived)) {
@@ -1675,6 +1696,8 @@ export function SyncProvider(props: {
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
   const routingIndex = routingIndexRef.current
+  const currentDirectoryRef = useRef(props.directory)
+  currentDirectoryRef.current = props.directory
   const lastStreamActivityAtRef = useRef(0)
   const lastStatusPollAtByDirectoryRef = useRef(new Map<string, number>())
   const lastFullResyncAtByDirectoryRef = useRef(new Map<string, number>())
@@ -1887,7 +1910,7 @@ export function SyncProvider(props: {
             dispatchOpenCodeUpdateAvailableUnlessBundled({ version })
           }
         }
-        handleEvent(directory, payload, childStores, routingIndex, runtimeKey)
+        handleEvent(directory, payload, childStores, routingIndex, runtimeKey, false, currentDirectoryRef.current)
       },
       onReconnect: () => {
         useConfigStore.setState({
@@ -2134,8 +2157,8 @@ export function SyncProvider(props: {
     const store = childStores.getChild(props.directory)
     if (!store) return
     updateStreamingState(store.getState())
-    const unsubscribe = store.subscribe((state) => {
-      updateStreamingState(state)
+    const unsubscribe = store.subscribe((state, previous) => {
+      updateChangedStreamingSessions(state, previous)
     })
     return unsubscribe
   }, [props.directory, childStores])
@@ -2265,9 +2288,7 @@ export function useSessionPermissions(sessionID: string, directory?: string, opt
   }, [sessionID, store])
   const subscribe = useCallback((notify: () => void) => {
     if (!sessionID) return () => undefined
-    return store.subscribe((state, previous) => {
-      if (state.permission[sessionID] !== previous.permission[sessionID]) notify()
-    })
+    return subscribeDirectoryPermission(store, sessionID, notify)
   }, [sessionID, store])
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
@@ -2371,9 +2392,11 @@ export function useSession(sessionID?: string | null, directory?: string) {
 
   const subscribe = useCallback((notify: () => void) => {
     if (directory) {
-      return childStores.ensureChild(directory, { bootstrap: false }).subscribe(notify)
+      return childStores.ensureChild(directory, { bootstrap: false }).subscribe((state, previous) => {
+        if (state.session !== previous.session) notify()
+      })
     }
-    return childStores.subscribeAll(notify)
+    return childStores.subscribeAllSelected((state) => state.session, notify)
   }, [childStores, directory])
 
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
@@ -2679,6 +2702,21 @@ export function useSessionMessageCount(sessionID: string, directory?: string): n
   )
 }
 
+export function useSessionRenderable(sessionID: string, directory?: string): boolean {
+  const store = useDirectoryStore(directory)
+  const getSnapshot = useCallback(
+    () => Boolean(sessionID && getSessionMaterializationStatus(store.getState(), sessionID).renderable),
+    [sessionID, store],
+  )
+  const subscribe = useCallback(
+    (notify: () => void) => sessionID
+      ? subscribeDirectorySessionMessages(store, sessionID, notify)
+      : () => undefined,
+    [sessionID, store],
+  )
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
 export function useSessionTextMessages(sessionID: string, directory?: string): SessionTextMessage[] {
   const records = useSessionMessageRecords(sessionID, directory)
 
@@ -2704,7 +2742,17 @@ export function useUserMessageHistory(sessionID: string, directory?: string): st
 
   const subscribe = useCallback((notify: () => void) => {
     if (!sessionID) return () => undefined
-    return store.subscribe(notify)
+    const unsubscribeMessages = subscribeDirectorySessionMessages(store, sessionID, notify)
+    const unsubscribeSession = store.subscribe((state, previous) => {
+      if (state.session === previous.session) return
+      const currentRevert = state.session.find((session) => session.id === sessionID)?.revert?.messageID
+      const previousRevert = previous.session.find((session) => session.id === sessionID)?.revert?.messageID
+      if (currentRevert !== previousRevert) notify()
+    })
+    return () => {
+      unsubscribeMessages()
+      unsubscribeSession()
+    }
   }, [sessionID, store])
 
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
@@ -2775,27 +2823,17 @@ export function useSessionMessageRecords(
 
   const subscribe = useCallback((notify: () => void) => {
     if (!sessionID || options?.enabled === false) return () => undefined
-    return store.subscribe((state, previous) => {
-      if (state.message[sessionID] !== previous.message[sessionID]) {
-        notify()
-        return
-      }
-      if (state.session !== previous.session) {
-        const currentRevert = state.session.find((session) => session.id === sessionID)?.revert?.messageID
-        const previousRevert = previous.session.find((session) => session.id === sessionID)?.revert?.messageID
-        if (currentRevert !== previousRevert) {
-          notify()
-          return
-        }
-      }
-      if (state.part === previous.part) return
-      for (const message of state.message[sessionID] ?? EMPTY_MESSAGES) {
-        if (state.part[message.id] !== previous.part[message.id]) {
-          notify()
-          return
-        }
-      }
+    const unsubscribeMessages = subscribeDirectorySessionMessages(store, sessionID, notify)
+    const unsubscribeSession = store.subscribe((state, previous) => {
+      if (state.session === previous.session) return
+      const currentRevert = state.session.find((session) => session.id === sessionID)?.revert?.messageID
+      const previousRevert = previous.session.find((session) => session.id === sessionID)?.revert?.messageID
+      if (currentRevert !== previousRevert) notify()
     })
+    return () => {
+      unsubscribeMessages()
+      unsubscribeSession()
+    }
   }, [options?.enabled, sessionID, store])
 
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)

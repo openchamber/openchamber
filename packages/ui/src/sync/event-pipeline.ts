@@ -19,6 +19,7 @@ import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runt
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
+import { countSyncPerformance } from "./performance-diagnostics"
 
 const FLUSH_FRAME_MS = 33
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
@@ -309,6 +310,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     d.last = Date.now()
     syncDebug.pipeline.flush(events.length)
     for (const payload of events) {
+      countSyncPerformance("pipelineDeliveredEvents")
       onEvent(directory, payload)
     }
 
@@ -450,6 +452,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const enqueueEvent = (directory: string, payload: Event) => {
+    countSyncPerformance("pipelineRawEvents")
     const normalizedPayload = normalizeEventType(payload)
     const routedDirectory = routeDirectory?.(directory, normalizedPayload) || directory
     const d = getOrCreateDir(routedDirectory)
@@ -490,6 +493,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         } else {
           d.queue[i] = normalizedPayload
         }
+        countSyncPerformance("pipelineCoalescedEvents")
         syncDebug.pipeline.coalesced(normalizedPayload.type, k)
         return
       }

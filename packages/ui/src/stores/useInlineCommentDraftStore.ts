@@ -50,6 +50,16 @@ type InlineCommentDraftStore = InlineCommentDraftState & InlineCommentDraftActio
 const MAX_SESSIONS = 50;
 const MAX_DRAFTS_PER_SESSION = 20;
 const MAX_PERSISTED_BYTES = 1024 * 1024;
+const encoder = new TextEncoder();
+
+type SerializedSizeIndex = {
+  draftEntries: Map<string, number>;
+  touchedEntries: Map<string, number>;
+  total: number;
+};
+
+const serializedSizeByDrafts = new WeakMap<Record<string, InlineCommentDraft[]>, SerializedSizeIndex>();
+const EMPTY_ENVELOPE_BYTES = encoder.encode(JSON.stringify({ drafts: {}, touchedAt: {} })).byteLength;
 
 export const getInlineCommentDraftKey = (runtimeKey: string, directory: string, sessionKey: string): string | null => {
   const normalizedDirectory = normalizePath(directory);
@@ -60,28 +70,96 @@ export const getInlineCommentDraftKey = (runtimeKey: string, directory: string, 
 const getCurrentKey = (target: InlineCommentDraftTarget): string | null =>
   getInlineCommentDraftKey(getRuntimeKey(), target.directory, target.sessionKey);
 
-const serializedBytes = (drafts: Record<string, InlineCommentDraft[]>, touchedAt: Record<string, number>): number =>
-  new TextEncoder().encode(JSON.stringify({ drafts, touchedAt })).byteLength;
+const serializedEntryBytes = (key: string, value: unknown): number =>
+  encoder.encode(`${JSON.stringify(key)}:${JSON.stringify(value)}`).byteLength;
 
-const boundState = (
+const sumEntryBytes = (entries: Map<string, number>): number => {
+  let total = 0;
+  for (const bytes of entries.values()) total += bytes;
+  return total;
+};
+
+const indexedTotal = (draftEntries: Map<string, number>, touchedEntries: Map<string, number>): number => (
+  EMPTY_ENVELOPE_BYTES
+  + sumEntryBytes(draftEntries)
+  + Math.max(0, draftEntries.size - 1)
+  + sumEntryBytes(touchedEntries)
+  + Math.max(0, touchedEntries.size - 1)
+);
+
+const buildSerializedSizeIndex = (
   drafts: Record<string, InlineCommentDraft[]>,
   touchedAt: Record<string, number>,
+): SerializedSizeIndex => {
+  const draftEntries = new Map<string, number>();
+  const touchedEntries = new Map<string, number>();
+  for (const [key, value] of Object.entries(drafts)) draftEntries.set(key, serializedEntryBytes(key, value));
+  for (const [key, value] of Object.entries(touchedAt)) touchedEntries.set(key, serializedEntryBytes(key, value));
+  const index = { draftEntries, touchedEntries, total: indexedTotal(draftEntries, touchedEntries) };
+  serializedSizeByDrafts.set(drafts, index);
+  return index;
+};
+
+const updateSerializedSizeIndex = (
+  previous: InlineCommentDraftState,
+  drafts: Record<string, InlineCommentDraft[]>,
+  touchedAt: Record<string, number>,
+  changedKey: string,
+): SerializedSizeIndex => {
+  const previousIndex = serializedSizeByDrafts.get(previous.drafts)
+    ?? buildSerializedSizeIndex(previous.drafts, previous.touchedAt);
+  const draftEntries = new Map(previousIndex.draftEntries);
+  const touchedEntries = new Map(previousIndex.touchedEntries);
+  const bucket = drafts[changedKey];
+  if (bucket) draftEntries.set(changedKey, serializedEntryBytes(changedKey, bucket));
+  else draftEntries.delete(changedKey);
+  const touched = touchedAt[changedKey];
+  if (typeof touched === 'number') touchedEntries.set(changedKey, serializedEntryBytes(changedKey, touched));
+  else touchedEntries.delete(changedKey);
+  return { draftEntries, touchedEntries, total: indexedTotal(draftEntries, touchedEntries) };
+};
+
+const boundState = (
+  previous: InlineCommentDraftState,
+  drafts: Record<string, InlineCommentDraft[]>,
+  touchedAt: Record<string, number>,
+  changedKey: string,
 ): { drafts: Record<string, InlineCommentDraft[]>; touchedAt: Record<string, number> } | null => {
   const keys = Object.keys(drafts).sort((left, right) => (touchedAt[right] ?? 0) - (touchedAt[left] ?? 0));
+  const retainedKeys = keys.slice(0, MAX_SESSIONS);
   const retainedDrafts: Record<string, InlineCommentDraft[]> = {};
   const retainedTouchedAt: Record<string, number> = {};
-  for (const key of keys.slice(0, MAX_SESSIONS)) {
-    retainedDrafts[key] = drafts[key].slice(-MAX_DRAFTS_PER_SESSION);
+  for (const key of retainedKeys) {
+    retainedDrafts[key] = drafts[key].length > MAX_DRAFTS_PER_SESSION
+      ? drafts[key].slice(-MAX_DRAFTS_PER_SESSION)
+      : drafts[key];
     retainedTouchedAt[key] = touchedAt[key] ?? Date.now();
   }
-  while (Object.keys(retainedDrafts).length > 0 && serializedBytes(retainedDrafts, retainedTouchedAt) > MAX_PERSISTED_BYTES) {
-    const oldest = Object.keys(retainedDrafts).sort((left, right) => retainedTouchedAt[left] - retainedTouchedAt[right])[0];
+  const sizeIndex = updateSerializedSizeIndex(previous, retainedDrafts, retainedTouchedAt, changedKey);
+  for (const key of keys) {
+    if (!(key in retainedDrafts)) {
+      sizeIndex.draftEntries.delete(key);
+      sizeIndex.touchedEntries.delete(key);
+    } else if (retainedDrafts[key] !== drafts[key]) {
+      sizeIndex.draftEntries.set(key, serializedEntryBytes(key, retainedDrafts[key]));
+    }
+    if (key !== changedKey && retainedTouchedAt[key] !== previous.touchedAt[key]) {
+      sizeIndex.touchedEntries.set(key, serializedEntryBytes(key, retainedTouchedAt[key]));
+    }
+  }
+  sizeIndex.total = indexedTotal(sizeIndex.draftEntries, sizeIndex.touchedEntries);
+  const evictionKeys = [...retainedKeys];
+  while (evictionKeys.length > 0 && sizeIndex.total > MAX_PERSISTED_BYTES) {
+    const oldest = evictionKeys.pop()!;
     delete retainedDrafts[oldest];
     delete retainedTouchedAt[oldest];
+    sizeIndex.draftEntries.delete(oldest);
+    sizeIndex.touchedEntries.delete(oldest);
+    sizeIndex.total = indexedTotal(sizeIndex.draftEntries, sizeIndex.touchedEntries);
   }
-  return Object.keys(retainedDrafts).length === 0 && Object.keys(drafts).length > 0
-    ? null
-    : { drafts: retainedDrafts, touchedAt: retainedTouchedAt };
+  if (sizeIndex.draftEntries.size === 0 && keys.length > 0) return null;
+  serializedSizeByDrafts.set(retainedDrafts, sizeIndex);
+  return { drafts: retainedDrafts, touchedAt: retainedTouchedAt };
 };
 
 const removeDraftKey = (state: InlineCommentDraftState, key: string): InlineCommentDraftState => {
@@ -118,8 +196,10 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
             if (isDuplicateTerminalDraft) return state;
 
             const bounded = boundState(
+              state,
               { ...state.drafts, [key]: [...current, nextDraft] },
               { ...state.touchedAt, [key]: Date.now() },
+              key,
             );
             if (!bounded || !bounded.drafts[key]?.some((item) => item.id === id)) return state;
             accepted = true;
@@ -134,8 +214,10 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
             const current = state.drafts[key] ?? [];
             if (!current.some((draft) => draft.id === draftId)) return state;
             const bounded = boundState(
+              state,
               { ...state.drafts, [key]: current.map((draft) => draft.id === draftId ? { ...draft, ...updates } : draft) },
               { ...state.touchedAt, [key]: Date.now() },
+              key,
             );
             return bounded ?? state;
           });
@@ -181,8 +263,10 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
             const restored = draftsToRestore.filter((draft) => draft.sessionKey === target.sessionKey && !currentIds.has(draft.id));
             if (restored.length === 0) return state;
             return boundState(
+              state,
               { ...state.drafts, [key]: [...restored, ...current].sort((left, right) => left.createdAt - right.createdAt) },
               { ...state.touchedAt, [key]: Date.now() },
+              key,
             ) ?? state;
           });
         },

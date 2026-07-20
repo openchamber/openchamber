@@ -73,6 +73,8 @@ Persisted session todos use a bounded composite key of runtime, normalized direc
 
 Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sessions use the same runtime/directory/session ownership rule. Chat drafts use a bounded shared envelope and notify mounted composers when authoritative deletion clears their identity, preventing unmount autosave from resurrecting deleted text. Inline drafts enforce per-session, global-session, and serialized-byte bounds. Pins retain composite keys across runtimes, while authoritative reconciliation prunes only the runtime whose complete session list arrived. Ambiguous session-only legacy drafts and pins are not claimed.
 
+Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
+
 ## Git / PR Stores
 
 The Git and PR stores are the most important stores to understand before editing this directory.

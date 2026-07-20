@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
-import { ChildStoreManager } from './child-store';
+import {
+  ChildStoreManager,
+  markDirectorySessionPartChanged,
+  subscribeDirectoryPermission,
+  subscribeDirectorySessionMessages,
+} from './child-store';
+import {
+  getSyncPerformanceDiagnostics,
+  setSyncPerformanceDiagnosticsEnabled,
+} from './performance-diagnostics';
 import { DIR_IDLE_TTL_MS } from './types';
 
 const deferred = () => {
@@ -78,6 +87,79 @@ describe('ChildStoreManager directory lifecycle', () => {
       Date.now = originalDateNow;
       manager.disposeAll();
     }
+  });
+});
+
+describe('ChildStoreManager permission subscriptions', () => {
+  test('does not notify session permission listeners for unrelated high-frequency updates', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    let notifications = 0;
+    const unsubscribers = Array.from({ length: 50 }, (_, index) => (
+      subscribeDirectoryPermission(child, `session-${index}`, () => {
+        notifications += 1;
+      })
+    ));
+    setSyncPerformanceDiagnosticsEnabled(true);
+
+    for (let index = 0; index < 10_000; index += 1) {
+      child.setState({ part: { [`message-${index}`]: [] } });
+    }
+
+    expect(notifications).toBe(0);
+    expect(getSyncPerformanceDiagnostics()?.permissionChangeCallbacks).toBe(0);
+
+    child.setState({ permission: { 'session-17': [{ id: 'permission-1' }] as never[] } });
+
+    expect(notifications).toBe(1);
+    expect(getSyncPerformanceDiagnostics()?.permissionChangeCallbacks).toBe(1);
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    setSyncPerformanceDiagnosticsEnabled(false);
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager session message subscriptions', () => {
+  test('routes annotated part changes only to the owning session', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    const notifications = new Map<string, number>();
+    const unsubscribers = Array.from({ length: 50 }, (_, index) => {
+      const sessionID = `session-${index}`;
+      return subscribeDirectorySessionMessages(child, sessionID, () => {
+        notifications.set(sessionID, (notifications.get(sessionID) ?? 0) + 1);
+      });
+    });
+    setSyncPerformanceDiagnosticsEnabled(true);
+
+    for (let index = 0; index < 1_000; index += 1) {
+      const sessionID = `session-${index % 50}`;
+      const messageID = `message-${index}`;
+      markDirectorySessionPartChanged(child, sessionID, messageID);
+      child.setState({ part: { ...child.getState().part, [messageID]: [] } });
+    }
+
+    expect([...notifications.values()].reduce((sum, count) => sum + count, 0)).toBe(1_000);
+    expect(notifications.get('session-0')).toBe(20);
+    expect(getSyncPerformanceDiagnostics()?.sessionMessageChangeCallbacks).toBe(1_000);
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    setSyncPerformanceDiagnosticsEnabled(false);
+    manager.disposeAll();
+  });
+
+  test('conservatively resets active subscribers for unannotated bulk part replacement', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    let reset = false;
+    const unsubscribe = subscribeDirectorySessionMessages(child, 'session-1', (change) => {
+      reset = change.reset;
+    });
+
+    child.setState({ part: { message: [] } });
+
+    expect(reset).toBe(true);
+    unsubscribe();
+    manager.disposeAll();
   });
 });
 

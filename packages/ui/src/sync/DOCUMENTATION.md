@@ -72,7 +72,7 @@ Directory session lists record whether their current snapshot is empty, persiste
 
 The roots request is authoritative for root completeness. The broader child-session request has independent completeness: a successful empty response clears stale children, while a failed request preserves known children and their required ancestors without turning the failure into an empty snapshot.
 
-The persisted session snapshot keeps up to 50 sessions selected by `time.updated`/`time.created`, not ID ordering. Successful empty results persist an empty v2 tombstone so legacy data cannot reappear on restart. If localStorage quota prevents the full snapshot, persistence retries with progressively smaller recent snapshots and removes stale current/legacy values rather than leaving an old list indefinitely.
+The persisted session snapshot keeps up to 50 sessions selected by `time.updated`/`time.created`, not ID ordering. Non-empty updates coalesce to the latest runtime-directory snapshot and flush on lifecycle suspension; runtime switches reject stale pending writes. Successful empty results persist an empty v2 tombstone synchronously so legacy data cannot reappear on restart. If localStorage quota prevents the full snapshot, persistence retries with progressively smaller recent snapshots and removes stale current/legacy values rather than leaving an old list indefinitely.
 
 ### Directory-scoped session list
 
@@ -158,6 +158,12 @@ Initial loads use smaller pages on constrained VS Code/mobile surfaces. Older pa
 Session loading instrumentation is disabled by default. Set `localStorage.openchamber_session_load_perf` to `"1"`, reproduce the interaction, then inspect `window.__openchamberSessionLoadPerformance.events`.
 
 The bounded event buffer records bootstrap, message, and global-list operations with queue/duration, caller, outcome, retry count, and record count where applicable. Instrumentation is diagnostic only; unit/type/lint checks do not replace production runtime profiling at representative project/session scale.
+
+High-frequency sync diagnostics are separately disabled by default. Set `localStorage.openchamber_sync_perf` to `"1"` before reload to enable fixed numeric counters for pipeline traffic, reducer publications, streaming reconciliations, entries/messages visited, targeted heartbeat work, and persistence serialization/write volume. The hot path performs only a null check while disabled; counters never retain IDs, payloads, or user content.
+
+Streaming lifecycle derivation has two paths. Directory attach, switch, bootstrap, and reconnect may perform a full reconciliation. Normal store publications reconcile only sessions whose `session_status` or `message` bucket changed; part-only events update the affected streaming message heartbeat directly and must not rescan all busy sessions.
+
+Directory stores also own session-keyed sidecar notification channels for permissions and message materialization. High-frequency realtime part events annotate the exact session/message before committing, so visible records, user history, renderability, and sidebar permission rows are not notified by unrelated sessions. Structural message replacements notify only changed subscribed session buckets; unannotated bulk part replacement conservatively resets active message subscribers so bootstrap, pagination, rollback, and legacy writers cannot leave stale projections.
 
 ## Session action rules
 
