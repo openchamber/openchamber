@@ -1140,7 +1140,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                             fontFamily={resolvedFontStack}
                             fontSize={terminalFontSize}
                             enableTouchScroll={useTouchTerminalInput}
-                            autoFocus={!useTouchTerminalInput && isTerminalVisible}
+                            autoFocus={isTerminalVisible}
                             isVisible={isTerminalVisible}
                         />
                     ) : null}
