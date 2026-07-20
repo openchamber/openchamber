@@ -1342,10 +1342,9 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
     const needsAdvanced = section === 'guild' || section === 'channel' || section === 'advanced';
     if (needsAdvanced) {
       setAdvancedOpen(true);
-      setSettingsOpen(false);
-    } else if (section === 'test' || section === 'token') {
-      setSettingsOpen(true);
-      setAdvancedOpen(false);
+    }
+    if (section === 'token') {
+      setShowToken(true);
     }
     const ref =
       section === 'token'
@@ -1368,7 +1367,6 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
   const [tokenInput, setTokenInput] = useState('');
   const [showTokenPlain, setShowTokenPlain] = useState(false);
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const token = conn.botToken;
   const target = conn.defaultChannelId;
@@ -1480,136 +1478,112 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
 
       {isConnectedView ? (
         <>
-          {/* Connected: no token/setup chrome — just settings entry points. */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Connected: no setup chrome — change token + advanced entry points. */}
+          <div ref={tokenSectionRef} className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
-              variant={settingsOpen ? 'secondary' : 'outline'}
+              variant="outline"
               size="xs"
               className="!font-normal"
-              onClick={() => {
-                setSettingsOpen((open) => {
-                  const next = !open;
-                  if (next) setAdvancedOpen(false);
-                  return next;
-                });
-              }}
+              onClick={() => setShowToken((v) => !v)}
             >
-              {t('settings.integrations.discord.actions.settings')}
+              {showToken
+                ? t('settings.common.actions.cancel')
+                : t('settings.integrations.discord.actions.changeToken')}
             </Button>
             <Button
               type="button"
               variant={advancedOpen ? 'secondary' : 'outline'}
               size="xs"
               className="!font-normal"
-              onClick={() => {
-                setAdvancedOpen((open) => {
-                  const next = !open;
-                  if (next) setSettingsOpen(false);
-                  return next;
-                });
-              }}
+              onClick={() => setAdvancedOpen((open) => !open)}
             >
               {t('settings.integrations.discord.actions.advancedSettings')}
             </Button>
           </div>
 
-          {settingsOpen && (
-            <div ref={testSectionRef} className="space-y-3">
-              {(hasTarget || conn.discordGuildId) && (
-                <div className="space-y-2 rounded-md border border-border/60 bg-muted/30 p-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="default"
-                      size="xs"
-                      className="!font-normal"
-                      onClick={() => sendTestMessage(conn.type)}
-                      disabled={conn.lastSyncStatus === 'sending'}
-                    >
-                      {conn.lastSyncStatus === 'sending' ? (
-                        <RiLoader4Line className="size-3.5 animate-spin" />
-                      ) : (
-                        <RiSendPlaneLine className="size-3.5" />
-                      )}
-                      {t('settings.integrations.discord.wizard.step3.sendTest')}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      className="!font-normal"
-                      onClick={() => {
-                        if (conn.discordGuildId) {
-                          syncDiscordGuildProjects(buildProjectPayloads(), buildSummary());
-                        } else {
-                          sendSyncSummary(conn.type, buildSummary());
-                        }
-                      }}
-                      disabled={conn.lastSyncStatus === 'sending'}
-                    >
-                      {conn.lastSyncStatus === 'sending' ? (
-                        <RiLoader4Line className="size-3.5 animate-spin" />
-                      ) : (
-                        <RiRefreshLine className="size-3.5" />
-                      )}
-                      {t('settings.integrations.discord.wizard.step3.syncNow')}
-                    </Button>
-                    <div className="ml-auto text-[10px] text-muted-foreground">
-                      {t('settings.integrations.discord.actions.lastActivity', {
-                        when: formatRelative(conn.lastSyncAt),
-                      })}
-                    </div>
-                  </div>
-                  {conn.lastSyncMessage && (
-                    <div
-                      className={cn(
-                        'text-[11px] leading-snug',
-                        conn.lastSyncStatus === 'error' && 'text-destructive',
-                        conn.lastSyncStatus === 'ok' && 'text-[var(--status-success)]',
-                        conn.lastSyncStatus === 'sending' && 'text-muted-foreground',
-                      )}
-                    >
-                      {conn.lastSyncMessage}
-                    </div>
-                  )}
-                </div>
-              )}
+          {showToken && (
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <input
+                type="password"
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                placeholder={t('settings.integrations.discord.wizard.step1.tokenLabel')}
+                className={cn(inputClass, 'min-w-[12rem] flex-1')}
+              />
+              <Button
+                type="button"
+                variant="default"
+                size="xs"
+                className="!font-normal shrink-0"
+                onClick={handleSaveToken}
+                disabled={!tokenInput.trim()}
+              >
+                {t('settings.integrations.discord.actions.updateToken')}
+              </Button>
+            </div>
+          )}
 
-              <div ref={tokenSectionRef} className="flex flex-wrap items-center gap-2 text-xs">
+          {(hasTarget || conn.discordGuildId) && (
+            <div
+              ref={testSectionRef}
+              className="space-y-2 rounded-md border border-border/60 bg-muted/30 p-3"
+            >
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="default"
                   size="xs"
                   className="!font-normal"
-                  onClick={() => setShowToken((v) => !v)}
+                  onClick={() => sendTestMessage(conn.type)}
+                  disabled={conn.lastSyncStatus === 'sending'}
                 >
-                  {showToken
-                    ? t('settings.common.actions.cancel')
-                    : t('settings.integrations.discord.actions.changeToken')}
+                  {conn.lastSyncStatus === 'sending' ? (
+                    <RiLoader4Line className="size-3.5 animate-spin" />
+                  ) : (
+                    <RiSendPlaneLine className="size-3.5" />
+                  )}
+                  {t('settings.integrations.discord.wizard.step3.sendTest')}
                 </Button>
-                {showToken && (
-                  <div className="flex min-w-0 flex-1 gap-2">
-                    <input
-                      type="password"
-                      value={tokenInput}
-                      onChange={(e) => setTokenInput(e.target.value)}
-                      placeholder={t('settings.integrations.discord.wizard.step1.tokenLabel')}
-                      className={inputClass}
-                    />
-                    <Button
-                      type="button"
-                      variant="default"
-                      size="xs"
-                      className="!font-normal shrink-0"
-                      onClick={handleSaveToken}
-                      disabled={!tokenInput.trim()}
-                    >
-                      {t('settings.integrations.discord.actions.updateToken')}
-                    </Button>
-                  </div>
-                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  className="!font-normal"
+                  onClick={() => {
+                    if (conn.discordGuildId) {
+                      syncDiscordGuildProjects(buildProjectPayloads(), buildSummary());
+                    } else {
+                      sendSyncSummary(conn.type, buildSummary());
+                    }
+                  }}
+                  disabled={conn.lastSyncStatus === 'sending'}
+                >
+                  {conn.lastSyncStatus === 'sending' ? (
+                    <RiLoader4Line className="size-3.5 animate-spin" />
+                  ) : (
+                    <RiRefreshLine className="size-3.5" />
+                  )}
+                  {t('settings.integrations.discord.wizard.step3.syncNow')}
+                </Button>
+                <div className="ml-auto text-[10px] text-muted-foreground">
+                  {t('settings.integrations.discord.actions.lastActivity', {
+                    when: formatRelative(conn.lastSyncAt),
+                  })}
+                </div>
               </div>
+              {conn.lastSyncMessage && (
+                <div
+                  className={cn(
+                    'text-[11px] leading-snug',
+                    conn.lastSyncStatus === 'error' && 'text-destructive',
+                    conn.lastSyncStatus === 'ok' && 'text-[var(--status-success)]',
+                    conn.lastSyncStatus === 'sending' && 'text-muted-foreground',
+                  )}
+                >
+                  {conn.lastSyncMessage}
+                </div>
+              )}
             </div>
           )}
 
@@ -1667,22 +1641,24 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
               </div>
             </div>
           ) : (
-            <div ref={tokenSectionRef} className="flex items-center gap-2 text-xs">
+            <div ref={tokenSectionRef} className="flex flex-wrap items-center gap-2 text-xs">
               <RiCheckLine className="size-3 text-[var(--status-success)]" />
               <span className="text-muted-foreground">
                 {t('settings.integrations.discord.actions.tokenConfigured')}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="xs"
+                className="!font-normal"
                 onClick={() => setShowToken(!showToken)}
-                className="text-primary text-[10px]"
               >
                 {showToken
                   ? t('settings.common.actions.cancel')
                   : t('settings.integrations.discord.actions.changeToken')}
-              </button>
+              </Button>
               {showToken && (
-                <div className="flex gap-2 flex-1">
+                <div className="flex min-w-0 flex-1 gap-2">
                   <input
                     type="password"
                     value={tokenInput}
@@ -1694,7 +1670,7 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
                     type="button"
                     variant="default"
                     size="xs"
-                    className="!font-normal"
+                    className="!font-normal shrink-0"
                     onClick={handleSaveToken}
                     disabled={!tokenInput.trim()}
                   >
