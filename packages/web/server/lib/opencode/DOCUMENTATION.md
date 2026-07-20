@@ -87,6 +87,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - Returned API:
   - `processOpenCodeSsePayload(payload)`
   - `getSessionActivitySnapshot()`
+  - `getActiveSessionCount()`
   - `getSessionStateSnapshot()`
   - `getSessionAttentionSnapshot()`
   - `getSessionState(sessionId)`
@@ -96,6 +97,8 @@ This module provides OpenCode server integration utilities for the web server ru
   - `markUserMessageSent(sessionId)`
   - `resetAllSessionActivityToIdle()`
   - `dispose()`
+
+The runtime maintains active-session count incrementally from idempotent activity phase transitions. Upstream stall-timeout and lifecycle health checks read it in O(1); the hourly cleanup removes activity phases older than 24 hours without broadcasting synthetic state transitions. Snapshot generation remains reserved for the session-activity API.
 
 ## Public exports (lifecycle.js)
 - `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration.
