@@ -16,6 +16,9 @@ import {
   RiStethoscopeLine,
 } from '@remixicon/react';
 import {
+  MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS,
+  MESSENGER_INTERRUPT_TIMEOUT_MAX_MS,
+  MESSENGER_INTERRUPT_TIMEOUT_MIN_MS,
   useMessengerStore,
   type MessengerType,
   type MessengerConnection,
@@ -570,6 +573,10 @@ function BridgePanel({
   const setBridgeVerbosity = useMessengerStore((s) => s.setBridgeVerbosity);
   const bridgePermissionMode = useMessengerStore((s) => s.bridgePermissionMode);
   const setBridgePermissionMode = useMessengerStore((s) => s.setBridgePermissionMode);
+  const bridgeNotifyOnComplete = useMessengerStore((s) => s.bridgeNotifyOnComplete);
+  const setBridgeNotifyOnComplete = useMessengerStore((s) => s.setBridgeNotifyOnComplete);
+  const bridgeInterruptTimeoutMs = useMessengerStore((s) => s.bridgeInterruptTimeoutMs);
+  const setBridgeInterruptTimeoutMs = useMessengerStore((s) => s.setBridgeInterruptTimeoutMs);
   useEffect(() => {
     refreshBridgeStatus(type);
     const id = setInterval(() => refreshBridgeStatus(type), 8000);
@@ -584,6 +591,9 @@ function BridgePanel({
   const currentPermissionOption =
     PERMISSION_MODE_OPTIONS.find((o) => o.id === currentPermissionMode) ??
     PERMISSION_MODE_OPTIONS[0];
+  const notifyOnComplete = bridgeNotifyOnComplete[type] ?? false;
+  const interruptTimeoutMs =
+    bridgeInterruptTimeoutMs[type] ?? MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS;
 
   return (
     <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
@@ -616,6 +626,12 @@ function BridgePanel({
       <div className="text-[11px] text-muted-foreground leading-snug">
         Forwards channel messages to an OpenCode session in the matching project and streams the
         reply back, so the conversation is shared with the web UI.
+      </div>
+      <div data-settings-item="integrations.discord.proxy-worktrees" className="text-[10px] text-muted-foreground leading-snug">
+        {t('settings.integrations.discord.bridge.proxyNote')}
+      </div>
+      <div className="text-[10px] text-muted-foreground leading-snug">
+        {t('settings.integrations.discord.bridge.autoWorktreeNote')}
       </div>
       {!bridgeStatus.enabled && (
         <div className="text-[10px] text-yellow-700 dark:text-yellow-400">
@@ -676,6 +692,61 @@ function BridgePanel({
         </div>
         <div className="text-[10px] text-muted-foreground leading-snug">
           {t(currentPermissionOption.descKey)}
+        </div>
+      </div>
+
+      <div
+        data-settings-item="integrations.discord.notify-on-complete"
+        className="space-y-1.5 border-t border-border/60 pt-2"
+      >
+        <label className="flex cursor-pointer items-start gap-2 py-1">
+          <Checkbox
+            checked={notifyOnComplete}
+            onChange={(checked) => setBridgeNotifyOnComplete(type, checked)}
+            disabled={!bridgeStatus.enabled}
+            ariaLabel={t('settings.integrations.discord.bridge.notifyOnComplete.title')}
+          />
+          <span className="min-w-0">
+            <span className="block text-[11px] font-medium text-foreground">
+              {t('settings.integrations.discord.bridge.notifyOnComplete.title')}
+            </span>
+            <span className="block text-[10px] text-muted-foreground leading-snug">
+              {t('settings.integrations.discord.bridge.notifyOnComplete.description')}
+            </span>
+          </span>
+        </label>
+      </div>
+
+      <div
+        data-settings-item="integrations.discord.interrupt-timeout"
+        className="space-y-1.5 border-t border-border/60 pt-2"
+      >
+        <label className="text-[11px] font-medium text-foreground" htmlFor="discord-interrupt-timeout-ms">
+          {t('settings.integrations.discord.bridge.interruptTimeout.title')}
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            id="discord-interrupt-timeout-ms"
+            type="number"
+            min={MESSENGER_INTERRUPT_TIMEOUT_MIN_MS}
+            max={MESSENGER_INTERRUPT_TIMEOUT_MAX_MS}
+            step={500}
+            disabled={!bridgeStatus.enabled}
+            value={interruptTimeoutMs}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              if (Number.isFinite(next)) {
+                setBridgeInterruptTimeoutMs(type, next);
+              }
+            }}
+            className="h-7 w-24 rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+          />
+          <span className="text-[10px] text-muted-foreground">
+            {t('settings.integrations.discord.bridge.interruptTimeout.unit')}
+          </span>
+        </div>
+        <div className="text-[10px] text-muted-foreground leading-snug">
+          {t('settings.integrations.discord.bridge.interruptTimeout.description')}
         </div>
       </div>
 
@@ -809,6 +880,7 @@ function DiscordAdvancedSettings({
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = open ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
+  const { t } = useI18n();
 
   const updateConnection = useMessengerStore((s) => s.updateConnection);
   const saveDiscordConfig = useMessengerStore((s) => s.saveDiscordConfig);
@@ -1118,6 +1190,49 @@ function DiscordAdvancedSettings({
           />
         </div>
 
+        <div data-settings-item="integrations.discord.trusted-bots" className="space-y-2">
+          <div className="text-xs font-medium text-foreground">
+            {t('settings.integrations.discord.trustedBots.title')}
+          </div>
+          <div className="text-[11px] text-muted-foreground leading-snug">
+            {t('settings.integrations.discord.trustedBots.description')}
+          </div>
+          <textarea
+            value={(conn.trustedBotIds ?? []).join('\n')}
+            onChange={(e) => {
+              const trustedBotIds = e.target.value
+                .split(/[\s,]+/)
+                .map((id) => id.trim())
+                .filter(Boolean);
+              updateConnection('discord', { trustedBotIds });
+            }}
+            onBlur={() => setTimeout(() => saveDiscordConfig(), 0)}
+            placeholder={t('settings.integrations.discord.trustedBots.placeholder')}
+            className={cn(inputClass, 'min-h-16 resize-y')}
+          />
+        </div>
+
+        <div data-settings-item="integrations.discord.dynamic-slash" className="space-y-1.5">
+          <label className="flex cursor-pointer items-start gap-2 py-1">
+            <Checkbox
+              checked={Boolean(conn.registerDynamicSlashCommands)}
+              onChange={(checked) => {
+                updateConnection('discord', { registerDynamicSlashCommands: Boolean(checked) });
+                setTimeout(() => saveDiscordConfig(), 0);
+              }}
+              ariaLabel={t('settings.integrations.discord.dynamicSlash.title')}
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-medium text-foreground">
+                {t('settings.integrations.discord.dynamicSlash.title')}
+              </span>
+              <span className="block text-[11px] text-muted-foreground leading-snug">
+                {t('settings.integrations.discord.dynamicSlash.description')}
+              </span>
+            </span>
+          </label>
+        </div>
+
         {/* OpenCode bridge — when on, the listeners route inbound messages
             through OpenCode and stream the response back. This is what turns
             the messenger into a real OpenChamber chat surface, instead of the
@@ -1332,7 +1447,9 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <DiscordCommandsButton />
+          <div data-settings-item="integrations.discord.commands">
+            <DiscordCommandsButton />
+          </div>
           <button
             type="button"
             onClick={() => testConnection(conn.type)}

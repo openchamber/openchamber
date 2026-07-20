@@ -21,10 +21,13 @@ import {
 
 const CATEGORY_LABEL_KEYS: Record<DiscordCommandCategory, I18nKey> = {
   chat: 'settings.integrations.discord.commands.category.chat',
+  project: 'settings.integrations.discord.commands.category.project',
   model: 'settings.integrations.discord.commands.category.model',
   shell: 'settings.integrations.discord.commands.category.shell',
   git: 'settings.integrations.discord.commands.category.git',
+  mcp: 'settings.integrations.discord.commands.category.mcp',
   queue: 'settings.integrations.discord.commands.category.queue',
+  ops: 'settings.integrations.discord.commands.category.ops',
   sharing: 'settings.integrations.discord.commands.category.sharing',
 };
 

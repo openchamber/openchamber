@@ -2,9 +2,14 @@ import WebSocket from 'ws';
 import crypto from 'node:crypto';
 import { createDiscordModelWizard } from './discord-model-wizard.js';
 import { createDiscordCommandWizards } from './discord-command-wizards.js';
+import { createDiscordGatewayProxyAgent } from './discord-proxy-agent.js';
 import { registerApplicationCommands } from './discord-commands.js';
 import { resolveDiscordMentions } from './messenger-attachments.js';
-import { parseLeadingCommand, COMMAND_HELP } from './messenger-commands.js';
+import { parseLeadingCommand, isKnownMessengerCommand } from './messenger-commands.js';
+import {
+  evaluateDiscordAccess,
+  normalizeDiscordAccessSettings,
+} from './discord-access.js';
 import {
   normalizeLegacyDiscordCustomId,
   normalizeLegacyDiscordSelectValue,
@@ -14,8 +19,6 @@ import {
 // reserves `/` for its native slash-command UI, so `!cmd` is the natural
 // text-command prefix; these route through the same bridge command pipeline
 // as `/cmd`.
-const MESSENGER_COMMAND_NAMES = new Set(COMMAND_HELP.map((c) => c.name));
-
 /**
  * Discord Gateway listener registry, keyed by bot token.
  *
@@ -112,6 +115,7 @@ function buildAutoReply(message) {
 const MENTION_LOOKUP_TTL_MS = 10 * 60_000;
 const guildRolesCache = new Map(); // guildId → { at, roles: Map<id, name> }
 const channelNameCache = new Map(); // channelId → { at, name }
+const guildOwnerCache = new Map(); // guildId → { at, ownerId }
 
 async function lookupGuildRoleName(state, guildId, roleId) {
   if (!guildId || !roleId) return null;
@@ -136,6 +140,51 @@ async function lookupChannelName(state, channelId) {
   const name = r.ok ? r.body?.name ?? null : null;
   channelNameCache.set(channelId, { at: Date.now(), name });
   return name;
+}
+
+async function lookupGuildOwnerId(state, guildId) {
+  if (!guildId) return null;
+  const cached = guildOwnerCache.get(guildId);
+  if (cached && Date.now() - cached.at < MENTION_LOOKUP_TTL_MS) {
+    return cached.ownerId;
+  }
+  const known = state.guildOwnerIds?.get(String(guildId)) ?? null;
+  if (known) {
+    guildOwnerCache.set(guildId, { at: Date.now(), ownerId: known });
+    return known;
+  }
+  const r = await restCall(state.token, 'GET', `/guilds/${encodeURIComponent(guildId)}`);
+  const ownerId = r.ok ? r.body?.owner_id ?? null : null;
+  guildOwnerCache.set(guildId, { at: Date.now(), ownerId });
+  if (ownerId) state.guildOwnerIds?.set(String(guildId), String(ownerId));
+  return ownerId;
+}
+
+async function resolveRoleNames(state, guildId, roleIds) {
+  const ids = Array.isArray(roleIds) ? roleIds : [];
+  const names = await Promise.all(ids.map((roleId) => lookupGuildRoleName(state, guildId, roleId)));
+  return names.filter(Boolean);
+}
+
+function memberPermissions(member) {
+  return member?.permissions ?? member?.permissions_new ?? null;
+}
+
+async function canProcessDiscordUser(state, { guildId, user, member }) {
+  const access = normalizeDiscordAccessSettings({
+    trustedBotIds: state.trustedBotIds,
+  });
+  const roleNames = await resolveRoleNames(state, guildId, member?.roles);
+  const guildOwnerId = await lookupGuildOwnerId(state, guildId);
+  return evaluateDiscordAccess({
+    userId: user?.id ?? null,
+    isBot: Boolean(user?.bot),
+    guildId: guildId ?? null,
+    guildOwnerId,
+    permissions: memberPermissions(member),
+    roleNames,
+    ...access,
+  });
 }
 
 function inboundFromMessage(message) {
@@ -181,6 +230,19 @@ async function dispatchMessageCreate(state, message, broadcastEvent, bridge) {
     return;
   }
 
+  if (state.botId && message.author?.id === state.botId) return;
+
+  const access = await canProcessDiscordUser(state, {
+    guildId: message.guild_id ?? null,
+    user: message.author ?? {},
+    member: message.member ?? null,
+  });
+  if (!access.allowed) {
+    state.accessDeniedCount = (state.accessDeniedCount || 0) + 1;
+    state.lastAccessDeniedReason = access.reason;
+    return;
+  }
+
   const inbound = inboundFromMessage(message);
   state.recent.push(inbound);
   if (state.recent.length > RECENT_BUFFER_SIZE) {
@@ -194,9 +256,6 @@ async function dispatchMessageCreate(state, message, broadcastEvent, bridge) {
   } catch {
     // ignore
   }
-
-  if (message.author?.bot) return;
-  if (state.botId && message.author?.id === state.botId) return;
 
   let text = typeof message.content === 'string' ? message.content.trim() : '';
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
@@ -249,7 +308,7 @@ async function dispatchMessageCreate(state, message, broadcastEvent, bridge) {
   // (e.g. `!ping`) stay on the legacy auto-reply path below.
   const bangCommand =
     text.startsWith('!') ? parseLeadingCommand(text, { allowBang: true }) : null;
-  const isKnownBangCommand = Boolean(bangCommand && MESSENGER_COMMAND_NAMES.has(bangCommand.name));
+  const isKnownBangCommand = Boolean(bangCommand && isKnownMessengerCommand(bangCommand.name));
 
   // OpenCode bridge — every non-empty message that isn't an unknown `!cmd`
   // shortcut is forwarded to OpenCode and the streaming response is mirrored
@@ -366,32 +425,39 @@ function dispatchThreadDelete(state, data, bridge, reason = 'deleted') {
   }
 }
 
-/**
- * Known messenger command names that can be handled as native Discord slash commands.
- * Kept in sync with messenger-commands.js COMMAND_HELP.
- */
-const KNOWN_SLASH_COMMANDS = new Set([
-  'help', 'status', 'abort', 'new', 'undo', 'redo',
-  'compact', 'summary', 'init', 'review', 'shell',
-  'model', 'agent', 'verbosity', 'yolo', 'permissions', 'skill', 'sessions',
-  'session', 'resume', 'fork', 'share', 'unshare',
-  'queue', 'clear-queue', 'mention-mode',
-  'new-worktree', 'merge-worktree', 'schedule',
-]);
-
 async function handleApplicationCommand(state, interaction, broadcastEvent, bridge) {
   const cmdName = interaction.data?.name;
   if (!cmdName || typeof cmdName !== 'string') return;
+  const dynamicCommand = state.dynamicSlashCommands?.get(cmdName) ?? null;
 
   // Only handle commands we know about — pass unknown ones through silently.
-  if (!KNOWN_SLASH_COMMANDS.has(cmdName)) return;
+  if (!isKnownMessengerCommand(cmdName) && !dynamicCommand) return;
+
+  const user = interaction.member?.user ?? interaction.user ?? {};
+  const access = await canProcessDiscordUser(state, {
+    guildId: interaction.guild_id ?? null,
+    user,
+    member: interaction.member ?? null,
+  });
+  if (!access.allowed) {
+    await restCall(state.token, 'POST', `/interactions/${interaction.id}/${interaction.token}/callback`, {
+      type: 4,
+      data: {
+        flags: 64,
+        content: 'Access denied. Ask a server owner/admin to grant the OpenChamber role.',
+      },
+    }).catch(() => {});
+    state.accessDeniedCount = (state.accessDeniedCount || 0) + 1;
+    state.lastAccessDeniedReason = access.reason;
+    return;
+  }
 
   // Interactive wizard commands — handle with select menus instead of text.
-  if (cmdName === 'model' && state.modelWizard) {
+  if (!dynamicCommand && cmdName === 'model' && state.modelWizard) {
     await state.modelWizard.start(state, interaction);
     return;
   }
-  if (state.commandWizards) {
+  if (!dynamicCommand && state.commandWizards) {
     if (cmdName === 'verbosity') {
       await state.commandWizards.startVerbosity(state, interaction);
       return;
@@ -402,6 +468,10 @@ async function handleApplicationCommand(state, interaction, broadcastEvent, brid
     }
     if (cmdName === 'skill') {
       await state.commandWizards.startSkill(state, interaction);
+      return;
+    }
+    if (cmdName === 'login') {
+      await state.commandWizards.startLogin(state, interaction);
       return;
     }
     if (cmdName === 'yolo' || cmdName === 'permissions') {
@@ -434,20 +504,21 @@ async function handleApplicationCommand(state, interaction, broadcastEvent, brid
   // Run the command through the bridge's command pipeline.
   if (bridge?.runCommand) {
     try {
-      const user = interaction.member?.user ?? interaction.user ?? {};
-      const result = await bridge.runCommand({
+      const base = {
         type: 'discord',
         token: state.token,
         channelId: interaction.channel_id,
         threadId: null,
-        commandName: cmdName,
         args,
         from: {
           id: user.id,
           username: user.username,
           firstName: user.global_name ?? null,
         },
-      });
+      };
+      const result = dynamicCommand
+        ? await bridge.runDynamicCommand?.({ ...base, dynamicCommand })
+        : await bridge.runCommand({ ...base, commandName: cmdName });
 
       if (result?.reply) {
         // Edit the deferred ephemeral message with the command output.
@@ -558,6 +629,25 @@ async function dispatchInteractionCreate(state, interaction, broadcastEvent, bri
 
   // We only care about MESSAGE_COMPONENT (type 3) interactions.
   if (interaction.type !== 3) return;
+
+  const componentUser = interaction.member?.user ?? interaction.user ?? {};
+  const componentAccess = await canProcessDiscordUser(state, {
+    guildId: interaction.guild_id ?? null,
+    user: componentUser,
+    member: interaction.member ?? null,
+  });
+  if (!componentAccess.allowed) {
+    await restCall(state.token, 'POST', `/interactions/${interaction.id}/${interaction.token}/callback`, {
+      type: 4,
+      data: {
+        flags: 64,
+        content: 'Access denied. Ask a server owner/admin to grant the OpenChamber role.',
+      },
+    }).catch(() => {});
+    state.accessDeniedCount = (state.accessDeniedCount || 0) + 1;
+    state.lastAccessDeniedReason = componentAccess.reason;
+    return;
+  }
 
   const rawCustomId = interaction.data?.custom_id ?? '';
   const customId = normalizeLegacyDiscordCustomId(rawCustomId);
@@ -696,19 +786,31 @@ function send(ws, payload) {
  * Register the OpenChamber agent slash commands for this listener's bot, once per process.
  * Guild-scoped when a guildId is configured (instant), otherwise global.
  */
-async function ensureSlashCommandsRegistered(state) {
+async function ensureSlashCommandsRegistered(state, bridge) {
   if (state.slashCommandsRegistered) return;
   if (!state.applicationId) return;
   state.slashCommandsRegistered = true; // mark up-front so we don't double-fire
   try {
+    // Dynamic OpenCode `-cmd` / `-skill` slash registration is opt-in.
+    // When disabled we still PUT the core set so Discord drops any previously
+    // registered dynamic commands after a settings change + listener restart.
+    let dynamic = null;
+    if (state.registerDynamicSlashCommands) {
+      const listed = bridge?.listDynamicApplicationCommands
+        ? await bridge.listDynamicApplicationCommands().catch(() => ({}))
+        : {};
+      dynamic = { enabled: true, commands: listed?.commands ?? [], skills: listed?.skills ?? [] };
+    }
     const result = await registerApplicationCommands({
       restCall,
       token: state.token,
       applicationId: state.applicationId,
       guildId: state.guildId || null,
+      dynamic,
     });
     if (result.ok) {
-      console.log(`[DISCORD] Registered slash commands (${result.scope} scope).`);
+      state.dynamicSlashCommands = result.dynamicCommandMap ?? new Map();
+      console.log(`[DISCORD] Registered ${result.commandCount ?? 'slash'} commands (${result.scope} scope).`);
     } else {
       // Allow a retry on the next READY (e.g. transient 5xx or missing scope
       // that the user fixes by re-inviting the bot with applications.commands).
@@ -728,7 +830,9 @@ function startSession(state, broadcastEvent, bridge) {
   if (state.stopRequested) return;
   let ws;
   try {
-    ws = new WebSocket(GATEWAY_URL);
+    ws = new WebSocket(GATEWAY_URL, {
+      agent: createDiscordGatewayProxyAgent({ targetUrl: GATEWAY_URL }),
+    });
   } catch (err) {
     state.lastError = err?.message ?? 'gateway connect failed';
     return scheduleReconnect(state, broadcastEvent, bridge);
@@ -799,6 +903,11 @@ function startSession(state, broadcastEvent, bridge) {
           state.sessionId = payload.d?.session_id ?? null;
           state.botId = payload.d?.user?.id ?? null;
           state.botUsername = payload.d?.user?.username ?? null;
+          for (const guild of Array.isArray(payload.d?.guilds) ? payload.d.guilds : []) {
+            if (guild?.id && guild?.owner_id) {
+              state.guildOwnerIds.set(String(guild.id), String(guild.owner_id));
+            }
+          }
           // Bots authenticate with the application id baked into the token, so
           // the bot user id doubles as the application id for command registration.
           state.applicationId = payload.d?.application?.id ?? state.botId ?? null;
@@ -807,11 +916,17 @@ function startSession(state, broadcastEvent, bridge) {
           // Register native slash commands so dropdown wizards + autocomplete
           // suggestions are available. Best-effort and idempotent (Discord
           // upserts by name); only run once per process per bot.
-          void ensureSlashCommandsRegistered(state);
+          void ensureSlashCommandsRegistered(state, bridge);
           broadcastEvent?.('messenger.discord.listener_ready', {
             botId: state.botId,
             botUsername: state.botUsername,
           });
+          return;
+        }
+        if (t === 'GUILD_CREATE') {
+          if (payload.d?.id && payload.d?.owner_id) {
+            state.guildOwnerIds.set(String(payload.d.id), String(payload.d.owner_id));
+          }
           return;
         }
         if (t === 'MESSAGE_CREATE') {
@@ -955,6 +1070,11 @@ export function createDiscordListenerRegistry({ broadcastEvent, bridge = null } 
       autoReply: opts.autoReply !== false,
       bridgeEnabled: opts.bridgeEnabled !== false,
       resolveProject: opts.resolveProject ?? null,
+      trustedBotIds: normalizeDiscordAccessSettings({ trustedBotIds: opts.trustedBotIds }).trustedBotIds,
+      // Opt-in: register OpenCode commands/skills as Discord `-cmd`/`-skill` slash commands.
+      registerDynamicSlashCommands: Boolean(opts.registerDynamicSlashCommands),
+      dynamicSlashCommands: new Map(),
+      guildOwnerIds: new Map(),
       ws: null,
       heartbeatTimer: null,
       heartbeatAcked: true,
@@ -983,6 +1103,9 @@ export function createDiscordListenerRegistry({ broadcastEvent, bridge = null } 
       reconnectTimer: null,
       applicationId: null,
       slashCommandsRegistered: false,
+      dynamicSlashCommands: new Map(),
+      accessDeniedCount: 0,
+      lastAccessDeniedReason: null,
       modelWizard,
       commandWizards,
     };
@@ -1048,6 +1171,8 @@ export function createDiscordListenerRegistry({ broadcastEvent, bridge = null } 
       lastRawMessageGuildId: state.lastRawMessageGuildId,
       filteredOutCount: state.filteredOutCount,
       lastFilteredGuildId: state.lastFilteredGuildId,
+      accessDeniedCount: state.accessDeniedCount || 0,
+      lastAccessDeniedReason: state.lastAccessDeniedReason ?? null,
       recentCount: state.recent.length,
     };
   }

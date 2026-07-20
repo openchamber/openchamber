@@ -52,6 +52,21 @@ const COMMAND_HELP = [
     usage: '/status',
     summary: 'Show the current session, project, model and agent for this conversation',
   },
+  {
+    name: 'add-project',
+    usage: '/add-project <absolute-path> [label]',
+    summary: 'Register an existing directory as an OpenChamber project and bind this Discord channel',
+  },
+  {
+    name: 'create-new-project',
+    usage: '/create-new-project <name-or-absolute-path>',
+    summary: 'Create a folder, register it as a project, and ensure the Discord project channel exists',
+  },
+  {
+    name: 'remove-project',
+    usage: '/remove-project',
+    summary: 'Unbind this Discord channel from its project without deleting files or Discord history',
+  },
   { name: 'abort', usage: '/abort', summary: 'Stop the current OpenCode turn' },
   {
     name: 'new',
@@ -72,6 +87,27 @@ const COMMAND_HELP = [
   },
   { name: 'init', usage: '/init', summary: 'Run OpenCode `init` (creates/updates AGENTS.md)' },
   { name: 'review', usage: '/review', summary: 'Run OpenCode `review` workflow' },
+  {
+    name: 'diff',
+    usage: '/diff',
+    summary: 'Show a reviewable git diff for this conversation\'s bound project/worktree',
+  },
+  {
+    name: 'tunnel',
+    usage: '/tunnel [cloudflare|ngrok] [quick|managed-local|managed-remote]',
+    summary:
+      'Expose the running OpenChamber web server via the configured tunnel provider (not an arbitrary local port) and reply with the public URL',
+  },
+  {
+    name: 'login',
+    usage: '/login [provider]',
+    summary: 'Start the provider auth flow using OpenCode auth endpoints (OAuth link or API-key guidance)',
+  },
+  {
+    name: 'usage',
+    usage: '/usage',
+    summary: 'Show estimated token usage for the current session (`/credits` is an alias)',
+  },
   {
     name: 'shell',
     usage: '/shell <command>',
@@ -127,14 +163,19 @@ const COMMAND_HELP = [
     usage: '/fork [n]',
     summary: 'Branch from an earlier user message — `/fork` lists messages, `/fork 2` forks in a new thread',
   },
+  {
+    name: 'btw',
+    usage: '/btw <side question>',
+    summary: 'Fork the current session into a new thread and answer a side question without interrupting this run',
+  },
   { name: 'share', usage: '/share', summary: 'Generate a public URL for the current session' },
   { name: 'unshare', usage: '/unshare', summary: 'Revoke the public URL for the current session' },
   {
     name: 'queue',
     usage: '/queue <message>',
-    summary: 'Queue a message to send automatically after the current response finishes',
+    summary: 'Queue a message to send automatically after the current response finishes; suffix with `. queue` too',
   },
-  { name: 'clear-queue', usage: '/clear-queue', summary: 'Clear all queued messages for this conversation' },
+  { name: 'clear-queue', usage: '/clear-queue [n]', summary: 'Clear all queued messages, or one queued position' },
   {
     name: 'mention-mode',
     usage: '/mention-mode',
@@ -146,9 +187,35 @@ const COMMAND_HELP = [
     summary: 'Create an isolated git worktree + branch and work there in a new thread',
   },
   {
+    name: 'worktrees',
+    usage: '/worktrees',
+    summary: 'List git worktrees for this channel project',
+  },
+  {
+    name: 'toggle-worktrees',
+    usage: '/toggle-worktrees [on|off]',
+    summary: 'Toggle the project default that creates a worktree for new Discord sessions',
+  },
+  {
     name: 'merge-worktree',
     usage: '/merge-worktree',
     summary: 'Squash-merge this worktree\'s commits into the default branch',
+  },
+  {
+    name: 'mcp',
+    usage: '/mcp [connect|disconnect <server>]',
+    summary:
+      'List configured MCP servers, or update OpenCode config connect/disconnect + refresh (not a live MCP process manager)',
+  },
+  {
+    name: 'context-usage',
+    usage: '/context-usage',
+    summary: 'Show token/context usage for the current session',
+  },
+  {
+    name: 'session-id',
+    usage: '/session-id',
+    summary: 'Show the current OpenCode session id and copyable Discord/session reference',
   },
   {
     name: 'schedule',
@@ -156,10 +223,25 @@ const COMMAND_HELP = [
     summary:
       'Schedule a prompt in the project scheduler (synced with the web UI) — `when` is a UTC ISO date (2026-03-01T09:00) or cron (`0 9 * * 1`, UTC). Each run starts a fresh session in the project.',
   },
+  {
+    name: 'queue-command',
+    usage: '/queue-command <opencode-command> [args]',
+    summary: 'Queue an OpenCode slash command to run after the current response finishes (in-memory until idle)',
+  },
+  {
+    name: 'reload-opencode',
+    usage: '/reload-opencode',
+    summary:
+      'Ask OpenChamber to reload/reconnect its managed OpenCode path (cannot kill/restart an external OpenCode process)',
+  },
 ];
 
 /** Aliases for COMMAND_HELP entries — recognised by the gate but not listed twice in `/help`. */
-const COMMAND_ALIASES = new Map([['permissions', 'yolo']]);
+const COMMAND_ALIASES = new Map([
+  ['permissions', 'yolo'],
+  ['credits', 'usage'],
+  ['restart-opencode-server', 'reload-opencode'],
+]);
 
 const KNOWN_TOP_LEVEL = new Set([
   ...COMMAND_HELP.map((c) => c.name),
@@ -204,6 +286,38 @@ export function parseLeadingCommand(text, { allowBang = false } = {}) {
     // where the user pasted additional context.
     body: trimmed.includes('\n') ? trimmed.split('\n').slice(1).join('\n').trim() : '',
   };
+}
+
+export function stripBtwSuffix(text) {
+  if (typeof text !== 'string') return null;
+  const original = text.trim();
+  if (!original) return null;
+
+  const finalLineMatch = original.match(/^(?<body>[\s\S]*?)\n\s*btw\s*$/i);
+  if (finalLineMatch?.groups?.body?.trim()) {
+    return { text: finalLineMatch.groups.body.trim(), suffix: 'final-line' };
+  }
+
+  const punctuationMatch = original.match(/^(?<body>[\s\S]*?)[.!]\s+btw\s*$/i);
+  if (punctuationMatch?.groups?.body?.trim()) {
+    return { text: punctuationMatch.groups.body.trim(), suffix: 'punctuation' };
+  }
+
+  const trailingSentenceMatch = original.match(/^(?<body>[\s\S]*?)\s+btw\.\s*$/i);
+  if (trailingSentenceMatch?.groups?.body?.trim()) {
+    return { text: trailingSentenceMatch.groups.body.trim(), suffix: 'trailing-sentence' };
+  }
+
+  return null;
+}
+
+export function stripQueueSuffix(text) {
+  if (typeof text !== 'string') return null;
+  const original = text.trim();
+  if (!original) return null;
+  const match = original.match(/^(?<body>[\s\S]*?)[.!]\s+queue\s*$/i);
+  if (!match?.groups?.body?.trim()) return null;
+  return { text: match.groups.body.trim(), suffix: 'punctuation' };
 }
 
 function tokenHash(token) {
@@ -273,7 +387,7 @@ export async function executeMessengerCommand({
     return null;
   }
 
-  const cmd = command.name;
+  const cmd = COMMAND_ALIASES.get(command.name) ?? command.name;
   const sessionId = binding?.sessionId ?? null;
 
   switch (cmd) {
@@ -325,9 +439,69 @@ export async function executeMessengerCommand({
       return { reply: lines.join('\n') };
     }
 
+    case 'add-project': {
+      if (!bridgeOps?.addProject) {
+        return { reply: '✗ `/add-project` is not available on this surface.' };
+      }
+      const [pathArg, ...labelParts] = command.args.trim().split(/\s+/);
+      if (!pathArg) {
+        return { reply: '✗ Usage: `/add-project <absolute-path> [label]`.' };
+      }
+      const r = await bridgeOps.addProject({ path: pathArg, label: labelParts.join(' ').trim() || null });
+      if (!r.ok) return { reply: `✗ Could not add project: ${r.error ?? 'unknown error'}` };
+      return {
+        reply: [
+          `✓ Project bound: *${r.project.label ?? r.project.path}*`,
+          `📁 \`${r.project.path}\``,
+          r.discord?.ok && r.discord.channelId
+            ? `Discord channel: <#${r.discord.channelId}>${r.discord.created ? ' _(created)_' : ' _(reused)_'}`
+            : `Discord channel: ${r.discord?.error ?? 'not configured'}`,
+        ].join('\n'),
+      };
+    }
+
+    case 'create-new-project': {
+      if (!bridgeOps?.createNewProject) {
+        return { reply: '✗ `/create-new-project` is not available on this surface.' };
+      }
+      const raw = command.args.trim();
+      if (!raw) {
+        return { reply: '✗ Usage: `/create-new-project <name-or-absolute-path>`.' };
+      }
+      const r = await bridgeOps.createNewProject({ value: raw });
+      if (!r.ok) return { reply: `✗ Could not create project: ${r.error ?? 'unknown error'}` };
+      return {
+        reply: [
+          `✓ Project created and bound: *${r.project.label ?? r.project.path}*`,
+          `📁 \`${r.project.path}\``,
+          r.discord?.ok && r.discord.channelId
+            ? `Discord channel: <#${r.discord.channelId}>${r.discord.created ? ' _(created)_' : ' _(reused)_'}`
+            : `Discord channel: ${r.discord?.error ?? 'not configured'}`,
+        ].join('\n'),
+      };
+    }
+
+    case 'remove-project': {
+      if (!bridgeOps?.removeProjectBinding) {
+        return { reply: '✗ `/remove-project` is not available on this surface.' };
+      }
+      const r = await bridgeOps.removeProjectBinding();
+      if (!r.ok) return { reply: `✗ Could not remove project binding: ${r.error ?? 'unknown error'}` };
+      return {
+        reply: [
+          '✓ Project binding removed for this Discord channel.',
+          r.projectPath ? `Files were not deleted: \`${r.projectPath}\`.` : 'No project files were touched.',
+          r.channelId ? `Discord channel <#${r.channelId}> was not deleted.` : 'Discord history was not deleted.',
+        ].join('\n'),
+      };
+    }
+
     case 'abort': {
       if (!sessionId) return { reply: '✗ No session is active on this conversation.' };
       const r = await opencode.abortSession(sessionId, binding?.projectPath ?? undefined);
+      if (r.ok) {
+        bridgeOps?.markSessionAborted?.(sessionId);
+      }
       // Aborting clears any queued messages for the surface.
       let clearedNote = '';
       if (r.ok && bridgeOps?.clearQueue) {
@@ -394,6 +568,47 @@ export async function executeMessengerCommand({
           ? `⏳ Running \`/${cmd}\` against the current session…`
           : `✗ \`/${cmd}\` failed: ${r.error ?? 'unknown error'}`,
       };
+    }
+
+    case 'diff': {
+      if (!bridgeOps?.gitDiff) {
+        return { reply: '✗ `/diff` is not available on this surface.' };
+      }
+      const r = await bridgeOps.gitDiff();
+      return { reply: r.ok ? r.reply : `✗ Diff failed: ${r.error ?? 'unknown error'}` };
+    }
+
+    case 'tunnel': {
+      if (!bridgeOps?.startTunnel) {
+        return { reply: '✗ `/tunnel` is not available on this surface.' };
+      }
+      const r = await bridgeOps.startTunnel({ args: command.args.trim() });
+      if (!r.ok) return { reply: `✗ Tunnel failed: ${r.error ?? 'unknown error'}` };
+      return {
+        reply: [
+          '🔗 **OpenChamber tunnel is live**',
+          r.publicUrl ? `${r.publicUrl}` : null,
+          r.provider ? `Provider: \`${r.provider}\`${r.mode ? ` · mode \`${r.mode}\`` : ''}` : null,
+          r.note ?? null,
+        ].filter(Boolean).join('\n'),
+      };
+    }
+
+    case 'login': {
+      if (!bridgeOps?.loginInfo) {
+        return { reply: '✗ `/login` is not available on this surface.' };
+      }
+      const r = await bridgeOps.loginInfo({ provider: command.args.trim() || null });
+      return { reply: r.ok ? r.reply : `✗ Login setup failed: ${r.error ?? 'unknown error'}` };
+    }
+
+    case 'usage': {
+      if (!sessionId) return { reply: '✗ No session is active on this conversation.' };
+      if (!bridgeOps?.usageSummary) {
+        return { reply: '✗ `/usage` is not available on this surface.' };
+      }
+      const r = await bridgeOps.usageSummary();
+      return { reply: r.ok ? r.reply : `✗ Usage unavailable: ${r.error ?? 'unknown error'}` };
     }
 
     case 'shell': {
@@ -872,6 +1087,24 @@ export async function executeMessengerCommand({
       };
     }
 
+    case 'btw': {
+      const text = [command.args, command.body].filter(Boolean).join('\n').trim();
+      if (!text) {
+        return { reply: '✗ Usage: `/btw <side question>` — e.g. `/btw how should we test this?`.' };
+      }
+      if (!sessionId) {
+        return { reply: '✗ No session is active on this conversation — send a regular message first, then ask a side question with `/btw`.' };
+      }
+      if (!bridgeOps?.btwQuestion) {
+        return { reply: '✗ `/btw` is not available on this surface.' };
+      }
+      const r = await bridgeOps.btwQuestion({ text });
+      if (!r.ok) return { reply: `✗ Could not start side thread: ${r.error ?? 'unknown error'}` };
+      return {
+        reply: `↪ Side thread started${r.threadId ? ` in <#${r.threadId}>` : ''}. The current run was left alone.`,
+      };
+    }
+
     case 'share': {
       if (!sessionId) return { reply: '✗ No session is active on this conversation.' };
       const r = await opencode.shareSession(sessionId, binding?.projectPath ?? undefined);
@@ -908,10 +1141,17 @@ export async function executeMessengerCommand({
       if (!bridgeOps?.clearQueue) {
         return { reply: '✗ `/clear-queue` is not available on this surface.' };
       }
-      const cleared = await bridgeOps.clearQueue().catch(() => 0);
+      const raw = command.args.trim();
+      const position = raw ? Number.parseInt(raw, 10) : null;
+      if (raw && (!Number.isFinite(position) || position < 1)) {
+        return { reply: '✗ Usage: `/clear-queue [n]` where `n` is a queued message position.' };
+      }
+      const cleared = await (position ? bridgeOps.clearQueue({ position }) : bridgeOps.clearQueue()).catch(() => 0);
       return {
         reply: cleared > 0
-          ? `🗑 Cleared ${cleared} queued message${cleared === 1 ? '' : 's'}.`
+          ? position
+            ? `🗑 Cleared queued message ${position}.`
+            : `🗑 Cleared ${cleared} queued message${cleared === 1 ? '' : 's'}.`
           : '_(the queue was already empty)_',
       };
     }
@@ -943,6 +1183,133 @@ export async function executeMessengerCommand({
           `📁 \`${r.path}\``,
           `🌿 Branch: \`${r.branch}\``,
           r.threadId ? `Continue in <#${r.threadId}> — everything there happens inside the worktree.` : '',
+        ].filter(Boolean).join('\n'),
+      };
+    }
+
+    case 'worktrees': {
+      if (!bridgeOps?.listWorktrees) {
+        return { reply: '✗ `/worktrees` is not available on this surface.' };
+      }
+      const r = await bridgeOps.listWorktrees();
+      if (!r.ok) return { reply: `✗ Could not list worktrees: ${r.error ?? 'unknown error'}` };
+      const rows = (r.worktrees ?? []).map((wt, index) => ({
+        n: String(index + 1),
+        branch: wt.branch ?? (wt.detached ? '(detached)' : '(unknown)'),
+        path: wt.path,
+      }));
+      if (rows.length === 0) return { reply: '_(no git worktrees found for this project)_' };
+      return {
+        reply: ['**Project worktrees**', '', fmtTable(rows, [
+          { key: 'n' },
+          { key: 'branch', code: true },
+          { key: 'path', code: true },
+        ])].join('\n'),
+      };
+    }
+
+    case 'toggle-worktrees': {
+      if (!bridgeOps?.toggleAutoWorktrees) {
+        return { reply: '✗ `/toggle-worktrees` is not available on this surface.' };
+      }
+      if (!binding?.projectPath) {
+        return { reply: '✗ This channel is not bound to a project yet.' };
+      }
+      const raw = command.args.trim().toLowerCase();
+      let enabled = null;
+      if (raw) {
+        if (['on', 'true', 'yes', 'enable', 'enabled'].includes(raw)) enabled = true;
+        else if (['off', 'false', 'no', 'disable', 'disabled'].includes(raw)) enabled = false;
+        else return { reply: '✗ Usage: `/toggle-worktrees [on|off]`.' };
+      }
+      const r = await bridgeOps.toggleAutoWorktrees({ enabled });
+      if (!r.ok) return { reply: `✗ Could not update worktree default: ${r.error ?? 'unknown error'}` };
+      return {
+        reply: r.enabled
+          ? '✓ Auto-worktrees **enabled** for this project. New channel sessions can start in isolated worktrees when the bridge creates them.'
+          : '✓ Auto-worktrees **disabled** for this project.',
+      };
+    }
+
+    case 'mcp': {
+      if (!bridgeOps?.mcp) {
+        return { reply: '✗ `/mcp` is not available on this surface.' };
+      }
+      const args = command.args.trim();
+      if (!args) {
+        const r = await bridgeOps.mcp({ action: 'list' });
+        if (!r.ok) return { reply: `✗ MCP status unavailable: ${r.error ?? 'unknown error'}` };
+        const servers = r.servers ?? [];
+        if (servers.length === 0) {
+          return { reply: '_(no MCP servers configured for this project)_ ' };
+        }
+        const rows = servers.map((server) => ({
+          name: server.name,
+          status: server.status ?? 'configured',
+          source: server.scope ?? server.source ?? '',
+        }));
+        return {
+          reply: [
+            '**MCP servers**',
+            '',
+            fmtTable(rows, [
+              { key: 'name', code: true },
+              { key: 'status' },
+              { key: 'source', italic: true },
+            ]),
+            '',
+            'Use `/mcp connect <name>` or `/mcp disconnect <name>` to update OpenCode MCP config and refresh. This is not a separate live MCP supervisor.',
+          ].join('\n'),
+        };
+      }
+      const match = args.match(/^(connect|disconnect|enable|disable)\s+(.+)$/i);
+      if (!match) {
+        return { reply: '✗ Usage: `/mcp` or `/mcp connect <server>` / `/mcp disconnect <server>`.' };
+      }
+      const action = match[1].toLowerCase() === 'enable' ? 'connect'
+        : match[1].toLowerCase() === 'disable' ? 'disconnect'
+          : match[1].toLowerCase();
+      const name = match[2].trim();
+      const r = await bridgeOps.mcp({ action, name });
+      return {
+        reply: r.ok
+          ? `✓ MCP server \`${name}\` marked ${action === 'connect' ? 'connected' : 'disconnected'} in OpenCode config and refresh was requested.`
+          : `✗ MCP ${action} failed: ${r.error ?? 'unsupported by this OpenCode server'}`,
+      };
+    }
+
+    case 'context-usage': {
+      if (!sessionId) return { reply: '✗ No session is active on this conversation.' };
+      if (!bridgeOps?.contextUsage) {
+        return { reply: '✗ `/context-usage` is not available on this surface.' };
+      }
+      const r = await bridgeOps.contextUsage();
+      if (!r.ok) return { reply: `✗ Could not read context usage: ${r.error ?? 'unknown error'}` };
+      const percent = r.contextLimit && r.totalTokens
+        ? ` (${Math.round((r.totalTokens / r.contextLimit) * 100)}% of context)`
+        : '';
+      return {
+        reply: [
+          '**Context usage**',
+          `Session: \`${sessionId}\``,
+          `Last assistant turn: ${(r.totalTokens ?? 0).toLocaleString()} tokens${percent}`,
+          r.contextLimit ? `Context window: ${r.contextLimit.toLocaleString()} tokens` : 'Context window: unknown',
+        ].join('\n'),
+      };
+    }
+
+    case 'session-id': {
+      if (!sessionId) return { reply: '✗ No session is active on this conversation.' };
+      if (!bridgeOps?.sessionReference) {
+        return { reply: `Session id: \`${sessionId}\`` };
+      }
+      const r = await bridgeOps.sessionReference();
+      if (!r.ok) return { reply: `Session id: \`${sessionId}\`\nReference lookup failed: ${r.error ?? 'unknown error'}` };
+      return {
+        reply: [
+          `Session id: \`${r.sessionId}\``,
+          r.discordUrl ? `Discord: ${r.discordUrl}` : null,
+          `Reference: \`${r.reference ?? r.sessionId}\``,
         ].filter(Boolean).join('\n'),
       };
     }
@@ -1024,6 +1391,40 @@ export async function executeMessengerCommand({
           'Each run starts a fresh session in the project; results stream into Discord and the web UI.',
           `Next run: ${nextRunAt ? new Date(nextRunAt).toISOString() : 'n/a'} · manage with \`/schedule list\` / \`/schedule delete ${t.id}\` or the web UI's Scheduled tasks dialog.`,
         ].filter(Boolean).join('\n'),
+      };
+    }
+
+    case 'queue-command': {
+      const raw = [command.args, command.body].filter(Boolean).join('\n').trim();
+      if (!raw) return { reply: '✗ Usage: `/queue-command <opencode-command> [args]`.' };
+      if (!bridgeOps?.queueCommand) {
+        return { reply: '✗ `/queue-command` is not available on this surface.' };
+      }
+      const normalized = raw.replace(/^\/+/, '').trim();
+      const name = normalized.split(/\s+/)[0] ?? '';
+      const args = normalized.slice(name.length).trim();
+      if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(name)) {
+        return { reply: '✗ Queue only accepts an OpenCode command name, for example `/queue-command review`.' };
+      }
+      const r = await bridgeOps.queueCommand({ name, args });
+      if (!r.ok) return { reply: `✗ Could not queue command: ${r.error ?? 'unknown error'}` };
+      return {
+        reply: r.queued
+          ? `✓ Command queued (position: ${r.position}): \`/${name}${args ? ` ${args}` : ''}\`.`
+          : `⏳ Running \`/${name}${args ? ` ${args}` : ''}\` now — no response is currently running.`,
+      };
+    }
+
+    case 'reload-opencode': {
+      if (!bridgeOps?.restartOpencodeServer) {
+        return { reply: '✗ `/reload-opencode` is not available on this surface.' };
+      }
+      const r = await bridgeOps.restartOpencodeServer();
+      if (!r.ok) return { reply: `✗ Reload/reconnect failed: ${r.error ?? 'unknown error'}` };
+      return {
+        reply: r.external
+          ? '✓ OpenChamber rechecked the external OpenCode server. It cannot kill/restart an external process; restart that server separately if config changes need to load.'
+          : '✓ OpenChamber requested an OpenCode reload and reconnected the bridge.',
       };
     }
 

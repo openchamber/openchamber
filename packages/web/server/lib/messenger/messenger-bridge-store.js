@@ -3,6 +3,11 @@ import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
 
+export const MESSENGER_NOTIFY_ON_COMPLETE_DEFAULT = false;
+export const MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS = 8000;
+export const MESSENGER_INTERRUPT_TIMEOUT_MIN_MS = 1000;
+export const MESSENGER_INTERRUPT_TIMEOUT_MAX_MS = 60000;
+
 // Pick the SQLite driver that matches the current JS runtime. The web server
 // runs under Node (the published `openchamber serve` CLI and the in-process
 // server inside the Electron desktop shell) AND under Bun (the local
@@ -53,6 +58,16 @@ function resolveDefaultDbPath() {
       : path.join(os.homedir(), '.openchamber');
   fs.mkdirSync(root, { recursive: true });
   return path.join(root, 'messenger-bridge.sqlite');
+}
+
+export function normalizeMessengerInterruptTimeoutMs(value) {
+  if (value == null || value === '') return MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS;
+  const numeric = typeof value === 'string' ? Number(value.trim()) : Number(value);
+  if (!Number.isFinite(numeric)) return MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS;
+  return Math.min(
+    MESSENGER_INTERRUPT_TIMEOUT_MAX_MS,
+    Math.max(MESSENGER_INTERRUPT_TIMEOUT_MIN_MS, Math.round(numeric)),
+  );
 }
 
 export class MessengerBridgeStore {
@@ -124,7 +139,12 @@ export class MessengerBridgeStore {
     `);
     // Migrate older project-default tables that predate the verbosity/variant
     // (thinking-effort) project scopes. Ignored when the column already exists.
-    for (const col of ['verbosity_default TEXT', 'variant_default TEXT', 'permission_mode_default TEXT']) {
+    for (const col of [
+      'verbosity_default TEXT',
+      'variant_default TEXT',
+      'permission_mode_default TEXT',
+      'auto_worktree_default INTEGER',
+    ]) {
       try {
         this.db.exec(`ALTER TABLE messenger_project_defaults ADD COLUMN ${col}`);
       } catch {
@@ -186,6 +206,30 @@ export class MessengerBridgeStore {
     this.setSetting(`permission-mode:${type}`, mode ?? null);
   }
 
+  getNotifyOnComplete(type) {
+    if (!type) return MESSENGER_NOTIFY_ON_COMPLETE_DEFAULT;
+    return this.getSetting(`notify-on-complete:${type}`) === '1';
+  }
+
+  setNotifyOnComplete(type, enabled) {
+    if (!type) return;
+    this.setSetting(`notify-on-complete:${type}`, enabled ? '1' : null);
+  }
+
+  getInterruptTimeoutMs(type) {
+    if (!type) return MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS;
+    return normalizeMessengerInterruptTimeoutMs(this.getSetting(`interrupt-timeout-ms:${type}`));
+  }
+
+  setInterruptTimeoutMs(type, timeoutMs) {
+    if (!type) return;
+    const normalized = normalizeMessengerInterruptTimeoutMs(timeoutMs);
+    this.setSetting(
+      `interrupt-timeout-ms:${type}`,
+      normalized === MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS ? null : String(normalized),
+    );
+  }
+
   /** Read the project-wide defaults for a working directory. */
   getProjectDefaults(projectPath) {
     if (!projectPath) return null;
@@ -195,6 +239,7 @@ export class MessengerBridgeStore {
                 model_default AS modelDefault, agent_default AS agentDefault,
                 verbosity_default AS verbosityDefault, variant_default AS variantDefault,
                 permission_mode_default AS permissionModeDefault,
+                auto_worktree_default AS autoWorktreeDefault,
                 updated_at AS updatedAt
            FROM messenger_project_defaults
           WHERE project_path = ?`,
@@ -208,7 +253,7 @@ export class MessengerBridgeStore {
    * `verbosityDefault: null` / `variantDefault: null` to clear that field; pass
    * `undefined` to leave it untouched.
    */
-  setProjectDefaults({ projectPath, projectLabel, modelDefault, agentDefault, verbosityDefault, variantDefault, permissionModeDefault }) {
+  setProjectDefaults({ projectPath, projectLabel, modelDefault, agentDefault, verbosityDefault, variantDefault, permissionModeDefault, autoWorktreeDefault }) {
     if (!projectPath) return;
     const now = new Date().toISOString();
     const existing = this.getProjectDefaults(projectPath);
@@ -219,13 +264,16 @@ export class MessengerBridgeStore {
     const nextVariant = variantDefault === undefined ? existing?.variantDefault ?? null : variantDefault;
     const nextPermissionMode =
       permissionModeDefault === undefined ? existing?.permissionModeDefault ?? null : permissionModeDefault;
+    const nextAutoWorktree =
+      autoWorktreeDefault === undefined ? existing?.autoWorktreeDefault ?? null : autoWorktreeDefault;
     const nextLabel = projectLabel ?? existing?.projectLabel ?? null;
     this.db
       .prepare(
         `INSERT INTO messenger_project_defaults
             (project_path, project_label, model_default, agent_default,
-             verbosity_default, variant_default, permission_mode_default, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             verbosity_default, variant_default, permission_mode_default,
+             auto_worktree_default, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(project_path)
          DO UPDATE SET project_label           = excluded.project_label,
                        model_default           = excluded.model_default,
@@ -233,9 +281,10 @@ export class MessengerBridgeStore {
                        verbosity_default       = excluded.verbosity_default,
                        variant_default         = excluded.variant_default,
                        permission_mode_default = excluded.permission_mode_default,
+                       auto_worktree_default   = excluded.auto_worktree_default,
                        updated_at              = excluded.updated_at`,
       )
-      .run(projectPath, nextLabel, nextModel, nextAgent, nextVerbosity, nextVariant, nextPermissionMode, now);
+      .run(projectPath, nextLabel, nextModel, nextAgent, nextVerbosity, nextVariant, nextPermissionMode, nextAutoWorktree, now);
   }
 
   /** List every project that has bridge defaults configured. */
@@ -246,6 +295,7 @@ export class MessengerBridgeStore {
                 model_default AS modelDefault, agent_default AS agentDefault,
                 verbosity_default AS verbosityDefault, variant_default AS variantDefault,
                 permission_mode_default AS permissionModeDefault,
+                auto_worktree_default AS autoWorktreeDefault,
                 updated_at AS updatedAt
            FROM messenger_project_defaults
           ORDER BY updated_at DESC`,

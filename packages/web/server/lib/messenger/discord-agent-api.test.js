@@ -127,15 +127,17 @@ describe('discord-agent-api — pure helpers', () => {
 });
 
 describe('discord-agent-api — routes', () => {
+  let originalFetch;
   let fetchMock;
 
   beforeEach(() => {
+    originalFetch = globalThis.fetch;
     fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    globalThis.fetch = fetchMock;
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 

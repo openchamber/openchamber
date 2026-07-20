@@ -8,9 +8,16 @@ import { createMessengerOpencodeBridge } from './messenger-opencode-bridge.js';
 import { createDiscordAgentRouter } from './discord-agent-api.js';
 import { parseVerbosityLevel, VERBOSITY_LEVELS } from './messenger-verbosity.js';
 import { parsePermissionMode, PERMISSION_MODES } from './messenger-permissions.js';
+import { normalizeTrustedBotIds } from './discord-access.js';
 import { bootstrapProject as bootstrapProjectFn } from '../projects/project-bootstrap.js';
 import { renderPermissionContext, escapeMd } from './messenger-render.js';
 import { discoverSkills } from '../opencode/skills.js';
+import {
+  MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS,
+  MESSENGER_INTERRUPT_TIMEOUT_MAX_MS,
+  MESSENGER_INTERRUPT_TIMEOUT_MIN_MS,
+  normalizeMessengerInterruptTimeoutMs,
+} from './messenger-bridge-store.js';
 
 /**
  * Messenger sync routes for Discord.
@@ -150,6 +157,8 @@ export function createMessengerSyncRouter({
   // with the web UI's Scheduled-tasks dialog.
   projectConfigRuntime = null,
   scheduledTasksRuntime = null,
+  startTunnelWithNormalizedRequest = null,
+  refreshOpenCodeAfterConfigChange = null,
   // Optional async hook that starts the shared global event stream (the
   // OpenCode watcher + hub). The bridge depends on hub events for mirroring,
   // questions, todos and permissions — without this, a headless server that
@@ -350,6 +359,17 @@ export function createMessengerSyncRouter({
           broadcastEvent,
           listProjects,
           bootstrapProject: projectBootstrap,
+          autoCreateProjectChannel: async (project) => {
+            const { discord } = await loadDiscordSettings();
+            if (!discord?.botToken || !discord?.guildId) return [];
+            return autoCreateMessengerSurfacesForProject(project, {
+              discord: {
+                token: discord.botToken,
+                guildId: discord.guildId,
+                parentCategoryId: discord.parentCategoryId,
+              },
+            });
+          },
           lookupMessengerTarget: makeLookupMessengerTarget(),
           getDefaultMessengerTarget: readSettings ? resolveDefaultDiscordTarget : null,
           // Settings access for voice-message STT (sttServerUrl/sttModel/sttLanguage).
@@ -361,6 +381,8 @@ export function createMessengerSyncRouter({
           getLocalApiBaseUrl,
           projectConfigRuntime,
           scheduledTasksRuntime,
+          startTunnelWithNormalizedRequest,
+          refreshOpenCodeAfterConfigChange,
           // Powers the Discord `/skill` picker — list skills available to the
           // agent in the surface's bound project (or user-level when unbound).
           listSkills: ({ projectPath } = {}) => {
@@ -453,6 +475,8 @@ export function createMessengerSyncRouter({
       getLocalApiBaseUrl,
       listProjects,
       opencodeFetch,
+      projectConfigRuntime,
+      scheduledTasksRuntime,
       bootstrapProject: projectBootstrap,
       // Resolve the bot config server-side and reuse the exact same
       // find-or-create channel flow the UI's project-add path uses, so an
@@ -1102,6 +1126,8 @@ export function createMessengerSyncRouter({
         active: [],
         verbosity: {},
         permissionMode: {},
+        notifyOnComplete: {},
+        interruptTimeoutMs: {},
       });
     }
     const { type, token } = req.body ?? {};
@@ -1111,11 +1137,24 @@ export function createMessengerSyncRouter({
     const permissionMode = {
       discord: bridge.store.getPermissionModeDefault?.('discord') ?? null,
     };
+    const notifyOnComplete = {
+      discord: bridge.store.getNotifyOnComplete?.('discord') ?? false,
+    };
+    const interruptTimeoutMs = {
+      discord: bridge.store.getInterruptTimeoutMs?.('discord') ?? MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS,
+    };
     return res.json({
       ok: true,
       enabled: true,
       verbosity,
       permissionMode,
+      notifyOnComplete,
+      interruptTimeoutMs,
+      interruptTimeoutBounds: {
+        min: MESSENGER_INTERRUPT_TIMEOUT_MIN_MS,
+        max: MESSENGER_INTERRUPT_TIMEOUT_MAX_MS,
+        default: MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS,
+      },
       ...bridge.statusSnapshot({ type, token }),
     });
   });
@@ -1209,6 +1248,66 @@ export function createMessengerSyncRouter({
       permissionMode: {
         discord: bridge.store.getPermissionModeDefault?.('discord') ?? null,
       },
+    });
+  });
+
+  router.post('/bridge/notify-on-complete', (req, res) => {
+    if (!bridge) return res.status(503).json({ ok: false, error: 'bridge unavailable' });
+    const { type, enabled } = req.body ?? {};
+    if (type !== 'discord') {
+      return res.status(400).json({ ok: false, error: "type must be 'discord'" });
+    }
+    bridge.store.setNotifyOnComplete?.(type, Boolean(enabled));
+    return res.json({ ok: true, type, enabled: bridge.store.getNotifyOnComplete?.(type) ?? false });
+  });
+
+  router.get('/bridge/notify-on-complete', (req, res) => {
+    if (!bridge) return res.status(503).json({ ok: false, error: 'bridge unavailable' });
+    const type = typeof req.query?.type === 'string' ? req.query.type : '';
+    if (type === 'discord') {
+      return res.json({ ok: true, type, enabled: bridge.store.getNotifyOnComplete?.(type) ?? false });
+    }
+    return res.json({
+      ok: true,
+      notifyOnComplete: {
+        discord: bridge.store.getNotifyOnComplete?.('discord') ?? false,
+      },
+    });
+  });
+
+  router.post('/bridge/interrupt-timeout', (req, res) => {
+    if (!bridge) return res.status(503).json({ ok: false, error: 'bridge unavailable' });
+    const { type, timeoutMs } = req.body ?? {};
+    if (type !== 'discord') {
+      return res.status(400).json({ ok: false, error: "type must be 'discord'" });
+    }
+    const normalized = normalizeMessengerInterruptTimeoutMs(timeoutMs);
+    bridge.store.setInterruptTimeoutMs?.(type, normalized);
+    return res.json({ ok: true, type, timeoutMs: bridge.store.getInterruptTimeoutMs?.(type) ?? normalized });
+  });
+
+  router.get('/bridge/interrupt-timeout', (req, res) => {
+    if (!bridge) return res.status(503).json({ ok: false, error: 'bridge unavailable' });
+    const type = typeof req.query?.type === 'string' ? req.query.type : '';
+    const bounds = {
+      min: MESSENGER_INTERRUPT_TIMEOUT_MIN_MS,
+      max: MESSENGER_INTERRUPT_TIMEOUT_MAX_MS,
+      default: MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS,
+    };
+    if (type === 'discord') {
+      return res.json({
+        ok: true,
+        type,
+        timeoutMs: bridge.store.getInterruptTimeoutMs?.(type) ?? MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS,
+        bounds,
+      });
+    }
+    return res.json({
+      ok: true,
+      interruptTimeoutMs: {
+        discord: bridge.store.getInterruptTimeoutMs?.('discord') ?? MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS,
+      },
+      bounds,
     });
   });
 
@@ -1574,12 +1673,13 @@ export function createMessengerSyncRouter({
    * Settings UI directly.
    */
   /**
-   * Per-project bridge defaults (model + agent). The same layer the
-   * `/model default <p/m>` and `/agent default <name>` commands write to
+   * Per-project bridge defaults (model, agent, auto-worktrees). The same layer the
+   * `/model default <p/m>`, `/agent default <name>` and `/toggle-worktrees`
+   * commands write to
    * from Discord — exposed here so the OpenChamber UI's project
    * settings can read/write the same values.
    *
-   * POST body: { projectPath, projectLabel?, modelDefault?, agentDefault? }
+   * POST body: { projectPath, projectLabel?, modelDefault?, agentDefault?, autoWorktreeDefault? }
    *   Omit a field to leave it unchanged. Pass null to clear it.
    * Returns: { ok, project: { projectPath, projectLabel, modelDefault, agentDefault } }
    */
@@ -1590,14 +1690,28 @@ export function createMessengerSyncRouter({
 
   router.post('/bridge/project-defaults', (req, res) => {
     if (!bridge) return res.status(503).json({ ok: false, error: 'bridge unavailable' });
-    const { projectPath, projectLabel, modelDefault, agentDefault } = req.body ?? {};
+    const { projectPath, projectLabel, modelDefault, agentDefault, autoWorktreeDefault } = req.body ?? {};
     if (!projectPath) {
       return res.status(400).json({ ok: false, error: 'projectPath required' });
     }
     if (modelDefault != null && modelDefault !== '' && !/^[^/]+\/[^/]+$/.test(String(modelDefault))) {
       return res.status(400).json({ ok: false, error: 'modelDefault must be in "provider/model" form' });
     }
-    bridge.store.setProjectDefaults({ projectPath, projectLabel, modelDefault, agentDefault });
+    if (
+      autoWorktreeDefault !== undefined &&
+      autoWorktreeDefault !== null &&
+      typeof autoWorktreeDefault !== 'boolean'
+    ) {
+      return res.status(400).json({ ok: false, error: 'autoWorktreeDefault must be boolean or null' });
+    }
+    bridge.store.setProjectDefaults({
+      projectPath,
+      projectLabel,
+      modelDefault,
+      agentDefault,
+      autoWorktreeDefault:
+        autoWorktreeDefault === undefined ? undefined : autoWorktreeDefault === null ? null : autoWorktreeDefault ? 1 : 0,
+    });
     const updated = bridge.store.getProjectDefaults(projectPath);
     res.json({ ok: true, project: updated });
   });
@@ -1633,8 +1747,18 @@ export function createMessengerSyncRouter({
   });
 
   router.post('/discord/listener/start', async (req, res) => {
-    const { token, guildId, autoReply, scopeToGuild, bridgeEnabled, projectBindings, defaultChannelId, defaultUserId } =
-      req.body ?? {};
+    const {
+      token,
+      guildId,
+      autoReply,
+      scopeToGuild,
+      bridgeEnabled,
+      projectBindings,
+      defaultChannelId,
+      defaultUserId,
+      trustedBotIds,
+      registerDynamicSlashCommands,
+    } = req.body ?? {};
     if (!token) return res.status(400).json({ error: 'token required' });
     const resolveProject = buildResolveProject(projectBindings);
     const result = discordListener.start(token, {
@@ -1643,6 +1767,8 @@ export function createMessengerSyncRouter({
       scopeToGuild: Boolean(scopeToGuild),
       bridgeEnabled: bridgeEnabled !== false && Boolean(bridge),
       resolveProject,
+      trustedBotIds: normalizeTrustedBotIds(trustedBotIds),
+      registerDynamicSlashCommands: Boolean(registerDynamicSlashCommands),
     });
 
     // The bridge mirrors OpenCode output via the shared global event hub —
@@ -1675,6 +1801,12 @@ export function createMessengerSyncRouter({
                 projectLabel: b.projectLabel ? String(b.projectLabel) : undefined,
               }))
           : null;
+        const hasTrustedBotIds = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'trustedBotIds');
+        const normalizedTrustedBotIds = normalizeTrustedBotIds(trustedBotIds);
+        const hasDynamicSlash = Object.prototype.hasOwnProperty.call(
+          req.body ?? {},
+          'registerDynamicSlashCommands',
+        );
         await persistSettings({
           discord: {
             ...prev,
@@ -1685,6 +1817,12 @@ export function createMessengerSyncRouter({
             bridgeEnabled: bridgeEnabled !== false,
             defaultChannelId: defaultChannelId || prev.defaultChannelId || undefined,
             defaultUserId: defaultUserId || prev.defaultUserId || undefined,
+            trustedBotIds: hasTrustedBotIds
+              ? normalizedTrustedBotIds
+              : prev.trustedBotIds || undefined,
+            registerDynamicSlashCommands: hasDynamicSlash
+              ? Boolean(registerDynamicSlashCommands)
+              : Boolean(prev.registerDynamicSlashCommands),
             projectBindings:
               normalizedBindings && normalizedBindings.length > 0
                 ? normalizedBindings
@@ -1722,8 +1860,18 @@ export function createMessengerSyncRouter({
    * Body matches the start endpoint: { botToken, guildId, autoReply, scopeToGuild, bridgeEnabled, defaultChannelId }.
    */
   router.post('/discord/save-config', async (req, res) => {
-    const { botToken, guildId, autoReply, scopeToGuild, bridgeEnabled, defaultChannelId, defaultUserId, projectBindings } =
-      req.body ?? {};
+    const {
+      botToken,
+      guildId,
+      autoReply,
+      scopeToGuild,
+      bridgeEnabled,
+      defaultChannelId,
+      defaultUserId,
+      trustedBotIds,
+      registerDynamicSlashCommands,
+      projectBindings,
+    } = req.body ?? {};
     try {
       // Merge with the previous discord block so this best-effort save (fired
       // by the frontend right after listener start) doesn't clobber the
@@ -1739,6 +1887,12 @@ export function createMessengerSyncRouter({
               projectLabel: b.projectLabel ? String(b.projectLabel) : undefined,
             }))
         : null;
+      const hasTrustedBotIds = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'trustedBotIds');
+      const normalizedTrustedBotIds = normalizeTrustedBotIds(trustedBotIds);
+      const hasDynamicSlash = Object.prototype.hasOwnProperty.call(
+        req.body ?? {},
+        'registerDynamicSlashCommands',
+      );
       await persistSettings({
         discord: {
           ...prev,
@@ -1749,6 +1903,12 @@ export function createMessengerSyncRouter({
           bridgeEnabled: bridgeEnabled !== false,
           defaultChannelId: defaultChannelId || prev.defaultChannelId || undefined,
           defaultUserId: defaultUserId || prev.defaultUserId || undefined,
+          trustedBotIds: hasTrustedBotIds
+            ? normalizedTrustedBotIds
+            : prev.trustedBotIds || undefined,
+          registerDynamicSlashCommands: hasDynamicSlash
+            ? Boolean(registerDynamicSlashCommands)
+            : Boolean(prev.registerDynamicSlashCommands),
           projectBindings:
             normalizedBindings && normalizedBindings.length > 0
               ? normalizedBindings
@@ -1803,6 +1963,8 @@ export function createMessengerSyncRouter({
         // Without this, every channel fell back to the first project until
         // the user re-opened Settings and re-sent a manual start.
         resolveProject: buildResolveProject(discord.projectBindings),
+        trustedBotIds: normalizeTrustedBotIds(discord.trustedBotIds),
+        registerDynamicSlashCommands: Boolean(discord.registerDynamicSlashCommands),
       });
       res.json({ ok: true, ...result });
     } catch (err) {

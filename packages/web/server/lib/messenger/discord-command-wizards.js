@@ -36,6 +36,8 @@ const AGENT_SCOPE_PREFIX = 'openchamber-agent-scope:';
 const SKILL_PICK_PREFIX = 'openchamber-agent-skill-pick:';
 const PERM_MODE_PREFIX = 'openchamber-agent-perm-mode:';
 const PERM_SCOPE_PREFIX = 'openchamber-agent-perm-scope:';
+const LOGIN_PROVIDER_PREFIX = 'openchamber-agent-login-provider:';
+const LOGIN_METHOD_PREFIX = 'openchamber-agent-login-method:';
 
 const VERBOSITY_DESCRIPTIONS = {
   quiet: 'Final answer only — hides reasoning + tool activity',
@@ -51,6 +53,8 @@ const PREFIXES = [
   SKILL_PICK_PREFIX,
   PERM_MODE_PREFIX,
   PERM_SCOPE_PREFIX,
+  LOGIN_PROVIDER_PREFIX,
+  LOGIN_METHOD_PREFIX,
 ];
 
 function isNav(value) {
@@ -90,6 +94,27 @@ export function createDiscordCommandWizards({ restCall, bridge }) {
       token: wizard.token,
       channelId: wizard.channelId,
       threadId: null,
+    };
+  }
+
+  function normalizeAuthMethodType(method) {
+    const raw = typeof method?.type === 'string' ? method.type : '';
+    const label = `${method?.name ?? ''} ${method?.label ?? ''}`.toLowerCase();
+    const merged = `${raw} ${label}`.toLowerCase();
+    if (merged.includes('oauth')) return 'oauth';
+    if (merged.includes('api')) return 'api';
+    return raw.toLowerCase();
+  }
+
+  function extractOAuthDetails(payload) {
+    const record = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object'
+      ? payload.data
+      : payload;
+    const data = record && typeof record === 'object' ? record : {};
+    return {
+      url: typeof data.url === 'string' ? data.url : typeof data.verificationUri === 'string' ? data.verificationUri : null,
+      instructions: typeof data.instructions === 'string' ? data.instructions : null,
+      userCode: typeof data.userCode === 'string' ? data.userCode : typeof data.code === 'string' ? data.code : null,
     };
   }
 
@@ -311,6 +336,165 @@ export function createDiscordCommandWizards({ restCall, bridge }) {
         flags: 64,
         components: [],
       },
+    });
+  }
+
+  // ── /login ────────────────────────────────────────────────────────────────
+  function providerOptions(providers) {
+    return providers.map((provider) => ({
+      label: (provider.name ?? provider.id ?? 'provider').slice(0, 100),
+      value: provider.id ?? provider.name,
+      description: (provider.name && provider.id && provider.name !== provider.id ? provider.id : 'Provider').slice(0, 100),
+    }));
+  }
+
+  function renderLoginProviderSelect(hash, providers, page) {
+    const { options } = buildPagedOptions(providerOptions(providers), page);
+    return stringSelect(`${LOGIN_PROVIDER_PREFIX}${hash}`, options, 'Select a provider');
+  }
+
+  function renderLoginMethodSelect(hash, providerId, methods) {
+    const options = [];
+    const oauthMethods = methods
+      .map((method, index) => ({ method, index }))
+      .filter(({ method }) => normalizeAuthMethodType(method) === 'oauth');
+    for (const { method, index } of oauthMethods) {
+      options.push({
+        label: (method.label ?? method.name ?? `OAuth ${index + 1}`).slice(0, 100),
+        value: `oauth:${index}`,
+        description: (method.description ?? method.help ?? 'OpenCode OAuth flow').slice(0, 100),
+      });
+    }
+    options.push({
+      label: 'API key',
+      value: 'api',
+      description: 'Use Settings → Providers; Discord will not collect secrets',
+    });
+    return stringSelect(`${LOGIN_METHOD_PREFIX}${hash}`, options, `Authenticate ${providerId}`);
+  }
+
+  async function startLogin(state, interaction) {
+    let payload = null;
+    let authMethods = {};
+    try {
+      payload = await bridge?.fetchProviders?.();
+      authMethods = (await bridge?.listProviderAuthMethods?.()) ?? {};
+    } catch {
+      payload = null;
+      authMethods = {};
+    }
+    const providers = (payload?.all ?? [])
+      .map((provider) => ({
+        id: provider?.id ?? provider?.name,
+        name: provider?.name ?? provider?.id,
+      }))
+      .filter((provider) => provider.id);
+    if (providers.length === 0) {
+      await respond(state.token, interaction, {
+        type: 4,
+        data: { content: '_(no providers returned by OpenCode — open Settings → Providers in OpenChamber.)_', flags: 64 },
+      });
+      return;
+    }
+    const hash = randomWizardHash();
+    wizards.set(hash, {
+      kind: 'login',
+      token: state.token,
+      channelId: interaction.channel_id,
+      guildId: interaction.guild_id,
+      appId: interaction.application_id,
+      providers,
+      authMethods,
+      providerPage: 0,
+    });
+    await respond(state.token, interaction, {
+      type: 4,
+      data: {
+        content: '**Provider login**\nPick a provider to authenticate through OpenCode.',
+        flags: 64,
+        components: [renderLoginProviderSelect(hash, providers, 0)],
+      },
+    });
+  }
+
+  async function onLoginProvider(token, interaction, hash) {
+    const wizard = wizards.get(hash);
+    if (!wizard) return expired(token, interaction);
+    const value = interaction.data?.values?.[0];
+    if (!value) return;
+    if (isNav(value)) {
+      wizard.providerPage = nextPage(wizard.providerPage, value);
+      wizards.set(hash, wizard);
+      await respond(wizard.token, interaction, {
+        type: 7,
+        data: {
+          content: '**Provider login**\nPick a provider to authenticate through OpenCode.',
+          flags: 64,
+          components: [renderLoginProviderSelect(hash, wizard.providers, wizard.providerPage)],
+        },
+      });
+      return;
+    }
+    wizard.providerId = value;
+    wizards.set(hash, wizard);
+    const methods = wizard.authMethods?.[value] ?? [];
+    await respond(wizard.token, interaction, {
+      type: 7,
+      data: {
+        content: `**Provider login**\nProvider: \`${value}\`\nChoose an authentication method.`,
+        flags: 64,
+        components: [renderLoginMethodSelect(hash, value, methods)],
+      },
+    });
+  }
+
+  async function onLoginMethod(token, interaction, hash) {
+    const wizard = wizards.get(hash);
+    if (!wizard) return expired(token, interaction);
+    const value = interaction.data?.values?.[0];
+    const providerId = wizard.providerId;
+    if (!value || !providerId) return;
+
+    if (value === 'api') {
+      wizards.del(hash);
+      await respond(wizard.token, interaction, {
+        type: 7,
+        data: {
+          content: [
+            `**Provider login: \`${providerId}\`**`,
+            'Use OpenChamber Settings → Providers to save the API key.',
+            '_Discord never asks you to paste provider secrets into chat._',
+          ].join('\n'),
+          flags: 64,
+          components: [],
+        },
+      });
+      return;
+    }
+
+    const methodIndex = Number.parseInt(value.split(':')[1] ?? '0', 10);
+    const started = await bridge?.startProviderOAuth?.(providerId, Number.isFinite(methodIndex) ? methodIndex : 0);
+    wizards.del(hash);
+    if (!started?.ok) {
+      await respond(wizard.token, interaction, {
+        type: 7,
+        data: {
+          content: `✗ OAuth start failed: ${started?.error ?? 'unknown error'}`,
+          flags: 64,
+          components: [],
+        },
+      });
+      return;
+    }
+    const details = extractOAuthDetails(started.data);
+    const lines = [`**Provider login: \`${providerId}\`**`];
+    if (details.url) lines.push(`Open this URL: ${details.url}`);
+    if (details.userCode) lines.push(`Code: \`${details.userCode}\``);
+    if (details.instructions) lines.push(details.instructions);
+    lines.push('_After OAuth completes, OpenCode persists the credential in its existing auth storage._');
+    await respond(wizard.token, interaction, {
+      type: 7,
+      data: { content: lines.join('\n'), flags: 64, components: [] },
     });
   }
 
@@ -573,7 +757,11 @@ export function createDiscordCommandWizards({ restCall, bridge }) {
       return onPermissionsMode(token, interaction, customId.slice(PERM_MODE_PREFIX.length));
     if (customId.startsWith(PERM_SCOPE_PREFIX))
       return onPermissionsScope(token, interaction, customId.slice(PERM_SCOPE_PREFIX.length));
+    if (customId.startsWith(LOGIN_PROVIDER_PREFIX))
+      return onLoginProvider(token, interaction, customId.slice(LOGIN_PROVIDER_PREFIX.length));
+    if (customId.startsWith(LOGIN_METHOD_PREFIX))
+      return onLoginMethod(token, interaction, customId.slice(LOGIN_METHOD_PREFIX.length));
   }
 
-  return { ownsComponent, handleComponent, startVerbosity, startAgent, startSkill, startPermissions };
+  return { ownsComponent, handleComponent, startVerbosity, startAgent, startSkill, startPermissions, startLogin };
 }

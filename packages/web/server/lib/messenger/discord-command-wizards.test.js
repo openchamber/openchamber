@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createDiscordCommandWizards } from './discord-command-wizards.js';
 
 /** A restCall recorder + a bridge stub backed by fake store + spies. */
-function makeHarness({ agents = [], skills = [] } = {}) {
+function makeHarness({ agents = [], skills = [], providers = [], authMethods = {}, oauthResponse = null } = {}) {
   const calls = [];
   const restCall = async (token, method, path, body) => {
     calls.push({ token, method, path, body });
@@ -14,9 +14,19 @@ function makeHarness({ agents = [], skills = [] } = {}) {
   const projectDefaults = [];
   const routed = [];
   const activeTurnRefreshes = [];
+  const startedOAuth = [];
   const bridge = {
     listAgents: async () => agents,
     listSurfaceSkills: async () => skills,
+    fetchProviders: async () => ({ all: providers }),
+    listProviderAuthMethods: async () => authMethods,
+    startProviderOAuth: async (providerId, methodIndex) => {
+      startedOAuth.push({ providerId, methodIndex });
+      return oauthResponse ?? {
+        ok: true,
+        data: { url: 'https://auth.example.com/device', userCode: 'ABC-123' },
+      };
+    },
     routeInbound: async (args) => {
       routed.push(args);
       return { ok: true };
@@ -41,6 +51,7 @@ function makeHarness({ agents = [], skills = [] } = {}) {
     projectDefaults,
     routed,
     activeTurnRefreshes,
+    startedOAuth,
   };
 }
 
@@ -162,6 +173,52 @@ describe('verbosity wizard applies to the active turn', () => {
   });
 });
 
+describe('login wizard', () => {
+  const providers = [
+    { id: 'anthropic', name: 'Anthropic' },
+    { id: 'openai', name: 'OpenAI' },
+  ];
+
+  it('provider pick → OAuth method starts the OpenCode OAuth flow', async () => {
+    const { wizards, calls, startedOAuth } = makeHarness({
+      providers,
+      authMethods: {
+        anthropic: [{ type: 'oauth', label: 'OAuth' }],
+      },
+    });
+
+    await wizards.startLogin(state, interaction);
+    const providerCustomId = customIdOf(calls.at(-1));
+    expect(optionValues(calls.at(-1))).toEqual(['anthropic', 'openai']);
+
+    await wizards.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['anthropic'] } }, providerCustomId);
+    const methodCustomId = customIdOf(calls.at(-1));
+    expect(optionValues(calls.at(-1))).toEqual(['oauth:0', 'api']);
+
+    await wizards.handleComponent(state, { id: 'i3', token: 't3', data: { values: ['oauth:0'] } }, methodCustomId);
+    expect(startedOAuth).toEqual([{ providerId: 'anthropic', methodIndex: 0 }]);
+    expect(calls.at(-1).body.data.content).toContain('https://auth.example.com/device');
+    expect(calls.at(-1).body.data.content).toContain('ABC-123');
+  });
+
+  it('provider pick → API key method returns Settings guidance without collecting secrets', async () => {
+    const { wizards, calls, startedOAuth } = makeHarness({
+      providers,
+      authMethods: { openai: [{ type: 'api', label: 'API key' }] },
+    });
+
+    await wizards.startLogin(state, interaction);
+    const providerCustomId = customIdOf(calls.at(-1));
+    await wizards.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['openai'] } }, providerCustomId);
+    const methodCustomId = customIdOf(calls.at(-1));
+    await wizards.handleComponent(state, { id: 'i3', token: 't3', data: { values: ['api'] } }, methodCustomId);
+
+    expect(startedOAuth).toHaveLength(0);
+    expect(calls.at(-1).body.data.content).toContain('Settings → Providers');
+    expect(calls.at(-1).body.data.content).toContain('Discord never asks');
+  });
+});
+
 describe('agent wizard', () => {
   const agents = [
     { name: 'build', description: 'coding agent' },
@@ -225,6 +282,8 @@ describe('component ownership', () => {
     expect(wizards.ownsComponent('openchamber-agent-skill-pick:abc')).toBe(true);
     expect(wizards.ownsComponent('openchamber-agent-perm-mode:abc')).toBe(true);
     expect(wizards.ownsComponent('openchamber-agent-perm-scope:abc')).toBe(true);
+    expect(wizards.ownsComponent('openchamber-agent-login-provider:abc')).toBe(true);
+    expect(wizards.ownsComponent('openchamber-agent-login-method:abc')).toBe(true);
     expect(wizards.ownsComponent('openchamber-agent-model-provider:abc')).toBe(false);
     expect(wizards.ownsComponent('openchamber-agent-approve:abc')).toBe(false);
   });

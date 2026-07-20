@@ -92,6 +92,8 @@ export function createDiscordAgentRouter({
   getLocalApiBaseUrl = null,
   listProjects = null,
   opencodeFetch = null,
+  projectConfigRuntime = null,
+  scheduledTasksRuntime = null,
   // Async ({ action, url, path, label }) => { ok, project?, error? } — creates
   // or registers a project in OpenChamber settings (see project-bootstrap.js).
   bootstrapProject = null,
@@ -349,6 +351,8 @@ export function createDiscordAgentRouter({
           'Resolve { project | session | channel } → { channelId, url } without posting.',
         'POST /agent/post':
           'Post { text, project | session | channel, silent? } → { messageIds, url }.',
+        'POST /agent/schedule':
+          'Schedule { text, sendAt, model?, agent?, notifyOnly?, project | session | channel } through the project scheduler.',
         'POST /agent/create-project':
           "Create/register a project and its Discord channel: { action: 'new'|'clone'|'path', path?, url?, label? } → { project, discord: { channelId, url } }.",
         'POST /agent/read-session':
@@ -360,12 +364,33 @@ export function createDiscordAgentRouter({
         `curl -s ${api}/targets`,
         `curl -s -X POST ${api}/post -H 'Content-Type: application/json' -d '{"project":"my-app","text":"Build is green ✅"}'`,
         `curl -s -X POST ${api}/post -H 'Content-Type: application/json' -d '{"session":"ses_123","text":"done"}'`,
+        `curl -s -X POST ${api}/schedule -H 'Content-Type: application/json' -d '{"project":"my-app","sendAt":"2026-03-01T09:00Z","model":"anthropic/claude-sonnet-4","text":"Run release checks"}'`,
         `curl -s -X POST ${api}/resolve -H 'Content-Type: application/json' -d '{"channel":"https://discord.com/channels/1/2"}'`,
         `curl -s -X POST ${api}/create-project -H 'Content-Type: application/json' -d '{"action":"path","path":"/abs/path/to/project","label":"My Project"}'`,
         `curl -s -X POST ${api}/read-session -H 'Content-Type: application/json' -d '{"reference":"ses_123"}'`,
         `curl -s -X POST ${api}/resolve-reference -H 'Content-Type: application/json' -d '{"reference":"https://discord.com/channels/1/2"}'`,
       ],
     };
+  }
+
+  function parseSendAt(value) {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    const match = raw.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2}(?:\.\d{1,3})?)?Z?$/);
+    if (!match) return { error: 'sendAt must be a UTC ISO timestamp like 2026-03-01T09:00Z' };
+    const runAt = Date.parse(`${match[1]}T${match[2]}:00Z`);
+    if (!Number.isFinite(runAt)) return { error: `invalid sendAt: ${raw}` };
+    if (runAt <= Date.now()) return { error: 'sendAt must be in the future' };
+    return { schedule: { kind: 'once', date: match[1], time: match[2], timezone: 'UTC' }, runAt };
+  }
+
+  async function resolveProjectForTarget(cfg, target) {
+    const projectPath =
+      target?.projectPath ??
+      cfg.projectBindings.find((binding) => String(binding?.channelId) === String(target?.channelId))?.projectPath ??
+      null;
+    if (!projectPath || typeof listProjects !== 'function') return null;
+    const projects = await listProjects().catch(() => []);
+    return (projects ?? []).find((project) => project?.path === projectPath) ?? null;
   }
 
   function sessionReferenceDeps() {
@@ -571,6 +596,82 @@ export function createDiscordAgentRouter({
       target: { ...target, url: buildDiscordUrl(target) },
       sentAt: new Date().toISOString(),
     });
+  });
+
+  router.post('/schedule', async (req, res) => {
+    if (!projectConfigRuntime || !scheduledTasksRuntime) {
+      return res.status(503).json({ ok: false, error: 'Scheduled tasks are not available on this server.' });
+    }
+    const cfg = await loadDiscordConfig();
+    if (!cfg) {
+      return res
+        .status(503)
+        .json({ ok: false, error: 'Discord is not configured (no bot token saved).' });
+    }
+    const { project, session, channel, text, sendAt, model, agent, notifyOnly } = req.body ?? {};
+    if (typeof text !== 'string' || text.trim() === '') {
+      return res.status(400).json({ ok: false, error: 'text is required' });
+    }
+    const parsed = parseSendAt(sendAt);
+    if (parsed.error) return res.status(400).json({ ok: false, error: parsed.error });
+
+    const target = resolveTarget(cfg, { project, session, channel });
+    if (target.error) return res.status(400).json({ ok: false, error: target.error });
+    const projectEntry = await resolveProjectForTarget(cfg, target);
+    if (!projectEntry?.id) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Scheduled messenger sends require a target bound to an OpenChamber project.',
+      });
+    }
+
+    const settings = typeof readSettings === 'function' ? await readSettings().catch(() => null) : null;
+    const modelRef = typeof model === 'string' && model.trim()
+      ? model.trim()
+      : typeof settings?.defaultModel === 'string'
+        ? settings.defaultModel.trim()
+        : '';
+    if (!/^[^/]+\/.+$/.test(modelRef)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'model is required for scheduled sends. Use provider/model.',
+      });
+    }
+    const slash = modelRef.indexOf('/');
+    const prompt = notifyOnly
+      ? [
+          'Post this scheduled Discord notification using the local OpenChamber messenger agent API, then stop.',
+          `Target channel/thread: ${target.channelId}`,
+          '',
+          text.trim(),
+        ].join('\n')
+      : text.trim();
+    const taskInput = {
+      name: prompt.split('\n')[0].trim().slice(0, 80) || 'Messenger send',
+      enabled: true,
+      schedule: parsed.schedule,
+      execution: {
+        prompt,
+        providerID: modelRef.slice(0, slash),
+        modelID: modelRef.slice(slash + 1),
+        ...(typeof agent === 'string' && agent.trim() ? { agent: agent.trim() } : {}),
+      },
+    };
+
+    try {
+      const upserted = await projectConfigRuntime.upsertScheduledTask(projectEntry.id, taskInput);
+      await scheduledTasksRuntime.syncProject(projectEntry.id);
+      const tasks = await projectConfigRuntime.listScheduledTasks(projectEntry.id);
+      const task = tasks.find((entry) => entry.id === upserted.task.id) ?? upserted.task;
+      return res.json({
+        ok: true,
+        projectId: projectEntry.id,
+        task,
+        target: { ...target, url: buildDiscordUrl(target) },
+      });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error?.message ?? 'Failed to schedule messenger send' });
+    }
   });
 
   return router;

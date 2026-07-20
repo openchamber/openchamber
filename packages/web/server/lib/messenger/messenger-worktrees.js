@@ -75,6 +75,40 @@ export async function createBridgeWorktree({ projectPath, name }) {
   }
 }
 
+export async function listBridgeWorktrees({ projectPath }) {
+  if (!projectPath) return { ok: false, error: 'no project bound to this conversation.' };
+  const result = await runGit(projectPath, ['worktree', 'list', '--porcelain']);
+  if (!result.ok) {
+    return { ok: false, error: `git worktree list failed: ${result.stderr || result.stdout}` };
+  }
+  const entries = [];
+  let current = null;
+  for (const line of result.stdout.split('\n')) {
+    if (!line.trim()) {
+      if (current) entries.push(current);
+      current = null;
+      continue;
+    }
+    const space = line.indexOf(' ');
+    const key = space >= 0 ? line.slice(0, space) : line;
+    const value = space >= 0 ? line.slice(space + 1) : '';
+    if (key === 'worktree') {
+      if (current) entries.push(current);
+      current = { path: value, branch: null, commit: null, detached: false, bare: false };
+    } else if (current && key === 'branch') {
+      current.branch = value.replace(/^refs\/heads\//, '');
+    } else if (current && key === 'HEAD') {
+      current.commit = value;
+    } else if (current && key === 'detached') {
+      current.detached = true;
+    } else if (current && key === 'bare') {
+      current.bare = true;
+    }
+  }
+  if (current) entries.push(current);
+  return { ok: true, worktrees: entries };
+}
+
 async function resolveDefaultBranch(worktreeDir) {
   // Preferred: the remote's HEAD pointer (origin/main etc.).
   const remoteHead = await runGit(worktreeDir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);

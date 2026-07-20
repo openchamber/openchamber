@@ -302,6 +302,34 @@ describe('discord project sync persistence', () => {
       }),
     });
   });
+
+  it('persists an explicit empty trusted bot list instead of keeping stale IDs', async () => {
+    const persistSettings = vi.fn(async () => {});
+    const app = express();
+    app.use(
+      '/',
+      createMessengerSyncRouter({
+        broadcastEvent: () => {},
+        readSettings: async () => ({
+          discord: { botToken: 'old-token', trustedBotIds: ['bot-1', 'bot-2'] },
+        }),
+        persistSettings,
+        sanitizeProjects: (projects) => projects,
+      }).router,
+    );
+
+    await request(app)
+      .post('/discord/save-config')
+      .send({ botToken: 'bot-token', trustedBotIds: [] })
+      .expect(200);
+
+    expect(persistSettings).toHaveBeenCalledWith({
+      discord: expect.objectContaining({
+        botToken: 'bot-token',
+        trustedBotIds: [],
+      }),
+    });
+  });
 });
 
 describe('web session mirroring', () => {
@@ -1736,6 +1764,218 @@ describe('/shell command — agent resolution (regression: empty agent 500s)', (
   });
 });
 
+describe('dynamic Discord slash command handoff', () => {
+  let originalFetch;
+  let calls;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    calls = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body });
+      return { ok: true, status: 200, text: async () => '', json: async () => ({ id: 'discord-msg' }) };
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  function makeDynamicBridge(extra = {}) {
+    const binding = {
+      type: 'discord',
+      token: 'bot-token',
+      targetKey: 'chan-dyn',
+      sessionId: 'ses-dyn',
+      projectPath: '/proj',
+      projectLabel: 'proj',
+    };
+    return makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: () => binding,
+        lookupBySessionId: () => [binding],
+      },
+      ...extra,
+    });
+  }
+
+  it('dispatches dynamic command slash interactions to OpenCode session.command', async () => {
+    const bridge = makeDynamicBridge();
+    const result = await bridge.runDynamicCommand({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-dyn',
+      threadId: null,
+      dynamicCommand: { kind: 'cmd', name: 'lint' },
+      args: '--fix',
+    });
+
+    const commandCall = calls.find((c) => c.url.includes('/session/ses-dyn/command'));
+    expect(commandCall).toBeTruthy();
+    expect(JSON.parse(commandCall.body)).toEqual({ command: 'lint', arguments: '--fix' });
+    expect(result.reply).toContain('/lint');
+  });
+
+  it('dispatches dynamic skill slash interactions through the existing /skill handoff', async () => {
+    const bridge = makeDynamicBridge({
+      listSkills: async () => [{ name: 'theme-system', description: 'Use theme tokens' }],
+    });
+
+    const result = await bridge.runDynamicCommand({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-dyn',
+      threadId: null,
+      dynamicCommand: { kind: 'skill', name: 'theme-system' },
+    });
+
+    const promptCall = calls.find((c) => c.url.includes('/session/ses-dyn/prompt_async'));
+    expect(promptCall).toBeTruthy();
+    expect(JSON.parse(promptCall.body).parts[0].text).toContain('Use the "theme-system" skill');
+    expect(result.reply).toContain('theme-system');
+  });
+});
+
+describe('P1 bridge commands', () => {
+  let originalFetch;
+  let calls;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    calls = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body ?? null });
+      const u = String(url);
+      if (u.endsWith('/session/ses-usage/message?directory=%2Fproj')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => '',
+          json: async () => [
+            { info: { role: 'user' } },
+            {
+              info: {
+                role: 'assistant',
+                tokens: { input: 1000, output: 2000, reasoning: 500, cache: { read: 100, write: 250 } },
+              },
+            },
+          ],
+        };
+      }
+      if (u.endsWith('/session/ses-usage?directory=%2Fproj')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => '',
+          json: async () => ({ id: 'ses-usage', model: { providerID: 'anthropic', id: 'claude-sonnet-4' } }),
+        };
+      }
+      if (u.endsWith('/provider')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => '',
+          json: async () => ({
+            all: [{ id: 'anthropic', models: [{ id: 'claude-sonnet-4', cost: { input: 3, output: 15 } }] }],
+          }),
+        };
+      }
+      return { ok: true, status: 200, text: async () => '', json: async () => ({ id: 'discord-msg' }) };
+    });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  function makeP1Bridge(extra = {}) {
+    const binding = {
+      type: 'discord',
+      token: 'bot-token',
+      targetKey: 'chan-p1',
+      sessionId: 'ses-usage',
+      projectPath: '/proj',
+      projectLabel: 'proj',
+    };
+    return makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: () => binding,
+        lookupBySessionId: () => [binding],
+      },
+      ...extra,
+    });
+  }
+
+  it('/tunnel starts the existing tunnel runtime and replies with its public URL', async () => {
+    const startTunnelWithNormalizedRequest = vi.fn(async () => ({
+      publicUrl: 'https://openchamber.example.dev',
+      provider: 'cloudflare',
+      mode: 'quick',
+    }));
+    const bridge = makeP1Bridge({
+      readSettings: async () => ({ tunnelProvider: 'cloudflare', tunnelMode: 'quick' }),
+      startTunnelWithNormalizedRequest,
+    });
+
+    const result = await bridge.runCommand({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-p1',
+      threadId: null,
+      commandName: 'tunnel',
+      args: 'cloudflare quick',
+    });
+
+    expect(startTunnelWithNormalizedRequest).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'cloudflare',
+      mode: 'quick',
+      intent: 'ephemeral-public',
+    }));
+    expect(result.reply).toContain('https://openchamber.example.dev');
+  });
+
+  it('/tunnel surfaces provider/runtime configuration errors clearly', async () => {
+    const bridge = makeP1Bridge({
+      readSettings: async () => ({ tunnelProvider: 'ngrok', tunnelMode: 'quick' }),
+      startTunnelWithNormalizedRequest: vi.fn(async () => {
+        throw new Error('ngrok token is not configured');
+      }),
+    });
+
+    const result = await bridge.runCommand({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-p1',
+      threadId: null,
+      commandName: 'tunnel',
+      args: 'ngrok quick',
+    });
+
+    expect(result.reply).toContain('Tunnel failed');
+    expect(result.reply).toContain('ngrok token is not configured');
+  });
+
+  it('/usage summarizes session token usage and estimated model cost', async () => {
+    const bridge = makeP1Bridge();
+    const result = await bridge.runCommand({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-p1',
+      threadId: null,
+      commandName: 'usage',
+    });
+
+    expect(result.reply).toContain('**Session usage**');
+    expect(result.reply).toContain('Assistant turns with token data: 1');
+    expect(result.reply).toContain('Total tokens: 3,850');
+    expect(result.reply).toContain('Estimated cost: $0.04');
+  });
+});
+
 describe('plain message supersedes an in-flight turn', () => {
   let originalFetch;
   beforeEach(() => {
@@ -1799,6 +2039,104 @@ describe('plain message supersedes an in-flight turn', () => {
     const sentBodies = promptCalls().map((c) => JSON.parse(c.body).parts[0].text);
     expect(sentBodies).toContain('second');
     expect(promptCalls()).toHaveLength(2);
+  });
+
+  it('queues a suffix-marked message without aborting the running turn', async () => {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body });
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+    });
+
+    const bridge = makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: ({ targetKey }) =>
+          targetKey === 'chan-queue'
+            ? { sessionId: 'ses-queue', projectPath: '/p', projectLabel: 'P' }
+            : null,
+      },
+    });
+
+    await bridge.routeInbound({
+      type: 'discord', token: 'bot-token', channelId: 'chan-queue', threadId: null, text: 'first',
+    });
+    const queued = await bridge.routeInbound({
+      type: 'discord', token: 'bot-token', channelId: 'chan-queue', threadId: null, text: 'second. queue',
+      from: { username: 'alice', firstName: 'Alice' },
+    });
+
+    const promptCalls = () =>
+      calls.filter((c) => c.method === 'POST' && c.url.includes('/session/ses-queue/prompt_async'));
+    const abortCalls = () =>
+      calls.filter((c) => c.method === 'POST' && c.url.includes('/session/ses-queue/abort'));
+
+    expect(queued).toMatchObject({ ok: true, handledCommand: 'queue' });
+    expect(abortCalls()).toHaveLength(0);
+    expect(promptCalls()).toHaveLength(1);
+
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: { type: 'session.idle', properties: { sessionID: 'ses-queue' } },
+    });
+    await flush();
+
+    const sentBodies = promptCalls().map((c) => JSON.parse(c.body).parts[0].text);
+    expect(sentBodies).toEqual(['first', 'second']);
+  });
+
+  it('forks a suffix-marked btw question into a new thread without aborting the source session', async () => {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body });
+      const u = String(url);
+      if (u.includes('/session/ses-btw/fork')) {
+        return { ok: true, status: 200, json: async () => ({ id: 'ses-btw-side' }), text: async () => '' };
+      }
+      if (u.includes('/channels/chan-btw/threads')) {
+        return { ok: true, status: 200, json: async () => ({ id: 'thread-btw' }), text: async () => '' };
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+    });
+
+    const binds = [];
+    const bridge = makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: ({ targetKey }) =>
+          targetKey === 'chan-btw'
+            ? { sessionId: 'ses-btw', projectPath: '/p', projectLabel: 'P' }
+            : null,
+        bind: (row) => binds.push(row),
+      },
+    });
+
+    const result = await bridge.routeInbound({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-btw',
+      threadId: null,
+      text: 'Should we add a migration. btw',
+      from: { id: 'user-1', username: 'alice' },
+    });
+
+    expect(result).toMatchObject({ ok: true, handledCommand: 'btw' });
+    expect(calls.filter((c) => c.url.includes('/session/ses-btw/abort'))).toHaveLength(0);
+    expect(calls.filter((c) => c.url.includes('/session/ses-btw/fork'))).toHaveLength(1);
+    expect(binds).toContainEqual(expect.objectContaining({
+      targetKey: 'thread-btw',
+      sessionId: 'ses-btw-side',
+      projectPath: '/p',
+    }));
+
+    const sidePrompt = calls.find((c) => c.url.includes('/session/ses-btw-side/prompt_async'));
+    expect(sidePrompt).toBeTruthy();
+    expect(JSON.parse(sidePrompt.body).parts).toEqual([
+      { type: 'text', text: 'Should we add a migration' },
+    ]);
+
+    const reply = calls.find((c) => c.url.includes('/channels/chan-btw/messages'));
+    expect(JSON.parse(reply.body).content).toContain('<#thread-btw>');
   });
 
   it('suppresses a trailing abort error from the superseded turn (no false failure)', async () => {
@@ -1882,6 +2220,49 @@ describe('plain message supersedes an in-flight turn', () => {
       .map((c) => JSON.parse(c.body).content)
       .filter((p) => p.startsWith('✗'));
     expect(errorLines).toHaveLength(1);
+  });
+
+  it('uses the configured interrupt timeout before sending a deferred supersede prompt', async () => {
+    vi.useFakeTimers();
+    try {
+      const calls = [];
+      globalThis.fetch = vi.fn(async (url, init = {}) => {
+        calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body });
+        return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+      });
+      const bridge = makeBridge({
+        store: {
+          ...makeFakeStore(),
+          lookup: ({ targetKey }) =>
+            targetKey === 'chan-timeout'
+              ? { sessionId: 'ses-timeout', projectPath: '/p', projectLabel: 'P' }
+              : null,
+          getInterruptTimeoutMs: () => 1234,
+        },
+      });
+      const promptCalls = () =>
+        calls.filter((c) => c.method === 'POST' && c.url.includes('/session/ses-timeout/prompt_async'));
+
+      await bridge.routeInbound({
+        type: 'discord', token: 'bot-token', channelId: 'chan-timeout', threadId: null, text: 'first',
+      });
+      await bridge.routeInbound({
+        type: 'discord', token: 'bot-token', channelId: 'chan-timeout', threadId: null, text: 'second',
+      });
+      expect(promptCalls()).toHaveLength(1);
+
+      vi.advanceTimersByTime(1233);
+      await Promise.resolve();
+      expect(promptCalls()).toHaveLength(1);
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(promptCalls()).toHaveLength(2);
+      expect(JSON.parse(promptCalls()[1].body).parts[0].text).toBe('second');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -1991,6 +2372,179 @@ describe('duplicate session.idle — single "done" footer (abort/force-stop)', (
       .filter((p) => p.includes('done ·'));
 
     expect(doneFooters).toHaveLength(1);
+  });
+});
+
+describe('notify-on-complete mentions', () => {
+  let originalFetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  function makeNotifyBridge({ enabled }) {
+    const binding = { sessionId: 'ses-notify', projectPath: '/p', projectLabel: 'P' };
+    return makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: ({ targetKey }) => (targetKey === 'chan-notify' ? binding : null),
+        getNotifyOnComplete: () => enabled,
+      },
+    });
+  }
+
+  it('mentions the last Discord prompter after a real assistant turn completes', async () => {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body });
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+    });
+    const bridge = makeNotifyBridge({ enabled: true });
+
+    await bridge.routeInbound({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-notify',
+      threadId: null,
+      text: 'do work',
+      from: { id: 'user-mention', username: 'alice' },
+    });
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: {
+        type: 'message.updated',
+        properties: { info: { id: 'm-a', role: 'assistant', sessionID: 'ses-notify' } },
+      },
+    });
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: {
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'p-a',
+            type: 'text',
+            messageID: 'm-a',
+            sessionID: 'ses-notify',
+            text: 'done',
+            time: { end: Date.now() },
+          },
+        },
+      },
+    });
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: { type: 'session.idle', properties: { sessionID: 'ses-notify' } },
+    });
+    await flush();
+
+    const posted = calls
+      .filter((c) => c.method === 'POST' && c.url.includes('/channels/chan-notify/messages'))
+      .map((c) => JSON.parse(c.body).content);
+    expect(posted.some((content) => content.startsWith('<@user-mention>') && content.includes('done ·'))).toBe(true);
+  });
+
+  it('does not mention when the turn idles without assistant output', async () => {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body });
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+    });
+    const bridge = makeNotifyBridge({ enabled: true });
+
+    await bridge.routeInbound({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-notify',
+      threadId: null,
+      text: 'stop quickly',
+      from: { id: 'user-mention', username: 'alice' },
+    });
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: { type: 'session.idle', properties: { sessionID: 'ses-notify' } },
+    });
+    await flush();
+
+    const posted = calls
+      .filter((c) => c.method === 'POST' && c.url.includes('/channels/chan-notify/messages'))
+      .map((c) => JSON.parse(c.body).content);
+    expect(posted.some((content) => content.startsWith('<@user-mention>'))).toBe(false);
+  });
+
+  it('does not mention or post a done footer for an explicitly aborted turn', async () => {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body });
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+    });
+    const bridge = makeNotifyBridge({ enabled: true });
+
+    await bridge.routeInbound({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-notify',
+      threadId: null,
+      text: 'do work',
+      from: { id: 'user-mention', username: 'alice' },
+    });
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: {
+        type: 'message.updated',
+        properties: { info: { id: 'm-a', role: 'assistant', sessionID: 'ses-notify' } },
+      },
+    });
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: {
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'p-a',
+            type: 'text',
+            messageID: 'm-a',
+            sessionID: 'ses-notify',
+            text: 'partial answer',
+            time: { end: Date.now() },
+          },
+        },
+      },
+    });
+
+    await bridge.routeInbound({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'chan-notify',
+      threadId: null,
+      text: '/abort',
+      from: { id: 'user-mention', username: 'alice' },
+    });
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: {
+        type: 'session.error',
+        properties: { sessionID: 'ses-notify', error: { data: { message: 'streaming response failed' } } },
+      },
+    });
+    await bridge._handleGlobalEvent({
+      directory: '/p',
+      payload: { type: 'session.idle', properties: { sessionID: 'ses-notify' } },
+    });
+    await flush();
+
+    const posted = calls
+      .filter((c) => c.method === 'POST' && c.url.includes('/channels/chan-notify/messages'))
+      .map((c) => JSON.parse(c.body).content);
+    expect(posted.some((content) => content.startsWith('<@user-mention>'))).toBe(false);
+    expect(posted.some((content) => content.includes('done ·'))).toBe(false);
+    expect(posted.some((content) => content.startsWith('✗'))).toBe(false);
+    expect(posted.some((content) => content.includes('Aborted session'))).toBe(true);
   });
 });
 
