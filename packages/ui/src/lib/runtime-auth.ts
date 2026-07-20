@@ -361,7 +361,7 @@ export const acquireRuntimeUrlAuthToken = (apiBaseUrl?: string | null): (() => v
 
 // Subscribe to url-token *replacements* (an existing token swapped for a fresh
 // one). Fires only on a real change — not the initial mint — so consumers can
-// remount token-bearing assets without churning on first load. Returns an
+// refresh token-derived asset URLs without churning on first load. Returns an
 // unsubscribe function.
 export const subscribeRuntimeUrlAuthToken = (listener: () => void): (() => void) => {
   urlAuthListeners.add(listener);

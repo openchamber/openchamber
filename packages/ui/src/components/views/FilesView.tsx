@@ -674,16 +674,15 @@ interface FilesViewProps {
  * Keeps a token-bearing asset preview (image/HTML/PDF) authenticated. While
  * `assetKey` is set this registers an active url-token consumer (so runtime-auth
  * proactively refreshes the shared token before it expires) and subscribes to
- * token replacements, bumping `nonce` so the iframe/img remounts with the fresh
- * token — but only when the token actually changed, not on every interval.
+ * token replacements so the preview rerenders with the fresh token-derived URL.
  */
 const useAssetAuthRefresh = (
   assetKey: string,
   setFileError: React.Dispatch<React.SetStateAction<string | null>>,
   errorFallback: string,
-): { readyKey: string; nonce: number } => {
+): { readyKey: string } => {
   const [readyKey, setReadyKey] = React.useState('');
-  const [nonce, setNonce] = React.useState(0);
+  const [, forceRefresh] = React.useReducer((value: number) => value + 1, 0);
 
   React.useEffect(() => {
     if (!assetKey) {
@@ -710,9 +709,9 @@ const useAssetAuthRefresh = (
 
     const unsubscribe = subscribeRuntimeUrlAuthToken(() => {
       if (cancelled) return;
-      // Token was refreshed underneath us — remount the asset with the fresh URL.
+      // Token was refreshed underneath us — rerender so the asset URL is rebuilt.
       setReadyKey(assetKey);
-      setNonce((n) => n + 1);
+      forceRefresh();
       setFileError(null);
     });
 
@@ -723,7 +722,7 @@ const useAssetAuthRefresh = (
     };
   }, [assetKey, setFileError, errorFallback]);
 
-  return { readyKey, nonce };
+  return { readyKey };
 };
 
 export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
@@ -2953,11 +2952,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     : '';
 
   const assetAuthErrorFallback = t('filesView.error.readFileFailed');
-  const { readyKey: imageAssetAuthReadyKey, nonce: imagePreviewNonce } =
+  const { readyKey: imageAssetAuthReadyKey } =
     useAssetAuthRefresh(imageAssetAuthKey, setFileError, assetAuthErrorFallback);
-  const { readyKey: htmlAssetAuthReadyKey, nonce: htmlPreviewNonce } =
+  const { readyKey: htmlAssetAuthReadyKey } =
     useAssetAuthRefresh(htmlAssetAuthKey, setFileError, assetAuthErrorFallback);
-  const { readyKey: pdfAssetAuthReadyKey, nonce: pdfPreviewNonce } =
+  const { readyKey: pdfAssetAuthReadyKey } =
     useAssetAuthRefresh(pdfAssetAuthKey, setFileError, assetAuthErrorFallback);
 
   const isImageAssetAuthLoading = Boolean(imageAssetAuthKey && imageAssetAuthReadyKey !== imageAssetAuthKey);
@@ -2991,13 +2990,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const renderPdfPreview = React.useCallback((file: FileNode) => (
     <div className="h-full overflow-hidden bg-[var(--surface-background)]">
       <iframe
-        key={pdfPreviewNonce}
         src={pdfSrc}
         className="h-full w-full border-0"
         title={file.name}
       />
     </div>
-  ), [pdfSrc, pdfPreviewNonce]);
+  ), [pdfSrc]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -3815,7 +3813,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : isSelectedImage ? (
             <div className="flex h-full items-center justify-center p-3">
               <img
-                key={imagePreviewNonce}
                 src={imageSrc}
                 alt={selectedFile?.name ?? t('filesView.editor.imageAltFallback')}
                 className="max-w-full max-h-[70vh] object-contain rounded-md border border-border/30 bg-primary/10"
@@ -3884,7 +3881,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             ) : (
             <div className="h-full overflow-hidden">
               <iframe
-                key={htmlPreviewNonce}
                 src={!runtime.isVSCode && htmlAssetAuthReadyKey === htmlAssetAuthKey ? (() => {
                   const encoded = selectedFile.path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
                   return getRuntimeUrlResolver().authenticatedAsset(`/api/fs/serve${encoded.startsWith('/') ? encoded : `/${encoded}`}`);
@@ -4186,7 +4182,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : isSelectedImage ? (
             <div className="flex h-full items-center justify-center p-4">
               <img
-                key={imagePreviewNonce}
                 src={imageSrc}
                 alt={selectedFile.name}
                 className="max-w-full max-h-full object-contain rounded-md border border-border/30 bg-primary/10"
