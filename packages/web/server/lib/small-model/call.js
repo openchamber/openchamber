@@ -1,5 +1,8 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { readAuthFile, writeAuthFile } from '../opencode/auth.js';
-import { readConfig } from '../opencode/shared.js';
+import { readConfig, readConfigLayers } from '../opencode/shared.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
 
@@ -104,6 +107,15 @@ const ensureFreshOpenaiOauth = async (entry) => {
 
 const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, extraBody }) => {
   const trimmedBase = baseURL.replace(/\/+$/, '');
+  console.log('[small-model:diagnostic] request', {
+    provider: providerLabel,
+    model: modelID,
+    maxOutputTokens,
+    thinkingDisabled: extraBody?.thinking?.type === 'disabled',
+    promptChars: prompt.length,
+    systemChars: system?.length ?? 0,
+    inputChars: prompt.length + (system?.length ?? 0),
+  });
   const response = await fetch(`${trimmedBase}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -123,11 +135,29 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
+  console.log('[small-model:diagnostic] response', {
+    provider: providerLabel,
+    model: modelID,
+    httpStatus: response.status,
+    ok: response.ok,
+  });
   if (!response.ok) {
     throw await httpError(response, providerLabel);
   }
   const payload = await response.json();
   const message = payload?.choices?.[0]?.message;
+  console.log('[small-model:diagnostic] completion', {
+    provider: providerLabel,
+    model: modelID,
+    finishReason: payload?.choices?.[0]?.finish_reason ?? null,
+    contentType: Array.isArray(message?.content) ? 'parts' : typeof message?.content,
+    contentChars: typeof message?.content === 'string'
+      ? message.content.length
+      : Array.isArray(message?.content)
+        ? message.content.reduce((total, part) => total + (typeof part?.text === 'string' ? part.text.length : 0), 0)
+        : 0,
+    reasoningChars: typeof message?.reasoning_content === 'string' ? message.reasoning_content.length : 0,
+  });
 
   // Providers disagree on the content shape: plain string, an array of
   // typed parts, or (thinking models) an empty content with the budget spent
@@ -186,6 +216,9 @@ const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens 
 
 const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelID)}:generateContent`;
+  const thinkingConfig = modelID.toLowerCase().startsWith('gemini-3')
+    ? { thinkingLevel: modelID.toLowerCase().includes('flash') ? 'minimal' : 'low' }
+    : { thinkingBudget: 0 };
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -196,9 +229,7 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) 
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-      // thinkingBudget 0 switches Gemini Flash thinking off; Flash is the only
-      // family the small-model resolver picks for Google.
-      generationConfig: { maxOutputTokens, thinkingConfig: { thinkingBudget: 0 } },
+      generationConfig: { maxOutputTokens, thinkingConfig },
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -284,13 +315,48 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
 // Custom provider configuration support
 // ---------------------------------------------------------------------------
 
+const resolveConfigApiKey = (value, workingDirectory, providerID) => {
+  const envMatch = value.match(/^\{env:([^}]+)\}$/i);
+  if (envMatch) {
+    return process.env[envMatch[1].trim()]?.trim() || null;
+  }
+
+  const fileMatch = value.match(/^\{file:(.+)\}$/i);
+  if (!fileMatch) return value;
+
+  const configuredPath = fileMatch[1].trim();
+  let resolvedPath;
+  if (configuredPath === '~' || configuredPath.startsWith('~/') || configuredPath.startsWith('~\\')) {
+    resolvedPath = path.join(os.homedir(), configuredPath.slice(2));
+  } else if (path.isAbsolute(configuredPath)) {
+    resolvedPath = configuredPath;
+  } else {
+    const layers = readConfigLayers(workingDirectory);
+    const source = [
+      { config: layers.customConfig, filePath: layers.paths.customPath },
+      { config: layers.projectConfig, filePath: layers.paths.projectPath },
+      { config: layers.userConfig, filePath: layers.paths.userPath },
+    ].find(({ config }) => config?.provider?.[providerID]?.options?.apiKey === value);
+    resolvedPath = path.resolve(source?.filePath ? path.dirname(source.filePath) : workingDirectory || process.cwd(), configuredPath);
+  }
+
+  try {
+    const key = fs.readFileSync(resolvedPath, 'utf8').trim();
+    if (!key) throw new Error('empty file');
+    return key;
+  } catch {
+    throw new Error(`Failed to resolve configured apiKey file for provider "${providerID}"`);
+  }
+};
+
 const readProviderConfig = (workingDirectory, providerID) => {
   try {
     const config = readConfig(workingDirectory);
     const providerCfg = config?.provider?.[providerID];
     if (!providerCfg || typeof providerCfg !== 'object') return null;
     const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
-    const apiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
+    const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
+    const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
     return {
       baseURL,
       // Shape the config-supplied key as a regular api-key auth entry so it

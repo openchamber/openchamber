@@ -27,6 +27,7 @@ import {
   withoutReviewSessionLink,
   type SessionMetadataRecord,
 } from "@/lib/sessionReviewMetadata"
+import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -189,6 +190,115 @@ export function mirrorSessionIntoLiveStores(session: Session, directory?: string
     return
   }
   updateLiveSession(session)
+}
+
+function moveRecordEntries<T>(
+  source: Record<string, T>,
+  destination: Record<string, T>,
+  keys: Iterable<string>,
+): { source: Record<string, T>; destination: Record<string, T> } {
+  let nextSource = source
+  let nextDestination = destination
+
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue
+    if (nextSource === source) nextSource = { ...source }
+    if (nextDestination === destination) nextDestination = { ...destination }
+    nextDestination[key] = source[key]
+    delete nextSource[key]
+  }
+
+  return { source: nextSource, destination: nextDestination }
+}
+
+function reconcileSessionMove(
+  session: Session,
+  sourceDirectory: string,
+  destinationDirectory: string,
+): Session {
+  const stores = _childStores
+  const sourceStore = stores?.getChild(sourceDirectory)
+  const destinationStore = stores?.ensureChild(destinationDirectory, { bootstrap: false })
+  const sourceState = sourceStore?.getState()
+  const destinationState = destinationStore?.getState()
+  const liveSession = sourceState?.session.find((candidate) => candidate.id === session.id) ?? session
+  const movedSession = { ...liveSession, directory: destinationDirectory } as Session
+
+  if (!destinationStore || !destinationState || sourceStore === destinationStore) {
+    return movedSession
+  }
+
+  const destinationSessionIndex = destinationState.session.findIndex((candidate) => candidate.id === session.id)
+  const destinationSessions = [...destinationState.session]
+  if (destinationSessionIndex === -1) destinationSessions.push(movedSession)
+  else destinationSessions[destinationSessionIndex] = movedSession
+
+  if (!sourceStore || !sourceState) {
+    destinationStore.setState({
+      session: destinationSessions,
+      sessionTotal: destinationSessionIndex === -1
+        ? destinationState.sessionTotal + 1
+        : destinationState.sessionTotal,
+    })
+    return movedSession
+  }
+
+  const sourceContainsSession = sourceState.session.some((candidate) => candidate.id === session.id)
+  const status = moveRecordEntries(sourceState.session_status, destinationState.session_status, [session.id])
+  const diffs = moveRecordEntries(sourceState.session_diff, destinationState.session_diff, [session.id])
+  const todos = moveRecordEntries(sourceState.todo, destinationState.todo, [session.id])
+  const permissions = moveRecordEntries(sourceState.permission, destinationState.permission, [session.id])
+  const questions = moveRecordEntries(sourceState.question, destinationState.question, [session.id])
+  const messages = moveRecordEntries(sourceState.message, destinationState.message, [session.id])
+  const messageIds = sourceState.message[session.id]?.map((message) => message.id) ?? []
+  const parts = moveRecordEntries(sourceState.part, destinationState.part, messageIds)
+
+  sourceStore.setState({
+    session: sourceState.session.filter((candidate) => candidate.id !== session.id),
+    sessionTotal: sourceContainsSession ? Math.max(0, sourceState.sessionTotal - 1) : sourceState.sessionTotal,
+    session_status: status.source,
+    session_diff: diffs.source,
+    todo: todos.source,
+    permission: permissions.source,
+    question: questions.source,
+    message: messages.source,
+    part: parts.source,
+  })
+  destinationStore.setState({
+    session: destinationSessions,
+    sessionTotal: destinationSessionIndex === -1
+      ? destinationState.sessionTotal + 1
+      : destinationState.sessionTotal,
+    session_status: status.destination,
+    session_diff: diffs.destination,
+    todo: todos.destination,
+    permission: permissions.destination,
+    question: questions.destination,
+    message: messages.destination,
+    part: parts.destination,
+  })
+
+  return movedSession
+}
+
+export async function moveSessionToDirectory(
+  session: Session,
+  sourceDirectory: string,
+  destinationDirectory: string,
+  moveChanges = true,
+): Promise<void> {
+  const result = await opencodeClient.getSdkClient().experimental.controlPlane.moveSession({
+    sessionID: session.id,
+    destination: { directory: destinationDirectory },
+    moveChanges,
+  })
+  assertSdkSuccess(result, "Move session")
+
+  const moved = reconcileSessionMove(session, sourceDirectory, destinationDirectory)
+
+  registerSessionDirectory(session.id, destinationDirectory)
+  useGlobalSessionsStore.getState().upsertSession(moved)
+  useSessionUIStore.getState().setSessionDirectory(session.id, destinationDirectory)
 }
 
 function dir() {
@@ -435,13 +545,19 @@ export async function createSession(
   metadata?: Record<string, unknown>,
 ): Promise<Session | null> {
   try {
+    // Capture the effective directory used for session creation so we can fall
+    // back to it when the server response omits the `directory` field.
+    // Without this, setCurrentSession would fall through to a stale
+    // opencodeClient.getDirectory() value and group the session under the
+    // wrong project (closes #1637, #2270).
+    const effectiveDirectory = directoryOverride ?? dir()
     const session = await opencodeClient.createSession({
       title,
       parentID: parentID ?? undefined,
       metadata,
-    }, directoryOverride ?? dir())
+    }, effectiveDirectory)
 
-    const sessionDirectory = (session as { directory?: string | null }).directory ?? null
+    const sessionDirectory = (session as { directory?: string | null }).directory ?? effectiveDirectory ?? null
     // Pre-populate routing index so SSE events arriving before session.created
     // can be routed to the correct child store
     if (sessionDirectory) {
@@ -469,6 +585,19 @@ export async function patchSessionMetadata(
   useGlobalSessionsStore.getState().upsertSession(updated)
   const sessionDirectory = (updated as { directory?: string | null }).directory ?? targetDirectory
   if (sessionDirectory) registerSessionDirectory(updated.id, sessionDirectory)
+  return updated
+}
+
+export async function setContextObligatoryMessage(
+  sessionId: string,
+  directory: string | null | undefined,
+  message: ContextObligatoryMessage,
+  pinned: boolean,
+): Promise<Session> {
+  const updated = await patchSessionMetadata(sessionId, directory, (metadata) =>
+    withContextObligatoryMessage(metadata, message, pinned))
+  const sessionDirectory = (updated as Session & { directory?: string | null }).directory ?? directory ?? undefined
+  mirrorSessionIntoLiveStores(updated, sessionDirectory ?? undefined)
   return updated
 }
 

@@ -59,7 +59,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     ref
   ) => {
     const { t } = useI18n()
-    const [draft, setDraft] = React.useState(() => (value === undefined ? '' : String(value)))
+    const [draft, setDraft] = React.useState(() => (value == null ? '' : String(value)))
     const { isMobile } = useDeviceInfo()
     const ignoreNextClickRef = React.useRef(false)
     const swallowNextClickCleanupRef = React.useRef<(() => void) | null>(null)
@@ -100,7 +100,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     }, [])
 
     React.useEffect(() => {
-      setDraft(value === undefined ? '' : String(value))
+      setDraft(value == null ? '' : String(value))
     }, [value])
 
     const baseValue = React.useMemo(() => {
@@ -158,7 +158,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       (event: React.FocusEvent<HTMLInputElement>) => {
         if (draft.trim() === '') {
           if (!onClear) {
-            setDraft(value === undefined ? '' : String(value))
+            setDraft(value == null ? '' : String(value))
           }
           onBlur?.(event)
           return
@@ -166,7 +166,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
 
         const parsed = Number(draft)
         if (!Number.isFinite(parsed)) {
-          setDraft(value === undefined ? '' : String(value))
+          setDraft(value == null ? '' : String(value))
         } else {
           const clamped = clamp(parsed, min, max)
           const normalized = normalizeToStep(clamped, step)
@@ -228,7 +228,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
         <div
           className={cn(
             // NOTE: mobile.css enforces min-height:36px on buttons; match it to avoid clipping.
-            "flex h-9 shrink-0 items-stretch overflow-x-hidden overflow-y-hidden rounded-lg border border-border bg-transparent select-none overscroll-contain",
+            "flex h-8 shrink-0 items-stretch overflow-x-hidden overflow-y-hidden rounded-lg border border-border bg-transparent select-none overscroll-contain",
             "[-webkit-user-select:none] [-webkit-touch-callout:none]",
             "disabled:pointer-events-none disabled:opacity-50",
             containerClassName
@@ -241,7 +241,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
             onTouchStart={handleMobileTouchActivate(handleMobileDecrement)}
             onClick={handleMobileClickActivate(handleMobileDecrement)}
             className={cn(
-              "grid h-full min-h-0 w-9 place-items-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-none",
+              "grid h-full min-h-0 w-9 shrink-0 place-items-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-none",
               "text-muted-foreground",
               "disabled:pointer-events-none disabled:opacity-50",
               !decrementDisabled && "active:bg-interactive-hover"
@@ -252,13 +252,13 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
 
           <div
             className={cn(
-              "flex h-full min-w-0 w-14 items-center justify-center bg-transparent px-1.5",
+              "flex h-full min-w-0 flex-1 items-center justify-center bg-transparent px-1.5",
               "text-center text-[16px] leading-none text-foreground [font-variant-numeric:tabular-nums]",
               className
             )}
             aria-live="polite"
           >
-            {value === undefined ? emptyLabel : draft}
+            {value == null ? emptyLabel : draft}
           </div>
 
           <button
@@ -268,7 +268,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
             onTouchStart={handleMobileTouchActivate(handleMobileIncrement)}
             onClick={handleMobileClickActivate(handleMobileIncrement)}
             className={cn(
-              "grid h-full min-h-0 w-9 place-items-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-none",
+              "grid h-full min-h-0 w-9 shrink-0 place-items-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-none",
               "text-muted-foreground",
               "disabled:pointer-events-none disabled:opacity-50",
               !incrementDisabled && "active:bg-interactive-hover"
@@ -283,8 +283,9 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     return (
       <div
         className={cn(
-          "flex h-7 shrink-0 items-stretch overflow-x-hidden overflow-y-hidden rounded-lg border border-border bg-transparent",
+          "flex h-8 shrink-0 items-stretch overflow-x-hidden overflow-y-hidden rounded-md border border-border bg-transparent",
           "disabled:pointer-events-none disabled:opacity-50",
+          "transition-[background-color,border-color,box-shadow] duration-150 ease-in-out",
           containerClassName
         )}
       >
@@ -294,9 +295,10 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           disabled={decrementDisabled}
           onClick={() => commitValue(committedValueRef.current - step)}
           className={cn(
-            "flex h-full w-7 items-center justify-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-manipulation",
+            "flex h-full w-7 shrink-0 items-center justify-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-manipulation",
             "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
-            "disabled:pointer-events-none disabled:opacity-50"
+            "disabled:pointer-events-none disabled:opacity-50",
+            "transition-colors duration-150 ease-in-out"
           )}
         >
           <Icon name="subtract" className="block h-3.5 w-3.5" />
@@ -315,7 +317,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           autoCorrect="off"
           autoCapitalize="off"
           className={cn(
-            "h-full min-w-0 w-14 bg-transparent px-1.5 text-center typography-ui-label leading-none text-foreground [font-variant-numeric:tabular-nums]",
+            "h-full min-w-0 w-10 flex-1 bg-transparent px-1.5 text-center typography-ui-label leading-none text-foreground [font-variant-numeric:tabular-nums]",
             "placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground",
             "appearance-none outline-none [appearance:textfield] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
             "disabled:pointer-events-none disabled:cursor-not-allowed",
@@ -328,9 +330,10 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           disabled={incrementDisabled}
           onClick={() => commitValue(committedValueRef.current + step)}
           className={cn(
-            "flex h-full w-7 items-center justify-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-manipulation",
+            "flex h-full w-7 shrink-0 items-center justify-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-manipulation",
             "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
-            "disabled:pointer-events-none disabled:opacity-50"
+            "disabled:pointer-events-none disabled:opacity-50",
+            "transition-colors duration-150 ease-in-out"
           )}
         >
           <Icon name="add" className="block h-3.5 w-3.5" />

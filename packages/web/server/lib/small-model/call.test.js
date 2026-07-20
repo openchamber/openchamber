@@ -1,3 +1,6 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // readConfig reads merged opencode config layers from disk; mock it so each
@@ -6,10 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // untouched for this file.
 vi.mock('../opencode/shared.js', () => ({
   readConfig: vi.fn(),
+  readConfigLayers: vi.fn(),
 }));
 
 const { callSmallModel } = await import('./call.js');
-const { readConfig } = await import('../opencode/shared.js');
+const { readConfig, readConfigLayers } = await import('../opencode/shared.js');
 
 // Minimal catalog fragment used by the catalog-based base URL resolution case.
 const CATALOG = {
@@ -50,13 +54,68 @@ describe('callSmallModel — custom provider config', () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = fetchMock;
     readConfig.mockReset();
+    readConfigLayers.mockReset();
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+    delete process.env.OPENCHAMBER_TEST_PROVIDER_KEY;
   });
 
   describe('config-supplied credentials (no auth.json entry)', () => {
+    it('resolves an OpenCode file variable before sending the API key', async () => {
+      const secretPath = path.join(os.homedir(), '.secret');
+      const originalReadFileSync = fs.readFileSync;
+      vi.spyOn(fs, 'readFileSync').mockImplementation((filePath, ...args) => {
+        if (filePath === secretPath) return 'sk-file-key\n';
+        return originalReadFileSync(filePath, ...args);
+      });
+      readConfig.mockReturnValue({
+        provider: {
+          custom: {
+            options: { apiKey: '{file:~/.secret}', baseURL: 'https://proxy.example.test/v1' },
+          },
+        },
+      });
+      fetchMock.mockResolvedValue(ok('hello'));
+
+      await callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'custom',
+        modelID: 'model',
+        prompt: 'hi',
+      });
+
+      expect(lastCall(fetchMock).init.headers.Authorization).toBe('Bearer sk-file-key');
+      expect(JSON.stringify(fetchMock.mock.calls[0][1])).not.toContain('{file:');
+    });
+
+    it('resolves an OpenCode environment variable before sending the API key', async () => {
+      process.env.OPENCHAMBER_TEST_PROVIDER_KEY = 'sk-env-key';
+      readConfig.mockReturnValue({
+        provider: {
+          custom: {
+            options: { apiKey: '{env:OPENCHAMBER_TEST_PROVIDER_KEY}', baseURL: 'https://proxy.example.test/v1' },
+          },
+        },
+      });
+      fetchMock.mockResolvedValue(ok('hello'));
+
+      await callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'custom',
+        modelID: 'model',
+        prompt: 'hi',
+      });
+
+      expect(lastCall(fetchMock).init.headers.Authorization).toBe('Bearer sk-env-key');
+    });
+
     it('uses apiKey and baseURL from provider config when no auth.json entry exists', async () => {
       readConfig.mockReturnValue({
         provider: {
@@ -334,5 +393,61 @@ describe('callSmallModel — custom provider config', () => {
       // confirm callSmallModel passes the working directory straight through.
       expect(readConfig).toHaveBeenCalledWith('/path/to/project');
     });
+  });
+});
+
+describe('callSmallModel — Google thinking configuration', () => {
+  let fetchMock;
+  let originalFetch;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    readConfig.mockReset();
+    readConfig.mockReturnValue({});
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const googleResponse = (text) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }),
+  });
+
+  it('uses thinkingLevel for Gemini 3 Flash models', async () => {
+    fetchMock.mockResolvedValue(googleResponse('generated commit'));
+
+    const text = await callSmallModel({
+      auth: { google: { type: 'api', key: 'google-key' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'google',
+      modelID: 'gemini-3.1-flash-lite-preview',
+      prompt: 'generate',
+    });
+
+    expect(text).toBe('generated commit');
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'minimal' });
+  });
+
+  it('keeps thinkingBudget disabled for Gemini 2.5 Flash models', async () => {
+    fetchMock.mockResolvedValue(googleResponse('generated commit'));
+
+    await callSmallModel({
+      auth: { google: { type: 'api', key: 'google-key' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'google',
+      modelID: 'gemini-2.5-flash-lite',
+      prompt: 'generate',
+    });
+
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
   });
 });

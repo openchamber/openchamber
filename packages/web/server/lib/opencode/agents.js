@@ -215,70 +215,12 @@ function getAgentPermissionSource(agentName, workingDirectory, lookupCache = nul
   return { source: null, scope: null, path: null };
 }
 
-function mergePermissionWithNonWildcards(newPermission, permissionSource, agentName) {
-  if (!permissionSource.source || !permissionSource.path) {
-    return newPermission;
-  }
-
-  let existingPermission = null;
-  if (permissionSource.source === 'md') {
-    const { frontmatter } = parseMdFile(permissionSource.path);
-    existingPermission = frontmatter.permission;
-  } else if (permissionSource.source === 'json') {
-    const config = readConfigFile(permissionSource.path);
-    existingPermission = config?.agent?.[agentName]?.permission;
-  }
-
-  if (!existingPermission || typeof existingPermission === 'string') {
-    return newPermission;
-  }
-
+function applyAgentPermission(target, newPermission) {
   if (newPermission == null) {
-    return null;
+    delete target.permission;
+  } else {
+    target.permission = newPermission;
   }
-
-  if (typeof newPermission === 'string') {
-    return newPermission;
-  }
-
-  const nonWildcardPatterns = {};
-  for (const [permKey, permValue] of Object.entries(existingPermission)) {
-    if (permKey === '*') continue;
-
-    if (typeof permValue === 'object' && permValue !== null && !Array.isArray(permValue)) {
-      const nonWildcards = {};
-      for (const [pattern, action] of Object.entries(permValue)) {
-        if (pattern !== '*') {
-          nonWildcards[pattern] = action;
-        }
-      }
-      if (Object.keys(nonWildcards).length > 0) {
-        nonWildcardPatterns[permKey] = nonWildcards;
-      }
-    }
-  }
-
-  if (Object.keys(nonWildcardPatterns).length === 0) {
-    return newPermission;
-  }
-
-  const merged = { ...newPermission };
-  for (const [permKey, patterns] of Object.entries(nonWildcardPatterns)) {
-    const newValue = merged[permKey];
-    if (typeof newValue === 'string') {
-      merged[permKey] = { '*': newValue, ...patterns };
-    } else if (typeof newValue === 'object' && newValue !== null) {
-      merged[permKey] = { ...patterns, ...newValue };
-    } else {
-      const existingValue = existingPermission[permKey];
-      if (typeof existingValue === 'object' && existingValue !== null) {
-        const wildcard = existingValue['*'];
-        merged[permKey] = wildcard ? { '*': wildcard, ...patterns } : patterns;
-      }
-    }
-  }
-
-  return merged;
 }
 
 function getAgentSources(agentName, workingDirectory, lookupCache = createAgentLookupCache()) {
@@ -520,15 +462,17 @@ function updateAgent(agentName, updates, workingDirectory) {
 
     if (field === 'permission') {
       const permissionSource = getAgentPermissionSource(agentName, workingDirectory, lookupCache);
-      const newPermission = mergePermissionWithNonWildcards(value, permissionSource, agentName);
+      // The client edits the complete source permission map; persist it verbatim.
+      // (The old non-wildcard re-merge resurrected rules the user deleted.)
+      const newPermission = value && typeof value === 'object' && Object.keys(value).length === 0 ? null : value;
 
       if (permissionSource.source === 'md') {
         if (mdData && permissionSource.path === targetPath) {
-          mdData.frontmatter.permission = newPermission;
+          applyAgentPermission(mdData.frontmatter, newPermission);
           mdModified = true;
         } else {
           const existingMdData = parseMdFile(permissionSource.path);
-          existingMdData.frontmatter.permission = newPermission;
+          applyAgentPermission(existingMdData.frontmatter, newPermission);
           writeMdFile(permissionSource.path, existingMdData.frontmatter, existingMdData.body);
           console.log(`Updated permission in .md file: ${permissionSource.path}`);
         }
@@ -536,30 +480,30 @@ function updateAgent(agentName, updates, workingDirectory) {
         if (permissionSource.path === (jsonTarget.path || CONFIG_FILE)) {
           if (!config.agent) config.agent = {};
           if (!config.agent[agentName]) config.agent[agentName] = {};
-          config.agent[agentName].permission = newPermission;
+          applyAgentPermission(config.agent[agentName], newPermission);
           jsonModified = true;
         } else {
           const existingConfig = readConfigFile(permissionSource.path);
           if (!existingConfig.agent) existingConfig.agent = {};
           if (!existingConfig.agent[agentName]) existingConfig.agent[agentName] = {};
-          existingConfig.agent[agentName].permission = newPermission;
+          applyAgentPermission(existingConfig.agent[agentName], newPermission);
           writeConfig(existingConfig, permissionSource.path);
           console.log(`Updated permission in JSON: ${permissionSource.path}`);
         }
       } else {
         if (mdExists && mdData) {
-          mdData.frontmatter.permission = newPermission;
+          applyAgentPermission(mdData.frontmatter, newPermission);
           mdModified = true;
         } else if (hasJsonFields) {
           if (!config.agent) config.agent = {};
           if (!config.agent[agentName]) config.agent[agentName] = {};
-          config.agent[agentName].permission = newPermission;
+          applyAgentPermission(config.agent[agentName], newPermission);
           jsonModified = true;
         } else {
           const writeTarget = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
           if (!writeTarget.config.agent) writeTarget.config.agent = {};
           if (!writeTarget.config.agent[agentName]) writeTarget.config.agent[agentName] = {};
-          writeTarget.config.agent[agentName].permission = newPermission;
+          applyAgentPermission(writeTarget.config.agent[agentName], newPermission);
           writeConfig(writeTarget.config, writeTarget.path);
           console.log(`Created permission in JSON: ${writeTarget.path}`);
         }

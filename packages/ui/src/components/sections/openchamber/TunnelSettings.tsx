@@ -16,6 +16,8 @@ import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { SettingsSection, SettingsGroupTitle, SETTINGS_SELECT_SIZE, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 
 type TunnelState =
   | 'checking'
@@ -1236,26 +1238,24 @@ export const TunnelSettings: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="typography-ui-header font-semibold text-foreground">{t('settings.openchamber.tunnel.title')}</h3>
-        <p className="typography-meta mt-0 text-muted-foreground/70">
-          {t('settings.openchamber.tunnel.description')}
-        </p>
-        <p className="typography-meta mt-0 text-muted-foreground/60">
-          {t('settings.openchamber.tunnel.note.serverSideEnforced')}
-        </p>
-        <p className="typography-meta mt-0 text-muted-foreground/60">
-          {t('settings.openchamber.tunnel.note.connectLinksOneTime')}
-        </p>
-      </div>
-
+    <SettingsSection
+      title={t('settings.openchamber.tunnel.title')}
+      info={(
+        <div className="space-y-1">
+          <p>{t('settings.openchamber.tunnel.description')}</p>
+          <p>{t('settings.openchamber.tunnel.note.serverSideEnforced')}</p>
+          <p>{t('settings.openchamber.tunnel.note.connectLinksOneTime')}</p>
+        </div>
+      )}
+      divider={false}
+    >
+      <div className="space-y-6">
       {renderedSessionRecords.length > 0 && (
         <section className="space-y-2 px-2 pb-2 pt-0">
           <div className="rounded-lg border border-[var(--status-info-border)] bg-[var(--status-info-background)]/30 p-3">
             <div className="mb-2 flex items-center gap-2">
               <Icon name="information" className="size-4 text-[var(--status-info)]" />
-              <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.section.redeemedAccessLinks')}</p>
+              <p className={SETTINGS_CALLOUT_TITLE_CLASS}>{t('settings.openchamber.tunnel.section.redeemedAccessLinks')}</p>
             </div>
             <div className="space-y-1">
               {renderedSessionRecords.map((record) => {
@@ -1307,7 +1307,7 @@ export const TunnelSettings: React.FC = () => {
           <div className="flex items-start gap-2 rounded-lg border border-[var(--status-warning)]/30 bg-[var(--status-warning)]/5 p-3">
             <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
             <div className="space-y-1">
-              <p className="typography-meta font-medium text-foreground">
+              <p className={SETTINGS_CALLOUT_TITLE_CLASS}>
                 {t('settings.openchamber.tunnel.notAvailable.dependencyNotFound', { dependency: displayedDependencyInstallInfo.dependency })}
               </p>
               <p className="typography-meta text-muted-foreground/70">{t('settings.openchamber.tunnel.notAvailable.installHint')}</p>
@@ -1323,7 +1323,7 @@ export const TunnelSettings: React.FC = () => {
         <section className="space-y-4 px-2 pb-2 pt-0">
           <div className="space-y-3">
             <div data-settings-item="tunnel.provider" className="space-y-1.5">
-              <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.provider')}</p>
+              <p className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.tunnel.field.provider')}</p>
               <Select
                 value={tunnelProvider}
                 onValueChange={(value) => {
@@ -1331,7 +1331,7 @@ export const TunnelSettings: React.FC = () => {
                 }}
                 disabled={isSavingMode || state === 'starting' || state === 'stopping'}
               >
-                <SelectTrigger className="max-w-[16rem]">
+                <SelectTrigger size={SETTINGS_SELECT_SIZE} className="max-w-[16rem]">
                   <SelectValue placeholder={t('settings.openchamber.tunnel.field.providerPlaceholder')}>
                     {getProviderLabel(tunnelProvider)}
                   </SelectValue>
@@ -1354,7 +1354,7 @@ export const TunnelSettings: React.FC = () => {
             </div>
 
             <div data-settings-item="tunnel.type" className="space-y-1.5">
-              <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.tunnelType')}</p>
+              <p className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.tunnel.field.tunnelType')}</p>
               <div className="flex flex-wrap items-center gap-1">
                 {tunnelModeOptions.map((option) => (
                   <Tooltip key={option.value}>
@@ -1383,7 +1383,7 @@ export const TunnelSettings: React.FC = () => {
 
           <div data-settings-item="tunnel.ttl" className="mt-2 grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="typography-ui-label shrink-0 text-foreground">{t('settings.openchamber.tunnel.field.connectLinkTtl')}</span>
+              <span className={cn(SETTINGS_FIELD_LABEL_CLASS, 'shrink-0')}>{t('settings.openchamber.tunnel.field.connectLinkTtl')}</span>
               <Select
                 value={ttlOptionValue(BOOTSTRAP_TTL_OPTIONS, bootstrapTtlMs, '1800000')}
                 onValueChange={(value) => {
@@ -1391,7 +1391,7 @@ export const TunnelSettings: React.FC = () => {
                 }}
                 disabled={isSavingTtl || isSavingMode || state === 'starting' || state === 'stopping'}
               >
-                <SelectTrigger className="max-w-[11rem] min-w-0">
+                <SelectTrigger size={SETTINGS_SELECT_SIZE} className="max-w-[11rem] min-w-0">
                   <SelectValue className="truncate">
                     {ttlOptionLabel(BOOTSTRAP_TTL_OPTIONS, bootstrapTtlMs, '1800000')}
                   </SelectValue>
@@ -1405,7 +1405,7 @@ export const TunnelSettings: React.FC = () => {
             </div>
 
             <div className="flex min-w-0 items-center gap-2">
-              <span className="typography-ui-label shrink-0 text-foreground">{t('settings.openchamber.tunnel.field.tunnelSessionTtl')}</span>
+              <span className={cn(SETTINGS_FIELD_LABEL_CLASS, 'shrink-0')}>{t('settings.openchamber.tunnel.field.tunnelSessionTtl')}</span>
               <Select
                 value={ttlOptionValue(SESSION_TTL_OPTIONS, sessionTtlMs, '28800000')}
                 onValueChange={(value) => {
@@ -1413,7 +1413,7 @@ export const TunnelSettings: React.FC = () => {
                 }}
                 disabled={isSavingTtl || isSavingMode || state === 'starting' || state === 'stopping'}
               >
-                <SelectTrigger className="max-w-[11rem] min-w-0">
+                <SelectTrigger size={SETTINGS_SELECT_SIZE} className="max-w-[11rem] min-w-0">
                   <SelectValue className="truncate">
                     {ttlOptionLabel(SESSION_TTL_OPTIONS, sessionTtlMs, '28800000')}
                   </SelectValue>
@@ -1456,7 +1456,7 @@ export const TunnelSettings: React.FC = () => {
               )}
 
               <div className="mb-1 flex items-center justify-between gap-3">
-                <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.section.savedManagedRemoteTunnels')}</p>
+                <SettingsGroupTitle>{t('settings.openchamber.tunnel.section.savedManagedRemoteTunnels')}</SettingsGroupTitle>
                 <Button
                   variant="ghost"
                   size="xs"
@@ -1634,20 +1634,9 @@ export const TunnelSettings: React.FC = () => {
 
               <div className="flex items-center gap-1.5">
                 <p className="typography-meta text-muted-foreground/80">{t('settings.openchamber.tunnel.note.tokensSavedPerTunnel')}</p>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground"
-                      aria-label={t('settings.openchamber.tunnel.field.managedRemoteTokenInfoAria')}
-                    >
-                      <Icon name="information" className="h-3.5 w-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent sideOffset={8} className="max-w-xs">
-                    {t('settings.openchamber.tunnel.tooltip.tokensSavedPath')}
-                  </TooltipContent>
-                </Tooltip>
+                <SettingsInfoHint>
+                  {t('settings.openchamber.tunnel.tooltip.tokensSavedPath')}
+                </SettingsInfoHint>
               </div>
 
               {!selectedPreset && managedRemoteValidationError && (
@@ -1659,7 +1648,7 @@ export const TunnelSettings: React.FC = () => {
           {tunnelMode === 'managed-local' && (
             <div data-settings-item="tunnel.managed-local-config" className="space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
               <div className="space-y-1.5">
-                <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.configurationFile')}</p>
+                <p className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.tunnel.field.configurationFile')}</p>
                 <input
                   ref={managedLocalConfigFileInputRef}
                   type="file"
@@ -1772,7 +1761,7 @@ export const TunnelSettings: React.FC = () => {
 
               {tunnelMode === 'managed-remote' && (
                 <div className="space-y-1.5">
-                  <p className="typography-ui-label text-foreground">{t('settings.openchamber.tunnel.field.managedRemoteTunnelToConnect')}</p>
+                  <p className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.tunnel.field.managedRemoteTunnelToConnect')}</p>
                   <Select
                     value={selectedPresetId || (managedRemoteTunnelPresets[0]?.id ?? '')}
                     onValueChange={(presetId) => {
@@ -1785,7 +1774,7 @@ export const TunnelSettings: React.FC = () => {
                       || managedRemoteTunnelPresets.length <= 1
                     }
                   >
-                    <SelectTrigger>
+                    <SelectTrigger size={SETTINGS_SELECT_SIZE}>
                       <SelectValue placeholder={t('settings.openchamber.tunnel.field.selectSavedTunnelPlaceholder')}>
                         {selectedPreset?.name}
                       </SelectValue>
@@ -1909,6 +1898,7 @@ export const TunnelSettings: React.FC = () => {
           <Button size="sm" variant="ghost" onClick={handleStart}>{t('settings.openchamber.tunnel.actions.retry')}</Button>
         </section>
       )}
-    </div>
+      </div>
+    </SettingsSection>
   );
 };

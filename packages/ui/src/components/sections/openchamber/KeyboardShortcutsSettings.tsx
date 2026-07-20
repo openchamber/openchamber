@@ -1,8 +1,10 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Icon } from "@/components/icon/Icon";
+import {
+  SettingsSection,
+  SettingsFieldRow,
+} from '@/components/sections/shared/SettingsSection';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -157,41 +159,34 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   }, [clearShortcutOverride, persistShortcutOverrides, shortcutOverrides]);
 
   return (
-    <div data-settings-item="shortcuts.keyboard-shortcuts" className="mb-8">
-      <div className="mb-1 px-1">
-        <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.keyboardShortcuts.title')}</h3>
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            className="!font-normal"
-            onClick={() => {
-              resetAllShortcutOverrides();
-              persistShortcutOverrides({});
-              setDraftByAction({});
-              setPendingOverwrite(null);
-              setErrorText('');
-              setWarningText('');
-            }}
-          >
-            {t('settings.openchamber.keyboardShortcuts.actions.resetAll')}
-          </Button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8} className="max-w-xs">
-              {t('settings.openchamber.keyboardShortcuts.tooltip')}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
+    <SettingsSection
+      settingsItem="shortcuts.keyboard-shortcuts"
+      title={t('settings.openchamber.keyboardShortcuts.title')}
+      divider={false}
+      info={t('settings.openchamber.keyboardShortcuts.tooltip')}
+      headerAction={(
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="!font-normal"
+          onClick={() => {
+            resetAllShortcutOverrides();
+            persistShortcutOverrides({});
+            setDraftByAction({});
+            setPendingOverwrite(null);
+            setErrorText('');
+            setWarningText('');
+          }}
+        >
+          {t('settings.openchamber.keyboardShortcuts.actions.resetAll')}
+        </Button>
+      )}
+    >
       {(errorText || warningText || pendingOverwrite) && (
-        <div className="mb-2 space-y-2 px-1">
+        <div className="mb-2 space-y-2">
           {pendingOverwrite && (
-            <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3 flex flex-col @xl:flex-row @xl:items-center justify-between gap-3">
               <span className="typography-meta text-foreground">
                 {t('settings.openchamber.keyboardShortcuts.overwritePrompt')}
               </span>
@@ -214,7 +209,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
         </div>
       )}
 
-      <section className="px-2 pb-2 pt-0 space-y-0.5">
+      <div>
         {actions.map((action, index) => {
           const effective = getEffectiveShortcutCombo(action.id, shortcutOverrides);
           const draft = draftByAction[action.id];
@@ -222,11 +217,11 @@ export const KeyboardShortcutsSettings: React.FC = () => {
           const hasDraft = typeof draft === 'string' && normalizeCombo(draft) !== normalizeCombo(effective);
 
           return (
-            <div key={action.id} className={cn("flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8", index > 0 && "border-t border-[var(--surface-subtle)]")}>
-              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                <span className="typography-ui-label text-foreground">{actionLabel(action.id, action.label)}</span>
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+            <div key={action.id} className={cn("py-1.5", index > 0 && "border-t border-border/40")}>
+              <SettingsFieldRow
+                label={actionLabel(action.id, action.label)}
+                alignEnd={false}
+              >
                 <Input
                   readOnly
                   value={capturingActionId === action.id ? t('settings.openchamber.keyboardShortcuts.field.pressKeys') : formatShortcutForDisplay(displayCombo)}
@@ -283,11 +278,11 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                 <Button type="button" size="xs" className="!font-normal" variant="ghost" onClick={() => resetOne(action.id)}>
                   {t('settings.common.actions.reset')}
                 </Button>
-              </div>
+              </SettingsFieldRow>
             </div>
           );
         })}
-      </section>
-    </div>
+      </div>
+    </SettingsSection>
   );
 };

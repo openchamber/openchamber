@@ -17,6 +17,7 @@ import type {
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 
 type WorktreeListEntry = {
   path?: string;
@@ -57,6 +58,18 @@ const normalizePath = (value: string): string => {
   return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
 };
 
+export const getLatestWorktreeMetadata = (metadata: WorktreeMetadata): WorktreeMetadata => {
+  const target = normalizePath(metadata.path);
+  const state = useSessionUIStore.getState();
+  const available = state.availableWorktrees.find((candidate) => normalizePath(candidate.path) === target);
+  if (available) return available;
+  for (const worktrees of state.availableWorktreesByProject.values()) {
+    const candidate = worktrees.find((worktree) => normalizePath(worktree.path) === target);
+    if (candidate) return candidate;
+  }
+  return metadata;
+};
+
 const slugifyWorktreeName = (value: string): string => {
   return value
     .trim()
@@ -86,6 +99,7 @@ const setStoredWorktreeStatus = (directory: string, status: NonNullable<Worktree
     return;
   }
 
+  const changedSessionIds: string[] = [];
   useSessionUIStore.setState((state) => {
     let changed = false;
 
@@ -131,6 +145,7 @@ const setStoredWorktreeStatus = (directory: string, status: NonNullable<Worktree
     for (const [sessionId, metadata] of state.worktreeMetadata) {
       const next = applyStatus(metadata);
       if (next !== metadata) {
+        changedSessionIds.push(sessionId);
         if (worktreeMetadata === state.worktreeMetadata) {
           worktreeMetadata = new Map(state.worktreeMetadata);
         }
@@ -148,6 +163,19 @@ const setStoredWorktreeStatus = (directory: string, status: NonNullable<Worktree
       worktreeMetadata,
     };
   });
+
+  if (changedSessionIds.length > 0) {
+    useSessionWorktreeStore.setState((state) => {
+      let attachments = state.attachments;
+      for (const sessionId of changedSessionIds) {
+        const attachment = attachments.get(sessionId);
+        if (!attachment || attachment.worktreeStatus === status) continue;
+        if (attachments === state.attachments) attachments = new Map(state.attachments);
+        attachments.set(sessionId, { ...attachment, worktreeStatus: status });
+      }
+      return attachments === state.attachments ? state : { attachments };
+    });
+  }
 };
 
 const getWorktreeStatusFromBootstrap = (status?: GitWorktreeBootstrapStatus): WorktreeMetadata['worktreeStatus'] => {
@@ -404,13 +432,17 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
 
   if (created?.bootstrapStatus) {
     setWorktreeBootstrapState(metadata.path, created.bootstrapStatus);
-  } else {
+  } else if (created?.directoryCreated) {
     markWorktreeBootstrapPending(metadata.path);
   }
-  startWorktreeBootstrapWatcher(metadata.path, {
-    onFailed: () => setStoredWorktreeStatus(metadata.path, 'invalid'),
-    onReady: () => setStoredWorktreeStatus(metadata.path, 'ready'),
-  });
+  const shouldWatchBootstrap = created?.bootstrapStatus?.status === 'pending'
+    || (!created?.bootstrapStatus && created?.directoryCreated === true);
+  if (shouldWatchBootstrap) {
+    startWorktreeBootstrapWatcher(metadata.path, {
+      onFailed: () => setStoredWorktreeStatus(metadata.path, 'invalid'),
+      onReady: () => setStoredWorktreeStatus(metadata.path, 'ready'),
+    });
+  }
 
   invalidateWorktreeList(projectDirectory);
   // The new worktree changes the repo's worktree topology; drop cached root

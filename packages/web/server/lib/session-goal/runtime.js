@@ -213,6 +213,8 @@ const parseGoalMetadata = (session) => {
     auditFailStreak: Number.isFinite(goal.auditFailStreak) && goal.auditFailStreak > 0 ? Math.floor(goal.auditFailStreak) : 0,
     note: typeof goal.note === 'string' ? goal.note.slice(0, NOTE_CHAR_LIMIT) : '',
     statusReason: typeof goal.statusReason === 'string' ? goal.statusReason.slice(0, REASON_CHAR_LIMIT) : '',
+    evaluationProviderID: typeof goal.evaluationProviderID === 'string' ? goal.evaluationProviderID : '',
+    evaluationModelID: typeof goal.evaluationModelID === 'string' ? goal.evaluationModelID : '',
     lastAccountedMessageID: typeof goal.lastAccountedMessageID === 'string' ? goal.lastAccountedMessageID : '',
     createdAt: Number.isFinite(goal.createdAt) ? goal.createdAt : 0,
     updatedAt: Number.isFinite(goal.updatedAt) ? goal.updatedAt : 0,
@@ -332,7 +334,7 @@ export const createSessionGoalRuntime = ({
     return nextGoal;
   };
 
-  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID }) => {
+  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID }) => {
     const written = await writeGoal(sessionId, directory, goal.id, (current) => ({
       status,
       statusReason: clampText(statusReason, REASON_CHAR_LIMIT),
@@ -343,6 +345,8 @@ export const createSessionGoalRuntime = ({
       ...(tokensBaseline !== undefined ? { tokensBaseline } : {}),
       ...(tokensCommitted !== undefined ? { tokensCommitted } : {}),
       ...(lastAccountedMessageID ? { lastAccountedMessageID } : {}),
+      ...(evaluationProviderID ? { evaluationProviderID } : {}),
+      ...(evaluationModelID ? { evaluationModelID } : {}),
     }));
     if (!written) return;
     console.log(`[session-goal] ${sessionId} settled as ${status}${statusReason ? ` (${statusReason})` : ''}`);
@@ -378,13 +382,35 @@ export const createSessionGoalRuntime = ({
       });
       const structured = extractJsonObject(generated?.text);
       const verdict = typeof structured?.verdict === 'string' ? structured.verdict.trim().toLowerCase() : '';
-      if (!['continue', 'complete', 'blocked'].includes(verdict)) return null;
+      if (!structured || !['continue', 'complete', 'blocked'].includes(verdict)) {
+        console.warn('[session-goal:diagnostic] audit parse failed', {
+          sessionId: lastAssistantInfo?.sessionID ?? null,
+          provider: generated?.providerID ?? null,
+          model: generated?.modelID ?? null,
+          outputChars: typeof generated?.text === 'string' ? generated.text.length : 0,
+          jsonObjectFound: Boolean(structured),
+          verdict: verdict || null,
+        });
+        return null;
+      }
+      console.log('[session-goal:diagnostic] audit verdict', {
+        sessionId: lastAssistantInfo?.sessionID ?? null,
+        provider: generated?.providerID ?? null,
+        model: generated?.modelID ?? null,
+        outputChars: generated.text.length,
+        verdict,
+      });
       let note = clampText(structured?.note, NOTE_CHAR_LIMIT);
       if (note && hasScriptMismatch(note, `${goal.objective}\n${assistantText}`)) {
         console.warn('[session-goal] dropped audit note: language mismatch with objective');
         note = '';
       }
-      return { verdict, note };
+      return {
+        verdict,
+        note,
+        evaluationProviderID: generated.providerID,
+        evaluationModelID: generated.modelID,
+      };
     } catch (error) {
       // No authenticated small model (404) or a transient failure — the loop
       // still terminates via markers, budget, and the turn cap.
@@ -656,15 +682,22 @@ export const createSessionGoalRuntime = ({
       if (audit?.verdict === 'complete') {
         await settleGoal({
           sessionId, directory, goal, status: 'complete', statusReason: 'verified by audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+          evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
         });
         return;
       }
 
       if (audit?.verdict === 'blocked') {
         blockedStreak = goal.blockedStreak + 1;
+        console.warn('[session-goal:diagnostic] blocked audit streak', {
+          sessionId,
+          blockedStreak,
+          blockedStreakLimit: BLOCKED_STREAK_LIMIT,
+        });
         if (blockedStreak >= BLOCKED_STREAK_LIMIT) {
           await settleGoal({
             sessionId, directory, goal, status: 'blocked', statusReason: audit.note || 'blocked per audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+            evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
           });
           return;
         }
@@ -684,6 +717,8 @@ export const createSessionGoalRuntime = ({
       auditFailStreak,
       statusReason: '',
       ...(audit?.note ? { note: audit.note } : {}),
+      ...(audit?.evaluationProviderID ? { evaluationProviderID: audit.evaluationProviderID } : {}),
+      ...(audit?.evaluationModelID ? { evaluationModelID: audit.evaluationModelID } : {}),
     }));
     if (!written) {
       console.log('[session-goal] goal changed during tick, dropping continuation');

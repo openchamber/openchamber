@@ -134,11 +134,19 @@ describe('checkForUpdates', () => {
     const result = await checkForUpdates({
       appType: 'desktop-electron',
       currentVersion: '1.9.10',
+      installId: '4f4dfead-9688-4c4f-97d7-4607fbbfc3ab',
+      platform: 'windows',
+      arch: 'arm64',
     });
 
     expect(result.available).toBe(true);
     expect(result.version).toBe('1.10.0');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      installId: '4f4dfead-9688-4c4f-97d7-4607fbbfc3ab',
+      platform: 'windows',
+      arch: 'arm64',
+    });
   });
 
   it('resolves an Android APK asset when the update API returns an AAB', async () => {

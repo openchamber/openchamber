@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
-import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
+import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 
 function createSession(id: string, overrides: Partial<Session> = {}): Session {
   return {
@@ -86,5 +86,28 @@ describe("getReconnectCandidateSessionIds", () => {
       directory: "/repo-a",
       viewedSession: { directory: "/repo-b", sessionId: "active" },
     }).sort()).not.toContain("active")
+  })
+})
+
+describe("mergeBootstrapSessions", () => {
+  test("recovers a referenced parent when the roots response is temporarily empty", () => {
+    const parent = createSession("parent")
+    const child = createSession("child", { parentID: "parent" })
+
+    expect(mergeBootstrapSessions([], [child], [parent])).toEqual({
+      sessions: [child, parent],
+      rootCount: 1,
+    })
+  })
+
+  test("recovers referenced parents from the broader response without retaining stale roots", () => {
+    const parent = createSession("parent")
+    const stale = createSession("stale")
+    const child = createSession("child", { parentID: "parent" })
+
+    expect(mergeBootstrapSessions([], [parent, child], [stale])).toEqual({
+      sessions: [child, parent],
+      rootCount: 1,
+    })
   })
 })

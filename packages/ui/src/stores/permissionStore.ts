@@ -89,16 +89,6 @@ export const usePermissionStore = create<PermissionStore>()(persist((set, get) =
 
     setSessionAutoAccept: async (sessionId, enabled) => {
         if (!sessionId) return;
-        if (isVSCodeRuntime()) {
-            const response = await runtimeFetch("/api/notifications/auto-accept", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sessionId, enabled }),
-            });
-            if (!response.ok) throw new Error(`Permission auto-accept request failed (${response.status})`);
-            set((state) => ({ autoAccept: { ...state.autoAccept, [sessionId]: enabled }, loaded: true }));
-            return;
-        }
         set({ saving: true });
         try {
             const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
@@ -113,6 +103,10 @@ export const usePermissionStore = create<PermissionStore>()(persist((set, get) =
                 },
             );
             set({ autoAccept: snapshot.sessions, loaded: true });
+            if (isVSCodeRuntime() && enabled) {
+                const { reconcileVSCodePendingPermissions } = await import("@/sync/vscode-permission-auto-accept");
+                void reconcileVSCodePendingPermissions(directory).catch(() => undefined);
+            }
         } finally {
             set({ saving: false });
         }
