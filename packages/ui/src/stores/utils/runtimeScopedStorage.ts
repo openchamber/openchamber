@@ -15,8 +15,12 @@ const normalizeRuntimeStorageKey = (value?: string | null): string => {
   return key;
 };
 
+const getRuntimeScopedStorageKeyFromNormalizedRuntimeKey = (key: string, normalizedRuntimeKey: string): string => {
+  return `${key}:${encodeURIComponent(normalizedRuntimeKey)}`;
+};
+
 export const getRuntimeScopedStorageKey = (key: string, runtimeKey?: string | null): string => {
-  return `${key}:${encodeURIComponent(normalizeRuntimeStorageKey(runtimeKey))}`;
+  return getRuntimeScopedStorageKeyFromNormalizedRuntimeKey(key, normalizeRuntimeStorageKey(runtimeKey));
 };
 
 export const readRuntimeScopedStorage = (
@@ -25,7 +29,7 @@ export const readRuntimeScopedStorage = (
   runtimeKey?: string | null,
 ): string | null => {
   const normalizedRuntimeKey = normalizeRuntimeStorageKey(runtimeKey);
-  const scoped = storage.getItem(getRuntimeScopedStorageKey(key, normalizedRuntimeKey));
+  const scoped = storage.getItem(getRuntimeScopedStorageKeyFromNormalizedRuntimeKey(key, normalizedRuntimeKey));
   if (scoped !== null) {
     return scoped;
   }
