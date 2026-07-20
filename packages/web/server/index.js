@@ -1478,6 +1478,8 @@ async function main(options = {}) {
             scopeToGuild: Boolean(discordConfig.scopeToGuild),
             bridgeEnabled: true,
             resolveProject,
+            trustedBotIds: discordConfig.trustedBotIds,
+            registerDynamicSlashCommands: Boolean(discordConfig.registerDynamicSlashCommands),
           });
           console.log(
             '[Discord] Listener auto-start:',
@@ -1526,6 +1528,8 @@ async function main(options = {}) {
               scopeToGuild: Boolean(discordConfig.scopeToGuild),
               bridgeEnabled: true,
               resolveProject,
+              trustedBotIds: discordConfig.trustedBotIds,
+              registerDynamicSlashCommands: Boolean(discordConfig.registerDynamicSlashCommands),
             });
             console.log(
               '[Discord] Health check: restart result — running=' + startResult.running +

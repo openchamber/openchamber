@@ -1747,8 +1747,18 @@ export function createMessengerSyncRouter({
   });
 
   router.post('/discord/listener/start', async (req, res) => {
-    const { token, guildId, autoReply, scopeToGuild, bridgeEnabled, projectBindings, defaultChannelId, defaultUserId, trustedBotIds } =
-      req.body ?? {};
+    const {
+      token,
+      guildId,
+      autoReply,
+      scopeToGuild,
+      bridgeEnabled,
+      projectBindings,
+      defaultChannelId,
+      defaultUserId,
+      trustedBotIds,
+      registerDynamicSlashCommands,
+    } = req.body ?? {};
     if (!token) return res.status(400).json({ error: 'token required' });
     const resolveProject = buildResolveProject(projectBindings);
     const result = discordListener.start(token, {
@@ -1758,6 +1768,7 @@ export function createMessengerSyncRouter({
       bridgeEnabled: bridgeEnabled !== false && Boolean(bridge),
       resolveProject,
       trustedBotIds: normalizeTrustedBotIds(trustedBotIds),
+      registerDynamicSlashCommands: Boolean(registerDynamicSlashCommands),
     });
 
     // The bridge mirrors OpenCode output via the shared global event hub —
@@ -1792,6 +1803,10 @@ export function createMessengerSyncRouter({
           : null;
         const hasTrustedBotIds = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'trustedBotIds');
         const normalizedTrustedBotIds = normalizeTrustedBotIds(trustedBotIds);
+        const hasDynamicSlash = Object.prototype.hasOwnProperty.call(
+          req.body ?? {},
+          'registerDynamicSlashCommands',
+        );
         await persistSettings({
           discord: {
             ...prev,
@@ -1805,6 +1820,9 @@ export function createMessengerSyncRouter({
             trustedBotIds: hasTrustedBotIds
               ? normalizedTrustedBotIds
               : prev.trustedBotIds || undefined,
+            registerDynamicSlashCommands: hasDynamicSlash
+              ? Boolean(registerDynamicSlashCommands)
+              : Boolean(prev.registerDynamicSlashCommands),
             projectBindings:
               normalizedBindings && normalizedBindings.length > 0
                 ? normalizedBindings
@@ -1842,8 +1860,18 @@ export function createMessengerSyncRouter({
    * Body matches the start endpoint: { botToken, guildId, autoReply, scopeToGuild, bridgeEnabled, defaultChannelId }.
    */
   router.post('/discord/save-config', async (req, res) => {
-    const { botToken, guildId, autoReply, scopeToGuild, bridgeEnabled, defaultChannelId, defaultUserId, trustedBotIds, projectBindings } =
-      req.body ?? {};
+    const {
+      botToken,
+      guildId,
+      autoReply,
+      scopeToGuild,
+      bridgeEnabled,
+      defaultChannelId,
+      defaultUserId,
+      trustedBotIds,
+      registerDynamicSlashCommands,
+      projectBindings,
+    } = req.body ?? {};
     try {
       // Merge with the previous discord block so this best-effort save (fired
       // by the frontend right after listener start) doesn't clobber the
@@ -1861,6 +1889,10 @@ export function createMessengerSyncRouter({
         : null;
       const hasTrustedBotIds = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'trustedBotIds');
       const normalizedTrustedBotIds = normalizeTrustedBotIds(trustedBotIds);
+      const hasDynamicSlash = Object.prototype.hasOwnProperty.call(
+        req.body ?? {},
+        'registerDynamicSlashCommands',
+      );
       await persistSettings({
         discord: {
           ...prev,
@@ -1874,6 +1906,9 @@ export function createMessengerSyncRouter({
           trustedBotIds: hasTrustedBotIds
             ? normalizedTrustedBotIds
             : prev.trustedBotIds || undefined,
+          registerDynamicSlashCommands: hasDynamicSlash
+            ? Boolean(registerDynamicSlashCommands)
+            : Boolean(prev.registerDynamicSlashCommands),
           projectBindings:
             normalizedBindings && normalizedBindings.length > 0
               ? normalizedBindings
@@ -1929,6 +1964,7 @@ export function createMessengerSyncRouter({
         // the user re-opened Settings and re-sent a manual start.
         resolveProject: buildResolveProject(discord.projectBindings),
         trustedBotIds: normalizeTrustedBotIds(discord.trustedBotIds),
+        registerDynamicSlashCommands: Boolean(discord.registerDynamicSlashCommands),
       });
       res.json({ ok: true, ...result });
     } catch (err) {

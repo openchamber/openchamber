@@ -791,9 +791,16 @@ async function ensureSlashCommandsRegistered(state, bridge) {
   if (!state.applicationId) return;
   state.slashCommandsRegistered = true; // mark up-front so we don't double-fire
   try {
-    const dynamic = bridge?.listDynamicApplicationCommands
-      ? await bridge.listDynamicApplicationCommands().catch(() => ({}))
-      : {};
+    // Dynamic OpenCode `-cmd` / `-skill` slash registration is opt-in.
+    // When disabled we still PUT the core set so Discord drops any previously
+    // registered dynamic commands after a settings change + listener restart.
+    let dynamic = null;
+    if (state.registerDynamicSlashCommands) {
+      const listed = bridge?.listDynamicApplicationCommands
+        ? await bridge.listDynamicApplicationCommands().catch(() => ({}))
+        : {};
+      dynamic = { enabled: true, commands: listed?.commands ?? [], skills: listed?.skills ?? [] };
+    }
     const result = await registerApplicationCommands({
       restCall,
       token: state.token,
@@ -1064,6 +1071,9 @@ export function createDiscordListenerRegistry({ broadcastEvent, bridge = null } 
       bridgeEnabled: opts.bridgeEnabled !== false,
       resolveProject: opts.resolveProject ?? null,
       trustedBotIds: normalizeDiscordAccessSettings({ trustedBotIds: opts.trustedBotIds }).trustedBotIds,
+      // Opt-in: register OpenCode commands/skills as Discord `-cmd`/`-skill` slash commands.
+      registerDynamicSlashCommands: Boolean(opts.registerDynamicSlashCommands),
+      dynamicSlashCommands: new Map(),
       guildOwnerIds: new Map(),
       ws: null,
       heartbeatTimer: null,

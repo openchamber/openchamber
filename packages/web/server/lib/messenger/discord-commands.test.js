@@ -11,7 +11,12 @@ import { isKnownMessengerCommand } from './messenger-commands.js';
 describe('buildSlashCommandDefinitions', () => {
   const defs = buildSlashCommandDefinitions();
 
-  it('includes the interactive wizard commands and the new /skill command', () => {
+  it('keeps a compact core slash set under Discord room for optional dynamics', () => {
+    expect(defs.length).toBeLessThanOrEqual(35);
+    expect(defs.length).toBeGreaterThanOrEqual(20);
+  });
+
+  it('includes the interactive wizard commands and high-frequency session controls', () => {
     const names = defs.map((d) => d.name);
     for (const name of [
       'model',
@@ -20,11 +25,41 @@ describe('buildSlashCommandDefinitions', () => {
       'yolo',
       'permissions',
       'skill',
+      'login',
       'help',
       'status',
-      'sessions',
+      'btw',
+      'queue',
+      'reload-opencode',
     ]) {
       expect(names).toContain(name);
+    }
+  });
+
+  it('does not register stub or low-frequency parity commands as native slash', () => {
+    const names = new Set(defs.map((d) => d.name));
+    for (const name of [
+      'add-dir',
+      'fork-subagent',
+      'restart-opencode-server',
+      'add-project',
+      'create-new-project',
+      'remove-project',
+      'tunnel',
+      'mcp',
+      'worktrees',
+      'toggle-worktrees',
+      'queue-command',
+      'context-usage',
+      'session-id',
+      'compact',
+      'summary',
+      'init',
+      'review',
+      'sessions',
+      'unshare',
+    ]) {
+      expect(names.has(name)).toBe(false);
     }
   });
 
@@ -37,48 +72,21 @@ describe('buildSlashCommandDefinitions', () => {
     }
   });
 
-  it('declares options only on the parameterised commands', () => {
+  it('declares options only on the parameterised core commands', () => {
     const withOptions = defs.filter((d) => Array.isArray(d.options) && d.options.length > 0);
     expect(withOptions.map((d) => d.name).sort()).toEqual(
       [
-        'add-dir',
-        'add-project',
         'btw',
         'clear-queue',
-        'create-new-project',
         'fork',
-        'mcp',
         'new-worktree',
         'queue',
-        'queue-command',
         'resume',
         'schedule',
         'session',
         'shell',
-        'summary',
-        'toggle-worktrees',
-        'tunnel',
       ].sort(),
     );
-    const summary = defs.find((d) => d.name === 'summary');
-    expect(summary.options[0]).toMatchObject({ name: 'topic', required: false, type: 3 });
-    const shell = defs.find((d) => d.name === 'shell');
-    expect(shell.options[0]).toMatchObject({ name: 'command', required: true, type: 3 });
-    const session = defs.find((d) => d.name === 'session');
-    expect(session.options[0]).toMatchObject({ name: 'prompt', required: true, type: 3 });
-    const queue = defs.find((d) => d.name === 'queue');
-    expect(queue.options[0]).toMatchObject({ name: 'message', required: true, type: 3 });
-  });
-
-  it('includes the extended command set', () => {
-    const names = defs.map((d) => d.name);
-    for (const name of [
-      'session', 'resume', 'fork', 'share', 'unshare',
-      'btw', 'queue', 'clear-queue', 'mention-mode',
-      'new-worktree', 'merge-worktree',
-    ]) {
-      expect(names).toContain(name);
-    }
   });
 
   it('keeps every registered built-in routable by the messenger command core', () => {
@@ -95,8 +103,20 @@ describe('dynamic slash command registration helpers', () => {
     expect(sanitizeDiscordCommandName('!!!', '-cmd')).toBeNull();
   });
 
-  it('keeps built-ins first and caps the total at Discord\'s 100-command limit', () => {
+  it('skips dynamic registration unless explicitly enabled', () => {
     const dynamic = {
+      enabled: false,
+      commands: [{ name: 'lint', description: 'Lint' }],
+      skills: [{ name: 'theme-system', description: 'Use theme tokens' }],
+    };
+    const registration = buildApplicationCommandRegistration({ dynamic });
+    expect(registration.commands).toEqual(buildSlashCommandDefinitions());
+    expect(registration.dynamicCommandMap.size).toBe(0);
+  });
+
+  it('keeps built-ins first and caps the total at Discord\'s 100-command limit when enabled', () => {
+    const dynamic = {
+      enabled: true,
       commands: Array.from({ length: 120 }, (_, i) => ({
         name: `custom command ${i}`,
         description: `Command ${i}`,
@@ -143,13 +163,13 @@ describe('registerApplicationCommands', () => {
     expect(calls[0].path).toBe('/applications/app-1/commands');
   });
 
-  it('returns a dynamic command map for interaction dispatch', async () => {
+  it('returns a dynamic command map for interaction dispatch when enabled', async () => {
     const restCall = async () => ({ ok: true, status: 200, body: [] });
     const r = await registerApplicationCommands({
       restCall,
       token: 't',
       applicationId: 'app-1',
-      dynamic: { skills: [{ name: 'theme-system' }] },
+      dynamic: { enabled: true, skills: [{ name: 'theme-system' }] },
     });
     expect(r.dynamicCommandMap.get('theme-system-skill')).toEqual({
       kind: 'skill',

@@ -3,9 +3,14 @@
  *
  * Without registering these, typing `/model` in Discord just sends literal text
  * and the interactive wizards (which fire on APPLICATION_COMMAND interactions)
- * never run. We register the full set against the bot's application on every
+ * never run. We register the core set against the bot's application on every
  * gateway READY so a fresh bot — or a bot that gained a new command after an
  * update — works out of the box with autocomplete suggestions and dropdowns.
+ *
+ * Broader messenger commands remain available as text/`!` commands via
+ * `messenger-commands.js` `/help`. Keeping the Discord slash surface small
+ * preserves room under Discord's 100-command hard limit for optional dynamic
+ * OpenCode `-cmd` / `-skill` registration.
  *
  * Registration is guild-scoped when a guildId is known (instant propagation),
  * otherwise global (can take up to an hour to appear). Both are idempotent:
@@ -37,69 +42,28 @@ export function sanitizeDiscordCommandName(name, suffix = '') {
 }
 
 /**
- * The canonical OpenChamber agent slash command set. Descriptions are kept ≤ 100 chars
- * (Discord's hard limit). Commands backed by an interactive wizard
- * (`model`, `agent`, `verbosity`, `skill`) take no options — the dropdowns
- * collect everything. The rest map straight onto the text command pipeline.
+ * Core Discord slash commands only. Text-prefix commands beyond this set still
+ * work through the messenger command pipeline; they are intentionally not
+ * registered as native Discord application commands.
+ *
+ * Wizard-backed commands (`model`, `agent`, `verbosity`, `skill`, `yolo`,
+ * `permissions`, `login`) take no options — dropdowns collect everything.
  */
 export function buildSlashCommandDefinitions() {
   return [
     { name: 'help', description: 'List OpenChamber agent messenger commands' },
     { name: 'status', description: 'Show the session, project, model and agent for this conversation' },
-    {
-      name: 'add-project',
-      description: 'Register an existing project directory and bind this Discord channel',
-      options: [
-        { type: STRING_OPTION, name: 'path', description: 'Absolute project path, optionally followed by a label', required: true },
-      ],
-    },
-    {
-      name: 'create-new-project',
-      description: 'Create an OpenChamber project folder and Discord project channel',
-      options: [
-        { type: STRING_OPTION, name: 'name', description: 'Project name or absolute path', required: true },
-      ],
-    },
-    { name: 'remove-project', description: 'Unbind this Discord channel from its project without deleting files' },
     { name: 'abort', description: 'Stop the current OpenCode turn' },
     { name: 'new', description: 'Drop the current session and start fresh on the next message' },
     { name: 'undo', description: 'Revert one user message' },
     { name: 'redo', description: 'Step forward through undo' },
-    { name: 'compact', description: 'Summarise + compact the session history (destructive)' },
-    {
-      name: 'summary',
-      description: 'Write a non-destructive summary of the session',
-      options: [
-        { type: STRING_OPTION, name: 'topic', description: 'Optional topic to focus the summary on', required: false },
-      ],
-    },
-    { name: 'init', description: 'Run OpenCode init (creates/updates AGENTS.md)' },
-    { name: 'review', description: 'Run the OpenCode review workflow' },
-    { name: 'diff', description: 'Show a reviewable git diff for this project/worktree' },
-    {
-      name: 'tunnel',
-      description: 'Expose OpenChamber through the configured tunnel provider',
-      options: [
-        { type: STRING_OPTION, name: 'args', description: 'Optional provider/mode, e.g. cloudflare quick', required: false },
-      ],
-    },
-    { name: 'login', description: 'Pick a provider auth method and open OpenCode login guidance' },
-    { name: 'usage', description: 'Show estimated token usage for this session' },
-    { name: 'credits', description: 'Alias for /usage — show session usage' },
-    {
-      name: 'shell',
-      description: 'Run a shell command in the project and show its output',
-      options: [
-        { type: STRING_OPTION, name: 'command', description: 'The shell command to run (e.g. pwd)', required: true },
-      ],
-    },
     { name: 'model', description: 'Pick the model + thinking effort (this chat, project, or everywhere)' },
     { name: 'agent', description: 'Pick the agent for this conversation (or set a project default)' },
-    { name: 'verbosity', description: 'Choose how much OpenChamber agent streams back (this chat, project, or everywhere)' },
+    { name: 'verbosity', description: 'Choose how much OpenChamber agent streams back' },
     { name: 'yolo', description: 'Set tool permission mode: always ask / non-destructive / allow all' },
     { name: 'permissions', description: 'Synonym for /yolo — set tool permission mode' },
     { name: 'skill', description: 'Pick an available skill and hand it to the agent' },
-    { name: 'sessions', description: 'List recent OpenCode sessions for this project' },
+    { name: 'login', description: 'Start OpenCode provider auth (OAuth link or API-key guidance)' },
     {
       name: 'session',
       description: 'Start a new OpenCode session (and thread) with a prompt',
@@ -128,8 +92,6 @@ export function buildSlashCommandDefinitions() {
         { type: STRING_OPTION, name: 'question', description: 'The side question for the forked thread', required: true },
       ],
     },
-    { name: 'share', description: 'Generate a public URL for the current session' },
-    { name: 'unshare', description: 'Revoke the public URL for the current session' },
     {
       name: 'queue',
       description: 'Queue a message to send after the current response finishes',
@@ -145,6 +107,16 @@ export function buildSlashCommandDefinitions() {
       ],
     },
     { name: 'mention-mode', description: 'Toggle mention-only mode for this channel' },
+    { name: 'diff', description: 'Show a reviewable git diff for this project/worktree' },
+    { name: 'usage', description: 'Show estimated token usage for this session' },
+    { name: 'credits', description: 'Alias for /usage — show session usage' },
+    {
+      name: 'shell',
+      description: 'Run a shell command in the project and show its output',
+      options: [
+        { type: STRING_OPTION, name: 'command', description: 'The shell command to run (e.g. pwd)', required: true },
+      ],
+    },
     {
       name: 'new-worktree',
       description: 'Create an isolated git worktree and work there in a new thread',
@@ -152,31 +124,8 @@ export function buildSlashCommandDefinitions() {
         { type: STRING_OPTION, name: 'name', description: 'Worktree name (derived automatically when omitted)', required: false },
       ],
     },
-    { name: 'worktrees', description: 'List git worktrees for this channel project' },
-    {
-      name: 'toggle-worktrees',
-      description: 'Toggle auto-worktrees for new sessions in this project',
-      options: [
-        { type: STRING_OPTION, name: 'value', description: 'on or off (omit to toggle)', required: false },
-      ],
-    },
     { name: 'merge-worktree', description: 'Squash-merge this worktree into the default branch' },
-    {
-      name: 'mcp',
-      description: 'List MCP servers or enable/disable a configured server',
-      options: [
-        { type: STRING_OPTION, name: 'args', description: 'connect <name> or disconnect <name>', required: false },
-      ],
-    },
-    {
-      name: 'add-dir',
-      description: 'Check whether extra directory access grants are supported',
-      options: [
-        { type: STRING_OPTION, name: 'path', description: 'Absolute directory path', required: true },
-      ],
-    },
-    { name: 'context-usage', description: 'Show token/context usage for this session' },
-    { name: 'session-id', description: 'Show the current session id and Discord URL' },
+    { name: 'share', description: 'Generate a public URL for the current session' },
     {
       name: 'schedule',
       description: 'Schedule a prompt: UTC ISO date or cron — list / delete <id> to manage',
@@ -184,15 +133,7 @@ export function buildSlashCommandDefinitions() {
         { type: STRING_OPTION, name: 'args', description: '<when> [model=p/m] [agent=name] <prompt> | list | delete <id>', required: false },
       ],
     },
-    {
-      name: 'queue-command',
-      description: 'Queue an OpenCode slash command after the current response',
-      options: [
-        { type: STRING_OPTION, name: 'command', description: 'OpenCode command name and optional args', required: true },
-      ],
-    },
-    { name: 'fork-subagent', description: 'Explain current subagent fork support' },
-    { name: 'restart-opencode-server', description: 'Reload/reconnect OpenChamber managed OpenCode server' },
+    { name: 'reload-opencode', description: 'Reload/reconnect OpenChamber-managed OpenCode (not an external process kill)' },
   ].map((c) => ({ type: 1, ...c }));
 }
 
@@ -249,16 +190,19 @@ export function buildDynamicSlashCommandDefinitions({
   return { definitions: defs, commandMap: map };
 }
 
-export function buildApplicationCommandRegistration({ dynamic = {} } = {}) {
+export function buildApplicationCommandRegistration({ dynamic = null } = {}) {
   const builtIns = buildSlashCommandDefinitions();
   const existingNames = new Set(builtIns.map((command) => command.name));
   const remaining = Math.max(0, DISCORD_APPLICATION_COMMAND_LIMIT - builtIns.length);
-  const dynamicBuilt = buildDynamicSlashCommandDefinitions({
-    commands: dynamic.commands ?? [],
-    skills: dynamic.skills ?? [],
-    existingNames,
-    remaining,
-  });
+  const includeDynamic = Boolean(dynamic) && dynamic.enabled !== false;
+  const dynamicBuilt = includeDynamic
+    ? buildDynamicSlashCommandDefinitions({
+        commands: dynamic.commands ?? [],
+        skills: dynamic.skills ?? [],
+        existingNames,
+        remaining,
+      })
+    : { definitions: [], commandMap: new Map() };
   const commands = [...builtIns, ...dynamicBuilt.definitions].slice(0, DISCORD_APPLICATION_COMMAND_LIMIT);
   return { commands, dynamicCommandMap: dynamicBuilt.commandMap };
 }
@@ -271,9 +215,10 @@ export function buildApplicationCommandRegistration({ dynamic = {} } = {}) {
  * @param {string} args.token        bot token
  * @param {string} args.applicationId  bot application id (equals the bot user id)
  * @param {string|null} [args.guildId]  register guild-scoped when set (instant)
+ * @param {object|null} [args.dynamic]  optional `{ enabled, commands, skills }` for -cmd/-skill
  * @returns {Promise<{ ok: boolean, scope: 'guild'|'global', status?: number, error?: string }>}
  */
-export async function registerApplicationCommands({ restCall, token, applicationId, guildId = null, dynamic = {} }) {
+export async function registerApplicationCommands({ restCall, token, applicationId, guildId = null, dynamic = null }) {
   if (!applicationId) return { ok: false, scope: 'global', error: 'no application id' };
   const { commands, dynamicCommandMap } = buildApplicationCommandRegistration({ dynamic });
   const scope = guildId ? 'guild' : 'global';

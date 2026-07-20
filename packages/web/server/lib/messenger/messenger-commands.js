@@ -95,7 +95,8 @@ const COMMAND_HELP = [
   {
     name: 'tunnel',
     usage: '/tunnel [cloudflare|ngrok] [quick|managed-local|managed-remote]',
-    summary: 'Expose OpenChamber through the configured tunnel provider and reply with the public URL',
+    summary:
+      'Expose the running OpenChamber web server via the configured tunnel provider (not an arbitrary local port) and reply with the public URL',
   },
   {
     name: 'login',
@@ -203,12 +204,8 @@ const COMMAND_HELP = [
   {
     name: 'mcp',
     usage: '/mcp [connect|disconnect <server>]',
-    summary: 'List MCP servers and connect/disconnect them when OpenCode exposes that operation',
-  },
-  {
-    name: 'add-dir',
-    usage: '/add-dir <absolute-path>',
-    summary: 'Report whether extra directory grants are supported for the current session',
+    summary:
+      'List configured MCP servers, or update OpenCode config connect/disconnect + refresh (not a live MCP process manager)',
   },
   {
     name: 'context-usage',
@@ -229,17 +226,13 @@ const COMMAND_HELP = [
   {
     name: 'queue-command',
     usage: '/queue-command <opencode-command> [args]',
-    summary: 'Queue an OpenCode slash command to run after the current response finishes',
+    summary: 'Queue an OpenCode slash command to run after the current response finishes (in-memory until idle)',
   },
   {
-    name: 'fork-subagent',
-    usage: '/fork-subagent',
-    summary: 'Explain current subagent forking support for this OpenCode server',
-  },
-  {
-    name: 'restart-opencode-server',
-    usage: '/restart-opencode-server',
-    summary: 'Ask OpenChamber to reload/reconnect its managed OpenCode server path',
+    name: 'reload-opencode',
+    usage: '/reload-opencode',
+    summary:
+      'Ask OpenChamber to reload/reconnect its managed OpenCode path (cannot kill/restart an external OpenCode process)',
   },
 ];
 
@@ -247,6 +240,7 @@ const COMMAND_HELP = [
 const COMMAND_ALIASES = new Map([
   ['permissions', 'yolo'],
   ['credits', 'usage'],
+  ['restart-opencode-server', 'reload-opencode'],
 ]);
 
 const KNOWN_TOP_LEVEL = new Set([
@@ -1264,7 +1258,7 @@ export async function executeMessengerCommand({
               { key: 'source', italic: true },
             ]),
             '',
-            'Use `/mcp connect <name>` or `/mcp disconnect <name>` when this OpenCode server supports runtime MCP connect/disconnect.',
+            'Use `/mcp connect <name>` or `/mcp disconnect <name>` to update OpenCode MCP config and refresh. This is not a separate live MCP supervisor.',
           ].join('\n'),
         };
       }
@@ -1279,16 +1273,8 @@ export async function executeMessengerCommand({
       const r = await bridgeOps.mcp({ action, name });
       return {
         reply: r.ok
-          ? `✓ MCP server \`${name}\` ${action === 'connect' ? 'connected' : 'disconnected'}.`
+          ? `✓ MCP server \`${name}\` marked ${action === 'connect' ? 'connected' : 'disconnected'} in OpenCode config and refresh was requested.`
           : `✗ MCP ${action} failed: ${r.error ?? 'unsupported by this OpenCode server'}`,
-      };
-    }
-
-    case 'add-dir': {
-      if (!command.args.trim()) return { reply: '✗ Usage: `/add-dir <absolute-path>`.' };
-      return {
-        reply:
-          '✗ `/add-dir` is not supported by the current OpenChamber/OpenCode API. Extra directory access still requires OpenCode permission approval when the agent first touches that directory.',
       };
     }
 
@@ -1429,23 +1415,16 @@ export async function executeMessengerCommand({
       };
     }
 
-    case 'fork-subagent': {
-      return {
-        reply:
-          '✗ `/fork-subagent` is not available through the current OpenCode API surface. Use `/fork` to branch a session; subagent spawning remains agent-internal for now.',
-      };
-    }
-
-    case 'restart-opencode-server': {
+    case 'reload-opencode': {
       if (!bridgeOps?.restartOpencodeServer) {
-        return { reply: '✗ `/restart-opencode-server` is not available on this surface.' };
+        return { reply: '✗ `/reload-opencode` is not available on this surface.' };
       }
       const r = await bridgeOps.restartOpencodeServer();
-      if (!r.ok) return { reply: `✗ Restart/reconnect failed: ${r.error ?? 'unknown error'}` };
+      if (!r.ok) return { reply: `✗ Reload/reconnect failed: ${r.error ?? 'unknown error'}` };
       return {
         reply: r.external
-          ? '✓ OpenChamber rechecked the external OpenCode server. It cannot restart an external process; restart that server separately if config changes need to load.'
-          : '✓ OpenChamber requested an OpenCode reload/restart and reconnected the bridge.',
+          ? '✓ OpenChamber rechecked the external OpenCode server. It cannot kill/restart an external process; restart that server separately if config changes need to load.'
+          : '✓ OpenChamber requested an OpenCode reload and reconnected the bridge.',
       };
     }
 

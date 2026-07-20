@@ -793,6 +793,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'integrations.discord.dynamic-slash',
+    page: 'integrations',
+    titleKey: 'settings.integrations.discord.dynamicSlash.title',
+    descriptionKey: 'settings.integrations.discord.dynamicSlash.description',
+    keywords: ['discord', 'slash', 'commands', 'skills', 'dynamic', 'opencode'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'integrations.discord.notify-on-complete',
     page: 'integrations',
     titleKey: 'settings.integrations.discord.bridge.notifyOnComplete.title',

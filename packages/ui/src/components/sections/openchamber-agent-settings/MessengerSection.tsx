@@ -1212,6 +1212,27 @@ function DiscordAdvancedSettings({
           />
         </div>
 
+        <div data-settings-item="integrations.discord.dynamic-slash" className="space-y-1.5">
+          <label className="flex cursor-pointer items-start gap-2 py-1">
+            <Checkbox
+              checked={Boolean(conn.registerDynamicSlashCommands)}
+              onChange={(checked) => {
+                updateConnection('discord', { registerDynamicSlashCommands: Boolean(checked) });
+                setTimeout(() => saveDiscordConfig(), 0);
+              }}
+              ariaLabel={t('settings.integrations.discord.dynamicSlash.title')}
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-medium text-foreground">
+                {t('settings.integrations.discord.dynamicSlash.title')}
+              </span>
+              <span className="block text-[11px] text-muted-foreground leading-snug">
+                {t('settings.integrations.discord.dynamicSlash.description')}
+              </span>
+            </span>
+          </label>
+        </div>
+
         {/* OpenCode bridge — when on, the listeners route inbound messages
             through OpenCode and stream the response back. This is what turns
             the messenger into a real OpenChamber chat surface, instead of the
@@ -1426,7 +1447,9 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <DiscordCommandsButton />
+          <div data-settings-item="integrations.discord.commands">
+            <DiscordCommandsButton />
+          </div>
           <button
             type="button"
             onClick={() => testConnection(conn.type)}
