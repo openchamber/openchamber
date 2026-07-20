@@ -10,6 +10,7 @@ type NormalizedProject = {
 };
 
 type Args = {
+  enabled?: boolean;
   isSessionsLoading: boolean;
   hasAuthoritativeGlobalSessions: boolean;
   isWorktreeTopologyLoading: boolean;
@@ -23,6 +24,7 @@ type Args = {
 export const useSessionFolderCleanup = (args: Args): void => {
   const {
     isSessionsLoading,
+    enabled = true,
     hasAuthoritativeGlobalSessions,
     isWorktreeTopologyLoading,
     normalizedProjects,
@@ -33,7 +35,7 @@ export const useSessionFolderCleanup = (args: Args): void => {
   } = args;
 
   React.useEffect(() => {
-    if (isSessionsLoading || !hasAuthoritativeGlobalSessions || isWorktreeTopologyLoading) {
+    if (!enabled || isSessionsLoading || !hasAuthoritativeGlobalSessions || isWorktreeTopologyLoading) {
       return;
     }
 
@@ -70,6 +72,7 @@ export const useSessionFolderCleanup = (args: Args): void => {
   }, [
     availableWorktreesByProject,
     cleanupSessions,
+    enabled,
     hasAuthoritativeGlobalSessions,
     isWorktreeTopologyLoading,
     isSessionsLoading,

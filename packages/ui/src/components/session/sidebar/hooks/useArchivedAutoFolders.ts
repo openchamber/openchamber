@@ -17,6 +17,7 @@ type FolderEntry = {
 };
 
 type Args = {
+  enabled?: boolean;
   normalizedProjects: ProjectForArchivedFolders[];
   ownership: SessionOwnershipIndex;
   isSessionsLoading: boolean;
@@ -32,6 +33,7 @@ type Args = {
 export const useArchivedAutoFolders = (args: Args): void => {
   const {
     normalizedProjects,
+    enabled = true,
     ownership,
     isSessionsLoading,
     hasAuthoritativeGlobalSessions,
@@ -44,7 +46,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
   } = args;
 
   React.useEffect(() => {
-    if (isSessionsLoading || !hasAuthoritativeGlobalSessions || isWorktreeTopologyLoading) {
+    if (!enabled || isSessionsLoading || !hasAuthoritativeGlobalSessions || isWorktreeTopologyLoading) {
       return;
     }
 
@@ -77,6 +79,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
     });
   }, [
     normalizedProjects,
+    enabled,
     ownership,
     isSessionsLoading,
     hasAuthoritativeGlobalSessions,

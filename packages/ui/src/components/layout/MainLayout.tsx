@@ -72,7 +72,6 @@ export const MainLayout: React.FC = () => {
         setMobileLeftDrawerOpen(open);
         useUIStore.getState().setSessionSwitcherOpen(open);
     }, []);
-    const mobileRightDrawerOpenRef = React.useRef(false);
     const initialDrawerWidthRef = React.useRef(typeof window === 'undefined' ? 0 : window.innerWidth);
 
     // Left drawer motion value
@@ -114,7 +113,6 @@ export const MainLayout: React.FC = () => {
             setMobileRightDrawerVisible(false);
             return;
         }
-        mobileRightDrawerOpenRef.current = mobileRightSidebarOpen;
         if (mobileRightSidebarOpen) {
             setMobileRightDrawerVisible(true);
         }
@@ -480,7 +478,7 @@ export const MainLayout: React.FC = () => {
                                 aria-hidden={!mobileLeftDrawerOpen}
                             >
                                 <ErrorBoundary>
-                                    <SessionSidebar mobileVariant />
+                                    <SessionSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />
                                 </ErrorBoundary>
                             </motion.div>
                             {mobileRightDrawerVisible && (
@@ -520,7 +518,7 @@ export const MainLayout: React.FC = () => {
                             className="border-border/50"
                             topBar={<SidebarTopBar />}
                         >
-                            <SessionSidebar />
+                            <SessionSidebar isVisible={isSidebarOpen} />
                         </Sidebar>
                         <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                             <Header />

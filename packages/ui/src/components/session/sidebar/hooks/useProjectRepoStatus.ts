@@ -5,6 +5,7 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 
 type Project = { id: string; path: string; normalizedPath: string };
+const ROOT_BRANCH_TTL_MS = 5 * 60_000;
 
 type Args = {
   enabled?: boolean;
@@ -41,12 +42,13 @@ export const useProjectRepoStatus = (args: Args): void => {
 
   // Read isGitRepo from the store-populated state
   React.useEffect(() => {
+    if (!enabled) return;
     const next = new Map<string, boolean | null>();
     normalizedProjects.forEach((project) => {
       next.set(project.id, gitRepoStatus.get(project.normalizedPath)?.isGitRepo ?? null);
     });
     setProjectRepoStatus(next);
-  }, [normalizedProjects, gitRepoStatus, setProjectRepoStatus]);
+  }, [enabled, normalizedProjects, gitRepoStatus, setProjectRepoStatus]);
 
   const projectGitBranchesKey = React.useMemo(() => {
     return normalizedProjects
@@ -71,15 +73,14 @@ export const useProjectRepoStatus = (args: Args): void => {
   // background updates and only re-resolve on cold start or actual
   // branch changes (those still invalidate via the input-key check).
   const rootBranchCacheRef = React.useRef<Map<string, { branch: string; at: number }>>(new Map());
-  const ROOT_BRANCH_TTL_MS = 5 * 60_000;
 
   React.useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
 
     // Debounce so the initial burst of per-project `ensureStatus` updates
     // settles into a single resolution pass instead of one pass per project.
     const timer = setTimeout(() => {
-      if (!enabled) return;
       const run = async () => {
         const validIds = new Set(normalizedProjects.map((project) => project.id));
         // Drop bookkeeping for projects that are no longer present.
@@ -167,9 +168,5 @@ export const useProjectRepoStatus = (args: Args): void => {
       cancelled = true;
       clearTimeout(timer);
     };
-    // ROOT_BRANCH_TTL_MS is a module-level constant; intentionally not
-    // in the deps array since it never changes during the component
-    // lifetime.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, normalizedProjects, projectGitBranchesKey, gitRepoStatus, setProjectRootBranches]);
 };

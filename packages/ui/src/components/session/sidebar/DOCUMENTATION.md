@@ -66,5 +66,5 @@
 - Current directory and selected-session directory are `selected` demand and therefore run first.
 - Expanded projects/worktrees outrank merely visible and background groups.
 - The sync scheduler deduplicates, promotes, retries, and limits work. Sidebar components must not reproduce that lifecycle with mount effects.
-- Hide speculative work when the sidebar/chat surface is hidden: message prefetch and Git/PR enrichment stop, while authoritative directory refresh continues.
+- Hide speculative work when the sidebar/chat surface is hidden: message prefetch, Git/PR enrichment and subscriptions, search listeners, sticky-header observation, and folder reconciliation stop. The session row tree unmounts so row-owned status, permission, unseen, and viewport subscriptions do no background work. The outer sidebar remains mounted, preserving UI state and authoritative directory refresh for an immediate reopen; deferred derived work reruns from current state when visibility returns.
 - Empty successful lists, unresolved loads, and failed loads are separate UI states. Failed groups expose Retry and retain prior data.

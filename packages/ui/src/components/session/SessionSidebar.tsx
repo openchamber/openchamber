@@ -159,6 +159,7 @@ const isKnownActiveSessionDirectory = (
 const SIDEBAR_PR_NO_PR_RETRY_MS = 5 * 60_000;
 
 const EMPTY_SUBTREE_SET: Set<string> = new Set();
+const EMPTY_STRING_ARRAY: string[] = [];
 
 const useStableRenderCallback = <Args extends unknown[], Return>(handler: (...args: Args) => Return): ((...args: Args) => Return) => {
   const handlerRef = React.useRef(handler);
@@ -310,13 +311,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const getSessionFolderId = useSessionFoldersStore((state) => state.getSessionFolderId);
 
   useSessionSearchEffects({
+    enabled: isVisible,
     isSessionSearchOpen,
     setIsSessionSearchOpen,
     sessionSearchInputRef,
     sessionSearchContainerRef,
   });
 
-  const gitBranches = useGitAllBranches();
+  const gitBranches = useGitAllBranches(isVisible);
 
   const sync = useSync();
   const childStores = useChildStoreManager();
@@ -391,20 +393,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     [archivedSessions, globalActiveSessions],
   );
 
-  const syncSessionStructureSignature = React.useMemo(
-    () => liveSessions
-      .map((session) => {
-        const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null) ?? '';
-        return `${session.id}:${session.title ?? ''}:${session.time?.archived ? 1 : 0}:${directory}`;
-      })
-      .join('|'),
-    [liveSessions],
-  );
-
   const syncSessionsSnapshotRef = React.useRef<Session[]>(liveSessions);
   React.useEffect(() => {
     syncSessionsSnapshotRef.current = liveSessions;
-  }, [syncSessionStructureSignature, liveSessions]);
+  }, [liveSessions]);
 
   // Batched live-session index. Building this here turns the per-row
   // `useSession(session.id)` reads in SessionNodeItem (each of which
@@ -973,7 +965,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
-  const gitRepoStatus = useGitRepoStatusMap(normalizedProjectPaths);
+  const gitRepoStatus = useGitRepoStatusMap(isVisible ? normalizedProjectPaths : EMPTY_STRING_ARRAY);
   const ensurePrStatusEntry = useGitHubPrStatusStore((state) => state.ensureEntry);
   const setPrStatusParams = useGitHubPrStatusStore((state) => state.setParams);
   const refreshPrStatusTargets = useGitHubPrStatusStore((state) => state.refreshTargets);
@@ -992,6 +984,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     [archivedSessions, availableWorktreesByProject, isVSCode, normalizedProjects, sessions],
   );
   useSessionFolderCleanup({
+    enabled: isVisible,
     isSessionsLoading,
     hasAuthoritativeGlobalSessions,
     isWorktreeTopologyLoading,
@@ -1007,6 +1000,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   });
 
   useArchivedAutoFolders({
+    enabled: isVisible,
     normalizedProjects,
     ownership: sessionOwnership,
     isSessionsLoading,
@@ -1284,6 +1278,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, [sectionsForRender, showArchivedSessions]);
 
   const prLookupKeys = React.useMemo(() => {
+    if (!isVisible) return EMPTY_STRING_ARRAY;
     const keys = new Set<string>();
     sectionsForSidebarRender.forEach((section) => {
       section.groups.forEach((group) => {
@@ -1296,7 +1291,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       });
     });
     return [...keys];
-  }, [gitBranches, sectionsForSidebarRender]);
+  }, [gitBranches, isVisible, sectionsForSidebarRender]);
 
   const prVisualSummaryMap = usePrVisualSummaryByKeys(prLookupKeys);
 
@@ -1305,7 +1300,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return;
     }
 
-    const missingTargets: Array<{ directory: string; branch: string; remoteName?: string | null }> = [];
+    const targetsByKey = new Map<string, { directory: string; branch: string }>();
     const now = Date.now();
 
     sectionsForSidebarRender.forEach((section) => {
@@ -1337,29 +1332,23 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           if (shouldRetryNoPr) {
             retriedNoPrStatusKeysRef.current.add(retryKey);
           }
-          missingTargets.push({ directory, branch });
+          if (!targetsByKey.has(key)) {
+            targetsByKey.set(key, { directory, branch });
+          }
         }
       });
     });
 
-    if (missingTargets.length === 0) {
+    if (targetsByKey.size === 0) {
       return;
     }
 
-    const uniqueTargets = new Map<string, { directory: string; branch: string; remoteName?: string | null }>();
-    missingTargets.forEach((target) => {
-      const key = getGitHubPrStatusKey(target.directory, target.branch, target.remoteName ?? null);
-      if (!uniqueTargets.has(key)) {
-        uniqueTargets.set(key, target);
-      }
-    });
-
-    uniqueTargets.forEach((target, key) => {
+    targetsByKey.forEach((target, key) => {
       ensurePrStatusEntry(key);
       setPrStatusParams(key, {
         directory: target.directory,
         branch: target.branch,
-        remoteName: target.remoteName ?? null,
+        remoteName: null,
         canShow: true,
         github,
         githubAuthChecked,
@@ -1367,7 +1356,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       });
     });
 
-    void refreshPrStatusTargets([...uniqueTargets.values()], {
+    void refreshPrStatusTargets([...targetsByKey.values()], {
       silent: true,
       markInitialResolved: true,
     });
@@ -1391,6 +1380,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const headerActionButtonClass = mobileVariant ? mobileHeaderActionButtonClass : desktopHeaderActionButtonClass;
   const headerActionIconClass = 'h-4.5 w-4.5';
   const stuckProjectHeaders = useStickyProjectHeaders({
+    enabled: isVisible,
     isDesktopShellRuntime,
     projectSections,
     projectHeaderSentinelRefs,
@@ -1674,7 +1664,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         onToggleSelectionMode={handleToggleSelectionMode}
       />
 
-      <SidebarProjectsList
+      {isVisible ? <SidebarProjectsList
         topContent={topContent}
         hasSharedSessions={hasActivitySectionItems}
         sectionsForRender={sectionsForSidebarRender}
@@ -1709,7 +1699,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         openSidebarMenuKey={openSidebarMenuKey}
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
         isInlineEditing={isInlineEditing}
-      />
+      /> : null}
 
       {selectionModeEnabled && hasSelection ? (
         <BulkActionBar

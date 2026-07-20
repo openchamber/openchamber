@@ -1219,9 +1219,11 @@ export const useGitBranchLabel = (directory: string | null) => {
 };
 
 const allBranchesCacheRef = { current: new Map<string, string | null>() };
+const EMPTY_BRANCHES = new Map<string, string | null>();
 
-export const useGitAllBranches = () => {
+export const useGitAllBranches = (enabled = true) => {
   return useGitStore((state) => {
+    if (!enabled) return EMPTY_BRANCHES;
     const prev = allBranchesCacheRef.current;
     let same = prev.size === state.directories.size;
     if (same) {
