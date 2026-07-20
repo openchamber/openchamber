@@ -201,7 +201,7 @@ export async function bootstrapDirectory(input: {
     retry(() => sdk.lsp.status().then((x) => set({ lsp: unwrap(x, "lsp.status") }))),
     retry(async () => {
       const branchBeforeRequest = getState().vcs?.branch
-      return sdk.vcs.get().then((x) => {
+      return sdk.vcs.get({ directory }).then((x) => {
         const current = getState()
         if (x.error) {
           throw new Error(`vcs.get failed: ${String(x.error)}`)

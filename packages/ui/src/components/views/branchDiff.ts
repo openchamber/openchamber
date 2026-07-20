@@ -54,12 +54,13 @@ export const isBranchDiffAvailable = (vcs: VcsInfo | undefined): boolean => {
 
 export const loadBranchDiff = async (
   request: (
-    input: { mode: 'branch'; context: number },
+    input: { mode: 'branch'; context: number; directory: string },
     options?: { signal?: AbortSignal },
   ) => Promise<BranchDiffResult>,
+  directory: string,
   signal?: AbortSignal,
 ): Promise<VcsFileDiff[]> => {
-  const result = await request({ mode: 'branch', context: 3 }, { signal });
+  const result = await request({ mode: 'branch', context: 3, directory }, { signal });
   if (result.error) {
     const status = result.response?.status;
     throw new Error(`Branch diff failed${status ? ` (${status})` : ''}: ${formatSdkError(result.error)}`);

@@ -1124,7 +1124,11 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
                 try {
                     const data = await Promise.race([
-                        loadBranchDiff((input, options) => sdk.vcs.diff(input, options), controller.signal),
+                        loadBranchDiff(
+                            (input, options) => sdk.vcs.diff(input, options),
+                            effectiveDirectory,
+                            controller.signal,
+                        ),
                         timeoutPromise,
                     ]);
                     if (!cancelled) {

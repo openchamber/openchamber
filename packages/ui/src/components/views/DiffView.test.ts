@@ -39,9 +39,13 @@ describe('branch diff scope', () => {
     const result = await loadBranchDiff(async (input) => {
       requests.push(input);
       return { data: [] };
-    });
+    }, '/workspace/openchamber');
 
-    expect(requests).toEqual([{ mode: 'branch', context: 3 }]);
+    expect(requests).toEqual([{
+      mode: 'branch',
+      context: 3,
+      directory: '/workspace/openchamber',
+    }]);
     expect(result).toEqual([]);
   });
 
@@ -49,9 +53,9 @@ describe('branch diff scope', () => {
     expect(loadBranchDiff(async () => ({
       error: { message: 'merge base unavailable' },
       response: { status: 500 },
-    }))).rejects.toThrow('Branch diff failed (500): merge base unavailable');
+    }), '/workspace/openchamber')).rejects.toThrow('Branch diff failed (500): merge base unavailable');
 
-    expect(loadBranchDiff(async () => ({}))).rejects.toThrow('Branch diff failed: empty response');
+    expect(loadBranchDiff(async () => ({}), '/workspace/openchamber')).rejects.toThrow('Branch diff failed: empty response');
   });
 
   test('maps branch status and totals into read-only stacked entries', () => {
