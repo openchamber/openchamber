@@ -851,11 +851,14 @@ function DiscordAdvancedSettings({
   guildSectionRef,
   open,
   onOpenChange,
+  hideTrigger = false,
 }: {
   conn: MessengerConnection;
   guildSectionRef?: React.RefObject<HTMLDivElement | null>;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** When true, the parent owns the open control (e.g. connected-state button). */
+  hideTrigger?: boolean;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = open ?? internalOpen;
@@ -908,15 +911,23 @@ function DiscordAdvancedSettings({
     <Collapsible
       open={isOpen}
       onOpenChange={setOpen}
-      className="border-t border-border/60 pt-3"
+      className={cn(!hideTrigger && 'border-t border-border/60 pt-3')}
     >
-      <label className="flex cursor-pointer select-none items-center gap-2">
-        <Checkbox checked={isOpen} onChange={setOpen} ariaLabel="Show advanced settings" />
-        <span className="text-xs font-medium text-foreground">Advanced settings</span>
-        <span className="text-[10px] font-normal text-muted-foreground">
-          server ID, single channel ID, listener, OpenCode bridge &amp; diagnostics
-        </span>
-      </label>
+      {!hideTrigger && (
+        <label className="flex cursor-pointer select-none items-center gap-2">
+          <Checkbox
+            checked={isOpen}
+            onChange={setOpen}
+            ariaLabel={t('settings.integrations.discord.actions.advancedSettings')}
+          />
+          <span className="text-xs font-medium text-foreground">
+            {t('settings.integrations.discord.actions.advancedSettings')}
+          </span>
+          <span className="text-[10px] font-normal text-muted-foreground">
+            {t('settings.integrations.discord.actions.advancedSettingsHint')}
+          </span>
+        </label>
+      )}
       <CollapsibleContent className="space-y-4 pt-3">
         {/* Server (Guild) ID — server-wide project sync */}
         <div
@@ -1331,6 +1342,10 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
     const needsAdvanced = section === 'guild' || section === 'channel' || section === 'advanced';
     if (needsAdvanced) {
       setAdvancedOpen(true);
+      setSettingsOpen(false);
+    } else if (section === 'test' || section === 'token') {
+      setSettingsOpen(true);
+      setAdvancedOpen(false);
     }
     const ref =
       section === 'token'
@@ -1353,12 +1368,14 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
   const [tokenInput, setTokenInput] = useState('');
   const [showTokenPlain, setShowTokenPlain] = useState(false);
   const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const token = conn.botToken;
   const target = conn.defaultChannelId;
 
   const hasToken = Boolean(token);
   const hasTarget = Boolean(target);
+  const isConnectedView = displayStatus === 'connected';
 
   // Reconcile badge + listener with the live server when this card opens.
   // Depends on botToken so we still run after Zustand persist hydration.
@@ -1461,149 +1478,307 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
         <DiscordOnboardingWizard conn={conn} onScrollToSection={scrollToSection} />
       )}
 
-      {/* Step 1: Token */}
-      {!token ? (
-        <div ref={tokenSectionRef} className="space-y-2">
-          <div className="text-xs font-medium text-foreground">{meta.tokenLabel}</div>
-          <div className="text-[11px] text-muted-foreground leading-snug">{meta.tokenHelp}</div>
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <input
-                type={showTokenPlain ? 'text' : 'password'}
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                placeholder={meta.tokenLabel}
-                className={cn(inputClass, 'pr-8')}
-              />
-              <button
-                type="button"
-                onClick={() => setShowTokenPlain((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                title={showTokenPlain ? 'Hide' : 'Show'}
-              >
-                {showTokenPlain ? (
-                  <RiEyeOffLine className="size-3.5" />
-                ) : (
-                  <RiEyeLine className="size-3.5" />
-                )}
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={handleSaveToken}
-              disabled={!tokenInput.trim()}
-              className="shrink-0 rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:opacity-50"
-            >
-              Save
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div ref={tokenSectionRef} className="flex items-center gap-2 text-xs">
-          <RiCheckLine className="size-3 text-green-500" />
-          <span className="text-muted-foreground">Token configured</span>
-          <button
-            type="button"
-            onClick={() => setShowToken(!showToken)}
-            className="text-primary text-[10px]"
-          >
-            {showToken ? 'Cancel' : 'Change'}
-          </button>
-          {showToken && (
-            <div className="flex gap-2 flex-1">
-              <input
-                type="password"
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                placeholder="New token"
-                className={inputClass}
-              />
-              <button
-                type="button"
-                onClick={handleSaveToken}
-                disabled={!tokenInput.trim()}
-                className="rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50"
-              >
-                Update
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Step 3: Action buttons - the visible "what next" call to action.
-          For Discord, server-id alone also unlocks the CTA (Sync now works with just guildId). */}
-      {hasToken && (hasTarget || conn.discordGuildId) && (
-        <div
-          ref={testSectionRef}
-          className="space-y-2 rounded-md border border-primary/20 bg-primary/5 p-3"
-        >
+      {isConnectedView ? (
+        <>
+          {/* Connected: no token/setup chrome — just settings entry points. */}
           <div className="flex flex-wrap items-center gap-2">
-            <button
+            <Button
               type="button"
-              onClick={() => sendTestMessage(conn.type)}
-              disabled={conn.lastSyncStatus === 'sending'}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {conn.lastSyncStatus === 'sending' ? (
-                <RiLoader4Line className="size-3.5 animate-spin" />
-              ) : (
-                <RiSendPlaneLine className="size-3.5" />
-              )}
-              Send test message
-            </button>
-            <button
-              type="button"
+              variant={settingsOpen ? 'secondary' : 'outline'}
+              size="xs"
+              className="!font-normal"
               onClick={() => {
-                if (conn.discordGuildId) {
-                  // Server-wide sync: per-project channel + thread.
-                  syncDiscordGuildProjects(buildProjectPayloads(), buildSummary());
-                } else {
-                  sendSyncSummary(conn.type, buildSummary());
-                }
+                setSettingsOpen((open) => {
+                  const next = !open;
+                  if (next) setAdvancedOpen(false);
+                  return next;
+                });
               }}
-              disabled={conn.lastSyncStatus === 'sending'}
-              className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 disabled:opacity-50"
             >
-              {conn.lastSyncStatus === 'sending' ? (
-                <RiLoader4Line className="size-3.5 animate-spin" />
-              ) : (
-                <RiRefreshLine className="size-3.5" />
-              )}
-              Sync now
-            </button>
-            <div className="ml-auto text-[10px] text-muted-foreground">
-              Last activity: {formatRelative(conn.lastSyncAt)}
-            </div>
+              {t('settings.integrations.discord.actions.settings')}
+            </Button>
+            <Button
+              type="button"
+              variant={advancedOpen ? 'secondary' : 'outline'}
+              size="xs"
+              className="!font-normal"
+              onClick={() => {
+                setAdvancedOpen((open) => {
+                  const next = !open;
+                  if (next) setSettingsOpen(false);
+                  return next;
+                });
+              }}
+            >
+              {t('settings.integrations.discord.actions.advancedSettings')}
+            </Button>
           </div>
-          {conn.lastSyncMessage && (
-            <div
-              className={cn(
-                'text-[11px] leading-snug',
-                conn.lastSyncStatus === 'error' && 'text-destructive',
-                conn.lastSyncStatus === 'ok' && 'text-green-600 dark:text-green-400',
-                conn.lastSyncStatus === 'sending' && 'text-muted-foreground',
+
+          {settingsOpen && (
+            <div ref={testSectionRef} className="space-y-3">
+              {(hasTarget || conn.discordGuildId) && (
+                <div className="space-y-2 rounded-md border border-border/60 bg-muted/30 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="xs"
+                      className="!font-normal"
+                      onClick={() => sendTestMessage(conn.type)}
+                      disabled={conn.lastSyncStatus === 'sending'}
+                    >
+                      {conn.lastSyncStatus === 'sending' ? (
+                        <RiLoader4Line className="size-3.5 animate-spin" />
+                      ) : (
+                        <RiSendPlaneLine className="size-3.5" />
+                      )}
+                      {t('settings.integrations.discord.wizard.step3.sendTest')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      className="!font-normal"
+                      onClick={() => {
+                        if (conn.discordGuildId) {
+                          syncDiscordGuildProjects(buildProjectPayloads(), buildSummary());
+                        } else {
+                          sendSyncSummary(conn.type, buildSummary());
+                        }
+                      }}
+                      disabled={conn.lastSyncStatus === 'sending'}
+                    >
+                      {conn.lastSyncStatus === 'sending' ? (
+                        <RiLoader4Line className="size-3.5 animate-spin" />
+                      ) : (
+                        <RiRefreshLine className="size-3.5" />
+                      )}
+                      {t('settings.integrations.discord.wizard.step3.syncNow')}
+                    </Button>
+                    <div className="ml-auto text-[10px] text-muted-foreground">
+                      {t('settings.integrations.discord.actions.lastActivity', {
+                        when: formatRelative(conn.lastSyncAt),
+                      })}
+                    </div>
+                  </div>
+                  {conn.lastSyncMessage && (
+                    <div
+                      className={cn(
+                        'text-[11px] leading-snug',
+                        conn.lastSyncStatus === 'error' && 'text-destructive',
+                        conn.lastSyncStatus === 'ok' && 'text-[var(--status-success)]',
+                        conn.lastSyncStatus === 'sending' && 'text-muted-foreground',
+                      )}
+                    >
+                      {conn.lastSyncMessage}
+                    </div>
+                  )}
+                </div>
               )}
-            >
-              {conn.lastSyncMessage}
+
+              <div ref={tokenSectionRef} className="flex flex-wrap items-center gap-2 text-xs">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="!font-normal"
+                  onClick={() => setShowToken((v) => !v)}
+                >
+                  {showToken
+                    ? t('settings.common.actions.cancel')
+                    : t('settings.integrations.discord.actions.changeToken')}
+                </Button>
+                {showToken && (
+                  <div className="flex min-w-0 flex-1 gap-2">
+                    <input
+                      type="password"
+                      value={tokenInput}
+                      onChange={(e) => setTokenInput(e.target.value)}
+                      placeholder={t('settings.integrations.discord.wizard.step1.tokenLabel')}
+                      className={inputClass}
+                    />
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="xs"
+                      className="!font-normal shrink-0"
+                      onClick={handleSaveToken}
+                      disabled={!tokenInput.trim()}
+                    >
+                      {t('settings.integrations.discord.actions.updateToken')}
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* Advanced — listener, OpenCode bridge, diagnostics, sync results and
-          project mappings. Hidden by default behind a checkbox to keep the
-          main setup flow simple; the listener/bridge still auto-start in the
-          background regardless of whether this section is expanded. */}
-      {hasToken && (
-        <div ref={advancedSectionRef}>
-          <DiscordAdvancedSettings
-            conn={conn}
-            guildSectionRef={guildSectionRef}
-            open={advancedOpen}
-            onOpenChange={setAdvancedOpen}
-          />
-        </div>
+          {advancedOpen && (
+            <div ref={advancedSectionRef}>
+              <DiscordAdvancedSettings
+                conn={conn}
+                guildSectionRef={guildSectionRef}
+                open={advancedOpen}
+                onOpenChange={setAdvancedOpen}
+                hideTrigger
+              />
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Setup: token field + instructions until the bot is connected. */}
+          {!token ? (
+            <div ref={tokenSectionRef} className="space-y-2">
+              <div className="text-xs font-medium text-foreground">{meta.tokenLabel}</div>
+              <div className="text-[11px] text-muted-foreground leading-snug">{meta.tokenHelp}</div>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type={showTokenPlain ? 'text' : 'password'}
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    placeholder={meta.tokenLabel}
+                    className={cn(inputClass, 'pr-8')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTokenPlain((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    title={showTokenPlain ? 'Hide' : 'Show'}
+                  >
+                    {showTokenPlain ? (
+                      <RiEyeOffLine className="size-3.5" />
+                    ) : (
+                      <RiEyeLine className="size-3.5" />
+                    )}
+                  </button>
+                </div>
+                <Button
+                  type="button"
+                  variant="default"
+                  size="xs"
+                  className="!font-normal shrink-0"
+                  onClick={handleSaveToken}
+                  disabled={!tokenInput.trim()}
+                >
+                  {t('settings.integrations.discord.actions.saveToken')}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div ref={tokenSectionRef} className="flex items-center gap-2 text-xs">
+              <RiCheckLine className="size-3 text-[var(--status-success)]" />
+              <span className="text-muted-foreground">
+                {t('settings.integrations.discord.actions.tokenConfigured')}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowToken(!showToken)}
+                className="text-primary text-[10px]"
+              >
+                {showToken
+                  ? t('settings.common.actions.cancel')
+                  : t('settings.integrations.discord.actions.changeToken')}
+              </button>
+              {showToken && (
+                <div className="flex gap-2 flex-1">
+                  <input
+                    type="password"
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    placeholder={t('settings.integrations.discord.wizard.step1.tokenLabel')}
+                    className={inputClass}
+                  />
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="xs"
+                    className="!font-normal"
+                    onClick={handleSaveToken}
+                    disabled={!tokenInput.trim()}
+                  >
+                    {t('settings.integrations.discord.actions.updateToken')}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {hasToken && (hasTarget || conn.discordGuildId) && (
+            <div
+              ref={testSectionRef}
+              className="space-y-2 rounded-md border border-border/60 bg-muted/30 p-3"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="default"
+                  size="xs"
+                  className="!font-normal"
+                  onClick={() => sendTestMessage(conn.type)}
+                  disabled={conn.lastSyncStatus === 'sending'}
+                >
+                  {conn.lastSyncStatus === 'sending' ? (
+                    <RiLoader4Line className="size-3.5 animate-spin" />
+                  ) : (
+                    <RiSendPlaneLine className="size-3.5" />
+                  )}
+                  {t('settings.integrations.discord.wizard.step3.sendTest')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  className="!font-normal"
+                  onClick={() => {
+                    if (conn.discordGuildId) {
+                      syncDiscordGuildProjects(buildProjectPayloads(), buildSummary());
+                    } else {
+                      sendSyncSummary(conn.type, buildSummary());
+                    }
+                  }}
+                  disabled={conn.lastSyncStatus === 'sending'}
+                >
+                  {conn.lastSyncStatus === 'sending' ? (
+                    <RiLoader4Line className="size-3.5 animate-spin" />
+                  ) : (
+                    <RiRefreshLine className="size-3.5" />
+                  )}
+                  {t('settings.integrations.discord.wizard.step3.syncNow')}
+                </Button>
+                <div className="ml-auto text-[10px] text-muted-foreground">
+                  {t('settings.integrations.discord.actions.lastActivity', {
+                    when: formatRelative(conn.lastSyncAt),
+                  })}
+                </div>
+              </div>
+              {conn.lastSyncMessage && (
+                <div
+                  className={cn(
+                    'text-[11px] leading-snug',
+                    conn.lastSyncStatus === 'error' && 'text-destructive',
+                    conn.lastSyncStatus === 'ok' && 'text-[var(--status-success)]',
+                    conn.lastSyncStatus === 'sending' && 'text-muted-foreground',
+                  )}
+                >
+                  {conn.lastSyncMessage}
+                </div>
+              )}
+            </div>
+          )}
+
+          {hasToken && (
+            <div ref={advancedSectionRef}>
+              <DiscordAdvancedSettings
+                conn={conn}
+                guildSectionRef={guildSectionRef}
+                open={advancedOpen}
+                onOpenChange={setAdvancedOpen}
+              />
+            </div>
+          )}
+        </>
       )}
 
       <Dialog open={disconnectConfirmOpen} onOpenChange={setDisconnectConfirmOpen}>
