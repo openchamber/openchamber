@@ -40,6 +40,12 @@ export type SessionMaterializationRequest = {
   partID?: string
 }
 
+export const getSessionMaterializationRequestKey = (
+  runtimeKey: string,
+  directory: string,
+  sessionID: string,
+): string => JSON.stringify([runtimeKey, directory, sessionID])
+
 export function isSessionMaterializationStillNeeded(
   state: MaterializedState,
   sessionID: string,

@@ -51,6 +51,7 @@ import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 import {
+  getSessionMaterializationRequestKey,
   getSessionMaterializationStatus,
   isSessionMaterializationStillNeeded,
   type SessionMaterializationRequest,
@@ -260,10 +261,11 @@ function haveEquivalentSyncSnapshots(left: unknown, right: unknown): boolean {
 // ---------------------------------------------------------------------------
 // Session materialization scheduler — when local message/part state is incomplete,
 // fetch the canonical session snapshot and materialize messages and parts together.
-// Tracked per-directory, deduplicated, and auto-expiring.
+// Tracked per-runtime and directory, deduplicated, and auto-expiring.
 // ---------------------------------------------------------------------------
 
 type PendingSessionMaterialization = {
+  runtimeKey: string
   sessionID: string
   directory: string
   enqueuedAt: number
@@ -271,9 +273,7 @@ type PendingSessionMaterialization = {
 }
 
 const SESSION_MATERIALIZATION_COOLDOWN_MS = 5_000
-const pendingSessionMaterializations = new Map<string, PendingSessionMaterialization>() // key: directory:sessionID
-
-const materializationKey = (directory: string, sessionID: string) => `${directory}:${sessionID}`
+const pendingSessionMaterializations = new Map<string, PendingSessionMaterialization>()
 
 function enqueueSessionMaterialization(
   directory: string,
@@ -282,11 +282,12 @@ function enqueueSessionMaterialization(
   request: SessionMaterializationRequest,
 ) {
   if (!directory || directory === "global" || !sessionID) return
-  const k = materializationKey(directory, sessionID)
+  const runtimeKey = getRuntimeKey()
+  const k = getSessionMaterializationRequestKey(runtimeKey, directory, sessionID)
   const existing = pendingSessionMaterializations.get(k)
   if (existing && Date.now() - existing.enqueuedAt < SESSION_MATERIALIZATION_COOLDOWN_MS) return
 
-  const pending = { sessionID, directory, enqueuedAt: Date.now(), request }
+  const pending = { runtimeKey, sessionID, directory, enqueuedAt: Date.now(), request }
   pendingSessionMaterializations.set(k, pending)
   countSyncPerformance("materializationEnqueues")
   if (request.reason === "empty-assistant-message") {
@@ -300,6 +301,12 @@ function enqueueSessionMaterialization(
   }
 
   const run = async () => {
+    if (pending.runtimeKey !== getRuntimeKey()) {
+      if (pendingSessionMaterializations.get(k) === pending) {
+        pendingSessionMaterializations.delete(k)
+      }
+      return
+    }
     const store = childStores.getChild(directory)
     if (!store) {
       if (pendingSessionMaterializations.get(k) === pending) {
