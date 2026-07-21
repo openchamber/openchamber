@@ -5,11 +5,6 @@ import type { Session } from '@opencode-ai/sdk/v2';
 // Archived buckets routinely grow into the hundreds/thousands; virtualize
 // when we cross this row count so the DOM stays bounded.
 const ARCHIVED_VIRTUALIZE_THRESHOLD = 50;
-// Active/worktree groups can also grow large (a single worktree with 80+
-// sessions), and unlike the archive they're interactive from the start.
-// Virtualize eagerly for non-archived groups to keep the rendered row
-// count bounded. With overscan ~8 the visible behavior is identical.
-const ACTIVE_VIRTUALIZE_THRESHOLD = 30;
 // Compact rows in the archived bucket without nested subagents render
 // around 24-32px; virtua measures mounted rows and uses this as the initial hint.
 const ARCHIVED_ROW_ESTIMATE_PX = 28;
@@ -531,21 +526,14 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   const remainingCount = totalSessions - visibleSessions.length;
   const canShowLess = !group.isArchivedBucket && !hasSessionSearchQuery && totalSessions > maxVisible && remainingCount === 0;
 
-  // Virtualize large groups. Archived buckets grow into the hundreds or
-  // thousands of rows; active/worktree groups can also hit 80+ sessions
-  // when a single worktree accumulates over time. Both paths share the
-  // same virtua Virtualizer; the threshold just controls when we mount
-  // it. The visible behavior is identical because virtua uses overscan
-  // (8) for the buffer zone. All hooks below MUST stay above the
-  // search-empty early-return so they fire in the same order every
-  // render — rules-of-hooks.
-  const shouldVirtualizeArchived = group.isArchivedBucket === true
+  // Virtualize archived buckets, which can grow into the thousands. Active
+  // groups retain normal flow because their incremental Show more control and
+  // the shared ancestor scroller cannot expose an unmounted virtual tail.
+  // Hooks below MUST stay above the search-empty early-return so they fire in
+  // the same order every render — rules-of-hooks.
+  const shouldVirtualize = group.isArchivedBucket === true
     && !hasSessionSearchQuery
     && visibleSessions.length >= ARCHIVED_VIRTUALIZE_THRESHOLD;
-  const shouldVirtualizeActive = group.isArchivedBucket !== true
-    && !hasSessionSearchQuery
-    && visibleSessions.length >= ACTIVE_VIRTUALIZE_THRESHOLD;
-  const shouldVirtualize = shouldVirtualizeArchived || shouldVirtualizeActive;
 
   // Check if any parent node is expanded - expanded parents render their
   // children inline, making them much taller than the fixed estimate.
