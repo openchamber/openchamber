@@ -278,8 +278,8 @@ function DiscordListenerPanel({
             Auto-reply
           </label>
           <label
-            className="flex items-center gap-1 text-[10px] text-muted-foreground cursor-pointer"
-            title="When on, only messages from the saved Server (Guild) ID reach the UI. When off (default) every message the bot can see is forwarded."
+            className="flex cursor-pointer items-center gap-1 text-[10px] text-muted-foreground"
+            title={t('settings.integrations.discord.listener.scopeToGuild.description')}
           >
             <input
               type="checkbox"
@@ -293,7 +293,7 @@ function DiscordListenerPanel({
               }}
               className="rounded border-border accent-primary"
             />
-            Scope to saved server
+            {t('settings.integrations.discord.listener.scopeToGuild.label')}
           </label>
         </div>
       </div>
@@ -344,7 +344,7 @@ function DiscordListenerPanel({
                 The listener is scoped to your saved Server ID (
                 <code className="bg-muted px-1 rounded">{conn.discordGuildId}</code>) but the bot
                 is also hearing from another server. Update the Server ID, or turn off
-                "Scope to saved server" below.
+                &ldquo;{t('settings.integrations.discord.listener.scopeToGuild.label')}&rdquo;.
               </div>
             </div>
           </div>
@@ -939,7 +939,11 @@ function DiscordAdvancedSettings({
         </label>
       )}
       <CollapsibleContent className="space-y-4 pt-3">
-        {/* Server (Guild) ID — server-wide project sync */}
+        <p className="typography-meta text-muted-foreground/70 px-0.5">
+          {t('settings.integrations.discord.advanced.serversNote')}
+        </p>
+
+        {/* Primary project-sync server (channel-per-project mirroring) */}
         <div
           ref={guildSectionRef}
           data-settings-item="integrations.discord.guild"
@@ -947,24 +951,23 @@ function DiscordAdvancedSettings({
         >
           <div className="font-medium text-foreground flex items-center gap-1.5">
             <RiDiscordLine className="size-3.5 text-[#5865F2]" />
-            Server (Guild) ID
-            <span className="text-[10px] font-normal text-muted-foreground">
-              — for server-wide sync
-            </span>
-            {conn.discordGuildId && <RiCheckLine className="size-3 text-green-500" />}
+            {t('settings.integrations.discord.advanced.primarySyncGuild.title')}
+            {conn.discordGuildId && <RiCheckLine className="size-3 text-[var(--status-success)]" />}
           </div>
+          <p className="text-[11px] text-muted-foreground leading-snug">
+            {t('settings.integrations.discord.advanced.primarySyncGuild.description')}
+          </p>
           {!conn.discordGuildId ? (
             <>
               <div className="text-[11px] text-muted-foreground leading-snug">
-                Right-click the server name → <strong>Copy Server ID</strong> to sync a channel per
-                project across the whole server.{' '}
+                {t('settings.integrations.discord.advanced.primarySyncGuild.hint')}{' '}
                 <a
                   href="https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID"
                   target="_blank"
                   rel="noreferrer"
                   className="text-primary hover:underline"
                 >
-                  ID guide
+                  {t('settings.integrations.discord.advanced.primarySyncGuild.idGuide')}
                 </a>
               </div>
               <div className="flex gap-2">
@@ -975,8 +978,11 @@ function DiscordAdvancedSettings({
                   placeholder="e.g. 1234567890123456789"
                   className={inputClass}
                 />
-                <button
+                <Button
                   type="button"
+                  variant="default"
+                  size="xs"
+                  className="!font-normal shrink-0"
                   onClick={() => {
                     const v = guildInput.trim();
                     if (!v) return;
@@ -986,14 +992,13 @@ function DiscordAdvancedSettings({
                     setTimeout(() => resolveDiscordGuild(), 0);
                   }}
                   disabled={!guildInput.trim()}
-                  className="shrink-0 rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:opacity-50"
                 >
-                  Save
-                </button>
+                  {t('settings.integrations.discord.actions.saveToken')}
+                </Button>
               </div>
               {conn.discordGuilds && conn.discordGuilds.length > 0 && (
                 <div className="text-[10px] text-muted-foreground">
-                  Quick pick from servers the bot is already in:
+                  {t('settings.integrations.discord.advanced.primarySyncGuild.quickPick')}
                   <div className="flex flex-wrap gap-1 mt-1">
                     {conn.discordGuilds.slice(0, 6).map((g) => (
                       <button
@@ -1039,9 +1044,9 @@ function DiscordAdvancedSettings({
                   type="button"
                   onClick={() => resolveDiscordGuild()}
                   className="text-primary text-[10px] hover:underline"
-                  title="Re-fetch server channel topology"
+                  title={t('settings.integrations.discord.advanced.primarySyncGuild.rescan')}
                 >
-                  Re-scan
+                  {t('settings.integrations.discord.advanced.primarySyncGuild.rescan')}
                 </button>
                 <button
                   type="button"
@@ -1057,7 +1062,7 @@ function DiscordAdvancedSettings({
                   }}
                   className="text-primary text-[10px] hover:underline"
                 >
-                  Change
+                  {t('settings.integrations.discord.advanced.primarySyncGuild.change')}
                 </button>
               </div>
               {conn.discordGuildCategories && conn.discordGuildCategories.length > 0 && (
@@ -1337,10 +1342,44 @@ function DiscordServersAndInviteBlock({ conn }: { conn: MessengerConnection }) {
   const fetchDiscordInviteUrl = useMessengerStore((s) => s.fetchDiscordInviteUrl);
   const setDiscordGuildPolicy = useMessengerStore((s) => s.setDiscordGuildPolicy);
   const setDiscordDefaultReplyMode = useMessengerStore((s) => s.setDiscordDefaultReplyMode);
+  const refreshDiscordGuilds = useMessengerStore((s) => s.refreshDiscordGuilds);
+  const refreshing = useMessengerStore((s) => s.discordGuildsRefreshing);
+  const guildsError = useMessengerStore((s) => s.discordGuildsError);
 
   const guildCount = conn.discordGuilds?.length ?? 0;
   const hasGuilds = guildCount > 0;
   const defaultReplyMode = conn.discordDefaultReplyMode ?? 'always';
+
+  // Mount refresh + short poll while empty so joining a server updates the list.
+  useEffect(() => {
+    if (hasGuilds) return;
+    if (!conn.discordInviteUrl && !conn.botToken) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 12;
+
+    const tick = async () => {
+      if (cancelled) return;
+      if (useMessengerStore.getState().discordGuildsRefreshing) return;
+      attempts += 1;
+      await useMessengerStore.getState().refreshDiscordGuilds();
+    };
+
+    void tick();
+    const id = setInterval(() => {
+      if (cancelled || attempts >= maxAttempts) {
+        clearInterval(id);
+        return;
+      }
+      void tick();
+    }, 5_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [hasGuilds, conn.discordInviteUrl, conn.botToken]);
 
   const replyModeLabelKey = (mode: DiscordReplyMode): I18nKey => {
     if (mode === 'always') return 'settings.integrations.discord.servers.replyMode.always';
@@ -1366,7 +1405,7 @@ function DiscordServersAndInviteBlock({ conn }: { conn: MessengerConnection }) {
         {conn.discordInviteUrl ? (
           <Button
             type="button"
-            variant="outline"
+            variant={hasGuilds ? 'outline' : 'default'}
             size="xs"
             className="!font-normal"
             onClick={() =>
@@ -1387,6 +1426,23 @@ function DiscordServersAndInviteBlock({ conn }: { conn: MessengerConnection }) {
             {t('settings.integrations.discord.servers.generateInvite')}
           </Button>
         )}
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="!font-normal"
+          disabled={refreshing || !conn.botToken}
+          onClick={() => void refreshDiscordGuilds()}
+        >
+          {refreshing ? (
+            <Icon name="loader-4" className="size-3.5 animate-spin" />
+          ) : (
+            <Icon name="refresh" className="size-3.5" />
+          )}
+          {refreshing
+            ? t('settings.integrations.discord.servers.refreshing')
+            : t('settings.integrations.discord.servers.refresh')}
+        </Button>
       </div>
 
       <div className="text-[11px] text-muted-foreground">
@@ -1394,6 +1450,27 @@ function DiscordServersAndInviteBlock({ conn }: { conn: MessengerConnection }) {
           ? t('settings.integrations.discord.wizard.step2.botInServers', { count: guildCount })
           : t('settings.integrations.discord.wizard.step2.botNotInServers')}
       </div>
+
+      {!hasGuilds && (
+        <div className="rounded-md border border-border/50 bg-background/60 px-2.5 py-2 space-y-1">
+          <p className="text-[11px] text-muted-foreground leading-snug">
+            {t('settings.integrations.discord.servers.empty')}
+          </p>
+          {refreshing && (
+            <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <Icon name="loader-4" className="size-3 animate-spin" />
+              {t('settings.integrations.discord.servers.refreshing')}
+            </p>
+          )}
+          {guildsError && (
+            <p className="text-[11px] text-[var(--status-error)] leading-snug">{guildsError}</p>
+          )}
+        </div>
+      )}
+
+      {hasGuilds && guildsError && (
+        <p className="text-[11px] text-[var(--status-error)] leading-snug">{guildsError}</p>
+      )}
 
       <p className="text-[10px] text-muted-foreground leading-snug">
         {t('settings.integrations.discord.servers.inviteHint')}
@@ -1605,9 +1682,20 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
           <div data-settings-item="integrations.discord.commands">
             <DiscordCommandsButton />
           </div>
-          {/* Setup-only header actions. When connected, Disconnect lives with
-              Change token / Advanced below so it stays visible. */}
-          {hasToken && !isConnectedView && (
+          {/* Setup-only / wizard header actions. When connected (post-wizard),
+              Disconnect lives with Change token / Advanced below. */}
+          {hasToken && showWizard && (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
+              onClick={() => setDisconnectConfirmOpen(true)}
+            >
+              {t('settings.integrations.discord.disconnect.button')}
+            </Button>
+          )}
+          {hasToken && !isConnectedView && !showWizard && (
             <>
               <Button
                 type="button"
@@ -1643,12 +1731,10 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
         </div>
       )}
 
-      {/* Onboarding wizard — shown during first-time setup */}
-      {showWizard && (
+      {/* Wizard is exclusive during onboarding — no duplicate token/invite/servers UI. */}
+      {showWizard ? (
         <DiscordOnboardingWizard conn={conn} onScrollToSection={scrollToSection} />
-      )}
-
-      {isConnectedView ? (
+      ) : isConnectedView ? (
         <>
           {/* Connected: change token, advanced, and disconnect — always visible. */}
           <div ref={tokenSectionRef} className="flex flex-wrap items-center gap-2">
