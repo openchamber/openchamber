@@ -5,7 +5,7 @@ import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { getToolMetadata } from '@/lib/toolHelpers';
-import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
+import type { ToolPart as ToolPartType, ToolState as ToolStateUnion, FilePart } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
@@ -59,7 +59,7 @@ const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!lead
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
-type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
+type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number }; attachments?: Array<FilePart> };
 
 interface ToolPartProps {
     part: ToolPartType;
@@ -1512,6 +1512,11 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const rawOutput = stateWithData.output;
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
+    const attachments = stateWithData.attachments;
+    const imageAttachments = React.useMemo(() => {
+        if (!Array.isArray(attachments)) return [];
+        return attachments.filter((f): f is FilePart & { url: string } => f.type === 'file' && typeof f.mime === 'string' && f.mime.startsWith('image/') && typeof f.url === 'string');
+    }, [attachments]);
 
     const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
     const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
@@ -1573,6 +1578,33 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     React.useEffect(() => {
         setDiffViewMode('unified');
     }, [part.id]);
+
+    const imageGallery = React.useMemo(() => {
+        return imageAttachments.map((f) => ({
+            url: f.url,
+            mimeType: f.mime,
+            filename: f.filename,
+        }));
+    }, [imageAttachments]);
+
+    const handleAttachmentClick = React.useCallback((index: number) => {
+        if (!onShowPopup || index >= imageGallery.length) return;
+        const file = imageGallery[index];
+        if (!file?.url) return;
+        onShowPopup({
+            open: true,
+            title: file.filename || 'Image',
+            content: '',
+            metadata: { tool: 'image-preview', filename: file.filename, mime: file.mimeType },
+            image: {
+                url: file.url,
+                mimeType: file.mimeType,
+                filename: file.filename,
+                gallery: imageGallery,
+                index,
+            },
+        });
+    }, [imageGallery, onShowPopup]);
 
     const renderScrollableBlock = (
         content: React.ReactNode,
@@ -1926,6 +1958,26 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     )}
                 </>
             )}
+
+            {imageAttachments.length > 0 && state.status === 'completed' ? (
+                <div className="flex flex-wrap gap-2">
+                    {imageAttachments.map((file, index) => (
+                        <button
+                            key={file.url}
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleAttachmentClick(index); }}
+                            className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden rounded-lg h-16 w-16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                            <img
+                                src={file.url}
+                                alt={file.filename || 'Attachment'}
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                            />
+                        </button>
+                    ))}
+                </div>
+            ) : null}
         </div>
     );
 });

@@ -72,6 +72,13 @@ function getStringField(part: Part, field: "text" | "output"): string | undefine
   return typeof value === "string" ? value : undefined
 }
 
+function getPartStateAttachments(part: Part): Array<unknown> | undefined {
+  const state = (part as Record<string, unknown>).state as Record<string, unknown> | undefined
+  if (!state) return undefined
+  const attachments = state.attachments
+  return Array.isArray(attachments) && attachments.length > 0 ? attachments : undefined
+}
+
 function hasLiveStreamingField(part: Part): boolean {
   if (getPartEndTime(part) !== undefined) return false
   return STREAMING_PART_FIELDS.some((field) => {
@@ -90,7 +97,18 @@ function getPartStateTime(part: Part): { start?: number; end?: number } | undefi
 }
 
 function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
-  if (!existing || getPartEndTime(next) !== undefined) return next
+  if (!existing) return next
+
+  if (getPartEndTime(next) !== undefined) {
+    const existingAttachments = getPartStateAttachments(existing)
+    if (existingAttachments && !getPartStateAttachments(next)) {
+      const nextRecord = { ...next }
+      const nextState = { ...((next as Record<string, unknown>).state as Record<string, unknown> ?? {}), attachments: existingAttachments }
+      ;(nextRecord as Record<string, unknown>).state = nextState
+      return nextRecord
+    }
+    return next
+  }
 
   let merged: Part = next
   for (const field of STREAMING_PART_FIELDS) {
@@ -104,6 +122,15 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
     if (merged === next) merged = { ...next }
     const mergedRecord = merged as Record<string, unknown>
     mergedRecord[field] = existingValue
+  }
+
+  const existingAttachments = getPartStateAttachments(existing)
+  if (existingAttachments && !getPartStateAttachments(next)) {
+    if (merged === next) merged = { ...next }
+    const mergedRecord = merged as Record<string, unknown>
+    const nextState = (next as Record<string, unknown>).state as Record<string, unknown> | undefined
+    const newState = { ...(nextState ?? {}), attachments: existingAttachments }
+    mergedRecord.state = newState
   }
 
   const existingTime = getPartStateTime(existing)
