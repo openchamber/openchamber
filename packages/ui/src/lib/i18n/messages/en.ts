@@ -2069,6 +2069,7 @@ export const dict = {
   'chat.toolPart.copiedOutput': 'Copied output',
   'chat.toolPart.copyOutputFailed': 'Failed to copy output',
   'chat.toolPart.openSubtask': 'Open {type} subtask',
+  'chat.toolPart.attachmentFallback': 'Attachment',
   'chat.todo.total': 'Total',
   'chat.todo.inProgress': 'In Progress',
   'chat.todo.pending': 'Pending',

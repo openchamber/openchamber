@@ -2035,6 +2035,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toolPart.copiedOutput": "Вивід скопійовано",
   "chat.toolPart.copyOutputFailed": "Не вдалося скопіювати вивід",
   "chat.toolPart.openSubtask": "Відкрити підзавдання {type}",
+  "chat.toolPart.attachmentFallback": "Вкладення",
   "chat.todo.total": "Усього",
   "chat.todo.inProgress": "В роботі",
   "chat.todo.pending": "В очікуванні",
