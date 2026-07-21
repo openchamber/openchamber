@@ -349,6 +349,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['agent', 'new sessions'],
   },
   {
+    id: 'sessions.permission-auto-accept',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.permissionAutoAccept.field.globalLabel',
+    descriptionKey: 'settings.openchamber.permissionAutoAccept.field.globalWarning',
+    keywords: ['permissions', 'approve', 'accept', 'auto approve', 'always allow', 'security'],
+  },
+  {
     id: 'sessions.deletion-dialog',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.showDeletionDialog',

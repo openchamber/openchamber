@@ -4,6 +4,7 @@ import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { DefaultsSettings } from './DefaultsSettings';
+import { PermissionAutoAcceptSettings } from './PermissionAutoAcceptSettings';
 import { GitSettings } from './GitSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { GitHubSettings } from './GitHubSettings';
@@ -50,6 +51,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
             <SettingsPageLayout showSaveStatus className="openchamber-page-body space-y-3 sm:space-y-6">
                 <OpenChamberVisualSettings />
                 <DefaultsSettings />
+                <PermissionAutoAcceptSettings />
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
                 {!isVSCode && <OpenCodeCliSettings />}
                 <SessionRetentionSettings />
@@ -214,6 +216,7 @@ const SessionsSectionContent: React.FC = () => {
     return (
         <>
             <DefaultsSettings />
+            <PermissionAutoAcceptSettings />
             <SessionRetentionSettings />
         </>
     );

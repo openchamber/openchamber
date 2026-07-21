@@ -2,9 +2,11 @@ const SETTINGS_KEY = 'permissionAutoAccept';
 const RETRY_DELAYS_MS = [0, 250, 1000];
 const REQUEST_TIMEOUT_MS = 5000;
 const SESSION_CACHE_LIMIT = 10000;
+const SESSION_LIST_PAGE_SIZE = 500;
 
 const normalizePolicy = (value) => {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const defaultEnabled = source.default === true;
   const sessions = {};
   const entries = source.sessions && typeof source.sessions === 'object' && !Array.isArray(source.sessions)
     ? Object.entries(source.sessions)
@@ -12,10 +14,36 @@ const normalizePolicy = (value) => {
   for (const [sessionId, enabled] of entries) {
     if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
   }
-  return { sessions };
+  return { default: defaultEnabled, sessions };
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const readCursorHeader = (response) => {
+  const raw = response?.headers?.get?.('x-next-cursor');
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeSessionInfo = (sessionId, payload) => {
+  const candidate = payload?.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
+    ? payload.data
+    : payload;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    throw new Error(`Invalid session payload for ${sessionId}`);
+  }
+  const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+  if (!id || id !== sessionId) {
+    throw new Error(`Unexpected session payload for ${sessionId}`);
+  }
+  return {
+    id,
+    parentID: typeof candidate.parentID === 'string' && candidate.parentID ? candidate.parentID : null,
+    directory: typeof candidate.directory === 'string' && candidate.directory ? candidate.directory : undefined,
+    time: candidate.time && typeof candidate.time === 'object' ? candidate.time : undefined,
+  };
+};
 
 export function createPermissionAutoAcceptRuntime({
   globalEventHub,
@@ -37,6 +65,7 @@ export function createPermissionAutoAcceptRuntime({
   const reconcilePromises = new Map();
 
   const snapshot = () => ({
+    default: policy.default === true,
     sessions: { ...policy.sessions },
   });
 
@@ -54,20 +83,25 @@ export function createPermissionAutoAcceptRuntime({
     return loadPromise;
   };
 
-  const persistUpdate = (update) => {
-    writePromise = writePromise.then(async () => {
-      const next = update(policy);
-      await persistSettings({ [SETTINGS_KEY]: next });
-      policy = next;
-      loaded = true;
-      broadcastGlobalUiEvent?.({
-        type: 'openchamber:permission-auto-accept.updated',
-        properties: snapshot(),
-      });
-      return snapshot();
-    });
-    return writePromise;
+  const enqueueWrite = (operation) => {
+    const task = writePromise.then(operation, operation);
+    writePromise = task.then(() => undefined, () => undefined);
+    return task;
   };
+
+  const persistUpdateUnqueued = async (update) => {
+    const next = update(policy);
+    await persistSettings({ [SETTINGS_KEY]: next });
+    policy = next;
+    loaded = true;
+    broadcastGlobalUiEvent?.({
+      type: 'openchamber:permission-auto-accept.updated',
+      properties: snapshot(),
+    });
+    return snapshot();
+  };
+
+  const persistUpdate = (update) => enqueueWrite(() => persistUpdateUnqueued(update));
 
   const setSessionPolicy = async (sessionId, enabled, directory) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new TypeError('sessionId is required');
@@ -81,6 +115,20 @@ export function createPermissionAutoAcceptRuntime({
     return result;
   };
 
+  const setDefaultPolicy = async (enabled) => {
+    if (typeof enabled !== 'boolean') throw new TypeError('enabled must be a boolean');
+    return enqueueWrite(async () => {
+      const reconcileDirectories = enabled ? await listKnownSessionDirectories() : [];
+      await load();
+      const result = await persistUpdateUnqueued((current) => ({
+        ...current,
+        default: enabled,
+      }));
+      if (enabled) await reconcilePending({ directories: reconcileDirectories });
+      return result;
+    });
+  };
+
   const rememberSession = (info, directoryHint) => {
     if (!info || typeof info.id !== 'string' || !info.id) return;
     sessions.set(info.id, {
@@ -90,6 +138,63 @@ export function createPermissionAutoAcceptRuntime({
     if (sessions.size > SESSION_CACHE_LIMIT) {
       sessions.delete(sessions.keys().next().value);
     }
+  };
+
+  const listKnownSessionDirectories = async () => {
+    const directories = new Set();
+    const seenIds = new Set();
+    let cursor;
+
+    while (true) {
+      const url = new URL(buildOpenCodeUrl('/experimental/session', ''));
+      url.searchParams.set('archived', 'false');
+      url.searchParams.set('roots', 'true');
+      url.searchParams.set('limit', String(SESSION_LIST_PAGE_SIZE));
+      if (cursor !== undefined) url.searchParams.set('cursor', String(cursor));
+
+      const response = await fetchImpl(url, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...getOpenCodeAuthHeaders(),
+        },
+        signal: AbortSignal.timeout(requestTimeoutMs),
+      });
+      if (!response.ok) {
+        const error = new Error(`OpenCode request failed (${response.status})`);
+        error.status = response.status;
+        throw error;
+      }
+
+      const payload = await response.json().catch(() => null);
+      if (!Array.isArray(payload)) {
+        throw new Error('Invalid experimental session list response');
+      }
+      if (payload.length === 0) break;
+
+      let appended = 0;
+      let lastUpdated;
+      for (const raw of payload) {
+        const sessionId = typeof raw?.id === 'string' ? raw.id.trim() : '';
+        const session = normalizeSessionInfo(sessionId, raw);
+        if (seenIds.has(session.id)) continue;
+        seenIds.add(session.id);
+        appended += 1;
+        if (session.directory) directories.add(session.directory);
+        lastUpdated = typeof session.time?.updated === 'number' && Number.isFinite(session.time.updated)
+          ? session.time.updated
+          : lastUpdated;
+      }
+
+      if (payload.length < SESSION_LIST_PAGE_SIZE) break;
+      const nextCursor = readCursorHeader(response) ?? lastUpdated;
+      if (nextCursor === undefined || nextCursor === null) break;
+      if (cursor !== undefined && nextCursor >= cursor) break;
+      if (appended === 0) break;
+      cursor = nextCursor;
+    }
+
+    return Array.from(directories);
   };
 
   const request = async (path, { directory, method = 'GET', body } = {}) => {
@@ -117,7 +222,7 @@ export function createPermissionAutoAcceptRuntime({
     const cached = sessions.get(sessionId);
     if (cached) return cached;
     const info = await request(`/session/${encodeURIComponent(sessionId)}`, { directory });
-    rememberSession(info?.data ?? info, directory);
+    rememberSession(normalizeSessionInfo(sessionId, info), directory);
     return sessions.get(sessionId) ?? null;
   };
 
@@ -126,6 +231,7 @@ export function createPermissionAutoAcceptRuntime({
     const seen = new Set();
     let current = sessionId;
     let currentDirectory = directory;
+    let resolvedLineage = false;
     while (current && !seen.has(current)) {
       if (Object.hasOwn(policy.sessions, current)) return policy.sessions[current] === true;
       seen.add(current);
@@ -138,7 +244,8 @@ export function createPermissionAutoAcceptRuntime({
       current = info?.parentID ?? null;
       currentDirectory = info?.directory ?? currentDirectory;
     }
-    return false;
+    if (!current) resolvedLineage = true;
+    return resolvedLineage ? policy.default === true : false;
   };
 
   const replyOnce = async (permission, directory) => {
@@ -235,6 +342,7 @@ export function createPermissionAutoAcceptRuntime({
   return {
     snapshot,
     load,
+    setDefaultPolicy,
     setSessionPolicy,
     isSessionAutoAccepting,
     processPermission,
@@ -256,6 +364,14 @@ export function registerPermissionAutoAcceptRoutes(app, runtime) {
     try {
       const directory = typeof req.body?.directory === 'string' ? req.body.directory : undefined;
       res.json(await runtime.setSessionPolicy(req.params.sessionId, req.body?.enabled, directory));
+    } catch (error) {
+      res.status(error instanceof TypeError ? 400 : 500).json({ error: error?.message });
+    }
+  });
+
+  app.put('/api/permission-auto-accept/default', async (req, res) => {
+    try {
+      res.json(await runtime.setDefaultPolicy(req.body?.enabled));
     } catch (error) {
       res.status(error instanceof TypeError ? 400 : 500).json({ error: error?.message });
     }

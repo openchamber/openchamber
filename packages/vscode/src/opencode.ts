@@ -8,6 +8,7 @@ import { spawnSync } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { normalizePermissionAutoAcceptStorageIdentity } from './permission-auto-accept-storage-identity';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './opencodeProcessRegistry';
 
@@ -58,6 +59,7 @@ export interface OpenCodeManager {
   setWorkingDirectory(path: string): Promise<SetWorkingDirectoryResult>;
   getStatus(): ConnectionStatus;
   getApiUrl(): string | null;
+  getPermissionAutoAcceptStorageIdentity(): string;
   getOpenCodeAuthHeaders(): Record<string, string>;
   getWorkingDirectory(): string;
   isCliAvailable(): boolean;
@@ -812,6 +814,9 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
   const config = vscode.workspace.getConfiguration('openchamber');
   const configuredApiUrl = config.get<string>('apiUrl') || '';
   const useConfiguredUrl = configuredApiUrl && configuredApiUrl.trim().length > 0;
+  const permissionAutoAcceptStorageIdentity = useConfiguredUrl
+    ? normalizePermissionAutoAcceptStorageIdentity(configuredApiUrl)
+    : 'workspace-local';
 
   let configuredPort: number | null = null;
   if (useConfiguredUrl) {
@@ -1153,6 +1158,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
     setWorkingDirectory,
     getStatus: () => status,
     getApiUrl,
+    getPermissionAutoAcceptStorageIdentity: () => permissionAutoAcceptStorageIdentity,
     getOpenCodeAuthHeaders,
     getWorkingDirectory: () => workingDirectory,
     isCliAvailable: () => !cliMissing || Boolean(cliPath || resolveOpencodeCliPath()),

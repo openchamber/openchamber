@@ -59,7 +59,10 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
-  - Broadcasts policy snapshots to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.
+  - Persists and broadcasts the authoritative snapshot shape (`default` plus explicit `sessions`) to every active OpenChamber webview.
+  - Scopes persisted policy by workspace/runtime identity in `workspaceState` so one VS Code workspace or configured runtime cannot leak a `default: true` policy into another.
+  - Serializes read-modify-write updates and only migrates legacy global per-session overrides into the scoped store; legacy global defaults do not cross the new scope boundary.
+  - Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime; with every webview closed or suspended, no responder exists.
 
 ## Extension guideline
 

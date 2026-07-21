@@ -606,7 +606,7 @@ const dispatchVSCodeRuntimeNotificationEvent = (directory: string, payload: Even
   }))
 }
 
-const createEventRoutingIndex = (): EventRoutingIndex => ({
+export const createEventRoutingIndex = (): EventRoutingIndex => ({
   sessionDirectoryById: new Map(),
   messageSessionById: new Map(),
   sessionMessageIdsById: new Map(),
@@ -1311,7 +1311,7 @@ async function resyncDirectoryAfterReconnect(
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
 
-function handleEvent(
+export function handleEvent(
   rawDirectory: string,
   payload: Event,
   childStores: ChildStoreManager,
@@ -1321,12 +1321,13 @@ function handleEvent(
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
     if (properties && typeof properties === "object") {
-      const snapshot = properties as { sessions?: unknown }
-      if (snapshot.sessions && typeof snapshot.sessions === "object") {
-        usePermissionStore.getState().applySnapshot({
-          sessions: snapshot.sessions as Record<string, boolean>,
-        })
-      }
+      const snapshot = properties as { default?: unknown; sessions?: unknown }
+      usePermissionStore.getState().applySnapshot({
+        default: snapshot.default === true,
+        sessions: snapshot.sessions && typeof snapshot.sessions === "object"
+          ? snapshot.sessions as Record<string, boolean>
+          : {},
+      })
     }
     return
   }
@@ -1418,10 +1419,6 @@ function handleEvent(
       void processVSCodePermissionAutoAccept(permission, resolvedDirectory).then((accepted) => {
         if (!accepted) handleEvent(rawDirectory, payload, childStores, routingIndex, true)
       })
-      return
-    }
-    if (!isVSCodeRuntime() && usePermissionStore.getState().isSessionAutoAccepting(permission.sessionID)) {
-      updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       return
     }
 

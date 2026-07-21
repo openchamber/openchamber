@@ -192,6 +192,7 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
     if (candidate.permissionAutoAccept && typeof candidate.permissionAutoAccept === 'object' && !Array.isArray(candidate.permissionAutoAccept)) {
+      const defaultEnabled = candidate.permissionAutoAccept.default === true;
       const sessions = {};
       const sourceSessions = candidate.permissionAutoAccept.sessions;
       if (sourceSessions && typeof sourceSessions === 'object' && !Array.isArray(sourceSessions)) {
@@ -200,6 +201,7 @@ export const createSettingsHelpers = (dependencies) => {
         }
       }
       result.permissionAutoAccept = {
+        default: defaultEnabled,
         sessions,
       };
     }

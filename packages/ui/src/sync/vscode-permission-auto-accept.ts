@@ -1,19 +1,84 @@
 import type { PermissionRequest, Session } from "@opencode-ai/sdk/v2/client"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
-import { getAllSyncSessionMap } from "./sync-refs"
+import { getAllSyncSessionMap, getSyncChildStores } from "./sync-refs"
 import * as sessionActions from "./session-actions"
 
 const RETRY_DELAYS_MS = [0, 250, 1000]
 
 type Dependencies = {
-  getPolicy: () => Record<string, boolean>
+  getPolicy: () => { default: boolean; sessions: Record<string, boolean> }
   getSessions: () => ReadonlyMap<string, Session>
   getSession: (sessionId: string, directory?: string) => Promise<Session>
+  getKnownDirectories?: (directory?: string) => string[]
   listPendingPermissions: (directory?: string) => Promise<PermissionRequest[]>
   getPermissionState: (sessionId: string, requestId: string) => Promise<"ok" | "resolved" | "unknown">
   reply: (sessionId: string, requestId: string) => Promise<void>
   wait: (delayMs: number) => Promise<void>
+}
+
+const normalizeDirectory = (value?: string | null): string | undefined => {
+  const trimmed = typeof value === "string" ? value.trim() : ""
+  if (!trimmed) return undefined
+  const normalized = trimmed
+    .replace(/\\/g, "/")
+    .replace(/^([a-z]):\//, (_, letter: string) => `${letter.toUpperCase()}:/`)
+    .replace(/^\/([a-z]):\//, (_, letter: string) => `/${letter.toUpperCase()}:/`)
+  if (normalized === "/") {
+    return "/"
+  }
+  return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized
+}
+
+const uniqueDirectories = (directories: Array<string | null | undefined>): string[] => {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const directory of directories) {
+    const normalized = normalizeDirectory(directory)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(normalized)
+  }
+  return result
+}
+
+const getVSCodeWorkspaceDirectories = (): string[] => {
+  if (typeof window === "undefined") return []
+  const config = (window as unknown as {
+    __VSCODE_CONFIG__?: {
+      workspaceFolder?: unknown
+      workspaceFolders?: unknown
+    }
+  }).__VSCODE_CONFIG__
+  const workspaceFolders = Array.isArray(config?.workspaceFolders)
+    ? config.workspaceFolders
+        .map((entry) => {
+          const candidate = entry as { path?: unknown }
+          return typeof candidate.path === "string" ? candidate.path : undefined
+        })
+    : []
+  if (workspaceFolders.length > 0) {
+    return uniqueDirectories(workspaceFolders)
+  }
+  return uniqueDirectories([
+    typeof config?.workspaceFolder === "string" ? config.workspaceFolder : undefined,
+  ])
+}
+
+const getLiveSyncDirectories = (): string[] => {
+  try {
+    return uniqueDirectories(Array.from(getSyncChildStores().children.keys()))
+  } catch {
+    return []
+  }
+}
+
+const isValidLineageSession = (sessionId: string, value: unknown): value is Session => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  const id = typeof (value as { id?: unknown }).id === 'string' ? (value as { id: string }).id.trim() : ''
+  return id === sessionId
 }
 
 export function createVSCodePermissionAutoAcceptRuntime(dependencies: Dependencies) {
@@ -28,15 +93,28 @@ export function createVSCodePermissionAutoAcceptRuntime(dependencies: Dependenci
     const seen = new Set<string>()
     let current: string | undefined = sessionId
     let currentDirectory = directory
+    let resolvedLineage = false
 
     while (current && !seen.has(current)) {
-      if (Object.prototype.hasOwnProperty.call(policy, current)) return policy[current] === true
+      if (Object.prototype.hasOwnProperty.call(policy.sessions, current)) return policy.sessions[current] === true
       seen.add(current)
 
-      let session: Session | undefined = syncedSessions.get(current) ?? fetchedSessions.get(current)
+      const syncedHasSession = syncedSessions.has(current)
+      const fetchedHasSession = fetchedSessions.has(current)
+      let session: Session | undefined = syncedHasSession
+        ? syncedSessions.get(current)
+        : fetchedHasSession
+          ? fetchedSessions.get(current)
+          : undefined
+      if ((syncedHasSession || fetchedHasSession) && !isValidLineageSession(current, session)) {
+        return false
+      }
       if (!session) {
         try {
           session = await dependencies.getSession(current, currentDirectory)
+          if (!isValidLineageSession(current, session)) {
+            return false
+          }
           fetchedSessions.set(session.id, session)
         } catch {
           return false
@@ -45,7 +123,10 @@ export function createVSCodePermissionAutoAcceptRuntime(dependencies: Dependenci
       current = session.parentID
       currentDirectory = session.directory || currentDirectory
     }
-    return false
+    if (!current) {
+      resolvedLineage = true
+    }
+    return resolvedLineage ? policy.default === true : false
   }
 
   const processPermission = (permission: PermissionRequest, directory?: string) => {
@@ -83,14 +164,18 @@ export function createVSCodePermissionAutoAcceptRuntime(dependencies: Dependenci
   }
 
   const reconcilePending = (directory?: string) => {
-    const key = directory?.trim() || "all"
+    const directories = directory
+      ? uniqueDirectories([directory])
+      : uniqueDirectories(dependencies.getKnownDirectories?.() ?? [])
+    const key = directories.join("\n") || "all"
     const existing = reconcileInFlight.get(key)
     if (existing) return existing
 
-    const task = dependencies.listPendingPermissions(directory)
-      .then(async (permissions) => {
-        await Promise.all(permissions.map((permission) => processPermission(permission, directory)))
-      })
+    const task = Promise.all((directories.length > 0 ? directories : [undefined]).map(async (knownDirectory) => {
+      const permissions = await dependencies.listPendingPermissions(knownDirectory)
+      await Promise.all(permissions.map((permission) => processPermission(permission, knownDirectory)))
+    }))
+      .then(() => undefined)
       .finally(() => reconcileInFlight.delete(key))
 
     reconcileInFlight.set(key, task)
@@ -101,9 +186,18 @@ export function createVSCodePermissionAutoAcceptRuntime(dependencies: Dependenci
 }
 
 const runtime = createVSCodePermissionAutoAcceptRuntime({
-  getPolicy: () => usePermissionStore.getState().autoAccept,
+  getPolicy: () => ({
+    default: usePermissionStore.getState().defaultEnabled,
+    sessions: usePermissionStore.getState().autoAccept,
+  }),
   getSessions: getAllSyncSessionMap,
   getSession: (sessionId, directory) => opencodeClient.getSession(sessionId, directory),
+  getKnownDirectories: (directory) => uniqueDirectories([
+    directory,
+    opencodeClient.getDirectory(),
+    ...getLiveSyncDirectories(),
+    ...getVSCodeWorkspaceDirectories(),
+  ]),
   listPendingPermissions: (directory) => opencodeClient.listPendingPermissions({ directories: [directory] }),
   getPermissionState: async (sessionId, requestId) => (await opencodeClient.fetchPermission(sessionId, requestId)).state,
   reply: (sessionId, requestId) => sessionActions.respondToPermission(sessionId, requestId, "once"),
