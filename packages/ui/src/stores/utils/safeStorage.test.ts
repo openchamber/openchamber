@@ -158,4 +158,64 @@ describe('safeStorage', () => {
             }
         }
     });
+
+    test('isolates quota failures to one key and retries durable storage later', async () => {
+        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+        const backingStorage = createFakeStorage();
+        backingStorage.setItem('large', 'old');
+        const originalSet = backingStorage.setItem.bind(backingStorage);
+        let rejectLarge = true;
+        backingStorage.setItem = (key, value) => {
+            if (key === 'large' && rejectLarge) throw new DOMException('quota', 'QuotaExceededError');
+            originalSet(key, value);
+        };
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: { localStorage: backingStorage, sessionStorage: createFakeStorage(), addEventListener: () => {} },
+        });
+
+        try {
+            const { getSafeStorage } = await importSafeStorage();
+            const storage = getSafeStorage();
+            storage.setItem('large', 'ephemeral-new');
+            storage.setItem('unrelated', 'durable');
+
+            expect(storage.getItem('large')).toBe('ephemeral-new');
+            expect(backingStorage.getItem('large')).toBeNull();
+            expect(backingStorage.getItem('unrelated')).toBe('durable');
+
+            rejectLarge = false;
+            storage.setItem('large', 'durable-new');
+            expect(backingStorage.getItem('large')).toBe('durable-new');
+            expect(storage.getItem('large')).toBe('durable-new');
+        } finally {
+            if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+            else delete (globalThis as { window?: unknown }).window;
+        }
+    });
+
+    test('removes malformed persisted JSON and permits later recovery', async () => {
+        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+        const backingStorage = createFakeStorage();
+        backingStorage.setItem('broken', '{not-json');
+        Object.defineProperty(globalThis, 'window', {
+            configurable: true,
+            value: { localStorage: backingStorage, sessionStorage: createFakeStorage(), addEventListener: () => {} },
+        });
+
+        try {
+            const { createDeferredSafeJSONStorage } = await importSafeStorage();
+            const storage = createDeferredSafeJSONStorage<{ value: string }>();
+            if (!storage) throw new Error('storage unavailable');
+
+            expect(storage.getItem('broken')).toBeNull();
+            expect(backingStorage.getItem('broken')).toBeNull();
+            storage.setItem('broken', { state: { value: 'recovered' } });
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            expect(storage.getItem('broken')).toEqual({ state: { value: 'recovered' } });
+        } finally {
+            if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+            else delete (globalThis as { window?: unknown }).window;
+        }
+    });
 });

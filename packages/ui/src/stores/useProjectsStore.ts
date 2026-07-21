@@ -13,6 +13,7 @@ import { PROJECT_COLORS } from '@/lib/projectMeta';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getVSCodeBootstrapConfig, isVSCodeRuntime } from './utils/vscodeRuntime';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -416,21 +417,11 @@ const createVSCodeWorkspaceProject = (
 };
 
 const getVSCodeWorkspaceFolders = (): VSCodeWorkspaceFolderConfig[] | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
   const runtimeApis = getRegisteredRuntimeAPIs();
-  if (!runtimeApis?.runtime?.isVSCode) {
+  const config = getVSCodeBootstrapConfig();
+  if (!isVSCodeRuntime(runtimeApis, config)) {
     return null;
   }
-
-  const config = (window as unknown as {
-    __VSCODE_CONFIG__?: {
-      workspaceFolder?: unknown;
-      workspaceFolders?: unknown;
-    };
-  }).__VSCODE_CONFIG__;
   const folders = Array.isArray(config?.workspaceFolders)
     ? config.workspaceFolders
         .map((entry) => {
@@ -542,8 +533,7 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
 // Always prefer the VS Code workspace projects over any persisted multi-project registry.
 const vscodeWorkspace = getVSCodeWorkspaceProject();
 const isVSCodeProjectsRuntime = (() => {
-  if (typeof window === 'undefined') return false;
-  return Boolean(getRegisteredRuntimeAPIs()?.runtime?.isVSCode);
+  return isVSCodeRuntime(getRegisteredRuntimeAPIs(), getVSCodeBootstrapConfig());
 })();
 const effectiveInitialProjects = vscodeWorkspace?.projects ?? (isVSCodeProjectsRuntime ? [] : initialProjects);
 const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? (isVSCodeProjectsRuntime ? null : readPersistedActiveProjectId());
@@ -915,25 +905,6 @@ export const useProjectsStore = create<ProjectsStore>()(
         : null;
 
       const current = get();
-
-      // Race guard: settings load can return empty projects during app
-      // rebuild/reinstall or an incomplete settings read. Don't clobber
-      // a populated cache with empty — the sidebar would go blank and
-      // localStorage would be overwritten, losing the list entirely.
-      if (incomingProjects.length === 0 && current.projects.length > 0) {
-        if (incomingActive !== current.activeProjectId) {
-          // Active project may still be valid within the cached list.
-          const activeExists = incomingActive
-            ? current.projects.some((project) => project.id === incomingActive)
-            : true;
-          if (activeExists) {
-            set({ activeProjectId: incomingActive });
-            cacheProjects(current.projects, incomingActive);
-            persistManualProjectOrder(get().manualProjectOrder);
-          }
-        }
-        return;
-      }
 
       const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(incomingProjects);
       const activeChanged = current.activeProjectId !== incomingActive;

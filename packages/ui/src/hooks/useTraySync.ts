@@ -359,7 +359,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   const resolveStatus = (id: string): TraySessionStatus => {
     const fromStores = live.statusById.get(id);
     if (fromStores && fromStores !== 'idle') return fromStores;
-    return globalStatusById.get(id)?.status ?? fromStores ?? 'idle';
+    return globalStatusById.get(id)?.status.type ?? fromStores ?? 'idle';
   };
 
   const rollupStatus = (family: string[]): TraySessionStatus => {

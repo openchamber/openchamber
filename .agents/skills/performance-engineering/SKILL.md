@@ -37,6 +37,8 @@ Do not optimize against a toy fixture when the report provides production scale.
 
 Do not infer a bottleneck from code appearance when a trace or counter can identify it.
 
+Profiling identifies where time is spent; it does not prove behavioral equivalence. Separately verify the applicable state, identity, layout, and lifecycle transitions for every structural optimization.
+
 ### 2. Write The Cost Equation
 
 Name every multiplying dimension:
@@ -109,6 +111,9 @@ Prefer indexes keyed by stable IDs. Keep high-frequency runtime state out of met
 - Preserve references for unaffected entities and buckets.
 - Keep streaming state out of broadly consumed stores.
 - Never rely on `React.memo`, `useMemo`, or Zustand equality to prevent selector execution upstream.
+- Treat every custom memo/equality comparator as a correctness boundary. Inventory every render-relevant value that comparator gates and observe its canonical identity or an explicit semantic version covering the same semantics.
+- Do not compare a proxy, aggregate, fallback, or differently resolved identity when the gated render path uses another source. Stable entity IDs do not imply stable rendered content; changes to comparator-gated semantics under the same ID must invalidate affected consumers, while semantically equivalent replacements may remain stable.
+- Prefer leaf subscriptions for isolated high-frequency state over threading broad state through custom comparators. Keep comparator work bounded so render fanout is not merely replaced by recursive comparison fanout.
 - Do not sort structural lists from token/delta-frequency fields.
 - Coalesce repeated same-entity events and skip no-op reducer updates.
 - Ensure hidden or disabled surfaces perform no ongoing work.
@@ -116,6 +121,20 @@ Prefer indexes keyed by stable IDs. Keep high-frequency runtime state out of met
 - Distinguish viewport resize from content growth and avoid fighting browser scroll anchoring.
 - Avoid textarea auto-size shrink/expand cycles when content only grows.
 - Freeze structural ordering during high-frequency updates and reorder at an explicit lifecycle edge.
+
+## Virtualization Contracts
+
+Virtualization changes layout, mounting, measurement, focus, and scroll semantics. It is not behaviorally equivalent merely because steady-state visible rows look the same.
+
+Before virtualizing a collection, define:
+
+- the actual scrolling element and whether it directly contains the virtualizer or is an ancestor;
+- how total virtual height and the final item remain reachable from that scroller;
+- estimated versus measured sizes, including expanded, nested, and dynamically resized items;
+- initialization, remount, and activation-threshold behavior;
+- interactions that depend on mounted DOM, including incremental reveal, focus, selection, drag-and-drop, menus, and accessibility traversal.
+
+When activation is threshold-based, test threshold minus one, threshold, and threshold plus one. Also test applicable collapsed/expanded, hidden/visible, filtered/unfiltered, and short/long transitions. If the current DOM or scroll topology cannot expose the virtual tail reliably, correct that topology or retain normal rendering rather than virtualizing solely by item count.
 
 ## Caching Rules
 
@@ -141,6 +160,9 @@ Require both correctness and performance guards:
 - repeated-event test for streaming/polling paths;
 - no-op and unrelated-entity update tests;
 - reference-stability test for unaffected buckets;
+- when custom comparators change, tests proving both directions: unrelated or semantically equivalent updates preserve the boundary, while changes to comparator-gated identity, membership, content, and source semantics invalidate it;
+- when memoized tree/list consumers change, same-ID replacements and rebuilt-container fixtures covering both semantic change and semantic equivalence;
+- when virtualization changes, tests using the real scrolling ancestor that prove final-item/control reachability and stable scroll, focus, and interactions; include activation-boundary cases when such a boundary exists;
 - failure, partial-data, empty-success, and stale-async-completion tests;
 - memory/cache growth check for long-running paths;
 - production build or equivalent runtime profile for UI interactions.
@@ -181,4 +203,6 @@ If the interaction remains above budget, do not call the mitigation the complete
 - [ ] Partial failure cannot trigger destructive cleanup.
 - [ ] Representative benchmark meets the stated budget.
 - [ ] Operation-count or repeated-event regression test prevents recurrence.
+- [ ] Structural optimizations have transition-focused correctness coverage independent of performance measurements.
+- [ ] When mount topology or activation boundaries change, instrumentation distinguishes those transitions from steady state.
 - [ ] Correctness, type, lint, and relevant runtime validations pass.

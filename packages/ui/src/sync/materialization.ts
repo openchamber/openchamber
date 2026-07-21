@@ -1,5 +1,6 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { mergeMessages } from "./optimistic"
+import type { SessionMaterializationReason } from "./event-reducer"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const STREAMING_PART_FIELDS = ["text", "output"] as const
@@ -33,6 +34,40 @@ export type SessionMaterializationStatus = {
   missingPartMessageIDs: string[]
 }
 
+export type SessionMaterializationRequest = {
+  reason: SessionMaterializationReason
+  messageID?: string
+  partID?: string
+}
+
+export const getSessionMaterializationRequestKey = (
+  runtimeKey: string,
+  directory: string,
+  sessionID: string,
+): string => JSON.stringify([runtimeKey, directory, sessionID])
+
+export function isSessionMaterializationStillNeeded(
+  state: MaterializedState,
+  sessionID: string,
+  request: SessionMaterializationRequest,
+): boolean {
+  if (request.reason === "empty-assistant-message") {
+    return !request.messageID || !Object.prototype.hasOwnProperty.call(state.part, request.messageID)
+  }
+
+  if (request.reason === "missing-owning-message") {
+    if (!request.messageID) return true
+    return !(state.message[sessionID] ?? []).some((message) => message.id === request.messageID)
+  }
+
+  if (request.reason === "orphan-delta" || request.reason === "missing-delta-part") {
+    if (!request.messageID || !request.partID) return true
+    return !(state.part[request.messageID] ?? []).some((part) => part.id === request.partID)
+  }
+
+  return true
+}
+
 function sortParts(parts: Part[], skipPartTypes: ReadonlySet<string>) {
   return parts
     .filter((part) => !!part?.id && !skipPartTypes.has(part.type))
@@ -50,6 +85,7 @@ function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): b
     const leftPart = left[index]
     const rightPart = right[index]
     if (!leftPart || !rightPart) return false
+    if (leftPart === rightPart) continue
     if (leftPart.id !== rightPart.id) return false
     if (JSON.stringify(leftPart) !== JSON.stringify(rightPart)) return false
   }
@@ -198,7 +234,7 @@ export function materializeSessionSnapshots(
   const messagesChanged = messages !== currentMessages || (existingMessages === undefined && snapshots.length === 0)
 
   let partsChanged = false
-  const nextPartState = { ...state.part }
+  let nextPartState = state.part
   const isPrepend = options.mode === "prepend"
 
   for (const record of snapshots) {
@@ -220,6 +256,8 @@ export function materializeSessionSnapshots(
       ? haveEquivalentPartSnapshots(existing, nextParts)
       : nextParts.length === 0 && !isAssistant
     if (equivalent) continue
+
+    if (nextPartState === state.part) nextPartState = { ...state.part }
 
     if (nextParts.length === 0 && !isAssistant) {
       delete nextPartState[messageID]

@@ -7,9 +7,15 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { usePermissionStore } from '@/stores/permissionStore';
+import { useFileSearchStore } from '@/stores/useFileSearchStore';
+import { useGitStore } from '@/stores/useGitStore';
+import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
+import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
+import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resetStreamingState } from '@/sync/streaming';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { syncDesktopSettings } from '@/lib/persistence';
 
 // Same-device transport switch (LAN⇄relay for one paired device): rebind the SDK
@@ -47,7 +53,13 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Cross-project session list (mobile sessions sheet & co) belongs to the
   // previous instance — drop it so stale sessions can't linger after a switch.
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
+  useGlobalSessionStatusStore.setState({ statusById: new Map() });
   usePermissionStore.getState().reset();
+  useFileSearchStore.getState().resetForRuntimeSwitch();
+  useGitStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  useGitHubPrStatusStore.getState().resetForRuntimeSwitch();
+  useSessionFoldersStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  useFilesViewTabsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
   useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
   resetStreamingState();

@@ -53,6 +53,7 @@ type CommandEntry = {
 };
 
 type FileHit = { path: string; name: string; relativePath: string };
+const EMPTY_SESSIONS: Session[] = [];
 
 const normalizePath = (value: string): string => {
   if (!value) return '';
@@ -85,7 +86,10 @@ export const CommandPalette: React.FC = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
 
-  const activeSessions = useGlobalSessionsStore((s) => s.activeSessions);
+  const activeSessions = useGlobalSessionsStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.activeSessions : EMPTY_SESSIONS,
+    [isCommandPaletteOpen],
+  ));
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const projects = useProjectsStore((s) => s.projects);

@@ -134,6 +134,7 @@ describe('settings helpers', () => {
     })).toEqual({
       permissionAutoAccept: {
         sessions: { root: true, child: false },
+        revision: 0,
       },
     });
   });

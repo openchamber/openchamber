@@ -8,6 +8,7 @@ import type {
   GitIdentitySummary,
 } from '@/lib/api/types';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -23,6 +24,7 @@ const DIFF_PREFETCH_LARGE_FILE_THRESHOLD = 500; // skip prefetch for files with 
 // Diff cache limits to prevent memory bloat with many modified files
 const DIFF_CACHE_MAX_ENTRIES = 30;
 const DIFF_CACHE_MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
+const DIFF_CACHE_MAX_GLOBAL_ENTRIES = 200;
 type GitStatusFetchMode = 'full' | 'light';
 
 interface DirectoryGitState {
@@ -47,7 +49,7 @@ interface DirectoryGitState {
 }
 
 interface GitStore {
-
+  runtimeKey: string;
   directories: Map<string, DirectoryGitState>;
 
   activeDirectory: string | null;
@@ -68,7 +70,7 @@ interface GitStore {
   bumpIndexRevision: (directory: string) => void;
 
   getDiff: (directory: string, filePath: string) => { original: string; modified: string; fetchedAt: number; isBinary?: boolean } | null;
-  setDiff: (directory: string, filePath: string, diff: { original: string; modified: string; isBinary?: boolean }) => void;
+  setDiff: (directory: string, filePath: string, diff: { original: string; modified: string; isBinary?: boolean }, expectedRuntimeKey?: string) => void;
   clearDiffCache: (directory: string) => void;
   fetchAllDiffs: (directory: string, git: GitAPI) => Promise<void>;
   prefetchDiffs: (directory: string, git: GitAPI, filePaths: string[], options?: { maxFiles?: number }) => Promise<void>;
@@ -76,6 +78,7 @@ interface GitStore {
   setLogMaxCount: (directory: string, maxCount: number) => void;
 
   refresh: (git: GitAPI, options?: { force?: boolean }) => Promise<void>;
+  resetForRuntimeSwitch: (runtimeKey: string) => void;
 }
 
 interface GitFileDiffResponse {
@@ -98,25 +101,72 @@ const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
 const diffFetchGenerationByDirectory = new Map<string, number>();
 const inFlightStatusFetches = new Map<string, Promise<boolean>>();
 const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
+const requestGenerationByChannel = new Map<string, number>();
+const statusMutationRevisionByDirectory = new Map<string, number>();
+let gitRuntimeGeneration = 0;
+let activeGitRuntimeKey = getRuntimeKey();
 
-const getStatusFetchKey = (directory: string, mode: GitStatusFetchMode): string => `${mode}:${directory}`;
+const runtimeDirectoryKey = (runtimeKey: string, directory: string) => JSON.stringify([runtimeKey, directory]);
+const getStatusFetchKey = (runtimeKey: string, directory: string, mode: GitStatusFetchMode): string =>
+  JSON.stringify([runtimeKey, directory, mode]);
+const channelKey = (runtimeKey: string, directory: string, channel: string) =>
+  JSON.stringify([runtimeKey, directory, channel]);
+
+type GitRequestToken = {
+  runtimeKey: string;
+  runtimeGeneration: number;
+  channelKey: string;
+  requestGeneration: number;
+  statusMutationRevision?: number;
+};
+
+const startRequest = (directory: string, channel: string, includeStatusMutation = false): GitRequestToken => {
+  const runtimeKey = getRuntimeKey();
+  const key = channelKey(runtimeKey, directory, channel);
+  const requestGeneration = (requestGenerationByChannel.get(key) ?? 0) + 1;
+  requestGenerationByChannel.set(key, requestGeneration);
+  return {
+    runtimeKey,
+    runtimeGeneration: gitRuntimeGeneration,
+    channelKey: key,
+    requestGeneration,
+    ...(includeStatusMutation
+      ? { statusMutationRevision: statusMutationRevisionByDirectory.get(runtimeDirectoryKey(runtimeKey, directory)) ?? 0 }
+      : {}),
+  };
+};
+
+const isRequestCurrent = (token: GitRequestToken, directory: string): boolean => (
+  token.runtimeKey === getRuntimeKey()
+  && token.runtimeKey === activeGitRuntimeKey
+  && token.runtimeGeneration === gitRuntimeGeneration
+  && requestGenerationByChannel.get(token.channelKey) === token.requestGeneration
+  && (token.statusMutationRevision === undefined
+    || token.statusMutationRevision === (statusMutationRevisionByDirectory.get(runtimeDirectoryKey(token.runtimeKey, directory)) ?? 0))
+);
+
+const bumpStatusMutationRevision = (runtimeKey: string, directory: string): void => {
+  const key = runtimeDirectoryKey(runtimeKey, directory);
+  statusMutationRevisionByDirectory.set(key, (statusMutationRevisionByDirectory.get(key) ?? 0) + 1);
+};
 
 const getDiffFetchGeneration = (directory: string): number =>
-  diffFetchGenerationByDirectory.get(directory) ?? 0;
+  diffFetchGenerationByDirectory.get(runtimeDirectoryKey(getRuntimeKey(), directory)) ?? 0;
 
 const bumpDiffFetchGeneration = (directory: string): number => {
   const next = getDiffFetchGeneration(directory) + 1;
-  diffFetchGenerationByDirectory.set(directory, next);
+  diffFetchGenerationByDirectory.set(runtimeDirectoryKey(getRuntimeKey(), directory), next);
   return next;
 };
 
 const getInFlightDiffs = (directory: string): Set<string> => {
-  const existing = inFlightDiffFetchesByDirectory.get(directory);
+  const key = runtimeDirectoryKey(getRuntimeKey(), directory);
+  const existing = inFlightDiffFetchesByDirectory.get(key);
   if (existing) {
     return existing;
   }
   const created = new Set<string>();
-  inFlightDiffFetchesByDirectory.set(directory, created);
+  inFlightDiffFetchesByDirectory.set(key, created);
   return created;
 };
 
@@ -152,33 +202,71 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
 // branch list is cached — never status/log/diff.
 // ---------------------------------------------------------------------------
 const GIT_BRANCH_CACHE_KEY = 'oc.gitBranchCache';
+const GIT_BRANCH_CACHE_V2_KEY = 'oc.gitBranchCache.v2';
+const MAX_BRANCH_CACHE_RUNTIMES = 8;
+const MAX_BRANCH_CACHE_DIRECTORIES = 50;
+type BranchCacheEnvelope = {
+  version: 2;
+  legacyClaimed: boolean;
+  runtimes: Record<string, { updatedAt: number; directories: Record<string, { branches: GitBranch; updatedAt: number }> }>;
+};
 
-const readBranchCache = (): Record<string, GitBranch> => {
+const emptyBranchCache = (): BranchCacheEnvelope => ({ version: 2, legacyClaimed: false, runtimes: {} });
+
+const readBranchCacheEnvelope = (runtimeKey: string): BranchCacheEnvelope => {
   try {
-    const raw = getDeferredSafeStorage().getItem(GIT_BRANCH_CACHE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, GitBranch>;
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    const storage = getDeferredSafeStorage();
+    const raw = storage.getItem(GIT_BRANCH_CACHE_V2_KEY);
+    const parsed = raw ? JSON.parse(raw) as Partial<BranchCacheEnvelope> : emptyBranchCache();
+    const envelope: BranchCacheEnvelope = parsed?.version === 2 && parsed.runtimes && typeof parsed.runtimes === 'object'
+      ? { version: 2, legacyClaimed: Boolean(parsed.legacyClaimed), runtimes: parsed.runtimes }
+      : emptyBranchCache();
+    if (!envelope.legacyClaimed) {
+      const legacyRaw = storage.getItem(GIT_BRANCH_CACHE_KEY);
+      if (legacyRaw) {
+        const legacy = JSON.parse(legacyRaw) as Record<string, GitBranch>;
+        const directories: BranchCacheEnvelope['runtimes'][string]['directories'] = {};
+        for (const [directory, branches] of Object.entries(legacy ?? {})) {
+          if (directory && branches && Array.isArray(branches.all)) directories[directory] = { branches, updatedAt: 0 };
+        }
+        if (Object.keys(directories).length > 0) envelope.runtimes[runtimeKey] = { updatedAt: 0, directories };
+      }
+      envelope.legacyClaimed = true;
+      const serialized = JSON.stringify(envelope);
+      storage.setItem(GIT_BRANCH_CACHE_V2_KEY, serialized);
+      if (storage.getItem(GIT_BRANCH_CACHE_V2_KEY) === serialized) storage.removeItem(GIT_BRANCH_CACHE_KEY);
+    }
+    return envelope;
   } catch {
-    return {};
+    return emptyBranchCache();
   }
 };
 
-const writeCachedBranches = (directory: string, branches: GitBranch): void => {
+const writeCachedBranches = (runtimeKey: string, directory: string, branches: GitBranch): void => {
   if (!directory || !branches) return;
   try {
-    const cache = readBranchCache();
-    cache[directory] = branches;
-    getDeferredSafeStorage().setItem(GIT_BRANCH_CACHE_KEY, JSON.stringify(cache));
+    const envelope = readBranchCacheEnvelope(runtimeKey);
+    const now = Date.now();
+    const current = envelope.runtimes[runtimeKey]?.directories ?? {};
+    const directories = { ...current, [directory]: { branches, updatedAt: now } };
+    const boundedDirectories = Object.fromEntries(
+      Object.entries(directories).sort(([, left], [, right]) => right.updatedAt - left.updatedAt).slice(0, MAX_BRANCH_CACHE_DIRECTORIES),
+    );
+    envelope.runtimes[runtimeKey] = { updatedAt: now, directories: boundedDirectories };
+    envelope.runtimes = Object.fromEntries(
+      Object.entries(envelope.runtimes).sort(([, left], [, right]) => right.updatedAt - left.updatedAt).slice(0, MAX_BRANCH_CACHE_RUNTIMES),
+    );
+    getDeferredSafeStorage().setItem(GIT_BRANCH_CACHE_V2_KEY, JSON.stringify(envelope));
   } catch {
     // quota / serialization — ignore; live fetch still refreshes the store
   }
 };
 
-const seedDirectoriesFromBranchCache = (): Map<string, DirectoryGitState> => {
+const seedDirectoriesFromBranchCache = (runtimeKey: string): Map<string, DirectoryGitState> => {
   const directories = new Map<string, DirectoryGitState>();
-  const cache = readBranchCache();
-  for (const [directory, branches] of Object.entries(cache)) {
+  const cache = readBranchCacheEnvelope(runtimeKey).runtimes[runtimeKey]?.directories ?? {};
+  for (const [directory, entry] of Object.entries(cache)) {
+    const branches = entry.branches;
     if (!directory || !branches || !Array.isArray(branches.all)) continue;
     // A cached branch list implies the directory was a git repo. Seed isGitRepo
     // so the selector's gate passes immediately; lastBranchesFetch stays 0 so the
@@ -197,7 +285,8 @@ const evictDiffCacheIfNeeded = (
   // Calculate total size
   let totalSize = 0;
   for (const entry of diffCache.values()) {
-    totalSize += (entry.original?.length ?? 0) + (entry.modified?.length ?? 0);
+    totalSize += new TextEncoder().encode(entry.original ?? '').byteLength
+      + new TextEncoder().encode(entry.modified ?? '').byteLength;
   }
 
   // If within limits, return as-is
@@ -215,16 +304,50 @@ const evictDiffCacheIfNeeded = (
   // Keep entries from newest to oldest until limits are reached
   for (let i = entries.length - 1; i >= 0; i--) {
     const [path, entry] = entries[i];
-    const entrySize = (entry.original?.length ?? 0) + (entry.modified?.length ?? 0);
+    const entrySize = new TextEncoder().encode(entry.original ?? '').byteLength
+      + new TextEncoder().encode(entry.modified ?? '').byteLength;
 
     if (newCache.size >= maxEntries) break;
-    if (newTotalSize + entrySize > maxTotalSize && newCache.size > 0) continue;
+    if (newTotalSize + entrySize > maxTotalSize) continue;
 
     newCache.set(path, entry);
     newTotalSize += entrySize;
   }
 
   return newCache;
+};
+
+const diffEntrySize = (entry: { original: string; modified: string }): number => {
+  const encoder = new TextEncoder();
+  return encoder.encode(entry.original ?? '').byteLength + encoder.encode(entry.modified ?? '').byteLength;
+};
+
+const evictGlobalDiffCachesIfNeeded = (directories: Map<string, DirectoryGitState>): Map<string, DirectoryGitState> => {
+  const entries: Array<{ directory: string; path: string; fetchedAt: number; size: number }> = [];
+  let totalSize = 0;
+  for (const [directory, state] of directories) {
+    for (const [path, entry] of state.diffCache) {
+      const size = diffEntrySize(entry);
+      entries.push({ directory, path, fetchedAt: entry.fetchedAt, size });
+      totalSize += size;
+    }
+  }
+  if (entries.length <= DIFF_CACHE_MAX_GLOBAL_ENTRIES && totalSize <= DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) return directories;
+
+  const next = new Map(directories);
+  entries.sort((left, right) => left.fetchedAt - right.fetchedAt);
+  let count = entries.length;
+  for (const entry of entries) {
+    if (count <= DIFF_CACHE_MAX_GLOBAL_ENTRIES && totalSize <= DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) break;
+    const state = next.get(entry.directory);
+    if (!state?.diffCache.has(entry.path)) continue;
+    const diffCache = new Map(state.diffCache);
+    diffCache.delete(entry.path);
+    next.set(entry.directory, { ...state, diffCache });
+    count -= 1;
+    totalSize -= entry.size;
+  }
+  return next;
 };
 
 const haveDiffStatsChanged = (
@@ -418,11 +541,26 @@ const toUnstagedStatusFile = (file: GitStatus['files'][number]): GitStatus['file
 const isCleanStatusFile = (file: GitStatus['files'][number]): boolean =>
   isBlankStatusCode(file.index) && isBlankStatusCode(file.working_dir);
 
+const initialGitRuntimeKey = activeGitRuntimeKey;
+
 export const useGitStore = create<GitStore>()(
   devtools(
     (set, get) => ({
-      directories: seedDirectoriesFromBranchCache(),
+      runtimeKey: initialGitRuntimeKey,
+      directories: seedDirectoriesFromBranchCache(initialGitRuntimeKey),
       activeDirectory: null,
+
+      resetForRuntimeSwitch: (runtimeKey) => {
+        gitRuntimeGeneration += 1;
+        activeGitRuntimeKey = runtimeKey;
+        requestGenerationByChannel.clear();
+        statusMutationRevisionByDirectory.clear();
+        inFlightStatusFetches.clear();
+        inFlightEnsureAllByDirectory.clear();
+        inFlightDiffFetchesByDirectory.clear();
+        diffFetchGenerationByDirectory.clear();
+        set({ runtimeKey, directories: seedDirectoriesFromBranchCache(runtimeKey), activeDirectory: null });
+      },
 
       setActiveDirectory: (directory) => {
         const { activeDirectory, directories } = get();
@@ -450,13 +588,15 @@ export const useGitStore = create<GitStore>()(
 
       fetchStatus: async (directory, git, options = {}) => {
         const statusFetchMode: GitStatusFetchMode = options.mode ?? 'full';
-        const statusFetchKey = getStatusFetchKey(directory, statusFetchMode);
+        const runtimeKey = getRuntimeKey();
+        const statusFetchKey = getStatusFetchKey(runtimeKey, directory, statusFetchMode);
         const existing = inFlightStatusFetches.get(statusFetchKey)
-          ?? (statusFetchMode === 'light' ? inFlightStatusFetches.get(getStatusFetchKey(directory, 'full')) : undefined);
+          ?? (statusFetchMode === 'light' ? inFlightStatusFetches.get(getStatusFetchKey(runtimeKey, directory, 'full')) : undefined);
         if (existing) {
           return existing;
         }
 
+        const token = startRequest(directory, 'status', true);
         const fetchPromise = (async () => {
           const { silent = false } = options;
           const { directories } = get();
@@ -484,6 +624,7 @@ export const useGitStore = create<GitStore>()(
             let isRepo = dirState.isGitRepo === true;
             if (shouldProbeRepository) {
               isRepo = await git.checkIsGitRepository(directory);
+              if (!isRequestCurrent(token, directory)) return false;
             }
 
             if (!isRepo) {
@@ -502,8 +643,10 @@ export const useGitStore = create<GitStore>()(
             }
 
             const newStatus = await git.getGitStatus(directory, options.mode ? { mode: options.mode } : undefined);
+            if (!isRequestCurrent(token, directory)) return false;
 
-            if (hasStatusChanged(dirState.status, newStatus)) {
+            const latestState = get().directories.get(directory) ?? createEmptyDirectoryState();
+            if (hasStatusChanged(latestState.status, newStatus)) {
               statusChanged = true;
               const newDirectories = new Map(get().directories);
               const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -573,7 +716,7 @@ export const useGitStore = create<GitStore>()(
           } catch (error) {
             console.error('Failed to fetch git status:', error);
           } finally {
-            if (!silent) {
+            if (!silent && isRequestCurrent(token, directory)) {
               const newDirectories = new Map(get().directories);
               const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
               newDirectories.set(directory, { ...d, isLoadingStatus: false });
@@ -636,6 +779,8 @@ export const useGitStore = create<GitStore>()(
           return previousStatus;
         }
 
+        bumpStatusMutationRevision(get().runtimeKey, directory);
+
         const nextDirectories = new Map(directories);
         nextDirectories.set(directory, {
           ...dirState,
@@ -659,6 +804,8 @@ export const useGitStore = create<GitStore>()(
           return;
         }
 
+        bumpStatusMutationRevision(get().runtimeKey, directory);
+
         const nextDirectories = new Map(directories);
         nextDirectories.set(directory, {
           ...dirState,
@@ -676,6 +823,8 @@ export const useGitStore = create<GitStore>()(
           return;
         }
 
+        bumpStatusMutationRevision(get().runtimeKey, directory);
+
         const nextDirectories = new Map(directories);
         nextDirectories.set(directory, {
           ...dirState,
@@ -685,6 +834,7 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchBranches: async (directory, git) => {
+        const token = startRequest(directory, 'branches');
         {
           const newDirectories = new Map(get().directories);
           const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -694,13 +844,15 @@ export const useGitStore = create<GitStore>()(
 
         try {
           const branches = await git.getGitBranches(directory);
+          if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, { ...dirState, branches, isLoadingBranches: false, lastBranchesFetch: Date.now() });
           set({ directories: newDirectories });
-          writeCachedBranches(directory, branches);
+          writeCachedBranches(token.runtimeKey, directory, branches);
         } catch (error) {
           console.error('Failed to fetch git branches:', error);
+          if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, { ...d, isLoadingBranches: false });
@@ -709,6 +861,7 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchLog: async (directory, git, maxCount) => {
+        const token = startRequest(directory, 'log');
         const { directories } = get();
         const dirState = directories.get(directory);
         const effectiveMaxCount = maxCount ?? dirState?.logMaxCount ?? 25;
@@ -722,6 +875,7 @@ export const useGitStore = create<GitStore>()(
 
         try {
           const log = await git.getGitLog(directory, { maxCount: effectiveMaxCount });
+          if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, {
@@ -734,6 +888,7 @@ export const useGitStore = create<GitStore>()(
           set({ directories: newDirectories });
         } catch (error) {
           console.error('Failed to fetch git log:', error);
+          if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, { ...d, isLoadingLog: false });
@@ -742,6 +897,7 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchIdentity: async (directory, git) => {
+        const token = startRequest(directory, 'identity');
         {
           const newDirectories = new Map(get().directories);
           const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -751,12 +907,14 @@ export const useGitStore = create<GitStore>()(
 
         try {
           const identity = await git.getCurrentGitIdentity(directory);
+          if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, { ...dirState, identity, isLoadingIdentity: false, lastIdentityFetch: Date.now() });
           set({ directories: newDirectories });
         } catch (error) {
           console.error('Failed to fetch git identity:', error);
+          if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, { ...d, isLoadingIdentity: false });
@@ -803,7 +961,9 @@ export const useGitStore = create<GitStore>()(
         return dirState?.diffCache.get(filePath) ?? null;
       },
 
-      setDiff: (directory, filePath, diff) => {
+      setDiff: (directory, filePath, diff, expectedRuntimeKey) => {
+        if (expectedRuntimeKey && expectedRuntimeKey !== get().runtimeKey) return;
+        if (diffEntrySize(diff) > DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) return;
         const newDirectories = new Map(get().directories);
         const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
         const newDiffCache = new Map(dirState.diffCache);
@@ -811,11 +971,12 @@ export const useGitStore = create<GitStore>()(
         // Apply LRU eviction to prevent memory bloat
         const evictedCache = evictDiffCacheIfNeeded(newDiffCache);
         newDirectories.set(directory, { ...dirState, diffCache: evictedCache });
-        set({ directories: newDirectories });
+        set({ directories: evictGlobalDiffCachesIfNeeded(newDirectories) });
       },
 
       clearDiffCache: (directory) => {
         bumpDiffFetchGeneration(directory);
+        startRequest(directory, 'diff');
         const newDirectories = new Map(get().directories);
         const dirState = newDirectories.get(directory);
         if (dirState) {
@@ -835,6 +996,7 @@ export const useGitStore = create<GitStore>()(
       },
 
       prefetchDiffs: async (directory, git, filePaths, options = {}) => {
+        const token = startRequest(directory, 'diff');
         const dirState = get().directories.get(directory);
         if (!dirState?.status?.files || dirState.status.files.length === 0 || filePaths.length === 0) return;
 
@@ -901,7 +1063,7 @@ export const useGitStore = create<GitStore>()(
 
         const worker = async () => {
           for (;;) {
-            if (generation !== getDiffFetchGeneration(directory)) {
+            if (generation !== getDiffFetchGeneration(directory) || !isRequestCurrent(token, directory)) {
               return;
             }
             const next = takeNext();
@@ -921,7 +1083,7 @@ export const useGitStore = create<GitStore>()(
 
         limitedFilePaths.forEach((path) => inFlight.delete(path));
 
-        if (generation !== getDiffFetchGeneration(directory)) {
+        if (generation !== getDiffFetchGeneration(directory) || !isRequestCurrent(token, directory)) {
           return;
         }
 
@@ -943,7 +1105,7 @@ export const useGitStore = create<GitStore>()(
         // Apply LRU eviction to prevent memory bloat
         const evictedCache = evictDiffCacheIfNeeded(newDiffCache);
         newDirectories.set(directory, { ...currentDirState, diffCache: evictedCache });
-        set({ directories: newDirectories });
+        set({ directories: evictGlobalDiffCachesIfNeeded(newDirectories) });
       },
 
       setLogMaxCount: (directory, maxCount) => {
@@ -963,7 +1125,8 @@ export const useGitStore = create<GitStore>()(
       },
 
       ensureAll: (directory, git) => {
-        const existing = inFlightEnsureAllByDirectory.get(directory);
+        const ensureKey = runtimeDirectoryKey(getRuntimeKey(), directory);
+        const existing = inFlightEnsureAllByDirectory.get(ensureKey);
         if (existing) return existing;
 
         const promise = (async () => {
@@ -993,10 +1156,10 @@ export const useGitStore = create<GitStore>()(
           if (fetches.length > 0) await Promise.all(fetches);
         })();
 
-        inFlightEnsureAllByDirectory.set(directory, promise);
+        inFlightEnsureAllByDirectory.set(ensureKey, promise);
         promise.finally(() => {
-          if (inFlightEnsureAllByDirectory.get(directory) === promise) {
-            inFlightEnsureAllByDirectory.delete(directory);
+          if (inFlightEnsureAllByDirectory.get(ensureKey) === promise) {
+            inFlightEnsureAllByDirectory.delete(ensureKey);
           }
         });
 
@@ -1056,9 +1219,11 @@ export const useGitBranchLabel = (directory: string | null) => {
 };
 
 const allBranchesCacheRef = { current: new Map<string, string | null>() };
+const EMPTY_BRANCHES = new Map<string, string | null>();
 
-export const useGitAllBranches = () => {
+export const useGitAllBranches = (enabled = true) => {
   return useGitStore((state) => {
+    if (!enabled) return EMPTY_BRANCHES;
     const prev = allBranchesCacheRef.current;
     let same = prev.size === state.directories.size;
     if (same) {

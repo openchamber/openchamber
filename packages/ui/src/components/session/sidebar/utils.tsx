@@ -1,10 +1,35 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { isSessionPinned } from '@/stores/useSessionPinnedStore';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 
 import { normalizePath } from '@/lib/pathNormalization';
 export { normalizePath };
+
+export const selectExpandedParentKeysForContext = (
+  previous: Set<string>,
+  expanded: ReadonlySet<string>,
+  context: 'project' | 'recent',
+): Set<string> => {
+  const prefix = `${context}:`;
+  const next = new Set([...expanded].filter((key) => key.startsWith(prefix)));
+  if (previous.size === next.size && [...next].every((key) => previous.has(key))) {
+    return previous;
+  }
+  return next;
+};
+
+export const toggleExpandedParentKey = (
+  expanded: Set<string>,
+  key: string,
+): Set<string> => {
+  const next = new Set(expanded);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+};
 
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
@@ -132,8 +157,8 @@ export const compareSessionsByPinnedAndTime = (
   b: Session,
   pinnedSessionIds: Set<string>,
 ): number => {
-  const aPinned = pinnedSessionIds.has(a.id);
-  const bPinned = pinnedSessionIds.has(b.id);
+  const aPinned = isSessionPinned(pinnedSessionIds, resolveGlobalSessionDirectory(a), a.id);
+  const bPinned = isSessionPinned(pinnedSessionIds, resolveGlobalSessionDirectory(b), b.id);
   if (aPinned !== bPinned) {
     return aPinned ? -1 : 1;
   }

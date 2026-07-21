@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
-import { getSessionMaterializationStatus, materializeSessionSnapshots } from "../materialization"
+import {
+  getSessionMaterializationRequestKey,
+  getSessionMaterializationStatus,
+  isSessionMaterializationStillNeeded,
+  materializeSessionSnapshots,
+} from "../materialization"
 
 function message(id: string, sessionID = "ses_1"): Message {
   return { id, sessionID, role: "assistant", time: { created: 1 } } as Message
@@ -13,6 +18,13 @@ function userMessage(id: string, sessionID = "ses_1"): Message {
 function part(id: string, messageID: string, type = "text", text = id): Part {
   return { id, messageID, sessionID: "ses_1", type, text } as Part
 }
+
+describe("getSessionMaterializationRequestKey", () => {
+  test("isolates the same directory and session identity across runtimes", () => {
+    expect(getSessionMaterializationRequestKey("runtime-a", "/repo", "ses_1"))
+      .not.toBe(getSessionMaterializationRequestKey("runtime-b", "/repo", "ses_1"))
+  })
+})
 
 describe("materializeSessionSnapshots", () => {
   test("marks an empty successful page as materialized", () => {
@@ -292,5 +304,49 @@ describe("getSessionMaterializationStatus", () => {
       renderable: true,
       missingPartMessageIDs: [],
     })
+  })
+})
+
+describe("isSessionMaterializationStillNeeded", () => {
+  test("skips empty-assistant recovery after a part bucket arrives", () => {
+    const state = { message: { ses_1: [message("msg_1")] }, part: { msg_1: [part("prt_1", "msg_1")] } }
+
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "empty-assistant-message",
+      messageID: "msg_1",
+    })).toBe(false)
+  })
+
+  test("treats an explicit empty part bucket as authoritative", () => {
+    const state = { message: { ses_1: [message("msg_1")] }, part: { msg_1: [] } }
+
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "empty-assistant-message",
+      messageID: "msg_1",
+    })).toBe(false)
+  })
+
+  test("skips missing-message and missing-part recovery after ordered events repair state", () => {
+    const state = { message: { ses_1: [message("msg_1")] }, part: { msg_1: [part("prt_1", "msg_1")] } }
+
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "missing-owning-message",
+      messageID: "msg_1",
+    })).toBe(false)
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "missing-delta-part",
+      messageID: "msg_1",
+      partID: "prt_1",
+    })).toBe(false)
+  })
+
+  test("keeps recovery active while the requested entity is still missing", () => {
+    const state = { message: { ses_1: [message("msg_1")] }, part: {} }
+
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "orphan-delta",
+      messageID: "msg_1",
+      partID: "prt_1",
+    })).toBe(true)
   })
 })

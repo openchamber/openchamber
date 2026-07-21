@@ -17,6 +17,7 @@ type FolderEntry = {
 };
 
 type Args = {
+  enabled?: boolean;
   normalizedProjects: ProjectForArchivedFolders[];
   ownership: SessionOwnershipIndex;
   isSessionsLoading: boolean;
@@ -26,12 +27,12 @@ type Args = {
   foldersMap: Record<string, FolderEntry[]>;
   createFolder: (scopeKey: string, name: string, parentId?: string | null) => FolderEntry;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
-  cleanupSessions: (scopeKey: string, existingSessionIds: Set<string>) => void;
 };
 
 export const useArchivedAutoFolders = (args: Args): void => {
   const {
     normalizedProjects,
+    enabled = true,
     ownership,
     isSessionsLoading,
     hasAuthoritativeGlobalSessions,
@@ -40,11 +41,10 @@ export const useArchivedAutoFolders = (args: Args): void => {
     foldersMap,
     createFolder,
     addSessionToFolder,
-    cleanupSessions,
   } = args;
 
   React.useEffect(() => {
-    if (isSessionsLoading || !hasAuthoritativeGlobalSessions || isWorktreeTopologyLoading) {
+    if (!enabled || isSessionsLoading || !hasAuthoritativeGlobalSessions || isWorktreeTopologyLoading) {
       return;
     }
 
@@ -54,8 +54,6 @@ export const useArchivedAutoFolders = (args: Args): void => {
       }
       const scopeKey = getArchivedScopeKey(project.normalizedPath);
       const projectArchivedSessions = ownership.archivedSessionsByProject.get(project.id) ?? [];
-      const sessionIds = new Set(projectArchivedSessions.map((session) => session.id));
-
       const existingFolders = foldersMap[scopeKey] ?? [];
       const folderByName = new Map(existingFolders.map((folder) => [folder.name.toLowerCase(), folder]));
 
@@ -72,11 +70,10 @@ export const useArchivedAutoFolders = (args: Args): void => {
           addSessionToFolder(scopeKey, folder.id, session.id);
         }
       });
-
-      cleanupSessions(scopeKey, sessionIds);
     });
   }, [
     normalizedProjects,
+    enabled,
     ownership,
     isSessionsLoading,
     hasAuthoritativeGlobalSessions,
@@ -85,6 +82,5 @@ export const useArchivedAutoFolders = (args: Args): void => {
     foldersMap,
     createFolder,
     addSessionToFolder,
-    cleanupSessions,
   ]);
 };

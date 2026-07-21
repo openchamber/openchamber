@@ -21,21 +21,19 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             return state.sessionAbortFlags?.get(currentSessionId) ?? null;
         }, [currentSessionId]),
     );
-    const { working } = useAssistantStatus();
+    const { activeModel, working } = useAssistantStatus();
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
-    const currentProviderId = useConfigStore((state) => state.currentProviderId);
-    const currentModelId = useConfigStore((state) => state.currentModelId);
     const providers = useConfigStore((state) => state.providers);
 
     const modelDisplayName = React.useMemo(() => {
-        if (!currentModelId) {
+        if (!activeModel) {
             return null;
         }
-        const provider = currentProviderId && providers.length > 0
-            ? providers.find((candidate) => candidate.id === currentProviderId)
+        const provider = providers.length > 0
+            ? providers.find((candidate) => candidate.id === activeModel.providerId)
             : undefined;
-        return getProviderModelDisplayName(provider, currentModelId) || null;
-    }, [currentProviderId, currentModelId, providers]);
+        return getProviderModelDisplayName(provider, activeModel.modelId) || null;
+    }, [activeModel, providers]);
 
     const wasAborted = Boolean(abortRecord && !abortRecord.acknowledged);
 
@@ -52,7 +50,7 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             showTodos={false}
             agentName={currentAgentName}
             modelName={modelDisplayName}
-            providerId={currentProviderId ?? null}
+            providerId={activeModel?.providerId ?? null}
         />
     );
 });
