@@ -218,7 +218,7 @@ window.addEventListener('message', (event: MessageEvent) => {
   if (message?.type === 'command' && message.command) {
     const handler = commandHandlers.get(message.command);
     if (handler) {
-      handler(message.payload);
+      Promise.resolve(handler(message.payload)).catch((error) => { console.error(`[OpenChamber] Unhandled error in command handler "${message.command}":`, error); });
     }
   }
 });

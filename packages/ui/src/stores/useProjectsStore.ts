@@ -542,7 +542,6 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
 // because static imports can reach this module before the runtime registry is
 // populated (see #2354). Use getters/functions so the values are computed on
 // first access, after the runtime APIs have been registered.
-const getVSCodeWorkspace = (): ReturnType<typeof getVSCodeWorkspaceProject> => getVSCodeWorkspaceProject();
 const getIsVSCodeProjectsRuntime = (): boolean => {
   if (typeof window === 'undefined') return false;
   return Boolean(getRegisteredRuntimeAPIs()?.runtime?.isVSCode);
@@ -552,7 +551,7 @@ function getInitialProjectsState(): {
   projects: ProjectEntry[];
   activeProjectId: string | null;
 } {
-  const vscodeWorkspace = getVSCodeWorkspace();
+  const vscodeWorkspace = getVSCodeWorkspaceProject();
   const isVSCodeProjectsRuntime = getIsVSCodeProjectsRuntime();
   const effectiveInitialProjects = vscodeWorkspace?.projects ?? (isVSCodeProjectsRuntime ? [] : initialProjects);
   const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? (isVSCodeProjectsRuntime ? null : readPersistedActiveProjectId());
@@ -567,12 +566,13 @@ function getInitialProjectsState(): {
   return { projects: effectiveInitialProjects, activeProjectId: initialActiveProjectId };
 }
 
-const initialProjectsState = getInitialProjectsState();
 
 export const useProjectsStore = create<ProjectsStore>()(
-  devtools((set, get) => ({
-    projects: initialProjectsState.projects,
-    activeProjectId: initialProjectsState.activeProjectId,
+  devtools((set, get) => {
+    const initial = getInitialProjectsState();
+    return {
+    projects: initial.projects,
+    activeProjectId: initial.activeProjectId,
     manualProjectOrder: readPersistedManualOrder(),
 
     validateProjectPath: (path: string): ProjectPathValidationResult => {
@@ -1014,7 +1014,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       return projects.find((project) => project.id === activeProjectId) ?? null;
     },
 
-  }), { name: 'projects-store' })
+  };
+  }, { name: 'projects-store' })
 );
 
 if (typeof window !== 'undefined') {
