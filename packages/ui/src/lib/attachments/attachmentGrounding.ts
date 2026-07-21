@@ -87,16 +87,17 @@ const splitDataUrl = (url: string): { base64: string; bytes: number } | null => 
   return { base64: payload, bytes: Math.max(0, Math.floor((payload.length * 3) / 4) - padding) };
 };
 
-const directoryHeaders = (directory: string | null | undefined): Record<string, string> => ({
-  'Content-Type': 'application/json',
-  ...(directory ? { 'x-opencode-directory': directory } : {}),
-});
+// Directory rides the query string, not the x-opencode-directory header:
+// header-based scoping is dropped by relay/remote transports, query survives
+// every path (resolveProjectDirectory reads both).
+const directoryQuery = (directory: string | null | undefined, lead: '?' | '&'): string =>
+  directory ? `${lead}directory=${encodeURIComponent(directory)}` : '';
 
 const pathExists = async (relativePath: string, directory: string | null | undefined): Promise<boolean> => {
   try {
-    const res = await runtimeFetch(`/api/fs/stat?path=${encodeURIComponent(relativePath)}`, {
-      headers: directoryHeaders(directory),
-    });
+    const res = await runtimeFetch(
+      `/api/fs/stat?path=${encodeURIComponent(relativePath)}${directoryQuery(directory, '&')}`,
+    );
     return res.ok;
   } catch {
     return false;
@@ -149,9 +150,9 @@ const groundOne = async (
 
   try {
     const relativePath = await pickUploadPath(filename, directory);
-    const res = await runtimeFetch('/api/fs/write', {
+    const res = await runtimeFetch(`/api/fs/write${directoryQuery(directory, '?')}`, {
       method: 'POST',
-      headers: directoryHeaders(directory),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: relativePath, content: data.base64, encoding: 'base64' }),
     });
     if (!res.ok) return { passthrough: true };

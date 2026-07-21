@@ -93,12 +93,13 @@ describe('groundAttachmentsForModel', () => {
 
     const write = fetchCalls.find((c) => c.url.includes('/api/fs/write'));
     expect(write).toBeDefined();
+    const stat = fetchCalls.find((c) => c.url.includes('/api/fs/stat'));
+    expect(stat?.url).toContain('directory=%2Frepo');
     const body = JSON.parse(String(write?.init?.body));
     expect(body.path).toBe('uploads/report.xlsx');
     expect(body.encoding).toBe('base64');
     expect(Buffer.from(body.content, 'base64').toString()).toBe('spreadsheet-bytes');
-    const headers = new Headers(write?.init?.headers);
-    expect(headers.get('x-opencode-directory')).toBe('/repo');
+    expect(write?.url).toContain('directory=%2Frepo');
   });
 
   test('name collision picks a suffixed path', async () => {
