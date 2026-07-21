@@ -29,6 +29,8 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.step2.openInvite': 'Open invite link',
     'settings.integrations.discord.wizard.step2.botInServers': 'Bot is in {count} server(s)',
     'settings.integrations.discord.wizard.step2.botNotInServers': 'Bot is not in any server yet',
+    'settings.integrations.discord.wizard.step2.inviteHint':
+      'After opening the invite, pick your server and authorize the bot.',
     'settings.integrations.discord.wizard.step3.title': 'Configure channels',
     'settings.integrations.discord.wizard.step3.description':
       'Add a Server ID for project-wide sync, or a single Channel ID for one channel.',
@@ -161,6 +163,23 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.description':
       'This removes the bot token and stops syncing from this device. The listener and bridge will stop. You can reconnect anytime by adding your token again.',
     'settings.integrations.discord.disconnect.dialog.confirm': 'Disconnect',
+    'settings.integrations.discord.servers.title': 'Servers & invite',
+    'settings.integrations.discord.servers.description':
+      'Add the bot to a server, then choose how it responds in each one.',
+    'settings.integrations.discord.servers.inviteButton': 'Add bot to a server',
+    'settings.integrations.discord.servers.generateInvite': 'Generate invite link',
+    'settings.integrations.discord.servers.inviteHint':
+      'Open the link, pick your server, and authorize the bot.',
+    'settings.integrations.discord.servers.refresh': 'Refresh server list',
+    'settings.integrations.discord.servers.defaultReplyMode.label': 'Default response mode',
+    'settings.integrations.discord.servers.defaultReplyMode.hint':
+      'Applies to servers without their own setting.',
+    'settings.integrations.discord.servers.replyMode.always': 'Always respond',
+    'settings.integrations.discord.servers.replyMode.mention': 'Only when mentioned',
+    'settings.integrations.discord.servers.replyMode.inherit': 'Use default',
+    'settings.integrations.discord.servers.enabled.label': 'Respond in this server',
+    'settings.integrations.discord.servers.mentionHint':
+      'In mention-only servers, start new conversations by @mentioning the bot. Existing threads keep working.',
     'settings.integrations.discord.listener.title': 'Listen for incoming messages',
     'settings.integrations.discord.listener.start': 'Start listening',
     'settings.integrations.discord.listener.stop': 'Stop listening',
@@ -202,6 +221,8 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.step2.openInvite': 'Abrir enlace de invitación',
     'settings.integrations.discord.wizard.step2.botInServers': 'El bot está en {count} servidor(es)',
     'settings.integrations.discord.wizard.step2.botNotInServers': 'El bot aún no está en ningún servidor',
+    'settings.integrations.discord.wizard.step2.inviteHint':
+      'Después de abrir la invitación, elige tu servidor y autoriza el bot.',
     'settings.integrations.discord.wizard.step3.title': 'Configura canales',
     'settings.integrations.discord.wizard.step3.description': 'Agrega un Server ID para sincronización de proyectos o un Channel ID para un solo canal.',
     'settings.integrations.discord.wizard.step3.guildLabel': 'ID de servidor (guild)',
@@ -320,6 +341,23 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.title': '¿Desconectar Discord?',
     'settings.integrations.discord.disconnect.dialog.description': 'Esto elimina el token del bot y detiene la sincronización desde este dispositivo. El listener y el bridge se detendrán. Puedes volver a conectar cuando quieras agregando el token otra vez.',
     'settings.integrations.discord.disconnect.dialog.confirm': 'Desconectar',
+    'settings.integrations.discord.servers.title': 'Servidores e invitación',
+    'settings.integrations.discord.servers.description':
+      'Añade el bot a un servidor y elige cómo responde en cada uno.',
+    'settings.integrations.discord.servers.inviteButton': 'Añadir bot a un servidor',
+    'settings.integrations.discord.servers.generateInvite': 'Generar enlace de invitación',
+    'settings.integrations.discord.servers.inviteHint':
+      'Abre el enlace, elige tu servidor y autoriza el bot.',
+    'settings.integrations.discord.servers.refresh': 'Actualizar lista de servidores',
+    'settings.integrations.discord.servers.defaultReplyMode.label': 'Modo de respuesta predeterminado',
+    'settings.integrations.discord.servers.defaultReplyMode.hint':
+      'Se aplica a servidores sin configuración propia.',
+    'settings.integrations.discord.servers.replyMode.always': 'Responder siempre',
+    'settings.integrations.discord.servers.replyMode.mention': 'Solo cuando se mencione',
+    'settings.integrations.discord.servers.replyMode.inherit': 'Usar predeterminado',
+    'settings.integrations.discord.servers.enabled.label': 'Responder en este servidor',
+    'settings.integrations.discord.servers.mentionHint':
+      'En servidores solo por mención, inicia conversaciones nuevas mencionando al bot. Los hilos existentes siguen funcionando.',
     'settings.integrations.discord.listener.title': 'Escuchar mensajes entrantes',
     'settings.integrations.discord.listener.start': 'Empezar a escuchar',
     'settings.integrations.discord.listener.stop': 'Dejar de escuchar',
@@ -361,6 +399,8 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.step2.openInvite': 'Ouvrir le lien d’invitation',
     'settings.integrations.discord.wizard.step2.botInServers': 'Le bot est sur {count} serveur(s)',
     'settings.integrations.discord.wizard.step2.botNotInServers': 'Le bot n’est encore sur aucun serveur',
+    'settings.integrations.discord.wizard.step2.inviteHint':
+      'Après avoir ouvert l’invitation, choisissez votre serveur et autorisez le bot.',
     'settings.integrations.discord.wizard.step3.title': 'Configurer les salons',
     'settings.integrations.discord.wizard.step3.description': 'Ajoutez un Server ID pour la synchronisation des projets ou un Channel ID pour un seul salon.',
     'settings.integrations.discord.wizard.step3.guildLabel': 'ID du serveur (guild)',
@@ -479,6 +519,23 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.title': 'Déconnecter Discord ?',
     'settings.integrations.discord.disconnect.dialog.description': 'Cela supprime le jeton du bot et arrête la synchronisation depuis cet appareil. Le listener et le bridge s’arrêteront. Vous pourrez vous reconnecter à tout moment en ajoutant de nouveau le jeton.',
     'settings.integrations.discord.disconnect.dialog.confirm': 'Déconnecter',
+    'settings.integrations.discord.servers.title': 'Serveurs et invitation',
+    'settings.integrations.discord.servers.description':
+      'Ajoutez le bot à un serveur, puis choisissez comment il répond dans chacun.',
+    'settings.integrations.discord.servers.inviteButton': 'Ajouter le bot à un serveur',
+    'settings.integrations.discord.servers.generateInvite': 'Générer un lien d’invitation',
+    'settings.integrations.discord.servers.inviteHint':
+      'Ouvrez le lien, choisissez votre serveur et autorisez le bot.',
+    'settings.integrations.discord.servers.refresh': 'Actualiser la liste des serveurs',
+    'settings.integrations.discord.servers.defaultReplyMode.label': 'Mode de réponse par défaut',
+    'settings.integrations.discord.servers.defaultReplyMode.hint':
+      'S’applique aux serveurs sans paramètre propre.',
+    'settings.integrations.discord.servers.replyMode.always': 'Toujours répondre',
+    'settings.integrations.discord.servers.replyMode.mention': 'Uniquement sur mention',
+    'settings.integrations.discord.servers.replyMode.inherit': 'Utiliser le défaut',
+    'settings.integrations.discord.servers.enabled.label': 'Répondre sur ce serveur',
+    'settings.integrations.discord.servers.mentionHint':
+      'Sur les serveurs en mode mention, démarrez de nouvelles conversations en @mentionnant le bot. Les fils existants continuent de fonctionner.',
     'settings.integrations.discord.listener.title': 'Écouter les messages entrants',
     'settings.integrations.discord.listener.start': 'Démarrer l’écoute',
     'settings.integrations.discord.listener.stop': 'Arrêter l’écoute',
@@ -520,6 +577,8 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.step2.openInvite': '招待リンクを開く',
     'settings.integrations.discord.wizard.step2.botInServers': 'Bot は {count} 個のサーバーに参加しています',
     'settings.integrations.discord.wizard.step2.botNotInServers': 'Bot はまだどのサーバーにも参加していません',
+    'settings.integrations.discord.wizard.step2.inviteHint':
+      '招待を開いたら、サーバーを選んでボットを認可してください。',
     'settings.integrations.discord.wizard.step3.title': 'チャンネルを設定',
     'settings.integrations.discord.wizard.step3.description': 'プロジェクト全体の同期には Server ID、単一チャンネルには Channel ID を追加します。',
     'settings.integrations.discord.wizard.step3.guildLabel': 'サーバー（Guild）ID',
@@ -638,6 +697,23 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.title': 'Discord を切断しますか？',
     'settings.integrations.discord.disconnect.dialog.description': 'Bot トークンを削除し、このデバイスからの同期を停止します。listener と bridge も停止します。トークンを再度追加すればいつでも再接続できます。',
     'settings.integrations.discord.disconnect.dialog.confirm': '切断',
+    'settings.integrations.discord.servers.title': 'サーバーと招待',
+    'settings.integrations.discord.servers.description':
+      'ボットをサーバーに追加し、各サーバーでの応答方法を選択します。',
+    'settings.integrations.discord.servers.inviteButton': 'サーバーにボットを追加',
+    'settings.integrations.discord.servers.generateInvite': '招待リンクを生成',
+    'settings.integrations.discord.servers.inviteHint':
+      'リンクを開き、サーバーを選んでボットを認可してください。',
+    'settings.integrations.discord.servers.refresh': 'サーバー一覧を更新',
+    'settings.integrations.discord.servers.defaultReplyMode.label': 'デフォルトの応答モード',
+    'settings.integrations.discord.servers.defaultReplyMode.hint':
+      '個別設定のないサーバーに適用されます。',
+    'settings.integrations.discord.servers.replyMode.always': '常に応答',
+    'settings.integrations.discord.servers.replyMode.mention': 'メンション時のみ',
+    'settings.integrations.discord.servers.replyMode.inherit': 'デフォルトを使用',
+    'settings.integrations.discord.servers.enabled.label': 'このサーバーで応答',
+    'settings.integrations.discord.servers.mentionHint':
+      'メンションのみのサーバーでは、新しい会話を始めるにはボットを@メンションしてください。既存のスレッドは引き続き動作します。',
     'settings.integrations.discord.listener.title': '着信メッセージをリッスン',
     'settings.integrations.discord.listener.start': 'リッスンを開始',
     'settings.integrations.discord.listener.stop': 'リッスンを停止',
@@ -679,6 +755,8 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.step2.openInvite': '초대 링크 열기',
     'settings.integrations.discord.wizard.step2.botInServers': '봇이 {count}개 서버에 있습니다',
     'settings.integrations.discord.wizard.step2.botNotInServers': '봇이 아직 어떤 서버에도 없습니다',
+    'settings.integrations.discord.wizard.step2.inviteHint':
+      '초대 링크를 연 뒤 서버를 선택하고 봇을 승인하세요.',
     'settings.integrations.discord.wizard.step3.title': '채널 구성',
     'settings.integrations.discord.wizard.step3.description': '프로젝트 전체 동기화에는 Server ID를, 단일 채널에는 Channel ID를 추가합니다.',
     'settings.integrations.discord.wizard.step3.guildLabel': '서버(Guild) ID',
@@ -797,6 +875,23 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.title': 'Discord 연결을 해제할까요?',
     'settings.integrations.discord.disconnect.dialog.description': '봇 토큰을 제거하고 이 장치의 동기화를 중지합니다. listener와 bridge도 중지됩니다. 토큰을 다시 추가하면 언제든지 재연결할 수 있습니다.',
     'settings.integrations.discord.disconnect.dialog.confirm': '연결 해제',
+    'settings.integrations.discord.servers.title': '서버 및 초대',
+    'settings.integrations.discord.servers.description':
+      '봇을 서버에 추가한 뒤 각 서버에서 응답 방식을 선택하세요.',
+    'settings.integrations.discord.servers.inviteButton': '서버에 봇 추가',
+    'settings.integrations.discord.servers.generateInvite': '초대 링크 생성',
+    'settings.integrations.discord.servers.inviteHint':
+      '링크를 열고 서버를 선택한 뒤 봇을 승인하세요.',
+    'settings.integrations.discord.servers.refresh': '서버 목록 새로고침',
+    'settings.integrations.discord.servers.defaultReplyMode.label': '기본 응답 모드',
+    'settings.integrations.discord.servers.defaultReplyMode.hint':
+      '개별 설정이 없는 서버에 적용됩니다.',
+    'settings.integrations.discord.servers.replyMode.always': '항상 응답',
+    'settings.integrations.discord.servers.replyMode.mention': '멘션 시에만',
+    'settings.integrations.discord.servers.replyMode.inherit': '기본값 사용',
+    'settings.integrations.discord.servers.enabled.label': '이 서버에서 응답',
+    'settings.integrations.discord.servers.mentionHint':
+      '멘션 전용 서버에서는 봇을 @멘션하여 새 대화를 시작하세요. 기존 스레드는 계속 동작합니다.',
     'settings.integrations.discord.listener.title': '수신 메시지 수신',
     'settings.integrations.discord.listener.start': '수신 시작',
     'settings.integrations.discord.listener.stop': '수신 중지',
@@ -838,6 +933,8 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.step2.openInvite': 'Otwórz link zaproszenia',
     'settings.integrations.discord.wizard.step2.botInServers': 'Bot jest na {count} serwerze/serwerach',
     'settings.integrations.discord.wizard.step2.botNotInServers': 'Bot nie jest jeszcze na żadnym serwerze',
+    'settings.integrations.discord.wizard.step2.inviteHint':
+      'Po otwarciu zaproszenia wybierz serwer i autoryzuj bota.',
     'settings.integrations.discord.wizard.step3.title': 'Skonfiguruj kanały',
     'settings.integrations.discord.wizard.step3.description': 'Dodaj Server ID do synchronizacji projektów albo Channel ID dla jednego kanału.',
     'settings.integrations.discord.wizard.step3.guildLabel': 'ID serwera (guild)',
@@ -956,6 +1053,23 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.title': 'Odłączyć Discorda?',
     'settings.integrations.discord.disconnect.dialog.description': 'Usunie token bota i zatrzyma synchronizację z tego urządzenia. Listener i bridge zostaną zatrzymane. Możesz połączyć ponownie w dowolnym momencie, dodając token jeszcze raz.',
     'settings.integrations.discord.disconnect.dialog.confirm': 'Odłącz',
+    'settings.integrations.discord.servers.title': 'Serwery i zaproszenie',
+    'settings.integrations.discord.servers.description':
+      'Dodaj bota na serwer, a następnie wybierz sposób odpowiedzi na każdym z nich.',
+    'settings.integrations.discord.servers.inviteButton': 'Dodaj bota na serwer',
+    'settings.integrations.discord.servers.generateInvite': 'Wygeneruj link zaproszenia',
+    'settings.integrations.discord.servers.inviteHint':
+      'Otwórz link, wybierz serwer i autoryzuj bota.',
+    'settings.integrations.discord.servers.refresh': 'Odśwież listę serwerów',
+    'settings.integrations.discord.servers.defaultReplyMode.label': 'Domyślny tryb odpowiedzi',
+    'settings.integrations.discord.servers.defaultReplyMode.hint':
+      'Dotyczy serwerów bez własnego ustawienia.',
+    'settings.integrations.discord.servers.replyMode.always': 'Zawsze odpowiadaj',
+    'settings.integrations.discord.servers.replyMode.mention': 'Tylko przy wzmiance',
+    'settings.integrations.discord.servers.replyMode.inherit': 'Użyj domyślnego',
+    'settings.integrations.discord.servers.enabled.label': 'Odpowiadaj na tym serwerze',
+    'settings.integrations.discord.servers.mentionHint':
+      'Na serwerach tylko ze wzmianką rozpoczynaj nowe rozmowy, @wzmiankując bota. Istniejące wątki nadal działają.',
     'settings.integrations.discord.listener.title': 'Nasłuchuj wiadomości przychodzących',
     'settings.integrations.discord.listener.start': 'Rozpocznij nasłuchiwanie',
     'settings.integrations.discord.listener.stop': 'Zatrzymaj nasłuchiwanie',
@@ -997,6 +1111,8 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.step2.openInvite': 'Abrir link de convite',
     'settings.integrations.discord.wizard.step2.botInServers': 'O bot está em {count} servidor(es)',
     'settings.integrations.discord.wizard.step2.botNotInServers': 'O bot ainda não está em nenhum servidor',
+    'settings.integrations.discord.wizard.step2.inviteHint':
+      'Depois de abrir o convite, escolha seu servidor e autorize o bot.',
     'settings.integrations.discord.wizard.step3.title': 'Configure canais',
     'settings.integrations.discord.wizard.step3.description': 'Adicione um Server ID para sincronização de projetos ou um Channel ID para um único canal.',
     'settings.integrations.discord.wizard.step3.guildLabel': 'ID do servidor (guild)',
@@ -1115,6 +1231,23 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.title': 'Desconectar Discord?',
     'settings.integrations.discord.disconnect.dialog.description': 'Isso remove o token do bot e interrompe a sincronização deste dispositivo. O listener e o bridge serão interrompidos. Você pode reconectar a qualquer momento adicionando o token novamente.',
     'settings.integrations.discord.disconnect.dialog.confirm': 'Desconectar',
+    'settings.integrations.discord.servers.title': 'Servidores e convite',
+    'settings.integrations.discord.servers.description':
+      'Adicione o bot a um servidor e escolha como ele responde em cada um.',
+    'settings.integrations.discord.servers.inviteButton': 'Adicionar bot a um servidor',
+    'settings.integrations.discord.servers.generateInvite': 'Gerar link de convite',
+    'settings.integrations.discord.servers.inviteHint':
+      'Abra o link, escolha seu servidor e autorize o bot.',
+    'settings.integrations.discord.servers.refresh': 'Atualizar lista de servidores',
+    'settings.integrations.discord.servers.defaultReplyMode.label': 'Modo de resposta padrão',
+    'settings.integrations.discord.servers.defaultReplyMode.hint':
+      'Aplica-se a servidores sem configuração própria.',
+    'settings.integrations.discord.servers.replyMode.always': 'Sempre responder',
+    'settings.integrations.discord.servers.replyMode.mention': 'Somente quando mencionado',
+    'settings.integrations.discord.servers.replyMode.inherit': 'Usar padrão',
+    'settings.integrations.discord.servers.enabled.label': 'Responder neste servidor',
+    'settings.integrations.discord.servers.mentionHint':
+      'Em servidores só por menção, inicie novas conversas @mencionando o bot. Threads existentes continuam funcionando.',
     'settings.integrations.discord.listener.title': 'Ouvir mensagens recebidas',
     'settings.integrations.discord.listener.start': 'Começar a ouvir',
     'settings.integrations.discord.listener.stop': 'Parar de ouvir',
@@ -1156,6 +1289,7 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.step2.openInvite': '打开邀请链接',
     'settings.integrations.discord.wizard.step2.botInServers': '机器人已在 {count} 个服务器中',
     'settings.integrations.discord.wizard.step2.botNotInServers': '机器人尚未加入任何服务器',
+    'settings.integrations.discord.wizard.step2.inviteHint': '打开邀请后，选择服务器并授权机器人。',
     'settings.integrations.discord.wizard.step3.title': '配置频道',
     'settings.integrations.discord.wizard.step3.description': '添加 Server ID 用于项目级同步，或添加 Channel ID 用于单个频道。',
     'settings.integrations.discord.wizard.step3.guildLabel': '服务器（Guild）ID',
@@ -1274,6 +1408,21 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.title': '断开 Discord？',
     'settings.integrations.discord.disconnect.dialog.description': '这会移除机器人令牌并停止从此设备同步。listener 和 bridge 将停止。你可以随时再次添加令牌重新连接。',
     'settings.integrations.discord.disconnect.dialog.confirm': '断开连接',
+    'settings.integrations.discord.servers.title': '服务器与邀请',
+    'settings.integrations.discord.servers.description':
+      '将机器人添加到服务器，然后选择它在各服务器中的响应方式。',
+    'settings.integrations.discord.servers.inviteButton': '将机器人添加到服务器',
+    'settings.integrations.discord.servers.generateInvite': '生成邀请链接',
+    'settings.integrations.discord.servers.inviteHint': '打开链接，选择服务器并授权机器人。',
+    'settings.integrations.discord.servers.refresh': '刷新服务器列表',
+    'settings.integrations.discord.servers.defaultReplyMode.label': '默认响应模式',
+    'settings.integrations.discord.servers.defaultReplyMode.hint': '适用于未单独设置的服务器。',
+    'settings.integrations.discord.servers.replyMode.always': '始终响应',
+    'settings.integrations.discord.servers.replyMode.mention': '仅在被 @ 提及时',
+    'settings.integrations.discord.servers.replyMode.inherit': '使用默认',
+    'settings.integrations.discord.servers.enabled.label': '在此服务器中响应',
+    'settings.integrations.discord.servers.mentionHint':
+      '在仅提及模式的服务器中，通过 @提及 机器人开始新对话。现有线程仍可继续使用。',
     'settings.integrations.discord.listener.title': '监听传入消息',
     'settings.integrations.discord.listener.start': '开始监听',
     'settings.integrations.discord.listener.stop': '停止监听',
@@ -1315,6 +1464,7 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.step2.openInvite': '開啟邀請連結',
     'settings.integrations.discord.wizard.step2.botInServers': '機器人已在 {count} 個伺服器中',
     'settings.integrations.discord.wizard.step2.botNotInServers': '機器人尚未加入任何伺服器',
+    'settings.integrations.discord.wizard.step2.inviteHint': '開啟邀請後，選擇伺服器並授權機器人。',
     'settings.integrations.discord.wizard.step3.title': '設定頻道',
     'settings.integrations.discord.wizard.step3.description': '加入 Server ID 用於專案同步，或加入 Channel ID 用於單一頻道。',
     'settings.integrations.discord.wizard.step3.guildLabel': '伺服器（Guild）ID',
@@ -1433,6 +1583,21 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.title': '中斷 Discord 連線？',
     'settings.integrations.discord.disconnect.dialog.description': '這會移除機器人權杖並停止從此裝置同步。listener 和 bridge 會停止。你可以隨時再次加入權杖重新連線。',
     'settings.integrations.discord.disconnect.dialog.confirm': '中斷連線',
+    'settings.integrations.discord.servers.title': '伺服器與邀請',
+    'settings.integrations.discord.servers.description':
+      '將機器人加入伺服器，然後選擇它在各伺服器中的回應方式。',
+    'settings.integrations.discord.servers.inviteButton': '將機器人加入伺服器',
+    'settings.integrations.discord.servers.generateInvite': '產生邀請連結',
+    'settings.integrations.discord.servers.inviteHint': '開啟連結，選擇伺服器並授權機器人。',
+    'settings.integrations.discord.servers.refresh': '重新整理伺服器清單',
+    'settings.integrations.discord.servers.defaultReplyMode.label': '預設回應模式',
+    'settings.integrations.discord.servers.defaultReplyMode.hint': '適用於未個別設定的伺服器。',
+    'settings.integrations.discord.servers.replyMode.always': '一律回應',
+    'settings.integrations.discord.servers.replyMode.mention': '僅在被 @ 提及時',
+    'settings.integrations.discord.servers.replyMode.inherit': '使用預設',
+    'settings.integrations.discord.servers.enabled.label': '在此伺服器中回應',
+    'settings.integrations.discord.servers.mentionHint':
+      '在僅提及模式的伺服器中，透過 @提及 機器人開始新對話。現有討論串仍可繼續使用。',
     'settings.integrations.discord.listener.title': '監聽傳入訊息',
     'settings.integrations.discord.listener.start': '開始監聽',
     'settings.integrations.discord.listener.stop': '停止監聽',
@@ -1478,6 +1643,8 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.wizard.step2.openInvite': 'Відкрити invite-посилання',
     'settings.integrations.discord.wizard.step2.botInServers': 'Бот на {count} сервері(ах)',
     'settings.integrations.discord.wizard.step2.botNotInServers': 'Бот ще не на жодному сервері',
+    'settings.integrations.discord.wizard.step2.inviteHint':
+      'Після відкриття запрошення виберіть сервер і авторизуйте бота.',
     'settings.integrations.discord.wizard.step3.title': 'Налаштуйте канали',
     'settings.integrations.discord.wizard.step3.description':
       'Додайте Server ID для синхронізації проєктів або Channel ID для одного каналу.',
@@ -1611,6 +1778,23 @@ export const discordIntegrationI18n = {
     'settings.integrations.discord.disconnect.dialog.description':
       'Це видалить токен бота та зупинить синхронізацію на цьому пристрої. Listener і bridge буде зупинено. Ви зможете підключитися знову, додавши токен.',
     'settings.integrations.discord.disconnect.dialog.confirm': 'Відключити',
+    'settings.integrations.discord.servers.title': 'Сервери та запрошення',
+    'settings.integrations.discord.servers.description':
+      'Додайте бота на сервер і виберіть, як він відповідає на кожному.',
+    'settings.integrations.discord.servers.inviteButton': 'Додати бота на сервер',
+    'settings.integrations.discord.servers.generateInvite': 'Згенерувати посилання запрошення',
+    'settings.integrations.discord.servers.inviteHint':
+      'Відкрийте посилання, виберіть сервер і авторизуйте бота.',
+    'settings.integrations.discord.servers.refresh': 'Оновити список серверів',
+    'settings.integrations.discord.servers.defaultReplyMode.label': 'Режим відповіді за замовчуванням',
+    'settings.integrations.discord.servers.defaultReplyMode.hint':
+      'Застосовується до серверів без власного налаштування.',
+    'settings.integrations.discord.servers.replyMode.always': 'Завжди відповідати',
+    'settings.integrations.discord.servers.replyMode.mention': 'Лише при @mention',
+    'settings.integrations.discord.servers.replyMode.inherit': 'Використати за замовчуванням',
+    'settings.integrations.discord.servers.enabled.label': 'Відповідати на цьому сервері',
+    'settings.integrations.discord.servers.mentionHint':
+      'На серверах лише з @mention починайте нові розмови, згадавши бота. Наявні треди й надалі працюють.',
     'settings.integrations.discord.listener.title': 'Слухати вхідні повідомлення',
     'settings.integrations.discord.listener.start': 'Почати прослуховування',
     'settings.integrations.discord.listener.stop': 'Зупинити прослуховування',

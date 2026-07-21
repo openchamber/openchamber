@@ -1758,6 +1758,8 @@ export function createMessengerSyncRouter({
       defaultUserId,
       trustedBotIds,
       registerDynamicSlashCommands,
+      defaultReplyMode,
+      guildPolicies,
     } = req.body ?? {};
     if (!token) return res.status(400).json({ error: 'token required' });
     const resolveProject = buildResolveProject(projectBindings);
@@ -1769,6 +1771,8 @@ export function createMessengerSyncRouter({
       resolveProject,
       trustedBotIds: normalizeTrustedBotIds(trustedBotIds),
       registerDynamicSlashCommands: Boolean(registerDynamicSlashCommands),
+      defaultReplyMode,
+      guildPolicies,
     });
 
     // The bridge mirrors OpenCode output via the shared global event hub —
@@ -1831,6 +1835,14 @@ export function createMessengerSyncRouter({
               normalizedBindings && normalizedBindings.length > 0
                 ? normalizedBindings
                 : prev.projectBindings || undefined,
+            defaultReplyMode:
+              defaultReplyMode === 'always' || defaultReplyMode === 'mention'
+                ? defaultReplyMode
+                : prev.defaultReplyMode || undefined,
+            guildPolicies:
+              guildPolicies && typeof guildPolicies === 'object'
+                ? guildPolicies
+                : prev.guildPolicies || undefined,
           },
         });
       } catch {
@@ -1914,6 +1926,11 @@ export function createMessengerSyncRouter({
         // Absent means start-by-default; only explicit false is sticky-stopped.
         listenerEnabled: discord.listenerEnabled !== false,
         ...discordListener.status(token),
+        defaultReplyMode: discord.defaultReplyMode === 'mention' ? 'mention' : 'always',
+        guildPolicies:
+          discord.guildPolicies && typeof discord.guildPolicies === 'object'
+            ? discord.guildPolicies
+            : {},
       });
     } catch (err) {
       return res.status(500).json({ ok: false, error: err?.message ?? 'status failed' });
@@ -1977,6 +1994,8 @@ export function createMessengerSyncRouter({
       trustedBotIds,
       registerDynamicSlashCommands,
       projectBindings,
+      defaultReplyMode,
+      guildPolicies,
     } = req.body ?? {};
     try {
       // Merge with the previous discord block so this best-effort save (fired
@@ -2019,6 +2038,14 @@ export function createMessengerSyncRouter({
             normalizedBindings && normalizedBindings.length > 0
               ? normalizedBindings
               : prev.projectBindings || undefined,
+          defaultReplyMode:
+            defaultReplyMode === 'always' || defaultReplyMode === 'mention'
+              ? defaultReplyMode
+              : prev.defaultReplyMode || undefined,
+          guildPolicies:
+            guildPolicies && typeof guildPolicies === 'object'
+              ? guildPolicies
+              : prev.guildPolicies || undefined,
         },
       });
       res.json({ ok: true });
@@ -2074,6 +2101,8 @@ export function createMessengerSyncRouter({
         resolveProject: buildResolveProject(discord.projectBindings),
         trustedBotIds: normalizeTrustedBotIds(discord.trustedBotIds),
         registerDynamicSlashCommands: Boolean(discord.registerDynamicSlashCommands),
+        defaultReplyMode: discord.defaultReplyMode,
+        guildPolicies: discord.guildPolicies,
       });
       res.json({ ok: true, ...result });
     } catch (err) {

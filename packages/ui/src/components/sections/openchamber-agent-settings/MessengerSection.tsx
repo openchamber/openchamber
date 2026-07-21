@@ -43,6 +43,7 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { Icon } from '@/components/icon/Icon';
 import { DiscordOnboardingWizard } from './DiscordOnboardingWizard';
 import { DiscordCommandsButton } from './DiscordCommandPalette';
 
@@ -1326,6 +1327,163 @@ function DiscordAdvancedSettings({
   );
 }
 
+type DiscordReplyMode = 'always' | 'mention' | 'inherit';
+
+const DISCORD_DEFAULT_REPLY_MODES = ['always', 'mention'] as const;
+const DISCORD_GUILD_REPLY_MODES = ['always', 'mention', 'inherit'] as const;
+
+function DiscordServersAndInviteBlock({ conn }: { conn: MessengerConnection }) {
+  const { t } = useI18n();
+  const fetchDiscordInviteUrl = useMessengerStore((s) => s.fetchDiscordInviteUrl);
+  const setDiscordGuildPolicy = useMessengerStore((s) => s.setDiscordGuildPolicy);
+  const setDiscordDefaultReplyMode = useMessengerStore((s) => s.setDiscordDefaultReplyMode);
+
+  const guildCount = conn.discordGuilds?.length ?? 0;
+  const hasGuilds = guildCount > 0;
+  const defaultReplyMode = conn.discordDefaultReplyMode ?? 'always';
+
+  const replyModeLabelKey = (mode: DiscordReplyMode): I18nKey => {
+    if (mode === 'always') return 'settings.integrations.discord.servers.replyMode.always';
+    if (mode === 'mention') return 'settings.integrations.discord.servers.replyMode.mention';
+    return 'settings.integrations.discord.servers.replyMode.inherit';
+  };
+
+  return (
+    <div
+      data-settings-item="integrations.discord.servers"
+      className="space-y-3 rounded-md border border-border/60 bg-muted/20 p-3"
+    >
+      <div>
+        <div className="text-xs font-medium text-foreground">
+          {t('settings.integrations.discord.servers.title')}
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground leading-snug">
+          {t('settings.integrations.discord.servers.description')}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {conn.discordInviteUrl ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            className="!font-normal"
+            onClick={() =>
+              window.open(conn.discordInviteUrl!, '_blank', 'noopener,noreferrer')
+            }
+          >
+            <Icon name="external-link" className="size-3.5" />
+            {t('settings.integrations.discord.servers.inviteButton')}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="default"
+            size="xs"
+            className="!font-normal"
+            onClick={() => void fetchDiscordInviteUrl()}
+          >
+            {t('settings.integrations.discord.servers.generateInvite')}
+          </Button>
+        )}
+      </div>
+
+      <div className="text-[11px] text-muted-foreground">
+        {hasGuilds
+          ? t('settings.integrations.discord.wizard.step2.botInServers', { count: guildCount })
+          : t('settings.integrations.discord.wizard.step2.botNotInServers')}
+      </div>
+
+      <p className="text-[10px] text-muted-foreground leading-snug">
+        {t('settings.integrations.discord.servers.inviteHint')}
+      </p>
+
+      {hasGuilds && (
+        <>
+          <div className="space-y-1.5 border-t border-border/60 pt-2">
+            <div className="text-[11px] font-medium text-foreground">
+              {t('settings.integrations.discord.servers.defaultReplyMode.label')}
+            </div>
+            <p className="text-[10px] text-muted-foreground leading-snug">
+              {t('settings.integrations.discord.servers.defaultReplyMode.hint')}
+            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              {DISCORD_DEFAULT_REPLY_MODES.map((mode) => (
+                <Button
+                  key={mode}
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  className={cn(
+                    '!font-normal',
+                    defaultReplyMode === mode
+                      ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10'
+                      : 'text-foreground',
+                  )}
+                  onClick={() => setDiscordDefaultReplyMode(mode)}
+                >
+                  {t(replyModeLabelKey(mode))}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2 border-t border-border/60 pt-2">
+            {(conn.discordGuilds ?? []).map((g) => {
+              const policy = conn.discordGuildPolicies?.[g.id];
+              const enabled = policy?.enabled !== false;
+              const replyMode = policy?.replyMode ?? 'inherit';
+              return (
+                <div
+                  key={g.id}
+                  className="space-y-1.5 rounded-md border border-border/40 px-2 py-1.5"
+                >
+                  <div className="truncate text-[11px] font-medium text-foreground">{g.name}</div>
+                  <label className="flex cursor-pointer items-center gap-2 py-0.5">
+                    <Checkbox
+                      checked={enabled}
+                      onChange={(checked) => setDiscordGuildPolicy(g.id, { enabled: checked })}
+                      ariaLabel={t('settings.integrations.discord.servers.enabled.label')}
+                    />
+                    <span className="text-[11px] text-foreground">
+                      {t('settings.integrations.discord.servers.enabled.label')}
+                    </span>
+                  </label>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {DISCORD_GUILD_REPLY_MODES.map((mode) => (
+                      <Button
+                        key={mode}
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        disabled={!enabled}
+                        className={cn(
+                          '!font-normal',
+                          replyMode === mode
+                            ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10'
+                            : 'text-foreground',
+                        )}
+                        onClick={() => setDiscordGuildPolicy(g.id, { replyMode: mode })}
+                      >
+                        {t(replyModeLabelKey(mode))}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="text-[10px] text-muted-foreground leading-snug">
+            {t('settings.integrations.discord.servers.mentionHint')}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ConnectionCard({ conn }: { conn: MessengerConnection }) {
   const { t } = useI18n();
   const onboardingStep = useMessengerStore((s) => s.onboardingStep);
@@ -1524,6 +1682,8 @@ function ConnectionCard({ conn }: { conn: MessengerConnection }) {
               {t('settings.integrations.discord.disconnect.button')}
             </Button>
           </div>
+
+          <DiscordServersAndInviteBlock conn={conn} />
 
           {/* Default connected controls: start/stop listening (sticky stop). */}
           <div className="flex flex-wrap items-center gap-2">

@@ -769,6 +769,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'integrations.discord.servers',
+    page: 'integrations',
+    titleKey: 'settings.integrations.discord.servers.title',
+    descriptionKey: 'settings.integrations.discord.servers.description',
+    keywords: ['discord', 'server', 'guild', 'mention', 'invite', 'respond'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'integrations.discord.commands',
     page: 'integrations',
     titleKey: 'settings.integrations.discord.commands.title',

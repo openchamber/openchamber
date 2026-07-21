@@ -211,6 +211,13 @@ function inboundFromMessage(message) {
   };
 }
 
+function effectiveGuildReplyMode(state, guildId) {
+  const policy = guildId && state.guildPolicies ? state.guildPolicies[guildId] : null;
+  const mode = policy?.replyMode;
+  if (mode === 'always' || mode === 'mention') return mode;
+  return state.defaultReplyMode === 'mention' ? 'mention' : 'always';
+}
+
 async function dispatchMessageCreate(state, message, broadcastEvent, bridge) {
   // Always count the raw event so the user can tell the difference between
   // "Gateway delivers no messages" (intent / permission issue) and
@@ -227,6 +234,13 @@ async function dispatchMessageCreate(state, message, broadcastEvent, bridge) {
   if (state.scopeToGuild && state.guildId && message.guild_id && message.guild_id !== state.guildId) {
     state.filteredOutCount += 1;
     state.lastFilteredGuildId = message.guild_id;
+    return;
+  }
+
+  const guildId = message.guild_id ?? null;
+  if (guildId && state.guildPolicies && state.guildPolicies[guildId]?.enabled === false) {
+    state.filteredOutCount += 1;
+    state.lastFilteredGuildId = guildId;
     return;
   }
 
@@ -263,11 +277,12 @@ async function dispatchMessageCreate(state, message, broadcastEvent, bridge) {
   // Mention-only mode: when enabled for a channel, new
   // conversations require an @mention of the bot. Surfaces that already
   // have a session binding (existing threads) keep working without it.
-  if (
+  const channelMentionMode =
     bridge?.getMentionMode &&
-    text.length > 0 &&
-    bridge.getMentionMode({ type: 'discord', token: state.token, channelId: message.channel_id })
-  ) {
+    bridge.getMentionMode({ type: 'discord', token: state.token, channelId: message.channel_id });
+  const guildReplyMode = effectiveGuildReplyMode(state, guildId);
+  const mentionRequired = text.length > 0 && (Boolean(channelMentionMode) || guildReplyMode === 'mention');
+  if (mentionRequired) {
     const mentionsBot =
       (state.botId && (Array.isArray(message.mentions) ? message.mentions : []).some((u) => u?.id === state.botId)) ||
       (state.botId && text.includes(`<@${state.botId}>`)) ||
@@ -1066,6 +1081,8 @@ export function createDiscordListenerRegistry({ broadcastEvent, bridge = null } 
       // explicitly requested via opts.scopeToGuild, we still filter — but
       // record what we filter so the user can tell why.
       scopeToGuild: Boolean(opts.scopeToGuild),
+      defaultReplyMode: opts.defaultReplyMode === 'mention' ? 'mention' : 'always',
+      guildPolicies: (opts.guildPolicies && typeof opts.guildPolicies === 'object') ? opts.guildPolicies : {},
       intents: opts.intents ?? DEFAULT_INTENTS,
       autoReply: opts.autoReply !== false,
       bridgeEnabled: opts.bridgeEnabled !== false,
@@ -1158,6 +1175,8 @@ export function createDiscordListenerRegistry({ broadcastEvent, bridge = null } 
       autoReply: state.autoReply,
       bridgeEnabled: state.bridgeEnabled,
       scopeToGuild: state.scopeToGuild,
+      defaultReplyMode: state.defaultReplyMode,
+      guildPolicies: state.guildPolicies,
       guildId: state.guildId,
       botId: state.botId,
       botUsername: state.botUsername,
