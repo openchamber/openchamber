@@ -155,6 +155,27 @@ const getSessionSignature = (session: Session): string => {
   ].join(':');
 };
 
+export const getSessionStructuralSignature = (session: Session): string => {
+  const record = session as Session & { parentID?: string | null; slug?: string | null };
+  return [
+    session.id,
+    session.title ?? '',
+    record.parentID ?? '',
+    record.slug ?? '',
+    session.time?.created ?? 0,
+    session.time?.archived ?? 0,
+    session.share?.url ?? '',
+    JSON.stringify((session as Session & { metadata?: unknown }).metadata ?? null),
+    resolveGlobalSessionDirectory(session) ?? '',
+  ].join(':');
+};
+
+export const isGlobalSessionRecencyOnlyUpdate = (existing: Session, incoming: Session): boolean => {
+  const merged = mergeSessionDirectoryMetadata(incoming, existing);
+  return existing.time?.updated !== merged.time?.updated
+    && getSessionStructuralSignature(existing) === getSessionStructuralSignature(merged);
+};
+
 const sameSessionList = (prev: Session[], next: Session[]): boolean => {
   if (prev === next) {
     return true;

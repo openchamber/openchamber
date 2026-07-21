@@ -10,7 +10,6 @@ import type { SessionNode } from './types';
  * each child's extras object.
  */
 export type SessionNodeChildRenderExtras = {
-  subtreeContainsActive: Set<string>;
   subtreeContainsEditing: Set<string>;
   menuOpenSessionId: string | null;
   nodeStructureKey: string;
@@ -24,7 +23,7 @@ export type SessionNodeRenderExtras<TNode = SessionNode> = SessionNodeChildRende
  * Walk `nodes` and add `node.session.id` to `result` for every node
  * whose subtree contains `targetId`. This is used to precompute, once
  * per SessionGroupSection render, which rows need to update when
- * `currentSessionId` or `editingId` changes. With M visible rows, this
+ * `editingId` changes. With M visible rows, this
  * turns an O(M × subtree-depth) walk inside `SessionNodeItem.areEqual`
  * into a single O(M) `Set.has` per row.
  */
@@ -69,12 +68,22 @@ export const nodeContainsSessionId = (node: SessionNode, sessionId: string | nul
   return false;
 };
 
+const sessionObjectVersions = new WeakMap<object, number>();
+let nextSessionObjectVersion = 1;
+
+const getSessionObjectVersion = (session: object): number => {
+  const existing = sessionObjectVersions.get(session);
+  if (existing !== undefined) return existing;
+  const version = nextSessionObjectVersion;
+  nextSessionObjectVersion += 1;
+  sessionObjectVersions.set(session, version);
+  return version;
+};
+
 /**
- * Build a structural key for `node` that encodes the IDs of all
- * descendants. Used by `SessionNodeItem.areEqual` so a reference-only
- * rebuild of the tree (which happens on every `buildGroupedSessions`
- * pass) can be detected with a single string compare instead of a
- * recursive walk per row.
+ * Build a key encoding descendant IDs and session object versions. This lets
+ * row memoization detect one changed descendant without recursively comparing
+ * every subtree after a reference-only grouping rebuild.
  */
 export const computeNodeStructureKey = (node: SessionNode): string => {
   if (node.children.length === 0) {
@@ -82,10 +91,11 @@ export const computeNodeStructureKey = (node: SessionNode): string => {
   }
 
   const childKeys = node.children.map((child) => {
+    const childVersion = getSessionObjectVersion(child.session);
     if (child.children.length === 0) {
-      return child.session.id;
+      return `${child.session.id}@${childVersion}`;
     }
-    return `${child.session.id}:${computeNodeStructureKey(child)}`;
+    return `${child.session.id}@${childVersion}:${computeNodeStructureKey(child)}`;
   });
 
   return childKeys.join('|');

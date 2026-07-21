@@ -45,6 +45,7 @@ import { FusionIcon } from '@/components/icons/FusionIcon';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type Folder = { id: string; name: string; sessionIds: string[] };
 
@@ -59,7 +60,6 @@ type Props = {
   groupDirectory?: string | null;
   projectId?: string | null;
   archivedBucket?: boolean;
-  currentSessionId: string | null;
   pinnedSessionIds: Set<string>;
   expandedParents: Set<string>;
   hasSessionSearchQuery: boolean;
@@ -72,7 +72,7 @@ type Props = {
   handleSaveEdit: (titleOverride?: string) => void;
   handleCancelEdit: () => void;
   toggleParent: (expansionKey: string) => void;
-  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, projectId?: string | null) => void;
+  handleSessionSelect: (sessionId: string, sessionDirectory: string | null) => void;
   handleSessionDoubleClick: (sessionId: string, sessionTitle: string) => void;
   togglePinnedSession: (target: SessionPinnedTarget) => void;
   handleShareSession: (session: Session) => void;
@@ -104,15 +104,8 @@ type Props = {
   secondaryMeta?: SecondaryMeta | null;
   renderContext?: 'project' | 'recent';
   /**
-   * Precomputed set of session IDs whose subtree contains the current
-   * active session. Computed once per SessionGroupSection render (when
-   * currentSessionId changes) instead of being recomputed in every row's
-   * React.memo comparator.
-   */
-  subtreeContainsActive: Set<string>;
-  /**
    * Precomputed set of session IDs whose subtree contains the session
-   * currently being edited. Same rationale as subtreeContainsActive.
+   * currently being edited. Precomputed once per group render.
    */
   subtreeContainsEditing: Set<string>;
   /**
@@ -134,15 +127,52 @@ type Props = {
    * to fetch the right key for each child it produces.
    */
   childRenderExtrasFor?: (child: SessionNode) => SessionNodeChildRenderExtras;
-  /**
-   * Batched index of live session objects keyed by id. The previous
-   * implementation called `useSession(session.id)` per row, which used
-   * `findLiveSession` to iterate every child-store on every SSE event.
-   * With M visible rows that's M×child-stores per event; the batched
-   * map turns it into a single Map.get per row. The parent falls back
-   * to `useSession` only when this map returns undefined.
-   */
-  liveSessionById: Map<string, Session>;
+};
+
+const cancelScrollAnchorByContainer = new WeakMap<HTMLElement, () => void>();
+
+const holdSessionRowPosition = (target: HTMLElement): void => {
+  if (typeof window === 'undefined') return;
+  const row = target.closest<HTMLElement>('[data-session-row]');
+  const container = row?.closest<HTMLElement>('.overlay-scrollbar-container');
+  if (!row || !container) return;
+
+  cancelScrollAnchorByContainer.get(container)?.();
+
+  const initialTop = row.getBoundingClientRect().top;
+  let remainingFrames = 3;
+  let cancelled = false;
+  let frameId: number | null = null;
+  const cancel = () => {
+    cancelled = true;
+    if (frameId !== null) window.cancelAnimationFrame(frameId);
+    frameId = null;
+    cancelScrollAnchorByContainer.delete(container);
+    container.removeEventListener('wheel', cancel);
+    container.removeEventListener('touchstart', cancel);
+  };
+  const restore = () => {
+    if (cancelled || !row.isConnected || !container.isConnected) {
+      cancel();
+      return;
+    }
+    const delta = row.getBoundingClientRect().top - initialTop;
+    if (Math.abs(delta) > 0.5) {
+      container.scrollTop += delta;
+      streamPerfCount('ui.sidebar.selection_scroll_anchor_adjustment');
+    }
+    remainingFrames -= 1;
+    if (remainingFrames <= 0) {
+      cancel();
+      return;
+    }
+    frameId = window.requestAnimationFrame(restore);
+  };
+
+  container.addEventListener('wheel', cancel, { passive: true });
+  container.addEventListener('touchstart', cancel, { passive: true });
+  cancelScrollAnchorByContainer.set(container, cancel);
+  frameId = window.requestAnimationFrame(restore);
 };
 
 type QuickSessionActionProps = {
@@ -216,7 +246,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     groupDirectory,
     projectId,
     archivedBucket = false,
-    currentSessionId,
     pinnedSessionIds,
     expandedParents,
     hasSessionSearchQuery,
@@ -251,11 +280,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     renderSessionNode,
     secondaryMeta,
     renderContext = 'project',
-    subtreeContainsActive,
     subtreeContainsEditing,
     menuOpenSessionId,
     childRenderExtrasFor,
-    liveSessionById,
   } = props;
   const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
   const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
@@ -310,14 +337,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const formRef = React.useRef<HTMLFormElement>(null);
 
   const session = node.session;
-  // Batched live-session lookup. `liveSessionById` is built once per
-  // Sidebar render from the same `useAllLiveSessions` selector that
-  // `useSession` would have iterated per child-store, so a Map.get
-  // here is equivalent in observed state but O(1) per row instead of
-  // O(child-stores). Falls back to the row session when the live map
-  // hasn't seen this id yet (sub-render latency between when a session
-  // is created and when the SSE-driven aggregate picks it up).
-  const resolvedSession = liveSessionById.get(session.id) ?? session;
+  const resolvedSession = session;
+  const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
 
   const sessionDirectory =
     normalizePath((session as Session & { directory?: string | null }).directory ?? null)
@@ -378,7 +399,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       <Icon name="target" className="h-3 w-3" style={{ color: sessionGoalStatusColor[sessionGoal.status] }} />
     </span>
   ) : null;
-  const isActive = currentSessionId === session.id;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   const hasChildren = node.children.length > 0;
   const isPinnedSession = isSessionPinned(pinnedSessionIds, sessionDirectory, session.id);
@@ -774,7 +794,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       toggleRowSelected(session.id, sessionDirectory ?? null, collectNodeDescendantIds(node));
       return;
     }
-    handleSessionSelect(session.id, sessionDirectory, projectId);
+    if (event?.currentTarget) holdSessionRowPosition(event.currentTarget);
+    handleSessionSelect(session.id, sessionDirectory);
   };
 
   // The selection/active highlight covers the WHOLE row box (gutter, edge
@@ -1266,7 +1287,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           const childRenderExtras: SessionNodeChildRenderExtras = childRenderExtrasFor
             ? childRenderExtrasFor(child)
             : {
-                subtreeContainsActive,
                 subtreeContainsEditing,
                 menuOpenSessionId,
                 nodeStructureKey: '',
@@ -1386,26 +1406,6 @@ const hasSetMembershipChangeInNode = (
   return false;
 };
 
-const hasResolvedSessionChangeInNode = (
-  prevNode: SessionNode,
-  nextNode: SessionNode,
-  prevLiveSessionById: Map<string, Session>,
-  nextLiveSessionById: Map<string, Session>,
-): boolean => {
-  if (prevNode.session.id !== nextNode.session.id) return true;
-  const sessionId = prevNode.session.id;
-  if ((prevLiveSessionById.get(sessionId) ?? prevNode.session) !== (nextLiveSessionById.get(sessionId) ?? nextNode.session)) {
-    return true;
-  }
-  if (prevNode.children.length !== nextNode.children.length) return true;
-  for (let i = 0; i < prevNode.children.length; i += 1) {
-    if (hasResolvedSessionChangeInNode(prevNode.children[i], nextNode.children[i], prevLiveSessionById, nextLiveSessionById)) {
-      return true;
-    }
-  }
-  return false;
-};
-
 const hasExpansionMembershipChange = (prev: Props, next: Props): boolean => {
   if (prev.hasSessionSearchQuery || next.hasSessionSearchQuery) return false;
   const prevBucketTag = prev.archivedBucket ? 'archived' : 'active';
@@ -1427,6 +1427,7 @@ const hasExpansionMembershipChange = (prev: Props, next: Props): boolean => {
 
 const areSessionNodeItemPropsEqual = (prev: Props, next: Props): boolean => {
   if (prev.node.session.id !== next.node.session.id) return false;
+  if (prev.node.session !== next.node.session) return false;
   if (prev.depth !== next.depth) return false;
   if (prev.groupDirectory !== next.groupDirectory) return false;
   if (prev.projectId !== next.projectId) return false;
@@ -1441,25 +1442,12 @@ const areSessionNodeItemPropsEqual = (prev: Props, next: Props): boolean => {
   if (getNodeSessionDirectory(prev.node) !== getNodeSessionDirectory(next.node)) return false;
   if (!isSecondaryMetaEqual(prev.secondaryMeta, next.secondaryMeta)) return false;
 
-  if (prev.liveSessionById !== next.liveSessionById
-    && hasResolvedSessionChangeInNode(prev.node, next.node, prev.liveSessionById, next.liveSessionById)) {
-    return false;
-  }
-
   if (prev.pinnedSessionIds !== next.pinnedSessionIds
     && hasSetMembershipChangeInNode(prev.node, next.node, prev.pinnedSessionIds, next.pinnedSessionIds, (node) => node.session.id)) {
     return false;
   }
 
   if (prev.expandedParents !== next.expandedParents && hasExpansionMembershipChange(prev, next)) {
-    return false;
-  }
-
-  if (prev.currentSessionId !== next.currentSessionId
-    && (
-      subtreeContainsSession(prev, prev.currentSessionId, prev.subtreeContainsActive)
-      || subtreeContainsSession(next, next.currentSessionId, next.subtreeContainsActive)
-    )) {
     return false;
   }
 

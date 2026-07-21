@@ -79,7 +79,7 @@ type Props = {
   isInlineEditing: boolean;
 };
 
-export function SidebarProjectsList(props: Props): React.ReactNode {
+function SidebarProjectsListComponent(props: Props): React.ReactNode {
   streamPerfCount('ui.sidebar_projects_list.render');
   const { t } = useI18n();
   const projectSensors = useSensors(
@@ -313,3 +313,5 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     </ScrollableOverlay>
   );
 }
+
+export const SidebarProjectsList = React.memo(SidebarProjectsListComponent);

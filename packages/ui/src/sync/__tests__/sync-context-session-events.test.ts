@@ -8,6 +8,9 @@ let runtimeKey = "runtime-a"
 let runtimeWillChange: (() => void) | null = null
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
+  isGlobalSessionRecencyOnlyUpdate: (existing: Session, incoming: Session) => (
+    existing.title === incoming.title && existing.time?.updated !== incoming.time?.updated
+  ),
   useGlobalSessionsStore: {
     getState: () => ({
       activeSessions: currentSessions,
@@ -51,6 +54,11 @@ const buildDeleteEvent = (sessionId: string): Event => ({
   properties: { sessionID: sessionId },
 } as Event)
 
+const buildLifecycleEvent = (type: "session.idle" | "session.error", sessionId: string): Event => ({
+  type,
+  properties: { sessionID: sessionId },
+} as Event)
+
 describe("applySessionEventToGlobalSessions", () => {
   beforeEach(() => {
     runtimeWillChange?.()
@@ -68,36 +76,44 @@ describe("applySessionEventToGlobalSessions", () => {
     expect(upsertedSessions).toEqual([])
   })
 
-  test("coalesces existing global session updates to the latest session", async () => {
+  test("commits only the latest recency update when a session becomes idle", () => {
     currentSessions = [buildSession("Initial", { created: 1, updated: 10 })]
 
-    applySessionEventToGlobalSessions(buildEvent(buildSession("First", { created: 1, updated: 20 })))
-    applySessionEventToGlobalSessions(buildEvent(buildSession("Latest", { created: 1, updated: 30 })))
+    applySessionEventToGlobalSessions(buildEvent(buildSession("Initial", { created: 1, updated: 20 })))
+    applySessionEventToGlobalSessions(buildEvent(buildSession("Initial", { created: 1, updated: 30 })))
 
     expect(upsertedSessions).toEqual([])
-    await new Promise((resolve) => setTimeout(resolve, 1_050))
-    expect(upsertedSessions.map((session) => session.title)).toEqual(["Latest"])
+    applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
+    expect(upsertedSessions.map((session) => session.time.updated)).toEqual([30])
   })
 
-  test("cancels a pending global update when the session is deleted", async () => {
+  test("applies substantive session updates immediately", () => {
     currentSessions = [buildSession("Initial", { created: 1, updated: 10 })]
 
-    applySessionEventToGlobalSessions(buildEvent(buildSession("Pending", { created: 1, updated: 20 })))
-    applySessionEventToGlobalSessions(buildDeleteEvent("ses_1"))
+    applySessionEventToGlobalSessions(buildEvent(buildSession("Renamed", { created: 1, updated: 20 })))
 
-    await new Promise((resolve) => setTimeout(resolve, 1_050))
+    expect(upsertedSessions.map((session) => session.title)).toEqual(["Renamed"])
+  })
+
+  test("cancels a pending global update when the session is deleted", () => {
+    currentSessions = [buildSession("Initial", { created: 1, updated: 10 })]
+
+    applySessionEventToGlobalSessions(buildEvent(buildSession("Initial", { created: 1, updated: 20 })))
+    applySessionEventToGlobalSessions(buildDeleteEvent("ses_1"))
+    applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
+
     expect(upsertedSessions).toEqual([])
     expect(removedSessionIds).toEqual(["ses_1"])
   })
 
-  test("discards pending global updates when the runtime changes", async () => {
+  test("discards pending global updates when the runtime changes", () => {
     currentSessions = [buildSession("Initial", { created: 1, updated: 10 })]
-    applySessionEventToGlobalSessions(buildEvent(buildSession("Pending", { created: 1, updated: 20 })))
+    applySessionEventToGlobalSessions(buildEvent(buildSession("Initial", { created: 1, updated: 20 })))
 
     runtimeKey = "runtime-b"
     runtimeWillChange?.()
+    applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
 
-    await new Promise((resolve) => setTimeout(resolve, 1_050))
     expect(upsertedSessions).toEqual([])
   })
 })

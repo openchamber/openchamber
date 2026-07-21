@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process"
 import { createServer } from "node:net"
 import { mkdir, writeFile } from "node:fs/promises"
-import { existsSync } from "node:fs"
+import { createWriteStream, existsSync } from "node:fs"
 import { homedir, platform } from "node:os"
 import { join, resolve } from "node:path"
 import { createInterface } from "node:readline/promises"
@@ -222,6 +222,29 @@ const redactTraceJson = (key, value) => {
   return value
 }
 
+const writeTraceFile = (path, traceEvents) => new Promise((resolveWrite, rejectWrite) => {
+  const stream = createWriteStream(path, { encoding: "utf8" })
+  let index = 0
+
+  const writeNext = () => {
+    while (index < traceEvents.length) {
+      const prefix = index === 0 ? "" : ","
+      const serialized = JSON.stringify(traceEvents[index], redactTraceJson)
+      index += 1
+      if (!stream.write(`${prefix}${serialized}`)) {
+        stream.once("drain", writeNext)
+        return
+      }
+    }
+    stream.end("]}")
+  }
+
+  stream.on("error", rejectWrite)
+  stream.on("finish", resolveWrite)
+  stream.write('{"traceEvents":[')
+  writeNext()
+})
+
 const createHar = (records, pageUrl, startedAt) => ({
   log: {
     version: "1.2",
@@ -270,6 +293,35 @@ const createHar = (records, pageUrl, startedAt) => ({
 })
 
 const metricMap = (metrics = []) => Object.fromEntries(metrics.map(({ name, value }) => [name, value]))
+
+const LONG_TASK_ATTRIBUTION_MARKS = [
+  "openchamber.global_sessions.event_update_flush",
+  "openchamber.navigation.session_select",
+  "openchamber.navigation.session_state_set",
+  "openchamber.navigation.parent_auto_expand_commit",
+  "openchamber.react.session_sidebar_render",
+  "openchamber.react.message_list_render",
+]
+
+const buildLongTaskAttribution = (traceEvents, longTasks) => {
+  const marks = traceEvents.filter((event) => LONG_TASK_ATTRIBUTION_MARKS.includes(event.name))
+  return Object.fromEntries(LONG_TASK_ATTRIBUTION_MARKS.map((markName) => {
+    const matchingMarks = marks.filter((event) => event.name === markName)
+    const matchingTasks = longTasks.filter((task) => matchingMarks.some((mark) => (
+      mark.pid === task.pid
+      && mark.tid === task.tid
+      && Number(mark.ts) >= Number(task.ts)
+      && Number(mark.ts) <= Number(task.ts) + Number(task.dur)
+    )))
+    const durations = matchingTasks.map((task) => Number(task.dur) / 1000)
+    return [markName, {
+      marks: matchingMarks.length,
+      longTasks: matchingTasks.length,
+      totalLongTaskMs: Number(durations.reduce((total, duration) => total + duration, 0).toFixed(3)),
+      longestTaskMs: Number(durations.reduce((max, duration) => Math.max(max, duration), 0).toFixed(3)),
+    }]
+  }))
+}
 
 const evaluateValue = async (client, expression) => {
   const result = await client.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })
@@ -409,6 +461,7 @@ const main = async () => {
     for (const unsubscribe of unsubscribers) unsubscribe()
 
     const longTasks = traceEvents.filter((event) => event.name === "RunTask" && Number(event.dur) >= 50_000)
+    const longTaskAttribution = buildLongTaskAttribution(traceEvents, longTasks)
     const failedRequests = [...records.values()].filter((record) => (
       record.failed || Number(record.response?.status) >= 400
     )).length
@@ -423,6 +476,7 @@ const main = async () => {
       transferredBytes: [...records.values()].reduce((total, record) => total + (record.encodedDataLength ?? 0), 0),
       longTasksOver50ms: longTasks.length,
       longestTaskMs: longTasks.reduce((max, event) => Math.max(max, Number(event.dur) / 1000), 0),
+      longTaskAttribution,
       performanceMetricsBefore: beforeMetrics,
       performanceMetricsAfter: afterMetrics,
       heapBefore: beforeHeap,
@@ -430,16 +484,25 @@ const main = async () => {
       syncCounters,
       streamPerformance,
       traceComplete,
+      traceFileComplete: false,
       privacy: "Headers and sensitive URL parameters are redacted. Response bodies are not captured.",
     }
 
+    const summaryPath = join(output, "summary.json")
     await Promise.all([
-      writeFile(join(output, "trace.json"), JSON.stringify({ traceEvents }, redactTraceJson)),
       writeFile(join(output, "network.har"), JSON.stringify(createHar(records, options.url, startedAt), null, 2)),
-      writeFile(join(output, "summary.json"), JSON.stringify(summary, null, 2)),
+      writeFile(summaryPath, JSON.stringify(summary, null, 2)),
     ])
+    try {
+      await writeTraceFile(join(output, "trace.json"), traceEvents)
+      summary.traceFileComplete = true
+      await writeFile(summaryPath, JSON.stringify(summary, null, 2))
+    } catch (error) {
+      console.warn(`Trace file write failed; summary and HAR were preserved: ${error.message}`)
+    }
     console.log(`\nProfile saved to ${output}`)
     if (!traceComplete) console.log("Trace completion was not confirmed; summary, HAR, and the collected partial trace were preserved.")
+    if (!summary.traceFileComplete) console.log("Trace file is incomplete; summary and HAR are available.")
     console.log(`Long tasks over 50 ms: ${summary.longTasksOver50ms}; requests: ${summary.requests}`)
   } finally {
     client?.close()

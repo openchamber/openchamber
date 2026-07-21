@@ -8,6 +8,59 @@ import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { normalizePath } from '@/lib/pathNormalization';
 export { normalizePath };
 
+const PARENT_EXPANSION_CONTEXT_PREFIXES = [
+  'project:active:',
+  'project:archived:',
+  'recent:active:',
+  'recent:archived:',
+];
+
+export const replaceAutoExpandedParentKeys = (previous: Set<string>, parentID: string | null | undefined): Set<string> => {
+  const next = parentID
+    ? new Set(PARENT_EXPANSION_CONTEXT_PREFIXES.map((prefix) => `${prefix}${parentID}`))
+    : new Set<string>();
+  if (previous.size === next.size && [...next].every((key) => previous.has(key))) {
+    return previous;
+  }
+  return next;
+};
+
+export const mergeExpandedParentKeys = (
+  manual: Set<string>,
+  automatic: Set<string>,
+  suppressedAutomatic: Set<string>,
+): Set<string> => {
+  if (automatic.size === 0) return manual;
+  const next = new Set(manual);
+  automatic.forEach((key) => {
+    if (!suppressedAutomatic.has(key)) next.add(key);
+  });
+  return next;
+};
+
+export const toggleExpandedParentKey = (
+  manual: Set<string>,
+  automatic: Set<string>,
+  suppressedAutomatic: Set<string>,
+  key: string,
+): { manual: Set<string>; suppressedAutomatic: Set<string> } => {
+  const currentlyExpanded = manual.has(key)
+    || (automatic.has(key) && !suppressedAutomatic.has(key));
+  const nextManual = new Set(manual);
+  const nextSuppressed = new Set(suppressedAutomatic);
+
+  if (currentlyExpanded) {
+    nextManual.delete(key);
+    if (automatic.has(key)) nextSuppressed.add(key);
+  } else if (automatic.has(key)) {
+    nextSuppressed.delete(key);
+  } else {
+    nextManual.add(key);
+  }
+
+  return { manual: nextManual, suppressedAutomatic: nextSuppressed };
+};
+
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
 

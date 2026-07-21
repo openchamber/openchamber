@@ -1,47 +1,36 @@
 import type { Event, Session } from "@opencode-ai/sdk/v2/client"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { isGlobalSessionRecencyOnlyUpdate, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
-import { streamPerfCount } from "@/stores/utils/streamDebug"
+import { streamPerfCount, streamPerfMark } from "@/stores/utils/streamDebug"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
 
-const GLOBAL_SESSION_UPDATE_FLUSH_MS = 1_000
 const pendingGlobalSessionUpdates = new Map<string, { runtimeKey: string; session: Session }>()
-let pendingGlobalSessionUpdateTimer: ReturnType<typeof setTimeout> | null = null
 
 const clearPendingGlobalSessionUpdates = (): void => {
-  if (pendingGlobalSessionUpdateTimer) {
-    clearTimeout(pendingGlobalSessionUpdateTimer)
-    pendingGlobalSessionUpdateTimer = null
-  }
   pendingGlobalSessionUpdates.clear()
 }
 
-const flushPendingGlobalSessionUpdates = (): void => {
-  pendingGlobalSessionUpdateTimer = null
-  const updates = [...pendingGlobalSessionUpdates.values()]
-  pendingGlobalSessionUpdates.clear()
+const flushPendingGlobalSessionUpdate = (sessionID: string): void => {
+  const update = pendingGlobalSessionUpdates.get(sessionID)
+  pendingGlobalSessionUpdates.delete(sessionID)
+  if (!update) return
   const runtimeKey = getRuntimeKey()
-  const sessions: Session[] = []
-  for (const update of updates) {
-    if (update.runtimeKey !== runtimeKey) continue
-    const currentSession = getGlobalSessionSnapshot(update.session.id)
-    if (!shouldSkipStaleSessionEvent(currentSession, update.session)) {
-      sessions.push(update.session)
-    }
-  }
-  if (sessions.length > 0) {
-    useGlobalSessionsStore.getState().upsertSessions(sessions)
-    streamPerfCount("ui.global_sessions.event_update_publication", sessions.length)
-  }
+  if (update.runtimeKey !== runtimeKey) return
+  const currentSession = getGlobalSessionSnapshot(update.session.id)
+  if (
+    !currentSession
+    || shouldSkipStaleSessionEvent(currentSession, update.session)
+    || !isGlobalSessionRecencyOnlyUpdate(currentSession, update.session)
+  ) return
+  streamPerfMark("global_sessions.event_update_flush")
+  useGlobalSessionsStore.getState().upsertSession(update.session)
+  streamPerfCount("ui.global_sessions.event_update_publication")
 }
 
 const scheduleGlobalSessionUpdate = (session: Session): void => {
   pendingGlobalSessionUpdates.set(session.id, { runtimeKey: getRuntimeKey(), session })
   streamPerfCount("ui.global_sessions.event_update_deferred")
-  if (!pendingGlobalSessionUpdateTimer) {
-    pendingGlobalSessionUpdateTimer = setTimeout(flushPendingGlobalSessionUpdates, GLOBAL_SESSION_UPDATE_FLUSH_MS)
-  }
 }
 
 subscribeRuntimeEndpointWillChange(clearPendingGlobalSessionUpdates)
@@ -75,6 +64,12 @@ const getGlobalSessionSnapshot = (sessionId: string): Session | null => {
 }
 
 export const applySessionEventToGlobalSessions = (payload: Event): void => {
+  if (payload.type === "session.idle" || payload.type === "session.error") {
+    const sessionID = (payload as { properties?: { sessionID?: unknown } }).properties?.sessionID
+    if (typeof sessionID === "string") flushPendingGlobalSessionUpdate(sessionID)
+    return
+  }
+
   if (payload.type === "session.created") {
     const session = getSessionInfoFromPayload(payload)
     if (session) {
@@ -91,8 +86,13 @@ export const applySessionEventToGlobalSessions = (payload: Event): void => {
     if (session) {
       const currentSession = getGlobalSessionSnapshot(session.id)
       if (!shouldSkipStaleSessionEvent(currentSession, session)) {
-        if (currentSession) scheduleGlobalSessionUpdate(session)
-        else useGlobalSessionsStore.getState().upsertSession(session)
+        if (currentSession && isGlobalSessionRecencyOnlyUpdate(currentSession, session)) {
+          scheduleGlobalSessionUpdate(session)
+        } else {
+          pendingGlobalSessionUpdates.delete(session.id)
+          useGlobalSessionsStore.getState().upsertSession(session)
+          streamPerfCount("ui.global_sessions.event_update_immediate")
+        }
       }
     }
     return

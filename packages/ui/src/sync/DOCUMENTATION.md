@@ -124,7 +124,7 @@ VS Code does not run the server permission-auto-accept runtime. The extension ho
 `useGlobalSessionsStore` is kept correct by:
 
 1. shared global fetch/reconciliation via `loadSessions()` / `refreshGlobalSessions()`
-2. session create/update/delete events; updates for existing sessions are coalesced latest-per-session into one atomic global-cache mutation per second, while create/delete remain immediate and runtime switching discards pending updates
+2. session create/update/delete events; recency-only updates for existing sessions are retained latest-per-session and committed once on `session.idle`/`session.error`, while structural updates and create/delete remain immediate and runtime switching discards pending updates
 3. direct mutation from session actions after successful SDK calls:
    - create
    - title update
@@ -163,6 +163,8 @@ The bounded event buffer records bootstrap, message, and global-list operations 
 High-frequency sync diagnostics are separately disabled by default. Set `localStorage.openchamber_sync_perf` to `"1"` before reload to enable fixed numeric counters for pipeline traffic, reducer publications, streaming reconciliations, entries/messages visited, targeted heartbeat work, and persistence serialization/write volume. The hot path performs only a null check while disabled; counters never retain IDs, payloads, or user content.
 
 Browser profiling also enables `localStorage.openchamber_stream_perf` to capture bounded aggregate timings and render counts for chat projections, message components, and major sidebar boundaries. These metrics contain no session IDs or user content and are reset immediately before each recording.
+
+The profiler also emits a user-timing mark when pending global-session recency is committed at a lifecycle edge. `summary.json.longTaskAttribution` correlates that mark with enclosing long tasks without recording session data.
 
 Streaming assistant and reasoning text is throttled once before reaching the markdown renderer. The renderer incrementally reconciles changed markdown blocks but does not add a second character-pacing timer, which would multiply parse/morph work while catching up on large streamed chunks.
 
@@ -285,9 +287,10 @@ The optimization multiplies with targeted event cloning: fewer new references pe
 
 1. **Never add to `session-ui-store`** unless it's session selection, draft lifecycle, or abort state
 2. **Group by change frequency** — state that changes during streaming (viewport, memory) must not live with state that changes on user action (selections, input)
-3. **Group by subscriber set** — if only 2 components read a value, it should be in a store that only those 2 components subscribe to
-4. **Prefer a new store over growing an existing one** if the new state has different subscribers or change frequency
-5. **Cross-store reads use `.getState()`** — actions in one store that need to read another store call `useOtherStore.getState()` (imperative, no subscription)
+3. **Skip canonical no-ops** — selecting a session must not republish an already-reset draft; session ID and directory remain the authoritative navigation publication.
+4. **Group by subscriber set** — if only 2 components read a value, it should be in a store that only those 2 components subscribe to
+5. **Prefer a new store over growing an existing one** if the new state has different subscribers or change frequency
+6. **Cross-store reads use `.getState()`** — actions in one store that need to read another store call `useOtherStore.getState()` (imperative, no subscription)
 
 ### Anti-patterns
 

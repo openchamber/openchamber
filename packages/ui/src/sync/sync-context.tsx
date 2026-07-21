@@ -215,7 +215,7 @@ export function useAllSessionStatuses(): Record<string, SessionStatus> {
   )
 }
 
-export function useAllLiveSessions(notificationIntervalMs = 0): Session[] {
+export function useAllLiveSessions(): Session[] {
   return useLiveSyncSelector(
     useCallback((states) => aggregateLiveSessions(states), []),
     areSessionListsEquivalent,
@@ -223,9 +223,8 @@ export function useAllLiveSessions(notificationIntervalMs = 0): Session[] {
       (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
         (state: State) => state.session,
         notify,
-        notificationIntervalMs,
       ),
-      [notificationIntervalMs],
+      [],
     ),
   )
 }

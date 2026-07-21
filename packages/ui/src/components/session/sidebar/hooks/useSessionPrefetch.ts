@@ -153,3 +153,9 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
 
   React.useEffect(() => clearPendingPrefetches, [clearPendingPrefetches]);
 };
+
+export const SessionPrefetchEffect: React.FC<Omit<Args, 'currentSessionId'>> = (args) => {
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  useSessionPrefetch({ ...args, currentSessionId });
+  return null;
+};

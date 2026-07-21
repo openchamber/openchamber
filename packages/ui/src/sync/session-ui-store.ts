@@ -782,6 +782,23 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // closeNewSessionDraft
   // ---------------------------------------------------------------------------
   closeNewSessionDraft: () => {
+    const currentDraft = get().newSessionDraft
+    if (
+      !currentDraft.open
+      && currentDraft.selectedProjectId == null
+      && currentDraft.directoryOverride == null
+      && currentDraft.pendingWorktreeRequestId == null
+      && currentDraft.bootstrapPendingDirectory == null
+      && !currentDraft.preserveDirectoryOverride
+      && currentDraft.parentID == null
+      && currentDraft.title === undefined
+      && currentDraft.initialPrompt === undefined
+      && currentDraft.syntheticParts === undefined
+      && currentDraft.targetFolderId === undefined
+      && currentDraft.permissionAutoAcceptEnabled === undefined
+    ) {
+      return
+    }
     const nextDraft: NewSessionDraftState = {
         open: false,
         selectedProjectId: null,

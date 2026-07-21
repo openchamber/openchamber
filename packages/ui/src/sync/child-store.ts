@@ -710,25 +710,8 @@ export class ChildStoreManager {
     }
   }
 
-  subscribeAllSelected<T>(
-    selector: (state: DirectoryStore) => T,
-    listener: () => void,
-    notificationIntervalMs = 0,
-  ): () => void {
+  subscribeAllSelected<T>(selector: (state: DirectoryStore) => T, listener: () => void): () => void {
     const storeUnsubscribers = new Map<string, () => void>()
-    let notificationTimer: ReturnType<typeof setTimeout> | null = null
-
-    const notifySelected = () => {
-      if (notificationIntervalMs <= 0) {
-        listener()
-        return
-      }
-      if (notificationTimer) return
-      notificationTimer = setTimeout(() => {
-        notificationTimer = null
-        listener()
-      }, notificationIntervalMs)
-    }
 
     const syncStoreSubscriptions = () => {
       const activeDirectories = new Set(this.children.keys())
@@ -743,7 +726,7 @@ export class ChildStoreManager {
         if (storeUnsubscribers.has(directory)) continue
         storeUnsubscribers.set(directory, store.subscribe((state, previous) => {
           if (!Object.is(selector(state), selector(previous))) {
-            notifySelected()
+            listener()
           }
         }))
       }
@@ -752,16 +735,11 @@ export class ChildStoreManager {
     syncStoreSubscriptions()
     const unsubscribeRegistry = this.subscribeRegistry(() => {
       syncStoreSubscriptions()
-      if (notificationTimer) {
-        clearTimeout(notificationTimer)
-        notificationTimer = null
-      }
       listener()
     })
 
     return () => {
       unsubscribeRegistry()
-      if (notificationTimer) clearTimeout(notificationTimer)
       for (const unsubscribe of storeUnsubscribers.values()) {
         unsubscribe()
       }

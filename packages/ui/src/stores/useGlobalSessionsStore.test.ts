@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 
-import { resolveGlobalSessionDirectory, mergeLiveSessionWithGlobalSession, useGlobalSessionsStore } from './useGlobalSessionsStore';
+import {
+  isGlobalSessionRecencyOnlyUpdate,
+  resolveGlobalSessionDirectory,
+  mergeLiveSessionWithGlobalSession,
+  useGlobalSessionsStore,
+} from './useGlobalSessionsStore';
 
 type SessionExtra = Partial<Session> & {
   directory?: string | null;
@@ -142,5 +147,54 @@ describe('mergeLiveSessionWithGlobalSession', () => {
 
     const merged = mergeLiveSessionWithGlobalSession(live, global);
     expect(resolveGlobalSessionDirectory(merged)).toBe('/repo/worktree');
+  });
+});
+
+describe('isGlobalSessionRecencyOnlyUpdate', () => {
+  test('accepts an updated timestamp while preserving omitted directory metadata', () => {
+    const existing = buildSession('https://share.example/s', {
+      directory: '/repo/app',
+      time: { created: 1, updated: 2 },
+    });
+    const incoming = buildSession('https://share.example/s', {
+      time: { created: 1, updated: 3 },
+    });
+
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, incoming)).toBe(true);
+  });
+
+  test('rejects title and archive changes as structural updates', () => {
+    const existing = buildSession('https://share.example/s', { time: { created: 1, updated: 2 } });
+    const renamed = buildSession('https://share.example/s', {
+      title: 'Renamed',
+      time: { created: 1, updated: 3 },
+    });
+    const archived = buildSession('https://share.example/s', {
+      time: { created: 1, updated: 3, archived: 4 },
+    });
+
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, renamed)).toBe(false);
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, archived)).toBe(false);
+  });
+
+  test('rejects parent and slug changes as structural updates', () => {
+    const existing = buildSession('https://share.example/s', {
+      parentID: 'parent-a',
+      slug: 'slug-a',
+      time: { created: 1, updated: 2 },
+    });
+    const reparented = buildSession('https://share.example/s', {
+      parentID: 'parent-b',
+      slug: 'slug-a',
+      time: { created: 1, updated: 3 },
+    });
+    const reslugged = buildSession('https://share.example/s', {
+      parentID: 'parent-a',
+      slug: 'slug-b',
+      time: { created: 1, updated: 3 },
+    });
+
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, reparented)).toBe(false);
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, reslugged)).toBe(false);
   });
 });

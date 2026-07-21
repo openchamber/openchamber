@@ -214,6 +214,11 @@ const ChatViewport = React.memo(({
     // Shell-mode prompts show their extracted command; cache by message id so
     // the parts array reference is stable while the command is unchanged.
     const shellPreviewCache = React.useRef(new Map<string, { command: string; parts: Part[] }>());
+    const shellPreviewSessionRef = React.useRef(currentSessionId);
+    if (shellPreviewSessionRef.current !== currentSessionId) {
+        shellPreviewSessionRef.current = currentSessionId;
+        shellPreviewCache.current.clear();
+    }
     const promptPreviewsByTurnId = React.useMemo(() => {
         const next = new Map<string, Part[]>();
         for (let index = 0; index < renderedMessages.length; index += 1) {
@@ -338,6 +343,7 @@ const ChatViewport = React.memo(({
                             </div>
                         )}
                         <MessageList
+                            key={currentSessionId}
                             ref={messageListRef}
                             sessionKey={currentSessionId}
                             disableStaging={pendingRevealWork}
@@ -486,6 +492,35 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
     );
 };
 
+const DraftWelcome: React.FC = () => {
+    const { t } = useI18n();
+    const selectedProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId ?? null);
+    const projectLabel = useProjectsStore(React.useCallback((state) => {
+        const projectId = selectedProjectId ?? state.activeProjectId;
+        const project = (projectId
+            ? state.projects.find((candidate) => candidate.id === projectId)
+            : null) ?? state.projects[0] ?? null;
+        return project ? getProjectDisplayLabel(project) : null;
+    }, [selectedProjectId]));
+
+    return (
+        <div className="oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+            <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
+                {renderDraftTitle(
+                    projectLabel
+                        ? t('chat.emptyState.draftTitleWithProject', { project: projectLabel })
+                        : t('chat.emptyState.draftTitle'),
+                    projectLabel,
+                )}
+            </h1>
+            <DraftPresetChips
+                onSubmit={(text) => useInputStore.getState().requestPresetSubmit(text)}
+                className="oc-draft-starters mt-8 max-w-md"
+            />
+        </div>
+    );
+};
+
 type ChatContainerProps = {
     active?: boolean;
     autoOpenDraft?: boolean;
@@ -500,8 +535,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
-    const projects = useProjectsStore((s) => s.projects);
-    const activeProjectId = useProjectsStore((s) => s.activeProjectId);
 
     // Sync actions
     const sync = useSync();
@@ -646,17 +679,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     const isDesktopExpandedInput = isExpandedInput;
     const useCompactDraftLayout = isMobile || isVSCode || chatSurfaceMode === 'mini-chat';
     const messageListRef = React.useRef<MessageListHandle | null>(null);
-    const draftProjectLabel = React.useMemo(() => {
-        const selectedProject = newSessionDraft?.selectedProjectId
-            ? projects.find((project) => project.id === newSessionDraft.selectedProjectId) ?? null
-            : null;
-        const activeProject = activeProjectId
-            ? projects.find((project) => project.id === activeProjectId) ?? null
-            : null;
-        const project = selectedProject ?? activeProject ?? projects[0] ?? null;
-        return project ? getProjectDisplayLabel(project) : null;
-    }, [activeProjectId, newSessionDraft?.selectedProjectId, projects]);
-
     const parentSession = useParentSession(currentSessionId, effectiveSessionDirectory);
 
     // In the embedded session-chat iframe, hide "Return to parent" when
@@ -970,22 +992,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
 			// the fullscreen composer's position:fixed visual-viewport pinning in
 			// mobile browsers (see ChatInput's composerFormRef effect).
 			<div className="relative flex h-full flex-col bg-background">
-				{useCompactDraftLayout && !isDesktopExpandedInput ? (
-					<div className="oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-						<h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
-							{renderDraftTitle(
-								draftProjectLabel
-									? t('chat.emptyState.draftTitleWithProject', { project: draftProjectLabel })
-									: t('chat.emptyState.draftTitle'),
-								draftProjectLabel,
-							)}
-						</h1>
-						<DraftPresetChips
-							onSubmit={(text) => useInputStore.getState().requestPresetSubmit(text)}
-							className="oc-draft-starters mt-8 max-w-md"
-						/>
-					</div>
-				) : null}
+				{useCompactDraftLayout && !isDesktopExpandedInput ? <DraftWelcome /> : null}
 				<div
 					className={cn(
 						'relative z-10 flex min-h-0',
@@ -1123,7 +1130,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
 		<div className="relative flex flex-col h-full bg-background">
 			{returnToParentButton}
 			<ChatViewport
-				key={currentSessionId}
 				currentSessionId={currentSessionId}
                 isDesktopExpandedInput={isDesktopExpandedInput}
                 isMobile={isMobile}

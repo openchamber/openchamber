@@ -58,28 +58,6 @@ describe('ChildStoreManager.subscribeAllSelected', () => {
     manager.disposeAll();
   });
 
-  test('coalesces selected-field notifications when an interval is provided', async () => {
-    const manager = new ChildStoreManager();
-    const child = manager.ensureChild('/workspace', { bootstrap: false });
-    let notifications = 0;
-    const unsubscribe = manager.subscribeAllSelected((state) => state.session, () => {
-      notifications += 1;
-    }, 20);
-
-    child.setState({ session: [...child.getState().session] });
-    child.setState({ session: [...child.getState().session] });
-    child.setState({ session: [...child.getState().session] });
-    expect(notifications).toBe(0);
-
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(notifications).toBe(1);
-
-    child.setState({ session: [...child.getState().session] });
-    unsubscribe();
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(notifications).toBe(1);
-    manager.disposeAll();
-  });
 });
 
 describe('ChildStoreManager directory lifecycle', () => {

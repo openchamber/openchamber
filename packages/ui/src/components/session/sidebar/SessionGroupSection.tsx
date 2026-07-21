@@ -93,11 +93,9 @@ type Props = {
   pinnedSessionIds: Set<string>;
   expandedParents: Set<string>;
   sessionOrderIndex: Map<string, number>;
-  currentSessionId: string | null;
   editingId: string | null;
   editTitle: string;
   openSidebarMenuKey: string | null;
-  liveSessionById: Map<string, Session>;
   prVisualStateByDirectoryBranch: Map<string, {
     visualState: 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
     number: number;
@@ -178,21 +176,6 @@ const groupHasExpansionMembershipChange = (
   return group.sessions.some(visit);
 };
 
-const groupHasResolvedSessionChange = (
-  group: SessionGroup,
-  prevLiveSessionById: Map<string, Session>,
-  nextLiveSessionById: Map<string, Session>,
-): boolean => {
-  const visit = (node: SessionNode): boolean => {
-    const sessionId = node.session.id;
-    if ((prevLiveSessionById.get(sessionId) ?? node.session) !== (nextLiveSessionById.get(sessionId) ?? node.session)) {
-      return true;
-    }
-    return node.children.some(visit);
-  };
-  return group.sessions.some(visit);
-};
-
 const getProjectRepoStatusValue = (props: Props): boolean | null | undefined => {
   if (!props.projectId) return undefined;
   return props.projectRepoStatus.has(props.projectId)
@@ -237,11 +220,6 @@ const areGroupPropsEqual = (prev: Props, next: Props): boolean => {
     return false;
   }
 
-  if (prev.currentSessionId !== next.currentSessionId
-    && (groupContainsSessionId(prev.group, prev.currentSessionId) || groupContainsSessionId(next.group, next.currentSessionId))) {
-    return false;
-  }
-
   if (prev.editingId !== next.editingId
     && (groupContainsSessionId(prev.group, prev.editingId) || groupContainsSessionId(next.group, next.editingId))) {
     return false;
@@ -256,11 +234,6 @@ const areGroupPropsEqual = (prev: Props, next: Props): boolean => {
     const prevMenuSessionId = resolveMenuOpenSessionId(prev.group.sessions, prev.openSidebarMenuKey, 'project', Boolean(prev.group.isArchivedBucket));
     const nextMenuSessionId = resolveMenuOpenSessionId(next.group.sessions, next.openSidebarMenuKey, 'project', Boolean(next.group.isArchivedBucket));
     if (prevMenuSessionId || nextMenuSessionId) return false;
-  }
-
-  if (prev.liveSessionById !== next.liveSessionById
-    && groupHasResolvedSessionChange(next.group, prev.liveSessionById, next.liveSessionById)) {
-    return false;
   }
 
   // Per-row / per-state props. The PR-visual-state map flips frequently
@@ -353,7 +326,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     pinnedSessionIds,
     expandedParents,
     sessionOrderIndex,
-    currentSessionId,
     editingId,
     openSidebarMenuKey,
     prVisualStateByDirectoryBranch,
@@ -486,21 +458,12 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   const ungroupedSessions = React.useMemo(() => sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)), [sourceGroupNodes, sessionIdsInFolders]);
   const rootFolders = React.useMemo(() => allFoldersForGroup.filter(({ folder }) => !folder.parentId), [allFoldersForGroup]);
 
-  // Precompute per-row "subtree contains active session" and "subtree contains
-  // editing session" lookups once per render. The previous design walked the
+  // Precompute the per-row "subtree contains editing session" lookup once per
+  // render. The previous design walked the
   // node tree inside SessionNodeItem.areEqual for every row, which is O(M^2)
   // across the whole sidebar. These sets let areEqual answer with a single
   // Set.has lookup, so the cost is O(M) once per SessionGroupSection render.
   const renderContextForGroup = 'project' as const;
-  const subtreeContainsActive = React.useMemo(() => {
-    const set = new Set<string>();
-    collectSubtreeContainingId(sourceGroupNodes, currentSessionId, set);
-    allFoldersForGroup.forEach(({ nodes }) => {
-      collectSubtreeContainingId(nodes, currentSessionId, set);
-    });
-    return set;
-  }, [sourceGroupNodes, allFoldersForGroup, currentSessionId]);
-
   const subtreeContainsEditing = React.useMemo(() => {
     const set = new Set<string>();
     collectSubtreeContainingId(sourceGroupNodes, editingId, set);
@@ -553,11 +516,10 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   }, [nodeStructureKeyBySourceNode, nodeStructureKeyByFolderNode]);
 
   const childRenderExtrasFor = React.useCallback((child: SessionNode) => ({
-    subtreeContainsActive,
     subtreeContainsEditing,
     menuOpenSessionId,
     nodeStructureKey: resolveNodeStructureKey(child),
-  }), [subtreeContainsActive, subtreeContainsEditing, menuOpenSessionId, resolveNodeStructureKey]);
+  }), [subtreeContainsEditing, menuOpenSessionId, resolveNodeStructureKey]);
 
   const totalSessions = ungroupedSessions.length;
   const visibleSessions = group.isArchivedBucket
@@ -878,7 +840,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             renderSessionNode={renderSessionNode}
             getRenderExtras={resolveNodeStructureKey
               ? (node) => ({
-                subtreeContainsActive,
                 subtreeContainsEditing,
                 menuOpenSessionId,
                 nodeStructureKey: resolveNodeStructureKey(node),
@@ -955,7 +916,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             // meanwhile keeps the container's height real so the scroller
             // never collapses/clamps during the flip.
             visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
-              subtreeContainsActive,
               subtreeContainsEditing,
               menuOpenSessionId,
               nodeStructureKey: resolveNodeStructureKey(node),
@@ -994,7 +954,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
                   }}
                 >
                   {renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
-                    subtreeContainsActive,
                     subtreeContainsEditing,
                     menuOpenSessionId,
                     nodeStructureKey: resolveNodeStructureKey(node),
@@ -1008,7 +967,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         </div>
       ) : (
         visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
-          subtreeContainsActive,
           subtreeContainsEditing,
           menuOpenSessionId,
           nodeStructureKey: resolveNodeStructureKey(node),

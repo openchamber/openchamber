@@ -13,15 +13,11 @@ type SafeStorageLike = {
 
 type Keys = {
   sessionExpanded: string;
-  // v1 key, still on disk for users upgrading from pre-per-context expansion.
-  // When present, its bare-session-id entries are fanned out to all four
-  // (project|recent) × (active|archived) context combinations and rewritten
-  // under `sessionExpanded`. After migration the v1 key is removed.
-  sessionExpandedLegacy: string;
+  // Optional legacy key for callers whose old expansion state is safe to migrate.
+  sessionExpandedLegacy?: string;
   projectCollapse: string;
   sessionPinned: string;
   groupOrder: string;
-  projectActiveSession: string;
   groupCollapse: string;
 };
 
@@ -41,7 +37,6 @@ type Args = {
   pinnedSessionIds: Set<string>;
   setPinnedSessionIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   groupOrderByProject: Map<string, string[]>;
-  activeSessionByProject: Map<string, string>;
   collapsedGroups: Set<string>;
   setExpandedParents: React.Dispatch<React.SetStateAction<Set<string>>>;
   setCollapsedProjects: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -56,7 +51,6 @@ export const useSidebarPersistence = (args: Args) => {
     sessions,
     setPinnedSessionIds,
     groupOrderByProject,
-    activeSessionByProject,
     collapsedGroups,
     setExpandedParents,
     setCollapsedProjects,
@@ -118,7 +112,9 @@ export const useSidebarPersistence = (args: Args) => {
         }
       } else {
         // No v2 data — migrate from v1 (bare session ids) if present.
-        const legacyRaw = safeStorage.getItem(keys.sessionExpandedLegacy);
+        const legacyRaw = keys.sessionExpandedLegacy
+          ? safeStorage.getItem(keys.sessionExpandedLegacy)
+          : null;
         if (legacyRaw) {
           try {
             const parsedLegacy = JSON.parse(legacyRaw);
@@ -136,7 +132,9 @@ export const useSidebarPersistence = (args: Args) => {
           } catch {
             // legacy data was malformed; ignore and let it expire
           }
-          try { safeStorage.removeItem?.(keys.sessionExpandedLegacy); } catch { /* ignored */ }
+          try {
+            if (keys.sessionExpandedLegacy) safeStorage.removeItem?.(keys.sessionExpandedLegacy);
+          } catch { /* ignored */ }
         }
       }
       const storedProjects = safeStorage.getItem(keys.projectCollapse);
@@ -167,15 +165,6 @@ export const useSidebarPersistence = (args: Args) => {
       // ignored
     }
   }, [groupOrderByProject, keys.groupOrder, safeStorage]);
-
-  React.useEffect(() => {
-    try {
-      const serialized = Object.fromEntries(activeSessionByProject.entries());
-      safeStorage.setItem(keys.projectActiveSession, JSON.stringify(serialized));
-    } catch {
-      // ignored
-    }
-  }, [activeSessionByProject, keys.projectActiveSession, safeStorage]);
 
   React.useEffect(() => {
     try {
