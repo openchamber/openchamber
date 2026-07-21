@@ -15,12 +15,18 @@ import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstr
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
+import { sessionMRU } from '@/sync/session-mru';
+import { getAllSyncSessionMap } from '@/sync/sync-refs';
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const armAbortPrompt = useSessionUIStore((s) => s.armAbortPrompt);
   const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+  const currentSessionIdRef = React.useRef(currentSessionId);
+  React.useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
     const abortCurrentOperation = sessionActions.abortCurrentOperation;;
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
@@ -493,6 +499,77 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      if (
+        eventMatchesShortcut(e, combo('cycle_session_mru_forward')) ||
+        eventMatchesShortcut(e, combo('cycle_session_mru_backward'))
+      ) {
+        if (e.repeat) {
+          e.preventDefault();
+          return;
+        }
+
+        const {
+          isSettingsDialogOpen,
+          isCommandPaletteOpen,
+          isHelpDialogOpen,
+          isSessionSwitcherOpen,
+          isAboutDialogOpen,
+          isMultiRunLauncherOpen,
+          isImagePreviewOpen,
+          isModelSelectorOpen,
+          isTimelineDialogOpen,
+          activeMainTab,
+        } = useUIStore.getState();
+
+        const hasOverlay = isSettingsDialogOpen
+          || isCommandPaletteOpen
+          || isHelpDialogOpen
+          || isSessionSwitcherOpen
+          || isAboutDialogOpen
+          || isMultiRunLauncherOpen
+          || isImagePreviewOpen
+          || isModelSelectorOpen
+          || isTimelineDialogOpen;
+        if (hasOverlay || activeMainTab !== 'chat') {
+          return;
+        }
+
+        const direction: 1 | -1 = eventMatchesShortcut(e, combo('cycle_session_mru_forward'))
+          ? 1
+          : -1;
+
+        const sessionMap = getAllSyncSessionMap();
+        const currentSid = currentSessionIdRef.current;
+        const recentSessions = Array.from(sessionMap.values())
+          .filter((s) => s.id !== currentSid && !s.time?.archived)
+          .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
+          .map((s) => s.id);
+        sessionMRU.seedIfEmpty(recentSessions);
+
+        let targetSessionId: string | null = null;
+        for (let attempt = 0; attempt < 60; attempt++) {
+          const candidate = sessionMRU.cycle(direction);
+          if (!candidate) break;
+
+          const session = sessionMap.get(candidate);
+          if (!session || session.time?.archived) {
+            sessionMRU.removeSession(candidate);
+            continue;
+          }
+
+          targetSessionId = candidate;
+          break;
+        }
+
+        if (!targetSessionId) {
+          return;
+        }
+
+        e.preventDefault();
+        useSessionUIStore.getState().setCurrentSession(targetSessionId);
+        return;
+      }
+
       if (eventMatchesShortcut(e, combo('expand_input'))) {
         if (isMobile) {
           return;
@@ -568,7 +645,7 @@ export const useKeyboardShortcuts = () => {
         }
 
         // Double-ESC abort logic - only when on chat tab with no overlays
-        const sessionId = currentSessionId;
+        const sessionId = currentSessionIdRef.current;
         const canAbortNow = working.canAbort && Boolean(sessionId);
         if (!canAbortNow) {
           resetAbortPriming();
@@ -603,12 +680,20 @@ export const useKeyboardShortcuts = () => {
       }
     };
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Control' || e.key === 'Meta') {
+        sessionMRU.resetCursor();
+      }
+    };
+
     window.addEventListener('keydown', handleTerminalShortcutCapture, true);
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
 
     return () => {
       window.removeEventListener('keydown', handleTerminalShortcutCapture, true);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
     };
   }, [
     openNewSessionDraft,
@@ -634,7 +719,6 @@ export const useKeyboardShortcuts = () => {
     working,
     armAbortPrompt,
     resetAbortPriming,
-    currentSessionId,
     currentDirectory,
     activeProject?.id,
     activeProject?.path,

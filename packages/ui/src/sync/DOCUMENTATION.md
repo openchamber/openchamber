@@ -43,6 +43,7 @@ So:
 |---|---|---|
 | child directory stores in `sync-context.tsx` | `session`, `message`, `part`, `permission`, `question`, etc. | One directory |
 | `session-ui-store.ts` | Session selection, draft lifecycle, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
+| `session-mru.ts` | Most-recently-used session ordering for `cycle_session_mru_forward` / `cycle_session_mru_backward` keyboard shortcuts | App UI state (ephemeral) |
 | `useGlobalSessionsStore.ts` | Global active sessions, global archived sessions, `sessionsByDirectory` | All opened project/worktree session lists |
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
 | `input-store.ts` | Draft input state, attached files, synthetic parts | App UI state |

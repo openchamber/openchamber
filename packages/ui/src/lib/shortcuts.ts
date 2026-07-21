@@ -328,6 +328,20 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'cycle_session_mru_forward',
+    defaultCombo: 'ctrl+tab',
+    label: 'Switch to previous session',
+    description: 'Cycle to the most recently used session (Ctrl+Tab tab switching)',
+    customizable: true,
+  },
+  {
+    id: 'cycle_session_mru_backward',
+    defaultCombo: 'ctrl+shift+tab',
+    label: 'Switch to next session (reverse)',
+    description: 'Cycle backward through recently used sessions',
+    customizable: true,
+  },
+  {
     id: 'expand_input',
     defaultCombo: 'mod+shift+e',
     label: 'Expand input',
