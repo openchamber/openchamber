@@ -19,33 +19,72 @@ type ReconnectCandidateOptions = {
   viewedSession?: ViewedSessionMaterializationTarget | null
 }
 
+type BootstrapSessionRevisionOptions = {
+  baselineRevision: number
+  eventRevision?: Record<string, number>
+  deletedRevision?: Record<string, number>
+}
+
+const getParentId = (session: Session): string | null | undefined => (
+  (session as Session & { parentID?: string | null }).parentID
+)
+
+const includeAncestorSessions = (
+  parentIds: string[],
+  includedIds: Set<string>,
+  sessionsById: Map<string, Session>,
+  excludedIds?: ReadonlySet<string>,
+): void => {
+  while (parentIds.length > 0) {
+    const parentId = parentIds.pop()
+    if (!parentId || includedIds.has(parentId) || excludedIds?.has(parentId)) continue
+    const parent = sessionsById.get(parentId)
+    if (!parent) continue
+    includedIds.add(parentId)
+    const ancestorId = getParentId(parent)
+    if (ancestorId) parentIds.push(ancestorId)
+  }
+}
+
 export function mergeBootstrapSessions(
   rootSessions: Session[],
-  allSessions: Session[],
+  allSessions: Session[] | null,
   existingSessions: Session[],
+  revisions?: BootstrapSessionRevisionOptions,
 ): { sessions: Session[]; rootCount: number } {
+  const completeSessions = allSessions ?? existingSessions.filter(
+    (session) => Boolean(getParentId(session)),
+  )
   const rootIds = new Set(rootSessions.map((session) => session.id))
   const sessionsById = new Map(existingSessions.map((session) => [session.id, session]))
-  for (const session of allSessions) sessionsById.set(session.id, session)
+  for (const session of completeSessions) sessionsById.set(session.id, session)
   for (const session of rootSessions) sessionsById.set(session.id, session)
 
   const includedIds = new Set(rootIds)
   const pendingParentIds: string[] = []
-  for (const session of allSessions) {
-    const parentId = (session as Session & { parentID?: string | null }).parentID
+  for (const session of completeSessions) {
+    const parentId = getParentId(session)
     if (!parentId) continue
     includedIds.add(session.id)
     pendingParentIds.push(parentId)
   }
+  includeAncestorSessions(pendingParentIds, includedIds, sessionsById)
 
-  while (pendingParentIds.length > 0) {
-    const parentId = pendingParentIds.pop()
-    if (!parentId || includedIds.has(parentId)) continue
-    const parent = sessionsById.get(parentId)
-    if (!parent) continue
-    includedIds.add(parentId)
-    const ancestorId = (parent as Session & { parentID?: string | null }).parentID
-    if (ancestorId) pendingParentIds.push(ancestorId)
+  if (revisions) {
+    const deletedIds = new Set(
+      Object.entries(revisions.deletedRevision ?? {})
+        .filter(([, revision]) => revision > revisions.baselineRevision)
+        .map(([sessionId]) => sessionId),
+    )
+    for (const session of existingSessions) {
+      if ((revisions.eventRevision?.[session.id] ?? 0) <= revisions.baselineRevision) continue
+      sessionsById.set(session.id, session)
+      includedIds.add(session.id)
+      const parentId = getParentId(session)
+      if (parentId) pendingParentIds.push(parentId)
+    }
+    for (const sessionId of deletedIds) includedIds.delete(sessionId)
+    includeAncestorSessions(pendingParentIds, includedIds, sessionsById, deletedIds)
   }
 
   const sessions = [...includedIds]
@@ -53,7 +92,7 @@ export function mergeBootstrapSessions(
     .filter((session): session is Session => Boolean(session))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   const rootCount = sessions.reduce((count, session) => (
-    (session as Session & { parentID?: string | null }).parentID ? count : count + 1
+    getParentId(session) ? count : count + 1
   ), 0)
 
   return { sessions, rootCount }
@@ -81,7 +120,7 @@ export function getReconnectCandidateSessionIds(state: ReconnectMaterializationS
 
   const parentIds = new Set<string>()
   for (const session of state.session) {
-    const parentId = (session as Session & { parentID?: string | null }).parentID
+    const parentId = getParentId(session)
     if (parentId) {
       parentIds.add(parentId)
     }

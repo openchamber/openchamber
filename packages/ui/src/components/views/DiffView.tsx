@@ -3,6 +3,7 @@ import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useGitStore, useGitStatus, useIsGitRepo, useGitLoadingStatus } from '@/stores/useGitStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
 import type { GitStatus } from '@/lib/api/types';
 import {
@@ -698,6 +699,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         setIsLoading(true);
 
         let cancelled = false;
+        const runtimeKey = getRuntimeKey();
         const contextLines = loadFullFiles ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES;
         const fetchPromise = isImageFile(file.path)
             ? git.getGitFileDiff(directory, { path: file.path, staged })
@@ -728,7 +730,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     if (staged) {
                         setStagedDiffData(nextDiff);
                     } else {
-                        setDiff(directory, file.path, nextDiff);
+                        setDiff(directory, file.path, nextDiff, runtimeKey);
                     }
                 }
                 setIsLoading(false);
@@ -1668,6 +1670,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         }
 
         setOpeningEditorFilePath(filePath);
+        const runtimeKey = getRuntimeKey();
         try {
             if (activeDiffScope === 'branch') {
                 const targetLine = cachedDiffData?.patch && !cachedDiffData.isBinary
@@ -1713,7 +1716,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     isBinary: response.isBinary,
                 };
                 if (!activeDiffStaged) {
-                    setDiff(effectiveDirectory, filePath, diffForNavigation);
+                    setDiff(effectiveDirectory, filePath, diffForNavigation, runtimeKey);
                 }
             }
 

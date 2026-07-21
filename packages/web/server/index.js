@@ -448,10 +448,7 @@ const sessionRuntime = createSessionRuntime({
   broadcastEvent: broadcastGlobalUiEvent,
 });
 
-const getActiveSessionCount = () => {
-  const snapshot = sessionRuntime.getSessionActivitySnapshot();
-  return Object.values(snapshot).filter((entry) => entry.type === 'busy').length;
-};
+const getActiveSessionCount = () => sessionRuntime.getActiveSessionCount();
 
 const getUpstreamStallTimeoutMs = () => (
   getActiveSessionCount() > 1

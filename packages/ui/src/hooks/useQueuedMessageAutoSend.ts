@@ -1,13 +1,15 @@
 import React from 'react';
-import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { getMessageQueueKey, parseMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
-import { getSyncSessionStatus } from '@/sync/sync-refs';
+import { getDirectoryState } from '@/sync/sync-refs';
 import { useDirectorySync } from '@/sync/sync-context';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
@@ -67,6 +69,7 @@ type ResolvedQueuedSendConfig = {
 
 export const sendQueuedAutoSendPayload = (
   sessionId: string,
+  directory: string,
   payload: QueuedAutoSendPayload,
   resolved: ResolvedQueuedSendConfig,
 ) => {
@@ -80,7 +83,7 @@ export const sendQueuedAutoSendPayload = (
     undefined,
     resolved.variant,
     'normal',
-    { sessionId },
+    { sessionId, directory },
   );
 };
 
@@ -140,6 +143,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
   const autoReviewRuns = useAutoReviewStore((state) => state.runsByOriginalSessionID);
   const sessionStatusRecord = useDirectorySync((state) => state.session_status);
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
   const sendFailuresRef = React.useRef<Map<string, QueuedAutoSendFailure>>(new Map());
@@ -151,11 +155,13 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       return;
     }
 
-    const dispatchSessionQueue = async (sessionId: string, queueSnapshot: QueuedMessage[]) => {
+    const dispatchSessionQueue = async (target: MessageQueueTarget, queueSnapshot: QueuedMessage[]) => {
+      const { sessionId } = target;
+      const targetKey = getMessageQueueKey(target);
       if (queueSnapshot.length === 0) {
         return;
       }
-      if (inFlightSessionsRef.current.has(sessionId)) {
+      if (inFlightSessionsRef.current.has(targetKey)) {
         return;
       }
       if (hasRecentAbort(sessionId)) {
@@ -166,7 +172,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
-      const currentStatus = getSyncSessionStatus(sessionId)?.type ?? 'idle';
+      const currentStatus = getDirectoryState(target.directory)?.session_status?.[sessionId]?.type ?? 'idle';
       if (currentStatus !== 'idle') {
         return;
       }
@@ -176,9 +182,9 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
-      const failure = sendFailuresRef.current.get(sessionId);
+      const failure = sendFailuresRef.current.get(targetKey);
       if (failure && failure.messageId !== payload.queuedMessageId) {
-        sendFailuresRef.current.delete(sessionId);
+        sendFailuresRef.current.delete(targetKey);
       } else if (isQueuedAutoSendBackedOff(failure, payload.queuedMessageId, Date.now())) {
         return;
       }
@@ -192,28 +198,28 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
-      inFlightSessionsRef.current.add(sessionId);
+      inFlightSessionsRef.current.add(targetKey);
 
       try {
-        await sendQueuedAutoSendPayload(sessionId, payload, {
+        await sendQueuedAutoSendPayload(sessionId, target.directory, payload, {
           providerID: resolved.providerID,
           modelID: resolved.modelID,
           agent: resolved.agent,
           variant: resolved.variant,
         });
-        useMessageQueueStore.getState().removeFromQueue(sessionId, payload.queuedMessageId);
-        sendFailuresRef.current.delete(sessionId);
+        useMessageQueueStore.getState().removeFromQueue(target, payload.queuedMessageId);
+        sendFailuresRef.current.delete(targetKey);
       } catch (error) {
         console.warn('[queue] queued auto-send failed:', error);
         const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
         const failures = priorFailures + 1;
-        sendFailuresRef.current.set(sessionId, {
+        sendFailuresRef.current.set(targetKey, {
           messageId: payload.queuedMessageId,
           failures,
           nextAttemptAt: Date.now() + getQueuedAutoSendRetryDelayMs(failures),
         });
       } finally {
-        inFlightSessionsRef.current.delete(sessionId);
+        inFlightSessionsRef.current.delete(targetKey);
       }
     };
 
@@ -226,7 +232,10 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     }
 
     const queueEntries = Object.entries(queuedMessages);
-    queueEntries.forEach(([sessionId, queue]) => {
+    queueEntries.forEach(([key, queue]) => {
+      const target = parseMessageQueueKey(key);
+      if (!target || target.runtimeKey !== getRuntimeKey() || target.directory !== currentDirectory) return;
+      const { sessionId } = target;
       const currentStatusType = (statusRecord[sessionId]?.type ?? 'idle') as SessionStatusType;
       const previousStatusType = previousStatusRef.current.get(sessionId);
       const wasAutoReviewBlocked = autoReviewBlockedSessionsRef.current.has(sessionId);
@@ -241,12 +250,12 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType, queue.length > 0)
         || (wasAutoReviewBlocked && !isAutoReviewRunning && currentStatusType === 'idle')
       )) {
-        void dispatchSessionQueue(sessionId, queue);
+        void dispatchSessionQueue(target, queue);
       }
 
       nextStatusMap.set(sessionId, currentStatusType);
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, sessionStatusRecord, autoReviewRuns]);
+  }, [enabled, queuedMessages, sessionStatusRecord, autoReviewRuns, currentDirectory]);
 }

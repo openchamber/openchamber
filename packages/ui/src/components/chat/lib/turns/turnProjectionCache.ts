@@ -56,14 +56,7 @@ export const buildProjectionCacheKey = (
   ].join('|');
 };
 
-export const getCachedProjection = (
-  sessionKey: string,
-  messages: ChatMessageEntry[],
-  showTextJustificationActivity: boolean,
-  showTurnChangedFiles: boolean,
-  mergeHiddenUserTurnsKey: string,
-): TurnProjectionResult | undefined => {
-  const key = buildProjectionCacheKey(sessionKey, messages, showTextJustificationActivity, showTurnChangedFiles, mergeHiddenUserTurnsKey);
+export const getCachedProjection = (key: string): TurnProjectionResult | undefined => {
   const cached = projectionCache.get(key);
   if (cached) {
     // LRU re-order: move hit to the end (most recent) so it survives

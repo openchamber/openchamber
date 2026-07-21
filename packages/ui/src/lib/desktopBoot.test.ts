@@ -31,6 +31,27 @@ describe('resolveDesktopBootView', () => {
     ).toEqual({ screen: 'recovery', variant: 'remote-unreachable', hostId: 'remote-a', url: 'https://x.test' });
   });
 
+  test('preserves disabled local runtime capability for remote recovery', () => {
+    expect(
+      resolveDesktopBootView({
+        isDesktopShell: true,
+        bootOutcome: {
+          target: 'remote',
+          status: 'unreachable',
+          hostId: 'remote-a',
+          url: 'https://x.test',
+          localAvailable: false,
+        },
+      }),
+    ).toEqual({
+      screen: 'recovery',
+      variant: 'remote-unreachable',
+      hostId: 'remote-a',
+      url: 'https://x.test',
+      localAvailable: false,
+    });
+  });
+
   test('returns main for local ok', () => {
     expect(
       resolveDesktopBootView({
@@ -77,13 +98,22 @@ describe('resolveDesktopBootView', () => {
     ).toEqual({ screen: 'recovery', variant: 'remote-incompatible', hostId: 'old-host', url: 'https://old.test' });
   });
 
-  test('returns recovery view for local unreachable', () => {
+  test('returns chooser for local unreachable', () => {
     expect(
       resolveDesktopBootView({
         isDesktopShell: true,
         bootOutcome: { target: 'local', status: 'unreachable' },
       }),
-    ).toEqual({ screen: 'recovery', variant: 'local-unavailable' });
+    ).toEqual({ screen: 'chooser' });
+  });
+
+  test('returns remote-only chooser when local runtime is disabled', () => {
+    expect(
+      resolveDesktopBootView({
+        isDesktopShell: true,
+        bootOutcome: { target: 'local', status: 'unreachable', localAvailable: false },
+      }),
+    ).toEqual({ screen: 'chooser', localAvailable: false });
   });
 
   test('returns recovery view for remote missing', () => {

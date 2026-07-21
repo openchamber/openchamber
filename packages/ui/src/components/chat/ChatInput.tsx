@@ -6,7 +6,7 @@ import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -14,12 +14,21 @@ import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import { useDirectorySync, useUserMessageHistory } from '@/sync/sync-context';
-import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import {
+    createChatDraftIdentity,
+    getChatDraftIdentityKey,
+    readChatDraft,
+    subscribeChatDraftDeletion,
+    writeChatDraft,
+    type ChatDraftIdentity,
+    type ChatDraftSnapshot,
+} from '@/lib/chatDraftPersistence';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import ToolOutputDialog from './message/ToolOutputDialog';
@@ -111,6 +120,9 @@ const FILE_MENTION_TOKEN = /^@[^\s]+$/;
 const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
 const INLINE_SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
 const CHAT_DRAFT_PERSIST_DEBOUNCE_MS = 500;
+const getChatDraftSnapshotSignature = (text: string, confirmedMentions: Iterable<string>): string => (
+    `${text}\u0000${[...confirmedMentions].sort().join('\u0000')}`
+);
 const COMPACT_CHAT_PLACEHOLDER_MAX_WIDTH = 560;
 const VS_CODE_DROP_DATA_TYPES = [
     'CodeFiles',
@@ -918,81 +930,35 @@ type AutocompleteOverlayPosition = {
     maxHeight: number;
 };
 
-// Per-session draft key — preserves in-progress messages across project switches
-const getDraftKey = (sessionId: string | null): string =>
-    `openchamber_chat_input_draft_${sessionId ?? 'new'}`;
-
-// Helper to safely read from localStorage for a given session
-const getStoredDraft = (sessionId: string | null): string => {
-    try {
-        return localStorage.getItem(getDraftKey(sessionId)) ?? '';
-    } catch {
-        return '';
-    }
-};
-
-// Helper to safely write/clear a per-session draft
-const saveStoredDraft = (sessionId: string | null, draft: string): void => {
-    try {
-        if (draft) {
-            localStorage.setItem(getDraftKey(sessionId), draft);
-        } else {
-            localStorage.removeItem(getDraftKey(sessionId));
-        }
-    } catch {
-        // Ignore localStorage errors
-    }
-};
-
-// Per-session confirmed mentions key — tracks which @mentions are confirmed (blue) vs plain text
-const getConfirmedMentionsKey = (sessionId: string | null): string =>
-    `openchamber_chat_confirmed_mentions_${sessionId ?? 'new'}`;
-
-const saveConfirmedMentions = (sessionId: string | null, mentions: Set<string>): void => {
-    try {
-        if (mentions.size > 0) {
-            localStorage.setItem(getConfirmedMentionsKey(sessionId), JSON.stringify([...mentions]));
-        } else {
-            localStorage.removeItem(getConfirmedMentionsKey(sessionId));
-        }
-    } catch {
-        // Ignore localStorage errors
-    }
-};
-
-const loadConfirmedMentions = (sessionId: string | null): Set<string> => {
-    try {
-        const raw = localStorage.getItem(getConfirmedMentionsKey(sessionId));
-        if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-                return new Set(parsed.filter((v): v is string => typeof v === 'string'));
-            }
-        }
-    } catch {
-        // Ignore localStorage errors
-    }
-    return new Set();
+const resolveChatDraftIdentity = (sessionId: string | null): ChatDraftIdentity | null => {
+    const sessionState = useSessionUIStore.getState();
+    const newSessionDirectory = sessionState.newSessionDraft?.open
+        ? sessionState.newSessionDraft.bootstrapPendingDirectory ?? sessionState.newSessionDraft.directoryOverride
+        : null;
+    const directory = sessionId
+        ? sessionState.getDirectoryForSession(sessionId) ?? sessionState.currentSessionDirectory
+        : newSessionDirectory ?? useDirectoryStore.getState().currentDirectory;
+    return createChatDraftIdentity(getRuntimeKey(), directory, sessionId);
 };
 
 const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
     const { t } = useI18n();
     // Track if we restored a draft on mount (for text selection)
     const initialDraftRef = React.useRef<string | null>(null);
-    // Track initial session ID (captured at mount time for draft restoration)
-    const initialSessionIdRef = React.useRef<string | null>(null);
+    const initialDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(null);
+    const initialDraftSnapshotRef = React.useRef<ChatDraftSnapshot>({ text: '', confirmedMentions: new Set() });
     const [message, setMessage] = React.useState(() => {
-        // Read per-session draft at mount time using the current session from the store
         const sessionId = useSessionUIStore.getState().currentSessionId;
-        initialSessionIdRef.current = sessionId;
-        const draft = getStoredDraft(sessionId);
-        if (draft) {
-            initialDraftRef.current = draft;
+        const identity = resolveChatDraftIdentity(sessionId);
+        const snapshot = readChatDraft(identity);
+        initialDraftIdentityRef.current = identity;
+        initialDraftSnapshotRef.current = snapshot;
+        if (snapshot.text) {
+            initialDraftRef.current = snapshot.text;
         }
-        return draft;
+        return snapshot.text;
     });
-    // Restore confirmed mentions from localStorage on mount
-    const confirmedMentionsRef = React.useRef<Set<string>>(loadConfirmedMentions(initialSessionIdRef.current));
+    const confirmedMentionsRef = React.useRef<Set<string>>(initialDraftSnapshotRef.current.confirmedMentions);
     // Helper: check if a mention path looks like a file/folder (has path separators, extension, or was explicitly confirmed)
     const isConfirmedFilePath = (text: string): boolean =>
         text.includes('/') || text.includes('\\') || text.includes('.') || confirmedMentionsRef.current.has(text);
@@ -1070,7 +1036,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const draftPersistTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const skipNextDraftPersistRef = React.useRef(false);
     const lastPersistedDraftRef = React.useRef<Map<string, string>>(new Map());
-    const currentSessionIdForDraftRef = React.useRef<string | null>(null);
+    const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
 
     // TODO: port sendMessage to session-actions (complex — creates sessions, handles attachments, etc.)
@@ -1083,6 +1049,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const currentDirectory = useEffectiveDirectory() ?? fallbackDirectory;
     const currentSessionDirectoryForSync = useSessionUIStore(
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
+    );
+    const activeRuntimeKey = getRuntimeKey();
+    const chatDraftIdentity = React.useMemo(
+        () => createChatDraftIdentity(
+            activeRuntimeKey,
+            currentSessionDirectoryForSync ?? currentDirectory,
+            currentSessionId,
+        ),
+        [activeRuntimeKey, currentDirectory, currentSessionDirectoryForSync, currentSessionId],
     );
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
@@ -1487,14 +1462,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     } | null>(null);
 
     // Message queue
+    const messageQueueTarget = currentSessionId
+        ? createMessageQueueTarget(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory)
+        : null;
+    const messageQueueKey = messageQueueTarget ? getMessageQueueKey(messageQueueTarget) : null;
     const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
-                if (!currentSessionId) return EMPTY_QUEUE;
-                return state.queuedMessages[currentSessionId] ?? EMPTY_QUEUE;
+                if (!messageQueueKey) return EMPTY_QUEUE;
+                return state.queuedMessages[messageQueueKey] ?? EMPTY_QUEUE;
             },
-            [currentSessionId]
+            [messageQueueKey]
         )
     );
     const addToQueue = useMessageQueueStore((state) => state.addToQueue);
@@ -1502,21 +1481,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
 
     // Inline comment drafts
+    const inlineDraftSessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
+    const inlineDraftDirectory = currentSessionDirectoryForSync ?? currentDirectory;
+    const inlineDraftTarget = React.useMemo<InlineCommentDraftTarget | null>(
+        () => inlineDraftSessionKey && inlineDraftDirectory
+            ? { directory: inlineDraftDirectory, sessionKey: inlineDraftSessionKey }
+            : null,
+        [inlineDraftDirectory, inlineDraftSessionKey],
+    );
+    const inlineDraftKey = inlineDraftTarget
+        ? getInlineCommentDraftKey(activeRuntimeKey, inlineDraftTarget.directory, inlineDraftTarget.sessionKey)
+        : null;
     const draftCount = useInlineCommentDraftStore(
         React.useCallback(
-            (state) => {
-                const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
-                if (!sessionKey) return 0;
-                return (state.drafts[sessionKey] ?? []).length;
-            },
-            [currentSessionId, newSessionDraftOpen]
+            (state) => inlineDraftKey ? (state.drafts[inlineDraftKey] ?? []).length : 0,
+            [inlineDraftKey]
         )
     );
     const draftSourceKey = useInlineCommentDraftStore(
         React.useCallback(
             (state) => {
-                const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
-                const drafts = sessionKey ? (state.drafts[sessionKey] ?? []) : [];
+                const drafts = inlineDraftKey ? (state.drafts[inlineDraftKey] ?? []) : [];
                 let previewConsole = 0;
                 let previewAnnotation = 0;
                 let review = 0;
@@ -1529,7 +1514,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 }
                 return `${previewConsole}:${previewAnnotation}:${review}:${terminal}`;
             },
-            [currentSessionId, newSessionDraftOpen]
+            [inlineDraftKey]
         )
     );
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
@@ -1537,29 +1522,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const hasDrafts = draftCount > 0;
     const [previewConsoleCount, previewAnnotationCount, reviewCount, terminalContextCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
     const terminalContextDrafts = terminalContextCount > 0
-        ? (useInlineCommentDraftStore.getState().drafts[currentSessionId ?? (newSessionDraftOpen ? 'draft' : '')] ?? []).filter((draft) => draft.source === 'terminal')
+        ? (inlineDraftKey ? useInlineCommentDraftStore.getState().drafts[inlineDraftKey] ?? [] : []).filter((draft) => draft.source === 'terminal')
         : [];
     const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation') => {
-        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
-        if (!sessionKey) return;
-        const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
+        if (!inlineDraftTarget) return;
+        const drafts = useInlineCommentDraftStore.getState().getDrafts(inlineDraftTarget);
         for (const draft of drafts) {
             if (draft.source === source) {
-                removeInlineCommentDraft(sessionKey, draft.id);
+                removeInlineCommentDraft(inlineDraftTarget, draft.id);
             }
         }
-    }, [currentSessionId, newSessionDraftOpen, removeInlineCommentDraft]);
+    }, [inlineDraftTarget, removeInlineCommentDraft]);
     // Review comments are the inline-comment drafts that aren't preview sources.
     const removeReviewDrafts = React.useCallback(() => {
-        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
-        if (!sessionKey) return;
-        const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
+        if (!inlineDraftTarget) return;
+        const drafts = useInlineCommentDraftStore.getState().getDrafts(inlineDraftTarget);
         for (const draft of drafts) {
             if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation' && draft.source !== 'terminal') {
-                removeInlineCommentDraft(sessionKey, draft.id);
+                removeInlineCommentDraft(inlineDraftTarget, draft.id);
             }
         }
-    }, [currentSessionId, newSessionDraftOpen, removeInlineCommentDraft]);
+    }, [inlineDraftTarget, removeInlineCommentDraft]);
 
     // User message history for up/down arrow navigation.
     // Keep this on a narrow hook instead of full session message records.
@@ -1571,17 +1554,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [message]);
 
     React.useEffect(() => {
-        currentSessionIdForDraftRef.current = currentSessionId;
-    }, [currentSessionId]);
+        currentChatDraftIdentityRef.current = chatDraftIdentity;
+    }, [chatDraftIdentity]);
 
-    const persistDraftImmediately = React.useCallback((sessionId: string | null, draft: string) => {
-        const key = getDraftKey(sessionId);
-        const lastPersisted = lastPersistedDraftRef.current.get(key);
-        if (lastPersisted === draft) {
-            return;
-        }
-
-        saveStoredDraft(sessionId, draft);
+    const persistDraftImmediately = React.useCallback((identity: ChatDraftIdentity | null, draft: string) => {
+        if (!identity) return;
+        const key = getChatDraftIdentityKey(identity);
         // Only persist confirmed mentions that are actually present in the draft text
         const activeMentions = new Set<string>();
         for (const mention of confirmedMentionsRef.current) {
@@ -1590,8 +1568,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
         confirmedMentionsRef.current = activeMentions;
-        saveConfirmedMentions(sessionId, activeMentions);
-        lastPersistedDraftRef.current.set(key, draft);
+        const signature = getChatDraftSnapshotSignature(draft, activeMentions);
+        const lastPersisted = lastPersistedDraftRef.current.get(key);
+        if (lastPersisted === signature) {
+            return;
+        }
+        writeChatDraft(identity, draft, activeMentions);
+        lastPersistedDraftRef.current.set(key, signature);
     }, []);
 
     const clearPendingDraftPersist = React.useCallback(() => {
@@ -1614,11 +1597,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!persistChatDraft) {
             // Setting disabled - clear the restored draft
             setMessage('');
-            try {
-                localStorage.removeItem(getDraftKey(initialSessionIdRef.current));
-            } catch {
-                // Ignore
-            }
+            writeChatDraft(initialDraftIdentityRef.current, '', []);
         } else {
             // Setting enabled - select all text
             requestAnimationFrame(() => {
@@ -1627,24 +1606,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [persistChatDraft]);
 
-    // Handle session switching: save draft for old session, restore draft for new session
-    const prevSessionIdRef = React.useRef(currentSessionId);
+    // Handle identity switching: save the old draft and restore the new runtime/directory/session draft.
+    const prevChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
     React.useEffect(() => {
-        if (prevSessionIdRef.current !== currentSessionId) {
-            const oldSessionId = prevSessionIdRef.current;
-            prevSessionIdRef.current = currentSessionId;
+        const previousIdentity = prevChatDraftIdentityRef.current;
+        const previousKey = previousIdentity ? getChatDraftIdentityKey(previousIdentity) : null;
+        const currentKey = chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null;
+        if (previousKey !== currentKey) {
+            prevChatDraftIdentityRef.current = chatDraftIdentity;
             setInputMode('normal');
             clearPendingDraftPersist();
             skipNextDraftPersistRef.current = true;
 
             if (persistChatDraft) {
-                // Save current draft for the session we're leaving
-                persistDraftImmediately(oldSessionId, messageRef.current);
-                // Restore draft for the session we're entering
-                const newDraft = getStoredDraft(currentSessionId);
-                setMessage(newDraft);
-                confirmedMentionsRef.current = loadConfirmedMentions(currentSessionId);
-                if (newDraft) {
+                persistDraftImmediately(previousIdentity, messageRef.current);
+                const nextSnapshot = readChatDraft(chatDraftIdentity);
+                setMessage(nextSnapshot.text);
+                confirmedMentionsRef.current = nextSnapshot.confirmedMentions;
+                if (nextSnapshot.text) {
                     requestAnimationFrame(() => {
                         textareaRef.current?.select();
                     });
@@ -1655,7 +1634,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 confirmedMentionsRef.current = new Set();
             }
         }
-    }, [clearPendingDraftPersist, currentSessionId, persistChatDraft, persistDraftImmediately]);
+    }, [chatDraftIdentity, clearPendingDraftPersist, persistChatDraft, persistDraftImmediately]);
+
+    React.useEffect(() => subscribeChatDraftDeletion((deletedIdentity) => {
+        const deletedKey = getChatDraftIdentityKey(deletedIdentity);
+        lastPersistedDraftRef.current.set(deletedKey, getChatDraftSnapshotSignature('', []));
+        const currentIdentity = currentChatDraftIdentityRef.current;
+        if (!currentIdentity || getChatDraftIdentityKey(currentIdentity) !== deletedKey) return;
+        clearPendingDraftPersist();
+        skipNextDraftPersistRef.current = true;
+        messageRef.current = '';
+        confirmedMentionsRef.current = new Set();
+        setMessage('');
+    }), [clearPendingDraftPersist]);
 
     // Focus textarea when new session draft is opened
     const prevNewSessionDraftOpenRef = React.useRef(newSessionDraftOpen);
@@ -1678,7 +1669,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     React.useEffect(() => {
         if (!persistChatDraft) {
             clearPendingDraftPersist();
-            persistDraftImmediately(currentSessionId, '');
+            persistDraftImmediately(chatDraftIdentity, '');
             return;
         }
 
@@ -1689,23 +1680,36 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         clearPendingDraftPersist();
         const draftSnapshot = message;
-        const sessionSnapshot = currentSessionId;
+        const identitySnapshot = chatDraftIdentity;
         draftPersistTimerRef.current = setTimeout(() => {
             draftPersistTimerRef.current = null;
-            persistDraftImmediately(sessionSnapshot, draftSnapshot);
+            persistDraftImmediately(identitySnapshot, draftSnapshot);
         }, CHAT_DRAFT_PERSIST_DEBOUNCE_MS);
 
         return () => {
             clearPendingDraftPersist();
         };
-    }, [clearPendingDraftPersist, currentSessionId, message, persistChatDraft, persistDraftImmediately]);
+    }, [chatDraftIdentity, clearPendingDraftPersist, message, persistChatDraft, persistDraftImmediately]);
 
     React.useEffect(() => {
-        return () => {
+        const flushCurrentDraft = () => {
             clearPendingDraftPersist();
             if (persistChatDraft) {
-                persistDraftImmediately(currentSessionIdForDraftRef.current, messageRef.current);
+                persistDraftImmediately(currentChatDraftIdentityRef.current, messageRef.current);
             }
+        };
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') flushCurrentDraft();
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        document.addEventListener('freeze', flushCurrentDraft);
+        window.addEventListener('pagehide', flushCurrentDraft);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            document.removeEventListener('freeze', flushCurrentDraft);
+            window.removeEventListener('pagehide', flushCurrentDraft);
+            flushCurrentDraft();
         };
     }, [clearPendingDraftPersist, persistChatDraft, persistDraftImmediately]);
 
@@ -1782,9 +1786,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        if (!inputSnapshot.hasContent || !currentSessionId) return;
+        if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
-        const drafts = consumeDrafts(currentSessionId);
+        const drafts = inlineDraftTarget ? consumeDrafts(inlineDraftTarget) : [];
 
         let messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
         if (drafts.length > 0) {
@@ -1792,7 +1796,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
         const attachmentsToQueue = sanitizeAttachmentsForSend(sendableAttachedFiles);
 
-        addToQueue(currentSessionId, {
+        addToQueue(messageQueueTarget, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
             sendConfig: currentProviderId && currentModelId ? {
@@ -1815,7 +1819,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             textareaRef.current?.focus();
         }
-    }, [getCurrentInputSnapshot, currentSessionId, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inlineDraftTarget, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);
@@ -1974,10 +1978,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+        const consumedDraftTarget = inlineDraftTarget;
         let drafts: InlineCommentDraft[] = [];
-        if (!queuedOnly && sessionKey) {
-            drafts = consumeDrafts(sessionKey);
+        if (!queuedOnly && consumedDraftTarget) {
+            drafts = consumeDrafts(consumedDraftTarget);
         }
 
         if (drafts.length > 0) {
@@ -2032,17 +2036,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
 
         // Clear queue and input
-        if (currentSessionId && queuedMessageId) {
-            removeFromQueue(currentSessionId, queuedMessageId);
-        } else if (currentSessionId && hasQueuedMessages) {
-            clearQueue(currentSessionId);
+        if (messageQueueTarget && queuedMessageId) {
+            removeFromQueue(messageQueueTarget, queuedMessageId);
+        } else if (messageQueueTarget && hasQueuedMessages) {
+            clearQueue(messageQueueTarget);
         }
         if (!queuedOnly) {
             setMessage('');
             confirmedMentionsRef.current.clear();
             // Clear per-session draft on submit
-            saveStoredDraft(currentSessionId, '');
-            saveConfirmedMentions(currentSessionId, confirmedMentionsRef.current);
+            persistDraftImmediately(chatDraftIdentity, '');
             // Reset message history navigation state
             setHistoryIndex(-1);
             setDraftMessage('');
@@ -2333,8 +2336,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             sendMessageOptions,
         );
         const restoreConsumedDrafts = () => {
-            if (sessionKey && drafts.length > 0) {
-                useInlineCommentDraftStore.getState().restoreDrafts(sessionKey, drafts);
+            if (consumedDraftTarget && drafts.length > 0) {
+                useInlineCommentDraftStore.getState().restoreDrafts(consumedDraftTarget, drafts);
             }
         };
 
@@ -2369,7 +2372,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const currentInput = textareaRef.current?.value ?? messageRef.current;
             if (newSessionDraftOpen && inputSnapshot.message && (!currentInput || currentInput === inputSnapshot.message)) {
                 setMessage(inputSnapshot.message);
-                saveStoredDraft(null, inputSnapshot.message);
+                writeChatDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsRef.current);
             }
 
             const isSoftNetworkError =
@@ -4667,7 +4670,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 <span className="truncate text-xs font-medium text-[var(--surface-mutedForeground)]">
                                     {t('chat.chatInput.terminalContext', { terminal: draft.fileLabel, start: draft.startLine, end: draft.endLine })}
                                 </span>
-                                <button type="button" className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]" onClick={() => removeInlineCommentDraft(draft.sessionKey, draft.id)} aria-label={t('chat.chatInput.terminalContextRemove')} title={t('chat.chatInput.terminalContextRemove')}>
+                                <button type="button" className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]" onClick={() => inlineDraftTarget && removeInlineCommentDraft(inlineDraftTarget, draft.id)} aria-label={t('chat.chatInput.terminalContextRemove')} title={t('chat.chatInput.terminalContextRemove')}>
                                     <Icon name="close" className="h-3 w-3" />
                                 </button>
                             </div>

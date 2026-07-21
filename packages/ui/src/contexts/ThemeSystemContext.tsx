@@ -2,6 +2,7 @@ import React, {
   useEffect,
   useMemo,
   useCallback,
+  useRef,
   useState,
 } from 'react';
 import { flushSync } from 'react-dom';
@@ -24,6 +25,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getInitialSystemPreference, readEmbeddedThemeSearchParams } from './theme-embedded-bootstrap';
 import { isValidTheme } from './theme-validation';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
 type ThemePreferences = {
   themeMode: ThemeMode;
@@ -172,8 +174,8 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     return existing || null;
   });
   const isVSCode = useMemo(() => isVSCodeRuntime(), []);
-  const isLocalDesktopOrigin = useMemo(() => isDesktopLocalOriginActive(), []);
   const isDesktopShell = useMemo(() => detectDesktopShell(), []);
+  const customThemesRequestRef = useRef(0);
   const receivesParentThemeSync = useMemo(() => {
     if (typeof window === 'undefined') {
       return false;
@@ -249,11 +251,13 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
+    const runtimeKey = getRuntimeKey();
+    const request = ++customThemesRequestRef.current;
     setCustomThemesLoading(true);
     try {
       const res = await runtimeFetch('/api/config/themes', {
         method: 'GET',
-        credentials: isLocalDesktopOrigin ? 'omit' : 'include',
+        credentials: isDesktopLocalOriginActive() ? 'omit' : 'include',
         headers: {
           Accept: 'application/json',
         },
@@ -269,19 +273,30 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       }
 
       const payload = await res.json();
+      if (request !== customThemesRequestRef.current || runtimeKey !== getRuntimeKey()) return;
       const incoming = Array.isArray(payload?.themes) ? payload.themes : [];
       const normalized = incoming.filter(isValidTheme);
       setCustomThemes(normalized);
     } catch {
       // ignore
     } finally {
-      setCustomThemesLoading(false);
+      if (request === customThemesRequestRef.current && runtimeKey === getRuntimeKey()) {
+        setCustomThemesLoading(false);
+      }
     }
-  }, [isLocalDesktopOrigin, isVSCode]);
+  }, [isVSCode]);
 
   useEffect(() => {
     void reloadCustomThemes();
   }, [reloadCustomThemes]);
+
+  useEffect(() => subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey || isVSCode) return;
+    customThemesRequestRef.current += 1;
+    setCustomThemes([]);
+    setCustomThemesLoading(false);
+    void reloadCustomThemes();
+  }), [isVSCode, reloadCustomThemes]);
 
   useEffect(() => {
     if (!isVSCode) {

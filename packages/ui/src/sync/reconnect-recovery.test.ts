@@ -110,4 +110,50 @@ describe("mergeBootstrapSessions", () => {
       rootCount: 1,
     })
   })
+
+  test("treats a successful empty response as authoritative", () => {
+    const persisted = createSession("persisted")
+
+    expect(mergeBootstrapSessions([], [], [persisted])).toEqual({
+      sessions: [],
+      rootCount: 0,
+    })
+  })
+
+  test("preserves known children when the child-session request fails", () => {
+    const cachedParent = createSession("parent")
+    const authoritativeParent = createSession("parent", { title: "Current" })
+    const cachedChild = createSession("child", { parentID: "parent" })
+
+    expect(mergeBootstrapSessions([authoritativeParent], null, [cachedChild, cachedParent])).toEqual({
+      sessions: [cachedChild, authoritativeParent],
+      rootCount: 1,
+    })
+  })
+
+  test("overlays live session events that arrive after the request starts", () => {
+    const staleResponse = createSession("existing", { title: "Stale" })
+    const liveUpdate = createSession("existing", { title: "Live" })
+    const liveCreate = createSession("new")
+
+    expect(mergeBootstrapSessions([staleResponse], [], [liveUpdate, liveCreate], {
+      baselineRevision: 4,
+      eventRevision: { existing: 5, new: 6 },
+    })).toEqual({
+      sessions: [liveUpdate, liveCreate],
+      rootCount: 2,
+    })
+  })
+
+  test("does not resurrect a session deleted after the request starts", () => {
+    const deleted = createSession("deleted")
+
+    expect(mergeBootstrapSessions([deleted], [], [], {
+      baselineRevision: 2,
+      deletedRevision: { deleted: 3 },
+    })).toEqual({
+      sessions: [],
+      rootCount: 0,
+    })
+  })
 })

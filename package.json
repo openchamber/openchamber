@@ -72,6 +72,7 @@
     "docs:validate": "node scripts/docs/validate-docs.mjs",
     "dead-code": "bunx knip@5.80.0 --no-exit-code --include files,exports,nsExports,types,nsTypes,enumMembers,duplicates",
     "doctor": "node scripts/react-doctor.mjs",
+    "profile:browser": "node scripts/profile-browser.mjs",
     "icons:sprite": "node scripts/generate-file-type-sprite.mjs",
     "icons:generate": "bun run scripts/generate-icon-sprite.mjs",
     "themes:port:opencode": "tsx scripts/port-opencode-theme.ts",

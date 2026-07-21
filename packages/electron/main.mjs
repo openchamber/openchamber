@@ -183,6 +183,7 @@ const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
 const OPENCODE_SHUTDOWN_GRACE_MS = 100;
+const SKIP_LOCAL_SERVER = process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1';
 
 const { autoUpdater } = updaterPkg;
 
@@ -194,6 +195,7 @@ const state = {
   clientToken: null,
   requestHeaders: {},
   bootOutcome: null,
+  startupResolved: false,
   initScript: null,
   mainWindow: null,
   quitRequested: false,
@@ -490,12 +492,16 @@ const readJsonFile = (filePath) => {
 };
 
 const writeJsonFile = async (filePath, data) => {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  const directory = path.dirname(filePath);
+  await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') await fsp.chmod(directory, 0o700);
   // Atomic: write to a temp file then rename. Readers never see a partial
   // JSON file that could parse-error and get coerced to {}.
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2));
+  await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+  if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
   await fsp.rename(tmp, filePath);
+  if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
 };
 
 const readSettingsRoot = () => {
@@ -1527,6 +1533,7 @@ const buildInitScript = (localOrigin, bootOutcome, apiBaseUrl = '', clientToken 
 };
 
 const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => {
+  const availability = { localAvailable };
   if (envTargetUrl) {
     const status = probe?.status === 'unreachable'
       ? 'unreachable'
@@ -1535,23 +1542,23 @@ const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => 
         : probe?.status === 'wrong-service'
           ? 'wrong-service'
           : 'ok';
-    return { target: 'remote', status, hostId: ENV_OVERRIDE_HOST_ID, url: envTargetUrl };
+    return { target: 'remote', status, hostId: ENV_OVERRIDE_HOST_ID, url: envTargetUrl, ...availability };
   }
 
   const defaultId = config.defaultHostId || '';
   if (!defaultId) {
-    return { target: null, status: 'not-configured' };
+    return { target: null, status: 'not-configured', ...availability };
   }
 
   if (defaultId === LOCAL_HOST_ID) {
     return localAvailable
-      ? { target: 'local', status: 'ok' }
-      : { target: 'local', status: 'unreachable' };
+      ? { target: 'local', status: 'ok', ...availability }
+      : { target: 'local', status: 'unreachable', ...availability };
   }
 
   const host = config.hosts.find((entry) => entry.id === defaultId);
   if (!host) {
-    return { target: 'remote', status: 'missing', hostId: defaultId };
+    return { target: 'remote', status: 'missing', hostId: defaultId, ...availability };
   }
 
   const status = probe?.status === 'unreachable'
@@ -1561,7 +1568,7 @@ const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => 
       : probe?.status === 'wrong-service'
         ? 'wrong-service'
         : 'ok';
-  return { target: 'remote', status, hostId: host.id, url: host.apiUrl || host.url };
+  return { target: 'remote', status, hostId: host.id, url: host.apiUrl || host.url, ...availability };
 };
 
 const buildStartupSplashHtml = () => {
@@ -2464,6 +2471,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
 };
 
 const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig = {}) => {
+  state.startupResolved = true;
   state.localOrigin = localOrigin;
   state.apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : state.apiBaseUrl;
   state.clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : '';
@@ -2502,7 +2510,7 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
 };
 
 const openMainWindow = async () => {
-  if (!state.localOrigin) {
+  if (!state.startupResolved) {
     const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
     return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
   }
@@ -2536,7 +2544,7 @@ const openMainWindow = async () => {
 };
 
 const createAdditionalWindow = async (url, runtimeConfig = {}) => {
-  if (!state.localOrigin) {
+  if (!state.startupResolved || !url) {
     return null;
   }
   const browserWindow = createBrowserWindow({
@@ -2549,12 +2557,14 @@ const createAdditionalWindow = async (url, runtimeConfig = {}) => {
 };
 
 const buildMiniChatUrl = ({ mode, sessionId, directory, projectId }) => {
-  const base = state.localOrigin || state.sidecarUrl;
+  const base = shouldUsePackagedUi()
+    ? buildPackagedUiUrl('/mini-chat.html')
+    : state.localOrigin || state.sidecarUrl;
   if (!base) {
     throw new Error('Local UI is not available');
   }
 
-  const url = new URL(shouldUsePackagedUi() ? buildPackagedUiUrl('/mini-chat.html') : '/mini-chat.html', base);
+  const url = new URL(shouldUsePackagedUi() ? base : '/mini-chat.html', base);
   url.searchParams.set('mode', mode === 'session' ? 'session' : 'draft');
   if (sessionId) url.searchParams.set('sessionId', sessionId);
   if (directory) url.searchParams.set('directory', directory);
@@ -2750,9 +2760,11 @@ const resolveInitialUrl = async () => {
   const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
   const hmrApiUrl = `http://127.0.0.1:${hmrApiPort}`;
   const hmrUiUrl = `http://127.0.0.1:${hmrUiPort}`;
-  const localUrl = isDev && await waitForHealth(hmrApiUrl, 5_000, 100)
-    ? hmrApiUrl
-    : await spawnLocalServer();
+  const localUrl = SKIP_LOCAL_SERVER
+    ? null
+    : isDev && await waitForHealth(hmrApiUrl, 5_000, 100)
+      ? hmrApiUrl
+      : await spawnLocalServer();
 
   const localUiUrl = shouldUsePackagedUi()
     ? buildPackagedUiUrl('/index.html')
@@ -2763,10 +2775,10 @@ const resolveInitialUrl = async () => {
   state.sidecarUrl = localUrl;
   const localAvailable = Boolean(localUrl);
 
-  const localOrigin = new URL(localUrl).origin;
+  const localOrigin = localUrl ? new URL(localUrl).origin : null;
   let initialUrl = localUiUrl;
-  let apiBaseUrl = localUrl;
-  let clientToken = readDesktopLocalClientToken();
+  let apiBaseUrl = localUrl || '';
+  let clientToken = localUrl ? readDesktopLocalClientToken() : '';
   let requestHeaders = {};
   let remoteProbe = null;
 
@@ -2794,11 +2806,20 @@ const resolveInitialUrl = async () => {
     }
     if (remoteProbe.status === 'unreachable') {
       state.unreachableHosts.add(apiBaseUrl);
-      apiBaseUrl = localUrl;
-      clientToken = readDesktopLocalClientToken();
+      apiBaseUrl = localUrl || '';
+      clientToken = localUrl ? readDesktopLocalClientToken() : '';
       requestHeaders = {};
       initialUrl = localUiUrl;
     }
+  }
+
+  if (!initialUrl && apiBaseUrl && remoteProbe?.status !== 'unreachable') {
+    initialUrl = apiBaseUrl;
+  }
+  if (!initialUrl) {
+    throw new Error(
+      'OPENCHAMBER_SKIP_LOCAL_SERVER=1 requires bundled UI, a running desktop HMR UI, or a reachable remote instance.',
+    );
   }
 
   const bootOutcome = computeBootOutcome({
@@ -4887,11 +4908,16 @@ app.whenReady().then(async () => {
   }
 
   if (isBackgroundStart) {
-    const { localOrigin, bootOutcome, requestHeaders } = await resolveInitialUrl();
+    const { localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
     state.localOrigin = localOrigin;
+    state.apiBaseUrl = apiBaseUrl;
+    state.clientToken = clientToken;
     state.bootOutcome = bootOutcome ?? null;
     state.requestHeaders = sanitizeRuntimeRequestHeaders(requestHeaders || {});
-    state.initScript = buildInitScript(localOrigin, state.bootOutcome, '', '', state.requestHeaders);
+    // Serverless background startup re-probes the remote when a window is
+    // eventually opened instead of trusting reachability from login time.
+    state.startupResolved = !SKIP_LOCAL_SERVER;
+    state.initScript = buildInitScript(localOrigin, state.bootOutcome, apiBaseUrl, clientToken, state.requestHeaders);
     log.info('[electron] started in background without window');
     return;
   }
