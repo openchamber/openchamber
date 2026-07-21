@@ -5,7 +5,7 @@
  */
 
 import { toast } from '@/components/ui';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionUIStore, type NewSessionDraftState } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
@@ -205,10 +205,11 @@ const createInstantWorktreeDraft = async (options?: {
   }
 
   isCreatingWorktreeSession = true;
+  const pendingRequestId = createPendingDraftWorktreeRequest();
+  let capturedDraft: NewSessionDraftState | null = null;
 
   try {
     const projectRef: ProjectRef = { id: activeProject.id, path: projectDirectory };
-    const pendingRequestId = createPendingDraftWorktreeRequest();
 
     // Lock the draft immediately so no React effect can reset it to the project
     // root while we await the preview / worktree creation below.
@@ -232,6 +233,8 @@ const createInstantWorktreeDraft = async (options?: {
         initialPrompt: options?.initialPrompt,
       });
     }
+    const draft = useSessionUIStore.getState().newSessionDraft;
+    capturedDraft = draft;
 
     const preferredName = generateBranchName();
 
@@ -251,8 +254,7 @@ const createInstantWorktreeDraft = async (options?: {
         preserveDirectoryOverride: true,
         title: options?.title,
         initialPrompt: options?.initialPrompt,
-      });
-      useDirectoryStore.getState().setDirectory(preview.path, { showOverlay: false });
+      }, draft);
     }
 
     const metadata = await createQuickWorktree(projectRef, { preferredName });
@@ -266,18 +268,16 @@ const createInstantWorktreeDraft = async (options?: {
       preserveDirectoryOverride: true,
       title: options?.title,
       initialPrompt: options?.initialPrompt,
-    });
-    useDirectoryStore.getState().setDirectory(metadata.path, { showOverlay: false });
+    }, draft);
 
     return metadata.path;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create worktree';
-    const requestId = useSessionUIStore.getState().newSessionDraft.pendingWorktreeRequestId;
-    if (requestId) {
-      rejectPendingDraftWorktreeRequest(requestId, error instanceof Error ? error : new Error(message));
-      useSessionUIStore.getState().resolvePendingDraftWorktreeTarget(requestId, null);
+    rejectPendingDraftWorktreeRequest(pendingRequestId, error instanceof Error ? error : new Error(message));
+    useSessionUIStore.getState().resolvePendingDraftWorktreeTarget(pendingRequestId, null);
+    if (capturedDraft) {
+      useSessionUIStore.getState().setDraftBootstrapPendingDirectory(null, capturedDraft);
     }
-    useSessionUIStore.getState().setDraftBootstrapPendingDirectory(null);
     toast.error('Failed to create worktree', {
       description: message,
     });

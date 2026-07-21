@@ -48,7 +48,8 @@ describe("input-store attachments", () => {
     useInputStore.setState({
       pendingInputText: null,
       pendingInputMode: "replace",
-      pendingSyntheticParts: null,
+      pendingInputTextBySession: {},
+      pendingSyntheticParts: {},
       activeEditorFile: null,
     })
     useInputStore.getState().setAttachedFiles([])
@@ -134,5 +135,40 @@ describe("input-store attachments", () => {
     await secondAdd
 
     expect(useInputStore.getState().attachedFiles.map((attached) => attached.filename)).toEqual(["hello.txt"])
+  })
+})
+
+describe("input-store target-owned composer context", () => {
+  beforeEach(() => {
+    useInputStore.setState({
+      pendingInputTextBySession: {},
+      pendingSyntheticParts: {},
+    })
+  })
+
+  test("consuming session A synthetic context leaves session B context intact", () => {
+    useInputStore.getState().setPendingSyntheticParts("session-a", [{ text: "A context", synthetic: true }])
+    useInputStore.getState().setPendingSyntheticParts("session-b", [{ text: "B context", synthetic: true }])
+
+    expect(useInputStore.getState().consumePendingSyntheticParts("session-a")).toEqual([
+      { text: "A context", synthetic: true },
+    ])
+    expect(useInputStore.getState().pendingSyntheticParts["session-b"]).toEqual([
+      { text: "B context", synthetic: true },
+    ])
+  })
+
+  test("consuming session A staged text leaves session B text intact", () => {
+    useInputStore.getState().setPendingInputTextForSession("session-a", "A prompt")
+    useInputStore.getState().setPendingInputTextForSession("session-b", "B prompt")
+
+    expect(useInputStore.getState().consumePendingInputTextForSession("session-a")).toEqual({
+      text: "A prompt",
+      mode: "replace",
+    })
+    expect(useInputStore.getState().pendingInputTextBySession["session-b"]).toEqual({
+      text: "B prompt",
+      mode: "replace",
+    })
   })
 })

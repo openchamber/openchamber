@@ -206,13 +206,19 @@ export const IntegrateCommitsSection: React.FC<{
     return { visibleText, instructionsText, payloadText };
   }, []);
 
-  const setPendingInputText = useInputStore((s) => s.setPendingInputText);
+  const setPendingInputTextForSession = useInputStore((s) => s.setPendingInputTextForSession);
   const setPendingSyntheticParts = useInputStore((s) => s.setPendingSyntheticParts);
 
   const handleResolveWithAi = React.useCallback(async (
     payload: { state: IntegrateInProgress; details: IntegrateConflictDetails },
     useNewSession: boolean
   ) => {
+    const targetSessionId = currentSessionId;
+    if (!useNewSession && !targetSessionId) {
+      toast.error(t('gitView.integrate.noActiveSession'), { description: t('gitView.integrate.noActiveSessionDescription') });
+      return;
+    }
+
     const context = await buildConflictContext(payload);
 
     if (useNewSession) {
@@ -230,19 +236,20 @@ export const IntegrateCommitsSection: React.FC<{
       return;
     }
 
-    // Use current session - set pending input text and synthetic parts
-    if (!currentSessionId) {
-      toast.error(t('gitView.integrate.noActiveSession'), { description: t('gitView.integrate.noActiveSessionDescription') });
+    if (!targetSessionId) {
       return;
     }
 
-    setPendingInputText(context.visibleText, 'replace');
-    setPendingSyntheticParts([
+    // Use current session - set pending input text and synthetic parts
+    setPendingInputTextForSession(targetSessionId, context.visibleText, 'replace');
+    setPendingSyntheticParts(targetSessionId, [
       { text: context.instructionsText, synthetic: true },
       { text: context.payloadText, synthetic: true },
     ]);
-    setActiveMainTab('chat');
-  }, [currentSessionId, setActiveMainTab, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts, t]);
+    if (useSessionUIStore.getState().currentSessionId === targetSessionId) {
+      setActiveMainTab('chat');
+    }
+  }, [currentSessionId, setActiveMainTab, buildConflictContext, openNewSessionDraft, setPendingInputTextForSession, setPendingSyntheticParts, t]);
 
   const handleMove = React.useCallback(async () => {
     if (ui.kind !== 'ready') return;

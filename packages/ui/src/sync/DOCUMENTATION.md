@@ -130,6 +130,8 @@ Examples of global-store updates performed in `session-actions.ts`:
 
 ## The golden rule
 
+Async composer submit and draft work must carry its source session or draft identity, directory, and agent context across awaits; an explicitly captured `null` agent must not fall back to newer live config, and the work may never consume, clear, or restore newer composer intent.
+
 When creating a draft in `handleDirectoryEvent`, **only clone the state fields the event will mutate**. Never spread all fields eagerly.
 
 ```typescript

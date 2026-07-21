@@ -1,31 +1,14 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Agent } from '@opencode-ai/sdk/v2';
 import type { QueuedMessage } from '../stores/messageQueueStore';
+import type { SessionUIState } from '@/sync/session-ui-store';
 
 let visibleAgents: Agent[] = [];
 const sendMessageCalls: unknown[][] = [];
-
-const getVisibleAgentsMock = mock(() => visibleAgents);
-
-mock.module('@/stores/useConfigStore', () => ({
-  useConfigStore: {
-    getState: () => ({
-      getVisibleAgents: getVisibleAgentsMock,
-    }),
-  },
-}));
-
-mock.module('@/sync/session-ui-store', () => ({
-  useSessionUIStore: {
-    getState: () => ({
-      sendMessage: (...args: unknown[]) => {
-        sendMessageCalls.push(args);
-        return Promise.resolve();
-      },
-      sessionAbortFlags: new Map(),
-    }),
-  },
-}));
+const captureSendMessage: SessionUIState['sendMessage'] = (...args) => {
+  sendMessageCalls.push(args);
+  return Promise.resolve();
+};
 
 import {
   buildQueuedAutoSendPayload,
@@ -90,7 +73,7 @@ describe('buildQueuedAutoSendPayload', () => {
       },
     ];
 
-    const payload = buildQueuedAutoSendPayload(queue);
+    const payload = buildQueuedAutoSendPayload(queue, visibleAgents);
 
     expect(payload).not.toBeNull();
     expect(payload?.queuedMessageId).toBe('queued-1');
@@ -116,7 +99,7 @@ describe('buildQueuedAutoSendPayload', () => {
       },
     ];
 
-    const payload = buildQueuedAutoSendPayload(queue);
+    const payload = buildQueuedAutoSendPayload(queue, visibleAgents);
 
     expect(payload).not.toBeNull();
     expect(payload?.agentMentionName).toBe('Builder');
@@ -148,7 +131,7 @@ describe('buildQueuedAutoSendPayload', () => {
       },
     ];
 
-    const payload = buildQueuedAutoSendPayload(queue);
+    const payload = buildQueuedAutoSendPayload(queue, visibleAgents);
 
     expect(payload).not.toBeNull();
     expect(payload?.queuedMessageId).toBe('queued-attachments');
@@ -164,7 +147,7 @@ describe('buildQueuedAutoSendPayload', () => {
         content: 'queued message',
         createdAt: 1,
       },
-    ]);
+    ], visibleAgents);
 
     expect(payload).not.toBeNull();
     await sendQueuedAutoSendPayload('session-original', payload!, {
@@ -172,7 +155,7 @@ describe('buildQueuedAutoSendPayload', () => {
       modelID: 'model-1',
       agent: 'agent-1',
       variant: 'variant-1',
-    });
+    }, captureSendMessage);
 
     expect(sendMessageCalls.length).toBe(1);
     expect(sendMessageCalls[0]).toEqual([
@@ -185,7 +168,80 @@ describe('buildQueuedAutoSendPayload', () => {
       undefined,
       'variant-1',
       'normal',
-      { sessionId: 'session-original' },
+      {
+        sessionId: 'session-original',
+        goalArm: { armed: false, objectiveOverride: null },
+      },
     ]);
+  });
+
+  test('forwards the queued goal and synthetic context to its captured session', async () => {
+    const syntheticParts = [{ text: 'A-only context', synthetic: true as const }];
+    const goalArm = { armed: true, objectiveOverride: 'A objective' };
+    const payload = buildQueuedAutoSendPayload([
+      {
+        id: 'queued-a',
+        content: 'queued A message',
+        createdAt: 1,
+        syntheticParts,
+        goalArm,
+      },
+    ], visibleAgents);
+
+    expect(payload).not.toBeNull();
+    await sendQueuedAutoSendPayload('session-a', payload!, {
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    }, captureSendMessage);
+
+    expect(sendMessageCalls).toEqual([[
+      'queued A message',
+      'provider-a',
+      'model-a',
+      undefined,
+      [],
+      undefined,
+      syntheticParts,
+      undefined,
+      'normal',
+      { sessionId: 'session-a', goalArm },
+    ]]);
+  });
+
+  test('forwards captured routing context, including an explicit null agent', async () => {
+    const payload = buildQueuedAutoSendPayload([
+      {
+        id: 'queued-a',
+        content: 'queued A message',
+        createdAt: 1,
+        sessionDirectory: '/projects/alpha',
+        sessionAgent: null,
+      },
+    ], visibleAgents);
+
+    expect(payload).not.toBeNull();
+    await sendQueuedAutoSendPayload('session-a', payload!, {
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      agent: 'live-agent-b',
+    }, captureSendMessage);
+
+    expect(sendMessageCalls).toEqual([[
+      'queued A message',
+      'provider-a',
+      'model-a',
+      undefined,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      'normal',
+      {
+        sessionId: 'session-a',
+        sessionDirectory: '/projects/alpha',
+        sessionAgent: null,
+        goalArm: { armed: false, objectiveOverride: null },
+      },
+    ]]);
   });
 });

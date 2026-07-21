@@ -12,6 +12,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
 import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useUIStore } from '@/stores/useUIStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
@@ -321,6 +322,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
@@ -329,6 +331,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   // sessionAttentionStates removed — now using notification-store directly in SessionNodeItem
   const worktreeMetadata = useSessionUIStore((state) => state.worktreeMetadata);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const currentSessionOwnerProjectId = React.useMemo(
+    () => resolveProjectForSessionDirectory(projects, availableWorktreesByProject, currentSessionDirectory)?.id ?? null,
+    [availableWorktreesByProject, currentSessionDirectory, projects],
+  );
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   // The sidebar tree's +-buttons (project / group / folder) open a draft but,
   // unlike selecting an existing session, don't navigate. VS Code's compact view
@@ -1092,6 +1098,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     activeSessionByProject,
     setActiveSessionByProject,
     currentSessionId,
+    currentSessionOwnerProjectId,
     handleSessionSelect,
     newSessionDraftOpen,
     mobileVariant,

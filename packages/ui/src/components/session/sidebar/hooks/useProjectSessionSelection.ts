@@ -16,6 +16,7 @@ type Args = {
   activeSessionByProject: Map<string, string>;
   setActiveSessionByProject: React.Dispatch<React.SetStateAction<Map<string, string>>>;
   currentSessionId: string | null;
+  currentSessionOwnerProjectId?: string | null;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, projectId?: string | null) => void;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
@@ -24,6 +25,65 @@ type Args = {
   setSessionSwitcherOpen: (open: boolean) => void;
 };
 
+type MissingProjectSessionSelection =
+  | { kind: 'preserve-current' }
+  | { kind: 'open-draft' }
+  | { kind: 'select-session'; sessionId: string }
+  | { kind: 'none' };
+
+/**
+ * Resolves the active-project action after its session map does not contain the
+ * current session. An authoritative directory owner takes priority; otherwise,
+ * rendered session maps preserve unknown sessions while worktree data catches up.
+ */
+export function resolveMissingProjectSessionSelection<T>({
+  activeProjectId,
+  currentSessionId,
+  currentSessionOwnerProjectId,
+  projectMap,
+  metaByProject,
+  rememberedSessionId,
+  fallbackSessionId,
+}: {
+  activeProjectId: string;
+  currentSessionId: string | null;
+  currentSessionOwnerProjectId?: string | null;
+  projectMap: ReadonlyMap<string, T> | undefined;
+  metaByProject: ReadonlyMap<string, ReadonlyMap<string, T>>;
+  rememberedSessionId: string | undefined;
+  fallbackSessionId: string | null;
+}): MissingProjectSessionSelection {
+  if (currentSessionId && currentSessionOwnerProjectId === activeProjectId) {
+    return { kind: 'preserve-current' };
+  }
+
+  if (currentSessionOwnerProjectId == null) {
+    const currentSessionBelongsToAnotherProject = Boolean(
+      currentSessionId
+      && Array.from(metaByProject.entries()).some(
+        ([projectId, sessions]) => projectId !== activeProjectId && sessions.has(currentSessionId),
+      ),
+    );
+    if (currentSessionId && projectMap && !currentSessionBelongsToAnotherProject) {
+      return { kind: 'preserve-current' };
+    }
+  }
+
+  if (!projectMap || projectMap.size === 0) {
+    return { kind: 'open-draft' };
+  }
+
+  const remembered = rememberedSessionId && projectMap.has(rememberedSessionId)
+    ? rememberedSessionId
+    : null;
+  const targetSessionId = remembered ?? fallbackSessionId;
+  if (!targetSessionId || targetSessionId === currentSessionId) {
+    return { kind: 'none' };
+  }
+
+  return { kind: 'select-session', sessionId: targetSessionId };
+}
+
 export const useProjectSessionSelection = (args: Args): void => {
   const {
     projectSections,
@@ -31,6 +91,7 @@ export const useProjectSessionSelection = (args: Args): void => {
     activeSessionByProject,
     setActiveSessionByProject,
     currentSessionId,
+    currentSessionOwnerProjectId,
     handleSessionSelect,
     newSessionDraftOpen,
     mobileVariant,
@@ -117,16 +178,21 @@ export const useProjectSessionSelection = (args: Args): void => {
       return;
     }
 
-    // Path A' — currentSessionId is set but not in stale projectMap.
-    // Preserve user's explicit selection when the projectMap exists but
-    // is missing the session (worktree data not yet loaded). For
-    // empty projects (projectMap is undefined), fall through to Path B
-    // so a new session draft is opened.
-    if (currentSessionId && projectMap) {
+    const selection = resolveMissingProjectSessionSelection({
+      activeProjectId,
+      currentSessionId,
+      currentSessionOwnerProjectId,
+      projectMap,
+      metaByProject: projectSessionMeta.metaByProject,
+      rememberedSessionId: activeSessionByProject.get(activeProjectId),
+      fallbackSessionId: projectSessionMeta.firstSessionByProject.get(activeProjectId)?.id ?? null,
+    });
+
+    if (selection.kind === 'preserve-current') {
       return;
     }
 
-    if (!projectMap || projectMap.size === 0) {
+    if (selection.kind === 'open-draft') {
       setActiveMainTab('chat');
       if (mobileVariant) {
         setSessionSwitcherOpen(false);
@@ -138,21 +204,16 @@ export const useProjectSessionSelection = (args: Args): void => {
       return;
     }
 
-    const rememberedSessionId = activeSessionByProject.get(activeProjectId);
-    const remembered = rememberedSessionId && projectMap.has(rememberedSessionId)
-      ? rememberedSessionId
-      : null;
-    const fallback = projectSessionMeta.firstSessionByProject.get(activeProjectId)?.id ?? null;
-    const targetSessionId = remembered ?? fallback;
-    if (!targetSessionId || targetSessionId === currentSessionId) {
+    if (selection.kind !== 'select-session') {
       return;
     }
-    const targetDirectory = projectMap.get(targetSessionId)?.directory ?? null;
-    handleSessionSelect(targetSessionId, targetDirectory, activeProjectId);
+    const targetDirectory = projectMap?.get(selection.sessionId)?.directory ?? null;
+    handleSessionSelect(selection.sessionId, targetDirectory, activeProjectId);
   }, [
     activeProjectId,
     activeSessionByProject,
     currentSessionId,
+    currentSessionOwnerProjectId,
     handleSessionSelect,
     newSessionDraftOpen,
     mobileVariant,

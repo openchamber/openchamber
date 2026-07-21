@@ -43,6 +43,7 @@ import type {
   GitRemote,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { sendPullRequestSyntheticPrompt } from './pullRequestChatDispatch';
 
 type MergeMethod = 'merge' | 'squash' | 'rebase';
 type DetectedUpstream = { owner: string; repo: string; url: string; defaultBranch?: string; defaultBranchSha?: string | null; remoteName?: string | null };
@@ -240,6 +241,7 @@ type TimelineCommentItem = {
 
 type ChatDispatchTarget = {
   sessionId: string;
+  directory: string;
   providerID: string;
   modelID: string;
   currentAgentName: string | null;
@@ -713,12 +715,13 @@ export const PullRequestSection: React.FC<{
 
     return {
       sessionId: currentSessionId,
+      directory,
       providerID,
       modelID,
       currentAgentName: currentAgentName ?? null,
       currentVariant: currentVariant ?? null,
     };
-  }, [currentSessionId, t]);
+  }, [currentSessionId, directory, t]);
 
   const dispatchSyntheticPrompt = React.useCallback((
     target: ChatDispatchTarget,
@@ -726,19 +729,7 @@ export const PullRequestSection: React.FC<{
     instructionsText: string,
     payloadText: string,
   ) => {
-    void useSessionUIStore.getState().sendMessage(
-      visibleText,
-      target.providerID,
-      target.modelID,
-      target.currentAgentName ?? undefined,
-      undefined,
-      undefined,
-      [
-        { text: instructionsText, synthetic: true },
-        { text: payloadText, synthetic: true },
-      ],
-      target.currentVariant ?? undefined,
-    ).catch((e) => {
+    void sendPullRequestSyntheticPrompt(target, visibleText, instructionsText, payloadText).catch((e) => {
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.sendMessageFailed'), { description: message });
     });

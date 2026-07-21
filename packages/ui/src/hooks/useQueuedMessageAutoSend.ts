@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionUIStore, type SessionUIState } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
@@ -39,13 +39,20 @@ const hasRecentAbort = (sessionId: string): boolean => {
   return Date.now() - abortRecord.timestamp < RECENT_ABORT_WINDOW_MS;
 };
 
-export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
+export const buildQueuedAutoSendPayload = (
+  queue: QueuedMessage[],
+  agents = useConfigStore.getState().getVisibleAgents(),
+) => {
   const queued = queue[0];
   if (!queued) {
     return null;
   }
 
-  const agents = useConfigStore.getState().getVisibleAgents();
+  const sessionDirectory = typeof queued.sessionDirectory === 'string' && queued.sessionDirectory.trim().length > 0
+    ? queued.sessionDirectory
+    : undefined;
+  const hasCapturedSessionAgent = Object.prototype.hasOwnProperty.call(queued, 'sessionAgent');
+
   const { sanitizedText, mention } = parseAgentMentions(queued.content, agents);
 
   return {
@@ -54,10 +61,16 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
     primaryAttachments: queued.attachments ?? [],
     agentMentionName: mention?.name,
     sendConfig: queued.sendConfig,
+    syntheticParts: queued.syntheticParts,
+    goalArm: queued.goalArm,
+    sessionDirectory,
+    hasCapturedSessionAgent,
+    sessionAgent: queued.sessionAgent,
   };
 };
 
 type QueuedAutoSendPayload = NonNullable<ReturnType<typeof buildQueuedAutoSendPayload>>;
+type SendMessage = SessionUIState['sendMessage'];
 type ResolvedQueuedSendConfig = {
   providerID: string;
   modelID: string;
@@ -69,18 +82,28 @@ export const sendQueuedAutoSendPayload = (
   sessionId: string,
   payload: QueuedAutoSendPayload,
   resolved: ResolvedQueuedSendConfig,
+  sendMessage: SendMessage = useSessionUIStore.getState().sendMessage,
 ) => {
-  return useSessionUIStore.getState().sendMessage(
+  const options = {
+    sessionId,
+    ...(payload.sessionDirectory ? { sessionDirectory: payload.sessionDirectory } : {}),
+    ...(payload.hasCapturedSessionAgent ? { sessionAgent: payload.sessionAgent } : {}),
+    // Legacy queue records have no goal. Pass an explicit disarmed payload
+    // so this queued A send cannot consume a newly armed B goal.
+    goalArm: payload.goalArm ?? { armed: false, objectiveOverride: null },
+  };
+
+  return sendMessage(
     payload.primaryText,
     resolved.providerID,
     resolved.modelID,
-    resolved.agent,
+    payload.hasCapturedSessionAgent ? payload.sessionAgent ?? undefined : resolved.agent,
     payload.primaryAttachments,
     payload.agentMentionName,
-    undefined,
+    payload.syntheticParts?.length ? payload.syntheticParts : undefined,
     resolved.variant,
     'normal',
-    { sessionId },
+    options,
   );
 };
 
