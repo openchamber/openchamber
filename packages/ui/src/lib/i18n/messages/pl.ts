@@ -391,6 +391,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.goal.aria': 'Uruchom to zadanie jako cel, do którego agent dąży aż do ukończenia',
   'sessions.scheduledTasks.editor.goal.budgetLabel': 'Budżet tokenów',
   'sessions.scheduledTasks.editor.goal.budgetAria': 'Ogranicz cel budżetem tokenów',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.label': 'Automatycznie akceptuj uprawnienia',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.aria': 'Uruchom sesję zadania z włączonym automatycznym akceptowaniem uprawnień',
   'sessions.scheduledTasks.editor.actions.closeAria': 'Zamknij',
   'sessions.scheduledTasks.editor.actions.cancel': 'Anuluj',
   'sessions.scheduledTasks.editor.actions.save': 'Zapisz',

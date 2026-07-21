@@ -297,6 +297,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.goal.aria': '이 작업을 에이전트가 완료까지 추진하는 목표로 실행합니다',
   'sessions.scheduledTasks.editor.goal.budgetLabel': '토큰 예산',
   'sessions.scheduledTasks.editor.goal.budgetAria': '목표를 토큰 예산으로 제한합니다',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.label': '권한 자동 승인',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.aria': '권한 자동 승인이 켜진 상태로 작업 세션을 시작합니다',
   'sessions.scheduledTasks.editor.actions.closeAria': '닫기',
   'sessions.scheduledTasks.editor.actions.cancel': '취소',
   'sessions.scheduledTasks.editor.actions.save': '저장',

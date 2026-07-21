@@ -310,6 +310,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.goal.aria': '將此任務作為代理持續推進直至完成的目標執行',
   'sessions.scheduledTasks.editor.goal.budgetLabel': '權杖預算',
   'sessions.scheduledTasks.editor.goal.budgetAria': '以權杖預算限制該目標',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.label': '自動接受權限',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.aria': '啟動任務工作階段時啟用權限自動接受',
   'sessions.scheduledTasks.editor.actions.closeAria': '關閉',
   'sessions.scheduledTasks.editor.actions.cancel': '取消',
   'sessions.scheduledTasks.editor.actions.save': '儲存',

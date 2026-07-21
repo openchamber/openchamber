@@ -715,10 +715,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     const promptReadOnly = parentSession ? !allowPromptingSubagentSessions : readOnly;
 
     React.useEffect(() => {
-        if (typeof window === 'undefined' || window.parent === window) {
+        // VS Code/Cursor/Positron webviews delete window.parent (and window.top).
+        // The old `window.parent === window` check does not catch that, so
+        // `window.parent.postMessage(...)` threw on chat open:
+        // TypeError: Cannot read properties of undefined (reading 'postMessage')
+        if (typeof window === 'undefined' || !window.parent || window.parent === window) {
             return;
         }
 
+        const parentWindow = window.parent;
         const applySetting = (value: boolean) => {
             useUIStore.getState().setAllowPromptingSubagentSessions(value);
         };
@@ -729,7 +734,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
             applySetting(payload.allowPromptingSubagentSessions);
         };
         const handleMessage = (event: MessageEvent) => {
-            if (event.source !== window.parent || event.origin !== window.location.origin) return;
+            if (event.source !== parentWindow || event.origin !== window.location.origin) return;
             const data = event.data as { type?: unknown; payload?: { allowPromptingSubagentSessions?: unknown } };
             if (data?.type !== 'openchamber:chat-settings-sync'
                 || typeof data.payload?.allowPromptingSubagentSessions !== 'boolean') return;
@@ -738,7 +743,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
 
         scopedWindow.__openchamberApplyChatSettingsSync = applySync;
         window.addEventListener('message', handleMessage);
-        window.parent.postMessage({ type: 'openchamber:chat-settings-request' }, window.location.origin);
+        parentWindow.postMessage({ type: 'openchamber:chat-settings-request' }, window.location.origin);
         return () => {
             window.removeEventListener('message', handleMessage);
             if (scopedWindow.__openchamberApplyChatSettingsSync === applySync) {

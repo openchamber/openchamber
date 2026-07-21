@@ -297,6 +297,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.editor.goal.aria": "Виконати це завдання як ціль, яку агент веде до завершення",
   "sessions.scheduledTasks.editor.goal.budgetLabel": "Бюджет токенів",
   "sessions.scheduledTasks.editor.goal.budgetAria": "Обмежити ціль бюджетом токенів",
+  "sessions.scheduledTasks.editor.permissionAutoAccept.label": "Автоматично приймати дозволи",
+  "sessions.scheduledTasks.editor.permissionAutoAccept.aria": "Запускати сесію завдання з увімкненим автоматичним прийняттям дозволів",
   "sessions.scheduledTasks.editor.actions.closeAria": "Закрити",
   "sessions.scheduledTasks.editor.actions.cancel": "Скасувати",
   "sessions.scheduledTasks.editor.actions.save": "Зберегти",

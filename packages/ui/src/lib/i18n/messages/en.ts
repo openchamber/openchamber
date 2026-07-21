@@ -296,6 +296,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.goal.aria': 'Run this task as a goal the agent pursues to completion',
   'sessions.scheduledTasks.editor.goal.budgetLabel': 'Token budget',
   'sessions.scheduledTasks.editor.goal.budgetAria': 'Limit the goal to a token budget',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.label': 'Auto-accept permissions',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.aria': 'Start the task session with permission auto-accept enabled',
   'sessions.scheduledTasks.editor.actions.closeAria': 'Close',
   'sessions.scheduledTasks.editor.actions.cancel': 'Cancel',
   'sessions.scheduledTasks.editor.actions.save': 'Save',

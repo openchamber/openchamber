@@ -139,6 +139,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.goal.aria': 'Exécuter cette tâche comme un objectif que l\'agent poursuit jusqu\'au bout',
   'sessions.scheduledTasks.editor.goal.budgetLabel': 'Budget de tokens',
   'sessions.scheduledTasks.editor.goal.budgetAria': 'Limiter l’objectif à un budget de tokens',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.label': 'Accepter automatiquement les autorisations',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.aria': 'Démarrer la session de la tâche avec l’acceptation automatique des autorisations activée',
   'sessions.scheduledTasks.editor.actions.closeAria': 'Fermer',
   'sessions.scheduledTasks.editor.actions.cancel': 'Annuler',
   'sessions.scheduledTasks.editor.actions.save': 'Sauvegarder',

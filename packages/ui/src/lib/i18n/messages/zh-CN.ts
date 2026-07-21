@@ -297,6 +297,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.goal.aria': '将此任务作为代理持续推进直至完成的目标运行',
   'sessions.scheduledTasks.editor.goal.budgetLabel': '令牌预算',
   'sessions.scheduledTasks.editor.goal.budgetAria': '用令牌预算限制该目标',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.label': '自动接受权限',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.aria': '启动任务会话时启用权限自动接受',
   'sessions.scheduledTasks.editor.actions.closeAria': '关闭',
   'sessions.scheduledTasks.editor.actions.cancel': '取消',
   'sessions.scheduledTasks.editor.actions.save': '保存',

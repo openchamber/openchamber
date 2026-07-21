@@ -297,6 +297,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.goal.aria': 'このタスクをエージェントが完了まで追求するゴールとして実行します',
   'sessions.scheduledTasks.editor.goal.budgetLabel': 'トークン予算',
   'sessions.scheduledTasks.editor.goal.budgetAria': 'ゴールをトークン予算で制限します',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.label': '権限を自動承認',
+  'sessions.scheduledTasks.editor.permissionAutoAccept.aria': '権限の自動承認を有効にしてタスクのセッションを開始します',
   'sessions.scheduledTasks.editor.actions.closeAria': '閉じる',
   'sessions.scheduledTasks.editor.actions.cancel': 'キャンセル',
   'sessions.scheduledTasks.editor.actions.save': '保存',
