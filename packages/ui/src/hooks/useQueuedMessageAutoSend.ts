@@ -12,7 +12,6 @@ import { useDirectorySync } from '@/sync/sync-context';
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
 const RECENT_ABORT_WINDOW_MS = 2000;
-
 const AUTO_SEND_RETRY_BASE_DELAY_MS = 2000;
 const AUTO_SEND_RETRY_MAX_DELAY_MS = 60000;
 
@@ -31,12 +30,21 @@ export const isQueuedAutoSendBackedOff = (
   now: number,
 ): boolean => failure !== undefined && failure.messageId === messageId && now < failure.nextAttemptAt;
 
-const hasRecentAbort = (sessionId: string): boolean => {
+type RetryState = {
+  queuedMessageId: string;
+  timer?: ReturnType<typeof setTimeout>;
+};
+
+export const hasRecentAbort = (sessionId: string): boolean => {
   const abortRecord = useSessionUIStore.getState().sessionAbortFlags.get(sessionId);
   if (!abortRecord) {
     return false;
   }
   return Date.now() - abortRecord.timestamp < RECENT_ABORT_WINDOW_MS;
+};
+
+export const getAbortWindowRetryDelayMs = (abortTimestamp: number, now: number = Date.now()): number => {
+  return Math.max(RECENT_ABORT_WINDOW_MS - (now - abortTimestamp), 0);
 };
 
 export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
@@ -80,7 +88,7 @@ export const sendQueuedAutoSendPayload = (
     undefined,
     resolved.variant,
     'normal',
-    { sessionId },
+    { sessionId, delivery: 'steer' as const },
   );
 };
 
@@ -145,11 +153,21 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const sendFailuresRef = React.useRef<Map<string, QueuedAutoSendFailure>>(new Map());
   const previousStatusRef = React.useRef<Map<string, SessionStatusType>>(new Map());
   const autoReviewBlockedSessionsRef = React.useRef<Set<string>>(new Set());
+  const retryStateRef = React.useRef<Map<string, RetryState>>(new Map());
+  const dispatchRef = React.useRef<((sessionId: string) => void) | undefined>(undefined);
 
   React.useEffect(() => {
     if (!enabled) {
       return;
     }
+
+    const clearRetryState = (sessionId: string) => {
+      const state = retryStateRef.current.get(sessionId);
+      if (state?.timer) {
+        clearTimeout(state.timer);
+      }
+      retryStateRef.current.delete(sessionId);
+    };
 
     const dispatchSessionQueue = async (sessionId: string, queueSnapshot: QueuedMessage[]) => {
       if (queueSnapshot.length === 0) {
@@ -176,6 +194,16 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
+      const retryState = retryStateRef.current.get(sessionId);
+      if (retryState && retryState.queuedMessageId !== payload.queuedMessageId) {
+        clearRetryState(sessionId);
+      }
+
+      const currentRetryState = retryStateRef.current.get(sessionId);
+      if (currentRetryState?.queuedMessageId === payload.queuedMessageId && currentRetryState.timer) {
+        return;
+      }
+
       const failure = sendFailuresRef.current.get(sessionId);
       if (failure && failure.messageId !== payload.queuedMessageId) {
         sendFailuresRef.current.delete(sessionId);
@@ -183,6 +211,30 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
+      const abortRecord = useSessionUIStore.getState().sessionAbortFlags.get(sessionId);
+      if (abortRecord) {
+        const ageMs = Date.now() - abortRecord.timestamp;
+        if (ageMs < RECENT_ABORT_WINDOW_MS) {
+          const currentAbortRetryState = retryStateRef.current.get(sessionId);
+          if (currentAbortRetryState?.queuedMessageId === payload.queuedMessageId && currentAbortRetryState.timer) {
+            return;
+          }
+
+          if (currentAbortRetryState?.timer) {
+            clearTimeout(currentAbortRetryState.timer);
+          }
+
+          const timer = setTimeout(() => {
+            retryStateRef.current.delete(sessionId);
+            dispatchRef.current?.(sessionId);
+          }, getAbortWindowRetryDelayMs(abortRecord.timestamp));
+          retryStateRef.current.set(sessionId, {
+            queuedMessageId: payload.queuedMessageId,
+            timer,
+          });
+          return;
+        }
+      }
       // Use send config captured at queue time; fall back to current config
       const captured = payload.sendConfig;
       const resolved = captured?.providerID && captured?.modelID
@@ -202,19 +254,41 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           variant: resolved.variant,
         });
         useMessageQueueStore.getState().removeFromQueue(sessionId, payload.queuedMessageId);
+        clearRetryState(sessionId);
         sendFailuresRef.current.delete(sessionId);
       } catch (error) {
         console.warn('[queue] queued auto-send failed:', error);
         const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
         const failures = priorFailures + 1;
+        const nextAttemptAt = Date.now() + getQueuedAutoSendRetryDelayMs(failures);
         sendFailuresRef.current.set(sessionId, {
           messageId: payload.queuedMessageId,
           failures,
-          nextAttemptAt: Date.now() + getQueuedAutoSendRetryDelayMs(failures),
+          nextAttemptAt,
+        });
+        const existingState = retryStateRef.current.get(sessionId);
+        if (existingState?.timer) {
+          clearTimeout(existingState.timer);
+        }
+        const timer = setTimeout(() => {
+          retryStateRef.current.delete(sessionId);
+          dispatchRef.current?.(sessionId);
+        }, Math.max(nextAttemptAt - Date.now(), 0));
+        retryStateRef.current.set(sessionId, {
+          queuedMessageId: payload.queuedMessageId,
+          timer,
         });
       } finally {
         inFlightSessionsRef.current.delete(sessionId);
       }
+    };
+
+    dispatchRef.current = (sessionId: string) => {
+      const queue = useMessageQueueStore.getState().queuedMessages[sessionId];
+      if (!queue || queue.length === 0) {
+        return;
+      }
+      void dispatchSessionQueue(sessionId, queue);
     };
 
     const statusRecord = sessionStatusRecord ?? {};
@@ -247,6 +321,29 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       nextStatusMap.set(sessionId, currentStatusType);
     });
 
+    const activeQueueSessions = new Set(queueEntries.map(([sessionId]) => sessionId));
+    for (const [sessionId, retryState] of retryStateRef.current.entries()) {
+      if (activeQueueSessions.has(sessionId)) {
+        continue;
+      }
+      if (retryState.timer) {
+        clearTimeout(retryState.timer);
+      }
+      retryStateRef.current.delete(sessionId);
+    }
+
     previousStatusRef.current = nextStatusMap;
   }, [enabled, queuedMessages, sessionStatusRecord, autoReviewRuns]);
+
+  React.useEffect(() => {
+    const retryStateMap = retryStateRef.current;
+    return () => {
+      for (const retryState of retryStateMap.values()) {
+        if (retryState.timer) {
+          clearTimeout(retryState.timer);
+        }
+      }
+      retryStateMap.clear();
+    };
+  }, []);
 }

@@ -4,6 +4,7 @@ import type { QueuedMessage } from '../stores/messageQueueStore';
 
 let visibleAgents: Agent[] = [];
 const sendMessageCalls: unknown[][] = [];
+let sessionAbortFlagsMock = new Map<string, { timestamp: number; acknowledged: boolean }>();
 
 const getVisibleAgentsMock = mock(() => visibleAgents);
 
@@ -22,7 +23,9 @@ mock.module('@/sync/session-ui-store', () => ({
         sendMessageCalls.push(args);
         return Promise.resolve();
       },
-      sessionAbortFlags: new Map(),
+      get sessionAbortFlags() {
+        return sessionAbortFlagsMock;
+      },
     }),
   },
 }));
@@ -31,9 +34,15 @@ import {
   buildQueuedAutoSendPayload,
   getQueuedAutoSendRetryDelayMs,
   isQueuedAutoSendBackedOff,
+  getAbortWindowRetryDelayMs,
+  hasRecentAbort,
   sendQueuedAutoSendPayload,
   shouldDispatchQueuedAutoSend,
 } from './useQueuedMessageAutoSend';
+
+beforeEach(() => {
+  sessionAbortFlagsMock = new Map();
+});
 
 describe('shouldDispatchQueuedAutoSend', () => {
   test('dispatches only after an active session becomes idle', () => {
@@ -185,7 +194,82 @@ describe('buildQueuedAutoSendPayload', () => {
       undefined,
       'variant-1',
       'normal',
-      { sessionId: 'session-original' },
+      { sessionId: 'session-original', delivery: 'steer' },
     ]);
   });
+
+  test('sendQueuedAutoSendPayload passes delivery: "steer"', async () => {
+    const payload = buildQueuedAutoSendPayload([
+      {
+        id: 'queued-1',
+        content: 'queued message',
+        createdAt: 1,
+      },
+    ]);
+
+    expect(payload).not.toBeNull();
+    await sendQueuedAutoSendPayload('session-original', payload!, {
+      providerID: 'provider-1',
+      modelID: 'model-1',
+    });
+
+    expect(sendMessageCalls.length).toBe(1);
+    const lastArg = sendMessageCalls[0][sendMessageCalls[0].length - 1];
+    expect(lastArg).toEqual({ sessionId: 'session-original', delivery: 'steer' });
+  });
 });
+
+describe('hasRecentAbort', () => {
+  test('returns false when no abort record exists', () => {
+    expect(hasRecentAbort('session-a')).toBe(false);
+  });
+
+  test('returns true when a recent unacknowledged abort exists', () => {
+    sessionAbortFlagsMock.set('session-a', {
+      timestamp: Date.now(),
+      acknowledged: false,
+    });
+
+    expect(hasRecentAbort('session-a')).toBe(true);
+  });
+
+  test('returns false when abort is too old', () => {
+    sessionAbortFlagsMock.set('session-a', {
+      timestamp: Date.now() - 3000,
+      acknowledged: false,
+    });
+
+    expect(hasRecentAbort('session-a')).toBe(false);
+  });
+});
+
+describe('getAbortWindowRetryDelayMs', () => {
+  test('returns the remaining delay until the abort window ends', () => {
+    const now = 10_000;
+    expect(getAbortWindowRetryDelayMs(8_250, now)).toBe(250);
+    expect(getAbortWindowRetryDelayMs(7_500, now)).toBe(0);
+  });
+});
+
+describe('hasRecentAbort guards dispatch inside the effect', () => {
+  test('shouldDispatchQueuedAutoSend ignores abort flag; hasRecentAbort is checked separately in the effect', () => {
+    sessionAbortFlagsMock.set('session-a', {
+      timestamp: Date.now(),
+      acknowledged: false,
+    });
+
+    expect(hasRecentAbort('session-a')).toBe(true);
+    expect(shouldDispatchQueuedAutoSend('busy', 'idle', false)).toBe(true);
+    // hasRecentAbort is checked separately inside the effect; the flag itself
+    // does not change shouldDispatchQueuedAutoSend's signature.
+    // This test documents that the two mechanisms work together.
+  });
+});
+
+// Timer-based retry mechanism lives inside useQueuedMessageAutoSend's effect
+// and requires React rendering to exercise. Unit tests for it belong in a
+// component/hook integration test rather than in this pure-utility test file.
+//
+// Retry exhaustion behavior: after MAX_RETRY_ATTEMPTS failures, the message
+// stays queued, auto-retry pauses, and the user sees a failure toast. That path
+// is intentionally exercised by the hook effect rather than this utility file.

@@ -260,6 +260,7 @@ export type SessionUIState = {
   setDraftPreserveDirectoryOverride: (value: boolean) => void
   setDraftPermissionAutoAcceptEnabled: (enabled: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
+  setSessionAbortFlag: (sessionId: string) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
   clearError: () => void
@@ -848,6 +849,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const flags = new Map(s.sessionAbortFlags)
       const existing = flags.get(sessionId)
       if (existing) flags.set(sessionId, { ...existing, acknowledged: true })
+      return { sessionAbortFlags: flags }
+    }),
+
+  setSessionAbortFlag: (sessionId) =>
+    set((s) => {
+      const flags = new Map(s.sessionAbortFlags)
+      flags.set(sessionId, { timestamp: Date.now(), acknowledged: false })
       return { sessionAbortFlags: flags }
     }),
 

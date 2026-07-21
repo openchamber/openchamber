@@ -4,6 +4,7 @@
  */
 
 import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import { toast } from '@/components/ui'
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -12,6 +13,7 @@ import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { opencodeClient } from "@/lib/opencode/client"
 import { mergeSessionDirectoryMetadata, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
+import { formatMessage, useI18nStore } from '@/lib/i18n'
 import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
@@ -987,6 +989,20 @@ function materializeConfirmedSendRecords(
 // Abort
 // ---------------------------------------------------------------------------
 
+async function abortSessionWithFlag(sessionId: string, directory?: string | null, shouldSetFlag: boolean = true): Promise<void> {
+  if (shouldSetFlag) {
+    useSessionUIStore.getState().setSessionAbortFlag(sessionId)
+  }
+  try {
+    await sdk().session.abort({ sessionID: sessionId, directory: directory ?? undefined })
+  } catch (error) {
+    if (shouldSetFlag) {
+      toast.error(formatMessage(useI18nStore.getState().dictionary, 'gitView.toast.abortOperationFailed'))
+    }
+    console.error("[session-actions] abort failed", error)
+  }
+}
+
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
   // The abort must carry the SESSION'S directory, not the active UI directory:
   // OpenCode routes the request to the per-directory instance, and an abort
@@ -994,11 +1010,7 @@ export async function abortCurrentOperation(sessionId: string): Promise<void> {
   // (the "stop button does nothing" report — sessions in another project/
   // worktree than the UI's current directory could never be aborted).
   const { directory } = dirStoreForSession(sessionId)
-  try {
-    await sdk().session.abort({ sessionID: sessionId, directory })
-  } catch (error) {
-    console.error("[session-actions] abort failed", error)
-  }
+  await abortSessionWithFlag(sessionId, directory)
 }
 
 // ---------------------------------------------------------------------------
@@ -1187,11 +1199,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // Abort if busy before mutating session state
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
-    try {
-      await sdk().session.abort({ sessionID: sessionId, directory })
-    } catch {
-      // ignore abort errors
-    }
+    await abortSessionWithFlag(sessionId, directory, false)
   }
 
   // Extract message text for prompt restoration (only non-synthetic text parts —
@@ -1319,11 +1327,7 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   // Abort if busy
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
-    try {
-      await sdk().session.abort({ sessionID: sessionId, directory })
-    } catch {
-      // ignore
-    }
+    await abortSessionWithFlag(sessionId, directory, false)
   }
 
   const result = await sdk().session.unrevert({ sessionID: sessionId, directory })
