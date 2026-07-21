@@ -26,7 +26,7 @@ import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSession
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
-import { nodeContainsSessionId } from './sessionNodeItemUtils';
+import { nodeContainsSessionId, nodeHasPinnedMembershipChange } from './sessionNodeItemUtils';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
@@ -1443,7 +1443,14 @@ const areSessionNodeItemPropsEqual = (prev: Props, next: Props): boolean => {
   if (!isSecondaryMetaEqual(prev.secondaryMeta, next.secondaryMeta)) return false;
 
   if (prev.pinnedSessionIds !== next.pinnedSessionIds
-    && hasSetMembershipChangeInNode(prev.node, next.node, prev.pinnedSessionIds, next.pinnedSessionIds, (node) => node.session.id)) {
+    && nodeHasPinnedMembershipChange(
+      prev.node,
+      next.node,
+      prev.pinnedSessionIds,
+      next.pinnedSessionIds,
+      prev.groupDirectory,
+      next.groupDirectory,
+    )) {
     return false;
   }
 

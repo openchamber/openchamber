@@ -27,7 +27,6 @@ type Args = {
   foldersMap: Record<string, FolderEntry[]>;
   createFolder: (scopeKey: string, name: string, parentId?: string | null) => FolderEntry;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
-  cleanupSessions: (scopeKey: string, existingSessionIds: Set<string>) => void;
 };
 
 export const useArchivedAutoFolders = (args: Args): void => {
@@ -42,7 +41,6 @@ export const useArchivedAutoFolders = (args: Args): void => {
     foldersMap,
     createFolder,
     addSessionToFolder,
-    cleanupSessions,
   } = args;
 
   React.useEffect(() => {
@@ -56,8 +54,6 @@ export const useArchivedAutoFolders = (args: Args): void => {
       }
       const scopeKey = getArchivedScopeKey(project.normalizedPath);
       const projectArchivedSessions = ownership.archivedSessionsByProject.get(project.id) ?? [];
-      const sessionIds = new Set(projectArchivedSessions.map((session) => session.id));
-
       const existingFolders = foldersMap[scopeKey] ?? [];
       const folderByName = new Map(existingFolders.map((folder) => [folder.name.toLowerCase(), folder]));
 
@@ -74,8 +70,6 @@ export const useArchivedAutoFolders = (args: Args): void => {
           addSessionToFolder(scopeKey, folder.id, session.id);
         }
       });
-
-      cleanupSessions(scopeKey, sessionIds);
     });
   }, [
     normalizedProjects,
@@ -88,6 +82,5 @@ export const useArchivedAutoFolders = (args: Args): void => {
     foldersMap,
     createFolder,
     addSessionToFolder,
-    cleanupSessions,
   ]);
 };

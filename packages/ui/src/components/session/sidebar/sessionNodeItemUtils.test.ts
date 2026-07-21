@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { computeNodeStructureKey, selectFolderRootNodes } from './sessionNodeItemUtils';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
+import { computeNodeStructureKey, nodeHasPinnedMembershipChange, selectFolderRootNodes } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 
 const session = (id: string, title: string): Session => ({
@@ -27,6 +29,46 @@ describe('computeNodeStructureKey', () => {
     const next = { ...previous, title: 'After' };
 
     expect(computeNodeStructureKey(rootWithChild(previous))).not.toBe(computeNodeStructureKey(rootWithChild(next)));
+  });
+});
+
+describe('nodeHasPinnedMembershipChange', () => {
+  test('detects composite pin changes using the group directory fallback', () => {
+    const node: SessionNode = {
+      session: session('root', 'Root'),
+      children: [],
+      worktree: null,
+    };
+    const pinnedKey = getPinnedSessionKey(getRuntimeKey(), '/repo', 'root');
+
+    expect(pinnedKey).not.toBeNull();
+    expect(nodeHasPinnedMembershipChange(
+      node,
+      node,
+      new Set(),
+      new Set([pinnedKey!]),
+      '/repo',
+      '/repo',
+    )).toBe(true);
+  });
+
+  test('ignores pin changes for the same session id in another directory', () => {
+    const node: SessionNode = {
+      session: session('root', 'Root'),
+      children: [],
+      worktree: null,
+    };
+    const pinnedKey = getPinnedSessionKey(getRuntimeKey(), '/other-repo', 'root');
+
+    expect(pinnedKey).not.toBeNull();
+    expect(nodeHasPinnedMembershipChange(
+      node,
+      node,
+      new Set(),
+      new Set([pinnedKey!]),
+      '/repo',
+      '/repo',
+    )).toBe(false);
   });
 });
 

@@ -34,4 +34,13 @@ describe('useSessionPinnedStore', () => {
     expect(useSessionPinnedStore.getState().ids.has(activeKey)).toBe(false);
     expect(useSessionPinnedStore.getState().ids.has(otherRuntimeKey)).toBe(true);
   });
+
+  test('does not silently evict older user pins', () => {
+    const store = useSessionPinnedStore.getState();
+    for (let index = 0; index < 250; index += 1) {
+      store.toggle({ directory: '/repo', sessionId: `session-${index}` });
+    }
+
+    expect(useSessionPinnedStore.getState().ids.size).toBe(250);
+  });
 });

@@ -26,6 +26,7 @@ import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePa
 import {
   collectSubtreeContainingId,
   computeNodeStructureKey,
+  nodeHasPinnedMembershipChange,
   nodeContainsSessionId,
   resolveMenuOpenSessionId,
   selectFolderRootNodes,
@@ -142,12 +143,14 @@ const groupHasPinnedMembershipChange = (
   prevPinnedSessionIds: Set<string>,
   nextPinnedSessionIds: Set<string>,
 ): boolean => {
-  const visit = (node: SessionNode): boolean => {
-    const sessionId = node.session.id;
-    if (prevPinnedSessionIds.has(sessionId) !== nextPinnedSessionIds.has(sessionId)) return true;
-    return node.children.some(visit);
-  };
-  return group.sessions.some(visit);
+  return group.sessions.some((node) => nodeHasPinnedMembershipChange(
+    node,
+    node,
+    prevPinnedSessionIds,
+    nextPinnedSessionIds,
+    group.directory,
+    group.directory,
+  ));
 };
 
 const groupHasSessionOrderChange = (

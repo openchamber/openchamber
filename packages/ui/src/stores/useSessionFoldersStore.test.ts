@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 const storage = new Map<string, string>();
 let storageSetCount = 0;
 let runtimeKey = 'runtime-a';
+let diskResponseBody: Record<string, unknown> = { version: 1, exists: false };
 
 const safeStorage = {
   getItem: (key: string) => storage.get(key) ?? null,
@@ -32,7 +33,7 @@ mock.module('@/lib/desktop', () => ({
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async () => new Response('{}', { headers: { 'Content-Type': 'application/json' } })),
+  runtimeFetch: mock(async () => new Response(JSON.stringify(diskResponseBody), { headers: { 'Content-Type': 'application/json' } })),
 }));
 mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
 
@@ -45,6 +46,7 @@ describe('useSessionFoldersStore folder assignments', () => {
     storage.clear();
     storageSetCount = 0;
     runtimeKey = 'runtime-a';
+    diskResponseBody = { version: 1, exists: false };
     useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
     useSessionFoldersStore.setState({
       foldersMap: {},
@@ -95,5 +97,40 @@ describe('useSessionFoldersStore folder assignments', () => {
     runtimeKey = 'runtime-a';
     useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
     expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project').map((folder) => folder.name)).toEqual(['Runtime A']);
+  });
+
+  test('flushes the outgoing runtime before a debounced browser write can be lost', () => {
+    useSessionFoldersStore.getState().createFolder('/workspace/project', 'Runtime A pending');
+
+    runtimeKey = 'runtime-b';
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+    runtimeKey = 'runtime-a';
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+
+    expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project').map((folder) => folder.name)).toEqual(['Runtime A pending']);
+  });
+
+  test('does not replace browser folders when the server has no disk snapshot', async () => {
+    useSessionFoldersStore.getState().createFolder('/workspace/project', 'Browser folder');
+    runtimeKey = 'runtime-b';
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+    runtimeKey = 'runtime-a';
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project').map((folder) => folder.name)).toEqual(['Browser folder']);
+  });
+
+  test('does not silently evict folder state from older runtimes', () => {
+    for (let index = 0; index < 10; index += 1) {
+      runtimeKey = `runtime-${index}`;
+      useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+      useSessionFoldersStore.getState().createFolder('/workspace/project', `Folder ${index}`);
+    }
+
+    runtimeKey = 'runtime-0';
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+    expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project').map((folder) => folder.name)).toEqual(['Folder 0']);
   });
 });

@@ -90,7 +90,9 @@ recover its referenced parent instead of exposing an orphan-only snapshot.
 
 Session message loads use runtime, normalized directory, session ID, SDK epoch, and loader generation as commit authority. Eviction, archive, delete, move, directory disposal, and runtime switching invalidate the applicable loader generation before stale in-flight work can publish. A move invalidates both source and destination loader targets.
 
-An authoritative `session.deleted` event also clears persisted UI state before routing metadata can be removed. Cleanup is identity-owned by runtime, normalized directory, and session ID: queued messages, persisted todos, composer drafts, inline-comment drafts, and pins clear only that tuple, while the active runtime's folder store removes the session from every active or archived folder scope. Stale-runtime events and unresolved/global directory identities do not mutate persisted state.
+An authoritative `session.deleted` event also clears persisted UI state before routing metadata can be removed. Confirmed local deletion and accepted `404` deletion do the same directly instead of depending on the event echo. Cleanup is identity-owned by runtime, normalized directory, and session ID: queued messages, persisted todos, composer drafts, inline-comment drafts, and pins clear only that tuple, while the active runtime's folder store removes the session from every active or archived folder scope. Stale-runtime events and unresolved/global directory identities do not mutate persisted state.
+
+Persisted sidebar state is never reconciled destructively from the first successful startup list. That list establishes an authoritative active+archived baseline. Only a session present in that baseline and omitted from a later complete snapshot is treated as a missed external deletion. Archive and directory moves retain the session ID across snapshots and are not deletion cleanup. This favors harmless hidden stale metadata over irreversible user-state loss when startup data is incomplete.
 
 Session materialization recency is keyed by runtime and directory. Foreground loads and successful prefetches participate in the same bounded per-directory session LRU. Prefetch pagination metadata has a global count ceiling and is removed with session eviction, directory disposal, loader runtime reconfiguration, and loader disposal.
 
@@ -193,8 +195,8 @@ Examples of global-store updates performed in `session-actions.ts`:
 - `createSession()` -> `upsertSession(session)`
 - `updateSessionTitle()` -> `upsertSession(result.data)`
 - `shareSession()` / `unshareSession()` -> `upsertSession(result.data)`
-- `archiveSession()` -> `archiveSessions([id], archivedAt)`
-- `deleteSession()` -> `removeSessions([id])`
+- `archiveSession()` -> waits for server confirmation, then upserts the archived session
+- `deleteSession()` -> waits for server confirmation or `404`, then removes the session and its persisted state
 - `moveSessionToDirectory()` -> move the session between directory stores and update the global directory index
 
 ## The golden rule

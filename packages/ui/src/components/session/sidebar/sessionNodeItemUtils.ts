@@ -1,3 +1,5 @@
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
 import type { SessionNode } from './types';
 
 /**
@@ -122,6 +124,39 @@ export const computeNodeStructureKey = (node: SessionNode): string => {
   });
 
   return childKeys.join('|');
+};
+
+export const nodeHasPinnedMembershipChange = (
+  prevNode: SessionNode,
+  nextNode: SessionNode,
+  prevPinnedSessionIds: Set<string>,
+  nextPinnedSessionIds: Set<string>,
+  prevGroupDirectory?: string | null,
+  nextGroupDirectory?: string | null,
+): boolean => {
+  const runtimeKey = getRuntimeKey();
+  const visit = (previous: SessionNode, current: SessionNode): boolean => {
+    if (previous.session.id !== current.session.id || previous.children.length !== current.children.length) {
+      return true;
+    }
+
+    const prevDirectory = (previous.session as SessionNode['session'] & { directory?: string | null }).directory
+      ?? prevGroupDirectory;
+    const nextDirectory = (current.session as SessionNode['session'] & { directory?: string | null }).directory
+      ?? nextGroupDirectory;
+    const prevKey = getPinnedSessionKey(runtimeKey, prevDirectory ?? '', previous.session.id);
+    const nextKey = getPinnedSessionKey(runtimeKey, nextDirectory ?? '', current.session.id);
+    if (
+      (prevKey ? prevPinnedSessionIds.has(prevKey) : false)
+      !== (nextKey ? nextPinnedSessionIds.has(nextKey) : false)
+    ) {
+      return true;
+    }
+
+    return previous.children.some((child, index) => visit(child, current.children[index]));
+  };
+
+  return visit(prevNode, nextNode);
 };
 
 /**

@@ -31,7 +31,7 @@ import { useSessionActions } from './sidebar/hooks/useSessionActions';
 import { useSidebarPersistence } from './sidebar/hooks/useSidebarPersistence';
 import { useProjectRepoStatus } from './sidebar/hooks/useProjectRepoStatus';
 import { useProjectSessionLists } from './sidebar/hooks/useProjectSessionLists';
-import { useSessionFolderCleanup } from './sidebar/hooks/useSessionFolderCleanup';
+import { useAuthoritativeSessionCleanup } from './sidebar/hooks/useAuthoritativeSessionCleanup';
 import { createSessionOwnershipIndex } from './sidebar/sessionOwnership';
 import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders';
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
@@ -91,13 +91,11 @@ const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
-// v2 key holds composite "${renderContext}:${active|archived}:${sessionId}"
+// v3 holds composite "${renderContext}:${active|archived}:${sessionId}"
 // entries so the same session in different render contexts (e.g. "Recent"
-// and a project's root) has independent expand state. v1 held bare session
-// ids; useSidebarPersistence migrates v1 data on first read by fanning each
-// id into all four context combinations.
+// and a project's root) has independent expand state. Older expansion state
+// mixed contexts and is intentionally not migrated.
 const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents.v3';
-const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
@@ -263,7 +261,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [deleteFolderConfirm, setDeleteFolderConfirm] = React.useState<DeleteFolderConfirmState>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = React.useState<BulkDeleteSessionsConfirmState>(null);
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
-  const setPinnedSessionIds = useSessionPinnedStore((state) => state.setIds);
   const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => {
     try {
@@ -365,7 +362,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const removeSessionFromFolder = useSessionFoldersStore((state) => state.removeSessionFromFolder);
   const removeSessionsFromFolders = useSessionFoldersStore((state) => state.removeSessionsFromFolders);
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
-  const cleanupSessions = useSessionFoldersStore((state) => state.cleanupSessions);
   const getSessionFolderId = useSessionFoldersStore((state) => state.getSessionFolderId);
 
   useSessionSearchEffects({
@@ -623,18 +619,13 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
   const { scheduleCollapsedProjectsPersist } = useSidebarPersistence({
     isVSCode,
-    hasAuthoritativeGlobalSessions,
     safeStorage,
     keys: {
       sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,
       projectCollapse: PROJECT_COLLAPSE_STORAGE_KEY,
-      sessionPinned: SESSION_PINNED_STORAGE_KEY,
       groupOrder: GROUP_ORDER_STORAGE_KEY,
       groupCollapse: GROUP_COLLAPSE_STORAGE_KEY,
     },
-    sessions: persistenceSessions,
-    pinnedSessionIds,
-    setPinnedSessionIds,
     groupOrderByProject,
     collapsedGroups,
     setExpandedParents,
@@ -1010,16 +1001,10 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     () => createSessionOwnershipIndex(sessions, normalizedProjects, availableWorktreesByProject, isVSCode, archivedSessions),
     [archivedSessions, availableWorktreesByProject, isVSCode, normalizedProjects, sessions],
   );
-  useSessionFolderCleanup({
+  useAuthoritativeSessionCleanup({
     enabled: isVisible,
-    isSessionsLoading,
     hasAuthoritativeGlobalSessions,
-    isWorktreeTopologyLoading,
-    normalizedProjects,
-    ownership: sessionOwnership,
-    availableWorktreesByProject,
-    unresolvedWorktreeProjectPaths,
-    cleanupSessions,
+    sessions: persistenceSessions,
   });
 
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({
@@ -1037,7 +1022,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     foldersMap,
     createFolder,
     addSessionToFolder,
-    cleanupSessions,
   });
 
   // Keep last-known repo status to avoid UI jiggling during project switch

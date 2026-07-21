@@ -5,7 +5,6 @@ import { getDeferredSafeStorage } from './utils/safeStorage';
 
 const STORAGE_KEY = 'oc.sessions.pinned.v2';
 const LEGACY_STORAGE_KEY = 'oc.sessions.pinned';
-const MAX_PINNED_SESSIONS = 200;
 
 export type SessionPinnedTarget = { directory: string; sessionId: string };
 
@@ -30,7 +29,7 @@ export const getPinnedSessionKey = (runtimeKey: string, directory: string, sessi
   return JSON.stringify([runtimeKey, normalizedDirectory, sessionId]);
 };
 
-export const parsePinnedSessionKey = (key: string): [string, string, string] | null => {
+const parsePinnedSessionKey = (key: string): [string, string, string] | null => {
   try {
     const parsed = JSON.parse(key) as unknown;
     if (!Array.isArray(parsed) || parsed.length !== 3) return null;
@@ -52,13 +51,14 @@ export const isSessionPinned = (ids: Set<string>, directory: string | null | und
 
 const readPinned = (): PinnedSessionState => {
   storage.removeItem(LEGACY_STORAGE_KEY);
+  const raw = storage.getItem(STORAGE_KEY);
+  if (raw === null) return { ids: new Set(), touchedAt: {} };
   try {
-    const parsed = JSON.parse(storage.getItem(STORAGE_KEY) ?? '') as Partial<PersistedPins>;
+    const parsed = JSON.parse(raw) as Partial<PersistedPins>;
     if (parsed.version !== 2 || !parsed.sessions || typeof parsed.sessions !== 'object') return { ids: new Set(), touchedAt: {} };
     const entries = Object.entries(parsed.sessions)
       .filter(([key, touchedAt]) => parsePinnedSessionKey(key) && typeof touchedAt === 'number' && Number.isFinite(touchedAt))
-      .sort((left, right) => right[1] - left[1])
-      .slice(0, MAX_PINNED_SESSIONS);
+      .sort((left, right) => right[1] - left[1]);
     return { ids: new Set(entries.map(([key]) => key)), touchedAt: Object.fromEntries(entries) };
   } catch {
     storage.removeItem(STORAGE_KEY);
@@ -70,8 +70,7 @@ const boundPinnedState = (ids: Set<string>, touchedAt: Record<string, number>): 
   const entries = [...ids]
     .filter((key) => parsePinnedSessionKey(key) !== null)
     .map((key) => [key, touchedAt[key] ?? Date.now()] as const)
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, MAX_PINNED_SESSIONS);
+    .sort((left, right) => right[1] - left[1]);
   return {
     ids: new Set(entries.map(([key]) => key)),
     touchedAt: Object.fromEntries(entries),
