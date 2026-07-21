@@ -773,7 +773,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'integrations',
     titleKey: 'settings.integrations.discord.servers.title',
     descriptionKey: 'settings.integrations.discord.servers.description',
-    keywords: ['discord', 'server', 'guild', 'mention', 'invite', 'respond'],
+    keywords: ['discord', 'server', 'guild', 'mention', 'invite', 'respond', 'refresh'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'integrations.discord.guild',
+    page: 'integrations',
+    titleKey: 'settings.integrations.discord.advanced.primarySyncGuild.title',
+    descriptionKey: 'settings.integrations.discord.advanced.primarySyncGuild.description',
+    keywords: ['discord', 'guild', 'server', 'project', 'sync', 'channel', 'primary'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

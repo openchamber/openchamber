@@ -9,6 +9,7 @@ import { createDiscordAgentRouter } from './discord-agent-api.js';
 import { parseVerbosityLevel, VERBOSITY_LEVELS } from './messenger-verbosity.js';
 import { parsePermissionMode, PERMISSION_MODES } from './messenger-permissions.js';
 import { normalizeTrustedBotIds } from './discord-access.js';
+import { fetchDiscordBotGuilds } from './discord-guilds.js';
 import { bootstrapProject as bootstrapProjectFn } from '../projects/project-bootstrap.js';
 import { renderPermissionContext, escapeMd } from './messenger-render.js';
 import { discoverSkills } from '../opencode/skills.js';
@@ -529,18 +530,13 @@ export function createMessengerSyncRouter({
         const data = await resp.json();
 
         // Fetch guilds the bot belongs to so the UI can show server context.
-        // Failure here should not break verify — keep the response best-effort.
-        let guilds = [];
+        // Failure here should not break verify — omit `guilds` so the client
+        // can preserve a prior list instead of treating failure as empty.
+        let guilds = null;
         try {
-          const gResp = await fetch('https://discord.com/api/v10/users/@me/guilds', { headers });
-          if (gResp.ok) {
-            const list = await gResp.json();
-            guilds = Array.isArray(list)
-              ? list.slice(0, 25).map((g) => ({ id: g.id, name: g.name }))
-              : [];
-          }
+          guilds = await fetchDiscordBotGuilds(headers);
         } catch {
-          // ignore — guilds is optional
+          guilds = null;
         }
 
         return res.json({
@@ -548,7 +544,7 @@ export function createMessengerSyncRouter({
           id: data.id,
           username: data.username,
           discriminator: data.discriminator,
-          guilds,
+          ...(guilds !== null ? { guilds } : {}),
         });
       }
 
@@ -2048,6 +2044,31 @@ export function createMessengerSyncRouter({
               : prev.guildPolicies || undefined,
         },
       });
+
+      // Hot-apply reply-mode / guild policies to a live gateway so Settings
+      // toggles take effect without Stop → Start.
+      const liveToken = botToken || prev.botToken;
+      if (liveToken && typeof discordListener.updateConfig === 'function') {
+        const persisted = {
+          defaultReplyMode:
+            defaultReplyMode === 'always' || defaultReplyMode === 'mention'
+              ? defaultReplyMode
+              : prev.defaultReplyMode,
+          guildPolicies:
+            guildPolicies && typeof guildPolicies === 'object'
+              ? guildPolicies
+              : prev.guildPolicies,
+          autoReply: autoReply !== false,
+          scopeToGuild: Boolean(scopeToGuild),
+          guildId: guildId || prev.guildId || undefined,
+          bridgeEnabled: bridgeEnabled !== false,
+        };
+        if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'trustedBotIds')) {
+          persisted.trustedBotIds = normalizeTrustedBotIds(trustedBotIds);
+        }
+        discordListener.updateConfig(liveToken, persisted);
+      }
+
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err?.message ?? 'save failed' });

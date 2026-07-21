@@ -1072,6 +1072,9 @@ export function createDiscordListenerRegistry({ broadcastEvent, bridge = null } 
     const key = tokenKey(token);
     const existing = listeners.get(key);
     if (existing && existing.running) {
+      // Already live — still apply mutable policy/config so reply-mode and
+      // enable toggles take effect without forcing a gateway reconnect.
+      applyLiveConfig(existing, opts);
       return { ok: true, alreadyRunning: true, ...statusSnapshot(existing) };
     }
     const state = {
@@ -1203,7 +1206,48 @@ export function createDiscordListenerRegistry({ broadcastEvent, bridge = null } 
     return statusSnapshot(state);
   }
 
-  return { start, stop, status, recent, inspect };
+  /**
+   * Hot-update mutable listener config without reconnecting the gateway.
+   * Used by save-config and by start() when alreadyRunning.
+   */
+  function applyLiveConfig(state, opts = {}) {
+    if (!state || !opts || typeof opts !== 'object') return;
+    if (Object.prototype.hasOwnProperty.call(opts, 'defaultReplyMode')) {
+      state.defaultReplyMode = opts.defaultReplyMode === 'mention' ? 'mention' : 'always';
+    }
+    if (Object.prototype.hasOwnProperty.call(opts, 'guildPolicies')) {
+      state.guildPolicies =
+        opts.guildPolicies && typeof opts.guildPolicies === 'object' ? opts.guildPolicies : {};
+    }
+    if (typeof opts.autoReply === 'boolean') {
+      state.autoReply = opts.autoReply;
+    }
+    if (typeof opts.scopeToGuild === 'boolean') {
+      state.scopeToGuild = opts.scopeToGuild;
+    }
+    if (Object.prototype.hasOwnProperty.call(opts, 'guildId')) {
+      state.guildId = opts.guildId ?? null;
+    }
+    if (typeof opts.bridgeEnabled === 'boolean') {
+      state.bridgeEnabled = opts.bridgeEnabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(opts, 'trustedBotIds')) {
+      state.trustedBotIds = normalizeDiscordAccessSettings({
+        trustedBotIds: opts.trustedBotIds,
+      }).trustedBotIds;
+    }
+  }
+
+  function updateConfig(token, opts = {}) {
+    const state = listeners.get(tokenKey(token));
+    if (!state || !state.running) {
+      return { ok: true, running: false, updated: false };
+    }
+    applyLiveConfig(state, opts);
+    return { ok: true, running: true, updated: true, ...statusSnapshot(state) };
+  }
+
+  return { start, stop, status, recent, inspect, updateConfig };
 }
 
 export function generateApprovalId() {

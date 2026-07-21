@@ -240,6 +240,14 @@ interface MessengerState {
   } | null;
   discordDiagnosisRunning: boolean;
 
+  /**
+   * True while a Discord guild-list refresh (/api/messenger/test) is in flight.
+   * Store-root transient — not persisted.
+   */
+  discordGuildsRefreshing: boolean;
+  /** Soft error from a quiet guild refresh; does not flip connection.status. */
+  discordGuildsError: string | null;
+
   /** Pending + answered approvals, newest first. */
   approvals: MessengerApproval[];
 
@@ -293,6 +301,12 @@ interface MessengerState {
   /** Stop the live gateway, clear server Discord config, and drop local connection. */
   disconnectDiscord: () => Promise<void>;
   testConnection: (type: MessengerType) => Promise<boolean>;
+  /**
+   * Quiet re-fetch of Discord bot identity + guild membership via
+   * `/api/messenger/test`. Does not flash `status: 'connecting'` when already
+   * live; failures preserve existing `discordGuilds`.
+   */
+  refreshDiscordGuilds: () => Promise<boolean>;
   resolveDiscordChannel: () => Promise<boolean>;
   resolveDiscordGuild: () => Promise<boolean>;
   fetchDiscordInviteUrl: () => Promise<string | null>;
@@ -429,6 +443,105 @@ async function getJson<T>(url: string): Promise<T> {
 /** Dedupes concurrent resync calls from hydration + reconnect + settings mount. */
 let discordStatusResyncInFlight: Promise<void> | null = null;
 
+type DiscordTestPayload = {
+  ok: boolean;
+  error?: string;
+  id?: string;
+  username?: string;
+  discriminator?: string;
+  guilds?: { id: string; name: string }[];
+};
+
+type MessengerStoreGet = () => MessengerState;
+type MessengerStoreSet = (
+  partial:
+    | Partial<MessengerState>
+    | ((state: MessengerState) => Partial<MessengerState>),
+) => void;
+
+/**
+ * Shared Discord token verify + guild membership fetch for `testConnection`
+ * and `refreshDiscordGuilds`. Quiet mode skips the connecting spinner and
+ * avoids flipping an already-connected status to error on soft failures.
+ */
+async function verifyDiscordBotAndGuilds(
+  get: MessengerStoreGet,
+  set: MessengerStoreSet,
+  opts: { quiet?: boolean } = {},
+): Promise<boolean> {
+  const quiet = Boolean(opts.quiet);
+  const conn = get().connections.find((c) => c.type === 'discord');
+  if (!conn?.botToken) return false;
+
+  const alreadyLive =
+    conn.status === 'connected' ||
+    conn.status === 'connecting' ||
+    Boolean(conn.discordListenerConnected);
+
+  if (!quiet) {
+    get().updateConnection('discord', { status: 'connecting', error: null });
+  }
+
+  set({ discordGuildsRefreshing: true, discordGuildsError: null });
+  try {
+    const data = await postJson<DiscordTestPayload>('/api/messenger/test', {
+      type: 'discord',
+      token: conn.botToken,
+    });
+    if (!data.ok) throw new Error(data.error ?? 'Discord API failed');
+
+    const updates: Partial<MessengerConnection> = {
+      discordBotId: data.id,
+      discordBotUsername: data.username,
+      discordBotDiscriminator: data.discriminator,
+    };
+
+    // Only replace guilds when the server included an authoritative list.
+    // Omitting `guilds` means the guilds fetch failed — preserve prior state.
+    if (Array.isArray(data.guilds)) {
+      updates.discordGuilds = data.guilds;
+      // Keep the primary-sync guild's display name in sync when we know that id.
+      // Never blindly overwrite with guilds[0] — Discord's order is not the
+      // user's selected project-sync server.
+      if (conn.discordGuildId) {
+        const matched = data.guilds.find((g) => g.id === conn.discordGuildId);
+        if (matched) updates.guildName = matched.name;
+      } else if (!conn.guildName && data.guilds.length > 0) {
+        updates.guildName = data.guilds[0].name;
+      }
+    }
+
+    if (!quiet || conn.status === 'disconnected' || conn.status === 'error') {
+      updates.status = 'connected';
+      updates.lastConnectedAt = Date.now();
+      updates.error = null;
+    } else if (alreadyLive) {
+      // Stay quiet — keep status/error as-is while refreshing membership.
+      updates.lastConnectedAt = Date.now();
+    }
+
+    get().updateConnection('discord', updates);
+    if (data.id) {
+      void get().fetchDiscordInviteUrl();
+    }
+    return true;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Connection failed';
+    if (quiet && alreadyLive) {
+      // Soft failure: keep connected badge + prior guilds.
+      set({ discordGuildsError: message });
+      return false;
+    }
+    get().updateConnection('discord', {
+      status: 'error',
+      error: message,
+    });
+    return false;
+  } finally {
+    set({ discordGuildsRefreshing: false });
+  }
+}
+
 type DiscordListenerStatusPayload = {
   ok: boolean;
   configured?: boolean;
@@ -491,6 +604,8 @@ export const useMessengerStore = create<MessengerState>()(
       discordHistory: [],
       discordDiagnosis: null,
       discordDiagnosisRunning: false,
+      discordGuildsRefreshing: false,
+      discordGuildsError: null,
       approvals: [],
       bridgeStatus: { enabled: false, bindings: [], active: [] },
       bridgeVerbosity: {},
@@ -548,44 +663,26 @@ export const useMessengerStore = create<MessengerState>()(
         const conn = get().connections.find((c) => c.type === type);
         if (!conn) return false;
 
-        get().updateConnection(type, { status: 'connecting', error: null });
-
-        try {
-          if (type === 'discord' && conn.botToken) {
-            // Route through backend so we also get guild list + bot id in one call.
-            const data = await postJson<{
-              ok: boolean;
-              error?: string;
-              id?: string;
-              username?: string;
-              discriminator?: string;
-              guilds?: { id: string; name: string }[];
-            }>('/api/messenger/test', { type: 'discord', token: conn.botToken });
-            if (!data.ok) throw new Error(data.error ?? 'Discord API failed');
+        if (type === 'discord') {
+          if (!conn.botToken) {
             get().updateConnection(type, {
-              status: 'connected',
-              lastConnectedAt: Date.now(),
-              discordBotId: data.id,
-              discordBotUsername: data.username,
-              discordBotDiscriminator: data.discriminator,
-              discordGuilds: data.guilds ?? [],
-              guildName: data.guilds && data.guilds.length > 0 ? data.guilds[0].name : undefined,
+              status: 'error',
+              error: 'No token configured',
             });
-            // Best-effort: pre-fetch the invite URL so the user can re-invite if needed.
-            if (data.id) {
-              get().fetchDiscordInviteUrl();
-            }
-            return true;
+            return false;
           }
-
-          throw new Error('No token configured');
-        } catch (e) {
-          get().updateConnection(type, {
-            status: 'error',
-            error: e instanceof Error ? e.message : 'Connection failed',
-          });
-          return false;
+          return verifyDiscordBotAndGuilds(get, set, { quiet: false });
         }
+
+        get().updateConnection(type, {
+          status: 'error',
+          error: 'No token configured',
+        });
+        return false;
+      },
+
+      refreshDiscordGuilds: async () => {
+        return verifyDiscordBotAndGuilds(get, set, { quiet: true });
       },
 
       resolveDiscordChannel: async () => {
@@ -1317,15 +1414,10 @@ export const useMessengerStore = create<MessengerState>()(
           // after the next rebuild still has the token/bindings.
           void get().saveDiscordConfig();
 
-          // Re-verify the bot token when the badge still isn't live/connected.
-          // Skip when the gateway already marked us connected/connecting.
-          if (
-            afterRefresh.status !== 'connected' &&
-            afterRefresh.status !== 'connecting' &&
-            !afterRefresh.discordListenerConnected
-          ) {
-            await get().testConnection('discord');
-          }
+          // Always refresh guild membership + bot identity when a token exists.
+          // Previously this was gated on !connected, so a live gateway after
+          // reload skipped the fetch and left stale/empty discordGuilds.
+          await get().refreshDiscordGuilds();
 
           const latest = get().connections.find((c) => c.type === 'discord');
           // Respect sticky stop — never auto-restart after the user stopped

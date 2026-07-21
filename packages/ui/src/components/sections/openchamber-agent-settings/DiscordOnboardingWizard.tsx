@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -33,6 +33,9 @@ export function DiscordOnboardingWizard({
   const testConnection = useMessengerStore((s) => s.testConnection);
   const saveDiscordConfig = useMessengerStore((s) => s.saveDiscordConfig);
   const fetchDiscordInviteUrl = useMessengerStore((s) => s.fetchDiscordInviteUrl);
+  const refreshDiscordGuilds = useMessengerStore((s) => s.refreshDiscordGuilds);
+  const guildsRefreshing = useMessengerStore((s) => s.discordGuildsRefreshing);
+  const guildsError = useMessengerStore((s) => s.discordGuildsError);
   const resolveDiscordGuild = useMessengerStore((s) => s.resolveDiscordGuild);
   const resolveDiscordChannel = useMessengerStore((s) => s.resolveDiscordChannel);
   const sendTestMessage = useMessengerStore((s) => s.sendTestMessage);
@@ -49,6 +52,9 @@ export function DiscordOnboardingWizard({
   const [startingListener, setStartingListener] = useState(false);
   const [listenerStatusText, setListenerStatusText] = useState<string | null>(null);
 
+  const guilds = conn.discordGuilds ?? [];
+  const hasGuilds = guilds.length > 0;
+
   const hasToken = Boolean(conn.botToken);
   const isConnected = conn.status === 'connected';
   const hasTarget = Boolean(conn.defaultChannelId) || Boolean(conn.discordGuildId);
@@ -56,6 +62,40 @@ export function DiscordOnboardingWizard({
   const listenerRunning = Boolean(conn.discordListenerRunning);
   const listenerLive = Boolean(conn.discordListenerRunning && conn.discordListenerConnected);
   const listenerStuck = listenerRunning && !listenerLive && !startingListener;
+
+  // Invite step: poll guild membership while empty so authorizing the bot
+  // updates the list without hunting for Refresh (Servers block is hidden
+  // while the wizard is exclusive).
+  useEffect(() => {
+    if (step !== 1) return;
+    if (hasGuilds) return;
+    if (!conn.botToken) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 12;
+
+    const tick = async () => {
+      if (cancelled) return;
+      if (useMessengerStore.getState().discordGuildsRefreshing) return;
+      attempts += 1;
+      await useMessengerStore.getState().refreshDiscordGuilds();
+    };
+
+    void tick();
+    const id = setInterval(() => {
+      if (cancelled || attempts >= maxAttempts) {
+        clearInterval(id);
+        return;
+      }
+      void tick();
+    }, 5_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [step, hasGuilds, conn.botToken]);
 
   const canAdvance = (() => {
     if (step === 0) return hasToken && isConnected;
@@ -226,7 +266,7 @@ export function DiscordOnboardingWizard({
                 disabled={!tokenInput.trim()}
                 onClick={handleSaveToken}
               >
-                Save
+                {t('settings.integrations.discord.actions.saveToken')}
               </Button>
             </div>
           ) : (
@@ -270,12 +310,42 @@ export function DiscordOnboardingWizard({
             </p>
           </div>
           <div className="text-[11px] text-muted-foreground">
-            {(conn.discordGuilds?.length ?? 0) > 0
+            {hasGuilds
               ? t('settings.integrations.discord.wizard.step2.botInServers', {
-                  count: conn.discordGuilds?.length ?? 0,
+                  count: guilds.length,
                 })
               : t('settings.integrations.discord.wizard.step2.botNotInServers')}
           </div>
+          {hasGuilds ? (
+            <ul className="space-y-1 rounded-md border border-border/50 bg-background/50 px-2.5 py-2">
+              {guilds.map((g) => (
+                <li
+                  key={g.id}
+                  className="truncate text-[11px] font-medium text-foreground"
+                  title={g.id}
+                >
+                  {g.name}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="rounded-md border border-border/50 bg-background/50 px-2.5 py-2 space-y-1">
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                {t('settings.integrations.discord.servers.empty')}
+              </p>
+              {(guildsRefreshing || isConnected) && (
+                <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  {guildsRefreshing && (
+                    <Icon name="loader-4" className="size-3 animate-spin" />
+                  )}
+                  {t('settings.integrations.discord.wizard.step2.refreshingHint')}
+                </p>
+              )}
+              {guildsError && (
+                <p className="text-[11px] text-[var(--status-error)] leading-snug">{guildsError}</p>
+              )}
+            </div>
+          )}
           <p className="text-[10px] text-muted-foreground leading-snug">
             {t('settings.integrations.discord.wizard.step2.inviteHint')}
           </p>
@@ -283,7 +353,7 @@ export function DiscordOnboardingWizard({
             {conn.discordInviteUrl ? (
               <Button
                 type="button"
-                variant="outline"
+                variant={hasGuilds ? 'outline' : 'default'}
                 size="xs"
                 className="!font-normal"
                 onClick={() =>
@@ -306,12 +376,20 @@ export function DiscordOnboardingWizard({
             )}
             <Button
               type="button"
-              variant="ghost"
+              variant="outline"
               size="xs"
-              className="!font-normal h-auto px-0 py-0 text-[11px] text-primary hover:bg-transparent"
-              onClick={() => void testConnection('discord')}
+              className="!font-normal"
+              disabled={guildsRefreshing || !conn.botToken}
+              onClick={() => void refreshDiscordGuilds()}
             >
-              {t('settings.integrations.discord.servers.refresh')}
+              {guildsRefreshing ? (
+                <Icon name="loader-4" className="size-3.5 animate-spin" />
+              ) : (
+                <Icon name="refresh" className="size-3.5" />
+              )}
+              {guildsRefreshing
+                ? t('settings.integrations.discord.servers.refreshing')
+                : t('settings.integrations.discord.servers.refresh')}
             </Button>
           </div>
         </div>
@@ -365,12 +443,12 @@ export function DiscordOnboardingWizard({
                     setTimeout(() => void resolveDiscordGuild(), 0);
                   }}
                 >
-                  Save
+                  {t('settings.integrations.discord.actions.saveToken')}
                 </Button>
               </div>
-              {conn.discordGuilds && conn.discordGuilds.length > 0 && (
+              {guilds.length > 0 && (
                 <div className="flex flex-wrap gap-1 pt-1">
-                  {conn.discordGuilds.slice(0, 6).map((g) => (
+                  {guilds.slice(0, 6).map((g) => (
                     <button
                       key={g.id}
                       type="button"
@@ -426,7 +504,7 @@ export function DiscordOnboardingWizard({
                     setTimeout(() => void resolveDiscordChannel(), 0);
                   }}
                 >
-                  Save
+                  {t('settings.integrations.discord.actions.saveToken')}
                 </Button>
               </div>
             </div>
