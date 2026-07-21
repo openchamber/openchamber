@@ -1038,7 +1038,7 @@ const appendProxyAuthToProxyUrl = (value, { previewToken = '', urlAuthToken = ''
 
 const normalizeLoopbackUrl = (rawUrl) => normalizeProxyTargetUrl(rawUrl, { allowExternal: false });
 
-export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind, previewToken = '', urlAuthToken = '' }) => {
+export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind, previewToken = '', urlAuthToken = '', modulePath = '' }) => {
   if (typeof bodyText !== 'string' || bodyText.length === 0) {
     return bodyText;
   }
@@ -1072,6 +1072,25 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     }
     return value;
   };
+  const moduleDir = (() => {
+    if (!modulePath) return '';
+    try {
+      const parsed = new URL(modulePath, 'http://localhost');
+      const dir = parsed.pathname.replace(/[^/]*$/, '');
+      return dir;
+    } catch {
+      return '';
+    }
+  })();
+  const resolveRelativeUrl = (relativePath) => {
+    if (!moduleDir) return relativePath;
+    try {
+      const resolved = new URL(relativePath, `http://localhost${moduleDir}`);
+      return resolved.pathname;
+    } catch {
+      return relativePath;
+    }
+  };
   const stripPreviewCspMeta = (text) => text
     .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(['"])content-security-policy\1)[^>]*>/gi, '')
     .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*content-security-policy\b)[^>]*>/gi, '');
@@ -1083,16 +1102,40 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     .replace(/@import\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
       return `@import ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
     });
-  const rewriteJavaScript = (text) => text
-    .replace(/\bfrom\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
-      return `from ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
-    })
-    .replace(/\bimport\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
-      return `import ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
-    })
-    .replace(/\bimport\(\s*(['"])\/(?!\/)([^'"]*)\1\s*\)/gi, (_match, quote, path) => {
-      return `import(${quote}${rewriteResourceUrl(`/${path}`)}${quote})`;
-    });
+  const rewriteJavaScript = (text, dir = '') => {
+    const activeDir = dir || moduleDir;
+    let result = text
+      .replace(/\bfrom\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
+        return `from ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
+      })
+      .replace(/\bimport\s+(['"])\/(?!\/)([^'"]*)\1/gi, (_match, quote, path) => {
+        return `import ${quote}${rewriteResourceUrl(`/${path}`)}${quote}`;
+      })
+      .replace(/\bimport\(\s*(['"])\/(?!\/)([^'"]*)\1\s*\)/gi, (_match, quote, path) => {
+        return `import(${quote}${rewriteResourceUrl(`/${path}`)}${quote})`;
+      });
+    if (activeDir) {
+      const resolveRel = (relativePath) => {
+        try {
+          const resolved = new URL(relativePath, `http://localhost${activeDir}`);
+          return resolved.pathname;
+        } catch {
+          return relativePath;
+        }
+      };
+      result = result
+        .replace(/\bfrom\s+(['"])(\.\.?\/[^'"]*)\1/gi, (_match, quote, path) => {
+          return `from ${quote}${rewriteResourceUrl(resolveRel(path))}${quote}`;
+        })
+        .replace(/\bimport\s+(['"])(\.\.?\/[^'"]*)\1/gi, (_match, quote, path) => {
+          return `import ${quote}${rewriteResourceUrl(resolveRel(path))}${quote}`;
+        })
+        .replace(/\bimport\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/gi, (_match, quote, path) => {
+          return `import(${quote}${rewriteResourceUrl(resolveRel(path))}${quote})`;
+        });
+    }
+    return result;
+  };
   const rewriteInlineModuleScripts = (text) => text.replace(
     /<script\b([^>]*)>([\s\S]*?)<\/script>/gi,
     (match, attrs, scriptBody) => {
@@ -1102,26 +1145,28 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
       const type = String(typeMatch?.[1] ?? typeMatch?.[2] ?? typeMatch?.[3] ?? '').trim().toLowerCase();
       if (type !== 'module') return match;
 
-      const rewrittenScriptBody = rewriteJavaScript(scriptBody);
+      const rewrittenScriptBody = rewriteJavaScript(scriptBody, '');
       if (rewrittenScriptBody === scriptBody) return match;
       return `<script${attrs}>${rewrittenScriptBody}</script>`;
     },
   );
-  const rewriteHtml = (text) => rewriteInlineModuleScripts(text
-    .replace(/\b(src|href|action)=(['"])([^'"]*)\2/gi, (_match, attr, quote, value) => {
-      return `${attr}=${quote}${rewriteResourceUrl(value)}${quote}`;
-    })
-    .replace(/\bsrcset=(['"])([^'"]*)\1/gi, (_match, quote, value) => {
-      const rewritten = String(value).split(',').map((part) => {
-        const trimmed = part.trim();
-        if (!trimmed) return trimmed;
-        const segments = trimmed.split(/\s+/);
-        const url = segments[0] || '';
-        segments[0] = rewriteResourceUrl(url);
-        return segments.join(' ');
-      }).join(', ');
-      return `srcset=${quote}${rewritten}${quote}`;
-    }));
+  const rewriteHtml = (text) => rewriteInlineModuleScripts(
+    text
+      .replace(/\bcrossorigin(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi, '')
+      .replace(/\b(src|href|action)=(['"])([^'"]*)\2/gi, (_match, attr, quote, value) => {
+        return `${attr}=${quote}${rewriteResourceUrl(value)}${quote}`;
+      })
+      .replace(/\bsrcset=(['"])([^'"]*)\1/gi, (_match, quote, value) => {
+        const rewritten = String(value).split(',').map((part) => {
+          const trimmed = part.trim();
+          if (!trimmed) return trimmed;
+          const segments = trimmed.split(/\s+/);
+          const url = segments[0] || '';
+          segments[0] = rewriteResourceUrl(url);
+          return segments.join(' ');
+        }).join(', ');
+        return `srcset=${quote}${rewritten}${quote}`;
+      }));
 
   if (kind === 'html') return stripPreviewCspMeta(rewriteHtml(bodyText));
   if (kind === 'css') return rewriteCss(bodyText);
@@ -1505,6 +1550,7 @@ export const createPreviewProxyRuntime = ({
               kind: 'javascript',
               previewToken: resolved.entry.token,
               urlAuthToken,
+              modulePath: upstreamPath,
             });
           }
 
@@ -1515,6 +1561,7 @@ export const createPreviewProxyRuntime = ({
             kind: isHtml ? 'html' : isCss ? 'css' : 'javascript',
             previewToken: resolved.entry.token,
             urlAuthToken,
+            modulePath: isJavaScript ? upstreamPath : '',
           });
           return isHtml ? injectPreviewBridge(rewrittenBody, resolved.entry.origin, bridgeNonce) : rewrittenBody;
         }),
