@@ -503,10 +503,12 @@ export function applySessionStatusSnapshot(
   snapshot: DirectorySessionStatusSnapshot,
   candidateSessionIds: string[],
   mode: StatusSnapshotMode,
+  onSessionFreshness?: (sessionId: string) => void,
 ): boolean {
   if (candidateSessionIds.length === 0) return false
 
   let changed = false
+  const freshSessionIds = new Set<string>()
   store.setState((state: DirectoryStore) => {
     const current = state.session_status ?? {}
     let next: Record<string, SessionStatus> | undefined
@@ -516,8 +518,10 @@ export function applySessionStatusSnapshot(
       const incoming = toSessionStatus(snapshot[sessionId])
 
       if (incoming && incoming.type !== "idle") {
+        const isChanged = !haveEquivalentSyncSnapshots(current[sessionId], incoming)
+        if (mode === "authoritative" || isChanged) freshSessionIds.add(sessionId)
         // Confirm or raise active status (catches a busy event the SSE missed).
-        if (!haveEquivalentSyncSnapshots(current[sessionId], incoming)) {
+        if (isChanged) {
           draft()[sessionId] = incoming
           changed = true
         }
@@ -537,6 +541,8 @@ export function applySessionStatusSnapshot(
 
     return next ? { session_status: next } : state
   })
+
+  for (const sessionId of freshSessionIds) onSessionFreshness?.(sessionId)
 
   return changed
 }
@@ -568,6 +574,53 @@ export function needsSnapshotAfterStatusPoll(
   if (incoming && incoming.type !== "idle") return false
   const currentStatus = state.session_status?.[sessionId]
   return Boolean(currentStatus && currentStatus.type !== "idle")
+}
+
+export function getSessionWatchdogFreshnessAt(
+  directory: string,
+  sessionId: string,
+  freshnessBySessionByDirectory: ReadonlyMap<string, ReadonlyMap<string, number>>,
+  freshnessByDirectory: ReadonlyMap<string, number>,
+): number | undefined {
+  const perSession = freshnessBySessionByDirectory.get(directory)?.get(sessionId)
+  if (perSession !== undefined) return perSession
+  const directorySessions = freshnessBySessionByDirectory.get(directory)
+  return !directorySessions || directorySessions.size === 0
+    ? freshnessByDirectory.get(directory)
+    : undefined
+}
+
+export function getSessionWatchdogStaleSessionId(
+  directory: string,
+  candidateSessionIds: string[],
+  freshnessBySessionByDirectory: ReadonlyMap<string, ReadonlyMap<string, number>>,
+  freshnessByDirectory: ReadonlyMap<string, number>,
+  now: number,
+  staleEventMs = ACTIVE_SESSION_STALE_EVENT_MS,
+): string | undefined {
+  return candidateSessionIds.find((sessionId) => {
+    const freshAt = getSessionWatchdogFreshnessAt(
+      directory,
+      sessionId,
+      freshnessBySessionByDirectory,
+      freshnessByDirectory,
+    ) ?? 0
+    return now - freshAt >= staleEventMs
+  })
+}
+
+export function getSessionWatchdogFreshnessLineage(
+  directory: string,
+  sessionId: string,
+  lookupSession: (directory: string, sessionId: string) => Session | undefined,
+): string[] {
+  const lineage = new Set<string>()
+  let current: string | undefined = sessionId
+  while (current && !lineage.has(current)) {
+    lineage.add(current)
+    current = lookupSession(directory, current)?.parentID ?? undefined
+  }
+  return [...lineage]
 }
 
 // Decide whether the event stream is genuinely stale and warrants a full
@@ -1689,6 +1742,8 @@ export function SyncProvider(props: {
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
   const routingIndex = routingIndexRef.current
   const lastStreamActivityAtRef = useRef(0)
+  const lastActiveEventAtBySessionRef = useRef(new Map<string, Map<string, number>>())
+  const lastActiveEventAtByDirectoryRef = useRef(new Map<string, number>())
   const lastStatusPollAtByDirectoryRef = useRef(new Map<string, number>())
   const lastFullResyncAtByDirectoryRef = useRef(new Map<string, number>())
   const lastChildDiscoveryAtByDirectoryRef = useRef(new Map<string, number>())
@@ -1697,6 +1752,25 @@ export function SyncProvider(props: {
   const pipelineReconnectRef = useRef<((reason?: string) => void) | null>(null)
   const pipelineHasConnectedRef = useRef(false)
   const pipelineDisconnectedBeforeFirstConnectRef = useRef(false)
+
+  const recordSessionWatchdogFreshness = useCallback((directory: string, sessionId: string) => {
+    if (!directory || directory === "global" || !sessionId) return
+    const now = Date.now()
+    lastActiveEventAtByDirectoryRef.current.set(directory, now)
+    let sessions = lastActiveEventAtBySessionRef.current.get(directory)
+    if (!sessions) {
+      sessions = new Map()
+      lastActiveEventAtBySessionRef.current.set(directory, sessions)
+    }
+    const storeSessions = childStores.children.get(directory)?.getState().session ?? []
+    for (const target of getSessionWatchdogFreshnessLineage(
+      directory,
+      sessionId,
+      (_directory, targetId) => storeSessions.find((session) => session.id === targetId),
+    )) {
+      sessions.set(target, now)
+    }
+  }, [childStores])
 
   const system = useMemo<SyncSystem>(
     () => ({
@@ -1880,6 +1954,12 @@ export function SyncProvider(props: {
         // heartbeats here caused issue #1656: the stale timer fired for any
         // quiet session, triggering redundant full resyncs every ~15s.
         lastStreamActivityAtRef.current = Date.now()
+        const eventType = (payload as { type?: unknown }).type
+        if (eventType !== "server.heartbeat" && eventType !== "openchamber:heartbeat") {
+          lastActiveEventAtByDirectoryRef.current.set(directory, Date.now())
+          const sessionID = getSessionIdFromPayload(payload)
+          if (sessionID) recordSessionWatchdogFreshness(directory, sessionID)
+        }
         dispatchVSCodeRuntimeNotificationEvent(directory, payload)
         if (payload.type === "installation.update-available") {
           const version = typeof (payload.properties as { version?: unknown })?.version === "string"
@@ -1940,7 +2020,7 @@ export function SyncProvider(props: {
       }
       pipeline.cleanup()
     }
-  }, [props.sdk, childStores, routingIndex, messageStreamTransport, triggerDirectoryResync])
+  }, [props.sdk, childStores, routingIndex, messageStreamTransport, triggerDirectoryResync, recordSessionWatchdogFreshness])
 
   useEffect(() => {
     let stopped = false
@@ -2027,6 +2107,8 @@ export function SyncProvider(props: {
             const state = store.getState()
             const candidateSessionIds = getActiveSessionCandidateIds(directory, state)
             if (candidateSessionIds.length === 0) {
+              lastActiveEventAtByDirectoryRef.current.delete(directory)
+              lastActiveEventAtBySessionRef.current.delete(directory)
               lastStatusPollAtByDirectoryRef.current.delete(directory)
               lastFullResyncAtByDirectoryRef.current.delete(directory)
               continue
@@ -2039,6 +2121,17 @@ export function SyncProvider(props: {
             }
 
             const lastFullResyncAt = lastFullResyncAtByDirectoryRef.current.get(directory) ?? 0
+            const staleSessionId = getSessionWatchdogStaleSessionId(
+              directory,
+              candidateSessionIds,
+              lastActiveEventAtBySessionRef.current,
+              lastActiveEventAtByDirectoryRef.current,
+              now,
+            )
+            if (staleSessionId && now - lastFullResyncAt >= ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS) {
+              pipelineReconnectRef.current?.("active_session_stale")
+              triggerDirectoryResync(directory, "stale-status-resync")
+            }
             if (shouldTriggerStaleResync(lastStreamActivityAtRef.current, lastFullResyncAt, now)) {
               pipelineReconnectRef.current?.("active_stream_stale")
               triggerDirectoryResync(directory, "stale-status-resync")
@@ -2068,7 +2161,7 @@ export function SyncProvider(props: {
       stopped = true
       clearInterval(interval)
     }
-  }, [childStores, triggerDirectoryResync])
+  }, [childStores, triggerDirectoryResync, recordSessionWatchdogFreshness])
 
   // Ensure current directory's child store exists
   useEffect(() => {
@@ -2113,8 +2206,9 @@ export function SyncProvider(props: {
       props.sdk,
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
+      recordSessionWatchdogFreshness,
     )
-  }, [props.sdk, props.directory, childStores, routingIndex])
+  }, [props.sdk, props.directory, childStores, routingIndex, recordSessionWatchdogFreshness])
 
   // Subscribe to child store for streaming state derivation
   useEffect(() => {

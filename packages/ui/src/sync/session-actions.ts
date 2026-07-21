@@ -41,6 +41,7 @@ const UNREVERT_REFETCH_RETRY_MS = 150
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
+let _onSessionFreshness: ((directory: string, sessionId: string) => void) | null = null
 type OptimisticAddInput = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
 type OptimisticRemoveInput = { sessionID: string; directory?: string | null; messageID: string }
 type OptimisticConfirmInput = OptimisticRemoveInput
@@ -97,10 +98,12 @@ export function setActionRefs(
   sdk: OpencodeClient,
   childStores: ChildStoreManager,
   getDirectory: () => string,
+  onSessionFreshness?: (directory: string, sessionId: string) => void,
 ) {
   _sdk = sdk
   _childStores = childStores
   _getDirectory = getDirectory
+  _onSessionFreshness = onSessionFreshness ?? null
 }
 
 export function setOptimisticRefs(
@@ -894,6 +897,9 @@ export async function optimisticSend(input: {
       [input.sessionId]: { type: "busy" as const },
     },
   })
+  if (targetDirectory) {
+    _onSessionFreshness?.(targetDirectory, input.sessionId)
+  }
 
   try {
     await input.send(messageID)

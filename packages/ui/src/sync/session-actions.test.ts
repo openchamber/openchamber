@@ -492,9 +492,15 @@ describe("optimisticSend target directory", () => {
     let optimisticAdd: OptimisticAddCall | null = null
     let optimisticRemove: OptimisticRemoveCall | null = null
     let sentMessageID = ""
+    const freshness: Array<[string, string]> = []
 
     const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
-    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/current/project")
+    setActionRefs(
+      mockSdk as unknown as OpencodeClient,
+      childStores,
+      () => "/current/project",
+      (directory, sessionID) => freshness.push([directory, sessionID]),
+    )
     setOptimisticRefs(
       (input) => {
         optimisticAdd = input
@@ -523,6 +529,7 @@ describe("optimisticSend target directory", () => {
     expect(optimisticRemove).toBe(null)
     expect(targetStore.getState().session_status["session-new"]?.type).toBe("busy")
     expect(currentStore.getState().session_status["session-new"]).toBe(undefined)
+    expect(freshness).toEqual([["/target/project", "session-new"]])
   })
 
   test("allows callers to block final send when runtime changes after optimistic insert", async () => {

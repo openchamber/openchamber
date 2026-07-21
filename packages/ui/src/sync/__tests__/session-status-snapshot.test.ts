@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { create, type StoreApi } from "zustand"
+import type { Session } from "@opencode-ai/sdk/v2"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 
 import { INITIAL_STATE, type State } from "../types"
 import type { DirectoryStore } from "../child-store"
 import {
   applySessionStatusSnapshot,
+  getSessionWatchdogFreshnessAt,
+  getSessionWatchdogFreshnessLineage,
+  getSessionWatchdogStaleSessionId,
   needsSnapshotAfterStatusPoll,
   shouldTriggerStaleResync,
 } from "../sync-context"
@@ -53,6 +57,36 @@ describe("applySessionStatusSnapshot", () => {
       const changed = applySessionStatusSnapshot(store, { ses_a: { type: "busy" } }, ["ses_a"], "monotonic")
       expect(changed).toBe(true)
       expect(store.getState().session_status.ses_a).toEqual(BUSY)
+    })
+
+    test("seeds freshness when the snapshot reports an active session", () => {
+      const store = createDirectoryStore({ session_status: {} })
+      const freshness: string[] = []
+
+      applySessionStatusSnapshot(
+        store,
+        { ses_a: { type: "busy" } },
+        ["ses_a"],
+        "monotonic",
+        (sessionId) => freshness.push(sessionId),
+      )
+
+      expect(freshness).toEqual(["ses_a"])
+    })
+
+    test("does not refresh freshness for unchanged busy snapshots in monotonic mode", () => {
+      const store = createDirectoryStore({ session_status: { ses_a: BUSY } })
+      const freshness: string[] = []
+
+      applySessionStatusSnapshot(
+        store,
+        { ses_a: { type: "busy" } },
+        ["ses_a"],
+        "monotonic",
+        (sessionId) => freshness.push(sessionId),
+      )
+
+      expect(freshness).toEqual([])
     })
 
     test("updates busy → retry from the snapshot", () => {
@@ -114,6 +148,62 @@ describe("needsSnapshotAfterStatusPoll", () => {
   test("does NOT escalate when the store already considers the session idle", () => {
     const store = createDirectoryStore({ session_status: {} })
     expect(needsSnapshotAfterStatusPoll(store.getState(), "ses_a", undefined)).toBe(false)
+  })
+})
+
+describe("getSessionWatchdogFreshnessAt", () => {
+  test("prefers a session-scoped timestamp over unrelated directory activity in the same directory", () => {
+    const freshnessBySessionByDirectory = new Map<string, Map<string, number>>([
+      ["dir_a", new Map<string, number>([["ses_a", 1_000]])],
+    ])
+    const freshnessByDirectory = new Map<string, number>([["dir_a", 9_000]])
+
+    expect(
+      getSessionWatchdogFreshnessAt("dir_a", "ses_a", freshnessBySessionByDirectory, freshnessByDirectory),
+    ).toBe(1_000)
+  })
+
+  test("falls back to directory freshness until a session has its own timestamp", () => {
+    const freshnessBySessionByDirectory = new Map<string, Map<string, number>>()
+    const freshnessByDirectory = new Map<string, number>([["dir_a", 9_000]])
+
+    expect(
+      getSessionWatchdogFreshnessAt("dir_a", "ses_a", freshnessBySessionByDirectory, freshnessByDirectory),
+    ).toBe(9_000)
+  })
+})
+
+describe("getSessionWatchdogStaleSessionId", () => {
+  test("flags a stale session even when a sibling session has fresh activity", () => {
+    const freshnessBySessionByDirectory = new Map<string, Map<string, number>>([
+      ["dir_a", new Map<string, number>([["ses_fresh", 29_000]])],
+    ])
+    const freshnessByDirectory = new Map<string, number>([["dir_a", 25_000]])
+
+    expect(
+      getSessionWatchdogStaleSessionId(
+        "dir_a",
+        ["ses_stale", "ses_fresh"],
+        freshnessBySessionByDirectory,
+        freshnessByDirectory,
+        30_000,
+        20_000,
+      ),
+    ).toBe("ses_stale")
+  })
+})
+
+describe("getSessionWatchdogFreshnessLineage", () => {
+  test("includes ancestor sessions for delegated child activity", () => {
+    const sessions = new Map<string, Session>([
+      ["child", { id: "child", parentID: "parent" } as Session],
+      ["parent", { id: "parent", parentID: "root" } as Session],
+      ["root", { id: "root" } as Session],
+    ])
+
+    const lineage = getSessionWatchdogFreshnessLineage("dir_a", "child", (_directory, sessionId) => sessions.get(sessionId))
+
+    expect(lineage).toEqual(["child", "parent", "root"])
   })
 })
 
