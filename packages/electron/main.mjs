@@ -190,6 +190,7 @@ const state = {
   serverHandle: null,
   sidecarUrl: null,
   localOrigin: null,
+  localUiOrigin: null,
   apiBaseUrl: null,
   clientToken: null,
   requestHeaders: {},
@@ -2465,6 +2466,18 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
 
 const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig = {}) => {
   state.localOrigin = localOrigin;
+  try {
+    if (typeof url === 'string') {
+      const parsed = new URL(url);
+      state.localUiOrigin = (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' || parsed.hostname === '[::1]' || parsed.hostname === '0.0.0.0')
+        ? parsed.origin
+        : null;
+    } else {
+      state.localUiOrigin = null;
+    }
+  } catch {
+    state.localUiOrigin = null;
+  }
   state.apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : state.apiBaseUrl;
   state.clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : '';
   state.requestHeaders = sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || {});
@@ -4501,6 +4514,13 @@ const isLocalSender = (webContents) => {
       } catch {
       }
     }
+    if (state.localUiOrigin) {
+      try {
+        const allowed = new URL(state.localUiOrigin);
+        if (allowed.origin === url.origin) return true;
+      } catch {
+      }
+    }
     return false;
   } catch {
     return false;
@@ -4887,8 +4907,20 @@ app.whenReady().then(async () => {
   }
 
   if (isBackgroundStart) {
-    const { localOrigin, bootOutcome, requestHeaders } = await resolveInitialUrl();
+    const { localOrigin, localUiUrl, bootOutcome, requestHeaders } = await resolveInitialUrl();
     state.localOrigin = localOrigin;
+    try {
+      if (localUiUrl) {
+        const parsed = new URL(localUiUrl);
+        state.localUiOrigin = (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' || parsed.hostname === '[::1]' || parsed.hostname === '0.0.0.0')
+          ? parsed.origin
+          : null;
+      } else {
+        state.localUiOrigin = null;
+      }
+    } catch {
+      state.localUiOrigin = null;
+    }
     state.bootOutcome = bootOutcome ?? null;
     state.requestHeaders = sanitizeRuntimeRequestHeaders(requestHeaders || {});
     state.initScript = buildInitScript(localOrigin, state.bootOutcome, '', '', state.requestHeaders);
