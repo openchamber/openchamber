@@ -448,6 +448,36 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     );
   }
 
+  if (/^\/api\/sessions\/[^/]+\/view$/.test(normalizedPathname) && method === 'POST') {
+    const sessionId = normalizedPathname.split('/')[3] || '';
+    return new Response(
+      JSON.stringify({
+        success: true,
+        sessionId,
+        viewed: true,
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  if (/^\/api\/sessions\/[^/]+\/unview$/.test(normalizedPathname) && method === 'POST') {
+    const sessionId = normalizedPathname.split('/')[3] || '';
+    return new Response(
+      JSON.stringify({
+        success: true,
+        sessionId,
+        viewed: false,
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
   if (normalizedPathname === '/api/session-activity' && method === 'GET') {
     const activity = await sendBridgeMessage<Record<string, { type: 'idle' | 'busy' | 'cooldown' }>>('api:session-activity:get')
       .catch(() => ({}));

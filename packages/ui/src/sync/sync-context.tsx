@@ -34,7 +34,7 @@ import { processVSCodePermissionAutoAccept } from "./vscode-permission-auto-acce
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
-import { appendNotification } from "./notification-store"
+import { appendNotification, applySessionAttentionEvent, hydrateSessionAttentionState } from "./notification-store"
 import { applyGlobalSessionStatusEvent } from "./global-session-status"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
@@ -622,6 +622,7 @@ const normalizeEventDirectory = (rawDirectory: string): string => {
 }
 
 const getSessionIdFromPayload = (event: Event): string | null => {
+  const rawType = (event as { type?: unknown }).type
   const properties = (event as { properties?: unknown }).properties
   if (!properties || typeof properties !== "object") {
     return null
@@ -641,6 +642,7 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   if (
     event.type === "message.removed"
     || event.type === "session.status"
+    || rawType === "openchamber:session-attention"
     || event.type === "todo.updated"
     || event.type === "permission.asked"
     || event.type === "permission.replied"
@@ -1337,6 +1339,10 @@ function handleEvent(
     return
   }
 
+  if (applySessionAttentionEvent(payload)) {
+    return
+  }
+
   applySessionEventToGlobalSessions(payload)
   // Keep the cross-project status map current for ALL directories (mirrors the
   // global-session handling above). Child stores remain the primary source for
@@ -1486,11 +1492,12 @@ function handleEvent(
     if (session && (session as { parentID?: string }).parentID) {
       // subtask — skip notification
     } else if (sessionID) {
+      const viewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
       appendNotification({
         directory: resolvedDirectory,
         session: sessionID,
         time: Date.now(),
-        viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
+        viewed,
         ...(payload.type === "session.error"
           ? { type: "error" as const, error: props.error }
           : { type: "turn-complete" as const }),
@@ -1863,6 +1870,12 @@ export function SyncProvider(props: {
     }
   }, [props.sdk])
 
+  useEffect(() => {
+    void hydrateSessionAttentionState().catch(() => {
+      // Older servers may not expose attention hydration yet.
+    })
+  }, [props.sdk])
+
   // Event pipeline — created once per mount. No class, no start/stop.
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
@@ -1897,6 +1910,9 @@ export function SyncProvider(props: {
           hasEverConnected: true,
           connectionPhase: "connected",
         })
+        void hydrateSessionAttentionState().catch(() => {
+          // Attention hydration is best-effort across mixed-version runtimes.
+        })
         const isFirstConnect = !pipelineHasConnectedRef.current
         pipelineHasConnectedRef.current = true
         if (isFirstConnect && !pipelineDisconnectedBeforeFirstConnectRef.current) {
@@ -1927,6 +1943,9 @@ export function SyncProvider(props: {
           isConnected: true,
           hasEverConnected: true,
           connectionPhase: "connected",
+        })
+        void hydrateSessionAttentionState().catch(() => {
+          // Attention hydration is best-effort across mixed-version runtimes.
         })
         for (const dir of childStores.children.keys()) {
           triggerDirectoryResync(dir, "transport-switch")
