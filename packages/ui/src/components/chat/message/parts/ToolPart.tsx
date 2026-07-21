@@ -1517,6 +1517,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (!Array.isArray(attachments)) return [];
         return attachments.filter((f): f is FilePart & { url: string } => f.type === 'file' && typeof f.mime === 'string' && f.mime.startsWith('image/') && typeof f.url === 'string');
     }, [attachments]);
+    const otherAttachments = React.useMemo(() => {
+        if (!Array.isArray(attachments)) return [];
+        return attachments.filter((f): f is FilePart => f.type === 'file' && !(typeof f.mime === 'string' && f.mime.startsWith('image/')));
+    }, [attachments]);
 
     const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
     const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
@@ -1959,23 +1963,44 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 </>
             )}
 
-            {imageAttachments.length > 0 && state.status === 'completed' ? (
-                <div className="flex flex-wrap gap-2">
-                    {imageAttachments.map((file, index) => (
-                        <button
-                            key={file.url}
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); handleAttachmentClick(index); }}
-                            className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden rounded-lg h-16 w-16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                            <img
-                                src={file.url}
-                                alt={file.filename || 'Attachment'}
-                                className="h-full w-full object-cover"
-                                loading="lazy"
-                            />
-                        </button>
-                    ))}
+            {attachments && Array.isArray(attachments) && attachments.length > 0 && state.status === 'completed' ? (
+                <div className="space-y-2">
+                    {imageAttachments.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                            {imageAttachments.map((file, index) => (
+                                <button
+                                    key={file.url}
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); handleAttachmentClick(index); }}
+                                    className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden rounded-lg h-16 w-16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                >
+                                    <img
+                                        src={file.url}
+                                        alt={file.filename || 'Attachment'}
+                                        className="h-full w-full object-cover"
+                                        loading="lazy"
+                                    />
+                                </button>
+                            ))}
+                        </div>
+                    ) : null}
+                    {otherAttachments.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                            {otherAttachments.map((file) => {
+                                const fileName = file.filename || 'file';
+                                const ext = fileName.split('.').pop() || '';
+                                return (
+                                    <div
+                                        key={file.url || fileName}
+                                        className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg"
+                                    >
+                                        <FileTypeIcon filePath={fileName} extension={ext} className="text-muted-foreground h-3.5 w-3.5" />
+                                        <span className="truncate max-w-[140px] block" title={fileName}>{fileName}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
         </div>
