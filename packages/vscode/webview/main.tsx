@@ -13,8 +13,6 @@ import {
 } from '@openchamber/ui/lib/theme/vscode/adapter';
 import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
-import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
-import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
 import type { PermissionRequest } from '@opencode-ai/sdk/v2/client';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
@@ -1776,6 +1774,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       if (!settings.notifyOnQuestion) return;
       const requestId = getPayloadString(properties.id);
       if (requestId) {
+        const { processVSCodePermissionAutoAccept } = await import('@openchamber/ui/sync/vscode-permission-auto-accept');
         const accepted = await processVSCodePermissionAutoAccept(
           properties as unknown as PermissionRequest,
           detail?.directory,
@@ -1806,10 +1805,11 @@ onCommand('settingsSynced', () => {
   });
 });
 
-onCommand('permissionAutoAcceptSynced', (payload) => {
+onCommand('permissionAutoAcceptSynced', async (payload) => {
   if (!payload || typeof payload !== 'object') return;
   const sessions = (payload as { sessions?: unknown }).sessions;
   if (!sessions || typeof sessions !== 'object') return;
+  const { usePermissionStore } = await import('@openchamber/ui/stores/permissionStore');
   usePermissionStore.getState().applySnapshot({ sessions: sessions as Record<string, boolean> });
 });
 
