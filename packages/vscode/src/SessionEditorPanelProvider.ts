@@ -139,20 +139,20 @@ export class SessionEditorPanelProvider {
         if (command === 'openchamber.updateSessionEditorTitle') {
           const title = typeof args?.[1] === 'string' && args[1].trim().length > 0 ? args[1].trim() : t('Session');
           state.panel.title = title;
-          state.panel.webview.postMessage({ id: message.id, type: message.type, success: true, data: { result: true } });
+          state.panel?.webview.postMessage({ id: message.id, type: message.type, success: true, data: { result: true } });
           return;
         }
       }
 
       if (message.type === 'api:sse:start') {
         const response = await this._startSseProxy(message, state);
-        state.panel.webview.postMessage(response);
+        state.panel?.webview.postMessage(response);
         return;
       }
 
       if (message.type === 'api:sse:stop') {
         const response = await this._stopSseProxy(message, state);
-        state.panel.webview.postMessage(response);
+        state.panel?.webview.postMessage(response);
         return;
       }
 
@@ -160,7 +160,7 @@ export class SessionEditorPanelProvider {
         manager: this._openCodeManager,
         context: this._context,
       });
-      state.panel.webview.postMessage(response);
+      state.panel?.webview.postMessage(response);
 
       if (message.type === 'api:config/settings:save' && response.success) {
         void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
@@ -172,7 +172,7 @@ export class SessionEditorPanelProvider {
     const themeKind = getThemeKindName(kind);
     void getWebviewShikiThemes().then((shikiThemes) => {
       for (const entry of this._panels.values()) {
-        entry.panel.webview.postMessage({
+        entry.panel?.webview.postMessage({
           type: 'themeChange',
           theme: { kind: themeKind, shikiThemes },
         });
@@ -191,7 +191,7 @@ export class SessionEditorPanelProvider {
 
   public notifySettingsSynced(settings: unknown): void {
     for (const entry of this._panels.values()) {
-      entry.panel.webview.postMessage({
+      entry.panel?.webview.postMessage({
         type: 'command',
         command: 'settingsSynced',
         payload: settings,
@@ -211,7 +211,7 @@ export class SessionEditorPanelProvider {
 
   public notifyWindowFocusChanged(focused: boolean): void {
     for (const entry of this._panels.values()) {
-      entry.panel.webview.postMessage({
+      entry.panel?.webview.postMessage({
         type: 'command',
         command: 'windowFocusChanged',
         payload: { focused },
@@ -240,7 +240,7 @@ export class SessionEditorPanelProvider {
     }
 
     entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, true);
-    void entry.panel.webview.postMessage({
+    void entry.panel?.webview.postMessage({
       type: 'command',
       command: 'addContextSelection',
       payload: selection,
@@ -259,7 +259,7 @@ export class SessionEditorPanelProvider {
     }
 
     entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, true);
-    void entry.panel.webview.postMessage({
+    void entry.panel?.webview.postMessage({
       type: 'command',
       command: 'createSessionWithPrompt',
       payload: { prompt },
@@ -280,7 +280,7 @@ export class SessionEditorPanelProvider {
     }
 
     entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, true);
-    void entry.panel.webview.postMessage({
+    void entry.panel?.webview.postMessage({
       type: 'command',
       command: 'addFileAttachments',
       payload: { files: cleanedFiles },
@@ -289,12 +289,12 @@ export class SessionEditorPanelProvider {
   }
 
   private _sendCachedStateToPanel(entry: SessionPanelState) {
-    entry.panel.webview.postMessage({
+    entry.panel?.webview.postMessage({
       type: 'connectionStatus',
       status: this._cachedStatus,
       error: this._cachedError,
     });
-    entry.panel.webview.postMessage({
+    entry.panel?.webview.postMessage({
       type: 'command',
       command: 'windowFocusChanged',
       payload: { focused: vscode.window.state.focused },
@@ -303,7 +303,7 @@ export class SessionEditorPanelProvider {
 
   private _postCommandToPanels(command: string, payload: unknown): void {
     for (const entry of this._panels.values()) {
-      entry.panel.webview.postMessage({
+      entry.panel?.webview.postMessage({
         type: 'command',
         command,
         payload,
@@ -437,7 +437,7 @@ export class SessionEditorPanelProvider {
         headers: this._buildSseHeaders(headers),
         signal: controller.signal,
         onChunk: (chunk) => {
-          entry.panel.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk });
+          entry.panel?.webview?.postMessage({ type: 'api:sse:chunk', streamId, chunk });
         },
       });
 
@@ -445,12 +445,12 @@ export class SessionEditorPanelProvider {
 
       start.run
         .then(() => {
-          entry.panel.webview.postMessage({ type: 'api:sse:end', streamId });
+          entry.panel?.webview?.postMessage({ type: 'api:sse:end', streamId });
         })
         .catch((error) => {
           if (!controller.signal.aborted) {
             const messageText = error instanceof Error ? error.message : String(error);
-            entry.panel.webview.postMessage({ type: 'api:sse:end', streamId, error: messageText });
+            entry.panel?.webview?.postMessage({ type: 'api:sse:end', streamId, error: messageText });
           }
         })
         .finally(() => {
