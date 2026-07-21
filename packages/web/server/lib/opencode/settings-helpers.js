@@ -810,6 +810,33 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof value.scopeToGuild === 'boolean') {
       result.scopeToGuild = value.scopeToGuild;
     }
+    if (value.defaultReplyMode === 'always' || value.defaultReplyMode === 'mention') {
+      result.defaultReplyMode = value.defaultReplyMode;
+    }
+    if (value.guildPolicies && typeof value.guildPolicies === 'object' && !Array.isArray(value.guildPolicies)) {
+      const guildPolicies = {};
+      for (const [guildId, entry] of Object.entries(value.guildPolicies)) {
+        if (typeof guildId !== 'string' || guildId.length === 0) {
+          continue;
+        }
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          continue;
+        }
+        const policy = {};
+        if (typeof entry.enabled === 'boolean') {
+          policy.enabled = entry.enabled;
+        }
+        if (entry.replyMode === 'always' || entry.replyMode === 'mention' || entry.replyMode === 'inherit') {
+          policy.replyMode = entry.replyMode;
+        }
+        if (Object.keys(policy).length > 0) {
+          guildPolicies[guildId] = policy;
+        }
+      }
+      if (Object.keys(guildPolicies).length > 0) {
+        result.guildPolicies = guildPolicies;
+      }
+    }
     if (typeof value.bridgeEnabled === 'boolean') {
       result.bridgeEnabled = value.bridgeEnabled;
     }

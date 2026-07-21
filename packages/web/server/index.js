@@ -1483,6 +1483,8 @@ async function main(options = {}) {
             resolveProject,
             trustedBotIds: discordConfig.trustedBotIds,
             registerDynamicSlashCommands: Boolean(discordConfig.registerDynamicSlashCommands),
+            defaultReplyMode: discordConfig.defaultReplyMode,
+            guildPolicies: discordConfig.guildPolicies,
           });
           console.log(
             '[Discord] Listener auto-start:',
@@ -1543,6 +1545,8 @@ async function main(options = {}) {
             resolveProject,
             trustedBotIds: cfg.trustedBotIds,
             registerDynamicSlashCommands: Boolean(cfg.registerDynamicSlashCommands),
+            defaultReplyMode: cfg.defaultReplyMode,
+            guildPolicies: cfg.guildPolicies,
           });
           console.log(
             '[Discord] Health check: restart result — running=' + startResult.running +

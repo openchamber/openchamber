@@ -173,6 +173,47 @@ describe('settings helpers', () => {
     expect(merged.themeId).toBe('default');
   });
 
+  it('normalizes discord defaultReplyMode and guildPolicies, dropping invalid entries', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      discord: {
+        botToken: 'tok',
+        defaultReplyMode: 'mention',
+        guildPolicies: {
+          '111': { enabled: true, replyMode: 'always' },
+          '222': { enabled: false },
+          '333': { replyMode: 'inherit' },
+          '': { enabled: true },
+          '444': { replyMode: 'bogus', enabled: 'yes' },
+          '555': {},
+        },
+      },
+    })).toEqual({
+      discord: {
+        botToken: 'tok',
+        defaultReplyMode: 'mention',
+        guildPolicies: {
+          '111': { enabled: true, replyMode: 'always' },
+          '222': { enabled: false },
+          '333': { replyMode: 'inherit' },
+        },
+      },
+    });
+
+    expect(helpers.sanitizeSettingsUpdate({
+      discord: {
+        botToken: 'tok',
+        defaultReplyMode: 'bogus',
+        guildPolicies: null,
+      },
+    })).toEqual({
+      discord: {
+        botToken: 'tok',
+      },
+    });
+  });
+
   it('accepts shortcut overrides as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
