@@ -1112,18 +1112,24 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
           const resolved = new URL(relativePath, `http://localhost${activeDir}`);
           return resolved.pathname;
         } catch {
-          return relativePath;
+          return null;
         }
       };
       result = result
         .replace(/\bfrom\s+(['"])(\.\.?\/[^'"]*)\1/gi, (_match, quote, path) => {
-          return `from ${quote}${rewriteResourceUrl(resolveRel(path))}${quote}`;
+          const resolved = resolveRel(path);
+          if (resolved === null) return _match;
+          return `from ${quote}${rewriteResourceUrl(resolved)}${quote}`;
         })
         .replace(/\bimport\s+(['"])(\.\.?\/[^'"]*)\1/gi, (_match, quote, path) => {
-          return `import ${quote}${rewriteResourceUrl(resolveRel(path))}${quote}`;
+          const resolved = resolveRel(path);
+          if (resolved === null) return _match;
+          return `import ${quote}${rewriteResourceUrl(resolved)}${quote}`;
         })
         .replace(/\bimport\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/gi, (_match, quote, path) => {
-          return `import(${quote}${rewriteResourceUrl(resolveRel(path))}${quote})`;
+          const resolved = resolveRel(path);
+          if (resolved === null) return _match;
+          return `import(${quote}${rewriteResourceUrl(resolved)}${quote})`;
         });
     }
     return result;

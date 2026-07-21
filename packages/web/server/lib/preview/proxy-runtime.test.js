@@ -450,6 +450,19 @@ describe('preview body URL rewriting', () => {
     expect(output).toContain('crossoriginEnabled');
     expect(output).not.toMatch(/<link[^>]*crossorigin/i);
   });
+  it('preserves relative imports unchanged when modulePath is empty string (issue #2338)', () => {
+    const jsOutput = rewritePreviewBody({
+      bodyText: 'import { defineComponent } from "./chunk.js";',
+      kind: 'javascript',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+      modulePath: '',
+    });
+
+    // Empty modulePath means relative imports cannot be resolved; preserve original
+    expect(jsOutput).toContain('from "./chunk.js"');
+  });
 });
 
 describe('preview redirect URL rewriting', () => {
