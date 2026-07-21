@@ -19,6 +19,7 @@ import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runt
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
+import { sdkGlobalEventFetch } from "./sdk-global-event-fetch"
 
 const FLUSH_FRAME_MS = 33
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
@@ -518,6 +519,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const runSseAttempt = async (signal: AbortSignal) => {
     const events = await sdk.global.event({
       signal,
+      fetch: sdkGlobalEventFetch,
       ...(lastEventId && lastEventId.length > 0 ? { headers: { "Last-Event-ID": lastEventId } } : {}),
       onSseEvent: (event: { id?: unknown }) => {
         resetHeartbeat()

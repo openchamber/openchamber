@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
+import { sdkGlobalEventFetch } from "./sdk-global-event-fetch"
 
 const failAfter = (ms: number) => new Promise<never>((_, reject) => {
   setTimeout(() => reject(new Error("Timed out waiting for event pipeline flush")), ms)
@@ -56,6 +57,39 @@ function createSdk(events: Event[], streamFinished: () => void): OpencodeClient 
 }
 
 describe("createEventPipeline", () => {
+  test("passes the canonical runtime fetch adapter to the SDK SSE stream", async () => {
+    let resolveFetch!: (fetchOverride: typeof fetch | undefined) => void
+    const receivedFetch = new Promise<typeof fetch | undefined>((resolve) => {
+      resolveFetch = resolve
+    })
+    const sdk = {
+      global: {
+        event: async (options: { fetch?: typeof fetch; signal: AbortSignal }) => {
+          resolveFetch(options.fetch)
+          return {
+            stream: (async function* () {
+              await new Promise<void>((resolve) => {
+                options.signal.addEventListener("abort", () => resolve(), { once: true })
+              })
+              yield { payload: undefined }
+            })(),
+          }
+        },
+      },
+    } as unknown as OpencodeClient
+    const pipeline = createEventPipeline({
+      sdk,
+      onEvent: () => undefined,
+      transport: "sse",
+    })
+
+    try {
+      expect(await Promise.race([receivedFetch, failAfter(500)])).toBe(sdkGlobalEventFetch)
+    } finally {
+      pipeline.cleanup()
+    }
+  })
+
   test("preserves part update order around text deltas", async () => {
     let resolveStreamFinished!: () => void
     const streamFinished = new Promise<void>((resolve) => {
