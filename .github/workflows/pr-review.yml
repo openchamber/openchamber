@@ -1,8 +1,10 @@
 name: pr-review
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows: ["pr checks"]
+    types:
+      - completed
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -12,13 +14,13 @@ concurrency:
   # PR conversation comments arrive as `issue_comment` events, so their PR number
   # is exposed as `github.event.issue.number`. Keep comment-triggered runs in a
   # separate group so skipped non-command comments do not cancel active reviews.
-  group: pr-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+  group: pr-review-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.issue.number }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_run' }}
 
 jobs:
   review:
     if: |
-      (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '/oc-review' || startsWith(github.event.comment.body, '/oc-review ') || github.event.comment.body == '@openchamber-bot review' || startsWith(github.event.comment.body, '@openchamber-bot review '))) ||
       (github.event_name == 'pull_request_review_comment' && github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '/oc-review' || startsWith(github.event.comment.body, '/oc-review ') || github.event.comment.body == '@openchamber-bot review' || startsWith(github.event.comment.body, '@openchamber-bot review ')))
     runs-on: ubuntu-latest
@@ -43,7 +45,7 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          EVENT_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EVENT_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || github.event.issue.number }}
         run: |
           pr_json="$(gh pr view "$EVENT_PR_NUMBER" --json number,url,title,body,author,baseRefName,headRefName,headRepositoryOwner,isDraft)"
 
@@ -88,7 +90,7 @@ jobs:
           echo "safe=true" >> "$GITHUB_OUTPUT"
 
       - name: Resolve manual command
-        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && github.event_name != 'pull_request_target'
+        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && github.event_name != 'workflow_run'
         id: command
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
@@ -117,7 +119,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Acknowledge manual review command
-        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && github.event_name != 'pull_request_target'
+        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && github.event_name != 'workflow_run'
         id: manual-reaction
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -203,7 +205,7 @@ jobs:
           $PR_BODY"
 
       - name: Verify manual review comment
-        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && github.event_name != 'pull_request_target'
+        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && github.event_name != 'workflow_run'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
