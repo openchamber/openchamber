@@ -100,7 +100,7 @@
     "@codemirror/language": "6.12.2",
     "@codemirror/lint": "^6.9.2",
     "@codemirror/search": "^6.6.0",
-    "@codemirror/state": "^6.5.4",
+    "@codemirror/state": "6.7.1",
     "@codemirror/view": "6.39.13",
     "@heroui/scroll-shadow": "^2.3.18",
     "@heroui/system": "^2.4.23",
@@ -143,6 +143,7 @@
   },
   "overrides": {
     "@codemirror/language": "6.12.2",
+    "@codemirror/state": "6.7.1",
     "@codemirror/view": "6.39.13"
   },
   "devDependencies": {
