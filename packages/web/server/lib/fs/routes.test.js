@@ -266,6 +266,58 @@ describe('fs write', () => {
     expect(fsPromises.unlink).not.toHaveBeenCalled();
   });
 
+  it('writes binary content with base64 encoding', async () => {
+    const payload = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]);
+    const fsPromises = {
+      readFile: vi.fn(async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); }),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, {
+      path: '/repo/uploads/report.xlsx',
+      content: payload.toString('base64'),
+      encoding: 'base64',
+    });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/uploads/report.xlsx' });
+    const [tmp, written] = fsPromises.writeFile.mock.calls[0];
+    expect(tmp).toMatch(/^\/repo\/uploads\/report\.xlsx\.tmp-/);
+    expect(Buffer.isBuffer(written)).toBe(true);
+    expect(written.equals(payload)).toBe(true);
+    expect(fsPromises.writeFile.mock.calls[0].length).toBe(2);
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/uploads/report.xlsx');
+  });
+
+  it('skips base64 rewrite when binary content is unchanged', async () => {
+    const payload = Buffer.from('same-bytes');
+    const fsPromises = {
+      readFile: vi.fn(async () => Buffer.from(payload)),
+      mkdir: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => undefined),
+    };
+    const handler = registerWrite(fsPromises);
+
+    const res = await callWrite(handler, {
+      path: '/repo/uploads/report.xlsx',
+      content: payload.toString('base64'),
+      encoding: 'base64',
+    });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/uploads/report.xlsx' });
+    expect(fsPromises.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('rejects unknown encodings', async () => {
+    const handler = registerWrite({});
+    const res = await callWrite(handler, { path: '/repo/f', content: 'x', encoding: 'hex' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Unsupported encoding' });
+  });
+
   it('writes through existing symlinks without replacing the link', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => {
