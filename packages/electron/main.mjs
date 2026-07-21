@@ -18,6 +18,7 @@ import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
+import { withFileWriteLock } from '@openchamber/web/server/lib/fs/settings-file-lock.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -489,14 +490,17 @@ const readJsonFile = (filePath) => {
   }
 };
 
-const writeJsonFile = async (filePath, data) => {
+const writeJsonFile = async (filePath, data) => withFileWriteLock(filePath, async () => {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
   // Atomic: write to a temp file then rename. Readers never see a partial
-  // JSON file that could parse-error and get coerced to {}.
+  // JSON file that could parse-error and get coerced to {}. withFileWriteLock
+  // also serializes against the in-process OpenChamber web server's own
+  // settings writer (packages/web/server/lib/opencode/settings-runtime.js),
+  // which persists the same settings.json independently of this module.
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   await fsp.writeFile(tmp, JSON.stringify(data, null, 2));
   await fsp.rename(tmp, filePath);
-};
+});
 
 const readSettingsRoot = () => {
   const root = readJsonFile(settingsFilePath());
