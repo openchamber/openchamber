@@ -18,6 +18,9 @@ import {
   getWorktreeSetupWaitEnabled,
   saveWorktreeSetupCommands,
   saveWorktreeSetupWaitEnabled,
+  getArchivedWorktrees,
+  addArchivedWorktree,
+  removeArchivedWorktree,
 } from '@/lib/openchamberConfig';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -44,6 +47,8 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const projectPath = projectRefProp?.path ?? activeProject?.path ?? null;
 
   const getWorktreeMetadata = useSessionUIStore((s) => s.getWorktreeMetadata);
+  const archiveSessions = useSessionUIStore((s) => s.archiveSessions);
+  const unarchiveSessions = useSessionUIStore((s) => s.unarchiveSessions);
   const sessions = useSessions();
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
@@ -54,6 +59,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const [isGitRepoLocal, setIsGitRepoLocal] = React.useState<boolean | null>(null);
   const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
   const [isLoadingWorktrees, setIsLoadingWorktrees] = React.useState(false);
+  const [archivedWorktreePaths, setArchivedWorktreePaths] = React.useState<string[]>([]);
   const isSavingCommandsRef = React.useRef(false);
 
   const projectRef = React.useMemo(() => {
@@ -170,10 +176,87 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     };
   }, [projectRef]);
 
-  const persistSetupCommands = React.useCallback(async (commands: string[]): Promise<boolean> => {
+  React.useEffect(() => {
     if (!projectRef) {
-      return false;
+      setArchivedWorktreePaths([]);
+      return;
     }
+    let cancelled = false;
+    (async () => {
+      try {
+        const paths = await getArchivedWorktrees(projectRef);
+        if (!cancelled) setArchivedWorktreePaths(paths);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectRef]);
+
+  const getWorktreeSessionIds = React.useCallback((worktree: WorktreeMetadata): string[] => {
+    const normalize = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '');
+    const normalizedWorktreePath = normalize(worktree.path);
+
+    const directSessions = sessions.filter((session) => {
+      const metadata = getWorktreeMetadata(session.id);
+      if (metadata?.path && normalize(metadata.path) === normalizedWorktreePath) return true;
+      const sessionDir = (session as { directory?: string }).directory;
+      if (sessionDir && normalize(sessionDir) === normalizedWorktreePath) return true;
+      return false;
+    });
+
+    const directSessionIds = new Set(directSessions.map((s) => s.id));
+
+    const allKnownSessions = [
+      ...useGlobalSessionsStore.getState().activeSessions,
+      ...useGlobalSessionsStore.getState().archivedSessions,
+    ];
+
+    const findSubsessions = (parentIds: Set<string>): Session[] => {
+      const subsessions = allKnownSessions.filter((s) => {
+        const parentID = (s as Session & { parentID?: string | null }).parentID;
+        return parentID && parentIds.has(parentID);
+      });
+      if (subsessions.length === 0) return [];
+      return [...subsessions, ...findSubsessions(new Set(subsessions.map((s) => s.id)))];
+    };
+
+    const seenIds = new Set<string>();
+    return [...directSessions, ...findSubsessions(directSessionIds)]
+      .filter((s) => { if (seenIds.has(s.id)) return false; seenIds.add(s.id); return true; })
+      .map((s) => s.id);
+  }, [sessions, getWorktreeMetadata]);
+
+  const handleArchiveWorktree = React.useCallback(async (worktree: WorktreeMetadata) => {
+    if (!projectRef) return;
+    const sessionIds = getWorktreeSessionIds(worktree);
+    try {
+      if (sessionIds.length > 0) await archiveSessions(sessionIds);
+      await addArchivedWorktree(projectRef, worktree.path);
+      setArchivedWorktreePaths((prev) => [...prev, worktree.path.replace(/\\/g, '/').replace(/\/+$/, '')]);
+      toast.success(t('settings.openchamber.worktrees.list.archiveSuccess'));
+    } catch {
+      toast.error(t('settings.openchamber.worktrees.list.archiveFailed'));
+    }
+    refreshWorktrees();
+  }, [projectRef, getWorktreeSessionIds, archiveSessions, t, refreshWorktrees]);
+
+  const handleRestoreWorktree = React.useCallback(async (worktree: WorktreeMetadata) => {
+    if (!projectRef) return;
+    const sessionIds = getWorktreeSessionIds(worktree);
+    try {
+      await removeArchivedWorktree(projectRef, worktree.path);
+      if (sessionIds.length > 0) await unarchiveSessions(sessionIds);
+      setArchivedWorktreePaths((prev) => prev.filter((p) => p !== worktree.path.replace(/\\/g, '/').replace(/\/+$/, '')));
+      toast.success(t('settings.openchamber.worktrees.archived.restoreSuccess'));
+    } catch {
+      toast.error(t('settings.openchamber.worktrees.archived.restoreFailed'));
+    }
+    refreshWorktrees();
+  }, [projectRef, getWorktreeSessionIds, unarchiveSessions, t, refreshWorktrees]);
+
+  const persistSetupCommands = React.useCallback(async (commands: string[]): Promise<boolean> => {
+    if (!projectRef) return false;
     const filtered = commands.filter((cmd) => cmd.trim().length > 0);
     try {
       const ok = await saveWorktreeSetupCommands(projectRef, filtered);
@@ -435,45 +518,117 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
       >
         {isLoadingWorktrees ? (
           <p className="typography-meta text-muted-foreground">{t('settings.openchamber.worktrees.list.loading')}</p>
-        ) : availableWorktrees.length === 0 ? (
-          <p className="typography-meta text-muted-foreground/70">
-            {t('settings.openchamber.worktrees.list.empty')}
-          </p>
-        ) : (
-          <div className={cn('space-y-1', PROJECT_SETTINGS_CONTROL_WIDTH)}>
-            {availableWorktrees.map((worktree) => (
-              <div
-                key={worktree.path}
-                className="group flex w-full items-center gap-2 py-1.5"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <p className="typography-meta min-w-0 truncate text-foreground">
-                      {worktree.label || worktree.branch || t('settings.openchamber.worktrees.list.detachedHead')}
-                    </p>
-                    <span className="typography-micro flex-shrink-0 self-center rounded bg-sidebar-accent/40 px-1.5 py-[1px] leading-none text-muted-foreground/60">
-                      OpenCode
-                    </span>
-                  </div>
-                  <p className="typography-micro truncate text-muted-foreground/60">
-                    {formatPathForDisplay(worktree.path, homeDirectory)}
-                  </p>
+        ) : (() => {
+          const normalizePath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+          const archivedSet = new Set(archivedWorktreePaths.map(normalizePath));
+          const activeWorktrees = availableWorktrees.filter((w) => !archivedSet.has(normalizePath(w.path)));
+          const archivedWorktreeList = availableWorktrees.filter((w) => archivedSet.has(normalizePath(w.path)));
+
+          return (
+            <>
+              {activeWorktrees.length === 0 && archivedWorktreeList.length === 0 ? (
+                <p className="typography-meta text-muted-foreground/70">
+                  {t('settings.openchamber.worktrees.list.empty')}
+                </p>
+              ) : null}
+              {activeWorktrees.length > 0 && (
+                <div className={cn('space-y-1', PROJECT_SETTINGS_CONTROL_WIDTH)}>
+                  {activeWorktrees.map((worktree) => (
+                    <div
+                      key={worktree.path}
+                      className="group flex w-full items-center gap-2 py-1.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="typography-meta min-w-0 truncate text-foreground">
+                            {worktree.label || worktree.branch || t('settings.openchamber.worktrees.list.detachedHead')}
+                          </p>
+                          <span className="typography-micro flex-shrink-0 self-center rounded bg-sidebar-accent/40 px-1.5 py-[1px] leading-none text-muted-foreground/60">
+                            OpenCode
+                          </span>
+                        </div>
+                        <p className="typography-micro truncate text-muted-foreground/60">
+                          {formatPathForDisplay(worktree.path, homeDirectory)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { void handleArchiveWorktree(worktree); }}
+                        className={cn(
+                          'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                          alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        )}
+                        aria-label={t('settings.openchamber.worktrees.list.archiveWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
+                      >
+                        <Icon name="inbox-archive" className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteWorktree(worktree)}
+                        className={cn(
+                          'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                          alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        )}
+                        aria-label={t('settings.openchamber.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
+                      >
+                        <Icon name="delete-bin" className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteWorktree(worktree)}
-                  className={cn(
-                    'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                    alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                  )}
-                  aria-label={t('settings.openchamber.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
-                >
-                  <Icon name="delete-bin" className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+              {archivedWorktreeList.length > 0 && (
+                <div className={cn('mt-3 space-y-1', PROJECT_SETTINGS_CONTROL_WIDTH)}>
+                  <p className="typography-ui-label mb-1 text-muted-foreground/70">
+                    {t('settings.openchamber.worktrees.archived.title')}
+                  </p>
+                  {archivedWorktreeList.map((worktree) => (
+                    <div
+                      key={worktree.path}
+                      className="group flex w-full items-center gap-2 py-1.5 opacity-60 hover:opacity-100 transition-opacity"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="typography-meta min-w-0 truncate text-foreground">
+                            {worktree.label || worktree.branch || t('settings.openchamber.worktrees.list.detachedHead')}
+                          </p>
+                          <span className="typography-micro flex-shrink-0 self-center rounded bg-sidebar-accent/40 px-1.5 py-[1px] leading-none text-muted-foreground/60">
+                            {t('sessions.sidebar.bulkActions.archive')}
+                          </span>
+                        </div>
+                        <p className="typography-micro truncate text-muted-foreground/60">
+                          {formatPathForDisplay(worktree.path, homeDirectory)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { void handleRestoreWorktree(worktree); }}
+                        className={cn(
+                          'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                          alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        )}
+                        aria-label={t('settings.openchamber.worktrees.archived.restoreWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
+                      >
+                        <Icon name="inbox-unarchive" className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteWorktree(worktree)}
+                        className={cn(
+                          'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                          alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        )}
+                        aria-label={t('settings.openchamber.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
+                      >
+                        <Icon name="delete-bin" className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </ProjectSettingsSubsection>
     </>
   );
