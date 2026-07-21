@@ -49,6 +49,8 @@ type LoaderEntry = {
   snapshot: SessionMessageLoadState
   listeners: Set<() => void>
   inflight: Promise<void> | null
+  queuedRefresh: Promise<void> | null
+  queuedRefreshLimit: number
   optimistic: Map<string, OptimisticItem>
 }
 
@@ -231,7 +233,35 @@ export class SessionMessageLoader {
     const normalized = this.normalizeTarget(target)
     if (!normalized || this.disposed) return Promise.resolve()
     const entry = this.getEntry(normalized)
-    if (entry.inflight) return entry.inflight
+    if (entry.inflight) {
+      entry.queuedRefreshLimit = Math.max(entry.queuedRefreshLimit, limit)
+      if (entry.queuedRefresh) return entry.queuedRefresh
+      const inflight = entry.inflight
+      const entryKey = this.keyFor(normalized)
+      const generation = entry.snapshot.generation
+      const sdkEpoch = this.sdkEpoch
+      const clearQueuedRefresh = () => {
+        if (entry.queuedRefresh !== queuedRefresh) return
+        entry.queuedRefresh = null
+        entry.queuedRefreshLimit = 0
+      }
+      const queuedRefresh = inflight.then(() => {
+        if (
+          this.disposed
+          || this.sdkEpoch !== sdkEpoch
+          || entry.snapshot.generation !== generation
+          || this.entries.get(entryKey) !== entry
+        ) {
+          clearQueuedRefresh()
+          return
+        }
+        const refreshLimit = entry.queuedRefreshLimit
+        clearQueuedRefresh()
+        return this.refreshTail(normalized, refreshLimit)
+      })
+      entry.queuedRefresh = queuedRefresh
+      return queuedRefresh
+    }
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
     this.bumpGeneration(entry)
     return this.startLoad(normalized, entry, store, "refresh", async (isCurrent) => {
@@ -375,6 +405,8 @@ export class SessionMessageLoader {
         : createDefaultState(),
       listeners: new Set(),
       inflight: null,
+      queuedRefresh: null,
+      queuedRefreshLimit: 0,
       optimistic: new Map(),
     }
     this.entries.set(key, entry)

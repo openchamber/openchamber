@@ -2685,6 +2685,37 @@ const isSuspendExemptShellBridge = (state: State, info: Message, parts: Part[] |
   })
 }
 
+type TaskToolPart = Extract<Part, { type: "tool" }>
+
+const isTaskToolPart = (part: Part | undefined): part is TaskToolPart => (
+  part?.type === "tool" && part.tool?.trim().toLowerCase() === "task"
+)
+
+const readTaskSessionId = (part: Part | undefined): string | undefined => {
+  if (!isTaskToolPart(part)) return undefined
+  const metadata = (part.state as { metadata?: unknown } | undefined)?.metadata
+  if (!metadata || typeof metadata !== "object") return undefined
+  const record = metadata as { sessionId?: unknown; sessionID?: unknown }
+  const value = typeof record.sessionId === "string" ? record.sessionId : record.sessionID
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
+}
+
+const hasTaskSessionIdentityChange = (previous: Part[], current: Part[] | undefined): boolean => {
+  let previousTaskCount = 0
+  for (const part of previous) {
+    if (!isTaskToolPart(part)) continue
+    previousTaskCount += 1
+    const currentPart = current?.find((candidate) => candidate.id === part.id && isTaskToolPart(candidate))
+    if (!currentPart || readTaskSessionId(part) !== readTaskSessionId(currentPart)) return true
+  }
+
+  let currentTaskCount = 0
+  for (const part of current ?? EMPTY_PARTS) {
+    if (isTaskToolPart(part)) currentTaskCount += 1
+  }
+  return previousTaskCount !== currentTaskCount
+}
+
 const snapshotPartsMatchState = (snapshot: SessionMessageRecordsSnapshot, state: State): boolean => {
   for (const record of snapshot.list) {
     if (snapshot.suspendPartUpdates) {
@@ -2692,6 +2723,7 @@ const snapshotPartsMatchState = (snapshot: SessionMessageRecordsSnapshot, state:
       if (
         (!suspendedID || record.info.id === suspendedID)
         && !isSuspendExemptShellBridge(state, record.info, state.part[record.info.id])
+        && !hasTaskSessionIdentityChange(record.parts, state.part[record.info.id])
       ) {
         continue
       }
@@ -2771,6 +2803,7 @@ export function buildSessionMessageRecordsSnapshot(
       && previousRecord
       && (!suspendedPartUpdatesMessageID || message.id === suspendedPartUpdatesMessageID)
       && !isSuspendExemptShellBridge(state, message, state.part[message.id])
+      && !hasTaskSessionIdentityChange(previousRecord.parts, state.part[message.id])
     const parts = shouldSuspendParts
       ? previousRecord.parts
       : (state.part[message.id] ?? EMPTY_PARTS)
@@ -2976,7 +3009,13 @@ export function useSessionMessageRecords(
         const allChangesSuspended = change.partMessageIDs.every((messageID) => {
           if (suspendedPartUpdatesMessageID && messageID !== suspendedPartUpdatesMessageID) return false
           const message = snapshot?.byId.get(messageID)?.info
-          return Boolean(message && !isSuspendExemptShellBridge(state, message, state.part[messageID]))
+          const previousParts = snapshot?.byId.get(messageID)?.parts
+          return Boolean(
+            message
+            && previousParts
+            && !isSuspendExemptShellBridge(state, message, state.part[messageID])
+            && !hasTaskSessionIdentityChange(previousParts, state.part[messageID]),
+          )
         })
         if (allChangesSuspended) {
           countSyncPerformance("sessionMessageRecordNotificationSkips")

@@ -56,6 +56,39 @@ describe("SessionMessageLoader", () => {
     childStores.disposeAll()
   })
 
+  test("runs a requested tail refresh after an older in-flight load", async () => {
+    const initial = deferred<ReturnType<typeof response>>()
+    const refresh = deferred<ReturnType<typeof response>>()
+    let calls = 0
+    const limits: number[] = []
+    const { childStores, loader } = createLoader(async ({ limit }) => {
+      calls += 1
+      limits.push(limit ?? 0)
+      return calls === 1 ? initial.promise : refresh.promise
+    })
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    const loading = loader.ensure(target, { reason: "navigation" })
+    const refreshing = loader.refreshTail(target, 30)
+    const duplicateRefresh = loader.refreshTail(target, 80)
+    expect(calls).toBe(1)
+    expect(duplicateRefresh).toBe(refreshing)
+
+    initial.resolve(response([createRecord(target.sessionID, "msg_1")]))
+    await loading
+    await Promise.resolve()
+    expect(calls).toBe(2)
+    expect(limits).toEqual([50, 80])
+
+    refresh.resolve(response([createRecord(target.sessionID, "msg_2")]))
+    await Promise.all([refreshing, duplicateRefresh])
+
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id))
+      .toEqual(["msg_1", "msg_2"])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("does not deduplicate identical session IDs across directories", async () => {
     const calls: string[] = []
     const { childStores, loader } = createLoader(async ({ directory, sessionID }) => {
