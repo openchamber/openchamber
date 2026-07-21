@@ -81,6 +81,47 @@ describe('checkForUpdates', () => {
     expect(result.currentVersion).toBe('1.9.10');
   });
 
+  // --- Scenario: cross-verification uses the configured npm registry ---
+
+  it('cross-verifies against the configured npm registry, not registry.npmjs.org', async () => {
+    const previous = process.env.NPM_CONFIG_REGISTRY;
+    process.env.NPM_CONFIG_REGISTRY = 'https://mirror.example.com/npm';
+    // Only the mirror is mocked. A stray call to registry.npmjs.org would reject,
+    // drop npm cross-verification, and flip available to false.
+    fetchMock
+      .when('api.openchamber.dev', {
+        ok: true,
+        json: async () => ({
+          latestVersion: '1.10.0',
+          updateAvailable: true,
+          releaseNotes: '## [1.10.0]\n\n- New',
+        }),
+      })
+      .when('mirror.example.com/npm/@openchamber/web', {
+        ok: true,
+        json: async () => ({
+          'dist-tags': { latest: '1.10.0' },
+        }),
+      })
+      .when('raw.githubusercontent.com', {
+        ok: true,
+        text: async () => '## [1.10.0]\n\n- New',
+      });
+
+    try {
+      const result = await checkForUpdates({ currentVersion: '1.9.10' });
+
+      expect(result.available).toBe(true);
+      expect(result.version).toBe('1.10.0');
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url) === 'https://mirror.example.com/npm/@openchamber/web'),
+      ).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.NPM_CONFIG_REGISTRY;
+      else process.env.NPM_CONFIG_REGISTRY = previous;
+    }
+  });
+
   // --- Scenario (THE FIX): API says update available, npm does NOT have it ---
 
   it('returns available=false when API claims update but npm has same version', async () => {

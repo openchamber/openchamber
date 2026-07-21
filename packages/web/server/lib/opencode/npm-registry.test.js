@@ -171,6 +171,19 @@ describe('npm registry client', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://registry.npmjs.org/@scope%2Fpkg');
   });
 
+  test('configured registry base is used and trailing-slash trimmed', async () => {
+    const previous = process.env.NPM_CONFIG_REGISTRY;
+    process.env.NPM_CONFIG_REGISTRY = 'https://mirror.example.com/npm/';
+    try {
+      await npm.getNpmInfo('@scope/pkg');
+
+      expect(fetchMock.mock.calls[0][0]).toBe('https://mirror.example.com/npm/@scope%2Fpkg');
+    } finally {
+      if (previous === undefined) delete process.env.NPM_CONFIG_REGISTRY;
+      else process.env.NPM_CONFIG_REGISTRY = previous;
+    }
+  });
+
   test('user-agent header is present', async () => {
     await npm.getNpmInfo('foo');
 

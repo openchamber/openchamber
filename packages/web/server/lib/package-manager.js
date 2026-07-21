@@ -5,12 +5,13 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { resolveNpmRegistryBase } from './npm-registry-config.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
-const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/CHANGELOG.md';
 const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
@@ -686,7 +687,7 @@ export function getCurrentVersion() {
  */
 async function getLatestVersion() {
   try {
-    const response = await fetch(NPM_REGISTRY_URL, {
+    const response = await fetch(`${resolveNpmRegistryBase()}/${PACKAGE_NAME}`, {
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(10000),
     });

@@ -2,9 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { resolveNpmRegistryBase } from '../npm-registry-config.js';
+
 const NPM_CACHE_TTL_MS = 3_600_000;
 const NPM_FETCH_TIMEOUT_MS = 5_000;
-const NPM_REGISTRY_BASE = 'https://registry.npmjs.org';
 
 /**
  * @typedef {Object} NpmPackagePayload
@@ -87,7 +88,7 @@ function cacheResult(name, payload) {
  */
 export async function lookupNpmPackage(name) {
   try {
-    const response = await fetch(`${NPM_REGISTRY_BASE}/${encodeName(name)}`, {
+    const response = await fetch(`${resolveNpmRegistryBase()}/${encodeName(name)}`, {
       headers: {
         'User-Agent': _getUserAgent(),
         Accept: 'application/json',
