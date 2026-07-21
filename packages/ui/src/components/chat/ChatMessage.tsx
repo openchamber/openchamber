@@ -573,6 +573,17 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return freshnessDetector.shouldAnimateMessage(message.info, message.info.sessionID);
     }, [message.info, isUser]);
 
+    // Once a fresh assistant message has rendered, record it so it is not animated
+    // again when the chat viewport remounts on a session switch (issue #2124).
+    // Marking runs in a committed effect rather than inside shouldAnimateMessage
+    // (which runs in a useMemo during render): under React StrictMode the render is
+    // invoked twice, so marking there would flip the memoized result to false on the
+    // second pass and suppress the first animation.
+    React.useEffect(() => {
+        if (!shouldAnimateMessage) return;
+        MessageFreshnessDetector.getInstance().markMessageAsAnimated(message.info.id, message.info.time.created);
+    }, [shouldAnimateMessage, message.info.id, message.info.time.created]);
+
     const [hasStartedStreamingHeader, setHasStartedStreamingHeader] = React.useState(false);
 
     const nextRole = React.useMemo(() => {
