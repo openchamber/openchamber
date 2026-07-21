@@ -3,12 +3,12 @@ import type { OpencodeClient, Project } from "@opencode-ai/sdk/v2/client"
 import { bootstrapDirectory } from "./bootstrap"
 import { INITIAL_STATE, type State } from "./types"
 
-const createSdk = () => ({
+const createSdk = (options?: { commandList?: () => Promise<{ data: unknown[] }> }) => ({
   project: { current: async () => ({ data: { id: "project-a" } }) },
   config: { get: async () => ({ data: {} }) },
   path: { get: async () => ({ data: { state: "", config: "", worktree: "/repo", directory: "/repo", home: "/home" } }) },
   session: { status: async () => ({ data: {} }) },
-  command: { list: async () => ({ data: [] }) },
+  command: { list: options?.commandList ?? (async () => ({ data: [] })) },
   mcp: { status: async () => ({ data: {} }) },
   lsp: { status: async () => ({ data: [] }) },
   vcs: { get: async () => ({ data: { branch: "main" } }) },
@@ -25,16 +25,27 @@ const createState = (): State => ({
 const project = { id: "project-a", worktree: "/repo" } as Project
 
 describe("bootstrapDirectory", () => {
-  test("holds completion until deferred fields and session loading finish", async () => {
+  test("prioritizes session loading without waiting for deferred fields", async () => {
     let state = createState()
+    let deferredStarted = false
+    let resolveDeferred!: () => void
+    const deferred = new Promise<{ data: unknown[] }>((resolve) => {
+      resolveDeferred = () => resolve({ data: [] })
+    })
     let resolveSessions!: () => void
     const sessions = new Promise<void>((resolve) => {
       resolveSessions = resolve
     })
     let settled = false
+    const sdk = createSdk({
+      commandList: async () => {
+        deferredStarted = true
+        return deferred
+      },
+    })
     const bootstrapping = bootstrapDirectory({
       directory: "/repo",
-      sdk: createSdk(),
+      sdk,
       getState: () => state,
       set: (patch) => {
         state = { ...state, ...patch }
@@ -49,10 +60,15 @@ describe("bootstrapDirectory", () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(settled).toBe(false)
+    expect(deferredStarted).toBe(false)
     resolveSessions()
 
     expect(await bootstrapping).toBe("complete")
     expect(state.status).toBe("complete")
+    expect(deferredStarted).toBe(false)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(deferredStarted).toBe(true)
+    resolveDeferred()
   })
 
   test("reports session-list failure without clearing existing state", async () => {

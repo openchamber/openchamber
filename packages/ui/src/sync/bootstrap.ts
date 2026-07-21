@@ -201,7 +201,7 @@ export async function bootstrapDirectory(input: {
   // Phase 2: Deferrable — fetch after first paint without blocking.
   // These enrich the UI but aren't required for basic functionality.
   // ---------------------------------------------------------------------------
-  const phase2Promise = Promise.allSettled([
+  const runDeferredPhase = () => Promise.allSettled([
     retry(() => sdk.command.list().then((x) => commit({ command: unwrap(x, "command.list") }))),
     retry(() => sdk.mcp.status().then((x) => commit({ mcp: unwrap(x, "mcp.status") }))),
     retry(() => sdk.lsp.status().then((x) => commit({ lsp: unwrap(x, "lsp.status") }))),
@@ -286,14 +286,16 @@ export async function bootstrapDirectory(input: {
   })
 
   // ---------------------------------------------------------------------------
-  // Phase 3: Lazy — session list can be large; don't block on it.
+  // Phase 3: Authoritative session list. Keep this scheduler-owned so bounded
+  // bootstrap concurrency also bounds list pagination, but do not hold the slot
+  // for the deferrable enrichment phase above.
   // ---------------------------------------------------------------------------
-  const sessionsResult = await Promise.allSettled([
-    phase2Promise,
-    Promise.resolve(input.loadSessions(directory)),
-  ])
+  const sessionsResult = await Promise.allSettled([Promise.resolve(input.loadSessions(directory))])
   if (input.isStale?.()) return "stale"
-  const sessionLoad = sessionsResult[1]
+  const sessionLoad = sessionsResult[0]
+  setTimeout(() => {
+    if (!input.isStale?.()) void runDeferredPhase()
+  }, 0)
   if (sessionLoad?.status === "rejected") {
     console.error(`[bootstrap] session load failed for ${directory}`, sessionLoad.reason)
     return "failed"
