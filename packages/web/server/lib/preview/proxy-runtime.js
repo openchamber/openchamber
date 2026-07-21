@@ -1082,15 +1082,7 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
       return '';
     }
   })();
-  const resolveRelativeUrl = (relativePath) => {
-    if (!moduleDir) return relativePath;
-    try {
-      const resolved = new URL(relativePath, `http://localhost${moduleDir}`);
-      return resolved.pathname;
-    } catch {
-      return relativePath;
-    }
-  };
+
   const stripPreviewCspMeta = (text) => text
     .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*(['"])content-security-policy\1)[^>]*>/gi, '')
     .replace(/<meta\b(?=[^>]*\bhttp-equiv\s*=\s*content-security-policy\b)[^>]*>/gi, '');
