@@ -1152,7 +1152,7 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
   );
   const rewriteHtml = (text) => rewriteInlineModuleScripts(
     text
-      .replace(/\bcrossorigin(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi, '')
+      .replace(/<(script|link)\b[^>]*?>/gi, (match) => match.replace(/\bcrossorigin(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/gi, ''))
       .replace(/\b(src|href|action)=(['"])([^'"]*)\2/gi, (_match, attr, quote, value) => {
         return `${attr}=${quote}${rewriteResourceUrl(value)}${quote}`;
       })

@@ -437,6 +437,19 @@ describe('preview body URL rewriting', () => {
 
     expect(output).not.toMatch(/crossorigin/i);
   });
+
+  it('does not strip crossorigin from inline script JavaScript identifiers (issue #2338)', () => {
+    const output = rewritePreviewBody({
+      bodyText: '<script type="module">if (window.crossoriginEnabled) { console.log("test"); }</script><link rel="modulepreload" crossorigin="" href="/_nuxt/C2VRKy4g.js">',
+      kind: 'html',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'http://127.0.0.1:3000',
+      previewToken: 'preview-secret',
+    });
+
+    expect(output).toContain('crossoriginEnabled');
+    expect(output).not.toMatch(/<link[^>]*crossorigin/i);
+  });
 });
 
 describe('preview redirect URL rewriting', () => {
