@@ -117,6 +117,11 @@ export interface MessengerConnection {
   discordListenerAutoReply?: boolean;
   /** When true, scope the listener strictly to the saved Server (Guild) ID. */
   discordListenerScopeToGuild?: boolean;
+  discordDefaultReplyMode?: 'always' | 'mention';
+  discordGuildPolicies?: Record<
+    string,
+    { enabled?: boolean; replyMode?: 'always' | 'mention' | 'inherit' }
+  >;
   /**
    * Bridge inbound channel/chat messages to OpenCode (default true). When
    * off, the listener only does the legacy "OpenChamber agent received: ..." auto-reply.
@@ -316,6 +321,11 @@ interface MessengerState {
   startDiscordListener: () => Promise<boolean>;
   stopDiscordListener: () => Promise<boolean>;
   refreshDiscordListenerStatus: () => Promise<void>;
+  setDiscordGuildPolicy: (
+    guildId: string,
+    patch: { enabled?: boolean; replyMode?: 'always' | 'mention' | 'inherit' },
+  ) => void;
+  setDiscordDefaultReplyMode: (mode: 'always' | 'mention') => void;
   /**
    * Reconcile UI Discord status with the live server after reload / server
    * rebuild. Persisted store fields intentionally reset listener + verify
@@ -440,6 +450,11 @@ type DiscordListenerStatusPayload = {
   filteredOutCount?: number;
   lastFilteredGuildId?: string | null;
   lastError?: string | null;
+  defaultReplyMode?: 'always' | 'mention';
+  guildPolicies?: Record<
+    string,
+    { enabled?: boolean; replyMode?: 'always' | 'mention' | 'inherit' }
+  >;
 };
 
 /**
@@ -1074,6 +1089,8 @@ export const useMessengerStore = create<MessengerState>()(
             trustedBotIds: conn.trustedBotIds ?? [],
             registerDynamicSlashCommands: Boolean(conn.registerDynamicSlashCommands),
             projectBindings,
+            defaultReplyMode: conn.discordDefaultReplyMode ?? 'always',
+            guildPolicies: conn.discordGuildPolicies ?? {},
           });
         } catch {
           // silent — config save is best-effort
@@ -1125,6 +1142,8 @@ export const useMessengerStore = create<MessengerState>()(
             autoReply: conn.discordListenerAutoReply !== false,
             bridgeEnabled: conn.bridgeEnabled !== false,
             projectBindings,
+            defaultReplyMode: conn.discordDefaultReplyMode ?? 'always',
+            guildPolicies: conn.discordGuildPolicies ?? {},
           });
           if (!data.ok) return false;
           get().updateConnection('discord', {
@@ -1187,6 +1206,25 @@ export const useMessengerStore = create<MessengerState>()(
         }
       },
 
+      setDiscordGuildPolicy: (guildId, patch) => {
+        const conn = get().connections.find((c) => c.type === 'discord');
+        if (!conn) return;
+        const prev = conn.discordGuildPolicies ?? {};
+        const existing = prev[guildId] ?? {};
+        get().updateConnection('discord', {
+          discordGuildPolicies: {
+            ...prev,
+            [guildId]: { ...existing, ...patch },
+          },
+        });
+        setTimeout(() => get().saveDiscordConfig(), 0);
+      },
+
+      setDiscordDefaultReplyMode: (mode) => {
+        get().updateConnection('discord', { discordDefaultReplyMode: mode });
+        setTimeout(() => get().saveDiscordConfig(), 0);
+      },
+
       refreshDiscordListenerStatus: async () => {
         const conn = get().connections.find((c) => c.type === 'discord');
         try {
@@ -1241,6 +1279,9 @@ export const useMessengerStore = create<MessengerState>()(
             discordListenerError: data.lastError ?? null,
             discordListenerAutoReply: data.autoReply ?? true,
             discordListenerScopeToGuild: data.scopeToGuild ?? false,
+            discordDefaultReplyMode:
+              data.defaultReplyMode ?? conn?.discordDefaultReplyMode ?? 'always',
+            discordGuildPolicies: data.guildPolicies ?? conn?.discordGuildPolicies ?? {},
           };
           if (data.botId) updates.discordBotId = data.botId;
           if (data.botUsername) updates.discordBotUsername = data.botUsername;

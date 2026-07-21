@@ -276,28 +276,44 @@ export function DiscordOnboardingWizard({
                 })
               : t('settings.integrations.discord.wizard.step2.botNotInServers')}
           </div>
-          {conn.discordInviteUrl ? (
+          <p className="text-[10px] text-muted-foreground leading-snug">
+            {t('settings.integrations.discord.wizard.step2.inviteHint')}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {conn.discordInviteUrl ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="!font-normal"
+                onClick={() =>
+                  window.open(conn.discordInviteUrl!, '_blank', 'noopener,noreferrer')
+                }
+              >
+                <Icon name="external-link" className="size-3.5" />
+                {t('settings.integrations.discord.wizard.step2.openInvite')}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="!font-normal"
+                onClick={() => void fetchDiscordInviteUrl()}
+              >
+                {t('settings.integrations.discord.wizard.step2.generateInvite')}
+              </Button>
+            )}
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="xs"
-              className="!font-normal"
-              onClick={() => window.open(conn.discordInviteUrl!, '_blank', 'noopener,noreferrer')}
+              className="!font-normal h-auto px-0 py-0 text-[11px] text-primary hover:bg-transparent"
+              onClick={() => void testConnection('discord')}
             >
-              <Icon name="external-link" className="size-3.5" />
-              {t('settings.integrations.discord.wizard.step2.openInvite')}
+              {t('settings.integrations.discord.servers.refresh')}
             </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              className="!font-normal"
-              onClick={() => void fetchDiscordInviteUrl()}
-            >
-              {t('settings.integrations.discord.wizard.step2.generateInvite')}
-            </Button>
-          )}
+          </div>
         </div>
       )}
 
