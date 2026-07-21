@@ -231,7 +231,15 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     if (!projectRef) return;
     const sessionIds = getWorktreeSessionIds(worktree);
     try {
-      if (sessionIds.length > 0) await archiveSessions(sessionIds);
+      if (sessionIds.length > 0) {
+        const result = await archiveSessions(sessionIds);
+        if (result.failedIds.length > 0) {
+          const total = result.archivedIds.length + result.failedIds.length;
+          toast.error(t('settings.openchamber.worktrees.list.archivePartial', { fail: result.failedIds.length, total }));
+          refreshWorktrees();
+          return;
+        }
+      }
       await addArchivedWorktree(projectRef, worktree.path);
       setArchivedWorktreePaths((prev) => [...prev, worktree.path.replace(/\\/g, '/').replace(/\/+$/, '')]);
       toast.success(t('settings.openchamber.worktrees.list.archiveSuccess'));
@@ -245,8 +253,16 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     if (!projectRef) return;
     const sessionIds = getWorktreeSessionIds(worktree);
     try {
+      if (sessionIds.length > 0) {
+        const result = await unarchiveSessions(sessionIds);
+        if (result.failedIds.length > 0) {
+          const total = result.unarchivedIds.length + result.failedIds.length;
+          toast.error(t('settings.openchamber.worktrees.archived.restorePartial', { fail: result.failedIds.length, total }));
+          refreshWorktrees();
+          return;
+        }
+      }
       await removeArchivedWorktree(projectRef, worktree.path);
-      if (sessionIds.length > 0) await unarchiveSessions(sessionIds);
       setArchivedWorktreePaths((prev) => prev.filter((p) => p !== worktree.path.replace(/\\/g, '/').replace(/\/+$/, '')));
       toast.success(t('settings.openchamber.worktrees.archived.restoreSuccess'));
     } catch {
