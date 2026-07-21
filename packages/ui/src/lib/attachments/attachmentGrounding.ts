@@ -117,15 +117,20 @@ const pickUploadPath = async (
   return `${UPLOADS_DIR}/${stem}-${Date.now()}${ext}`;
 };
 
+const readAdvice = (mime: string): string =>
+  mime.startsWith('image/')
+    ? 'The current model cannot view image content, and tools cannot substitute for vision — '
+      + 'if the user needs the image interpreted, tell them to switch to a vision-capable model.'
+    : 'Read it from there with local tools (e.g. Python) when you need its contents.';
+
 const buildSavedHint = (filename: string, mime: string, bytes: number, relativePath: string): string =>
   `[Attachment saved to workspace] The user attached "${filename}" (${mime}, ${formatBytes(bytes)}). `
   + `The current model cannot ingest this file type directly, so it was saved to ${relativePath} `
-  + `in the working directory. Read it from there with local tools (e.g. Python) when you need its contents.`;
+  + `in the working directory. ${readAdvice(mime)}`;
 
 const buildOnDiskHint = (filename: string, mime: string, absolutePath: string): string =>
   `[Attachment on disk] The user attached "${filename}" (${mime}) located at ${absolutePath}. `
-  + `The current model cannot ingest this file type directly. Read it from there with local tools `
-  + `(e.g. Python) when you need its contents.`;
+  + `The current model cannot ingest this file type directly. ${readAdvice(mime)}`;
 
 const groundOne = async (
   file: GroundableFile,

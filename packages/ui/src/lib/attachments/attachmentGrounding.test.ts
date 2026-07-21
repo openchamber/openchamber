@@ -117,6 +117,14 @@ describe('groundAttachmentsForModel', () => {
     expect(result.hints).toHaveLength(0);
   });
 
+  test('image hint tells the agent to suggest a vision-capable model', async () => {
+    const img = { type: 'file' as const, mime: 'image/png', url: 'data:image/png;base64,aGk=', filename: 'photo.png' };
+    const result = await groundAttachmentsForModel({ files: [img], providerID: 'p', modelID: 'textonly', directory: '/repo' });
+    expect(result.hints).toHaveLength(1);
+    expect(result.hints[0]).toContain('vision-capable model');
+    expect(result.hints[0]).not.toContain('e.g. Python');
+  });
+
   test('file:// attachments produce an on-disk hint without uploading', async () => {
     const sheet = { type: 'file' as const, mime: xlsxMime, url: 'file:///repo/data/report.xlsx', filename: 'report.xlsx' };
     const result = await groundAttachmentsForModel({ files: [sheet], providerID: 'p', modelID: 'm', directory: '/repo' });
