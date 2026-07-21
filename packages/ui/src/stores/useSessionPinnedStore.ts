@@ -1,11 +1,13 @@
 import { create } from 'zustand';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from './utils/safeStorage';
+import { readRuntimeScopedStorage, writeRuntimeScopedStorage } from './utils/runtimeScopedStorage';
 
-const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
+export const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
 
-const readPinned = (storage: Storage): Set<string> => {
+const readPinned = (storage: Storage, runtimeKey = getRuntimeKey()): Set<string> => {
   try {
-    const raw = storage.getItem(SESSION_PINNED_STORAGE_KEY);
+    const raw = readRuntimeScopedStorage(storage, SESSION_PINNED_STORAGE_KEY, runtimeKey);
     if (!raw) return new Set();
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return new Set();
@@ -15,9 +17,9 @@ const readPinned = (storage: Storage): Set<string> => {
   }
 };
 
-const persistPinned = (storage: Storage, ids: Set<string>): void => {
+const persistPinned = (storage: Storage, ids: Set<string>, runtimeKey = getRuntimeKey()): void => {
   try {
-    storage.setItem(SESSION_PINNED_STORAGE_KEY, JSON.stringify([...ids]));
+    writeRuntimeScopedStorage(storage, SESSION_PINNED_STORAGE_KEY, JSON.stringify([...ids]), runtimeKey);
   } catch {
     // ignore
   }
@@ -52,3 +54,12 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
     persistPinned(safeStorage, next);
   },
 }));
+
+if (typeof window !== 'undefined') {
+  subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey) {
+      return;
+    }
+    useSessionPinnedStore.setState({ ids: readPinned(safeStorage, detail.runtimeKey) });
+  });
+}

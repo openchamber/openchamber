@@ -12,6 +12,7 @@ import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { getRuntimeScopedStorageKey, writeRuntimeScopedStorage } from '@/stores/utils/runtimeScopedStorage';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -33,6 +34,8 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
     return;
   }
 
+  const isLocalRuntime = getRuntimeKey() === 'local';
+
   if (settings.themeId) {
     localStorage.setItem('selectedThemeId', settings.themeId);
   }
@@ -48,38 +51,42 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof settings.useSystemTheme === 'boolean') {
     localStorage.setItem('useSystemTheme', String(settings.useSystemTheme));
   }
-  if (settings.lastDirectory) {
-    localStorage.setItem('lastDirectory', settings.lastDirectory);
-  }
-  if (settings.homeDirectory) {
-    localStorage.setItem('homeDirectory', settings.homeDirectory);
-    applyPersistedHomeDirectoryToWindow(settings.homeDirectory);
-  }
-  if (Array.isArray(settings.projects) && settings.projects.length > 0) {
-    localStorage.setItem('projects', JSON.stringify(settings.projects));
-  } else {
-    localStorage.removeItem('projects');
-  }
-  if (settings.activeProjectId) {
-    localStorage.setItem('activeProjectId', settings.activeProjectId);
-  } else {
-    localStorage.removeItem('activeProjectId');
-  }
-  if (Array.isArray(settings.pinnedDirectories) && settings.pinnedDirectories.length > 0) {
-    localStorage.setItem('pinnedDirectories', JSON.stringify(settings.pinnedDirectories));
-  } else {
-    localStorage.removeItem('pinnedDirectories');
-  }
-
-  if (Array.isArray(settings.projects) && settings.projects.length > 0) {
-    const collapsed = settings.projects
-      .filter((project) => (project as unknown as { sidebarCollapsed?: boolean }).sidebarCollapsed === true)
-      .map((project) => project.id)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0);
-    if (collapsed.length > 0) {
-      localStorage.setItem('oc.sessions.projectCollapse', JSON.stringify(collapsed));
+  if (isLocalRuntime) {
+    if (settings.lastDirectory) {
+      localStorage.setItem('lastDirectory', settings.lastDirectory);
+    }
+    if (settings.homeDirectory) {
+      localStorage.setItem('homeDirectory', settings.homeDirectory);
+      applyPersistedHomeDirectoryToWindow(settings.homeDirectory);
+    }
+    if (Array.isArray(settings.projects) && settings.projects.length > 0) {
+      localStorage.setItem('projects', JSON.stringify(settings.projects));
     } else {
-      localStorage.removeItem('oc.sessions.projectCollapse');
+      localStorage.removeItem('projects');
+    }
+    if (settings.activeProjectId) {
+      localStorage.setItem('activeProjectId', settings.activeProjectId);
+    } else {
+      localStorage.removeItem('activeProjectId');
+    }
+    if (Array.isArray(settings.pinnedDirectories) && settings.pinnedDirectories.length > 0) {
+      localStorage.setItem('pinnedDirectories', JSON.stringify(settings.pinnedDirectories));
+    } else {
+      localStorage.removeItem('pinnedDirectories');
+    }
+
+    if (Array.isArray(settings.projects) && settings.projects.length > 0) {
+      const collapsed = settings.projects
+        .filter((project) => (project as unknown as { sidebarCollapsed?: boolean }).sidebarCollapsed === true)
+        .map((project) => project.id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      if (collapsed.length > 0) {
+        writeRuntimeScopedStorage(localStorage, 'oc.sessions.projectCollapse', JSON.stringify(collapsed));
+        localStorage.removeItem('oc.sessions.projectCollapse');
+      } else {
+        localStorage.removeItem(getRuntimeScopedStorageKey('oc.sessions.projectCollapse', 'local'));
+        localStorage.removeItem('oc.sessions.projectCollapse');
+      }
     }
   }
   if (typeof settings.gitmojiEnabled === 'boolean') {
@@ -851,9 +858,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
   }
 
-  const projects = sanitizeProjects(candidate.projects);
-  if (projects) {
-    result.projects = projects;
+  if (Array.isArray(candidate.projects)) {
+    const projects = sanitizeProjects(candidate.projects);
+    if (projects || candidate.projects.length === 0) {
+      result.projects = projects ?? [];
+    }
   }
   if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
     result.activeProjectId = candidate.activeProjectId;

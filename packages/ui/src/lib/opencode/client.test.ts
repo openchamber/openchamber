@@ -6,6 +6,7 @@ type ConfigResponse = { data: Record<string, unknown> };
 
 const configResolvers: Array<(response: ConfigResponse) => void> = [];
 let configCalls = 0;
+let runtimeKey = 'test-runtime';
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
 
@@ -26,8 +27,15 @@ mock.module('@opencode-ai/sdk/v2', () => ({
         });
       }),
     },
+    path: {
+      get: mock(async () => ({ data: undefined })),
+    },
+    project: {
+      current: mock(async () => ({ data: undefined })),
+    },
     session: {
       promptAsync: promptAsyncMock,
+      list: mock(async () => ({ data: [] })),
     },
   })),
 }));
@@ -44,7 +52,7 @@ mock.module('@/lib/runtime-url', () => ({
 
 mock.module('@/lib/runtime-switch', () => ({
   getRuntimeApiBaseUrl: mock(() => ''),
-  getRuntimeKey: mock(() => 'test-runtime'),
+  getRuntimeKey: mock(() => runtimeKey),
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
@@ -87,6 +95,35 @@ describe('opencodeClient getConfig cache', () => {
     const cached = await opencodeClient.getConfig('/workspace/project');
     expect(cached).toEqual({ model: 'new/model' });
     expect(configCalls).toBe(2);
+  });
+});
+
+describe('opencodeClient system-info fallbacks', () => {
+  test('does not derive a remote home directory from browser-local storage', async () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    try {
+      runtimeKey = 'remote-runtime';
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: {
+          localStorage: {
+            getItem: (key: string) => key === 'homeDirectory' ? '/Users/local-user' : '/Users/local-user/projects/app',
+          },
+        },
+      });
+      opencodeClient.setDirectory(undefined);
+
+      const info = await opencodeClient.getSystemInfo();
+
+      expect(info.homeDirectory).toBe('/');
+    } finally {
+      runtimeKey = 'test-runtime';
+      if (previousWindow) {
+        Object.defineProperty(globalThis, 'window', previousWindow);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
   });
 });
 

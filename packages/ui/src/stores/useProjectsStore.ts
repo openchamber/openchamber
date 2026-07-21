@@ -12,7 +12,7 @@ import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -74,17 +74,27 @@ interface ProjectsStore {
 const safeStorage = getDeferredSafeStorage();
 const PROJECTS_STORAGE_KEY = 'projects';
 const ACTIVE_PROJECT_STORAGE_KEY = 'activeProjectId';
+const LEGACY_MANUAL_PROJECT_ORDER_STORAGE_KEY = `${PROJECTS_STORAGE_KEY}:manualOrder`;
+type ProjectsRuntimeContext = { runtimeKey: string; generation: number };
 
-const getLocalRuntimeOrigin = (): string => {
-  if (typeof window === 'undefined') return '';
-  const value = (window as typeof window & { __OPENCHAMBER_LOCAL_ORIGIN__?: string }).__OPENCHAMBER_LOCAL_ORIGIN__;
-  return typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
-};
+let projectsRuntimeGeneration = 0;
+const captureProjectsRuntimeContext = (): ProjectsRuntimeContext => ({
+  runtimeKey: getRuntimeKey(),
+  generation: projectsRuntimeGeneration,
+});
+const isSameProjectsRuntimeContext = (left: ProjectsRuntimeContext, right: ProjectsRuntimeContext): boolean => (
+  left.runtimeKey === right.runtimeKey && left.generation === right.generation
+);
+const isProjectsRuntimeContextCurrent = (context: ProjectsRuntimeContext): boolean => (
+  isSameProjectsRuntimeContext(context, captureProjectsRuntimeContext())
+);
+
+// The store can outlive an in-place endpoint switch until runtime settings hydrate.
+// Only persist a project snapshot when it belongs to the active runtime.
+let projectsRuntimeContext = captureProjectsRuntimeContext();
 
 const getProjectsStorageNamespace = (): string => {
-  const apiBaseUrl = getRuntimeApiBaseUrl().trim().replace(/\/+$/, '');
-  if (!apiBaseUrl) return '';
-  return apiBaseUrl;
+  return getRuntimeKey().trim();
 };
 
 const getProjectsStorageKey = (): string => {
@@ -98,10 +108,7 @@ const getActiveProjectStorageKey = (): string => {
 };
 
 const shouldReadLegacyProjectsCache = (): boolean => {
-  const namespace = getProjectsStorageNamespace();
-  if (!namespace) return true;
-  const localOrigin = getLocalRuntimeOrigin();
-  return Boolean(localOrigin && namespace === localOrigin);
+  return getRuntimeKey() === 'local';
 };
 
 const resolveTildePath = (value: string, homeDir?: string | null): string => {
@@ -155,7 +162,10 @@ const normalizeProjectPath = (value: string): string => {
     return '';
   }
 
-  const homeDirectory = safeStorage.getItem('homeDirectory') || useDirectoryStore.getState().homeDirectory || '';
+  const directoryState = useDirectoryStore.getState();
+  const homeDirectory = getRuntimeKey() === 'local'
+    ? safeStorage.getItem('homeDirectory') || directoryState.homeDirectory || ''
+    : directoryState.isHomeReady ? directoryState.homeDirectory : '';
   const expanded = resolveTildePath(trimmed, homeDirectory);
 
   const normalized = expanded.replace(/\\/g, '/');
@@ -318,7 +328,8 @@ const readPersistedProjects = (): ProjectEntry[] => {
 
 const readPersistedManualOrder = (): string[] => {
   try {
-    const raw = safeStorage.getItem(getProjectsStorageKey() + ':manualOrder');
+    const raw = safeStorage.getItem(getProjectsStorageKey() + ':manualOrder')
+      || (shouldReadLegacyProjectsCache() ? safeStorage.getItem(LEGACY_MANUAL_PROJECT_ORDER_STORAGE_KEY) : null);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
@@ -360,6 +371,9 @@ const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null)
 };
 
 const persistProjects = (projects: ProjectEntry[], activeProjectId: string | null, manualOrder?: string[]) => {
+  if (!isProjectsRuntimeContextCurrent(projectsRuntimeContext)) {
+    return;
+  }
   cacheProjects(projects, activeProjectId);
   if (manualOrder) {
     persistManualProjectOrder(manualOrder);
@@ -770,8 +784,12 @@ export const useProjectsStore = create<ProjectsStore>()(
         return { ok: false, error: 'Icon exceeds size limit (5 MB)' };
       }
 
+      const runtimeContext = captureProjectsRuntimeContext();
       try {
         const dataUrl = await readFileAsDataUrl(file);
+        if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+          return { ok: false };
+        }
         const normalizedDataUrl = dataUrl.replace(/^data:[^;]+;/i, `data:${mime};`);
 
         const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
@@ -783,17 +801,29 @@ export const useProjectsStore = create<ProjectsStore>()(
           body: JSON.stringify({ dataUrl: normalizedDataUrl }),
         });
 
+        if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+          return { ok: false };
+        }
         if (!response.ok) {
           const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+            return { ok: false };
+          }
           return { ok: false, error: payload?.error || 'Failed to upload project icon' };
         }
 
         const payload = (await response.json().catch(() => null)) as { settings?: DesktopSettings } | null;
+        if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+          return { ok: false };
+        }
         if (payload?.settings) {
           get().synchronizeFromSettings(payload.settings);
         }
         return { ok: true };
       } catch (error) {
+        if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+          return { ok: false };
+        }
         const message = error instanceof Error ? error.message : String(error);
         return { ok: false, error: message || 'Failed to upload project icon' };
       }
@@ -804,6 +834,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return { ok: false, error: 'Custom icons are not supported in this runtime' };
       }
 
+      const runtimeContext = captureProjectsRuntimeContext();
       try {
         const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
           method: 'DELETE',
@@ -812,17 +843,29 @@ export const useProjectsStore = create<ProjectsStore>()(
           },
         });
 
+        if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+          return { ok: false };
+        }
         if (!response.ok) {
           const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+            return { ok: false };
+          }
           return { ok: false, error: payload?.error || 'Failed to remove project icon' };
         }
 
         const payload = (await response.json().catch(() => null)) as { settings?: DesktopSettings } | null;
+        if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+          return { ok: false };
+        }
         if (payload?.settings) {
           get().synchronizeFromSettings(payload.settings);
         }
         return { ok: true };
       } catch (error) {
+        if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+          return { ok: false };
+        }
         const message = error instanceof Error ? error.message : String(error);
         return { ok: false, error: message || 'Failed to remove project icon' };
       }
@@ -833,6 +876,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return { ok: false, error: 'Custom icons are not supported in this runtime' };
       }
 
+      const runtimeContext = captureProjectsRuntimeContext();
       try {
         const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon/discover`, {
           method: 'POST',
@@ -850,6 +894,9 @@ export const useProjectsStore = create<ProjectsStore>()(
           settings?: DesktopSettings;
         } | null;
 
+        if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+          return { ok: false };
+        }
         if (!response.ok) {
           return { ok: false, error: payload?.error || 'Failed to discover project icon' };
         }
@@ -864,6 +911,9 @@ export const useProjectsStore = create<ProjectsStore>()(
           reason: typeof payload?.reason === 'string' ? payload.reason : undefined,
         };
       } catch (error) {
+        if (!isProjectsRuntimeContextCurrent(runtimeContext)) {
+          return { ok: false };
+        }
         const message = error instanceof Error ? error.message : String(error);
         return { ok: false, error: message || 'Failed to discover project icon' };
       }
@@ -902,25 +952,34 @@ export const useProjectsStore = create<ProjectsStore>()(
       const nextActiveProjectId = projects.some((project) => project.id === activeProjectId)
         ? activeProjectId
         : projects[0]?.id ?? null;
-      set({ projects, activeProjectId: nextActiveProjectId, manualProjectOrder: [] });
+      const manualProjectOrder = readPersistedManualOrder();
+      projectsRuntimeContext = captureProjectsRuntimeContext();
+      set({ projects, activeProjectId: nextActiveProjectId, manualProjectOrder });
     },
 
     synchronizeFromSettings: (settings: DesktopSettings) => {
       if (isVSCodeProjectsRuntime) {
         return;
       }
+      const hasAuthoritativeProjects = Array.isArray(settings.projects);
       const incomingProjects = sanitizeProjects(settings.projects ?? []);
       const incomingActive = typeof settings.activeProjectId === 'string' && settings.activeProjectId.trim()
         ? settings.activeProjectId.trim()
         : null;
 
       const current = get();
+      const runtimeContext = captureProjectsRuntimeContext();
 
-      // Race guard: settings load can return empty projects during app
-      // rebuild/reinstall or an incomplete settings read. Don't clobber
-      // a populated cache with empty — the sidebar would go blank and
-      // localStorage would be overwritten, losing the list entirely.
-      if (incomingProjects.length === 0 && current.projects.length > 0) {
+      // Preserve a populated cache only when an incomplete settings payload
+      // omitted projects. An explicit empty array is authoritative and must
+      // clear a stale list after a runtime switch.
+      if (
+        !hasAuthoritativeProjects
+        &&
+        incomingProjects.length === 0
+        && current.projects.length > 0
+        && isSameProjectsRuntimeContext(projectsRuntimeContext, runtimeContext)
+      ) {
         if (incomingActive !== current.activeProjectId) {
           // Active project may still be valid within the cached list.
           const activeExists = incomingActive
@@ -932,6 +991,7 @@ export const useProjectsStore = create<ProjectsStore>()(
             persistManualProjectOrder(get().manualProjectOrder);
           }
         }
+        projectsRuntimeContext = runtimeContext;
         return;
       }
 
@@ -939,11 +999,13 @@ export const useProjectsStore = create<ProjectsStore>()(
       const activeChanged = current.activeProjectId !== incomingActive;
 
       if (!projectsChanged && !activeChanged) {
+        projectsRuntimeContext = runtimeContext;
         return;
       }
 
       const incomingIds = new Set(incomingProjects.map((p) => p.id));
       const cleanedOrder = get().manualProjectOrder.filter((id) => incomingIds.has(id));
+      projectsRuntimeContext = runtimeContext;
       set({ projects: incomingProjects, activeProjectId: incomingActive, manualProjectOrder: cleanedOrder });
       cacheProjects(incomingProjects, incomingActive);
       persistManualProjectOrder(cleanedOrder);
@@ -1004,6 +1066,12 @@ export const useProjectsStore = create<ProjectsStore>()(
 );
 
 if (typeof window !== 'undefined') {
+  subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey !== detail.previousRuntimeKey) {
+      projectsRuntimeGeneration += 1;
+    }
+  });
+
   window.addEventListener('openchamber:settings-synced', (event: Event) => {
     const detail = (event as CustomEvent<DesktopSettings>).detail;
     if (detail && typeof detail === 'object') {

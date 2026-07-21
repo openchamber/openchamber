@@ -4,6 +4,7 @@ import {
   resolveArchivedFolderName,
 } from '../utils';
 import type { SessionOwnershipIndex } from '../sessionOwnership';
+import { captureSidebarRuntimeContext, isSidebarRuntimeContextCurrent } from './sidebarRuntimeContext';
 
 type ProjectForArchivedFolders = {
   id: string;
@@ -42,13 +43,26 @@ export const useArchivedAutoFolders = (args: Args): void => {
     addSessionToFolder,
     cleanupSessions,
   } = args;
+  const runtimeContextAtRender = captureSidebarRuntimeContext();
+  const runtimeKeyAtRender = runtimeContextAtRender.runtimeKey;
+  const runtimeGenerationAtRender = runtimeContextAtRender.generation;
 
   React.useEffect(() => {
+    const isRuntimeContextCurrent = () => isSidebarRuntimeContextCurrent({
+      runtimeKey: runtimeKeyAtRender,
+      generation: runtimeGenerationAtRender,
+    });
+    if (!isRuntimeContextCurrent()) {
+      return;
+    }
     if (isSessionsLoading || !hasAuthoritativeGlobalSessions || isWorktreeTopologyLoading) {
       return;
     }
 
     normalizedProjects.forEach((project) => {
+      if (!isRuntimeContextCurrent()) {
+        return;
+      }
       if (unresolvedWorktreeProjectPaths.has(project.normalizedPath)) {
         return;
       }
@@ -60,6 +74,9 @@ export const useArchivedAutoFolders = (args: Args): void => {
       const folderByName = new Map(existingFolders.map((folder) => [folder.name.toLowerCase(), folder]));
 
       projectArchivedSessions.forEach((session) => {
+        if (!isRuntimeContextCurrent()) {
+          return;
+        }
         const folderName = resolveArchivedFolderName(session, project.normalizedPath);
         const key = folderName.toLowerCase();
         let folder = folderByName.get(key);
@@ -73,7 +90,9 @@ export const useArchivedAutoFolders = (args: Args): void => {
         }
       });
 
-      cleanupSessions(scopeKey, sessionIds);
+      if (isRuntimeContextCurrent()) {
+        cleanupSessions(scopeKey, sessionIds);
+      }
     });
   }, [
     normalizedProjects,
@@ -86,5 +105,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
     createFolder,
     addSessionToFolder,
     cleanupSessions,
+    runtimeGenerationAtRender,
+    runtimeKeyAtRender,
   ]);
 };
