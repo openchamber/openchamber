@@ -1517,6 +1517,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (!Array.isArray(attachments)) return [];
         return attachments.filter((f): f is FilePart & { url: string } => f.type === 'file' && typeof f.mime === 'string' && f.mime.startsWith('image/') && typeof f.url === 'string');
     }, [attachments]);
+
     const otherAttachments = React.useMemo(() => {
         if (!Array.isArray(attachments)) return [];
         return attachments.filter((f): f is FilePart => f.type === 'file' && !(typeof f.mime === 'string' && f.mime.startsWith('image/')));
@@ -1595,9 +1596,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (!onShowPopup || index >= imageGallery.length) return;
         const file = imageGallery[index];
         if (!file?.url) return;
+        const filename = file.filename || t('filesView.editor.imageAltFallback');
         onShowPopup({
             open: true,
-            title: file.filename || 'Image',
+            title: filename,
             content: '',
             metadata: { tool: 'image-preview', filename: file.filename, mime: file.mimeType },
             image: {
@@ -1608,7 +1610,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 index,
             },
         });
-    }, [imageGallery, onShowPopup]);
+    }, [imageGallery, onShowPopup, t]);
 
     const renderScrollableBlock = (
         content: React.ReactNode,
@@ -1967,27 +1969,42 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 <div className="space-y-2">
                     {imageAttachments.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
-                            {imageAttachments.map((file, index) => (
-                                <button
-                                    key={file.url}
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); handleAttachmentClick(index); }}
-                                    className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden rounded-lg h-16 w-16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                >
-                                    <img
-                                        src={file.url}
-                                        alt={file.filename || 'Attachment'}
-                                        className="h-full w-full object-cover"
-                                        loading="lazy"
-                                    />
-                                </button>
-                            ))}
+                            {imageAttachments.map((file, index) => {
+                                const filename = file.filename || t('chat.toolPart.attachmentFallback');
+                                return (
+                                    <button
+                                        key={file.url || filename || index}
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleAttachmentClick(index); }}
+                                        className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden rounded-lg h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
+                                        aria-label={filename}
+                                    >
+                                        {file.url ? (
+                                            <img
+                                                src={file.url}
+                                                alt={filename}
+                                                className="h-full w-full object-cover"
+                                                loading="lazy"
+                                                onError={(e) => {
+                                                    const target = e.target as HTMLImageElement;
+                                                    target.style.visibility = 'hidden';
+                                                }}
+                                            />
+                                        ) : (
+                                            <div className="h-full w-full flex items-center justify-center bg-muted/30 text-muted-foreground">
+                                                <Icon name="file-image" className="h-6 w-6" />
+                                            </div>
+                                        )}
+                                        <span className="sr-only">{filename}</span>
+                                    </button>
+                                );
+                            })}
                         </div>
                     ) : null}
                     {otherAttachments.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5">
                             {otherAttachments.map((file) => {
-                                const fileName = file.filename || 'file';
+                                const fileName = file.filename || t('chat.fileAttachment.fileFallback');
                                 const ext = fileName.split('.').pop() || '';
                                 return (
                                     <div

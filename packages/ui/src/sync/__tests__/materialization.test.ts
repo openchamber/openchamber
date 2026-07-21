@@ -237,6 +237,42 @@ describe("materializeSessionSnapshots", () => {
     expect((mergedPart.state?.attachments?.[0] as { id?: string })?.id).toBe("att-1")
   })
 
+  test("preserves both state.attachments and state.time.start during streaming merge when snapshot lacks both", () => {
+    const livePart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: {
+        status: "running",
+        time: { start: 100 },
+        attachments: [{ id: "att-1", type: "file", mime: "image/png", url: "data:image/png,..." }],
+      },
+    } as unknown as Part
+    const snapshotPart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "running" },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [livePart] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotPart] }],
+    )
+
+    const mergedPart = result.part.msg_1[0] as { state?: { attachments?: Array<unknown>; time?: { start?: number; end?: number } } }
+    expect(mergedPart.state?.attachments).toHaveLength(1)
+    expect((mergedPart.state?.attachments?.[0] as { id?: string })?.id).toBe("att-1")
+    expect(mergedPart.state?.time?.start).toBe(100)
+  })
+
   test("does not merge existing state.attachments when snapshot has its own", () => {
     const livePart = {
       id: "prt_1",

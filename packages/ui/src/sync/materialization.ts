@@ -177,8 +177,8 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
     if (preservedStart !== nextTime?.start || preservedEnd !== nextTime?.end) {
       if (merged === next) merged = { ...next }
       const mergedRecord = merged as Record<string, unknown>
-      const nextState = (next as Record<string, unknown>).state as Record<string, unknown> | undefined
-      const newState = { ...(nextState ?? {}), time: { start: preservedStart, end: preservedEnd } }
+      const currentState = (mergedRecord.state as Record<string, unknown> | undefined) ?? (next as Record<string, unknown>).state as Record<string, unknown> | undefined
+      const newState = { ...(currentState ?? {}), time: { start: preservedStart, end: preservedEnd } }
       mergedRecord.state = newState
     }
   }
