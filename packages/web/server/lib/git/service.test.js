@@ -22,6 +22,7 @@ import {
   unstageFiles,
   applyHunk,
   getDiff,
+  getFileDiff,
 } from './service.js';
 
 // ---------------------------------------------------------------------------
@@ -281,6 +282,38 @@ describe('getStatus', () => {
     runGit(repo, ['commit', '-m', 'Initial commit']);
 
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getFileDiff
+// ---------------------------------------------------------------------------
+
+describe('getFileDiff', () => {
+  it('degrades a directory path to an empty diff instead of throwing', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir } = await createTempRepo();
+    fs.mkdirSync(path.join(tmpDir, 'nested'), { recursive: true });
+    await writeFile(tmpDir, 'nested/file.txt', 'hello\n');
+
+    await expect(getFileDiff(tmpDir, { path: 'nested/' })).resolves.toEqual({
+      original: '',
+      modified: '',
+      path: 'nested/',
+      isBinary: false,
+    });
+  });
+
+  it('returns worktree contents for an untracked file', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir } = await createTempRepo();
+    await writeFile(tmpDir, 'new.txt', 'new content\n');
+
+    const result = await getFileDiff(tmpDir, { path: 'new.txt' });
+
+    expect(result.original).toBe('');
+    expect(result.modified).toBe('new content\n');
+    expect(result.isBinary).toBe(false);
   });
 });
 
