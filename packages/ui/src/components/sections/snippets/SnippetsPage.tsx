@@ -5,10 +5,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useSnippetsStore, type SnippetScope } from '@/stores/useSnippetsStore';
 import { useShallow } from 'zustand/react/shallow';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SettingsStackedField,
+  SETTINGS_SELECT_SIZE,
+} from '@/components/sections/shared/SettingsSection';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 
 export const SnippetsPage: React.FC = () => {
   const { t } = useI18n();
@@ -117,53 +124,61 @@ export const SnippetsPage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-        <div className="mb-4 min-w-0">
-          <h2 className="typography-ui-header font-semibold text-foreground truncate">
-            {isNew ? t('settings.snippets.page.title.new') : `#${selectedSnippetName}`}
-          </h2>
-          {selectedSnippet ? <p className="typography-meta text-muted-foreground truncate">{selectedSnippet.filePath}</p> : null}
-        </div>
+    <SettingsPageLayout
+      title={isNew ? t('settings.snippets.page.title.new') : `#${selectedSnippetName}`}
+      description={selectedSnippet ? selectedSnippet.filePath : undefined}
+      showSaveStatus={false}
+    >
+      <SettingsSection divider={false} contentClassName="space-y-0">
+        {isNew ? (
+          <SettingsFieldRow label="#">
+            <Input
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              placeholder={t('settings.snippets.page.field.namePlaceholder')}
+              className="h-7 w-44 px-2"
+            />
+            <Select value={draftScope} onValueChange={(value) => setDraftScope(value as SnippetScope)}>
+              <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit min-w-[100px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="global">{t('settings.common.scope.global')}</SelectItem>
+                <SelectItem value="project">{t('settings.common.scope.project')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
+        ) : null}
+        <SettingsStackedField label={t('settings.common.field.description')}>
+          <Input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t('settings.snippets.page.field.descriptionPlaceholder')}
+            className="h-7 w-full max-w-sm px-2"
+          />
+        </SettingsStackedField>
+        <SettingsStackedField label={t('settings.snippets.page.field.aliases')}>
+          <Input
+            value={aliases}
+            onChange={(e) => setAliases(e.target.value)}
+            placeholder={t('settings.snippets.page.field.aliasesPlaceholder')}
+            className="h-7 w-full max-w-sm px-2"
+          />
+        </SettingsStackedField>
+      </SettingsSection>
 
-        <div className="mb-8 space-y-3 px-2">
-          <div>
-            {isNew ? (
-              <div className="mb-3 flex items-center gap-2">
-                <span className="typography-ui-label text-foreground">#</span>
-                <Input value={draftName} onChange={(e) => setDraftName(e.target.value)} placeholder={t('settings.snippets.page.field.namePlaceholder')} className="h-7 w-44 px-2" />
-                <Select value={draftScope} onValueChange={(value) => setDraftScope(value as SnippetScope)}>
-                  <SelectTrigger className="w-fit min-w-[100px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent align="end">
-                    <SelectItem value="global">{t('settings.common.scope.global')}</SelectItem>
-                    <SelectItem value="project">{t('settings.common.scope.project')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
-            <span className="typography-ui-label text-foreground">{t('settings.common.field.description')}</span>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('settings.snippets.page.field.descriptionPlaceholder')} className="mt-1.5 h-7 w-full max-w-sm px-2" />
-          </div>
-          <div>
-            <span className="typography-ui-label text-foreground">{t('settings.snippets.page.field.aliases')}</span>
-            <Input value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder={t('settings.snippets.page.field.aliasesPlaceholder')} className="mt-1.5 h-7 w-full max-w-sm px-2" />
-          </div>
-        </div>
-
-        <div data-settings-item="snippets.content" className="mb-2 px-2">
+      <SettingsSection settingsItem="snippets.content">
+        <div className="flex items-center gap-1">
           <span className="typography-ui-label text-foreground">{t('settings.snippets.page.field.content')}</span>
-          <Textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder={t('settings.snippets.page.field.contentPlaceholder')} rows={12} className="mt-1.5 w-full font-mono typography-meta min-h-[160px] max-h-[60vh] bg-transparent" />
-          <p className="mt-2 typography-meta text-muted-foreground">{t('settings.snippets.page.hint')}</p>
+          <SettingsInfoHint>{t('settings.snippets.page.hint')}</SettingsInfoHint>
         </div>
-
-        <div className="px-2 py-1">
+        <Textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder={t('settings.snippets.page.field.contentPlaceholder')} rows={12} className="mt-1.5 w-full font-mono typography-meta min-h-[160px] max-h-[60vh] bg-transparent" />
+        <div className="pt-3">
           <Button onClick={handleSave} disabled={isSaving || !isDirty} size="xs" className="!font-normal">
             {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
           </Button>
         </div>
-      </div>
-    </ScrollableOverlay>
+      </SettingsSection>
+    </SettingsPageLayout>
   );
 };

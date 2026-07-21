@@ -4,15 +4,76 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Remote access: a new private relay lets you reach your instance from anywhere — no open ports and no third-party tunnel. Enable it in Settings → Remote Instances, and pairing links (QR or `openchamber connect-url`) can carry the relay as a fallback so a device off your network connects over an end-to-end-encrypted tunnel.
-- Pairing: device pairing links are now single-use, expiring codes redeemed on connect instead of embedding a long-lived token in the QR.
+## [1.16.2] - 2026-07-18
+
+- **Terminal:** rebuilt terminal sessions across the Web, Desktop, and Mobile apps with faster rendering, retained scrollback after reconnecting, shell and login-shell selection, restart and selected-output attachment actions, live theme changes, and more accurate Unicode and full-screen app rendering. Mobile now includes a full-screen terminal workspace with touch scrolling and selection, quick keys, and Ctrl/Alt input.
+- **Pinned messages:** pin important user or assistant messages to restore their text to the agent after conversation compaction.
+- **Settings:** pages now use a consistent responsive layout, navigation is grouped into OpenChamber, Workspace, OpenCode, and Library sections, and save failures are shown in the page header. Agent tool permissions now distinguish inherited and explicit rules and show session-granted rules separately (thanks to @makeittech).
+- Session goals: audits now wait while direct subagents are still active, and goal details show the model used for the latest successful evaluation.
+- Chat: if creating a session fails, the new-session draft stays open and restores the submitted prompt instead of discarding it.
+- Sessions: new drafts and sessions now stay with the project selected in the sidebar, including workspaces with nested or sibling projects (thanks to @bashrusakh).
+- Small Model: provider API keys referenced through environment variables or files now work for summaries, goal audits, and other Small Model features; Gemini 3 Flash models now use their supported thinking setting.
+- VSCode: per-session permission auto-accept works again, persists across extension restarts, and applies to subagent sessions while an OpenChamber view is open.
+- Mobile/Android: update downloads now select an APK when a release also includes an Android App Bundle.
+
+## [1.16.1] - 2026-07-14
+
+- **Performance:** large session sidebars stay responsive while chats stream, including setups with many projects, worktrees, and sessions. Opening a long chat after an empty or aborted agent turn also no longer repeatedly loads larger portions of its history.
+- Chat: an optional Prompt Navigator adds a marker rail beside desktop chats; hover to preview prompts, click to jump between them, or assign a shortcut in Keyboard Shortcuts settings (thanks to @makeittech).
+- Chat: shell-mode command cards now update their status and output while the command runs, with syntax highlighting for the command and output.
+- Chat/Subagents: task cards now track the correct subagent when several run at once, preventing one subagent's activity or "Open subtask" action from pointing to another session.
+- Chat/Subagents: "Open subtask" now works for nested subagents inside the side-panel chat, with a Parent action to return to the previous subagent (thanks to @ameshkov).
+- Sessions: temporary project lookup failures no longer remove worktree groups from the sidebar.
+- Small Model: custom OpenAI-compatible providers now use the base URL and API key from OpenCode configuration (thanks to @ameshkov).
+
+## [1.16.0] - 2026-07-13
+
+- **Session goals:** arm the new target button in the composer and your next prompt becomes a [goal](https://docs.openchamber.dev/session-goals/) — the session keeps working toward it on its own, with an independent small-model audit checking each finished turn, until the objective is verifiably complete, blocked, or over its optional token budget. The loop runs on the server, so it continues with the app closed and survives restarts. A goal strip above the composer shows progress with pause/resume; goals can also start from the plan-implement dialog, from scheduled tasks ("Run as goal"), or with the new "Craft a Goal" starter and `/craft-goal` command. While a goal runs, per-turn "ready" notifications are replaced by a single notification when it settles.
+- **Usage:** OpenCode Go usage tracking is here, and Codex quota windows now show the correct reset times.
+- **Remote access:** connecting over the relay got much faster — the app no longer waits for a stale local address to time out before trying the relay (previously up to ~20 seconds on a phone away from home). When your computer gets a new local IP, paired devices now learn the new address over the relay and quietly move back to the local network on their own — no re-pairing. The phone's launch screen shows which device it is connecting to.
+- Remote access: running several OpenChamber instances on the same machine no longer makes paired devices land on a random one of them — only one process per machine serves the relay now. This was behind intermittent "Unable to reach server" errors on paired phones.
+- Permissions: per-session auto-accept now lives on the server — sessions keep auto-accepting tool calls while the app is closed and after a server restart, subagent sessions inherit the setting, and it can be enabled on a draft before the first message (thanks to @bashrusakh for the draft fix).
+- Chat: subagent sessions can now be prompted directly — open a subagent from the context panel and send it follow-up messages (off by default, available in settings).
+- Chat: queued messages now send when the session is already idle instead of waiting forever in some cases, pending agent questions stay answerable after a server restart, and session renames no longer flicker back to the old title (thanks to @bashrusakh).
+- Files: the file viewer has a markdown preview toggle (thanks to @greghaynes).
+- Sidebar: projects can be sorted by different modes with a direction toggle, pinned sessions survive refreshes, and the file tree stays expanded while it refreshes (thanks to @bashrusakh).
+- Command palette: projects are included in the fuzzy search alongside sessions and files (thanks to @bashrusakh).
+- Settings: chat visual settings are grouped into labeled sections, and a new editor font size setting for the code editor (thanks to @bashrusakh).
+- GitHub: PR and issue context now resolves against the source repository in fork workflows (thanks to @bashrusakh).
+- Agents: saving agent settings from the UI no longer drops custom YAML frontmatter fields (thanks to @bashrusakh).
+- Notifications: session errors and subagent completions now notify reliably across desktop, web, and mobile.
+- Editor: "Open in" now recognizes VS Code Insiders.
+- Windows: paths no longer mismatch on drive letter casing, which could split one project into duplicates (thanks to @bashrusakh).
+- Mobile: the sessions sidebar opens instantly instead of taking many seconds on some devices (thanks to @tomzx).
+- Mobile: renaming a saved instance no longer breaks its connection — the stored access token was getting lost on edit.
+- Mobile: on Android 15 the app no longer draws under the status bar.
+- Security: requests that spoof local host headers to look like same-machine traffic are rejected.
+
+## [1.15.0] - 2026-07-10
+
+- **Remote access:** a new [private relay](https://docs.openchamber.dev/private-relay/) lets you reach your instance from anywhere — no open ports and no third-party tunnel, over an end-to-end-encrypted tunnel. It turns on by itself when you pair a device over it and turns off once no paired device uses it (thanks to @yulia-ivashko).
+- **Mobile:** the native iOS and Android apps open for testing — join the [iOS public beta on TestFlight](https://testflight.apple.com/join/5ek6GU1E) or grab the Android APK from the [latest release](https://github.com/openchamber/openchamber/releases/latest). Connect by scanning a QR code from "Add a device" on your server; the app then moves between your local network and the private relay on its own — leaving home carries the open session onto the relay and coming back returns it to Wi-Fi, no re-pairing. Saved instances show a live Connected status with the active transport, iPad gets a split layout with a persistent sessions sidebar and a resizable Changes/Files sidebar, and the app checks for OpenChamber updates itself (Android shows a download toast).
+- **Pairing:** a redesigned ["Add a device"](https://docs.openchamber.dev/connect-devices/) dialog asks where you'll use the device — Anywhere (relay with local network preferred at home), Home network only, or This computer only — then shows a large scannable QR code with a copyable link, and closes itself once the device connects. Links are single-use expiring codes redeemed on connect instead of embedding a long-lived token in the QR (thanks to @yulia-ivashko).
+- Devices: the "Connect to this server" list now shows each paired device with a live status — Connected · Local network or Relay — and a platform badge (iOS, Android, macOS, Windows, Linux). Re-pairing or re-entering the password on the same device updates its existing entry instead of adding a duplicate.
+- Devices: a paired phone or desktop names the connection after the server's hostname; the name typed when creating the link labels the device in the server's list.
+- Desktop: saved servers keep every transport their pairing link carried — the app connects directly on your network and falls back to the relay away from it, including when opening a server in a new window and when restoring the connection after a restart.
+- Desktop: the header dropdown (instance / usage / MCP) was restyled with cards — usage grouped per provider, hosts showing a colored status line with ping and the active host highlighted, and MCP servers in one card. Host statuses persist between openings instead of flashing "Unknown", and switching to an already-checked host is immediate.
+- Desktop: the servers list in Settings shows live per-server reachability, and importing a pairing link is the primary way to add a server.
+- Desktop: Windows builds can launch at login and minimize to the system tray (thanks to @achcyano).
+- Chat/Tools: every tool call now expands to show its input, result, and errors, including MCP, plugin, and custom tools; Read and Skill stay compact links to their files. JSON results open in a new navigable summary view with linked URLs and expandable nested data, alongside tree and raw JSON views.
+- Chat/Tools: expanded file-edit and patch results now include per-file buttons to open the diff or jump to the first changed line in the file editor.
+- Chat/Thinking: reasoning parts stay separate and in chronological order instead of merging into one block, and collapsed previews no longer show empty trailing HTML comments.
+- Projects: each project can now set its own default model (thanks to @makeittech).
 - Diff/Chat: added a Last turn mode to the Diff view, and latest-turn changed-file chips in chat now open that snapshot while older turn chips stay read-only.
+- Chat: Mermaid diagrams now have zoom controls (thanks to @c-w-xiaohei).
+- Chat: code blocks can show line numbers that stay aligned while streaming, and a new Wrap Code Block Lines setting (Settings → Chat) controls long-line wrapping.
+- Chat: with Sticky User Header enabled, user messages no longer float over earlier messages in long conversations.
 - Chat: if sending a message times out or loses the connection after OpenCode accepted it, the app now keeps the sent message instead of rolling it back as failed.
-- Mobile: the native app can now check for OpenChamber app updates; Android shows a persistent download toast when an update is available.
 - Mobile: selecting local files from the composer now attaches the picked files even if the composer switches between compact and expanded layouts while the file picker is open.
 - Browser: links clicked inside an embedded browser tab now keep the tab on the navigated page instead of remounting the frame.
 - Context Panel: raw message rows now keep token and time columns aligned without showing shortened message IDs.
 - UI: closing the right sidebar after resizing no longer leaves stale width constraints behind.
+- Server: remote clients with non-ASCII project paths connect again (thanks to @FanFan4204).
 
 ## [1.14.1] - 2026-07-07
 

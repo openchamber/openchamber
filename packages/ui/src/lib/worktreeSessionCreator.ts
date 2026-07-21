@@ -26,8 +26,8 @@ import {
   resolvePendingDraftWorktreeRequest,
 } from '@/lib/worktrees/pendingDraftWorktree';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-
-const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '') || value;
+import { normalizePath } from '@/lib/pathNormalization';
+import { resolveProjectForDirectory } from '@/lib/projectResolution';
 
 const waitForWorktreeBootstrapIfEnabled = async (project: ProjectRef, directory: string): Promise<void> => {
   if (await getWorktreeSetupWaitEnabled(project)) {
@@ -35,29 +35,51 @@ const waitForWorktreeBootstrapIfEnabled = async (project: ProjectRef, directory:
   }
 };
 
-const resolveProjectRef = (directory: string): ProjectRef | null => {
-  const normalized = normalizePath(directory);
+export const resolveProjectRef = (directory: string): ProjectRef | null => {
   const projects = useProjectsStore.getState().projects;
-  if (projects.length === 0) {
-    return null;
-  }
+  const normalizedDirectory = normalizePath(directory);
+  if (!normalizedDirectory) return null;
 
-  const activeProject = useProjectsStore.getState().getActiveProject();
-  if (activeProject?.path) {
-    const activePath = normalizePath(activeProject.path);
-    if (normalized === activePath || normalized.startsWith(`${activePath}/`)) {
-      return { id: activeProject.id, path: activeProject.path };
+  let project: (typeof projects)[number] | null = null;
+  let matchedWorktreePathLength = -1;
+  for (const [projectPath, worktrees] of useSessionUIStore.getState().availableWorktreesByProject) {
+    for (const worktree of worktrees) {
+      const worktreePath = normalizePath(worktree.path);
+      if (!worktreePath) continue;
+      if (normalizedDirectory !== worktreePath && !normalizedDirectory.startsWith(`${worktreePath}/`)) continue;
+      if (worktreePath.length <= matchedWorktreePathLength) continue;
+
+      const ownerPaths = [worktree.projectDirectory, projectPath];
+      for (const ownerPath of ownerPaths) {
+        const owner = projects.find((candidate) => normalizePath(candidate.path) === normalizePath(ownerPath))
+          ?? resolveProjectForDirectory(projects, ownerPath);
+        if (!owner) continue;
+        project = owner;
+        matchedWorktreePathLength = worktreePath.length;
+        break;
+      }
     }
   }
 
-  const matches = projects.filter((project) => {
-    const projectPath = normalizePath(project.path);
-    return normalized === projectPath || normalized.startsWith(`${projectPath}/`);
+  project ??= resolveProjectForDirectory(projects, normalizedDirectory);
+  return project ? { id: project.id, path: project.path } : null;
+};
+
+export const createQuickWorktree = async (
+  project: ProjectRef,
+  options: { preferredName?: string; startRef?: string } = {},
+) => {
+  const preferredName = options.preferredName ?? generateBranchName();
+  const setupCommands = await getWorktreeSetupCommands(project);
+  return createWorktreeWithDefaults(project, {
+    preferredName,
+    mode: 'new',
+    branchName: preferredName,
+    worktreeName: preferredName,
+    startRef: options.startRef,
+    setupCommands,
+    returnAfterDirectoryCreated: true,
   });
-
-  const match = matches.sort((a, b) => normalizePath(b.path).length - normalizePath(a.path).length)[0];
-
-  return match ? { id: match.id, path: match.path } : null;
 };
 
 // Track if a worktree creation flow is already running
@@ -233,15 +255,7 @@ const createInstantWorktreeDraft = async (options?: {
       useDirectoryStore.getState().setDirectory(preview.path, { showOverlay: false });
     }
 
-    const setupCommands = await getWorktreeSetupCommands(projectRef);
-    const metadata = await createWorktreeWithDefaults(projectRef, {
-      preferredName,
-      mode: 'new',
-      branchName: preferredName,
-      worktreeName: preferredName,
-      setupCommands,
-      returnAfterDirectoryCreated: true,
-    });
+    const metadata = await createQuickWorktree(projectRef, { preferredName });
 
     resolvePendingDraftWorktreeRequest(pendingRequestId, metadata.path);
     useSessionUIStore.getState().overrideNewSessionDraftTarget({

@@ -60,6 +60,9 @@ import { MobileSurfaceShell } from './MobileSurfaceShell';
 type MobileSessionsSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 'sheet' (default) wraps the content in the swipe-dismiss MobileSurfaceShell;
+      'sidebar' renders the same content inline for the iPad persistent sidebar. */
+  variant?: 'sheet' | 'sidebar';
 };
 
 type ProjectMeta = {
@@ -511,7 +514,7 @@ const SortableProjectRow: React.FC<{
   );
 };
 
-export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange }) => {
+export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'sheet' }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const liveSessions = useAllLiveSessions();
@@ -999,14 +1002,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       </>
     ) : null;
 
-  return (
-    <MobileSurfaceShell
-      open={open}
-      onClose={() => onOpenChange(false)}
-      ariaLabel={t('mobile.sessions.sheet.title')}
-      title={t('mobile.sessions.sheet.title')}
-      trailing={trailingActions}
-    >
+  const surfaceContent = (
       <div className="flex h-full flex-col">
         <div className={cn('shrink-0 px-4 pb-2 pt-1', editingOrder && 'hidden')}>
           <div className="relative">
@@ -1294,6 +1290,34 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           onWorktreesChanged={() => setWorktreeRefreshKey((value) => value + 1)}
         />
       </div>
+  );
+
+  if (variant === 'sidebar') {
+    if (!open) return null;
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center justify-between gap-2 border-b border-border/30 px-4">
+          <h2 className="truncate typography-ui-label font-semibold text-foreground">
+            {t('mobile.sessions.sheet.title')}
+          </h2>
+          {trailingActions ? (
+            <div className="flex shrink-0 items-center gap-2">{trailingActions}</div>
+          ) : null}
+        </div>
+        {surfaceContent}
+      </div>
+    );
+  }
+
+  return (
+    <MobileSurfaceShell
+      open={open}
+      onClose={() => onOpenChange(false)}
+      ariaLabel={t('mobile.sessions.sheet.title')}
+      title={t('mobile.sessions.sheet.title')}
+      trailing={trailingActions}
+    >
+      {surfaceContent}
     </MobileSurfaceShell>
   );
 };

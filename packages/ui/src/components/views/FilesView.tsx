@@ -2326,6 +2326,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const isDrawio = Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
   const isTextFile = Boolean(selectedFile && !isSelectedImage && !isSelectedPdf);
   const canUseShikiFileView = isTextFile && !isMarkdown && !isDrawio && !(isHtml && htmlViewMode === 'preview');
+  const isEditingFile = (isMarkdown && mdViewMode === 'edit')
+    || (isHtml && htmlViewMode === 'edit')
+    || (isJson && jsonViewMode === 'text')
+    || (!isMarkdown && !isHtml && !isJson && textViewMode === 'edit');
   const staticLanguageExtension = React.useMemo(
     () => (selectedFilePath ? languageByExtension(selectedFilePath) : null),
     [selectedFilePath],
@@ -2369,8 +2373,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
-    const defaultMode: TextViewMode = settingsDefaultFileViewerPreview ? 'view' : 'edit';
-    setTextViewMode(textViewModeByPathRef.current[selectedPath] ?? defaultMode);
+    setTextViewMode(textViewModeByPathRef.current[selectedPath] ?? 'edit');
 
     // Respect per-type localStorage preference when available,
     // falling back to the setting-derived default when nothing is stored.
@@ -2395,7 +2398,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       // Ignore localStorage errors
     }
     setHtmlViewMode(htmlViewModeByPathRef.current[selectedPath] ?? htmlDefault);
-    setDrawioViewMode(drawioViewModeByPathRef.current[selectedPath] ?? 'preview');
+    setDrawioViewMode(drawioViewModeByPathRef.current[selectedPath] ?? (settingsDefaultFileViewerPreview ? 'preview' : 'edit'));
 
     let jsonDefault: 'tree' | 'text' = settingsDefaultFileViewerPreview ? 'tree' : 'text';
     try {
@@ -2560,23 +2563,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   React.useEffect(() => {
     const applyDefaultFileViewerMode = (enabled: boolean) => {
-      const textMode: TextViewMode = enabled ? 'view' : 'edit';
       const previewMode: PreviewViewMode = enabled ? 'preview' : 'edit';
       const nextJsonMode: 'tree' | 'text' = enabled ? 'tree' : 'text';
 
       for (const path of openPaths) {
-        textViewModeByPathRef.current[path] = textMode;
+        textViewModeByPathRef.current[path] = 'edit';
         if (isMarkdownFile(path)) {
           mdViewModeByPathRef.current[path] = previewMode;
         }
         if (isHtmlFile(path)) {
           htmlViewModeByPathRef.current[path] = previewMode;
         }
+        if (isDrawioFile(path)) {
+          drawioViewModeByPathRef.current[path] = previewMode;
+        }
       }
 
-      setTextViewMode(textMode);
+      setTextViewMode('edit');
       setMdViewMode(previewMode);
       setHtmlViewMode(previewMode);
+      setDrawioViewMode(previewMode);
       setJsonViewMode(nextJsonMode);
 
       try {
@@ -2756,32 +2762,30 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     if (selectedFile?.path !== targetPath) {
-      if (confirmDiscardOpen) {
-        return;
-      }
-      void handleSelectFile(toFileNode(targetPath));
+      // Selection is owned by the tab sync / user. A pending focus request must
+      // not steal selection back (e.g. after the user switched to another tab
+      // while this file was still loading). Wait; clear once it loads or the
+      // request is superseded.
       return;
     }
 
-    if (fileLoading || loadedFilePath !== targetPath || fileError || isSelectedImage || isSelectedPdf) {
+    if (fileLoading || loadedFilePath !== targetPath) {
       return;
     }
 
-    if (canEdit && textViewMode === 'edit') {
-      const view = editorViewRef.current;
-      if (!view) {
-        return;
-      }
-      view.focus();
+    // Best-effort focus: preview renderers (markdown/html preview, drawio,
+    // JSON tree, images, PDFs) never mount a CodeMirror editor, so the request
+    // must clear regardless — otherwise it lingers and replays on every
+    // dependency change.
+    if (!fileError && !isSelectedImage && !isSelectedPdf && canEdit && textViewMode === 'edit') {
+      editorViewRef.current?.focus();
     }
 
     setPendingFileFocusPath(null);
   }, [
     canEdit,
-    confirmDiscardOpen,
     fileError,
     fileLoading,
-    handleSelectFile,
     isSelectedImage,
     isSelectedPdf,
     loadedFilePath,
@@ -2790,7 +2794,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     selectedFile?.path,
     setPendingFileFocusPath,
     textViewMode,
-    toFileNode,
   ]);
 
   const nudgeEditorSelectionAboveKeyboard = React.useCallback((view: EditorView | null) => {
@@ -2885,17 +2888,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canEdit, isMobile, shortcutOverrides, textViewMode]);
 
+  const editorFontSize = useUIStore((state) => state.editorFontSize);
+
   const editorExtensions = React.useMemo(() => {
     if (!selectedFile?.path) {
-      return [createFlexokiCodeMirrorTheme(currentTheme)];
+      return [createFlexokiCodeMirrorTheme(currentTheme, { fontSize: editorFontSize })];
     }
 
     // Shiki token colors (worker-backed) match the Shiki file view exactly.
     // Same language resolver as the view, so both agree on the language. When
     // Shiki is the color source, drop the lezer token colors to avoid a
-    // competing highlighter (keep the lezer language for indentation/folding).
+    // competing highlighter (Keep the lezer language for indentation/folding).
     const shikiLanguage = getLanguageFromExtension(selectedFile.path);
-    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, shikiLanguage ? { syntaxColors: false } : undefined)];
+    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, shikiLanguage ? { syntaxColors: false, fontSize: editorFontSize } : { fontSize: editorFontSize })];
     const language = staticLanguageExtension ?? dynamicLanguageExtension;
     if (language) {
       extensions.push(language);
@@ -2925,7 +2930,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       }));
     }
     return extensions;
-  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard]);
+  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize]);
 
   const pierreTheme = React.useMemo(
     () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),
@@ -3150,7 +3155,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     return (
       <div className={wrapperCls}>
-        {canEdit && textViewMode === 'edit' && (
+        {canEdit && isEditingFile && (
           <>
             {isSaving ? (
               <span className="flex items-center gap-1 px-1 text-muted-foreground typography-meta">
@@ -3300,15 +3305,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           />
         )}
 
-        {(isMarkdown || isHtmlFile(selectedFile?.path ?? '')) && (
+        {isMarkdown && (
+          withTooltip(
+            t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => saveMdViewMode(getMdViewMode() === 'preview' ? 'edit' : 'preview')}
+              className={cn(
+                'size-6 p-0 transition-colors hover:bg-[var(--interactive-hover)] focus-visible:bg-[var(--interactive-hover)] active:bg-[var(--interactive-hover)]',
+                getMdViewMode() === 'preview'
+                  ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)] hover:bg-[var(--interactive-selection)] focus-visible:bg-[var(--interactive-selection)] active:bg-[var(--interactive-selection)]'
+                  : 'text-muted-foreground opacity-65 hover:opacity-100'
+              )}
+              title={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+              aria-label={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+            >
+              <Icon name={getMdViewMode() === 'preview' ? 'eye' : 'eye-off'} className="size-4" />
+            </Button>
+          )
+        )}
+
+        {isHtmlFile(selectedFile?.path ?? '') && (
           <PreviewToggleButton
-            currentMode={isMarkdown ? getMdViewMode() : getHtmlViewMode()}
+            currentMode={getHtmlViewMode()}
             onToggle={() => {
-              if (isHtmlFile(selectedFile?.path ?? '')) {
-                saveHtmlViewMode(getHtmlViewMode() === 'preview' ? 'edit' : 'preview');
-              } else {
-                saveMdViewMode(getMdViewMode() === 'preview' ? 'edit' : 'preview');
-              }
+              saveHtmlViewMode(getHtmlViewMode() === 'preview' ? 'edit' : 'preview');
             }}
           />
         )}
@@ -3714,7 +3736,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           <div
             ref={floatingToolbarRef}
             className="absolute right-3 top-3 z-30"
-            onMouseEnter={() => setIsFloatingToolbarOpen(true)}
             onMouseLeave={() => {
               if (toolbarDropdownOpenCountRef.current > 0) return;
               setIsFloatingToolbarOpen(false);
@@ -3723,23 +3744,54 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             {isFloatingToolbarOpen ? (
               renderFloatingFileControls()
             ) : (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setIsFloatingToolbarOpen(true)}
-                      className="size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 text-muted-foreground shadow-sm hover:text-foreground"
-                      aria-label={t('filesView.editor.showControlsAria')}
-                      title={t('filesView.editor.controlsTitle')}
+              <div className="flex items-center gap-1">
+                {isMarkdown ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => saveMdViewMode(getMdViewMode() === 'preview' ? 'edit' : 'preview')}
+                          className={cn(
+                            'size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 shadow-sm transition-colors',
+                            getMdViewMode() === 'preview'
+                              ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)] hover:bg-[var(--interactive-selection)]'
+                              : 'text-muted-foreground hover:text-foreground'
+                          )}
+                          aria-label={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+                          title={t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+                        >
+                          <Icon name={getMdViewMode() === 'preview' ? 'eye' : 'eye-off'} className="size-4" />
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={6}>
+                      {t(getMdViewMode() === 'preview' ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className="inline-flex"
+                      onMouseEnter={() => setIsFloatingToolbarOpen(true)}
                     >
-                      <Icon name="more-2-fill" className="size-4" />
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.controlsTitle')}</TooltipContent>
-              </Tooltip>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setIsFloatingToolbarOpen(true)}
+                        className="size-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 text-muted-foreground shadow-sm hover:text-foreground"
+                        aria-label={t('filesView.editor.showControlsAria')}
+                        title={t('filesView.editor.controlsTitle')}
+                      >
+                        <Icon name="more-2-fill" className="size-4" />
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.controlsTitle')}</TooltipContent>
+                </Tooltip>
+              </div>
             )}
           </div>
         )}

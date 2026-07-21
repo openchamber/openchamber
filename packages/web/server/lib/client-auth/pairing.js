@@ -13,8 +13,16 @@ const normalizeOptionalString = (value) => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const normalizeLabel = (value) => {
-  const normalized = normalizeOptionalString(value) || 'Pair new device';
+// Placeholder shown in the pending-devices list when the operator did not type a
+// name. It is a DISPLAY default only — the stored label stays null so redeem can
+// fall back to the device's own reported name instead of this placeholder.
+const PAIRING_LABEL_PLACEHOLDER = 'Pair new device';
+
+// The operator's typed device label, capped. Returns null when unset so callers
+// can distinguish "no name given" from a real name.
+const normalizeStoredLabel = (value) => {
+  const normalized = normalizeOptionalString(value);
+  if (!normalized) return null;
   return normalized.length > MAX_LABEL_LENGTH ? normalized.slice(0, MAX_LABEL_LENGTH) : normalized;
 };
 
@@ -59,7 +67,7 @@ const publicSession = (session) => ({
   usedAt: session.usedAt,
   cancelledAt: session.cancelledAt,
   clientId: session.clientId,
-  label: session.label,
+  label: session.label || PAIRING_LABEL_PLACEHOLDER,
   fingerprint: session.fingerprint,
   allowedClientKinds: session.allowedClientKinds,
   createdByClientId: session.createdByClientId,
@@ -125,7 +133,7 @@ export const createClientPairingRuntime = ({
           usedAt: normalizeTimestamp(session.usedAt),
           cancelledAt: normalizeTimestamp(session.cancelledAt),
           clientId: normalizeOptionalString(session.clientId),
-          label: normalizeLabel(session.label),
+          label: normalizeStoredLabel(session.label),
           fingerprint: normalizeOptionalString(session.fingerprint) || generateFingerprint(),
           allowedClientKinds: normalizeAllowedClientKinds(session.allowedClientKinds),
           createdByClientId: normalizeOptionalString(session.createdByClientId),
@@ -154,12 +162,17 @@ export const createClientPairingRuntime = ({
   };
 
   const sweepExpiredSessionsFromStore = (store) => {
-    const cutoff = Date.now() - ttlMs;
+    const now = Date.now();
+    const cutoff = now - ttlMs;
     store.sessions = store.sessions.filter((session) => {
       const usedAt = Date.parse(session.usedAt || '');
       const cancelledAt = Date.parse(session.cancelledAt || '');
       const inactiveAt = Number.isFinite(usedAt) ? usedAt : cancelledAt;
-      return !Number.isFinite(inactiveAt) || inactiveAt >= cutoff;
+      if (Number.isFinite(inactiveAt)) return inactiveAt >= cutoff;
+      // Never used or cancelled: drop once the session itself has expired —
+      // it can no longer be redeemed and would otherwise sit in the store forever.
+      const expiresAt = Date.parse(session.expiresAt || '');
+      return !Number.isFinite(expiresAt) || expiresAt > now;
     });
   };
 
@@ -176,7 +189,7 @@ export const createClientPairingRuntime = ({
         usedAt: null,
         cancelledAt: null,
         clientId: null,
-        label: normalizeLabel(label),
+        label: normalizeStoredLabel(label),
         fingerprint: generateFingerprint(),
         allowedClientKinds: normalizeAllowedClientKinds(allowedClientKinds),
         createdByClientId: normalizeOptionalString(createdByClientId),
@@ -248,7 +261,13 @@ export const createClientPairingRuntime = ({
       if (!session.allowedClientKinds.includes(normalizedKind)) throw redeemError();
       if (!constantTimeEqual(session.secretHash, hashSecret(normalizedSecret), crypto)) throw redeemError();
 
-      const label = normalizeOptionalString(clientLabel) || normalizeOptionalString(deviceName) || 'Remote client';
+      // The operator's typed pairing label is THIS server's name for the device
+      // (shown in the device list). It wins over the device's self-reported
+      // label; fall back to that only when no pairing label was set.
+      const label = normalizeOptionalString(session.label)
+        || normalizeOptionalString(clientLabel)
+        || normalizeOptionalString(deviceName)
+        || 'Remote client';
       const result = await remoteClientAuthRuntime.createClient({
         label,
         clientKind: normalizedKind,

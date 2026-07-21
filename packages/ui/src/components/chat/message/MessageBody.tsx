@@ -4,13 +4,14 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
-import ReasoningPart, { MergedReasoningPart } from './parts/ReasoningPart';
+import ReasoningPart from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
-import type { TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
+import type { TurnActivityGroup, TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
+import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
@@ -53,6 +54,9 @@ import {
     sendImplementationResponseToReviewer,
     sendReviewFeedbackToOriginal,
 } from '@/lib/reviewFlow';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { useProviderLogo } from '@/hooks/useProviderLogo';
+import { getAgentColor } from '@/lib/agentColors';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -252,7 +256,11 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                         className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
                         onClick={() => {
                             if (!effectiveDirectory) return;
-                            if (isMobile || isVSCodeRuntime()) {
+                            // In contexts with no ContextPanel (embedded
+                            // session-chat iframe) or single-surface layouts
+                            // (mobile, VS Code), navigate in place. Otherwise
+                            // open a new side-panel tab.
+                            if (isEmbeddedSessionChat() || isMobile || isVSCodeRuntime()) {
                                 setCurrentSession(taskSessionID, effectiveDirectory);
                                 return;
                             }
@@ -272,6 +280,8 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
         </div>
     );
 };
+
+const SHELL_CODE_TAG_STYLE: React.CSSProperties = { background: 'transparent', backgroundColor: 'transparent' };
 
 const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) => {
     const [expanded, setExpanded] = React.useState(false);
@@ -330,9 +340,14 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
             </div>
 
             {command ? (
-                <pre className="typography-meta mt-1.5 overflow-x-auto whitespace-pre-wrap break-words text-foreground/90 font-mono">
-                    {command}
-                </pre>
+                <div className="typography-meta mt-1.5 overflow-x-auto font-mono">
+                    <WorkerHighlightedCode
+                        language="bash"
+                        code={command}
+                        codeStyle={SHELL_CODE_TAG_STYLE}
+                        wrap
+                    />
+                </div>
             ) : null}
 
             {hasOutput ? (
@@ -358,9 +373,14 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
                         </button>
                     </div>
                     {expanded ? (
-                        <pre className="typography-meta mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap break-words text-foreground/85 font-mono">
-                            {output}
-                        </pre>
+                        <div className="typography-meta mt-1.5 max-h-56 overflow-auto font-mono text-foreground/85">
+                            <WorkerHighlightedCode
+                                language="bash"
+                                code={output}
+                                codeStyle={SHELL_CODE_TAG_STYLE}
+                                wrap
+                            />
+                        </div>
                     ) : null}
                 </div>
             ) : null}
@@ -416,6 +436,14 @@ interface MessageBodyProps {
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    contextPinned?: boolean;
+    contextPinPending?: boolean;
+    onToggleContextPin?: () => void;
+    footerProviderID?: string | null;
+    footerModelName?: string;
+    footerAgentName?: string;
+    footerVariant?: string;
+    isDarkTheme?: boolean;
 }
 
 const TOOL_REVEAL_CACHE_MAX = 200;
@@ -436,9 +464,10 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
     revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
-const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
+const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
     messageId: string;
     parts: Part[];
+    messageCreatedAt?: number | null;
     isMobile: boolean;
     alwaysShowActions?: boolean;
     hasTouchInput?: boolean;
@@ -449,11 +478,15 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
     agentMention?: AgentMentionInfo;
     onRevert?: () => void;
     onFork?: () => void;
+    contextPinned?: boolean;
+    contextPinPending?: boolean;
+    onToggleContextPin?: () => void;
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
 }) => {
-    const { t } = useI18n();
+    const { locale, t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
+    const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
 
@@ -528,7 +561,13 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
     );
 
     const effectiveOnFork = chatSurfaceMode === 'mini-chat' ? undefined : onFork;
-    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork) && showUserActions ? (
+    const timestamp = React.useMemo(() => {
+        void locale;
+        if (typeof messageCreatedAt !== 'number' || messageCreatedAt <= 0) return null;
+        const formatted = formatTimestampForDisplay(messageCreatedAt, timeFormatPreference);
+        return formatted.length > 0 ? formatted : null;
+    }, [locale, messageCreatedAt, timeFormatPreference]);
+    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
             isMobile
@@ -556,6 +595,20 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                         : 'pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100'
                 )}
             >
+                {timestamp ? (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <span
+                                className="mr-1 flex items-center gap-1 text-sm tabular-nums text-muted-foreground/60"
+                                aria-label={`Message time: ${timestamp}`}
+                            >
+                                <Icon name="time" className="h-3.5 w-3.5" />
+                                <span className="message-footer__label">{timestamp}</span>
+                            </span>
+                        </TooltipTrigger>
+                        <TooltipContent>{timestamp}</TooltipContent>
+                    </Tooltip>
+                ) : null}
                 {onRevert && (
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -596,6 +649,29 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                             </Button>
                         </TooltipTrigger>
                         <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.fork')}</TooltipContent>
+                    </Tooltip>
+                )}
+                {onToggleContextPin && hasCopyableText && (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className={cn(
+                                    'h-6 w-6 bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                                    contextPinned ? 'text-[color:var(--status-info)]' : 'text-muted-foreground',
+                                )}
+                                disabled={contextPinPending}
+                                aria-pressed={contextPinned}
+                                aria-label={t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => { event.stopPropagation(); onToggleContextPin(); }}
+                            >
+                                <Icon name={contextPinned ? 'pushpin-2-fill' : 'pushpin-2'} className="h-3 w-3" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>{t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}</TooltipContent>
                     </Tooltip>
                 )}
                 {canCopyMessage && hasCopyableText && (
@@ -1017,6 +1093,14 @@ const AssistantMessageBody = React.memo(({
     errorMessage,
     errorVariant = 'error',
     reviewTransferDirection = null,
+    contextPinned,
+    contextPinPending,
+    onToggleContextPin,
+    footerProviderID,
+    footerModelName,
+    footerAgentName,
+    footerVariant,
+    isDarkTheme = false,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t, locale } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
@@ -1032,6 +1116,7 @@ const AssistantMessageBody = React.memo(({
 
     const isTouchContext = Boolean(hasTouchInput ?? isMobile);
     const alwaysShowMessageActions = Boolean(alwaysShowActions ?? isMobile);
+    const { src: footerLogoSrc, onError: handleFooterLogoError, hasLogo: footerHasLogo } = useProviderLogo(footerProviderID ?? null);
     const awaitingMessageCompletion = !isMessageCompleted;
     const animateActivityRows = awaitingMessageCompletion || Boolean(turnGroupingContext?.isWorking);
 
@@ -1210,7 +1295,6 @@ const AssistantMessageBody = React.memo(({
     const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
-    const groupReasoningBlocks = useUIStore((state) => state.groupReasoningBlocks);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const vscodeApi = useRuntimeAPIs().vscode;
@@ -1676,51 +1760,82 @@ const AssistantMessageBody = React.memo(({
     const renderedParts = React.useMemo(() => {
         const rendered: React.ReactNode[] = [];
 
+        const renderSegmentBlock = (segment: TurnActivityGroup): React.ReactNode | null => {
+            if (!shouldRenderActivityGroup || !toggleActivityGroup) {
+                return null;
+            }
+            const visibleSegmentParts = showReasoningTraces
+                ? segment.parts
+                : segment.parts.filter((activity) => activity.kind !== 'reasoning');
+            if (visibleSegmentParts.length === 0) {
+                return null;
+            }
+            return (
+                <div key={`progressive-group-${segment.id}`} className="mb-3">
+                    <TurnActivity
+                        parts={visibleSegmentParts}
+                        isExpanded={turnGroupingContext?.isGroupExpanded === true}
+                        collapsedPreviewCount={collapsedPreviewCount}
+                        onToggle={toggleActivityGroup}
+                        isMobile={isMobile}
+                        expandedTools={expandedTools}
+                        onToggleTool={onToggleTool}
+                        onShowPopup={onShowPopup}
+                        onContentChange={onContentChange}
+                        streamPhase={effectiveStreamPhase}
+                        showHeader={true}
+                        animateRows={animateActivityRows}
+                        animatedToolIds={animatedToolIdsLookup}
+                        diffStats={turnGroupingContext?.diffStats}
+                        renderJustificationActions={renderJustificationActions}
+                    />
+                </div>
+            );
+        };
+
+        // Segments that follow a standalone tool of THIS message render right
+        // after that tool's row so e.g. an Agent Task sits chronologically
+        // between the activity before it and the activity after it.
+        const localToolPartIds = new Set<string>();
+        visibleParts.forEach((part, partIndex) => {
+            if (part.type === 'tool') {
+                localToolPartIds.add(part.id ?? `${messageId}-part-${partIndex}-${part.type}`);
+            }
+        });
+        const segmentsAfterLocalTool = new Map<string, TurnActivityGroup[]>();
         if (shouldRenderActivityGroup && toggleActivityGroup) {
             activityGroupSegmentsForMessage.forEach((segment) => {
-                const visibleSegmentParts = showReasoningTraces
-                    ? segment.parts
-                    : segment.parts.filter((activity) => activity.kind !== 'reasoning');
-                if (visibleSegmentParts.length === 0) {
+                if (segment.afterToolPartId && localToolPartIds.has(segment.afterToolPartId)) {
+                    const list = segmentsAfterLocalTool.get(segment.afterToolPartId) ?? [];
+                    list.push(segment);
+                    segmentsAfterLocalTool.set(segment.afterToolPartId, list);
                     return;
                 }
-                rendered.push(
-                    <div key={`progressive-group-${segment.id}`} className="mb-3">
-                        <TurnActivity
-                            parts={visibleSegmentParts}
-                            isExpanded={turnGroupingContext.isGroupExpanded === true}
-                            collapsedPreviewCount={collapsedPreviewCount}
-                            onToggle={toggleActivityGroup}
-                            isMobile={isMobile}
-                            expandedTools={expandedTools}
-                            onToggleTool={onToggleTool}
-                            onShowPopup={onShowPopup}
-                            onContentChange={onContentChange}
-                            streamPhase={effectiveStreamPhase}
-                            showHeader={true}
-                            animateRows={animateActivityRows}
-                            animatedToolIds={animatedToolIdsLookup}
-                            diffStats={turnGroupingContext.diffStats}
-                            renderJustificationActions={renderJustificationActions}
-                        />
-                    </div>
-                );
+                const block = renderSegmentBlock(segment);
+                if (block) {
+                    rendered.push(block);
+                }
             });
         }
+
+        const flushSegmentsAfterTool = (toolPartId: string) => {
+            const segments = segmentsAfterLocalTool.get(toolPartId);
+            if (!segments) {
+                return;
+            }
+            segmentsAfterLocalTool.delete(toolPartId);
+            segments.forEach((segment) => {
+                const block = renderSegmentBlock(segment);
+                if (block) {
+                    rendered.push(block);
+                }
+            });
+        };
 
         // Flat rendering: iterate parts in natural order.
         // Group consecutive static tools (read, grep, glob, etc.) into compact rows.
         // Expandable tools (bash, edit, task) get individual rows.
         // Text renders inline at its natural position.
-        // Reasoning: all reasoning parts for this message are merged into ONE block
-        // at the position of the first reasoning part (VSCode Copilot pattern).
-        const flatReasoningParts = visibleParts.filter((p) => {
-            if (p.type !== 'reasoning') return false;
-            const a = activityByPart.get(p);
-            return a?.kind !== 'reasoning';
-        });
-        let reasoningMergeRendered = false;
-
         let i = 0;
         while (i < visibleParts.length) {
             const part = visibleParts[i];
@@ -1782,20 +1897,6 @@ const AssistantMessageBody = React.memo(({
                                 onShowPopup={onShowPopup}
                             />
                         );
-                    } else if (groupReasoningBlocks) {
-                        // Merged mode (VSCode pattern): one block for all reasoning parts.
-                        if (!reasoningMergeRendered) {
-                            reasoningMergeRendered = true;
-                            rendered.push(
-                                <MergedReasoningPart
-                                    key={`reasoning-merged-${messageId}`}
-                                    parts={flatReasoningParts}
-                                    messageId={messageId}
-                                    streamPhase={effectiveStreamPhase}
-                                    onContentChange={onContentChange}
-                                />
-                            );
-                        }
                     } else {
                         // Per-part mode: each reasoning block at its natural position.
                         rendered.push(
@@ -1816,19 +1917,23 @@ const AssistantMessageBody = React.memo(({
             if (part.type === 'tool') {
                 const toolPart = part as ToolPartType;
                 const toolName = toolPart.tool?.toLowerCase() ?? '';
+                const toolPartId = toolPart.id ?? `${messageId}-part-${i}-${part.type}`;
 
                 if (isSortedRenderMode && !isActivityOwnerMessage) {
+                    flushSegmentsAfterTool(toolPartId);
                     i += 1;
                     continue;
                 }
 
                 const activity = activityByPart.get(part);
-                if (activity?.kind === 'tool' && (shouldRenderActivityGroup || !isStandaloneTool(toolName))) {
+                if (activity?.kind === 'tool' && !isStandaloneTool(toolName)) {
+                    flushSegmentsAfterTool(toolPartId);
                     i += 1;
                     continue;
                 }
 
                 if (!shouldShowTool(toolPart)) {
+                    flushSegmentsAfterTool(toolPartId);
                     i++;
                     continue;
                 }
@@ -1851,6 +1956,7 @@ const AssistantMessageBody = React.memo(({
                             </ToolRevealOnMount>
                         </FadeInOnReveal>
                     );
+                    flushSegmentsAfterTool(toolPartId);
                     i++;
                     continue;
                 }
@@ -1876,6 +1982,7 @@ const AssistantMessageBody = React.memo(({
                         </ToolRevealOnMount>
                     </FadeInOnReveal>
                 );
+                flushSegmentsAfterTool(toolPartId);
                 i++;
                 continue;
             }
@@ -1883,6 +1990,17 @@ const AssistantMessageBody = React.memo(({
             // Unknown part type — skip
             i++;
         }
+
+        // Any segments whose anchor tool never got flushed (filtered parts,
+        // unexpected ordering) must still render rather than disappear.
+        segmentsAfterLocalTool.forEach((segments) => {
+            segments.forEach((segment) => {
+                const block = renderSegmentBlock(segment);
+                if (block) {
+                    rendered.push(block);
+                }
+            });
+        });
 
         return rendered;
     }, [
@@ -1893,7 +2011,6 @@ const AssistantMessageBody = React.memo(({
         animateActivityRows,
         chatRenderMode,
         collapsibleThinkingBlocks,
-        groupReasoningBlocks,
         collapsedPreviewCount,
         expandedTools,
         isMobile,
@@ -1986,6 +2103,29 @@ const AssistantMessageBody = React.memo(({
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.saveAsPlan')}</TooltipContent>
+                </Tooltip>
+            ) : null}
+            {onToggleContextPin && hasCopyableText ? (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                                'h-8 w-8 bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                                contextPinned ? 'text-[color:var(--status-info)]' : 'text-muted-foreground',
+                            )}
+                            disabled={contextPinPending}
+                            aria-pressed={contextPinned}
+                            aria-label={t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => { event.stopPropagation(); onToggleContextPin(); }}
+                        >
+                            <Icon name={contextPinned ? 'pushpin-2-fill' : 'pushpin-2'} className="h-3.5 w-3.5" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}</TooltipContent>
                 </Tooltip>
             ) : null}
             {!isMiniChatSurface && !isReviewSessionView ? <Tooltip>
@@ -2094,13 +2234,46 @@ const AssistantMessageBody = React.memo(({
                 )}
                 {shouldShowTurnFooter && (
                     <div
-                        className="mt-2 mb-1 flex flex-wrap items-center justify-start gap-1.5"
+                        className="mt-2 mb-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5"
                         style={MESSAGE_FOOTER_CONTAINER_STYLE}
                     >
-                        <div className="flex items-center gap-1.5" data-message-action-group="true">
-                            {messageActionButtons}
-                            {finalTurnActionButtons}
-                        </div>
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-muted-foreground/60">
+                        {footerModelName ? (
+                            <span className="flex min-w-0 items-center gap-1.5">
+                                {footerHasLogo && footerLogoSrc ? (
+                                    <img
+                                        src={footerLogoSrc}
+                                        alt=""
+                                        className="h-3.5 w-3.5 flex-shrink-0"
+                                        style={{
+                                            filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
+                                        }}
+                                        onError={handleFooterLogoError}
+                                    />
+                                ) : (
+                                    <Icon
+                                        name="brain-ai-3"
+                                        className="h-3.5 w-3.5 flex-shrink-0"
+                                        style={{ color: `var(${getAgentColor(footerAgentName).var})` }}
+                                    />
+                                )}
+                                <span className="truncate">{footerModelName}</span>
+                            </span>
+                        ) : null}
+                        {footerVariant && !['default', 'none'].includes(footerVariant.toLowerCase()) ? (
+                            <span className="flex items-center gap-1">
+                                <Icon name="brain-ai-3" className="h-3.5 w-3.5 flex-shrink-0" />
+                                <span className="message-footer__label">
+                                    {footerVariant[0].toLowerCase() + footerVariant.slice(1)}
+                                </span>
+                            </span>
+                        ) : null}
+                        {footerAgentName ? (
+                            <span className="flex items-center gap-1">
+                                <Icon name="ai-agent" className="h-3.5 w-3.5 flex-shrink-0" />
+                                <span className="message-footer__label">{footerAgentName}</span>
+                            </span>
+                        ) : null}
                         {turnDurationText ? (
                             <Tooltip>
                                 <TooltipTrigger asChild>
@@ -2135,6 +2308,19 @@ const AssistantMessageBody = React.memo(({
                                 isInteractive={turnGroupingContext?.isLatestTurn === true}
                             />
                         ) : null}
+                        </div>
+                        <div
+                            className={cn(
+                                'flex items-center gap-1.5',
+                                alwaysShowMessageActions || isTouchContext
+                                    ? undefined
+                                    : 'pointer-events-none opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100'
+                            )}
+                            data-message-action-group="true"
+                        >
+                            {messageActionButtons}
+                            {finalTurnActionButtons}
+                        </div>
                     </div>
                 )}
 
@@ -2150,6 +2336,7 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
             <UserMessageBody
                 messageId={props.messageId}
                 parts={props.parts}
+                messageCreatedAt={props.messageCreatedAt}
                 isMobile={props.isMobile}
                 alwaysShowActions={props.alwaysShowActions}
                 hasTouchInput={props.hasTouchInput}
@@ -2160,6 +2347,9 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
                 agentMention={props.agentMention}
                 onRevert={props.onRevert}
                 onFork={props.onFork}
+                contextPinned={props.contextPinned}
+                contextPinPending={props.contextPinPending}
+                onToggleContextPin={props.onToggleContextPin}
                 userActionsMode={props.userActionsMode}
                 stickyUserHeaderEnabled={props.stickyUserHeaderEnabled}
             />

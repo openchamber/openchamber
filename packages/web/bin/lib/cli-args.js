@@ -387,7 +387,7 @@ OPTIONS:
   --hostname              Alias for --host outside tunnel commands
   --lan                   Bind to 0.0.0.0 for LAN access
   --server <url>          Public/server URL for connect-url links
-  --relay                 connect-url: generate an end-to-end-encrypted relay pairing link
+  --relay                 connect-url: also include the end-to-end-encrypted relay transport
   --ui-password           Protect browser UI with single password
   --api-only              Start API routes only, without serving browser UI assets
   --foreground            Run server in foreground (use with systemd/process managers)
@@ -465,10 +465,11 @@ OPTIONS:
   --lan                   Bind to 0.0.0.0 for LAN access when starting
   --server <url>          Public URL saved into the connection link
   --server-url <url>      Alias for --server
-  --relay                 Generate an end-to-end-encrypted relay pairing link
-                          (no server URL needed; requires the relay enabled on
-                          this instance). Set OPENCHAMBER_RELAY_URL to use a
-                          self-hosted relay.
+  --relay                 Also include the end-to-end-encrypted relay transport
+                          so the link works away from the local network. The
+                          device prefers the direct connection when reachable;
+                          the instance brings the relay up on its own. Set
+                          OPENCHAMBER_RELAY_URL to use a self-hosted relay.
   --name <label>          Label saved with the remote client token
   --ui-password <value>   Protect browser access when UI routes are enabled
   --api-only              Start in headless/API-only mode when starting

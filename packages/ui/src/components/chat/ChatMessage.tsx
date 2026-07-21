@@ -14,13 +14,13 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
-import MessageHeader from './message/MessageHeader';
 import MessageBody from './message/MessageBody';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
 import { filterVisibleParts, normalizeParts } from './message/partUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
+import { isHiddenUserMessage } from './message/hiddenUserMessage';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
 import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/lib/messages/providerAuthError';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
@@ -31,6 +31,12 @@ import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { areOptionalRenderRelevantMessagesEqual, areRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual } from './message/renderCompare';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
+import { toast } from 'sonner';
+import { useI18n } from '@/lib/i18n';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
+import { setContextObligatoryMessage } from '@/sync/session-actions';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -150,8 +156,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     onUserAnimationConsumed,
     reviewTransferDirection = null,
 }) => {
+    const { t } = useI18n();
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const alwaysShowMessageActions = isMobile || isTablet;
+    const canPinIntoContext = !isVSCodeRuntime();
     const { currentTheme } = useThemeSystem();
     const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -402,6 +410,29 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         const timeInfo = message.info.time as { created?: number } | undefined;
         return typeof timeInfo?.created === 'number' ? timeInfo.created : null;
     }, [message.info.time]);
+    const isPinnedIntoContext = useGlobalSessionsStore((state) => {
+        const session = state.activeSessions.find((candidate) => candidate.id === sessionId)
+            ?? state.archivedSessions.find((candidate) => candidate.id === sessionId);
+        return getContextObligatoryMessages(session).some((entry) => entry.id === message.info.id);
+    });
+    const [pinPending, setPinPending] = React.useState(false);
+    const handleToggleContextPin = React.useCallback(async () => {
+        if (!sessionId || !messageCreatedAt || pinPending) return;
+        setPinPending(true);
+        try {
+            const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
+            await setContextObligatoryMessage(sessionId, directory, {
+                id: message.info.id,
+                createdAt: messageCreatedAt,
+                role: isUser ? 'user' : 'assistant',
+            }, !isPinnedIntoContext);
+        } catch (error) {
+            console.error('[chat-message] failed to update context pin', error);
+            toast.error(t('chat.messageBody.actions.contextPinFailed'));
+        } finally {
+            setPinPending(false);
+        }
+    }, [isPinnedIntoContext, isUser, message.info.id, messageCreatedAt, pinPending, sessionId, t]);
 
     const isMessageCompleted = React.useMemo(() => {
         if (isUser) return true;
@@ -561,6 +592,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const hasTurnGrouping = Boolean(turnGroupingContext);
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
+
+    const previousIsHiddenUserMessage = React.useMemo(
+        () => !isUser && isHiddenUserMessage(previousMessage, { planModeEnabled }),
+        [isUser, planModeEnabled, previousMessage]
+    );
+
+    const nextIsHiddenUserMessage = React.useMemo(
+        () => !isUser && isHiddenUserMessage(nextMessage, { planModeEnabled }),
+        [isUser, planModeEnabled, nextMessage]
+    );
 
     const isFollowedByAssistant = React.useMemo(() => {
         if (isUser) return false;
@@ -975,7 +1016,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return null;
     }
 
-    const assistantTopPaddingClass = !isUser && shouldShowHeader
+    const assistantTopPaddingClass = !isUser && shouldShowHeader && !previousIsHiddenUserMessage
         ? (stickyUserHeader ? (isMobile ? 'pt-4' : 'pt-6') : 'pt-0')
         : 'pt-0';
     const userMessageRadius = 'var(--radius-xl)';
@@ -985,8 +1026,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             <div
                 className={cn(
                     'group w-full',
-                    isUser ? (isMobile ? 'pt-2' : 'pt-6') : assistantTopPaddingClass,
-                    isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : 'pb-8'
+                    isUser ? (isMobile ? 'pt-2' : 'pt-4') : assistantTopPaddingClass,
+                    isUser ? 'pb-0' : (isFollowedByAssistant || nextIsHiddenUserMessage) ? 'pb-0' : 'pb-2'
                 )}
                 id={`message-${message.info.id}`}
                 data-message-id={message.info.id}
@@ -1017,6 +1058,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 isUser={isUser}
                                                 isMessageCompleted={isMessageCompleted}
                                                 messageFinish={messageFinish}
+                                                messageCreatedAt={messageCreatedAt ?? undefined}
                                                  isMobile={isMobile}
                                                  alwaysShowActions={alwaysShowMessageActions}
                                                  hasTouchInput={hasTouchInput}
@@ -1037,6 +1079,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 agentMention={agentMention}
                                                 onRevert={handleRevert}
                                                 onFork={isUser ? handleFork : undefined}
+                                                contextPinned={isPinnedIntoContext}
+                                                contextPinPending={pinPending}
+                                                onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
                                                 errorVariant={assistantErrorVariant}
                                                 userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
@@ -1050,6 +1095,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 isUser={isUser}
                                                 isMessageCompleted={isMessageCompleted}
                                                 messageFinish={messageFinish}
+                                                messageCreatedAt={messageCreatedAt ?? undefined}
                                                  isMobile={isMobile}
                                                  alwaysShowActions={alwaysShowMessageActions}
                                                  hasTouchInput={hasTouchInput}
@@ -1070,6 +1116,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 agentMention={agentMention}
                                                 onRevert={handleRevert}
                                                 onFork={isUser ? handleFork : undefined}
+                                                contextPinned={isPinnedIntoContext}
+                                                contextPinPending={pinPending}
+                                                onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
                                                 errorVariant={assistantErrorVariant}
                                                 userActionsMode="external-actions"
@@ -1082,17 +1131,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                         )
                     ) : (
                         <div className="relative">
-                            {shouldShowHeader && (
-                                <MessageHeader
-                                    isUser={isUser}
-                                    providerID={headerProviderID}
-                                    agentName={headerAgentName}
-                                    modelName={headerModelName}
-                                    variant={headerVariant}
-                                    isDarkTheme={isDarkTheme}
-                                />
-                            )}
-
                             <MessageBody
                                 sessionId={message.info.sessionID}
                                 messageId={message.info.id}
@@ -1102,6 +1140,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 messageFinish={messageFinish}
                                 messageCompletedAt={messageCompletedAt ?? undefined}
                                 messageCreatedAt={messageCreatedAt ?? undefined}
+                                contextPinned={isPinnedIntoContext}
+                                contextPinPending={pinPending}
+                                onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                  isMobile={isMobile}
                                  alwaysShowActions={alwaysShowMessageActions}
                                  hasTouchInput={hasTouchInput}
@@ -1124,6 +1165,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 errorMessage={assistantErrorText}
                                 errorVariant={assistantErrorVariant}
                                 reviewTransferDirection={reviewTransferDirection}
+                                footerProviderID={headerProviderID}
+                                footerModelName={headerModelName}
+                                footerAgentName={headerAgentName}
+                                footerVariant={headerVariant}
+                                isDarkTheme={isDarkTheme}
                             />
 
                         </div>

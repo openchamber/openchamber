@@ -137,50 +137,6 @@ function buildPairingPayload({ pairing, label, candidates }) {
   };
 }
 
-// Relay-only pairing link: the sole candidate is the relay transport, for
-// sharing with a device that is not on the host's network. Needs no reachable
-// server URL, but the host must be running with the relay enabled to serve the
-// redeem over the tunnel.
-async function generateRelayConnectUrl(options) {
-  const label = options.name || os.hostname();
-  const relay = await buildRelayPairingCandidate();
-  const pairingRuntime = createCliPairingRuntime();
-  const { pairing } = await pairingRuntime.createPairingSession({ label });
-  const connectUrl = encodePairingConnectUrl(buildPairingPayload({ pairing, label, candidates: [relay.candidate] }));
-
-  if (isJsonMode(options)) {
-    printJson({
-      mode: 'relay',
-      relayUrl: relay.relayUrl,
-      serverId: relay.serverId,
-      relayEnabled: relay.enabled,
-      pairingId: pairing.id,
-      fingerprint: pairing.fingerprint,
-      expiresAt: pairing.expiresAt,
-      connectUrl,
-    });
-    return;
-  }
-
-  if (isQuietMode(options)) {
-    process.stdout.write(`${connectUrl}\n`);
-    return;
-  }
-
-  clackIntro('OpenChamber relay pairing link');
-  logStatus('success', connectUrl);
-  clackLog.info(`Relay: ${relay.relayUrl}`);
-  if (pairing.fingerprint) clackLog.info(`Fingerprint: ${pairing.fingerprint}`);
-  if (!relay.enabled) {
-    logStatus('info', '[RELAY_ENABLE]', 'Enable the relay on this instance so this link can connect (Settings -> Remote Instances).');
-  }
-  clackLog.info('Scan or paste this link into another OpenChamber client. It is single-use and expires.');
-  if (options.qr === true) {
-    await displayTunnelQrCode(connectUrl);
-  }
-  clackOutro('relay pairing link generated');
-}
-
 async function resolveConnectUrlServerUrl(options) {
   let hostOverride = options.host;
   if (typeof hostOverride !== 'string' && !process.env.OPENCHAMBER_HOST) {
@@ -226,6 +182,15 @@ function isWildcardBindHost(host) {
   return host === '0.0.0.0' || host === '::' || host === '[::]';
 }
 
+function isLoopbackServerUrl(serverUrl) {
+  try {
+    const hostname = new URL(serverUrl).hostname.replace(/^\[|\]$/g, '');
+    return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
 function normalizeServerUrlForConnection(value) {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   if (!trimmed) return null;
@@ -266,13 +231,6 @@ function createConnectUrlCommand({ serveCommand }) {
       throw new TunnelCliError('Invalid --server URL. Use an http:// or https:// URL.', EXIT_CODE.USAGE_ERROR);
     }
 
-    // Relay pairing needs neither a reachable server URL nor a running server:
-    // the link is built from the instance's local relay identity + a fresh client
-    // token. The client reads the relay endpoint from the offer.
-    if (options.relay) {
-      return await generateRelayConnectUrl(options);
-    }
-
     const running = await discoverRunningInstances();
     const serverState = running.some((entry) => entry.port === options.port)
       ? { port: options.port, autoStarted: false }
@@ -298,14 +256,20 @@ function createConnectUrlCommand({ serveCommand }) {
     const label = options.name || os.hostname();
 
     // Direct candidate for the reachable server URL, plus the relay transport as
-    // a fallback candidate when the host relay is enabled — one link that works
-    // both on the LAN and off-network.
+    // a fallback candidate — one link that works both on the LAN and off-network.
+    // Candidate priorities make the client prefer the direct route and try the
+    // relay last, mirroring the UI's "Anywhere" pairing. `--relay` opts in even
+    // when the host relay is not up yet (the demand-driven lifecycle starts it);
+    // otherwise the relay rides along only when it is already enabled.
     const candidates = [{ type: serverUrl.startsWith('https://') ? 'tunnel' : 'lan', url: serverUrl, priority: 10 }];
     const relay = await buildRelayPairingCandidate();
-    if (relay.enabled) candidates.push(relay.candidate);
+    if (options.relay || relay.enabled) candidates.push(relay.candidate);
 
     const pairingRuntime = createCliPairingRuntime();
-    const { pairing } = await pairingRuntime.createPairingSession({ label });
+    // Mark relay-carrying sessions like the server route does, so the host's
+    // demand-driven relay lifecycle keeps the relay up while the link is pending.
+    const usesRelay = candidates.some((candidate) => candidate.type === 'relay');
+    const { pairing } = await pairingRuntime.createPairingSession({ label, usesRelay });
     const connectUrl = encodePairingConnectUrl(buildPairingPayload({ pairing, label, candidates }));
 
     if (isJsonMode(options)) {
@@ -332,8 +296,11 @@ function createConnectUrlCommand({ serveCommand }) {
     }
     logStatus('success', connectUrl);
     clackLog.info(`Server URL: ${serverUrl}`);
-    if (relay.enabled) {
+    if (options.relay || relay.enabled) {
       clackLog.info(`Relay fallback: ${relay.relayUrl}`);
+    }
+    if (options.relay && !relay.enabled) {
+      logStatus('info', '[RELAY_STARTING]', 'Relay is not up yet. A running instance starts it within a minute; a stopped instance starts it on next launch.');
     }
     if (pairing.fingerprint) {
       clackLog.info(`Fingerprint: ${pairing.fingerprint}`);
@@ -342,6 +309,15 @@ function createConnectUrlCommand({ serveCommand }) {
       clackLog.info('Detected a LAN address because OpenChamber is bound to all interfaces. Use --server to override it.');
     } else if (resolvedServerUrl.source === 'loopback-fallback') {
       clackLog.warn('OpenChamber is bound to all interfaces, but no LAN address was detected. Use --server to provide a reachable URL.');
+    } else if (isLoopbackServerUrl(serverUrl)) {
+      // The direct candidate points at this machine only — other devices cannot
+      // use it. Say so instead of letting a "LAN" link silently not work (or a
+      // --relay link silently go relay-only).
+      if (options.relay) {
+        logStatus('warn', '[LAN_UNREACHABLE]', 'OpenChamber only listens on this machine, so devices will always connect through the relay. Restart with --lan to allow direct home-network connections.');
+      } else {
+        logStatus('warn', '[LAN_UNREACHABLE]', 'OpenChamber only listens on this machine, so other devices cannot use this link. Restart with --lan, or use --server to provide a reachable URL.');
+      }
     }
     clackLog.info('Scan or paste this link into another OpenChamber client. It is single-use and expires.');
     if (options.qr === true) {

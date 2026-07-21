@@ -73,6 +73,8 @@ import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
+import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
+import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -84,6 +86,7 @@ import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
+import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
@@ -91,6 +94,7 @@ import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
+import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -159,9 +163,6 @@ function shouldSkipCompression(req, res) {
     return true;
   }
 
-  if (pathname.startsWith('/api/terminal/') && pathname.endsWith('/stream')) {
-    return true;
-  }
   for (const prefix of SSE_PATH_PREFIXES) {
     if (pathname === prefix) {
       return true;
@@ -363,6 +364,7 @@ const settingsRuntime = createSettingsRuntime({
 
 const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
 const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
+const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
 const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
 
@@ -407,6 +409,7 @@ const apnsRuntime = createApnsRuntime({
   APNS_TOKENS_FILE_PATH,
   readSettingsFromDiskMigrated,
   writeSettingsToDisk,
+  readSettingsStrict: readSettingsFromDiskStrict,
 });
 
 const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
@@ -715,7 +718,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
-const setAutoAcceptSession = (...args) => notificationTriggerRuntime.setAutoAcceptSession(...args);
+const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
 const sessionAssistRuntime = createSessionAssistRuntime({
@@ -724,11 +727,68 @@ const sessionAssistRuntime = createSessionAssistRuntime({
   getSmallModelService: async () => import('./lib/small-model/index.js'),
 });
 
+const sessionGoalRuntime = createSessionGoalRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getSmallModelService: async () => import('./lib/small-model/index.js'),
+  emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
+    // The goal settle notification replaces the per-turn ready notifications
+    // (suppressed while the goal is active) — so it obeys the same toggle.
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnCompletion === false) {
+      return;
+    }
+    const title = status === 'complete'
+      ? 'Goal complete'
+      : (status === 'budgetLimited' ? 'Goal reached its token budget' : 'Goal blocked');
+    const detail = goal?.statusReason && goal.statusReason !== 'verified by audit' && goal.statusReason !== 'reported by agent'
+      ? goal.statusReason
+      : (goal?.note || '');
+    const objective = typeof goal?.objective === 'string' ? goal.objective.slice(0, 140) : '';
+    const notificationPayload = {
+      title,
+      body: [objective, detail].filter(Boolean).join(' — ').slice(0, 240),
+      tag: `goal-${sessionId}`,
+      kind: 'goal',
+      sessionId,
+      directory,
+    };
+    const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
+    broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+    void notificationTriggerRuntime.sendGoalSettlePush({
+      sessionId,
+      directory,
+      status,
+      title,
+      body: notificationPayload.body,
+    }).catch((error) => {
+      console.warn('[session-goal] push fanout failed:', error?.message || error);
+    });
+  },
+});
+const contextObligatoryRuntime = createContextObligatoryRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+});
+
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
 });
+
+const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
+  globalEventHub: globalMessageStreamHub,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  readSettingsFromDiskMigrated,
+  persistSettings,
+  broadcastGlobalUiEvent,
+});
+permissionAutoAcceptRuntime.start();
+notificationTriggerRuntime.setGetIsSessionAutoAccepting(
+  (sessionId, directory) => permissionAutoAcceptRuntime.isSessionAutoAccepting(sessionId, directory),
+);
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
@@ -754,6 +814,8 @@ globalMessageStreamHub.subscribeEvent((event) => {
     ? event.directory
     : '';
   sessionAssistRuntime.processPayload(payload, directory);
+  sessionGoalRuntime.processPayload(payload, directory);
+  contextObligatoryRuntime.processPayload(payload, directory);
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
@@ -1006,6 +1068,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
+  setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
       try {
@@ -1070,6 +1133,8 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   syncToHmrState,
   openCodeWatcherRuntime,
   sessionAssistRuntime,
+  sessionGoalRuntime,
+  contextObligatoryRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),
@@ -1117,17 +1182,35 @@ async function main(options = {}) {
   // a specific non-loopback host → that host), NOT from how the UI was opened — so
   // "Local network" works even when the UI is opened on localhost, and is absent
   // when the server is only bound to loopback (a LAN link would not connect).
-  const resolvePairingTransports = () => {
+  // The IPv4 the requesting client actually reached this server on (if any).
+  // Strips the IPv6-mapped prefix; loopback means "not a LAN path".
+  const requestReachedLanAddress = (req) => {
+    const raw = typeof req?.socket?.localAddress === 'string' ? req.socket.localAddress : '';
+    const address = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(address)) return null;
+    if (address.startsWith('127.')) return null;
+    return address;
+  };
+  const resolvePairingTransports = (req) => {
     const activePort = tunnelRuntimeContext.getActivePort() || port;
     const local = `http://127.0.0.1:${activePort}`;
     let lanHost = null;
     if (isNetworkExposedBindHost(effectiveBindHost)) {
+      // Prefer the address the client is ALREADY talking to us on — it is the
+      // one interface guaranteed to be routable from that client's network.
+      // Interface scanning is only a fallback: on servers with virtual bridges
+      // (docker0 etc.) the first non-internal IPv4 can be an address no other
+      // machine can reach, which produced pairing links whose LAN candidate
+      // silently failed and forced devices onto the relay.
+      lanHost = requestReachedLanAddress(req);
       try {
-        for (const list of Object.values(os.networkInterfaces())) {
-          for (const entry of (list || [])) {
-            if (entry.family === 'IPv4' && !entry.internal) { lanHost = entry.address; break; }
+        if (!lanHost) {
+          for (const list of Object.values(os.networkInterfaces())) {
+            for (const entry of (list || [])) {
+              if (entry.family === 'IPv4' && !entry.internal) { lanHost = entry.address; break; }
+            }
+            if (lanHost) break;
           }
-          if (lanHost) break;
         }
       } catch {
         lanHost = null;
@@ -1138,6 +1221,37 @@ async function main(options = {}) {
     }
     const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort}` : null;
     return { local, lan, relayAvailable: true };
+  };
+  // ALL direct LAN URLs this server is currently reachable on, for the
+  // candidates-refresh endpoint: the address the requesting client already
+  // reached us on first (guaranteed routable from its network — over the relay
+  // tunnel this is loopback and yields nothing), then every non-internal IPv4
+  // interface. A client that paired while the machine had a different DHCP
+  // lease uses this to replace its stale LAN candidate.
+  const resolveDirectLanUrls = (req) => {
+    const activePort = tunnelRuntimeContext.getActivePort() || port;
+    const urls = [];
+    const push = (host) => {
+      if (typeof host !== 'string' || !host) return;
+      const url = `http://${host.includes(':') ? `[${host}]` : host}:${activePort}`;
+      if (!urls.includes(url)) urls.push(url);
+    };
+    if (isNetworkExposedBindHost(effectiveBindHost)) {
+      push(requestReachedLanAddress(req));
+      try {
+        for (const list of Object.values(os.networkInterfaces())) {
+          for (const entry of (list || [])) {
+            if (entry.family === 'IPv4' && !entry.internal) push(entry.address);
+          }
+        }
+      } catch {
+        // interface scan failure → whatever we already collected
+      }
+    } else {
+      const h = String(effectiveBindHost || '').toLowerCase();
+      if (h && h !== '127.0.0.1' && h !== 'localhost' && h !== '::1') push(effectiveBindHost);
+    }
+    return urls;
   };
   const uiPassword = typeof options.uiPassword === 'string'
     ? options.uiPassword
@@ -1220,7 +1334,7 @@ async function main(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') {
@@ -1299,6 +1413,21 @@ async function main(options = {}) {
     // redeemed device can flip relay demand on or off).
     reconcileRelay: () => (relayServiceInstance ? relayServiceInstance.reconcile() : Promise.resolve()),
     getPairingTransports: resolvePairingTransports,
+    getDirectCandidateUrls: resolveDirectLanUrls,
+    // Stable server identity for client-side verification of learned addresses.
+    // Lazily resolved: the relay service is constructed after these routes.
+    getServerId: () => (relayServiceInstance ? relayServiceInstance.getServerId() : Promise.resolve(null)),
+    // The display name a paired device shows for THIS server. Devices name the
+    // connection by the issuing machine's hostname, not the per-device pairing
+    // label typed by the operator.
+    getServerLabel: () => {
+      try {
+        const name = os.hostname();
+        return typeof name === 'string' && name.trim().length > 0 ? name.trim() : 'OpenChamber';
+      } catch {
+        return 'OpenChamber';
+      }
+    },
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
@@ -1350,8 +1479,17 @@ async function main(options = {}) {
     os,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
+    readSettingsStrict: readSettingsFromDiskStrict,
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
+    // One relay host per machine: every instance sharing this data dir shares
+    // the relay identity (serverId), so concurrent hosts evict each other at
+    // the relay worker and devices land on a random local instance.
+    hostLock: createRelayHostLock({
+      lockFilePath: path.join(OPENCHAMBER_DATA_DIR, 'relay-host.lock'),
+      fs,
+      process,
+    }),
     // Relay demand = any paired device or pending pairing session that uses the
     // relay transport. Drives the auto on/off lifecycle.
     hasRelayDemand: async () => {
@@ -1398,6 +1536,7 @@ async function main(options = {}) {
     scheduledTasksRuntime,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
+    permissionAutoAcceptRuntime,
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({
@@ -1479,6 +1618,15 @@ async function main(options = {}) {
   // device/session exists, stop it (and clear a stale enabled flag) otherwise.
   void relayService.reconcile();
 
+  // Relay demand can change outside our routes: `openchamber connect-url
+  // --relay` writes a pending relay session straight to the on-disk store, and
+  // pending sessions expire without any request hitting us. Poll reconcile so a
+  // headless instance picks the relay up (or drops it) within a minute.
+  const relayReconcileTimer = setInterval(() => {
+    void relayService.reconcile();
+  }, 60_000);
+  relayReconcileTimer.unref?.();
+
   return {
     expressApp: app,
     httpServer: server,
@@ -1509,6 +1657,7 @@ async function main(options = {}) {
     },
     stop: (shutdownOptions = {}) => {
       realtimeProxyRuntime.stop();
+      clearInterval(relayReconcileTimer);
       try {
         relayService.stop();
       } catch {

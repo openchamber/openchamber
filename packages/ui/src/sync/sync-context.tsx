@@ -25,10 +25,12 @@ import { updateStreamingState } from "./streaming"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
+import { applySessionEventToGlobalSessions } from "./session-event-router"
 import { syncDebug } from "./debug"
-import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
+import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { processVSCodePermissionAutoAccept } from "./vscode-permission-auto-accept"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { toast } from "@/components/ui"
@@ -38,15 +40,14 @@ import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
-import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { openSessionFromToast } from "./session-navigation"
+import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { setSessionPrefetch } from "./session-prefetch-cache"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
 import { runtimeFetch } from "@/lib/runtime-fetch"
@@ -108,7 +109,11 @@ function getLiveStates(childStores: ChildStoreManager): State[] {
   return Array.from(childStores.children.values(), (store) => store.getState())
 }
 
-function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left: T, right: T) => boolean = Object.is): T {
+function useLiveSyncSelector<T>(
+  selector: (states: State[]) => T,
+  isEqual: (left: T, right: T) => boolean = Object.is,
+  subscribe?: (childStores: ChildStoreManager, notify: () => void) => () => void,
+): T {
   const { childStores } = useSyncSystem()
   const cacheRef = useRef<T | undefined>(undefined)
   const initializedRef = useRef(false)
@@ -125,7 +130,10 @@ function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left
   }, [childStores, isEqual, selector])
 
   return React.useSyncExternalStore(
-    useCallback((notify) => childStores.subscribeAll(notify), [childStores]),
+    useCallback(
+      (notify) => subscribe ? subscribe(childStores, notify) : childStores.subscribeAll(notify),
+      [childStores, subscribe],
+    ),
     getSnapshot,
     getSnapshot,
   )
@@ -141,6 +149,14 @@ function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left
 export function useGlobalSessionStatus(sessionId: string): SessionStatus | undefined {
   return useLiveSyncSelector(
     useCallback((states) => findLiveSessionStatus(states, sessionId), [sessionId]),
+    Object.is,
+    useCallback(
+      (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
+        (state: State) => state.session_status?.[sessionId],
+        notify,
+      ),
+      [sessionId],
+    ),
   )
 }
 
@@ -149,6 +165,13 @@ export function useAllSessionStatuses(): Record<string, SessionStatus> {
   return useLiveSyncSelector(
     useCallback((states) => aggregateLiveSessionStatuses(states), []),
     areStatusMapsEquivalent,
+    useCallback(
+      (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
+        (state: State) => state.session_status,
+        notify,
+      ),
+      [],
+    ),
   )
 }
 
@@ -156,6 +179,13 @@ export function useAllLiveSessions(): Session[] {
   return useLiveSyncSelector(
     useCallback((states) => aggregateLiveSessions(states), []),
     areSessionListsEquivalent,
+    useCallback(
+      (childStores: ChildStoreManager, notify: () => void) => childStores.subscribeAllSelected(
+        (state: State) => state.session,
+        notify,
+      ),
+      [],
+    ),
   )
 }
 
@@ -316,11 +346,6 @@ const pendingQuestionToastIds = new Set<string>()
 const pendingPermissionToastIds = new Set<string>()
 
 const getQuestionToastKey = (sessionID?: string, requestID?: string) => {
-  if (!sessionID || !requestID) return null
-  return `${sessionID}:${requestID}`
-}
-
-const getPermissionToastKey = (sessionID?: string, requestID?: string) => {
   if (!sessionID || !requestID) return null
   return `${sessionID}:${requestID}`
 }
@@ -657,46 +682,6 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   }
 
   return null
-}
-
-const getSessionInfoFromPayload = (event: Event): Session | null => {
-  if (event.type !== "session.created" && event.type !== "session.updated" && event.type !== "session.deleted") {
-    return null
-  }
-
-  const properties = (event as { properties?: unknown }).properties
-  if (!properties || typeof properties !== "object") {
-    return null
-  }
-
-  const info = (properties as { info?: unknown }).info
-  if (!info || typeof info !== "object") {
-    return null
-  }
-
-  const session = info as Partial<Session>
-  if (typeof session.id !== "string" || !session.time) {
-    return null
-  }
-
-  return stripSessionDiffSnapshots(session as Session)
-}
-
-const applySessionEventToGlobalSessions = (payload: Event) => {
-  if (payload.type === "session.created" || payload.type === "session.updated") {
-    const session = getSessionInfoFromPayload(payload)
-    if (session) {
-      useGlobalSessionsStore.getState().upsertSession(session)
-    }
-    return
-  }
-
-  if (payload.type === "session.deleted") {
-    const sessionID = getSessionIdFromPayload(payload) ?? getSessionInfoFromPayload(payload)?.id
-    if (sessionID) {
-      useGlobalSessionsStore.getState().removeSessions([sessionID])
-    }
-  }
 }
 
 const getMessageIdFromPayload = (event: Event): string | null => {
@@ -1174,25 +1159,18 @@ export async function resyncBlockingRequestsForDirectory(
       grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     }
 
-    const permissionStore = usePermissionStore.getState()
-    const autoAcceptingSessionIds = Object.keys(grouped).filter((sessionId) => permissionStore.isSessionAutoAccepting(sessionId))
-
-    if (autoAcceptingSessionIds.length > 0) {
+    if (isVSCodeRuntime()) {
       const acceptedIdsBySession = new Map<string, Set<string>>()
-      await Promise.all(autoAcceptingSessionIds.flatMap((sessionId) =>
-        (grouped[sessionId] ?? []).map(async (permission) => {
-          try {
-            await sessionActions.respondToPermission(permission.sessionID, permission.id, "once")
-            const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
-            accepted.add(permission.id)
-            acceptedIdsBySession.set(sessionId, accepted)
-          } catch {
-            // Keep failed auto-accept permissions in UI state so the user can act.
-          }
+      await Promise.all(Object.entries(grouped).flatMap(([sessionId, permissions]) =>
+        permissions.map(async (permission) => {
+          if (!(await processVSCodePermissionAutoAccept(permission, directory))) return
+          const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
+          accepted.add(permission.id)
+          acceptedIdsBySession.set(sessionId, accepted)
         }),
       ))
 
-      for (const sessionId of autoAcceptingSessionIds) {
+      for (const sessionId of Object.keys(grouped)) {
         const acceptedIds = acceptedIdsBySession.get(sessionId)
         if (!acceptedIds) continue
         const remaining = (grouped[sessionId] ?? []).filter((permission) => !acceptedIds.has(permission.id))
@@ -1207,19 +1185,13 @@ export async function resyncBlockingRequestsForDirectory(
       if (isViewed) continue
       for (const permission of permissions) {
         if (knownIds.has(permission.id)) continue
-        const toastKey = getPermissionToastKey(sessionId, permission.id)
-        if (!toastKey || pendingPermissionToastIds.has(toastKey)) continue
-        pendingPermissionToastIds.add(toastKey)
-        const description = typeof permission.permission === "string" && permission.permission.trim().length > 0
-          ? permission.permission
-          : "Agent needs your approval"
-        toast.info("Permission needed", {
-          id: `permission-${toastKey}`,
-          description,
-          action: {
-            label: "Open session",
-            onClick: () => openSessionFromToast(sessionId, directory),
-          },
+        showPermissionNeededToast({
+          permission,
+          directory,
+          isViewed,
+          pendingIds: pendingPermissionToastIds,
+          show: (title, options) => toast.info(title, options),
+          openSession: openSessionFromToast,
         })
       }
     }
@@ -1344,7 +1316,21 @@ function handleEvent(
   payload: Event,
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
+  skipVSCodeAutoAccept = false,
 ) {
+  if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
+    const properties = (payload as unknown as { properties?: unknown }).properties
+    if (properties && typeof properties === "object") {
+      const snapshot = properties as { sessions?: unknown }
+      if (snapshot.sessions && typeof snapshot.sessions === "object") {
+        usePermissionStore.getState().applySnapshot({
+          sessions: snapshot.sessions as Record<string, boolean>,
+        })
+      }
+    }
+    return
+  }
+
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
 
   if (handleUiNotificationEvent(payload, directory)) {
@@ -1427,29 +1413,27 @@ function handleEvent(
 
   if (payload.type === "permission.asked") {
     const permission = payload.properties as PermissionRequest
-    const permissionStore = usePermissionStore.getState()
-    if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
+    if (isVSCodeRuntime() && !skipVSCodeAutoAccept) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
-      void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
+      void processVSCodePermissionAutoAccept(permission, resolvedDirectory).then((accepted) => {
+        if (!accepted) handleEvent(rawDirectory, payload, childStores, routingIndex, true)
+      })
+      return
+    }
+    if (!isVSCodeRuntime() && usePermissionStore.getState().isSessionAutoAccepting(permission.sessionID)) {
+      updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       return
     }
 
-    const toastKey = getPermissionToastKey(permission.sessionID, permission.id)
     const isViewed = isViewedInCurrentSession(resolvedDirectory, permission.sessionID)
-    if (!isViewed && toastKey && !pendingPermissionToastIds.has(toastKey)) {
-      pendingPermissionToastIds.add(toastKey)
-      const description = typeof permission.permission === "string" && permission.permission.trim().length > 0
-        ? permission.permission
-        : "Agent needs your approval"
-      toast.info("Permission needed", {
-        id: `permission-${toastKey}`,
-        description,
-        action: {
-          label: "Open session",
-          onClick: () => openSessionFromToast(permission.sessionID, resolvedDirectory),
-        },
-      })
-    }
+    showPermissionNeededToast({
+      permission,
+      directory: resolvedDirectory,
+      isViewed,
+      pendingIds: pendingPermissionToastIds,
+      show: (title, options) => toast.info(title, options),
+      openSession: openSessionFromToast,
+    })
   }
 
   if (payload.type === "permission.replied") {
@@ -1742,6 +1726,10 @@ export function SyncProvider(props: {
 
   // Configure child store manager
   useEffect(() => {
+    void usePermissionStore.getState().hydrate().catch(() => undefined)
+  }, [props.sdk])
+
+  useEffect(() => {
     const bootingDirs = new Set<string>()
 
     childStores.configure({
@@ -1778,41 +1766,36 @@ export function SyncProvider(props: {
                 .filter((s) => !!s?.id)
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
-              // Also load child sessions (sub-agent delegations) so they
-              // appear in the sidebar immediately instead of relying on
-              // the async global session store.
+              // Also load child sessions (sub-agent delegations) with pagination
+              // so pending questions can scope to them immediately after restart.
               let allSessions: typeof rootSessions = []
               try {
-                const allResult = await props.sdk.session.list({
+                allSessions = await listGlobalSessionPages(props.sdk, {
                   directory: dir,
-                  limit: 200,
+                  archived: false,
+                  roots: false,
+                  pageSize: 500,
                 })
-                const allError = (allResult as { error?: unknown }).error
-                if (!allError) {
-                  allSessions = ((allResult as { data?: unknown }).data ?? []) as typeof rootSessions
-                }
               } catch {
-                // Child load is best-effort; fall back to roots only
+                // Child load is best-effort; fall back to roots only.
               }
 
-              // Merge: keep root sessions from the first query (for accurate
-              // sessionTotal), plus any child sessions from the broader query.
-              const rootIds = new Set(rootSessions.map((s: { id: string }) => s.id))
-              const childSessions = allSessions.filter((s: { id: string; parentID?: string | null }) => s?.id && !rootIds.has(s.id) && s.parentID)
-
-              const sessions = rootSessions.concat(childSessions)
+              // A cold OpenCode process can briefly return children before its
+              // roots query catches up. Recover referenced parents from the
+              // broader response or cache instead of publishing orphan rows.
+              const currentSessions = store.getState().session
+              const { sessions, rootCount } = mergeBootstrapSessions(rootSessions, allSessions, currentSessions)
               // Race guard: if the list came back empty but event pipeline
               // already populated the store, don't clobber. OpenCode can
               // answer HTTP with empty sessions while WS delivers session
               // events for the same data (disk warmup race on app launch).
-              const currentSessions = store.getState().session
               if (sessions.length === 0 && currentSessions.length > 0) {
                 console.warn(
                   `[bootstrap] experimental.session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
                 )
                 return
               }
-              store.setState({ session: sessions, sessionTotal: rootSessions.length, limit: Math.max(sessions.length, 50) })
+              store.setState({ session: sessions, sessionTotal: rootCount, limit: Math.max(sessions.length, 50) })
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })
@@ -2490,11 +2473,37 @@ export function dropCachedSessionMessageRecordsSnapshots(
   }
 }
 
+// Shell-mode bridge messages (single bash tool part parented to a synthetic
+// shell-marker user message) are hidden from the timeline and rendered inside
+// the user row, so they never go through the live streaming-tail path. Their
+// part updates (output chunks, running→completed) must not be suspended, or
+// the shell card freezes until the next full snapshot rebuild.
+const USER_SHELL_MARKER = "The following tool was executed by the user"
+
+const isSuspendExemptShellBridge = (state: State, info: Message, parts: Part[] | undefined): boolean => {
+  if (!parts || parts.length !== 1) return false
+  const part = parts[0] as { type?: unknown; tool?: unknown }
+  if (part?.type !== "tool" || typeof part.tool !== "string" || part.tool.toLowerCase() !== "bash") return false
+  const parentID = (info as { parentID?: unknown }).parentID
+  if (typeof parentID !== "string" || parentID.length === 0) return false
+  const parentParts = state.part[parentID]
+  if (!parentParts) return false
+  return parentParts.some((parentPart) => {
+    if (parentPart?.type !== "text") return false
+    if ((parentPart as { synthetic?: boolean }).synthetic !== true) return false
+    const text = (parentPart as { text?: unknown }).text
+    return typeof text === "string" && text.trim().startsWith(USER_SHELL_MARKER)
+  })
+}
+
 const snapshotPartsMatchState = (snapshot: SessionMessageRecordsSnapshot, state: State): boolean => {
   for (const record of snapshot.list) {
     if (snapshot.suspendPartUpdates) {
       const suspendedID = snapshot.suspendedPartUpdatesMessageID
-      if (!suspendedID || record.info.id === suspendedID) {
+      if (
+        (!suspendedID || record.info.id === suspendedID)
+        && !isSuspendExemptShellBridge(state, record.info, state.part[record.info.id])
+      ) {
         continue
       }
     }
@@ -2572,6 +2581,7 @@ export function buildSessionMessageRecordsSnapshot(
     const shouldSuspendParts = suspendPartUpdates
       && previousRecord
       && (!suspendedPartUpdatesMessageID || message.id === suspendedPartUpdatesMessageID)
+      && !isSuspendExemptShellBridge(state, message, state.part[message.id])
     const parts = shouldSuspendParts
       ? previousRecord.parts
       : (state.part[message.id] ?? EMPTY_PARTS)

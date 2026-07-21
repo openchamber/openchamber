@@ -75,6 +75,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
+import { togglePermissionAutoAccept } from './permissionAutoAccept';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -99,6 +100,8 @@ import {
 } from './attachmentCitations';
 import { getFileMentionAutocompleteQuery, type FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
+import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
+import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
 import type { Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
@@ -556,6 +559,16 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                         type="button"
                         className={footerIconButtonClass}
                         onClick={props.onOpenMobileSheet}
+                        // Same guard as PermissionAutoAcceptButton: keep the tap
+                        // from dismissing the keyboard. On Android's
+                        // resizes-content viewport the keyboard-close relayout
+                        // moves this button mid-tap and the click never lands.
+                        onMouseDown={(event) => event.preventDefault()}
+                        onPointerDownCapture={(event) => {
+                            if (event.pointerType === 'touch') {
+                                event.preventDefault();
+                            }
+                        }}
                         title={t('chat.chatInput.actions.addAttachment')}
                         aria-label={t('chat.chatInput.actions.addAttachment')}
                     >
@@ -638,7 +651,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
 type PermissionAutoAcceptButtonProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
-    permissionScopeSessionId: string | null;
+    isInteractive: boolean;
     permissionAutoAcceptEnabled: boolean;
     handlePermissionAutoAcceptToggle: () => void;
     withTooltip?: boolean;
@@ -649,7 +662,7 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
     const {
         footerIconButtonClass,
         iconSizeClass,
-        permissionScopeSessionId,
+        isInteractive,
         permissionAutoAcceptEnabled,
         handlePermissionAutoAcceptToggle,
         withTooltip = false,
@@ -669,7 +682,7 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
             className={cn(
                 footerIconButtonClass,
                 'rounded-md hover:bg-transparent',
-                !permissionScopeSessionId && 'opacity-30',
+                !isInteractive && 'opacity-30',
             )}
             onMouseDown={(event) => {
                 event.preventDefault();
@@ -1073,7 +1086,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     );
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
+    const draftPermissionAutoAcceptEnabled = useSessionUIStore((s) => (
+        s.newSessionDraft?.open ? s.newSessionDraft.permissionAutoAcceptEnabled === true : false
+    ));
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
+    const setDraftPermissionAutoAcceptEnabled = useSessionUIStore((s) => s.setDraftPermissionAutoAcceptEnabled);
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
@@ -1238,7 +1255,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const availableSkills = useSkillsStore((s) => s.skills);
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
-            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'catch-up', 'debug', 'weigh', 'explore',
+            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'catch-up', 'debug', 'weigh', 'explore',
         ]);
         if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
@@ -1503,12 +1520,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 let previewConsole = 0;
                 let previewAnnotation = 0;
                 let review = 0;
+                let terminal = 0;
                 for (const draft of drafts) {
                     if (draft.source === 'preview-console') previewConsole += 1;
                     else if (draft.source === 'preview-annotation') previewAnnotation += 1;
+                    else if (draft.source === 'terminal') terminal += 1;
                     else review += 1;
                 }
-                return `${previewConsole}:${previewAnnotation}:${review}`;
+                return `${previewConsole}:${previewAnnotation}:${review}:${terminal}`;
             },
             [currentSessionId, newSessionDraftOpen]
         )
@@ -1516,7 +1535,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const removeInlineCommentDraft = useInlineCommentDraftStore((state) => state.removeDraft);
     const hasDrafts = draftCount > 0;
-    const [previewConsoleCount, previewAnnotationCount, reviewCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const [previewConsoleCount, previewAnnotationCount, reviewCount, terminalContextCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const terminalContextDrafts = terminalContextCount > 0
+        ? (useInlineCommentDraftStore.getState().drafts[currentSessionId ?? (newSessionDraftOpen ? 'draft' : '')] ?? []).filter((draft) => draft.source === 'terminal')
+        : [];
     const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation') => {
         const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
         if (!sessionKey) return;
@@ -1533,7 +1555,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!sessionKey) return;
         const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
         for (const draft of drafts) {
-            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation') {
+            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation' && draft.source !== 'terminal') {
                 removeInlineCommentDraft(sessionKey, draft.id);
             }
         }
@@ -2148,6 +2170,32 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 }
                 return;
             }
+            else if (commandName === 'craft-goal' && (currentSessionId || newSessionDraftOpen)) {
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const idea = normalizedCommand.replace(/^\/craft-goal\b/i, '').trim();
+                    const visibleText = await renderMagicPrompt('session.craftGoal.visible', {
+                        idea_block: idea ? `\n\nHere is my initial idea:\n${idea}` : '',
+                    });
+                    const instructionsText = await renderMagicPrompt('session.craftGoal.instructions');
+                    await sendMessage(
+                        visibleText,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        variantToSend,
+                        inputMode,
+                        sendMessageOptions,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.craftGoalFailed'));
+                }
+                return;
+            }
             else if (commandName === 'catch-up' && (currentSessionId || newSessionDraftOpen)) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
@@ -2284,6 +2332,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             inputMode,
             sendMessageOptions,
         );
+        const restoreConsumedDrafts = () => {
+            if (sessionKey && drafts.length > 0) {
+                useInlineCommentDraftStore.getState().restoreDrafts(sessionKey, drafts);
+            }
+        };
 
         if (typeof window === 'undefined') {
             scrollToBottom?.();
@@ -2311,6 +2364,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const normalized = rawMessage.toLowerCase();
 
             console.error('Message send failed:', rawMessage || error);
+            restoreConsumedDrafts();
+
+            const currentInput = textareaRef.current?.value ?? messageRef.current;
+            if (newSessionDraftOpen && inputSnapshot.message && (!currentInput || currentInput === inputSnapshot.message)) {
+                setMessage(inputSnapshot.message);
+                saveStoredDraft(null, inputSnapshot.message);
+            }
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
@@ -2371,7 +2431,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // The text goes straight into the submit (see SubmitOptions.presetText)
         // instead of through the composer input — the collapsed mobile pill has
         // no mounted textarea to stage it in.
-        void handleSubmitRef.current({ presetText: text });
+        const draft = (textareaRef.current?.value ?? messageRef.current).trim();
+        const presetText = draft ? `${text}\n${draft}` : text;
+        void handleSubmitRef.current({ presetText });
     }, []);
 
     // Dictation: insert the transcript inline; optionally submit immediately.
@@ -4087,7 +4149,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [newSessionDraftOpen, openNewSessionDraft, currentDirectory]);
 
     const openMobileAttachSheet = React.useCallback(() => {
+        // Same order as handleOpenMobilePanel: mark the sheet open BEFORE the
+        // blur so the collapse watcher sees an overlay when the keyboard-close
+        // lands. The trigger button blocks the tap's own focus transfer, so
+        // the keyboard must be dismissed explicitly here.
         setMobileAttachMenuOpen(true);
+        textareaRef.current?.blur();
     }, []);
 
     const mobileComposerExpandedRef = React.useRef(mobileComposerExpanded);
@@ -4507,22 +4574,32 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const permissionScopeSessionId = currentSessionId ?? currentManagementSessionId;
     const permissionAutoAcceptEnabled = usePermissionStore((state) => {
         if (!permissionScopeSessionId) {
-            return false;
+            return draftPermissionAutoAcceptEnabled;
         }
         return state.isSessionAutoAccepting(permissionScopeSessionId);
     });
+    const isPermissionAutoAcceptInteractive = Boolean(permissionScopeSessionId || newSessionDraftOpen);
 
     const handlePermissionAutoAcceptToggle = React.useCallback(() => {
-        if (!permissionScopeSessionId) {
-            toast.error(t('chat.chatInput.toast.openSessionFirst'));
-            return;
-        }
-
-        const nextEnabled = !permissionAutoAcceptEnabled;
-        setSessionAutoAccept(permissionScopeSessionId, nextEnabled).catch(() => {
-            toast.error(t('chat.chatInput.toast.togglePermissionAutoAcceptFailed'));
+        togglePermissionAutoAccept({
+            permissionScopeSessionId,
+            newSessionDraftOpen,
+            draftPermissionAutoAcceptEnabled,
+            permissionAutoAcceptEnabled,
+            setDraftPermissionAutoAcceptEnabled,
+            setSessionAutoAccept,
+            onOpenSessionFirst: () => toast.error(t('chat.chatInput.toast.openSessionFirst')),
+            onToggleFailed: () => toast.error(t('chat.chatInput.toast.togglePermissionAutoAcceptFailed')),
         });
-    }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept, t]);
+    }, [
+        draftPermissionAutoAcceptEnabled,
+        newSessionDraftOpen,
+        permissionAutoAcceptEnabled,
+        permissionScopeSessionId,
+        setDraftPermissionAutoAcceptEnabled,
+        setSessionAutoAccept,
+        t,
+    ]);
 
     React.useEffect(() => {
         const pendingAbortBanner = Boolean(abortPromptSessionId) && abortPromptSessionId === currentSessionId;
@@ -4584,6 +4661,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
+                        {terminalContextDrafts.map((draft) => (
+                            <div key={draft.id} className="inline-flex max-w-full items-center gap-1.5 rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2.5 py-1" title={draft.code}>
+                                <Icon name="terminal" className="h-3.5 w-3.5" />
+                                <span className="truncate text-xs font-medium text-[var(--surface-mutedForeground)]">
+                                    {t('chat.chatInput.terminalContext', { terminal: draft.fileLabel, start: draft.startLine, end: draft.endLine })}
+                                </span>
+                                <button type="button" className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]" onClick={() => removeInlineCommentDraft(draft.sessionKey, draft.id)} aria-label={t('chat.chatInput.terminalContextRemove')} title={t('chat.chatInput.terminalContextRemove')}>
+                                    <Icon name="close" className="h-3 w-3" />
+                                </button>
+                            </div>
+                        ))}
                         {reviewCount > 0 ? (
                             <div
                                 className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
@@ -4874,6 +4962,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 >
                 {isMobile && !mobileComposerExpanded ? (
                     <div className="flex flex-col">
+                    <SessionGoalRow
+                        sessionId={currentSessionId}
+                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                        className="mb-1.5"
+                    />
                     <SessionSuggestionChip
                         sessionId={currentSessionId}
                         directory={currentSessionDirectoryForSync ?? currentDirectory}
@@ -4883,7 +4976,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     />
                     <div className="flex items-center gap-2">
                         <div
-                            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1"
+                            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                             style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
                         >
                             <MobileSessionPanelTrigger
@@ -4936,13 +5029,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             already open, letting the pill expand into its place. */}
                         <div
                             className={cn(
-                                'flex-shrink-0 overflow-hidden transition-all duration-200 ease-out',
-                                newSessionDraftOpen ? 'w-0 opacity-0' : 'w-11 opacity-100',
+                                'flex-shrink-0 transition-all duration-200 ease-out',
+                                newSessionDraftOpen ? 'w-0 opacity-0 overflow-hidden' : 'w-11 opacity-100',
                             )}
                         >
                             <button
                                 type="button"
-                                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground"
+                                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                                 style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
                                 onClick={handleMobileNewSession}
                                 disabled={newSessionDraftOpen}
@@ -4956,6 +5049,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     </div>
                 ) : (
                 <>
+                <SessionGoalRow
+                    sessionId={currentSessionId}
+                    directory={currentSessionDirectoryForSync ?? currentDirectory}
+                    className="mb-1.5"
+                />
                 <SessionSuggestionChip
                     sessionId={currentSessionId}
                     directory={currentSessionDirectoryForSync ?? currentDirectory}
@@ -4968,6 +5066,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         "flex flex-col relative overflow-visible",
                         isComposerExpanded && 'flex-1 min-h-0',
                         "border border-border/80",
+                        "shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]",
                         "focus-within:ring-1",
                         inputMode === 'shell'
                             ? 'focus-within:ring-[var(--status-info)]'
@@ -5279,10 +5378,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         <PermissionAutoAcceptButton
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
-                                            permissionScopeSessionId={permissionScopeSessionId}
+                                            isInteractive={isPermissionAutoAcceptInteractive}
                                             permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                             handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         />
+                                        <SessionGoalButton
+                                            sessionId={currentSessionId}
+                                            directory={currentSessionDirectoryForSync ?? currentDirectory}
+                                            draftOpen={newSessionDraftOpen}
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                        />
+                                        <SessionGoalObjectiveCounter length={message.length} />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
                                         <div className="flex items-center gap-x-1 flex-shrink-0">
@@ -5347,11 +5454,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     <PermissionAutoAcceptButton
                                         footerIconButtonClass={footerIconButtonClass}
                                         iconSizeClass={iconSizeClass}
-                                        permissionScopeSessionId={permissionScopeSessionId}
+                                        isInteractive={isPermissionAutoAcceptInteractive}
                                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                         handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         withTooltip
                                     />
+                                    <SessionGoalButton
+                                        sessionId={currentSessionId}
+                                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                                        draftOpen={newSessionDraftOpen}
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        withTooltip
+                                    />
+                                    <SessionGoalObjectiveCounter length={message.length} />
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
                                     <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />

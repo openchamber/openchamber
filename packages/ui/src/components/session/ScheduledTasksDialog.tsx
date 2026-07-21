@@ -34,6 +34,7 @@ import {
   type ScheduledTaskStatus,
 } from '@/lib/scheduledTasksApi';
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
+import { canonicalizeTimezone } from '@/lib/timezones';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
@@ -59,7 +60,7 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
     if (task.schedule.timezone) {
       return t('sessions.scheduledTasks.dialog.schedule.dailyWithTimezone', {
         time: timesLabel,
-        timezone: task.schedule.timezone,
+        timezone: canonicalizeTimezone(task.schedule.timezone),
       });
     }
     return t('sessions.scheduledTasks.dialog.schedule.daily', { time: timesLabel });
@@ -72,7 +73,7 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
       return t('sessions.scheduledTasks.dialog.schedule.weeklyWithTimezone', {
         days,
         time: timesLabel,
-        timezone: task.schedule.timezone,
+        timezone: canonicalizeTimezone(task.schedule.timezone),
       });
     }
     return t('sessions.scheduledTasks.dialog.schedule.weekly', { days, time: timesLabel });
@@ -88,7 +89,7 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
       return t('sessions.scheduledTasks.dialog.schedule.onceWithTimezone', {
         date,
         time,
-        timezone: task.schedule.timezone,
+        timezone: canonicalizeTimezone(task.schedule.timezone),
       });
     }
     return t('sessions.scheduledTasks.dialog.schedule.once', { date, time });
@@ -96,7 +97,7 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
   if (task.schedule.timezone) {
     return t('sessions.scheduledTasks.dialog.schedule.cronWithTimezone', {
       cron: task.schedule.cron || '',
-      timezone: task.schedule.timezone,
+      timezone: canonicalizeTimezone(task.schedule.timezone),
     });
   }
   return t('sessions.scheduledTasks.dialog.schedule.cron', { cron: task.schedule.cron || '' });
@@ -387,7 +388,7 @@ export function ScheduledTasksDialog() {
           }
         }}
       >
-        <SelectTrigger className={isMobile ? 'w-full' : undefined}>
+        <SelectTrigger size="lg" className={isMobile ? 'w-full' : undefined}>
           {selectedProject ? (
             <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
           ) : (
@@ -414,7 +415,7 @@ export function ScheduledTasksDialog() {
   const tasksContent = (
     <div className="space-y-4">
       {!isMobile ? (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           {projectSelector}
           <Button onClick={openNewTaskEditor} disabled={!selectedProjectID}>
             <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}

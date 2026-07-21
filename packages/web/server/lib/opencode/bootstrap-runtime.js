@@ -26,6 +26,9 @@ export const createBootstrapRuntime = (dependencies) => {
       getRelayPairingCandidate,
       reconcileRelay,
       getPairingTransports,
+      getDirectCandidateUrls,
+      getServerId,
+      getServerLabel,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
       sayTTSCapability,
@@ -75,6 +78,7 @@ export const createBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
+      getServerId,
       tunnelAuthController,
       uiAuthController,
     });
@@ -90,6 +94,9 @@ export const createBootstrapRuntime = (dependencies) => {
       getRelayPairingCandidate,
       reconcileRelay,
       getPairingTransports,
+      getDirectCandidateUrls,
+      getServerId,
+      getServerLabel,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });

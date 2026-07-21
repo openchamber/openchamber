@@ -78,6 +78,19 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ messageStreamTransport: 'websocket' })).toEqual({});
   });
 
+  it('sanitizes the persisted terminal shell', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: ' ZSH ' })).toEqual({ terminalShell: 'zsh' });
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: 'auto' })).toEqual({ terminalShell: 'auto' });
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: '/bin/zsh' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: 'zsh -c whoami' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ terminalLoginShells: [' ZSH ', 'bash', 'zsh', '/bin/fish', 42] })).toEqual({
+      terminalLoginShells: ['zsh', 'bash'],
+    });
+    expect(helpers.sanitizeSettingsUpdate({ terminalLoginShells: [] })).toEqual({ terminalLoginShells: [] });
+  });
+
   it('accepts desktopLanAccessEnabled as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -97,6 +110,31 @@ describe('settings helpers', () => {
     });
     expect(helpers.sanitizeSettingsUpdate({ desktopKeepAwakeEnabled: false })).toEqual({
       desktopKeepAwakeEnabled: false,
+    });
+  });
+
+  it('accepts desktopMinimizeToTrayEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopMinimizeToTrayEnabled: true })).toEqual({
+      desktopMinimizeToTrayEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopMinimizeToTrayEnabled: false })).toEqual({
+      desktopMinimizeToTrayEnabled: false,
+    });
+  });
+
+  it('sanitizes the persisted permission auto-accept policy', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      permissionAutoAccept: {
+        sessions: { root: true, child: false, invalid: 'true' },
+      },
+    })).toEqual({
+      permissionAutoAccept: {
+        sessions: { root: true, child: false },
+      },
     });
   });
 

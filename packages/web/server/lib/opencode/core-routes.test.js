@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { createTunnelAuth } from './tunnel-auth.js';
 import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerServerStatusRoutes } from './core-routes.js';
 
 describe('core-routes', () => {
@@ -416,6 +417,9 @@ describe('core-routes', () => {
     app.set('trust proxy', true);
     dependencies.clientPairingRuntime.redeemPairingSession.mockRejectedValue(new Error('Invalid or expired pairing session'));
 
+    // The X-Forwarded-For headers below are deliberate spoof attempts: the rate
+    // limiter buckets by socket address (not forwarded headers), so rotating the
+    // header must NOT reset the counter or evade the lockout.
     for (let index = 0; index < 10; index += 1) {
       await request(app)
         .post('/api/client-auth/pairing/redeem')
@@ -580,11 +584,59 @@ describe('client auth routes', () => {
 
     const listedAfterPurge = await request(app).get('/api/client-auth/clients');
     expect(listedAfterPurge.body.clients).toHaveLength(0);
-    expect(dependencies.testHooks.requireSessionAuth).toHaveBeenCalled();
-    expect(dependencies.testHooks.requireAuth).not.toHaveBeenCalled();
   });
 
-  it('allows client credentials to list and revoke only the authenticated client', async () => {
+  it('reports current connection candidates with server identity for paired devices', async () => {
+    const app = express();
+    const relayCandidate = {
+      type: 'relay',
+      relayUrl: 'wss://relay.example/ws',
+      serverId: 'server-abc',
+      hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+      priority: 30,
+    };
+    const dependencies = {
+      ...createDependencies({ resolveAuthContext: async () => ({ type: 'client', clientId: 'client-1' }) }),
+      getDirectCandidateUrls: () => ['http://192.168.1.20:3000', 'http://10.0.0.5:3000', 'not-a-url'],
+      getRelayPairingCandidate: async () => relayCandidate,
+      getServerId: async () => 'server-abc',
+      getServerLabel: () => 'my-host',
+    };
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    const response = await request(app).get('/api/client-auth/connection/candidates');
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body.serverId).toBe('server-abc');
+    expect(response.body.label).toBe('my-host');
+    expect(response.body.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:3000', priority: 10 },
+      { type: 'lan', url: 'http://10.0.0.5:3000', priority: 10 },
+      relayCandidate,
+    ]);
+  });
+
+  it('omits serverId and relay candidate when unavailable and survives failures', async () => {
+    const app = express();
+    const dependencies = {
+      ...createDependencies(),
+      getDirectCandidateUrls: () => {
+        throw new Error('scan failed');
+      },
+      getRelayPairingCandidate: async () => {
+        throw new Error('relay status failed');
+      },
+      getServerId: async () => null,
+    };
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    const response = await request(app).get('/api/client-auth/connection/candidates');
+    expect(response.status).toBe(200);
+    expect(response.body).not.toHaveProperty('serverId');
+    expect(response.body.candidates).toEqual([]);
+  });
+
+  it('scopes non-desktop client credentials to list and revoke only themselves', async () => {
     const app = express();
     let authContext = { type: 'session' };
     const dependencies = createDependencies({
@@ -599,20 +651,57 @@ describe('client auth routes', () => {
       .post('/api/client-auth/clients')
       .send({ label: 'Other device' });
 
-    authContext = { type: 'client', clientId: current.body.client.id, client: current.body.client };
+    // A regular (non-desktop-local) client token only sees and manages itself.
+    authContext = { type: 'client', clientId: other.body.client.id, client: other.body.client };
 
     const listed = await request(app).get('/api/client-auth/clients');
     expect(listed.status).toBe(200);
-    expect(listed.body.clients).toEqual([current.body.client]);
+    expect(listed.body.clients).toEqual([other.body.client]);
 
-    const denied = await request(app).delete(`/api/client-auth/clients/${other.body.client.id}`);
+    const denied = await request(app).delete(`/api/client-auth/clients/${current.body.client.id}`);
     expect(denied.status).toBe(403);
     expect(denied.body.revoked).toBe(false);
 
-    const revoked = await request(app).delete(`/api/client-auth/clients/${current.body.client.id}`);
+    const deniedPurge = await request(app).delete('/api/client-auth/clients');
+    expect(deniedPurge.status).toBe(403);
+
+    const revoked = await request(app).delete(`/api/client-auth/clients/${other.body.client.id}`);
     expect(revoked.status).toBe(200);
     expect(revoked.body.revoked).toBe(true);
-    expect(revoked.body.client.id).toBe(current.body.client.id);
+    expect(revoked.body.client.id).toBe(other.body.client.id);
+  });
+
+  it('lets the local desktop client list and revoke every device', async () => {
+    const app = express();
+    let authContext = { type: 'session' };
+    const dependencies = createDependencies({
+      resolveAuthContext: async () => authContext,
+    });
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    const desktop = await request(app)
+      .post('/api/client-auth/clients')
+      .send({ label: 'OpenChamber Desktop', clientKind: 'desktop-local' });
+    const other = await request(app)
+      .post('/api/client-auth/clients')
+      .send({ label: 'Other device' });
+
+    // The trusted desktop shell client manages all devices like a UI session.
+    authContext = { type: 'client', clientId: desktop.body.client.id, client: desktop.body.client };
+
+    const listed = await request(app).get('/api/client-auth/clients');
+    expect(listed.status).toBe(200);
+    const listedIds = listed.body.clients.map((client) => client.id).sort();
+    expect(listedIds).toEqual([desktop.body.client.id, other.body.client.id].sort());
+
+    const revoked = await request(app).delete(`/api/client-auth/clients/${other.body.client.id}`);
+    expect(revoked.status).toBe(200);
+    expect(revoked.body.revoked).toBe(true);
+    expect(revoked.body.client.id).toBe(other.body.client.id);
+
+    const purged = await request(app).delete('/api/client-auth/clients');
+    expect(purged.status).toBe(200);
+    expect(purged.body.purged).toBe(1);
   });
 
   it('allows only the local desktop client token to create remote client tokens', async () => {
@@ -655,5 +744,35 @@ describe('client auth routes', () => {
 
     expect(dependencies.testHooks.requireSessionAuth).toHaveBeenCalledTimes(2);
     expect(dependencies.testHooks.requireAuth).not.toHaveBeenCalled();
+  });
+
+  it('treats private LAN hosts as local even when a tunnel is active', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const tunnelAuthController = createTunnelAuth();
+    tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://tunnel.example.com' });
+    dependencies.tunnelAuthController = tunnelAuthController;
+    dependencies.uiAuthController.handlePasskeyStatus = vi.fn((_req, res) => {
+      res.json({ enabled: true, hasPasskeys: true, passkeyCount: 1, rpID: 'example.com' });
+    });
+
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    await request(app)
+      .get('/auth/passkey/status')
+      .set('Host', '192.168.1.5:57123')
+      .expect(200, { enabled: true, hasPasskeys: true, passkeyCount: 1, rpID: 'example.com' });
+
+    expect(dependencies.uiAuthController.handlePasskeyStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not trust a private Host header from a public socket peer', () => {
+    const tunnelAuthController = createTunnelAuth();
+    tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://tunnel.example.com' });
+
+    expect(tunnelAuthController.classifyRequestScope({
+      headers: { host: '192.168.1.5:57123' },
+      socket: { remoteAddress: '203.0.113.10' },
+    })).toBe('unknown-public');
   });
 });

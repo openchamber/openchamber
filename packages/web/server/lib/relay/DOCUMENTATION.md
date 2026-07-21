@@ -23,6 +23,7 @@ Host side (`packages/web/server/lib/relay/`):
 - `identity.js` — the host's stable identity: the long-lived signing keypair (shared with the push relay, defines the routing id) plus a long-lived encryption keypair (the E2EE trust anchor). Reused across restarts; never rotated implicitly.
 - `signing-key.js` — storage/derivation of the signing keypair and the routing id, shared with the notifications runtime.
 - `host-client.js` — the long-lived connection manager: one outbound control connection to the relay, a per-client data connection for each connected device, reconnect/backoff, and the E2EE responder handshake per connection.
+- `host-lock.js` — the per-machine host claim. Every local instance sharing the data dir shares the relay identity (same serverId), so concurrent relay hosts evict each other at the relay worker (`4001: Control replaced`) and paired devices land on whichever local process won last. The claim file (`<data-dir>/relay-host.lock`, `{ pid }`) makes this deterministic: `service.js` only starts the host when no LIVE process holds the claim (stale claims from dead pids are ignored), goes to `standby` otherwise, and a 30s watcher both takes over when the claimant dies and stands down when another process claims. Explicit user intent — creating a pairing link or hitting `/relay/enable` — force-claims; the previous holder's watcher sees the takeover and backs off instead of fighting. The claim is cooperative (the relay worker still enforces the single host slot); it only decides which process keeps retrying.
 - `tunnel-host.js` — the per-connection dispatcher: decrypts tunnel frames and forwards HTTP/SSE/WS to the local server over loopback, then streams responses back. Enforces a path allowlist and never injects credentials.
 - `e2ee.js`, `tunnel-codec.js` — host-side (JS) mirrors of the shared crypto and framing (see "Two implementations" below).
 
@@ -39,7 +40,7 @@ Relay is not a separate link format: it is one transport candidate inside the un
 
 Everything a client normally sends to the single OpenChamber origin:
 - **HTTP** — REST endpoints and proxied OpenCode SDK calls under `/api/*`, plus `/auth/*` and `/health`.
-- **SSE** — long-lived streamed responses (the event stream, notifications, terminal output fallback). These are just HTTP responses whose body streams; the tunnel needs no special SSE handling.
+- **SSE** — long-lived streamed responses (the event stream and notifications). These are just HTTP responses whose body streams; the tunnel needs no special SSE handling.
 - **WebSocket** — the endpoints that use a real socket (the global event stream on platforms that support WS, terminal I/O, dictation).
 
 The host dispatcher restricts tunneled traffic to explicit path allowlists (one for HTTP, one for WS).
@@ -57,7 +58,26 @@ The host dispatcher restricts tunneled traffic to explicit path allowlists (one 
 2. **Presence.** When the relay is enabled, the host opens one outbound control connection and waits.
 3. **Connect.** The client connects for a given routing id; the relay notifies the host over the control connection; the host opens a matching per-client data connection.
 4. **Handshake.** Over that connection pair, client and host run the E2EE handshake and derive a shared encrypted channel the relay cannot read.
-5. **Traffic.** All normal app traffic is multiplexed and encrypted through that channel. On the host, decrypted requests are dispatched to the local server over loopback; responses stream back encrypted. Reconnects re-establish a fresh channel and the app's existing retry machinery recovers.
+5. **Traffic.** All normal app traffic is multiplexed and encrypted through that channel. On the host, decrypted requests are dispatched to the local server over loopback with the actual loopback origin, so normal origin checks still apply without trusting client-supplied origin metadata; responses stream back encrypted. Reconnects re-establish a fresh channel and the app's existing retry machinery recovers.
+
+## Candidate refresh (staying off the relay when direct works)
+
+Pairing-payload transport candidates are a snapshot: when DHCP hands the host
+machine a new LAN address, a device's saved direct candidate goes stale and the
+device silently degrades to relay-only. To recover, an already-paired client can
+call `GET /api/client-auth/connection/candidates` (UI session or client bearer;
+registered with the auth/access routes) over any live transport — including
+through the tunnel — to learn the server's **current** LAN URLs plus the relay
+candidate, and update its saved candidate set (mobile: `mobileConnections.ts`;
+desktop: `desktopRelayRestore.ts`).
+
+Identity gating: the response carries the stable `serverId` (base64url SHA-256 of
+the public signing JWK — the same identity the relay routes by, exposed by the
+relay service's `getServerId()` and echoed unauthenticated on `/health` and
+`/api/version`). Clients ignore a refresh whose `serverId` does not match their
+pinned relay identity, and verify `/health`'s `serverId` on a learned address
+**before** sending their bearer token to it — a re-assigned LAN address may now
+belong to a different machine.
 
 ## Two implementations, kept in sync
 

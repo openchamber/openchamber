@@ -125,4 +125,18 @@ describe('client auth pairing runtime', () => {
       dedupeKey: `pairing:${created.pairing.id}`,
     }));
   });
+
+  it('sweeps expired never-used sessions from the store on the next create', async () => {
+    const { dir, runtime } = await makeRuntime({ ttlMs: -1000 });
+    // Immediately expired (negative TTL), never used or cancelled.
+    const expired = await runtime.createPairingSession({ label: 'stale' });
+
+    // The next create sweeps the store; only the fresh session should remain.
+    const storePath = path.join(dir, 'pairing.json');
+    await runtime.createPairingSession({ label: 'fresh' });
+    const store = JSON.parse(await fs.readFile(storePath, 'utf8'));
+    const ids = store.sessions.map((session) => session.id);
+    expect(ids).not.toContain(expired.pairing.id);
+    expect(ids).toHaveLength(1);
+  });
 });

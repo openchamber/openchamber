@@ -10,6 +10,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
   { id: 'iterm2', label: 'iTerm2', appName: 'iTerm' },
   { id: 'ghostty', label: 'Ghostty', appName: 'Ghostty' },
   { id: 'vscode', label: 'VS Code', appName: 'Visual Studio Code' },
+  { id: 'vscode-insiders', label: 'VS Code Insiders', appName: 'Visual Studio Code - Insiders' },
   { id: 'intellij', label: 'IntelliJ', appName: 'IntelliJ IDEA' },
   { id: 'visual-studio', label: 'Visual Studio', appName: 'Visual Studio' },
   { id: 'cursor', label: 'Cursor', appName: 'Cursor' },

@@ -87,6 +87,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
           clientKind: normalizeOptionalString(client.clientKind),
           dedupeKey: normalizeOptionalString(client.dedupeKey),
           usesRelay: client.usesRelay === true,
+          lastTransport: client.lastTransport === 'relay' || client.lastTransport === 'direct' ? client.lastTransport : null,
           ...normalizeMetadata(client),
         }))
         .filter((client) => client.tokenHash.length > 0)
@@ -126,6 +127,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     deviceModel: client.deviceModel,
     appVersion: client.appVersion,
     usesRelay: client.usesRelay === true,
+    lastTransport: client.lastTransport ?? null,
   });
 
   const listClients = async () => {
@@ -229,10 +231,14 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     });
   };
 
-  const authenticateBearerToken = async (token) => {
+  const authenticateBearerToken = async (token, req) => {
     if (typeof token !== 'string' || !token.startsWith(TOKEN_PREFIX)) {
       return null;
     }
+    // Which transport carried this request: the relay tunnel proxy stamps every
+    // forwarded request with x-openchamber-relay-connection; anything else is a
+    // direct (local/LAN/tunnel-URL) request. Display-only device metadata.
+    const transport = req?.headers?.['x-openchamber-relay-connection'] ? 'relay' : 'direct';
     return withStoreMutation(async () => {
       const tokenHash = hashToken(token);
       const store = await readStore();
@@ -241,8 +247,11 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) return null;
       const now = Date.now();
       const lastUsedAt = Date.parse(client.lastUsedAt || '');
-      if (!Number.isFinite(lastUsedAt) || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS) {
+      // Write on the throttle interval — or immediately when the transport
+      // changed, so a LAN⇄relay switch is visible right away, not a minute late.
+      if (!Number.isFinite(lastUsedAt) || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS || client.lastTransport !== transport) {
         client.lastUsedAt = new Date(now).toISOString();
+        client.lastTransport = transport;
         await writeStore(store);
       }
       return { ok: true, clientId: client.id, sessionToken: client.id, client: publicClient(client) };
