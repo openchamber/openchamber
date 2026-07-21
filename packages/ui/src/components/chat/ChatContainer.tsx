@@ -21,6 +21,7 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { useChatAutoFollow, type AnimationHandlers, type ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { useChatTimelineController } from './hooks/useChatTimelineController';
 import { TimelineDialog } from './TimelineDialog';
+import { SessionPickerDialog } from '@/components/session/SessionPickerDialog';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { useDeviceInfo } from '@/lib/device';
@@ -524,6 +525,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
     const isTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
     const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
+    const isSessionPickerOpen = useUIStore((s) => s.isSessionPickerOpen);
+    const setSessionPickerOpen = useUIStore((s) => s.setSessionPickerOpen);
 
     // Streaming state
     const streamingMessageId = useStreamingStore(
@@ -1183,6 +1186,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 canLoadEarlier={timelineController.historySignals.canLoadEarlier}
                 isLoadingEarlier={timelineController.isLoadingOlder}
                 onLoadEarlier={handleLoadOlderClick}
+            />
+            <SessionPickerDialog
+                open={isSessionPickerOpen}
+                onOpenChange={setSessionPickerOpen}
             />
         </div>
     );

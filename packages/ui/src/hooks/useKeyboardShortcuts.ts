@@ -42,6 +42,7 @@ export const useKeyboardShortcuts = () => {
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
   const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
+  const setSessionPickerOpen = useUIStore((s) => s.setSessionPickerOpen);
   const togglePromptNavigatorPanel = useUIStore((s) => s.togglePromptNavigatorPanel);
   const setPromptNavigatorPanelOpen = useUIStore((s) => s.setPromptNavigatorPanelOpen);
   const toggleExpandedInput = useUIStore((s) => s.toggleExpandedInput);
@@ -137,6 +138,13 @@ export const useKeyboardShortcuts = () => {
       if (eventMatchesShortcut(e, combo('open_timeline_dialog'))) {
         e.preventDefault();
         setTimelineDialogOpen(true);
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('switch_session'))) {
+        e.preventDefault();
+        const { isSessionPickerOpen } = useUIStore.getState();
+        setSessionPickerOpen(!isSessionPickerOpen);
         return;
       }
 
@@ -518,6 +526,7 @@ export const useKeyboardShortcuts = () => {
           isImagePreviewOpen,
           isModelSelectorOpen,
           isTimelineDialogOpen,
+          isSessionPickerOpen,
           activeMainTab,
         } = useUIStore.getState();
 
@@ -529,7 +538,8 @@ export const useKeyboardShortcuts = () => {
           || isMultiRunLauncherOpen
           || isImagePreviewOpen
           || isModelSelectorOpen
-          || isTimelineDialogOpen;
+          || isTimelineDialogOpen
+          || isSessionPickerOpen;
         if (hasOverlay || activeMainTab !== 'chat') {
           return;
         }
@@ -712,6 +722,7 @@ export const useKeyboardShortcuts = () => {
     setSettingsDialogOpen,
     setModelSelectorOpen,
     setTimelineDialogOpen,
+    setSessionPickerOpen,
     togglePromptNavigatorPanel,
     setPromptNavigatorPanelOpen,
     toggleExpandedInput,

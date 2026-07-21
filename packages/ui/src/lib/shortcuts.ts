@@ -342,6 +342,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'switch_session',
+    defaultCombo: 'mod+s',
+    label: 'Open session picker',
+    description: 'Open a searchable dialog to switch sessions',
+    customizable: true,
+  },
+  {
     id: 'expand_input',
     defaultCombo: 'mod+shift+e',
     label: 'Expand input',
