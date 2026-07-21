@@ -10,11 +10,12 @@ import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueS
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore, type SendMessageOptions } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useInputStore } from '@/sync/input-store';
+import { useInputStore, type SyntheticContextPart } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
+import { useSessionGoalArmStore, type SessionGoalArm } from '@/stores/useSessionGoalArmStore';
 import * as sessionActions from '@/sync/session-actions';
 import { useDirectorySync, useUserMessageHistory } from '@/sync/sync-context';
-import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
@@ -103,6 +104,18 @@ import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
 import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
 import type { Part } from '@opencode-ai/sdk/v2/client';
+import {
+    captureQueuedMessageEditContext,
+    captureComposerSubmitTarget,
+    getQueuedMessageEditContextForSession,
+    isCurrentComposerSubmitTarget,
+    mergeRecoveredAttachments,
+    resolveSubmitGoalArm,
+    restoreCapturedInlineCommentDrafts,
+    shouldClaimComposerGoal,
+    shouldRestoreComposerText,
+    type QueuedMessageEditContext,
+} from './chatSubmitIsolation';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -1072,6 +1085,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const lastPersistedDraftRef = React.useRef<Map<string, string>>(new Map());
     const currentSessionIdForDraftRef = React.useRef<string | null>(null);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
+    const editedQueuedMessageContextRef = React.useRef<QueuedMessageEditContext | null>(null);
 
     // TODO: port sendMessage to session-actions (complex — creates sessions, handles attachments, etc.)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1089,6 +1103,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const draftPermissionAutoAcceptEnabled = useSessionUIStore((s) => (
         s.newSessionDraft?.open ? s.newSessionDraft.permissionAutoAcceptEnabled === true : false
     ));
+
+    React.useEffect(() => {
+        if (editedQueuedMessageContextRef.current?.sessionId !== currentSessionId) {
+            editedQueuedMessageContextRef.current = null;
+        }
+    }, [currentSessionId]);
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
     const setDraftPermissionAutoAcceptEnabled = useSessionUIStore((s) => s.setDraftPermissionAutoAcceptEnabled);
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -1100,9 +1120,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const clearAttachedFiles = useInputStore((s) => s.clearAttachedFiles);
     const saveSessionAgentSelection = useSelectionStore((s) => s.saveSessionAgentSelection);
     const consumePendingInputText = useInputStore((s) => s.consumePendingInputText);
+    const consumePendingInputTextForSession = useInputStore((s) => s.consumePendingInputTextForSession);
     const pendingPresetSubmit = useInputStore((s) => s.pendingPresetSubmit);
     const setPendingInputText = useInputStore((s) => s.setPendingInputText);
     const pendingInputText = useInputStore((s) => s.pendingInputText);
+    const pendingInputTextForSession = useInputStore(
+        React.useCallback(
+            (state) => currentSessionId ? state.pendingInputTextBySession[currentSessionId] ?? null : null,
+            [currentSessionId],
+        ),
+    );
     const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
     const acknowledgeSessionAbort = useSessionUIStore((s) => s.acknowledgeSessionAbort);
     const abortCurrentOperation = React.useCallback(
@@ -1383,12 +1410,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         [],
     );
 
-    const extractInlineFileMentions = React.useCallback((rawText: string): { sanitizedText: string; attachments: AttachedFile[] } => {
+    const extractInlineFileMentions = React.useCallback((rawText: string, sourceDirectory?: string | null): { sanitizedText: string; attachments: AttachedFile[] } => {
         if (!rawText || !rawText.includes('@')) {
             return { sanitizedText: rawText, attachments: [] };
         }
 
-        const clientDirectory = opencodeClient.getDirectory() || '';
+        const clientDirectory = sourceDirectory || opencodeClient.getDirectory() || '';
         const root = (chatSearchDirectory || clientDirectory).replace(/\\/g, '/').replace(/\/+$/, '');
         const seenPaths = new Set<string>();
         const attachments: AttachedFile[] = [];
@@ -1498,7 +1525,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         )
     );
     const addToQueue = useMessageQueueStore((state) => state.addToQueue);
-    const clearQueue = useMessageQueueStore((state) => state.clearQueue);
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
 
     // Inline comment drafts
@@ -1520,12 +1546,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 let previewConsole = 0;
                 let previewAnnotation = 0;
                 let review = 0;
+                let terminal = 0;
                 for (const draft of drafts) {
                     if (draft.source === 'preview-console') previewConsole += 1;
                     else if (draft.source === 'preview-annotation') previewAnnotation += 1;
+                    else if (draft.source === 'terminal') terminal += 1;
                     else review += 1;
                 }
-                return `${previewConsole}:${previewAnnotation}:${review}`;
+                return `${previewConsole}:${previewAnnotation}:${review}:${terminal}`;
             },
             [currentSessionId, newSessionDraftOpen]
         )
@@ -1533,7 +1561,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const removeInlineCommentDraft = useInlineCommentDraftStore((state) => state.removeDraft);
     const hasDrafts = draftCount > 0;
-    const [previewConsoleCount, previewAnnotationCount, reviewCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const [previewConsoleCount, previewAnnotationCount, reviewCount, terminalContextCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const terminalContextDrafts = terminalContextCount > 0
+        ? (useInlineCommentDraftStore.getState().drafts[currentSessionId ?? (newSessionDraftOpen ? 'draft' : '')] ?? []).filter((draft) => draft.source === 'terminal')
+        : [];
     const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation') => {
         const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
         if (!sessionKey) return;
@@ -1550,7 +1581,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!sessionKey) return;
         const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
         for (const draft of drafts) {
-            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation') {
+            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation' && draft.source !== 'terminal') {
                 removeInlineCommentDraft(sessionKey, draft.id);
             }
         }
@@ -1748,6 +1779,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [pendingInputText, consumePendingInputText]);
 
+    // Current-session workflows (for example conflict resolution) stage text
+    // under their source session. A later selection must not receive it.
+    React.useEffect(() => {
+        if (!currentSessionId || !pendingInputTextForSession) return;
+        const pending = consumePendingInputTextForSession(currentSessionId);
+        if (!pending?.text) return;
+
+        if (pending.mode === 'append') {
+            setMessage((prev) => appendWithLineBreaks(prev, pending.text));
+        } else if (pending.mode === 'append-inline') {
+            setMessage((prev) => appendInlineText(prev, pending.text));
+        } else {
+            setMessage(pending.text);
+        }
+        setTimeout(() => {
+            textareaRef.current?.focus();
+        }, 0);
+    }, [consumePendingInputTextForSession, currentSessionId, pendingInputTextForSession]);
+
     const hasContent = message.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;
     const hasQueuedMessages = queuedMessages.length > 0;
     const canSend = hasContent || hasQueuedMessages;
@@ -1767,6 +1817,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         queuedOnly?: boolean;
         queuedMessageId?: string;
         delivery?: 'steer';
+        /** Capture and enqueue the current composer transaction without sending. */
+        queueInsteadOfSend?: boolean;
         /** Submit this text instead of the composer input. Used by preset
             starter chips: on mobile the collapsed pill has no mounted textarea,
             so the DOM-first input snapshot would read empty content. */
@@ -1774,46 +1826,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
-    // Add message to queue instead of sending
+    // Route queue actions through the same capture path as sends so they retain
+    // their source-owned goal and synthetic context.
     const handleQueueMessage = React.useCallback(() => {
-        const inputSnapshot = getCurrentInputSnapshot();
-        if (!inputSnapshot.hasContent || !currentSessionId) return;
+        void handleSubmitRef.current({ queueInsteadOfSend: true });
+    }, []);
 
-        const drafts = consumeDrafts(currentSessionId);
-
-        let messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
-        if (drafts.length > 0) {
-            messageToQueue = appendInlineComments(messageToQueue, drafts);
-        }
-        const attachmentsToQueue = sanitizeAttachmentsForSend(sendableAttachedFiles);
-
-        addToQueue(currentSessionId, {
-            content: messageToQueue,
-            attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
-            sendConfig: currentProviderId && currentModelId ? {
-                providerID: currentProviderId,
-                modelID: currentModelId,
-                agent: currentAgentName ?? undefined,
-                variant: currentVariant ?? undefined,
-            } : undefined,
-        });
-
-        // Clear input and attachments
-        // Note: confirmedMentionsRef is NOT cleared here because queued messages
-        // are processed later in handleSubmit which reads the ref via extractInlineFileMentions.
-        // The ref is cleared in handleSubmit after all queued messages are sent.
-        setMessage('');
-        if (attachmentsToQueue.length > 0) {
-            clearAttachedFiles();
-        }
-
-        if (!isMobile) {
-            textareaRef.current?.focus();
-        }
-    }, [getCurrentInputSnapshot, currentSessionId, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
-
-    const handleQueuedMessageEdit = React.useCallback((content: string) => {
-        setMessage(content);
+    const handleQueuedMessageEdit = React.useCallback((queuedMessage: QueuedMessage, sessionId: string) => {
+        editedQueuedMessageContextRef.current = captureQueuedMessageEditContext(sessionId, queuedMessage);
+        setMessage(queuedMessage.content);
         setTimeout(() => {
             textareaRef.current?.focus();
         }, 0);
@@ -1842,6 +1863,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
+        const queueInsteadOfSend = options?.queueInsteadOfSend ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
         const inputSnapshot = options?.presetText != null
@@ -1864,20 +1886,205 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        // Capture session target and full draft state before any async gap —
-        // sidebar selection may change during the async preparation below, and
-        // sendMessage reads currentSessionId / newSessionDraft live from the store.
+        // Capture every composer-owned value before the first async gap. The
+        // selection, draft, goal arm, input stores, and links are all mutable.
         const capturedSessionId = currentSessionId;
         const capturedDraft = newSessionDraft;
+        const submitTarget = captureComposerSubmitTarget(capturedSessionId, capturedDraft);
+        const capturedSessionKey = capturedSessionId ?? (capturedDraft.open ? 'draft' : null);
+        const capturedQueuedMessages = [...queuedMessagesToSend];
+        const capturedEditedQueuedMessageContext = !queuedOnly
+            ? getQueuedMessageEditContextForSession(editedQueuedMessageContextRef.current, capturedSessionId)
+            : null;
+        const capturedEditedSyntheticParts = capturedEditedQueuedMessageContext?.syntheticParts ?? [];
+        const capturedAttachments = [...sendableAttachedFiles];
+        const capturedDirectory = capturedSessionId
+            ? currentSessionDirectoryForSync ?? currentDirectory
+            : currentDirectory;
+        const capturedChatSearchDirectory = chatSearchDirectory;
+        const capturedLinkedIssue = linkedIssue;
+        const capturedLinkedPr = linkedPr;
 
         const capturedSendConfig = queuedOnly ? queuedMessagesToSend[0]?.sendConfig : undefined;
+        const capturedQueuedMessage = queuedOnly ? capturedQueuedMessages[0] : undefined;
+        const hasCapturedQueuedSessionDirectory = capturedQueuedMessage !== undefined
+            && Object.prototype.hasOwnProperty.call(capturedQueuedMessage, 'sessionDirectory');
+        const hasCapturedQueuedSessionAgent = capturedQueuedMessage !== undefined
+            && Object.prototype.hasOwnProperty.call(capturedQueuedMessage, 'sessionAgent');
+        const sessionDirectoryToSend = hasCapturedQueuedSessionDirectory
+            ? capturedQueuedMessage?.sessionDirectory ?? null
+            : capturedDirectory ?? null;
+        const sessionAgentToSend = hasCapturedQueuedSessionAgent
+            ? capturedQueuedMessage?.sessionAgent ?? null
+            : currentAgentName ?? null;
         const providerIdToSend = capturedSendConfig?.providerID ?? currentProviderId;
         const modelIdToSend = capturedSendConfig?.modelID ?? currentModelId;
-        const agentNameToSend = capturedSendConfig?.agent ?? currentAgentName;
+        const agentNameToSend = hasCapturedQueuedSessionAgent
+            ? sessionAgentToSend ?? undefined
+            : capturedSendConfig?.agent ?? currentAgentName;
         const variantToSend = capturedSendConfig?.variant ?? currentVariant;
 
-        if (!providerIdToSend || !modelIdToSend) {
+        if (!queueInsteadOfSend && (!providerIdToSend || !modelIdToSend)) {
             console.warn('Cannot send message: provider or model not selected');
+            return;
+        }
+
+        const capturedGoalArm: SessionGoalArm = !queuedOnly && shouldClaimComposerGoal({
+            content: inputSnapshot.message,
+            inputMode,
+            hasExistingSession: Boolean(capturedSessionId),
+            // A queued submit never reaches this component's local-command
+            // branch, so its slash text remains a sendable transaction.
+            hasQueuedPrimary: capturedQueuedMessages.length > 0 || queueInsteadOfSend || autoReviewRunning,
+            isMobile,
+            isVSCode: isVSCodeRuntime(),
+        })
+            ? useSessionGoalArmStore.getState().consume()
+            : { armed: false, objectiveOverride: null };
+        const submitGoalArm = resolveSubmitGoalArm(
+            capturedGoalArm,
+            capturedQueuedMessages,
+            capturedEditedQueuedMessageContext?.goalArm,
+        );
+        const capturedSyntheticParts = !queuedOnly && capturedSessionId
+            ? consumePendingSyntheticParts(capturedSessionId) ?? []
+            : [];
+        const drafts = !queuedOnly && capturedSessionKey
+            ? consumeDrafts(capturedSessionKey)
+            : [];
+        const capturedLinkedSyntheticParts: SyntheticContextPart[] = [];
+        if (capturedLinkedIssue) {
+            capturedLinkedSyntheticParts.push({ text: capturedLinkedIssue.contextText, synthetic: true });
+        }
+        if (capturedLinkedPr) {
+            capturedLinkedSyntheticParts.push(
+                { text: capturedLinkedPr.instructionsText, synthetic: true },
+                { text: capturedLinkedPr.contextText, synthetic: true },
+            );
+        }
+
+        const isCapturedTargetCurrent = () => isCurrentComposerSubmitTarget(
+            submitTarget,
+            useSessionUIStore.getState(),
+        );
+
+        const restoreCapturedSubmitState = (recoveredAttachments: AttachedFile[]) => {
+            if (capturedSessionId && capturedSyntheticParts.length > 0) {
+                useInputStore.getState().restorePendingSyntheticParts(capturedSessionId, capturedSyntheticParts);
+            }
+            restoreCapturedInlineCommentDrafts(
+                capturedSessionKey,
+                drafts,
+                useInlineCommentDraftStore.getState().restoreDrafts,
+            );
+            if (!isCapturedTargetCurrent()) return;
+
+            const currentInput = textareaRef.current?.value ?? messageRef.current;
+            if (shouldRestoreComposerText(submitTarget, useSessionUIStore.getState(), currentInput, inputSnapshot.message)) {
+                setMessage(inputSnapshot.message);
+                saveStoredDraft(capturedSessionId, inputSnapshot.message);
+            }
+
+            if (recoveredAttachments.length > 0) {
+                const currentAttachments = useInputStore.getState().attachedFiles;
+                useInputStore.getState().setAttachedFiles(
+                    mergeRecoveredAttachments(recoveredAttachments, currentAttachments),
+                );
+            }
+        };
+
+        const clearCapturedComposer = (options?: { collapse?: boolean; preserveConfirmedMentions?: boolean }) => {
+            if (!isCapturedTargetCurrent()) return;
+
+            const currentInput = textareaRef.current?.value ?? messageRef.current;
+            if (!currentInput || currentInput === inputSnapshot.message) {
+                setMessage('');
+                saveStoredDraft(capturedSessionId, '');
+                if (!options?.preserveConfirmedMentions) {
+                    confirmedMentionsRef.current.clear();
+                    saveConfirmedMentions(capturedSessionId, confirmedMentionsRef.current);
+                }
+            }
+
+            const currentAttachments = useInputStore.getState().attachedFiles;
+            const capturedAttachmentIds = new Set(capturedAttachments.map((file) => file.id));
+            if (capturedAttachmentIds.size > 0
+                && currentAttachments.length === capturedAttachments.length
+                && currentAttachments.every((file) => capturedAttachmentIds.has(file.id))) {
+                clearAttachedFiles();
+            }
+
+            setHistoryIndex(-1);
+            setDraftMessage('');
+            if (options?.collapse !== false) {
+                setExpandedInput(false);
+            }
+        };
+
+        const clearCapturedLinks = () => {
+            if (!isCapturedTargetCurrent()) return;
+            if (capturedLinkedIssue) {
+                setLinkedIssue((current) => current === capturedLinkedIssue ? null : current);
+            }
+            if (capturedLinkedPr) {
+                setLinkedPr((current) => current === capturedLinkedPr ? null : current);
+            }
+        };
+
+        const clearCapturedEditedQueuedMessageContext = () => {
+            if (capturedEditedQueuedMessageContext
+                && editedQueuedMessageContextRef.current === capturedEditedQueuedMessageContext) {
+                editedQueuedMessageContextRef.current = null;
+            }
+        };
+
+        const queueCapturedInput = () => {
+            if (!capturedSessionId || !inputSnapshot.hasContent) return false;
+
+            let messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+            if (drafts.length > 0) {
+                messageToQueue = appendInlineComments(messageToQueue, drafts);
+            }
+            const attachmentsToQueue = sanitizeAttachmentsForSend(capturedAttachments);
+            const syntheticPartsToQueue = [
+                ...capturedEditedSyntheticParts,
+                ...capturedSyntheticParts,
+                ...capturedLinkedSyntheticParts,
+            ].map((part) => ({
+                ...part,
+                attachments: part.attachments ? sanitizeAttachmentsForSend(part.attachments) : undefined,
+                synthetic: true,
+            }));
+
+            addToQueue(capturedSessionId, {
+                content: messageToQueue,
+                attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+                syntheticParts: syntheticPartsToQueue.length > 0 ? syntheticPartsToQueue : undefined,
+                goalArm: submitGoalArm.armed ? submitGoalArm : undefined,
+                ...(sessionDirectoryToSend ? { sessionDirectory: sessionDirectoryToSend } : {}),
+                sessionAgent: sessionAgentToSend,
+                sendConfig: providerIdToSend && modelIdToSend ? {
+                    providerID: providerIdToSend,
+                    modelID: modelIdToSend,
+                    agent: agentNameToSend ?? undefined,
+                    variant: variantToSend ?? undefined,
+                } : undefined,
+            });
+            clearCapturedComposer({ collapse: false, preserveConfirmedMentions: true });
+            clearCapturedLinks();
+            clearCapturedEditedQueuedMessageContext();
+            return true;
+        };
+
+        if (queueInsteadOfSend) {
+            queueCapturedInput();
+            if (!isMobile && isCapturedTargetCurrent()) {
+                textareaRef.current?.focus();
+            }
+            return;
+        }
+
+        if (!providerIdToSend || !modelIdToSend) {
             return;
         }
 
@@ -1890,22 +2097,36 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // queued-message auto-send hook delivers it as the next turn once the
         // rejected turn winds down and the session returns to idle. This avoids
         // aborting the turn (which would surface an "aborted" notice).
-        if (currentSessionId && !queuedOnly && autoReviewRunning) {
-            handleQueueMessage();
+        if (capturedSessionId && !queuedOnly && autoReviewRunning) {
+            queueCapturedInput();
             return;
         }
 
-        if (currentSessionId && !queuedOnly) {
-            const dismissedQuestions = await sessionActions.dismissOpenQuestionsForSession(currentSessionId);
-            if (dismissedQuestions) {
-                handleQueueMessage();
-                return;
+        if (capturedSessionId && !queuedOnly) {
+            try {
+                const dismissedQuestions = await sessionActions.dismissOpenQuestionsForSession(capturedSessionId);
+                if (dismissedQuestions) {
+                    queueCapturedInput();
+                    return;
+                }
+            } catch (error) {
+                restoreCapturedSubmitState(capturedAttachments);
+                throw error;
             }
         }
 
-        const sendMessageOptions: SendMessageOptions = delivery ? { delivery } : {};
+        const sendMessageOptions: SendMessageOptions = {
+            goalArm: submitGoalArm,
+        };
+        if (delivery) {
+            sendMessageOptions.delivery = delivery;
+        }
         if (capturedSessionId) {
             sendMessageOptions.sessionId = capturedSessionId;
+            if (sessionDirectoryToSend) {
+                sendMessageOptions.sessionDirectory = sessionDirectoryToSend;
+            }
+            sendMessageOptions.sessionAgent = sessionAgentToSend;
         } else if (capturedDraft?.open) {
             sendMessageOptions.draftSnapshot = capturedDraft;
         }
@@ -1922,15 +2143,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 if (!mentionedSkillNames.includes(name)) mentionedSkillNames.push(name);
             }
         };
-
-        // Consume any pending synthetic parts (from conflict resolution, etc.)
-        const syntheticParts = consumePendingSyntheticParts();
+        const appendSyntheticParts = (parts: SyntheticContextPart[] | undefined) => {
+            for (const part of parts ?? []) {
+                additionalParts.push({
+                    text: part.text,
+                    attachments: part.attachments ? sanitizeAttachmentsForSend(part.attachments) : undefined,
+                    synthetic: true,
+                });
+            }
+        };
 
         // Process queued messages first
-        for (let i = 0; i < queuedMessagesToSend.length; i++) {
-            const queuedMsg = queuedMessagesToSend[i];
+        for (let i = 0; i < capturedQueuedMessages.length; i++) {
+            const queuedMsg = capturedQueuedMessages[i];
             const { sanitizedText, mention } = parseAgentMentions(queuedMsg.content, agents);
-            const { sanitizedText: queuedText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
+            const { sanitizedText: queuedText, attachments: mentionAttachments } = extractInlineFileMentions(
+                sanitizedText,
+                capturedChatSearchDirectory ?? capturedDirectory,
+            );
             addMentionedSkills(queuedText);
 
             // Use agent mention from first message that has one
@@ -1953,21 +2183,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     attachments: [...queuedAttachments, ...mentionAttachments],
                 });
             }
+            appendSyntheticParts(queuedMsg.syntheticParts);
         }
 
         // Add current input (skip for queued-only auto-send)
         if (!queuedOnly && inputSnapshot.hasContent) {
             const messageToSend = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
             const { sanitizedText, mention } = parseAgentMentions(messageToSend, agents);
-            const { sanitizedText: messageText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
-            const attachmentsToSend = sanitizeAttachmentsForSend(sendableAttachedFiles);
+            const { sanitizedText: messageText, attachments: mentionAttachments } = extractInlineFileMentions(
+                sanitizedText,
+                capturedChatSearchDirectory ?? capturedDirectory,
+            );
+            const attachmentsToSend = sanitizeAttachmentsForSend(capturedAttachments);
             addMentionedSkills(messageText);
 
             if (!agentMentionName && mention?.name) {
                 agentMentionName = mention.name;
             }
 
-            if (queuedMessagesToSend.length === 0) {
+            if (capturedQueuedMessages.length === 0) {
                 // No queue - current input is primary
                 primaryText = messageText;
                 primaryAttachments = [...attachmentsToSend, ...mentionAttachments];
@@ -1980,14 +2214,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-        let drafts: InlineCommentDraft[] = [];
-        if (!queuedOnly && sessionKey) {
-            drafts = consumeDrafts(sessionKey);
-        }
-
         if (drafts.length > 0) {
-            if (queuedMessagesToSend.length === 0) {
+            if (capturedQueuedMessages.length === 0) {
                 primaryText = appendInlineComments(primaryText, drafts);
             } else if (additionalParts.length > 0) {
                 const lastPart = additionalParts[additionalParts.length - 1];
@@ -1997,35 +2225,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        // Add synthetic parts (from conflict resolution, etc.)
-        if (syntheticParts && syntheticParts.length > 0) {
-            for (const part of syntheticParts) {
-                additionalParts.push({
-                    text: part.text,
-                    synthetic: true,
-                });
-            }
-        }
-
-        // Add linked issue as synthetic part (only the parts with synthetic: true)
-        // The text part (synthetic: false) is completely dropped per requirements
-        if (linkedIssue) {
-            additionalParts.push({
-                text: linkedIssue.contextText,
-                synthetic: true,
-            });
-        }
-
-        if (linkedPr) {
-            additionalParts.push({
-                text: linkedPr.instructionsText,
-                synthetic: true,
-            });
-            additionalParts.push({
-                text: linkedPr.contextText,
-                synthetic: true,
-            });
-        }
+        // Synthetic context, including linked issue/PR context, belongs to the
+        // captured target and was claimed before any async preparation.
+        appendSyntheticParts(capturedEditedSyntheticParts);
+        appendSyntheticParts(capturedSyntheticParts);
+        appendSyntheticParts(capturedLinkedSyntheticParts);
 
         const skillMentionInstruction = buildSkillMentionInstruction(mentionedSkillNames);
         if (skillMentionInstruction) {
@@ -2037,31 +2241,36 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
 
-        // Clear queue and input
-        if (currentSessionId && queuedMessageId) {
-            removeFromQueue(currentSessionId, queuedMessageId);
-        } else if (currentSessionId && hasQueuedMessages) {
-            clearQueue(currentSessionId);
+        // Remove only the queue entries captured for A. Never clear a queue
+        // that could have received later work while this submit was awaiting.
+        if (capturedSessionId) {
+            for (const queuedMessage of capturedQueuedMessages) {
+                removeFromQueue(capturedSessionId, queuedMessage.id);
+            }
         }
         if (!queuedOnly) {
-            setMessage('');
-            confirmedMentionsRef.current.clear();
-            // Clear per-session draft on submit
-            saveStoredDraft(currentSessionId, '');
-            saveConfirmedMentions(currentSessionId, confirmedMentionsRef.current);
-            // Reset message history navigation state
-            setHistoryIndex(-1);
-            setDraftMessage('');
-            if (attachedFiles.length > 0) {
-                clearAttachedFiles();
-            }
-            // Close expanded input overlay when submitting
-            setExpandedInput(false);
+            clearCapturedComposer();
         }
 
-        if (isMobile) {
+        if (isMobile && isCapturedTargetCurrent()) {
             textareaRef.current?.blur();
         }
+
+        const sendGeneratedCommand = async (visibleText: string, instructionsText: string) => {
+            await sendMessage(
+                visibleText,
+                providerIdToSend,
+                modelIdToSend,
+                agentNameToSend,
+                [],
+                agentMentionName,
+                [...additionalParts, { text: instructionsText, synthetic: true }],
+                variantToSend,
+                inputMode,
+                sendMessageOptions,
+            );
+            clearCapturedEditedQueuedMessageContext();
+        };
 
         // Handle local slash commands only in normal mode
         const normalizedCommand = primaryText.trimStart();
@@ -2072,31 +2281,48 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 .split(/\s+/)[0]
                 ?.toLowerCase();
 
-            if (commandName === 'undo' && currentSessionId) {
-                await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
+            if (commandName === 'undo' && capturedSessionId) {
+                try {
+                    await useSessionUIStore.getState().handleSlashUndo(capturedSessionId);
+                } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
+                    throw error;
+                }
+                clearCapturedEditedQueuedMessageContext();
                 scrollToBottom?.();
                 return;
             }
-            else if (commandName === 'redo' && currentSessionId) {
-                await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
+            else if (commandName === 'redo' && capturedSessionId) {
+                try {
+                    await useSessionUIStore.getState().handleSlashRedo(capturedSessionId);
+                } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
+                    throw error;
+                }
+                clearCapturedEditedQueuedMessageContext();
                 scrollToBottom?.();
                 return;
             }
-            else if (commandName === 'timeline' && currentSessionId) {
-                setTimelineDialogOpen(true);
+            else if (commandName === 'timeline' && capturedSessionId) {
+                if (isCapturedTargetCurrent()) {
+                    setTimelineDialogOpen(true);
+                }
+                clearCapturedEditedQueuedMessageContext();
                 return;
             }
-            else if (commandName === 'compact' && currentSessionId) {
+            else if (commandName === 'compact' && capturedSessionId) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
-                    const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                    await opencodeClient.summarizeSession(currentSessionId, currentProviderId, currentModelId, compactDirectory);
+                    const compactDirectory = sessionDirectoryToSend ?? undefined;
+                    await opencodeClient.summarizeSession(capturedSessionId, providerIdToSend, modelIdToSend, compactDirectory);
+                    clearCapturedEditedQueuedMessageContext();
                 } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
                 }
                 return;
             }
-            else if (commandName === 'summary' && currentSessionId) {
+            else if (commandName === 'summary' && capturedSessionId) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     // Everything after `/summary ` is an optional topic hint
@@ -2108,75 +2334,51 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         : '';
                     const visibleText = await renderMagicPrompt('session.summary.visible', { topic_line: topicLine });
                     const instructionsText = await renderMagicPrompt('session.summary.instructions', { topic_block: topicBlock });
-                    await sendMessage(
-                        visibleText,
-                        providerIdToSend,
-                        modelIdToSend,
-                        agentNameToSend,
-                        [],
-                        agentMentionName,
-                        [{ text: instructionsText, synthetic: true }],
-                        variantToSend,
-                        inputMode,
-                        sendMessageOptions,
-                    );
+                    await sendGeneratedCommand(visibleText, instructionsText);
+                    clearCapturedLinks();
                     scrollToBottom?.();
                 } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.summaryFailed'));
                 }
                 return;
             }
-            else if (commandName === 'workspace-review' && (currentSessionId || newSessionDraftOpen)) {
+            else if (commandName === 'workspace-review' && (capturedSessionId || capturedDraft.open)) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const visibleText = await renderMagicPrompt('session.review.visible');
                     const instructionsText = await renderMagicPrompt('session.review.instructions');
-                    await sendMessage(
-                        visibleText,
-                        providerIdToSend,
-                        modelIdToSend,
-                        agentNameToSend,
-                        [],
-                        agentMentionName,
-                        [{ text: instructionsText, synthetic: true }],
-                        variantToSend,
-                        inputMode,
-                        sendMessageOptions,
-                    );
+                    await sendGeneratedCommand(visibleText, instructionsText);
+                    clearCapturedLinks();
                     scrollToBottom?.();
                 } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.reviewFailed'));
                 }
                 return;
             }
-            else if (commandName === 'handoff-review' && currentSessionId && !isMobile && !isVSCodeRuntime()) {
-                setReviewDialogOpen(true);
+            else if (commandName === 'handoff-review' && capturedSessionId && !isMobile && !isVSCodeRuntime()) {
+                if (isCapturedTargetCurrent()) {
+                    setReviewDialogOpen(true);
+                }
+                clearCapturedEditedQueuedMessageContext();
                 return;
             }
-            else if (commandName === 'plan-feature' && (currentSessionId || newSessionDraftOpen)) {
+            else if (commandName === 'plan-feature' && (capturedSessionId || capturedDraft.open)) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const visibleText = await renderMagicPrompt('session.plan.visible');
                     const instructionsText = await renderMagicPrompt('session.plan.instructions');
-                    await sendMessage(
-                        visibleText,
-                        providerIdToSend,
-                        modelIdToSend,
-                        agentNameToSend,
-                        [],
-                        agentMentionName,
-                        [{ text: instructionsText, synthetic: true }],
-                        variantToSend,
-                        inputMode,
-                        sendMessageOptions,
-                    );
+                    await sendGeneratedCommand(visibleText, instructionsText);
+                    clearCapturedLinks();
                     scrollToBottom?.();
                 } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.planFeatureFailed'));
                 }
                 return;
             }
-            else if (commandName === 'craft-goal' && (currentSessionId || newSessionDraftOpen)) {
+            else if (commandName === 'craft-goal' && (capturedSessionId || capturedDraft.open)) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const idea = normalizedCommand.replace(/^\/craft-goal\b/i, '').trim();
@@ -2184,122 +2386,77 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         idea_block: idea ? `\n\nHere is my initial idea:\n${idea}` : '',
                     });
                     const instructionsText = await renderMagicPrompt('session.craftGoal.instructions');
-                    await sendMessage(
-                        visibleText,
-                        providerIdToSend,
-                        modelIdToSend,
-                        agentNameToSend,
-                        [],
-                        agentMentionName,
-                        [{ text: instructionsText, synthetic: true }],
-                        variantToSend,
-                        inputMode,
-                        sendMessageOptions,
-                    );
+                    await sendGeneratedCommand(visibleText, instructionsText);
+                    clearCapturedLinks();
                     scrollToBottom?.();
                 } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.craftGoalFailed'));
                 }
                 return;
             }
-            else if (commandName === 'catch-up' && (currentSessionId || newSessionDraftOpen)) {
+            else if (commandName === 'catch-up' && (capturedSessionId || capturedDraft.open)) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const visibleText = await renderMagicPrompt('session.catchup.visible');
                     const instructionsText = await renderMagicPrompt('session.catchup.instructions');
-                    await sendMessage(
-                        visibleText,
-                        providerIdToSend,
-                        modelIdToSend,
-                        agentNameToSend,
-                        [],
-                        agentMentionName,
-                        [{ text: instructionsText, synthetic: true }],
-                        variantToSend,
-                        inputMode,
-                        sendMessageOptions,
-                    );
+                    await sendGeneratedCommand(visibleText, instructionsText);
+                    clearCapturedLinks();
                     scrollToBottom?.();
                 } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.catchUpFailed'));
                 }
                 return;
             }
-            else if (commandName === 'debug' && (currentSessionId || newSessionDraftOpen)) {
+            else if (commandName === 'debug' && (capturedSessionId || capturedDraft.open)) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const visibleText = await renderMagicPrompt('session.debug.visible');
                     const instructionsText = await renderMagicPrompt('session.debug.instructions');
-                    await sendMessage(
-                        visibleText,
-                        providerIdToSend,
-                        modelIdToSend,
-                        agentNameToSend,
-                        [],
-                        agentMentionName,
-                        [{ text: instructionsText, synthetic: true }],
-                        variantToSend,
-                        inputMode,
-                        sendMessageOptions,
-                    );
+                    await sendGeneratedCommand(visibleText, instructionsText);
+                    clearCapturedLinks();
                     scrollToBottom?.();
                 } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.debugFailed'));
                 }
                 return;
             }
-            else if (commandName === 'weigh' && (currentSessionId || newSessionDraftOpen)) {
+            else if (commandName === 'weigh' && (capturedSessionId || capturedDraft.open)) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const visibleText = await renderMagicPrompt('session.weigh.visible');
                     const instructionsText = await renderMagicPrompt('session.weigh.instructions');
-                    await sendMessage(
-                        visibleText,
-                        providerIdToSend,
-                        modelIdToSend,
-                        agentNameToSend,
-                        [],
-                        agentMentionName,
-                        [{ text: instructionsText, synthetic: true }],
-                        variantToSend,
-                        inputMode,
-                        sendMessageOptions,
-                    );
+                    await sendGeneratedCommand(visibleText, instructionsText);
+                    clearCapturedLinks();
                     scrollToBottom?.();
                 } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.weighFailed'));
                 }
                 return;
             }
-            else if (commandName === 'explore' && (currentSessionId || newSessionDraftOpen)) {
+            else if (commandName === 'explore' && (capturedSessionId || capturedDraft.open)) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const visibleText = await renderMagicPrompt('session.explore.visible');
                     const instructionsText = await renderMagicPrompt('session.explore.instructions');
-                    await sendMessage(
-                        visibleText,
-                        providerIdToSend,
-                        modelIdToSend,
-                        agentNameToSend,
-                        [],
-                        agentMentionName,
-                        [{ text: instructionsText, synthetic: true }],
-                        variantToSend,
-                        inputMode,
-                        sendMessageOptions,
-                    );
+                    await sendGeneratedCommand(visibleText, instructionsText);
+                    clearCapturedLinks();
                     scrollToBottom?.();
                 } catch (error) {
+                    restoreCapturedSubmitState(capturedAttachments);
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.exploreFailed'));
                 }
                 return;
             }
         }
 
-        const currentSessionDirectory = currentSessionId
-            ? useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory
-            : currentDirectory;
-        const shouldAddResponseStyle = newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false);
+        const currentSessionDirectory = capturedSessionId
+            ? sessionDirectoryToSend
+            : capturedDirectory;
+        const shouldAddResponseStyle = capturedDraft.open || (capturedSessionId ? !hasUserMessages(capturedSessionId, currentSessionDirectory ?? undefined) : false);
         if (shouldAddResponseStyle) {
             const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
             if (responseStyleInstruction) {
@@ -2348,13 +2505,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         void sendPromise.then(() => {
-            // Clear linked issue after successful message send
-            if (linkedIssue) {
-                setLinkedIssue(null);
-            }
-            if (linkedPr) {
-                setLinkedPr(null);
-            }
+            clearCapturedEditedQueuedMessageContext();
+            clearCapturedLinks();
         }).catch((error: unknown) => {
             const rawMessage =
                 error instanceof Error
@@ -2365,6 +2517,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const normalized = rawMessage.toLowerCase();
 
             console.error('Message send failed:', rawMessage || error);
+            restoreCapturedSubmitState(allAttachments);
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
@@ -2379,27 +2532,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
-                }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
             }
 
-            if (allAttachments.length > 0) {
-                useInputStore.getState().setAttachedFiles(allAttachments);
-            }
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
         });
 
-        if (!isMobile) {
+        if (!isMobile && isCapturedTargetCurrent()) {
             textareaRef.current?.focus();
         }
     };
@@ -4655,6 +4801,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
+                        {terminalContextDrafts.map((draft) => (
+                            <div key={draft.id} className="inline-flex max-w-full items-center gap-1.5 rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2.5 py-1" title={draft.code}>
+                                <Icon name="terminal" className="h-3.5 w-3.5" />
+                                <span className="truncate text-xs font-medium text-[var(--surface-mutedForeground)]">
+                                    {t('chat.chatInput.terminalContext', { terminal: draft.fileLabel, start: draft.startLine, end: draft.endLine })}
+                                </span>
+                                <button type="button" className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]" onClick={() => removeInlineCommentDraft(draft.sessionKey, draft.id)} aria-label={t('chat.chatInput.terminalContextRemove')} title={t('chat.chatInput.terminalContextRemove')}>
+                                    <Icon name="close" className="h-3 w-3" />
+                                </button>
+                            </div>
+                        ))}
                         {reviewCount > 0 ? (
                             <div
                                 className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
@@ -4959,7 +5116,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     />
                     <div className="flex items-center gap-2">
                         <div
-                            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1"
+                            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                             style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
                         >
                             <MobileSessionPanelTrigger
@@ -5012,13 +5169,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             already open, letting the pill expand into its place. */}
                         <div
                             className={cn(
-                                'flex-shrink-0 overflow-hidden transition-all duration-200 ease-out',
-                                newSessionDraftOpen ? 'w-0 opacity-0' : 'w-11 opacity-100',
+                                'flex-shrink-0 transition-all duration-200 ease-out',
+                                newSessionDraftOpen ? 'w-0 opacity-0 overflow-hidden' : 'w-11 opacity-100',
                             )}
                         >
                             <button
                                 type="button"
-                                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground"
+                                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                                 style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
                                 onClick={handleMobileNewSession}
                                 disabled={newSessionDraftOpen}
@@ -5049,6 +5206,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         "flex flex-col relative overflow-visible",
                         isComposerExpanded && 'flex-1 min-h-0',
                         "border border-border/80",
+                        "shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]",
                         "focus-within:ring-1",
                         inputMode === 'shell'
                             ? 'focus-within:ring-[var(--status-info)]'

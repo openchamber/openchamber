@@ -58,7 +58,7 @@ import {
   fetchMessagesForSession,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
-import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { useSessionGoalArmStore, type SessionGoalArm } from "@/stores/useSessionGoalArmStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
 import { wrapSystemReminder } from "@/lib/systemReminder"
 import { useUIStore } from "@/stores/useUIStore"
@@ -172,9 +172,22 @@ export function routeMessage(params: {
 
 export type SendMessageOptions = {
   sessionId?: string
+  /** Explicitly captured existing-session directory; absent/null falls back to session resolution. */
+  sessionDirectory?: string | null
+  /**
+   * Explicitly captured existing-session agent. Property presence matters:
+   * `null` intentionally suppresses fallback to the live config agent.
+   */
+  sessionAgent?: string | null
   delivery?: 'steer'
   draftSnapshot?: NewSessionDraftState
+  /** Explicitly captured composer goal state. Suppresses global arm fallback. */
+  goalArm?: SessionGoalArm
 }
+
+const hasExplicitSessionAgent = (
+  options: SendMessageOptions | undefined,
+): boolean => options !== undefined && Object.prototype.hasOwnProperty.call(options, 'sessionAgent')
 
 type AssistantMessageSessionExecution = {
   providerID: string
@@ -200,6 +213,7 @@ export type { SessionMemoryState } from "./viewport-store"
 
 export type NewSessionDraftState = {
   open: boolean
+  draftToken?: symbol
   selectedProjectId?: string | null
   directoryOverride: string | null
   permissionAutoAcceptEnabled?: boolean
@@ -269,9 +283,9 @@ export type SessionUIState = {
   getContextUsage: (contextLimit: number, outputLimit: number) => SessionContextUsage | null
   initializeNewOpenChamberSession: (sessionId: string, agents: unknown[]) => void
   setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null) => void
-  overrideNewSessionDraftTarget: (options: Record<string, unknown>) => void
+  overrideNewSessionDraftTarget: (options: Record<string, unknown>, capturedDraft?: NewSessionDraftState) => void
   resolvePendingDraftWorktreeTarget: (requestId: string, directory: string | null, options?: Record<string, unknown>) => void
-  setDraftBootstrapPendingDirectory: (directory: string | null) => void
+  setDraftBootstrapPendingDirectory: (directory: string | null, capturedDraft?: NewSessionDraftState) => void
   setPendingDraftWorktreeRequest: (requestId: string | null) => void
   getWorktreeMetadata: (sessionId: string) => WorktreeMetadata | undefined
 
@@ -395,6 +409,8 @@ const DEFAULT_DRAFT: NewSessionDraftState = {
   parentID: null,
 }
 
+const createDraftToken = (): symbol => Symbol("new-session-draft")
+
 const activeSessionByRuntime = new Map<string, string | null>()
 type RuntimeSessionMemory = {
   sessionId: string | null
@@ -409,6 +425,13 @@ const runtimeMemoryKey = (value?: string | null): string => {
 }
 
 const cloneDraft = (draft: NewSessionDraftState): NewSessionDraftState => ({ ...draft })
+
+const isCurrentLogicalDraft = (draft: NewSessionDraftState): boolean => {
+  const { currentSessionId, newSessionDraft } = useSessionUIStore.getState()
+  if (!draft.open || !newSessionDraft.open || currentSessionId !== null) return false
+  return newSessionDraft === draft
+    || (draft.draftToken !== undefined && newSessionDraft.draftToken === draft.draftToken)
+}
 
 const writeRuntimeSessionMemory = (key: string, patch: Partial<RuntimeSessionMemory>): void => {
   const current = runtimeSessionMemory.get(key)
@@ -490,9 +513,14 @@ export async function materializeOpenDraftSession(
   const draftSyntheticParts = draft.syntheticParts
   const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
   const configState = useConfigStore.getState()
-  void activateConfigForDirectory(createdDirectory).catch((error) => {
-    console.warn("Failed to activate directory after creating session:", error)
-  })
+
+  // Activation changes the active provider/model/agent state before its async
+  // work completes, so check that this is still the same logical draft.
+  if (isCurrentLogicalDraft(draft)) {
+    void activateConfigForDirectory(createdDirectory).catch((error) => {
+      console.warn("Failed to activate directory after creating session:", error)
+    })
+  }
 
   const effectiveDraftAgent = trimmedAgent ?? configState.currentAgentName
 
@@ -508,7 +536,7 @@ export async function materializeOpenDraftSession(
 
   // A snapshot send must not replace a newer draft or session selection made
   // while the original send was awaiting preparation or session creation.
-  if (useSessionUIStore.getState().newSessionDraft === draft) {
+  if (isCurrentLogicalDraft(draft)) {
     store.closeNewSessionDraft()
     store.setCurrentSession(created.id, createdDirectory)
   }
@@ -762,6 +790,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const nextDraft: NewSessionDraftState = {
       open: true,
+      draftToken: createDraftToken(),
       selectedProjectId: selectedProject?.id ?? null,
       directoryOverride: directory,
       permissionAutoAcceptEnabled: options?.permissionAutoAcceptEnabled === true,
@@ -784,6 +813,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       error: null,
     })
 
+    const capturedDraft = get().newSessionDraft
     writeRuntimeSessionMemory(runtimeMemoryKey(), { sessionId: null, directory, draft: nextDraft })
     // Clear composer attachments when opening a new session draft.
     // Attachments from the previous session (e.g. restored by revert) must
@@ -802,6 +832,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // (a fresh draft must start from defaults, not inherit the previous session's selection).
     const configDirectory = normalizePath(selectedProject?.path ?? null) ?? directory
     void activateConfigForDirectory(configDirectory).then(() => {
+      if (!isCurrentLogicalDraft(capturedDraft)) return
       useConfigStore.getState().applyDefaultModelAgentSelection({
         projectDefaultModel: selectedProject?.defaultModel,
       })
@@ -966,7 +997,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     })
   },
 
-  overrideNewSessionDraftTarget: (options) => {
+  overrideNewSessionDraftTarget: (options, capturedDraft) => {
+    if (capturedDraft && !isCurrentLogicalDraft(capturedDraft)) return
     let nextDirectory: string | null = null
     set((s) => {
       const nextDraft = { ...s.newSessionDraft, ...options }
@@ -997,11 +1029,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
     }),
 
-  setDraftBootstrapPendingDirectory: (directory) =>
+  setDraftBootstrapPendingDirectory: (directory, capturedDraft) => {
+    if (capturedDraft && !isCurrentLogicalDraft(capturedDraft)) return
     set((s) => {
       if (!s.newSessionDraft?.open) return s
       return { newSessionDraft: { ...s.newSessionDraft, bootstrapPendingDirectory: normalizePath(directory) } }
-    }),
+    })
+  },
 
   setPendingDraftWorktreeRequest: (requestId) =>
     set((s) => {
@@ -1051,7 +1085,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
     const goalArm = inputMode !== "shell" && content.trim().length > 0
-      ? useSessionGoalArmStore.getState().consume()
+      ? options?.goalArm ?? useSessionGoalArmStore.getState().consume()
       : { armed: false, objectiveOverride: null }
     const goalArmed = goalArm.armed
     if (goalArmed) {
@@ -1134,11 +1168,18 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     // ---- Existing session ----
     const targetSessionId = options?.sessionId ?? get().currentSessionId
+    const hasCapturedSessionAgent = hasExplicitSessionAgent(options)
+    const capturedSessionAgent = typeof options?.sessionAgent === 'string' && options.sessionAgent.trim().length > 0
+      ? options.sessionAgent.trim()
+      : undefined
     const sessionAgentSelection = targetSessionId
       ? useSelectionStore.getState().getSessionAgentSelection(targetSessionId)
       : null
     const configAgentName = useConfigStore.getState().currentAgentName
-    const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
+    const effectiveAgent = trimmedAgent
+      ?? (hasCapturedSessionAgent
+        ? capturedSessionAgent
+        : sessionAgentSelection || configAgentName || undefined)
 
     if (targetSessionId) {
       useSelectionStore.getState().saveSessionModelSelection(targetSessionId, providerID, modelID)
@@ -1167,8 +1208,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
     }
 
+    const capturedSessionDirectory = typeof options?.sessionDirectory === 'string'
+      ? normalizePath(options.sessionDirectory)
+      : null
     const currentSessionDirectory = targetSessionId
-      ? normalizePath(get().getDirectoryForSession(targetSessionId))
+      ? capturedSessionDirectory ?? normalizePath(get().getDirectoryForSession(targetSessionId))
       : null
     if (targetSessionId) {
       notifyMessageSent(targetSessionId)
@@ -1218,14 +1262,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   createSession: async (title, directoryOverride, parentID, metadata, targetFolderIdOverride, options) => {
     const targetFolderId = targetFolderIdOverride
-    if (options?.activateSession !== false) {
-      get().closeNewSessionDraft()
-    }
 
     try {
       const dir = directoryOverride ?? opencodeClient.getDirectory()
       const session = await createSessionAction(title, dir, parentID ?? null, metadata, options)
       if (!session) return null
+
+      if (options?.activateSession !== false) {
+        get().closeNewSessionDraft()
+      }
 
       if (targetFolderId) {
         const scopeKey = directoryOverride || session.directory || get().lastLoadedDirectory
@@ -1496,12 +1541,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useDirectoryStore.getState().setDirectory(createdWorktree.path, { showOverlay: false })
     }
 
-    // "Run as goal" rides the same arm mechanism as the composer target
-    // button: sendMessage consumes the flag, stamps the goal (objective =
-    // the composed fork message) and attaches the goal-mode intro part.
-    // Set explicitly either way so a stray armed flag cannot leak into a
-    // non-goal fork.
-    useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true)
+    // This immediate send owns its goal state; do not use the composer-global
+    // arm, which may be re-armed by another composer before dispatch.
+    const goalArm: SessionGoalArm = {
+      armed: execution.runAsGoal === true,
+      objectiveOverride: null,
+    }
 
     await get().sendMessage(
       composeForkSessionMessage(execution.instructions, assistantPlanText),
@@ -1513,7 +1558,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       undefined,
       execution.variant || undefined,
       undefined,
-      { sessionId: session.id },
+      { sessionId: session.id, goalArm },
     )
   },
 

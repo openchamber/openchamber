@@ -1,5 +1,10 @@
 import { create } from 'zustand';
 
+export type SessionGoalArm = {
+  armed: boolean;
+  objectiveOverride: string | null;
+};
+
 // Narrow store for the "next message starts a goal" flag. Armed by the
 // composer target button (works for existing sessions AND session drafts)
 // and by the run-as-goal flows (fork dialog, plan send); consumed by
@@ -11,7 +16,7 @@ interface SessionGoalArmStore {
   objectiveOverride: string | null;
   setArmed: (armed: boolean, objectiveOverride?: string | null) => void;
   /** Read-and-clear in one step at send time. */
-  consume: () => { armed: boolean; objectiveOverride: string | null };
+  consume: () => SessionGoalArm;
 }
 
 export const useSessionGoalArmStore = create<SessionGoalArmStore>((set, get) => ({

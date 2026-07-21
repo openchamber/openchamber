@@ -5,6 +5,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import {
   Command,
   CommandEmpty,
@@ -205,13 +206,19 @@ export const IntegrateCommitsSection: React.FC<{
     return { visibleText, instructionsText, payloadText };
   }, []);
 
-  const setPendingInputText = useInputStore((s) => s.setPendingInputText);
+  const setPendingInputTextForSession = useInputStore((s) => s.setPendingInputTextForSession);
   const setPendingSyntheticParts = useInputStore((s) => s.setPendingSyntheticParts);
 
   const handleResolveWithAi = React.useCallback(async (
     payload: { state: IntegrateInProgress; details: IntegrateConflictDetails },
     useNewSession: boolean
   ) => {
+    const targetSessionId = currentSessionId;
+    if (!useNewSession && !targetSessionId) {
+      toast.error(t('gitView.integrate.noActiveSession'), { description: t('gitView.integrate.noActiveSessionDescription') });
+      return;
+    }
+
     const context = await buildConflictContext(payload);
 
     if (useNewSession) {
@@ -229,19 +236,20 @@ export const IntegrateCommitsSection: React.FC<{
       return;
     }
 
-    // Use current session - set pending input text and synthetic parts
-    if (!currentSessionId) {
-      toast.error(t('gitView.integrate.noActiveSession'), { description: t('gitView.integrate.noActiveSessionDescription') });
+    if (!targetSessionId) {
       return;
     }
 
-    setPendingInputText(context.visibleText, 'replace');
-    setPendingSyntheticParts([
+    // Use current session - set pending input text and synthetic parts
+    setPendingInputTextForSession(targetSessionId, context.visibleText, 'replace');
+    setPendingSyntheticParts(targetSessionId, [
       { text: context.instructionsText, synthetic: true },
       { text: context.payloadText, synthetic: true },
     ]);
-    setActiveMainTab('chat');
-  }, [currentSessionId, setActiveMainTab, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts, t]);
+    if (useSessionUIStore.getState().currentSessionId === targetSessionId) {
+      setActiveMainTab('chat');
+    }
+  }, [currentSessionId, setActiveMainTab, buildConflictContext, openNewSessionDraft, setPendingInputTextForSession, setPendingSyntheticParts, t]);
 
   const handleMove = React.useCallback(async () => {
     if (ui.kind !== 'ready') return;
@@ -361,11 +369,14 @@ export const IntegrateCommitsSection: React.FC<{
 
             <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5">
+                <button
+                  type="button"
+                  className={dropdownTriggerVariants({ size: 'default' })}
+                >
                   {t('gitView.integrate.target')}
                   <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
                   <Icon name="arrow-down-s" className="size-4 opacity-60" />
-                </Button>
+                </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"

@@ -29,7 +29,6 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -595,9 +594,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         }
 
         setCurrentSession(sessionId, directoryHint);
-        // "Run as goal" rides the same arm mechanism as the composer target
-        // button; set explicitly either way so a stray armed flag cannot
-        // leak into a non-goal plan send. The objective override carries the
+        // This immediate send carries its goal state explicitly rather than
+        // borrowing the composer-global arm. The objective override carries the
         // plan substance — "Implement this plan: X" alone would give the
         // progress audit nothing to judge against. Plans that exceed the
         // objective limit are distilled into completion criteria by the
@@ -616,7 +614,10 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
               content,
             ].join('\n')
           : null;
-        useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true, goalObjective);
+        const goalArm = {
+          armed: execution.runAsGoal === true,
+          objectiveOverride: goalObjective,
+        };
         await sendMessage(
           visiblePrompt,
           execution.providerID,
@@ -626,6 +627,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
           undefined,
           syntheticParts,
           execution.variant || undefined,
+          undefined,
+          { sessionId, goalArm },
         );
 
         setPendingPlanSend(null);

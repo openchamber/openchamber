@@ -1,3 +1,10 @@
+## [1.16.2] - 2026-07-18
+
+- **Settings:** pages now use a consistent responsive layout, navigation is grouped by area, and save failures are shown in the page header. Agent tool permissions now distinguish inherited and explicit rules and show session-granted rules separately (thanks to @makeittech).
+- Permissions: per-session auto-accept works again, persists across extension restarts, and applies to subagent sessions while an OpenChamber view is open.
+- Sessions: new drafts and sessions now stay with the workspace selected in the sidebar, including multi-root and nested workspace setups (thanks to @bashrusakh).
+- Chat: if creating a session fails, the new-session draft stays open and restores the submitted prompt instead of discarding it.
+
 ## [1.16.1] - 2026-07-14
 
 - **Performance:** large workspace session lists no longer regroup every session while chats stream. Opening a long chat after an empty or aborted agent turn also no longer repeatedly loads larger portions of its history.

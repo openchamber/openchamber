@@ -76,6 +76,11 @@ export type SyntheticContextPart = {
   synthetic?: boolean
 }
 
+type PendingInputText = {
+  text: string
+  mode: "replace" | "append" | "append-inline"
+}
+
 export type VSCodeActiveEditorFile = {
   filePath: string
   fileName: string
@@ -87,7 +92,10 @@ export type VSCodeActiveEditorFile = {
 export type InputState = {
   pendingInputText: string | null
   pendingInputMode: "replace" | "append" | "append-inline"
-  pendingSyntheticParts: SyntheticContextPart[] | null
+  /** Target-owned input staged by a current-session workflow. */
+  pendingInputTextBySession: Record<string, PendingInputText>
+  /** Target-owned synthetic context; never consume another session's context. */
+  pendingSyntheticParts: Record<string, SyntheticContextPart[]>
   /**
    * Text a draft preset chip asked to submit immediately. Set by surfaces that
    * render the chips outside ChatInput (e.g. under the welcome message on
@@ -99,10 +107,13 @@ export type InputState = {
 
   setPendingInputText: (text: string | null, mode?: "replace" | "append" | "append-inline") => void
   consumePendingInputText: () => { text: string; mode: "replace" | "append" | "append-inline" } | null
+  setPendingInputTextForSession: (sessionId: string, text: string, mode?: "replace" | "append" | "append-inline") => void
+  consumePendingInputTextForSession: (sessionId: string) => PendingInputText | null
   requestPresetSubmit: (text: string) => void
   consumePendingPresetSubmit: () => string | null
-  setPendingSyntheticParts: (parts: SyntheticContextPart[] | null) => void
-  consumePendingSyntheticParts: () => SyntheticContextPart[] | null
+  setPendingSyntheticParts: (sessionId: string, parts: SyntheticContextPart[] | null) => void
+  consumePendingSyntheticParts: (sessionId: string) => SyntheticContextPart[] | null
+  restorePendingSyntheticParts: (sessionId: string, parts: SyntheticContextPart[]) => void
   addAttachedFile: (file: File) => Promise<void>
   removeAttachedFile: (id: string) => void
   setAttachedFiles: (files: AttachedFile[]) => void
@@ -117,7 +128,8 @@ export type InputState = {
 export const useInputStore = create<InputState>()((set, get) => ({
   pendingInputText: null,
   pendingInputMode: "replace",
-  pendingSyntheticParts: null,
+  pendingInputTextBySession: {},
+  pendingSyntheticParts: {},
   pendingPresetSubmit: null,
   attachedFiles: [],
   activeEditorFile: null,
@@ -132,6 +144,27 @@ export const useInputStore = create<InputState>()((set, get) => ({
     return { text: pendingInputText, mode: pendingInputMode }
   },
 
+  setPendingInputTextForSession: (sessionId, text, mode = "replace") => {
+    if (!sessionId) return
+    set((state) => ({
+      pendingInputTextBySession: {
+        ...state.pendingInputTextBySession,
+        [sessionId]: { text, mode },
+      },
+    }))
+  },
+
+  consumePendingInputTextForSession: (sessionId) => {
+    const pending = get().pendingInputTextBySession[sessionId]
+    if (!pending) return null
+    set((state) => {
+      const { [sessionId]: _consumed, ...rest } = state.pendingInputTextBySession
+      void _consumed
+      return { pendingInputTextBySession: rest }
+    })
+    return pending
+  },
+
   requestPresetSubmit: (text) => set({ pendingPresetSubmit: text }),
 
   consumePendingPresetSubmit: () => {
@@ -141,14 +174,43 @@ export const useInputStore = create<InputState>()((set, get) => ({
     return pendingPresetSubmit
   },
 
-  setPendingSyntheticParts: (parts) => set({ pendingSyntheticParts: parts }),
+  setPendingSyntheticParts: (sessionId, parts) => {
+    if (!sessionId) return
+    set((state) => {
+      if (!parts || parts.length === 0) {
+        const { [sessionId]: _cleared, ...rest } = state.pendingSyntheticParts
+        void _cleared
+        return { pendingSyntheticParts: rest }
+      }
+      return {
+        pendingSyntheticParts: {
+          ...state.pendingSyntheticParts,
+          [sessionId]: parts,
+        },
+      }
+    })
+  },
 
-  consumePendingSyntheticParts: () => {
-    const { pendingSyntheticParts } = get()
+  consumePendingSyntheticParts: (sessionId) => {
+    const pendingSyntheticParts = get().pendingSyntheticParts[sessionId] ?? null
     if (pendingSyntheticParts !== null) {
-      set({ pendingSyntheticParts: null })
+      set((state) => {
+        const { [sessionId]: _consumed, ...rest } = state.pendingSyntheticParts
+        void _consumed
+        return { pendingSyntheticParts: rest }
+      })
     }
     return pendingSyntheticParts
+  },
+
+  restorePendingSyntheticParts: (sessionId, parts) => {
+    if (!sessionId || parts.length === 0) return
+    set((state) => ({
+      pendingSyntheticParts: {
+        ...state.pendingSyntheticParts,
+        [sessionId]: [...parts, ...(state.pendingSyntheticParts[sessionId] ?? [])],
+      },
+    }))
   },
 
   addAttachedFile: async (file: File) => {

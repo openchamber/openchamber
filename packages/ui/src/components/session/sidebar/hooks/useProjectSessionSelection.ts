@@ -16,10 +16,11 @@ type Args = {
   activeSessionByProject: Map<string, string>;
   setActiveSessionByProject: React.Dispatch<React.SetStateAction<Map<string, string>>>;
   currentSessionId: string | null;
+  currentSessionOwnerProjectId?: string | null;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, projectId?: string | null) => void;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
-  openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
 };
@@ -32,12 +33,13 @@ type MissingProjectSessionSelection =
 
 /**
  * Resolves the active-project action after its session map does not contain the
- * current session. Unknown sessions are preserved while worktree data catches
- * up; sessions known to another project resolve this project's selection.
+ * current session. An authoritative directory owner takes priority; otherwise,
+ * rendered session maps preserve unknown sessions while worktree data catches up.
  */
 export function resolveMissingProjectSessionSelection<T>({
   activeProjectId,
   currentSessionId,
+  currentSessionOwnerProjectId,
   projectMap,
   metaByProject,
   rememberedSessionId,
@@ -45,19 +47,26 @@ export function resolveMissingProjectSessionSelection<T>({
 }: {
   activeProjectId: string;
   currentSessionId: string | null;
+  currentSessionOwnerProjectId?: string | null;
   projectMap: ReadonlyMap<string, T> | undefined;
   metaByProject: ReadonlyMap<string, ReadonlyMap<string, T>>;
   rememberedSessionId: string | undefined;
   fallbackSessionId: string | null;
 }): MissingProjectSessionSelection {
-  const currentSessionBelongsToAnotherProject = Boolean(
-    currentSessionId
-    && Array.from(metaByProject.entries()).some(
-      ([projectId, sessions]) => projectId !== activeProjectId && sessions.has(currentSessionId),
-    ),
-  );
-  if (currentSessionId && projectMap && !currentSessionBelongsToAnotherProject) {
+  if (currentSessionId && currentSessionOwnerProjectId === activeProjectId) {
     return { kind: 'preserve-current' };
+  }
+
+  if (currentSessionOwnerProjectId == null) {
+    const currentSessionBelongsToAnotherProject = Boolean(
+      currentSessionId
+      && Array.from(metaByProject.entries()).some(
+        ([projectId, sessions]) => projectId !== activeProjectId && sessions.has(currentSessionId),
+      ),
+    );
+    if (currentSessionId && projectMap && !currentSessionBelongsToAnotherProject) {
+      return { kind: 'preserve-current' };
+    }
   }
 
   if (!projectMap || projectMap.size === 0) {
@@ -82,6 +91,7 @@ export const useProjectSessionSelection = (args: Args): void => {
     activeSessionByProject,
     setActiveSessionByProject,
     currentSessionId,
+    currentSessionOwnerProjectId,
     handleSessionSelect,
     newSessionDraftOpen,
     mobileVariant,
@@ -171,6 +181,7 @@ export const useProjectSessionSelection = (args: Args): void => {
     const selection = resolveMissingProjectSessionSelection({
       activeProjectId,
       currentSessionId,
+      currentSessionOwnerProjectId,
       projectMap,
       metaByProject: projectSessionMeta.metaByProject,
       rememberedSessionId: activeSessionByProject.get(activeProjectId),
@@ -186,7 +197,10 @@ export const useProjectSessionSelection = (args: Args): void => {
       if (mobileVariant) {
         setSessionSwitcherOpen(false);
       }
-      openNewSessionDraft({ directoryOverride: section.project.normalizedPath });
+      openNewSessionDraft({
+        selectedProjectId: section.project.id,
+        directoryOverride: section.project.normalizedPath,
+      });
       return;
     }
 
@@ -199,6 +213,7 @@ export const useProjectSessionSelection = (args: Args): void => {
     activeProjectId,
     activeSessionByProject,
     currentSessionId,
+    currentSessionOwnerProjectId,
     handleSessionSelect,
     newSessionDraftOpen,
     mobileVariant,

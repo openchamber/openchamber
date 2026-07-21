@@ -5,7 +5,7 @@
  */
 
 import { toast } from '@/components/ui';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionUIStore, type NewSessionDraftState } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
@@ -26,8 +26,8 @@ import {
   resolvePendingDraftWorktreeRequest,
 } from '@/lib/worktrees/pendingDraftWorktree';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-
-const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '') || value;
+import { normalizePath } from '@/lib/pathNormalization';
+import { resolveProjectForDirectory } from '@/lib/projectResolution';
 
 const waitForWorktreeBootstrapIfEnabled = async (project: ProjectRef, directory: string): Promise<void> => {
   if (await getWorktreeSetupWaitEnabled(project)) {
@@ -35,29 +35,51 @@ const waitForWorktreeBootstrapIfEnabled = async (project: ProjectRef, directory:
   }
 };
 
-const resolveProjectRef = (directory: string): ProjectRef | null => {
-  const normalized = normalizePath(directory);
+export const resolveProjectRef = (directory: string): ProjectRef | null => {
   const projects = useProjectsStore.getState().projects;
-  if (projects.length === 0) {
-    return null;
-  }
+  const normalizedDirectory = normalizePath(directory);
+  if (!normalizedDirectory) return null;
 
-  const activeProject = useProjectsStore.getState().getActiveProject();
-  if (activeProject?.path) {
-    const activePath = normalizePath(activeProject.path);
-    if (normalized === activePath || normalized.startsWith(`${activePath}/`)) {
-      return { id: activeProject.id, path: activeProject.path };
+  let project: (typeof projects)[number] | null = null;
+  let matchedWorktreePathLength = -1;
+  for (const [projectPath, worktrees] of useSessionUIStore.getState().availableWorktreesByProject) {
+    for (const worktree of worktrees) {
+      const worktreePath = normalizePath(worktree.path);
+      if (!worktreePath) continue;
+      if (normalizedDirectory !== worktreePath && !normalizedDirectory.startsWith(`${worktreePath}/`)) continue;
+      if (worktreePath.length <= matchedWorktreePathLength) continue;
+
+      const ownerPaths = [worktree.projectDirectory, projectPath];
+      for (const ownerPath of ownerPaths) {
+        const owner = projects.find((candidate) => normalizePath(candidate.path) === normalizePath(ownerPath))
+          ?? resolveProjectForDirectory(projects, ownerPath);
+        if (!owner) continue;
+        project = owner;
+        matchedWorktreePathLength = worktreePath.length;
+        break;
+      }
     }
   }
 
-  const matches = projects.filter((project) => {
-    const projectPath = normalizePath(project.path);
-    return normalized === projectPath || normalized.startsWith(`${projectPath}/`);
+  project ??= resolveProjectForDirectory(projects, normalizedDirectory);
+  return project ? { id: project.id, path: project.path } : null;
+};
+
+export const createQuickWorktree = async (
+  project: ProjectRef,
+  options: { preferredName?: string; startRef?: string } = {},
+) => {
+  const preferredName = options.preferredName ?? generateBranchName();
+  const setupCommands = await getWorktreeSetupCommands(project);
+  return createWorktreeWithDefaults(project, {
+    preferredName,
+    mode: 'new',
+    branchName: preferredName,
+    worktreeName: preferredName,
+    startRef: options.startRef,
+    setupCommands,
+    returnAfterDirectoryCreated: true,
   });
-
-  const match = matches.sort((a, b) => normalizePath(b.path).length - normalizePath(a.path).length)[0];
-
-  return match ? { id: match.id, path: match.path } : null;
 };
 
 // Track if a worktree creation flow is already running
@@ -183,10 +205,11 @@ const createInstantWorktreeDraft = async (options?: {
   }
 
   isCreatingWorktreeSession = true;
+  const pendingRequestId = createPendingDraftWorktreeRequest();
+  let capturedDraft: NewSessionDraftState | null = null;
 
   try {
     const projectRef: ProjectRef = { id: activeProject.id, path: projectDirectory };
-    const pendingRequestId = createPendingDraftWorktreeRequest();
 
     // Lock the draft immediately so no React effect can reset it to the project
     // root while we await the preview / worktree creation below.
@@ -210,6 +233,8 @@ const createInstantWorktreeDraft = async (options?: {
         initialPrompt: options?.initialPrompt,
       });
     }
+    const draft = useSessionUIStore.getState().newSessionDraft;
+    capturedDraft = draft;
 
     const preferredName = generateBranchName();
 
@@ -229,19 +254,10 @@ const createInstantWorktreeDraft = async (options?: {
         preserveDirectoryOverride: true,
         title: options?.title,
         initialPrompt: options?.initialPrompt,
-      });
-      useDirectoryStore.getState().setDirectory(preview.path, { showOverlay: false });
+      }, draft);
     }
 
-    const setupCommands = await getWorktreeSetupCommands(projectRef);
-    const metadata = await createWorktreeWithDefaults(projectRef, {
-      preferredName,
-      mode: 'new',
-      branchName: preferredName,
-      worktreeName: preferredName,
-      setupCommands,
-      returnAfterDirectoryCreated: true,
-    });
+    const metadata = await createQuickWorktree(projectRef, { preferredName });
 
     resolvePendingDraftWorktreeRequest(pendingRequestId, metadata.path);
     useSessionUIStore.getState().overrideNewSessionDraftTarget({
@@ -252,18 +268,16 @@ const createInstantWorktreeDraft = async (options?: {
       preserveDirectoryOverride: true,
       title: options?.title,
       initialPrompt: options?.initialPrompt,
-    });
-    useDirectoryStore.getState().setDirectory(metadata.path, { showOverlay: false });
+    }, draft);
 
     return metadata.path;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create worktree';
-    const requestId = useSessionUIStore.getState().newSessionDraft.pendingWorktreeRequestId;
-    if (requestId) {
-      rejectPendingDraftWorktreeRequest(requestId, error instanceof Error ? error : new Error(message));
-      useSessionUIStore.getState().resolvePendingDraftWorktreeTarget(requestId, null);
+    rejectPendingDraftWorktreeRequest(pendingRequestId, error instanceof Error ? error : new Error(message));
+    useSessionUIStore.getState().resolvePendingDraftWorktreeTarget(pendingRequestId, null);
+    if (capturedDraft) {
+      useSessionUIStore.getState().setDraftBootstrapPendingDirectory(null, capturedDraft);
     }
-    useSessionUIStore.getState().setDraftBootstrapPendingDirectory(null);
     toast.error('Failed to create worktree', {
       description: message,
     });

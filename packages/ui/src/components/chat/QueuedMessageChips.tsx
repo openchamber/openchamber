@@ -102,7 +102,7 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit, onSend }: QueuedMe
 QueuedMessageChip.displayName = 'QueuedMessageChip';
 
 interface QueuedMessageChipsProps {
-    onEditMessage: (content: string, attachments?: QueuedMessage['attachments']) => void;
+    onEditMessage: (message: QueuedMessage, sessionId: string) => void;
     onSendMessage: (messageId: string) => void;
 }
 
@@ -145,7 +145,7 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
                 const currentAttachments = useInputStore.getState().attachedFiles;
                 useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
             }
-            onEditMessage(popped.content, popped.attachments);
+            onEditMessage(popped, currentSessionId);
         }
     }, [currentSessionId, popToInput, onEditMessage]);
 

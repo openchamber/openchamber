@@ -6,6 +6,7 @@ import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleConfigBridgeMessage } from './bridge-config-runtime';
 import { handleSystemBridgeMessage } from './bridge-system-runtime';
 import { handleProxyBridgeMessage } from './bridge-proxy-runtime';
+import { handlePermissionAutoAcceptBridgeMessage } from './bridge-permission-auto-accept-runtime';
 import {
   fetchOpenCodeSkillsFromApi,
   persistSettings,
@@ -63,6 +64,18 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
   const { id, type, payload } = message;
 
   try {
+    const permissionAutoAcceptResponse = await handlePermissionAutoAcceptBridgeMessage(
+      { id, type, payload },
+      ctx?.context,
+      {
+        broadcast: (snapshot) => vscode.commands.executeCommand(
+          'openchamber.internal.permissionAutoAcceptSynced',
+          snapshot,
+        ),
+      },
+    );
+    if (permissionAutoAcceptResponse) return permissionAutoAcceptResponse;
+
     const standardGitResponse = await handleStandardGitBridgeMessage({ id, type, payload });
     if (standardGitResponse) {
       return standardGitResponse;

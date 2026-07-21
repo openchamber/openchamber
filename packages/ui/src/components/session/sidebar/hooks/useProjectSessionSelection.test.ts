@@ -183,13 +183,46 @@ describe('useProjectSessionSelection — worktree session click race', () => {
     expect(projectMap?.has('wt-session-1')).toBe(true);
   });
 
-  test('preserves an unknown stale worktree session while metadata catches up', () => {
+  test('selects Project B remembered session when a stale unknown session is authoritatively owned by Project A', () => {
+    const projectBMap = new Map([
+      ['project-b-first-session', null],
+      ['project-b-remembered-session', null],
+    ]);
+
+    expect(resolveMissingProjectSessionSelection({
+      activeProjectId: 'project-b',
+      currentSessionId: 'stale-worktree-session-a',
+      currentSessionOwnerProjectId: 'project-a',
+      projectMap: projectBMap,
+      metaByProject: new Map([['project-b', projectBMap]]),
+      rememberedSessionId: 'project-b-remembered-session',
+      fallbackSessionId: 'project-b-first-session',
+    })).toEqual({ kind: 'select-session', sessionId: 'project-b-remembered-session' });
+  });
+
+  test('preserves an unknown session when its authoritative owner is the active project', () => {
     const projectMap = new Map([['root-session-1', null]]);
     const metaByProject = new Map([['project-1', projectMap]]);
 
     expect(resolveMissingProjectSessionSelection({
       activeProjectId: 'project-1',
       currentSessionId: 'wt-session-1',
+      currentSessionOwnerProjectId: 'project-1',
+      projectMap,
+      metaByProject,
+      rememberedSessionId: undefined,
+      fallbackSessionId: 'root-session-1',
+    })).toEqual({ kind: 'preserve-current' });
+  });
+
+  test('preserves an unknown session through rendered-map compatibility when its owner is unknown', () => {
+    const projectMap = new Map([['root-session-1', null]]);
+    const metaByProject = new Map([['project-1', projectMap]]);
+
+    expect(resolveMissingProjectSessionSelection({
+      activeProjectId: 'project-1',
+      currentSessionId: 'wt-session-1',
+      currentSessionOwnerProjectId: null,
       projectMap,
       metaByProject,
       rememberedSessionId: undefined,

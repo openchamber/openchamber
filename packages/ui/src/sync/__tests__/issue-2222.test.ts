@@ -13,12 +13,65 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 // -- Mocks ------------------------------------------------------------------
 
 const optimisticSendCalls: Array<{ sessionId: string; directory?: string }> = [];
+const optimisticSendAgents: Array<string | undefined> = [];
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null }> = [];
 const folderAssignmentCalls: Array<{ directory: string; folderId: string; sessionId: string }> = [];
+type ActiveConfig = {
+  directory: string | null;
+  providerID: string | null;
+  modelID: string | null;
+  agent: string | null;
+};
+const configByDirectory: Record<string, Omit<ActiveConfig, "directory">> = {
+  "/projects/alpha": {
+    providerID: "provider-alpha",
+    modelID: "model-alpha",
+    agent: "agent-alpha",
+  },
+  "/projects/beta": {
+    providerID: "provider-beta",
+    modelID: "model-beta",
+    agent: "agent-beta",
+  },
+};
+const configActivationCalls: Array<string | null> = [];
+let activeConfig: ActiveConfig = {
+  directory: null,
+  providerID: null,
+  modelID: null,
+  agent: null,
+};
+let pendingConfigActivation: { directory: string | null; completion: Promise<void> } | null = null;
+const activateDirectory = async (directory: string | null | undefined) => {
+  const normalizedDirectory = directory ?? null;
+  const config = normalizedDirectory ? configByDirectory[normalizedDirectory] : undefined;
+  configActivationCalls.push(normalizedDirectory);
+  const pending = pendingConfigActivation;
+  if (pending?.directory === normalizedDirectory) {
+    await pending.completion;
+  }
+  activeConfig = {
+    directory: normalizedDirectory,
+    providerID: config?.providerID ?? null,
+    modelID: config?.modelID ?? null,
+    agent: config?.agent ?? null,
+  };
+};
+const defaultSelectionCalls: Array<{ projectDefaultModel?: string }> = [];
+const applyDefaultModelAgentSelection = (options: { projectDefaultModel?: string }) => {
+  defaultSelectionCalls.push(options);
+};
+let mockProjects: Array<{ id: string; path: string; defaultModel?: string }> = [];
+let mockActiveProjectId: string | null = null;
 let pendingCreateSession: {
   completion: Promise<void>;
   signalStarted: () => void;
 } | null = null;
+let armedGoal = { armed: false, objectiveOverride: null as string | null };
+let goalConsumeCalls = 0;
+const setSessionGoalCalls: Array<{ sessionId: string; directory: string | undefined; objective: string }> = [];
+let currentConfigAgentName: string | null = "agent-default";
+let sessionAgentSelection: string | null = null;
 
 mock.module("zustand", () => ({
   create:
@@ -95,10 +148,10 @@ mock.module("@/stores/permissionStore", () => ({
 mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
     getState: () => ({
-      currentAgentName: "agent-default",
+      currentAgentName: currentConfigAgentName,
       agents: [],
-      activateDirectory: mock(() => Promise.resolve()),
-      applyDefaultModelAgentSelection: mock(() => undefined),
+      activateDirectory,
+      applyDefaultModelAgentSelection,
     }),
   },
 }));
@@ -106,9 +159,9 @@ mock.module("@/stores/useConfigStore", () => ({
 mock.module("@/stores/useProjectsStore", () => ({
   useProjectsStore: {
     getState: () => ({
-      projects: [],
-      activeProjectId: null,
-      getActiveProject: () => null,
+      projects: mockProjects,
+      activeProjectId: mockActiveProjectId,
+      getActiveProject: () => mockProjects.find((project) => project.id === mockActiveProjectId) ?? null,
     }),
   },
 }));
@@ -161,10 +214,27 @@ mock.module("@/stores/useSkillsStore", () => ({
 mock.module("@/stores/useSessionGoalArmStore", () => ({
   useSessionGoalArmStore: {
     getState: () => ({
-      consume: () => ({ armed: false, objectiveOverride: null }),
+      consume: () => {
+        goalConsumeCalls += 1;
+        const goal = armedGoal;
+        if (goal.armed) {
+          armedGoal = { armed: false, objectiveOverride: null };
+        }
+        return goal;
+      },
     }),
     subscribe: () => () => undefined,
   },
+}));
+
+mock.module("@/lib/sessionGoalActions", () => ({
+  setSessionGoal: mock(async (
+    sessionId: string,
+    directory: string | undefined,
+    input: { objective: string },
+  ) => {
+    setSessionGoalCalls.push({ sessionId, directory, objective: input.objective });
+  }),
 }));
 
 mock.module("@/components/ui", () => ({
@@ -182,7 +252,7 @@ mock.module("../selection-store", () => ({
       saveSessionAgentSelection: () => undefined,
       saveAgentModelForSession: () => undefined,
       saveAgentModelVariantForSession: () => undefined,
-      getSessionAgentSelection: () => null,
+      getSessionAgentSelection: () => sessionAgentSelection,
       getSessionModelSelection: () => null,
       getAgentModelForSession: () => null,
       getAgentModelVariantForSession: () => undefined,
@@ -279,8 +349,9 @@ mock.module("../session-actions", () => ({
   updateSessionTitle: mock(async () => undefined),
   shareSession: mock(async () => undefined),
   unshareSession: mock(async () => undefined),
-  optimisticSend: mock(async (params: { sessionId: string; directory?: string }) => {
+  optimisticSend: mock(async (params: { sessionId: string; directory?: string; agent?: string }) => {
     optimisticSendCalls.push({ sessionId: params.sessionId, directory: params.directory });
+    optimisticSendAgents.push(params.agent);
     return;
   }),
   refetchSessionMessages: mock(async () => undefined),
@@ -332,14 +403,32 @@ mock.module("@/stores/useSnippetsStore", () => ({
   },
 }));
 
-const { useSessionUIStore } = await import("../session-ui-store");
+const { materializeOpenDraftSession, useSessionUIStore } = await import("../session-ui-store");
+const { createPendingDraftWorktreeRequest, resolvePendingDraftWorktreeRequest } = await import("@/lib/worktrees/pendingDraftWorktree");
 
 describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
   beforeEach(() => {
     optimisticSendCalls.length = 0;
+    optimisticSendAgents.length = 0;
     createSessionCalls.length = 0;
     folderAssignmentCalls.length = 0;
     pendingCreateSession = null;
+    pendingConfigActivation = null;
+    configActivationCalls.length = 0;
+    defaultSelectionCalls.length = 0;
+    setSessionGoalCalls.length = 0;
+    goalConsumeCalls = 0;
+    armedGoal = { armed: false, objectiveOverride: null };
+    currentConfigAgentName = "agent-default";
+    sessionAgentSelection = null;
+    mockProjects = [];
+    mockActiveProjectId = null;
+    activeConfig = {
+      directory: null,
+      providerID: null,
+      modelID: null,
+      agent: null,
+    };
 
     useSessionUIStore.setState({
       currentSessionId: null,
@@ -355,7 +444,6 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
       pendingChangesBarDismissed: new Map(),
     });
 
-    // Goal arm store is already in its default state (armed: false) via mock
   });
 
   // ---------------------------------------------------------------------------
@@ -472,6 +560,68 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
     // Assert: message is routed to session-a (the captured target)
     expect(optimisticSendCalls).toHaveLength(1);
     expect(optimisticSendCalls[0].sessionId).toBe("session-a");
+  });
+
+  test("explicit A routing context preserves its directory and captured-null agent after B is selected", async () => {
+    useSessionUIStore.getState().setCurrentSession("session-a", "/projects/alpha");
+    currentConfigAgentName = null;
+
+    useSessionUIStore.getState().setCurrentSession("session-b", "/projects/beta");
+    currentConfigAgentName = "agent-beta";
+
+    await useSessionUIStore.getState().sendMessage(
+      "message from A",
+      "provider-a",
+      "model-a",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "normal",
+      {
+        sessionId: "session-a",
+        sessionDirectory: "/projects/alpha",
+        sessionAgent: null,
+        goalArm: { armed: false, objectiveOverride: null },
+      },
+    );
+
+    expect(optimisticSendCalls).toEqual([{
+      sessionId: "session-a",
+      directory: "/projects/alpha",
+    }]);
+    expect(optimisticSendAgents).toEqual([undefined]);
+  });
+
+  test("explicit A goal arm does not consume a newly armed B goal", async () => {
+    useSessionUIStore.getState().setCurrentSession("session-a", "/projects/alpha");
+    useSessionUIStore.getState().setCurrentSession("session-b", "/projects/beta");
+    armedGoal = { armed: true, objectiveOverride: "B objective" };
+
+    await useSessionUIStore.getState().sendMessage(
+      "message from A",
+      "provider-a",
+      "model-a",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "normal",
+      {
+        sessionId: "session-a",
+        goalArm: { armed: true, objectiveOverride: "A objective" },
+      },
+    );
+
+    expect(goalConsumeCalls).toBe(0);
+    expect(armedGoal).toEqual({ armed: true, objectiveOverride: "B objective" });
+    expect(setSessionGoalCalls).toEqual([{
+      sessionId: "session-a",
+      directory: undefined,
+      objective: "A objective",
+    }]);
   });
 
   // ---------------------------------------------------------------------------
@@ -632,6 +782,170 @@ describe("Issue #2222 — sendMessage reads live currentSessionId", () => {
     expect(optimisticSendCalls.some((call) => call.sessionId === "session-b")).toBe(false);
     expect(useSessionUIStore.getState().currentSessionId).toBe("session-b");
     expect(useSessionUIStore.getState().currentSessionDirectory).toBe("/projects/beta");
+  });
+
+  test("does not let captured draft A activate its config after newer draft B takes over", async () => {
+    let markCreateSessionStarted!: () => void;
+    let resumeCreateSession!: () => void;
+    const createSessionStarted = new Promise<void>((resolve) => {
+      markCreateSessionStarted = resolve;
+    });
+    const createSessionPaused = new Promise<void>((resolve) => {
+      resumeCreateSession = resolve;
+    });
+    pendingCreateSession = {
+      completion: createSessionPaused,
+      signalStarted: markCreateSessionStarted,
+    };
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: "/projects/alpha",
+    });
+    const capturedDraft = useSessionUIStore.getState().newSessionDraft;
+
+    const materialization = materializeOpenDraftSession(
+      {
+        providerID: "provider-alpha",
+        modelID: "model-alpha",
+        agent: "agent-alpha",
+      },
+      capturedDraft,
+    );
+
+    await createSessionStarted;
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: "/projects/beta",
+    });
+    expect(activeConfig).toEqual({
+      directory: "/projects/beta",
+      providerID: "provider-beta",
+      modelID: "model-beta",
+      agent: "agent-beta",
+    });
+
+    resumeCreateSession();
+    await materialization;
+    pendingCreateSession = null;
+
+    expect(configActivationCalls).toEqual(["/projects/alpha", "/projects/beta"]);
+    expect(activeConfig).toEqual({
+      directory: "/projects/beta",
+      providerID: "provider-beta",
+      modelID: "model-beta",
+      agent: "agent-beta",
+    });
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true);
+    expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe("/projects/beta");
+  });
+
+  test("does not let stale config defaults from draft A reset draft B", async () => {
+    let resumeAlphaActivation!: () => void;
+    const alphaActivationPaused = new Promise<void>((resolve) => {
+      resumeAlphaActivation = resolve;
+    });
+    pendingConfigActivation = {
+      directory: "/projects/alpha",
+      completion: alphaActivationPaused,
+    };
+    mockProjects = [
+      { id: "project-alpha", path: "/projects/alpha", defaultModel: "provider-alpha/model-alpha" },
+      { id: "project-beta", path: "/projects/beta", defaultModel: "provider-beta/model-beta" },
+    ];
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      selectedProjectId: "project-alpha",
+      directoryOverride: "/projects/alpha",
+    });
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      selectedProjectId: "project-beta",
+      directoryOverride: "/projects/beta",
+    });
+    const draftB = useSessionUIStore.getState().newSessionDraft;
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(defaultSelectionCalls).toEqual([
+      { projectDefaultModel: "provider-beta/model-beta" },
+    ]);
+
+    resumeAlphaActivation();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(defaultSelectionCalls).toEqual([
+      { projectDefaultModel: "provider-beta/model-beta" },
+    ]);
+    expect(useSessionUIStore.getState().newSessionDraft.draftToken).toBe(draftB.draftToken);
+    expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe("/projects/beta");
+  });
+
+  test("guarded draft target and bootstrap mutations ignore stale A and refine live B", () => {
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: "/projects/alpha",
+      bootstrapPendingDirectory: "/projects/alpha-preview",
+    });
+    const draftA = useSessionUIStore.getState().newSessionDraft;
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: "/projects/beta",
+      bootstrapPendingDirectory: "/projects/beta-preview",
+    });
+    const draftB = useSessionUIStore.getState().newSessionDraft;
+
+    useSessionUIStore.getState().overrideNewSessionDraftTarget({
+      directoryOverride: "/projects/alpha-worktree",
+      bootstrapPendingDirectory: "/projects/alpha-worktree",
+    }, draftA);
+    useSessionUIStore.getState().setDraftBootstrapPendingDirectory(null, draftA);
+
+    expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe("/projects/beta");
+    expect(useSessionUIStore.getState().newSessionDraft.bootstrapPendingDirectory).toBe("/projects/beta-preview");
+
+    useSessionUIStore.getState().overrideNewSessionDraftTarget({
+      directoryOverride: "/projects/beta-worktree",
+      bootstrapPendingDirectory: "/projects/beta-worktree",
+    }, draftB);
+    useSessionUIStore.getState().setDraftBootstrapPendingDirectory("/projects/beta-ready", draftB);
+
+    expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe("/projects/beta-worktree");
+    expect(useSessionUIStore.getState().newSessionDraft.bootstrapPendingDirectory).toBe("/projects/beta-ready");
+    expect(useSessionUIStore.getState().newSessionDraft.draftToken).toBe(draftB.draftToken);
+  });
+
+  test("pending worktree refinement materializes the same logical draft", async () => {
+    const requestId = createPendingDraftWorktreeRequest();
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: "/projects/alpha",
+      pendingWorktreeRequestId: requestId,
+    });
+    const capturedDraft = useSessionUIStore.getState().newSessionDraft;
+
+    const materialization = materializeOpenDraftSession(
+      {
+        providerID: "provider-alpha",
+        modelID: "model-alpha",
+        agent: "agent-alpha",
+      },
+      capturedDraft,
+    );
+
+    resolvePendingDraftWorktreeRequest(requestId, "/projects/alpha-worktree");
+    const created = await materialization;
+
+    expect(created?.sessionId).toBe("ses_materialized_2222");
+    expect(createSessionCalls).toEqual([
+      {
+        title: undefined,
+        directory: "/projects/alpha-worktree",
+        parentID: null,
+      },
+    ]);
+    expect(configActivationCalls).toEqual(["/projects/alpha", "/projects/alpha-worktree"]);
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(false);
+    expect(useSessionUIStore.getState().currentSessionId).toBe("ses_materialized_2222");
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe("/projects/alpha-worktree");
   });
 
   test("draftSnapshot materialization preserves an unrelated newer draft", async () => {

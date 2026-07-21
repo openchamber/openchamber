@@ -3,6 +3,8 @@ import { devtools, persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { updateDesktopSettings } from '@/lib/persistence';
+import type { SyntheticContextPart } from '@/sync/input-store';
+import type { SessionGoalArm } from './useSessionGoalArmStore';
 
 export type FollowUpBehavior = 'steer' | 'queue';
 
@@ -42,6 +44,14 @@ export interface QueuedMessage {
     id: string;
     content: string;
     attachments?: AttachedFile[];
+    /** Synthetic context captured with this message's composer transaction. */
+    syntheticParts?: SyntheticContextPart[];
+    /** Goal arm captured with this message's composer transaction. */
+    goalArm?: SessionGoalArm;
+    /** Captured session directory; absent on legacy queue records. */
+    sessionDirectory?: string | null;
+    /** Captured session agent; explicit null suppresses live-config fallback. */
+    sessionAgent?: string | null;
     createdAt: number;
     /** Send config captured at queue time — used as-is when auto-sending */
     sendConfig?: {
@@ -89,6 +99,10 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         id,
                         content: message.content,
                         attachments: message.attachments,
+                        syntheticParts: message.syntheticParts,
+                        goalArm: message.goalArm,
+                        ...(message.sessionDirectory !== undefined ? { sessionDirectory: message.sessionDirectory } : {}),
+                        ...(message.sessionAgent !== undefined ? { sessionAgent: message.sessionAgent } : {}),
                         createdAt: Date.now(),
                         sendConfig: message.sendConfig,
                     };

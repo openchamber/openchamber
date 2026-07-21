@@ -387,7 +387,7 @@ export function ScheduledTasksDialog() {
           }
         }}
       >
-        <SelectTrigger className={isMobile ? 'w-full' : undefined}>
+        <SelectTrigger size="lg" className={isMobile ? 'w-full' : undefined}>
           {selectedProject ? (
             <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
           ) : (
@@ -414,7 +414,7 @@ export function ScheduledTasksDialog() {
   const tasksContent = (
     <div className="space-y-4">
       {!isMobile ? (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           {projectSelector}
           <Button onClick={openNewTaskEditor} disabled={!selectedProjectID}>
             <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}

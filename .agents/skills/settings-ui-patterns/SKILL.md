@@ -15,54 +15,74 @@ When examples conflict, shared component/theme and localization contracts win. S
 
 ## Canonical Direction
 
-- Prefer flat hierarchy built with spacing and typography.
-- Avoid unnecessary cards, wrappers, row chrome, and redundant headings.
-- Keep controls compact and align related rows consistently.
-- Put checkbox/radio state before labels.
-- Use subtle, stable selected-state styling without layout shifts.
-- Preserve responsive wrapping/stacking and long-text behavior.
+Settings are built from the shared primitives in
+`packages/ui/src/components/sections/shared/SettingsSection.tsx`,
+`SettingsPageLayout.tsx`, and `SettingsInfoHint.tsx`. Never hand-roll page
+chrome, section headers, field rows, checkbox rows, or info tooltips with raw
+divs — use the primitives, and extend them (in the shared file) when a new
+shape is genuinely missing.
+
+- Flat hierarchy through spacing and typography; no cards, boxed backgrounds, or row chrome.
+- Secondary helper text is hidden behind an info icon (`info` prop); the default view stays quiet.
+- Controls have one standard size (`h-9` / select `size="settings"`) and capped widths — no full-bleed inputs.
+- Layouts respond to the settings pane width via container queries (`@xl:` / `@3xl:`), never viewport `sm:`/`lg:` breakpoints (the pane is much narrower than the viewport inside the dialog).
+- Checkbox/radio state comes before labels; selected states are subtle and never shift layout.
 
 ## Load References By Task
 
 | Task | Required reference |
 |---|---|
-| Page hierarchy, typography, spacing, columns, responsive grids | `references/layout.md` |
-| Chips, radios, checkboxes, numeric overrides, inputs, icon actions, pickers | `references/controls.md` |
+| Page skeleton, sections, hierarchy, nav placement, spacing, columns, responsiveness | `references/layout.md` |
+| Field rows, checkboxes, radios, chips, selects, inputs, numeric steppers, info hints | `references/controls.md` |
 | Adding/moving controls, pages, availability, anchors, or search entries | `references/search.md` |
 
 Load every matching reference before editing.
 
-## Quick Control Selection
+## Quick Primitive Selection
 
-| Need | Shared pattern |
+| Need | Shared primitive |
 |---|---|
-| Short selectable options | `Button variant="chip" size="xs"` + `aria-pressed` |
-| Mutually exclusive mode list | `Radio` rows |
-| Boolean | `Checkbox` |
-| Numeric value/override | `NumberInput` |
-| Text/path | `Input` with shared adjacent actions |
-| Icon-only action | `Button size="icon"` + sprite `Icon` + localized `aria-label` |
+| Page wrapper (title, description, save status, scrolling, `@container`) | `SettingsPageLayout` |
+| Titled block with divider | `SettingsSection` (`divider={false}` for the first one) |
+| Label left / control right | `SettingsFieldRow` |
+| Label above control (two-column cells, wide controls) | `SettingsStackedField` |
+| Boolean | `SettingsCheckboxRow` |
+| Mutually exclusive list | `SettingsRadioGroup` + `SettingsRadioOption` |
+| Short segmented options | `SettingsChipGroup` |
+| Sub-cluster with a quiet L3 title inside a section | `SettingsControlGroup` |
+| Two-column area on wide panes | `SettingsTwoColumn` |
+| Helper text on demand (hover + tap) | `info` prop or `SettingsInfoHint` |
 
-Do not introduce `ButtonSmall`, direct Remixicon components, hardcoded user-facing strings, or one-off color/button systems.
+Do not introduce raw `<Tooltip>`-based info icons, direct Remixicon components, hardcoded user-facing strings, or one-off color/button systems. New icons: reference a Remix icon name in code, then run `bun run icons:generate` to add it to the sprite.
+
+## Description Policy (info hints)
+
+- Explanatory prose (what a feature does, when it applies) goes behind the info icon via the `info` prop — never as always-visible `description`.
+- Stays visible: security/data-loss warnings, destructive consequences, required syntax/placeholder lists the user reads while typing, dynamic status, empty states, validation errors, active-flow wizard instructions.
+- Mixed text: keep the warning sentence visible, move the explanation to `info`.
+
+## Save Feedback
+
+`SettingsPageLayout showSaveStatus` renders the shared quiet indicator: success is silent, "Saving…" appears only past ~500 ms, failures show "Save failed". Anything persisted through `updateDesktopSettings` reports automatically; page-specific APIs must call `reportSettingsSaveState` from `@/lib/persistence`. Never add per-page save badges or success toasts for ordinary setting writes.
 
 ## Settings Search Contract
 
 Every stable Settings control addition or move must consider search in the same change:
 
 - explicit registry item in `packages/ui/src/lib/settings/search.ts` when searchable;
-- matching `data-settings-item` anchor;
+- matching `data-settings-item` anchor (primitives accept `settingsItem`);
 - localized title/description keys;
 - availability matching actual render conditions;
-- state preparation before highlighting conditional targets.
+- when a control moves to another page, update the item's `page` too.
 
 Dynamic entity rows normally are not indexed. Load `references/search.md` for exact rules.
 
 ## Review Checklist
 
-- Hierarchy reads through spacing and typography without unnecessary boxes.
-- Shared controls are used with localized visible/accessibility text.
-- Desktop alignment degrades cleanly on narrow/mobile layouts.
-- Disabled state affects the control, not unrelated labels, unless intentional.
-- Long labels and adjacent actions do not overflow.
-- Search registry, anchor, localization, and availability agree.
+- Built from shared primitives; no ad-hoc page/section/row markup.
+- Explanatory text hidden behind `info`; warnings/syntax/status still visible.
+- Container-query (`@xl:`/`@3xl:`) responsiveness — no viewport breakpoints in pane content.
+- Controls use the standard size and width caps; no stretched full-width inputs.
+- Localized visible and accessibility text everywhere.
+- Search registry, anchor, page, localization, and availability agree.
 - Nearby Settings precedent and relevant tests remain consistent.

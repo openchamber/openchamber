@@ -9,6 +9,7 @@
 - Active/hover row styling is text-first; selected sessions use primary text instead of background fills.
 - Archived groups are collapsed by default and support bulk deletion at group/folder level.
 - Session rows support compact inline dates in minimal mode and simplified metadata in default mode.
+- Root session menus can quickly create a worktree from the session directory's current branch and move the full session subtree there while idle.
 - New extractions in latest pass reduced local effect/callback bulk further:
   - project session list builders
   - folder cleanup sync

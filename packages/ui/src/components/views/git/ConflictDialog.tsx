@@ -39,7 +39,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   const { t } = useI18n();
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const setPendingInputText = useInputStore((state) => state.setPendingInputText);
+  const setPendingInputTextForSession = useInputStore((state) => state.setPendingInputTextForSession);
   const setPendingSyntheticParts = useInputStore((state) => state.setPendingSyntheticParts);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
 
@@ -119,25 +119,28 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   };
 
   const handleResolveInCurrentSession = async () => {
+    const targetSessionId = currentSessionId;
+    if (!targetSessionId) {
+      toast.error(t('gitView.conflict.noActiveSession'), { description: t('gitView.conflict.noActiveSessionDescription') });
+      return;
+    }
+
     const context = await buildConflictContext();
     if (!context) {
       toast.error(t('gitView.conflict.noDetailsAvailable'));
       return;
     }
 
-    if (!currentSessionId) {
-      toast.error(t('gitView.conflict.noActiveSession'), { description: t('gitView.conflict.noActiveSessionDescription') });
-      return;
-    }
-
     // Set the visible text in the input and the synthetic parts for when user sends
-    setPendingInputText(context.visibleText, 'replace');
-    setPendingSyntheticParts([
+    setPendingInputTextForSession(targetSessionId, context.visibleText, 'replace');
+    setPendingSyntheticParts(targetSessionId, [
       { text: context.instructionsText, synthetic: true },
       { text: context.payloadText, synthetic: true },
     ]);
 
-    setActiveMainTab('chat');
+    if (useSessionUIStore.getState().currentSessionId === targetSessionId) {
+      setActiveMainTab('chat');
+    }
     onClearState?.();
     onOpenChange(false);
   };

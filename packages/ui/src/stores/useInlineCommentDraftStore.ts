@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
-export type InlineCommentSource = 'diff' | 'plan' | 'file' | 'preview-console' | 'preview-annotation';
+export type InlineCommentSource = 'diff' | 'plan' | 'file' | 'preview-console' | 'preview-annotation' | 'terminal';
 
 export interface InlineCommentDraft {
   id: string;
@@ -29,6 +29,7 @@ interface InlineCommentDraftActions {
   clearDrafts: (sessionKey: string) => void;
   getDrafts: (sessionKey: string) => InlineCommentDraft[];
   consumeDrafts: (sessionKey: string) => InlineCommentDraft[];
+  restoreDrafts: (sessionKey: string, drafts: InlineCommentDraft[]) => void;
   getDraftCount: (sessionKey: string) => number;
   hasDrafts: (sessionKey: string) => boolean;
 }
@@ -36,7 +37,7 @@ interface InlineCommentDraftActions {
 type InlineCommentDraftStore = InlineCommentDraftState & InlineCommentDraftActions;
 
 const isValidSource = (value: unknown): value is InlineCommentSource =>
-  value === 'diff' || value === 'plan' || value === 'file' || value === 'preview-console' || value === 'preview-annotation';
+  value === 'diff' || value === 'plan' || value === 'file' || value === 'preview-console' || value === 'preview-annotation' || value === 'terminal';
 
 const isValidSide = (value: unknown): value is 'original' | 'modified' =>
   value === 'original' || value === 'modified';
@@ -62,6 +63,8 @@ const sanitizeDraft = (input: unknown): InlineCommentDraft | null => {
     ? draft.id
     : `icd-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
+  const code = typeof draft.code === 'string' ? draft.code : '';
+  if (draft.source === 'terminal' && !code.trim()) return null;
   return {
     id,
     sessionKey: draft.sessionKey,
@@ -70,7 +73,7 @@ const sanitizeDraft = (input: unknown): InlineCommentDraft | null => {
     startLine,
     endLine,
     side: isValidSide(draft.side) ? draft.side : undefined,
-    code: typeof draft.code === 'string' ? draft.code : '',
+    code,
     language: typeof draft.language === 'string' ? draft.language : 'text',
     text: typeof draft.text === 'string' ? draft.text : '',
     createdAt: Number.isFinite(draft.createdAt) ? Number(draft.createdAt) : Date.now(),
@@ -106,6 +109,7 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
         drafts: {},
 
         addDraft: (draft) => {
+          if (draft.source === 'terminal' && !draft.code.trim()) return;
           const id = `icd-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
           const newDraft: InlineCommentDraft = {
             ...draft,
@@ -115,6 +119,9 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
 
           set((state) => {
             const currentDrafts = state.drafts[draft.sessionKey] ?? [];
+            if (draft.source === 'terminal' && currentDrafts.some((current) => current.source === 'terminal' && current.fileLabel === draft.fileLabel && current.startLine === draft.startLine && current.endLine === draft.endLine && current.code === draft.code)) {
+              return state;
+            }
             return {
               drafts: {
                 ...state.drafts,
@@ -195,6 +202,22 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
           });
 
           return sortedDrafts;
+        },
+
+        restoreDrafts: (sessionKey, drafts) => {
+          if (drafts.length === 0) return;
+          set((state) => {
+            const current = state.drafts[sessionKey] ?? [];
+            const currentIds = new Set(current.map((draft) => draft.id));
+            const restored = drafts.filter((draft) => draft.sessionKey === sessionKey && !currentIds.has(draft.id));
+            if (restored.length === 0) return state;
+            return {
+              drafts: {
+                ...state.drafts,
+                [sessionKey]: [...restored, ...current].sort((a, b) => a.createdAt - b.createdAt),
+              },
+            };
+          });
         },
 
         getDraftCount: (sessionKey) => {
