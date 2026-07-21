@@ -2,8 +2,8 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { canonicalWorkspaceLabelID } from '@openchamber/opencode-workspace-plugin/label-id';
-import { SECURE_DOCKER_NETWORK } from '@openchamber/opencode-workspace-plugin/policy';
+import { canonicalWorkspaceLabelID } from '@openchamber/opencode-container-workspace/label-id';
+import { SECURE_APPLE_CONTAINER_NETWORK, SECURE_DOCKER_NETWORK } from '@openchamber/opencode-container-workspace/policy';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 const spawnMock = vi.fn();
@@ -113,6 +113,7 @@ describe('workspace routes', () => {
     expect(entry.spec).toBe('/real/plugin/src/plugin.js');
     expect(entry.options.defaultProvider).toBe('docker');
     expect(entry.options.docker).toEqual({ networkMode: SECURE_DOCKER_NETWORK, allowedNetworks: [] });
+    expect(entry.options.appleContainer).toEqual({ networkMode: SECURE_APPLE_CONTAINER_NETWORK });
     expect(entry.options.kubernetes.networkPolicy).toBe('default-deny');
     expect(entry.options.egress).toEqual({
       httpProxy: 'http://proxy.openchamber:3128',
@@ -187,6 +188,39 @@ describe('workspace routes', () => {
     expect(deps.createPluginEntry).not.toHaveBeenCalled();
   });
 
+  it('treats Apple Container adapters as active secure workspace support', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const deps = createDependencies({
+      workspacePluginSpec: '/real/plugin/src/plugin.js',
+      listPluginEntries: vi.fn(() => [{ id: 'plugin-1', spec: '/real/plugin/src/plugin.js' }]),
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => [{ kind: 'apple-container' }] }));
+    registerWorkspaceRoutes(app, deps);
+
+    const res = createMockResponse();
+    await getRoute('GET', '/api/workspaces/compatibility')({ query: {} }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ configured: true, active: true, supported: true, adapterKinds: ['apple-container'] });
+  });
+
+  it('bounds workspace compatibility adapter probes', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const deps = createDependencies({ workspacePluginSpec: '/real/plugin/src/plugin.js' });
+    globalThis.fetch = vi.fn(async (_url, options) => {
+      options.signal.dispatchEvent(new Event('abort'));
+      throw new DOMException('aborted', 'AbortError');
+    });
+    registerWorkspaceRoutes(app, deps);
+
+    const res = createMockResponse();
+    await getRoute('GET', '/api/workspaces/compatibility')({ query: {} }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ active: false, supported: true, status: 'not-configured' });
+    expect(globalThis.fetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
   it('reports missing Docker egress during provider validation', async () => {
     const { app, getRoute } = createRouteRegistry();
     const deps = createDependencies({
@@ -241,6 +275,30 @@ describe('workspace routes', () => {
     expect(res.body.available).toBe(true);
   });
 
+  it('configures Apple Container as the default provider with explicit egress', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const deps = createDependencies({
+      workspacePluginSpec: '/real/plugin/src/plugin.js',
+      readSettingsFromDiskMigrated: vi.fn(async () => ({
+        secureWorkspacesEnabled: true,
+        secureWorkspacesDefaultProvider: 'apple-container',
+        secureWorkspacesImage: 'ghcr.io/openchamber/opencode-workspace:1.0.0',
+        secureWorkspacesEgressHttpProxy: 'http://127.0.0.1:3128',
+        secureWorkspacesEgressNoProxy: '127.0.0.1,localhost',
+      })),
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => [{ kind: 'apple-container' }] }));
+    registerWorkspaceRoutes(app, deps);
+
+    const res = createMockResponse();
+    await getRoute('POST', '/api/workspaces/configure')({ body: {} }, res);
+
+    expect(res.statusCode).toBe(200);
+    const entry = deps.createPluginEntry.mock.calls[0][0];
+    expect(entry.options.defaultProvider).toBe('apple-container');
+    expect(entry.options.appleContainer).toEqual({ networkMode: SECURE_APPLE_CONTAINER_NETWORK });
+  });
+
   it('rejects egress proxy URLs with embedded credentials', async () => {
     const { app, getRoute } = createRouteRegistry();
     const deps = createDependencies();
@@ -289,7 +347,7 @@ describe('workspace routes', () => {
       }),
       listPluginEntries: vi.fn(() => [{
         id: 'plugin-1',
-        spec: '/Applications/OpenChamber.app/Contents/Resources/app.asar/node_modules/@openchamber/opencode-workspace-plugin/src/plugin.js',
+        spec: '/Applications/OpenChamber.app/Contents/Resources/app.asar/node_modules/@openchamber/opencode-container-workspace/src/plugin.js',
       }]),
     });
     globalThis.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => [] }));
@@ -307,20 +365,20 @@ describe('workspace routes', () => {
   it('resolves an explicit plugin path override before module resolution', () => {
     expect(resolveWorkspacePluginSpec({
       env: { OPENCHAMBER_WORKSPACE_PLUGIN_PATH: '/custom/plugin.js' },
-      resolvedSpecUrl: 'file:///app/app.asar/node_modules/@openchamber/opencode-workspace-plugin/src/plugin.js',
+      resolvedSpecUrl: 'file:///app/app.asar/node_modules/@openchamber/opencode-container-workspace/src/plugin.js',
     })).toBe('/custom/plugin.js');
   });
 
   it('resolves app.asar plugin paths to unpacked Electron resources', () => {
     const resourcesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-workspaces-'));
-    const pluginPath = path.join(resourcesDir, 'opencode-workspace-plugin', 'src', 'plugin.js');
+    const pluginPath = path.join(resourcesDir, 'opencode-container-workspace', 'src', 'plugin.js');
     fs.mkdirSync(path.dirname(pluginPath), { recursive: true });
     fs.writeFileSync(pluginPath, 'export default {}\n');
     try {
       const resolved = resolveWorkspacePluginSpec({
         env: {},
         resourcesPath: resourcesDir,
-        resolvedSpecUrl: 'file:///Applications/OpenChamber.app/Contents/Resources/app.asar/node_modules/@openchamber/opencode-workspace-plugin/src/plugin.js',
+        resolvedSpecUrl: 'file:///Applications/OpenChamber.app/Contents/Resources/app.asar/node_modules/@openchamber/opencode-container-workspace/src/plugin.js',
       });
       expect(resolved).toBe(pluginPath);
     } finally {
@@ -427,6 +485,40 @@ describe('workspace routes', () => {
     expect(res.body).toMatchObject({ patch: 'diff --git a/new.txt b/new.txt\n', provider: 'kubernetes' });
     expect(res.body.exportID).toEqual(expect.any(String));
     expect(res.body.summary.files[0]).toMatchObject({ path: 'new.txt' });
+  });
+
+  it.each(['ws_1', 'ws:1/abc'])('exports Apple Container diffs for workspace ID %s using canonical labels', async (workspaceID) => {
+    const { app, getRoute } = createRouteRegistry();
+    const deps = createDependencies();
+    registerWorkspaceRoutes(app, deps);
+    const labelID = canonicalWorkspaceLabelID(workspaceID);
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => [{
+        id: workspaceID,
+        extra: {
+          provider: 'apple-container',
+          runtime: { container: 'openchamber-ws-1' },
+          policy: { appleContainer: { cli: '/usr/local/bin/container' } },
+          labels: {
+            'openchamber.managed': 'true',
+            'openchamber.workspace.provider': 'apple-container',
+            'openchamber.workspace.id': labelID,
+          },
+        },
+      }],
+    }));
+    spawnMock
+      .mockReturnValueOnce(createChild({ stdout: JSON.stringify([{ configuration: { labels: { 'openchamber.managed': 'true', 'openchamber.workspace.provider': 'apple-container', 'openchamber.workspace.id': labelID } } }]) }))
+      .mockReturnValueOnce(createChild({ stdout: 'diff --git a/new.txt b/new.txt\n' }));
+
+    const res = createMockResponse();
+    await getRoute('GET', '/api/workspaces/:id/export-diff')({ params: { id: workspaceID }, query: {} }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ patch: 'diff --git a/new.txt b/new.txt\n', provider: 'apple-container' });
+    expect(spawnMock.mock.calls[0][0]).toBe('/usr/local/bin/container');
+    expect(spawnMock.mock.calls[1][1]).toEqual(['exec', 'openchamber-ws-1', 'sh', '-lc', expect.stringContaining('git diff --binary HEAD')]);
   });
 
   it('rejects docker export when workspace metadata is missing managed ownership labels', async () => {

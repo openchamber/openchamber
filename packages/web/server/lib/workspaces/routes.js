@@ -4,17 +4,19 @@ import fs from 'node:fs';
 import { isIP } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canonicalWorkspaceLabelID } from '@openchamber/opencode-workspace-plugin/label-id';
-import { SECURE_DOCKER_NETWORK } from '@openchamber/opencode-workspace-plugin/policy';
+import { canonicalWorkspaceLabelID } from '@openchamber/opencode-container-workspace/label-id';
+import { SECURE_APPLE_CONTAINER_NETWORK, SECURE_DOCKER_NETWORK } from '@openchamber/opencode-container-workspace/policy';
 import { buildPatchFromSectionIDs, parseWorkspacePatchSections, summarizePatchSections } from './patch-sections.js';
 
 const MAX_PATCH_BYTES = 20 * 1024 * 1024;
 const EXPORT_ARTIFACT_TTL_MS = 30 * 60 * 1000;
 const EXPORT_ARTIFACT_MAX_COUNT = 20;
 const EXPORT_ARTIFACT_MAX_BYTES = 80 * 1024 * 1024;
-const WORKSPACE_PLUGIN_PACKAGE = '@openchamber/opencode-workspace-plugin';
-const WORKSPACE_PLUGIN_RESOURCE_PATH = path.join('opencode-workspace-plugin', 'src', 'plugin.js');
+const WORKSPACE_ADAPTER_PROBE_TIMEOUT_MS = 10_000;
+const WORKSPACE_PLUGIN_PACKAGE = '@openchamber/opencode-container-workspace';
+const WORKSPACE_PLUGIN_RESOURCE_PATH = path.join('opencode-container-workspace', 'src', 'plugin.js');
 const EXPORT_DIFF_COMMAND = 'tmp=$(mktemp); idx=$(git rev-parse --git-path index 2>/dev/null || true); if [ -n "$idx" ] && [ -f "$idx" ]; then cp "$idx" "$tmp"; fi; GIT_INDEX_FILE="$tmp" git add -N . >/dev/null 2>&1 || true; GIT_INDEX_FILE="$tmp" git diff --binary HEAD; code=$?; rm -f "$tmp"; exit $code';
+const SECURE_WORKSPACE_PROVIDERS = new Set(['docker', 'kubernetes', 'apple-container']);
 
 export function resolveWorkspacePluginSpec(options = {}) {
   const env = options.env ?? process.env;
@@ -156,7 +158,7 @@ class ExportArtifactCache {
 
 function createCompatibilityResult({ configured, spec, adapterProbe }) {
   const adapterKinds = adapterProbe.adapters.map((adapter) => adapter?.kind ?? adapter?.id ?? adapter?.type).filter(Boolean);
-  const active = adapterProbe.ok && adapterKinds.some((kind) => kind === 'docker' || kind === 'kubernetes');
+  const active = adapterProbe.ok && adapterKinds.some((kind) => SECURE_WORKSPACE_PROVIDERS.has(kind));
   return {
     configured,
     active,
@@ -225,20 +227,33 @@ function validateKubernetesEgress(settings) {
   for (const cidr of settings.egressDnsCIDRs) validateCIDR(cidr, 'Workspace egress DNS CIDR');
 }
 
-async function validateDocker(settings) {
-  validateDockerEgress(settings);
-  await run('docker', ['info'], { timeoutMs: 15_000 });
-  const version = await run('docker', ['version', '--format', '{{.Server.Version}}'], { timeoutMs: 15_000 }).catch(() => ({ stdout: '' }));
+function validateAppleContainerEgress(settings) {
+  if (!settings.egressHttpProxy) throw new Error('Apple Container secure workspaces require an egress HTTP proxy');
+  validateProxyUrl(settings.egressHttpProxy);
+}
+
+async function validateAppleContainer(settings, spawnCommand) {
+  validateAppleContainerEgress(settings);
+  const cli = process.env.OPENCHAMBER_WORKSPACE_APPLE_CONTAINER_CLI || 'container';
+  await run(cli, ['system', 'status'], { timeoutMs: 15_000, spawn: spawnCommand });
+  const version = await run(cli, ['--version'], { timeoutMs: 15_000, spawn: spawnCommand }).catch(() => ({ stdout: '' }));
   return { available: true, version: version.stdout.trim() || null };
 }
 
-async function validateKubernetes({ context, namespace }, settings) {
+async function validateDocker(settings, spawnCommand) {
+  validateDockerEgress(settings);
+  await run('docker', ['info'], { timeoutMs: 15_000, spawn: spawnCommand });
+  const version = await run('docker', ['version', '--format', '{{.Server.Version}}'], { timeoutMs: 15_000, spawn: spawnCommand }).catch(() => ({ stdout: '' }));
+  return { available: true, version: version.stdout.trim() || null };
+}
+
+async function validateKubernetes({ context, namespace }, settings, spawnCommand) {
   validateKubernetesEgress(settings);
   const base = context ? ['--context', context] : [];
   const targetNamespace = namespace || 'default';
-  await run('kubectl', [...base, 'version', '--client=true'], { timeoutMs: 15_000 });
+  await run('kubectl', [...base, 'version', '--client=true'], { timeoutMs: 15_000, spawn: spawnCommand });
   for (const [verb, resource] of requiredKubernetesPermissions()) {
-    const { stdout } = await run('kubectl', [...base, 'auth', 'can-i', verb, resource, '-n', targetNamespace], { timeoutMs: 15_000 });
+    const { stdout } = await run('kubectl', [...base, 'auth', 'can-i', verb, resource, '-n', targetNamespace], { timeoutMs: 15_000, spawn: spawnCommand });
     if (stdout.trim() !== 'yes') throw new Error(`Kubernetes RBAC denies ${verb} ${resource} in namespace ${targetNamespace}`);
   }
   return { available: true, context: context || null, namespace: targetNamespace };
@@ -275,9 +290,14 @@ function requiredKubernetesPermissions() {
 }
 
 function readWorkspaceSettings(settings) {
+  const defaultProvider = settings?.secureWorkspacesDefaultProvider === 'kubernetes'
+    ? 'kubernetes'
+    : settings?.secureWorkspacesDefaultProvider === 'apple-container'
+      ? 'apple-container'
+      : 'docker';
   return {
     enabled: settings?.secureWorkspacesEnabled === true,
-    defaultProvider: settings?.secureWorkspacesDefaultProvider === 'kubernetes' ? 'kubernetes' : 'docker',
+    defaultProvider,
     image: typeof settings?.secureWorkspacesImage === 'string' && settings.secureWorkspacesImage.trim()
       ? settings.secureWorkspacesImage.trim()
       : 'ghcr.io/openchamber/opencode-workspace:1.0.0',
@@ -308,6 +328,9 @@ function buildPluginOptions(settings) {
       networkMode: SECURE_DOCKER_NETWORK,
       allowedNetworks: [],
     },
+    appleContainer: {
+      networkMode: SECURE_APPLE_CONTAINER_NETWORK,
+    },
     egress: {
       httpProxy: settings.egressHttpProxy,
       proxyCIDR: settings.egressProxyCIDR,
@@ -322,7 +345,6 @@ function isWorkspacePluginEntry(entry, pluginSpec) {
     || entry?.spec === WORKSPACE_PLUGIN_PACKAGE
     || (typeof entry?.spec === 'string' && (
       entry.spec.includes('opencode-container-workspace')
-      || entry.spec.includes('opencode-workspace-plugin')
     ));
 }
 
@@ -370,6 +392,14 @@ async function exportWorkspaceDiff(workspace, spawnCommand) {
     ], { timeoutMs: 60_000, spawn: spawnCommand });
     return { patch: stdout, provider: 'kubernetes' };
   }
+  if (extra.provider === 'apple-container') {
+    const container = extra.runtime?.container;
+    if (!container) throw new Error('Apple Container workspace metadata is missing container name');
+    await verifyAppleContainerWorkspace(workspace, extra, spawnCommand);
+    const cli = extra.policy?.appleContainer?.cli || process.env.OPENCHAMBER_WORKSPACE_APPLE_CONTAINER_CLI || 'container';
+    const { stdout } = await run(cli, ['exec', container, 'sh', '-lc', EXPORT_DIFF_COMMAND], { timeoutMs: 60_000, spawn: spawnCommand });
+    return { patch: stdout, provider: 'apple-container' };
+  }
   throw new Error(`Unsupported workspace provider: ${extra.provider ?? '<unknown>'}`);
 }
 
@@ -391,6 +421,16 @@ async function verifyKubernetesWorkspace(workspace, extra, contextArgs, spawnCom
   const labels = JSON.parse(stdout)?.metadata?.labels ?? {};
   for (const [key, value] of Object.entries(extra.labels ?? {})) {
     if (labels[key] !== String(value)) throw new Error(`Kubernetes workspace label mismatch for ${key}`);
+  }
+}
+
+async function verifyAppleContainerWorkspace(workspace, extra, spawnCommand) {
+  requireAppleContainerManagedLabels(workspace, extra);
+  const cli = extra.policy?.appleContainer?.cli || process.env.OPENCHAMBER_WORKSPACE_APPLE_CONTAINER_CLI || 'container';
+  const { stdout } = await run(cli, ['inspect', extra.runtime.container], { timeoutMs: 20_000, spawn: spawnCommand });
+  const labels = JSON.parse(stdout)?.[0]?.configuration?.labels ?? {};
+  for (const [key, value] of Object.entries(extra.labels ?? {})) {
+    if (labels[key] !== String(value)) throw new Error(`Apple Container workspace label mismatch for ${key}`);
   }
 }
 
@@ -418,6 +458,18 @@ function requireKubernetesManagedLabels(workspace, extra) {
   }
 }
 
+function requireAppleContainerManagedLabels(workspace, extra) {
+  const labels = extra.labels ?? {};
+  const required = {
+    'openchamber.managed': 'true',
+    'openchamber.workspace.provider': 'apple-container',
+    'openchamber.workspace.id': canonicalWorkspaceLabelID(workspace.id),
+  };
+  for (const [key, value] of Object.entries(required)) {
+    if (!value || labels[key] !== String(value)) throw new Error(`Apple Container workspace metadata is missing required managed label: ${key}`);
+  }
+}
+
 export function registerWorkspaceRoutes(app, dependencies) {
   const {
     validateDirectoryPath,
@@ -439,7 +491,8 @@ export function registerWorkspaceRoutes(app, dependencies) {
     const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
     try {
       const response = await fetch(buildOpenCodeUrl(`/experimental/workspace/adapter${query}`, ''), {
-        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        headers: { Accept: 'application/json', Connection: 'close', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(WORKSPACE_ADAPTER_PROBE_TIMEOUT_MS),
       });
       if (!response.ok) {
         return { ok: false, status: response.status, adapters: [], error: response.statusText };
@@ -473,13 +526,16 @@ export function registerWorkspaceRoutes(app, dependencies) {
         ...overrides,
       });
       if (provider === 'docker') {
-        return res.json(await validateDocker(settings));
+        return res.json(await validateDocker(settings, spawnCommand));
       }
       if (provider === 'kubernetes') {
         return res.json(await validateKubernetes({
           context: settings.kubernetesContext,
           namespace: settings.kubernetesNamespace,
-        }, settings));
+        }, settings, spawnCommand));
+      }
+      if (provider === 'apple-container') {
+        return res.json(await validateAppleContainer(settings, spawnCommand));
       }
       return res.status(400).json({ available: false, error: 'Unsupported workspace provider' });
     } catch (error) {
@@ -642,6 +698,7 @@ export function registerWorkspaceRoutes(app, dependencies) {
       const pluginSpec = workspacePluginSpec ?? resolvePluginSpec();
       if (settings.defaultProvider === 'docker') validateDockerEgress(settings);
       if (settings.defaultProvider === 'kubernetes') validateKubernetesEgress(settings);
+      if (settings.defaultProvider === 'apple-container') validateAppleContainerEgress(settings);
       const existing = entries.find((entry) => isWorkspacePluginEntry(entry, pluginSpec));
       const entry = {
         spec: pluginSpec,

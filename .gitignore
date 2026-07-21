@@ -46,6 +46,7 @@ build/
 
 # Built webview assets (generated during build)
 src/main/resources/webview/
+packages/electron/resources/opencode-container-workspace/
 
 # IDE
 *.iml

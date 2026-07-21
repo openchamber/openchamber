@@ -14,6 +14,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.0",
+    "@openchamber/opencode-container-workspace": "github:openchamber/opencode-container-workspace#0b484cadb238ce8fc8f6dc60a08c63995ab1a28c",
     "electron": "^41.2.1",
     "electron-builder": "^26.0.0"
   },
@@ -33,10 +34,11 @@
     "bundle:main": "bun ./scripts/bundle-main.mjs",
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
-    "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
+    "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run stage:workspace-plugin && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
-    "lint": "node -e \"process.exit(0)\""
+    "lint": "node -e \"process.exit(0)\"",
+    "stage:workspace-plugin": "node ./scripts/stage-workspace-plugin.mjs"
   },
   "build": {
     "appId": "dev.openchamber.desktop",
@@ -63,11 +65,15 @@
         "to": "opencode-cli"
       },
       {
-        "from": "../opencode-workspace-plugin",
-        "to": "opencode-workspace-plugin",
+        "from": "resources/opencode-container-workspace",
+        "to": "opencode-container-workspace",
         "filter": [
           "src/**",
-          "package.json"
+          "!src/**/*.test.js",
+          "runtime-image/**",
+          "package.json",
+          "README.md",
+          "LICENSE"
         ]
       }
     ],

@@ -60,6 +60,8 @@
   'settings.workspaces.provider.dockerHint': '用於開發沙箱的本機隔離容器與 volume。',
   'settings.workspaces.provider.kubernetes': 'Kubernetes',
   'settings.workspaces.provider.kubernetesHint': '既有叢集 namespace，包含 PVC、Service、Secret 與政策控制。',
+  'settings.workspaces.provider.appleContainer': 'Apple Container',
+  'settings.workspaces.provider.appleContainerHint': 'macOS 原生容器執行環境，使用僅限主機的 vmnet 隔離，並透過主機代理明確出站。',
   'settings.workspaces.default': '預設',
   'settings.workspaces.actions.use': '使用',
   'settings.workspaces.actions.validate': '驗證',

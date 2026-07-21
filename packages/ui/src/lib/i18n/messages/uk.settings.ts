@@ -63,6 +63,8 @@ export const settingsDict = {
   "settings.workspaces.provider.dockerHint": "Локальний ізольований контейнер і volume для developer sandbox.",
   "settings.workspaces.provider.kubernetes": "Kubernetes",
   "settings.workspaces.provider.kubernetesHint": "Існуючий namespace кластера з PVC, Service, Secret і policy controls.",
+  "settings.workspaces.provider.appleContainer": "Apple Container",
+  "settings.workspaces.provider.appleContainerHint": "Нативний контейнерний runtime macOS з host-only vmnet ізоляцією та явним виходом через host proxy.",
   "settings.workspaces.default": "За замовчуванням",
   "settings.workspaces.actions.use": "Використати",
   "settings.workspaces.actions.validate": "Перевірити",

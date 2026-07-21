@@ -63,6 +63,8 @@ export const settingsDict = {
   'settings.workspaces.provider.dockerHint': '用于开发沙箱的本地隔离容器和卷。',
   'settings.workspaces.provider.kubernetes': 'Kubernetes',
   'settings.workspaces.provider.kubernetesHint': '现有集群 namespace，包含 PVC、Service、Secret 和策略控制。',
+  'settings.workspaces.provider.appleContainer': 'Apple Container',
+  'settings.workspaces.provider.appleContainerHint': 'macOS 原生容器运行时，使用仅主机 vmnet 隔离，并通过主机代理显式出站。',
   'settings.workspaces.default': '默认',
   'settings.workspaces.actions.use': '使用',
   'settings.workspaces.actions.validate': '验证',

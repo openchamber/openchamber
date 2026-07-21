@@ -63,6 +63,8 @@ export const settingsDict = {
   'settings.workspaces.provider.dockerHint': 'Local isolated container and volume for developer sandboxes.',
   'settings.workspaces.provider.kubernetes': 'Kubernetes',
   'settings.workspaces.provider.kubernetesHint': 'Existing cluster namespace with PVC, Service, Secret, and policy controls.',
+  'settings.workspaces.provider.appleContainer': 'Apple Container',
+  'settings.workspaces.provider.appleContainerHint': 'Native macOS container runtime with host-only vmnet isolation and explicit host-proxy egress.',
   'settings.workspaces.default': 'Default',
   'settings.workspaces.actions.use': 'Use',
   'settings.workspaces.actions.validate': 'Validate',

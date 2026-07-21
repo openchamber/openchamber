@@ -63,6 +63,8 @@ export const settingsDict = {
   'settings.workspaces.provider.dockerHint': '開発用サンドボックス向けのローカル隔離コンテナとボリュームです。',
   'settings.workspaces.provider.kubernetes': 'Kubernetes',
   'settings.workspaces.provider.kubernetesHint': 'PVC、Service、Secret、ポリシー制御を備えた既存クラスタ namespace です。',
+  'settings.workspaces.provider.appleContainer': 'Apple Container',
+  'settings.workspaces.provider.appleContainerHint': 'ホスト専用 vmnet 分離と明示的なホストプロキシ経由の egress を備えた macOS ネイティブのコンテナランタイムです。',
   'settings.workspaces.default': 'デフォルト',
   'settings.workspaces.actions.use': '使用',
   'settings.workspaces.actions.validate': '検証',

@@ -734,7 +734,7 @@ export interface ToolsAPI {
   getAvailableTools(): Promise<string[]>;
 }
 
-export type WorkspaceProviderKind = 'docker' | 'kubernetes';
+export type WorkspaceProviderKind = 'docker' | 'kubernetes' | 'apple-container';
 
 export interface WorkspaceProviderValidationInput {
   provider: WorkspaceProviderKind;

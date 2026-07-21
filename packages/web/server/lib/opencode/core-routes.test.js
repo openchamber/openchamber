@@ -126,6 +126,21 @@ describe('core-routes', () => {
     expect(response.body).toEqual({ body: { content: 'Snippet body' } });
   });
 
+  it('should parse JSON bodies for workspace routes', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express });
+    app.post('/api/workspaces/configure', (req, res) => {
+      res.json({ body: req.body });
+    });
+
+    const response = await request(app)
+      .post('/api/workspaces/configure')
+      .send({ activate: true })
+      .expect(200);
+
+    expect(response.body).toEqual({ body: { activate: true } });
+  });
+
   it('should require API auth before probing loopback preview URLs', async () => {
     const app = express();
     const originalFetch = globalThis.fetch;

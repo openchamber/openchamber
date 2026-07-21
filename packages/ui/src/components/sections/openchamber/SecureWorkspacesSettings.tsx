@@ -98,7 +98,11 @@ export const SecureWorkspacesSettings: React.FC = () => {
         setSettings((current) => ({
           ...current,
           secureWorkspacesEnabled: loaded.secureWorkspacesEnabled === true,
-          secureWorkspacesDefaultProvider: loaded.secureWorkspacesDefaultProvider === 'kubernetes' ? 'kubernetes' : 'docker',
+          secureWorkspacesDefaultProvider: loaded.secureWorkspacesDefaultProvider === 'kubernetes'
+            ? 'kubernetes'
+            : loaded.secureWorkspacesDefaultProvider === 'apple-container'
+              ? 'apple-container'
+              : 'docker',
           secureWorkspacesImage: typeof loaded.secureWorkspacesImage === 'string' && loaded.secureWorkspacesImage.trim()
             ? loaded.secureWorkspacesImage.trim()
             : DEFAULT_IMAGE,
@@ -200,7 +204,7 @@ export const SecureWorkspacesSettings: React.FC = () => {
     }
     setValidating(provider);
     try {
-      const result = await workspaces.validateProvider({
+    const result = await workspaces.validateProvider({
         provider,
         context: provider === 'kubernetes' ? settings.secureWorkspacesKubernetesContext : undefined,
         namespace: provider === 'kubernetes' ? settings.secureWorkspacesKubernetesNamespace : undefined,
@@ -365,6 +369,7 @@ export const SecureWorkspacesSettings: React.FC = () => {
 
   const canApplyEgress = settings.secureWorkspacesEgressHttpProxy.trim().length > 0
     && (settings.secureWorkspacesDefaultProvider === 'docker'
+      || settings.secureWorkspacesDefaultProvider === 'apple-container'
       || (settings.secureWorkspacesEgressProxyCIDR.trim().length > 0 && settings.secureWorkspacesEgressDnsCIDRs.trim().length > 0));
   const selectedFileCount = selectedFileIDs.length;
   const selectableFiles = patchSummary?.files.filter((file) => file.id) ?? [];
@@ -428,7 +433,7 @@ export const SecureWorkspacesSettings: React.FC = () => {
           </div>
         </div>
 
-        <div data-settings-item="workspaces.providers" className="grid gap-3 md:grid-cols-2">
+        <div data-settings-item="workspaces.providers" className="grid gap-3 md:grid-cols-3">
           <ProviderCard
             provider="docker"
             title={t('settings.workspaces.provider.docker')}
@@ -438,6 +443,18 @@ export const SecureWorkspacesSettings: React.FC = () => {
             validating={validating === 'docker'}
             onSelect={() => void save({ secureWorkspacesDefaultProvider: 'docker' })}
             onValidate={() => void validate('docker')}
+            validateLabel={t('settings.workspaces.actions.validate')}
+            selectedLabel={t('settings.workspaces.default')}
+          />
+          <ProviderCard
+            provider="apple-container"
+            title={t('settings.workspaces.provider.appleContainer')}
+            description={t('settings.workspaces.provider.appleContainerHint')}
+            selected={settings.secureWorkspacesDefaultProvider === 'apple-container'}
+            status={status['apple-container']}
+            validating={validating === 'apple-container'}
+            onSelect={() => void save({ secureWorkspacesDefaultProvider: 'apple-container' })}
+            onValidate={() => void validate('apple-container')}
             validateLabel={t('settings.workspaces.actions.validate')}
             selectedLabel={t('settings.workspaces.default')}
           />

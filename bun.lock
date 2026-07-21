@@ -106,6 +106,7 @@
       },
       "devDependencies": {
         "@electron/rebuild": "^3.7.0",
+        "@openchamber/opencode-container-workspace": "github:openchamber/opencode-container-workspace#0b484cadb238ce8fc8f6dc60a08c63995ab1a28c",
         "electron": "^41.2.1",
         "electron-builder": "^26.0.0",
       },
@@ -129,14 +130,6 @@
         "@types/node": "^24.3.1",
         "serve-sim": "^0.1.34",
         "typescript": "~5.9.0",
-      },
-    },
-    "packages/opencode-workspace-plugin": {
-      "name": "@openchamber/opencode-workspace-plugin",
-      "version": "0.1.0",
-      "devDependencies": {
-        "vitest": "^4.1.5",
-        "ws": "^8.18.3",
       },
     },
     "packages/ui": {
@@ -275,7 +268,7 @@
       "dependencies": {
         "@clack/prompts": "^1.1.0",
         "@octokit/rest": "^22.0.1",
-        "@openchamber/opencode-workspace-plugin": "workspace:*",
+        "@openchamber/opencode-container-workspace": "github:openchamber/opencode-container-workspace#0b484cadb238ce8fc8f6dc60a08c63995ab1a28c",
         "@opencode-ai/sdk": "1.17.12",
         "@simplewebauthn/server": "13.3.1",
         "adm-zip": "^0.5.16",
@@ -1000,7 +993,7 @@
 
     "@openchamber/mobile": ["@openchamber/mobile@workspace:packages/mobile"],
 
-    "@openchamber/opencode-workspace-plugin": ["@openchamber/opencode-workspace-plugin@workspace:packages/opencode-workspace-plugin"],
+    "@openchamber/opencode-container-workspace": ["@openchamber/opencode-container-workspace@github:openchamber/opencode-container-workspace#0b484ca", {}, "openchamber-opencode-container-workspace-0b484ca"],
 
     "@openchamber/ui": ["@openchamber/ui@workspace:packages/ui"],
 
