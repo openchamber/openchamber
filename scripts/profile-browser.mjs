@@ -298,7 +298,6 @@ const LONG_TASK_ATTRIBUTION_MARKS = [
   "openchamber.global_sessions.event_update_flush",
   "openchamber.navigation.session_select",
   "openchamber.navigation.session_state_set",
-  "openchamber.navigation.parent_auto_expand_commit",
   "openchamber.react.session_sidebar_render",
   "openchamber.react.message_list_render",
 ]

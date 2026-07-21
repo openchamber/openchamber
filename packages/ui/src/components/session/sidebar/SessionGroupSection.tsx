@@ -28,6 +28,7 @@ import {
   computeNodeStructureKey,
   nodeContainsSessionId,
   resolveMenuOpenSessionId,
+  selectFolderRootNodes,
 } from './sessionNodeItemUtils';
 import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
@@ -395,10 +396,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   }, [sourceGroupNodes]);
 
   const allFoldersForGroupBase = React.useMemo(() => scopeFolders.map((folder) => {
-    const nodes = folder.sessionIds
-      .map((sid) => nodeBySessionId.get(sid))
-      .filter((n): n is SessionNode => Boolean(n))
-      .sort(compareSessionNodes);
+    const nodes = selectFolderRootNodes(folder.sessionIds, nodeBySessionId).sort(compareSessionNodes);
     return { folder, nodes };
   }), [scopeFolders, nodeBySessionId, compareSessionNodes]);
 

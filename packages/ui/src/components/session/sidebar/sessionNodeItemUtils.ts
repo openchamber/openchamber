@@ -68,6 +68,29 @@ export const nodeContainsSessionId = (node: SessionNode, sessionId: string | nul
   return false;
 };
 
+export const selectFolderRootNodes = (
+  sessionIds: string[],
+  nodeBySessionId: ReadonlyMap<string, SessionNode>,
+): SessionNode[] => {
+  const assignedSessionIds = new Set(sessionIds);
+
+  return sessionIds
+    .map((sessionId) => nodeBySessionId.get(sessionId))
+    .filter((node): node is SessionNode => {
+      if (!node) return false;
+
+      const visited = new Set<string>();
+      let parentID = (node.session as SessionNode['session'] & { parentID?: string | null }).parentID ?? null;
+      while (parentID && !visited.has(parentID)) {
+        if (assignedSessionIds.has(parentID) && nodeBySessionId.has(parentID)) return false;
+        visited.add(parentID);
+        const parentNode = nodeBySessionId.get(parentID);
+        parentID = (parentNode?.session as (SessionNode['session'] & { parentID?: string | null }) | undefined)?.parentID ?? null;
+      }
+      return true;
+    });
+};
+
 const sessionObjectVersions = new WeakMap<object, number>();
 let nextSessionObjectVersion = 1;
 

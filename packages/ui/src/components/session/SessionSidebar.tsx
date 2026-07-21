@@ -69,9 +69,8 @@ import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import {
   compareSessionsByPinnedAndTime,
   formatProjectLabel,
-  mergeExpandedParentKeys,
   normalizePath,
-  replaceAutoExpandedParentKeys,
+  selectExpandedParentKeysForContext,
   toggleExpandedParentKey,
 } from './sidebar/utils';
 import {
@@ -180,35 +179,6 @@ interface SessionSidebarProps {
   showOnlyMainWorkspace?: boolean;
 }
 
-const CurrentSessionParentAutoExpandEffect: React.FC<{
-  sessions: Session[];
-  setAutoExpandedParents: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setSuppressedAutoExpandedParents: React.Dispatch<React.SetStateAction<Set<string>>>;
-}> = ({ sessions, setAutoExpandedParents, setSuppressedAutoExpandedParents }) => {
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const current = currentSessionId
-    ? sessions.find((session) => session.id === currentSessionId)
-    : null;
-  const parentID = (current as Session & { parentID?: string | null } | null)?.parentID;
-
-  React.useEffect(() => {
-    const commit = () => {
-      streamPerfMark('navigation.parent_auto_expand_commit');
-      streamPerfCount('ui.navigation.parent_auto_expand_commit');
-      setAutoExpandedParents((previous) => replaceAutoExpandedParentKeys(previous, parentID));
-      setSuppressedAutoExpandedParents((previous) => previous.size === 0 ? previous : new Set());
-    };
-    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-      commit();
-      return;
-    }
-    const frameId = window.requestAnimationFrame(commit);
-    return () => window.cancelAnimationFrame(frameId);
-  }, [parentID, setAutoExpandedParents, setSuppressedAutoExpandedParents]);
-
-  return null;
-};
-
 const SidebarBootstrapDemandEffect: React.FC<{
   owner: string;
   childStores: ReturnType<typeof useChildStoreManager>;
@@ -278,8 +248,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [editTitle, setEditTitle] = React.useState('');
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
-  const [autoExpandedParents, setAutoExpandedParents] = React.useState<Set<string>>(new Set());
-  const [suppressedAutoExpandedParents, setSuppressedAutoExpandedParents] = React.useState<Set<string>>(new Set());
   const safeStorage = React.useMemo(() => getDeferredSafeStorage(), []);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
 
@@ -838,18 +806,14 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   }, []);
 
   const toggleParent = React.useCallback((expansionKey: string) => {
-    const next = toggleExpandedParentKey(
-      expandedParents,
-      autoExpandedParents,
-      suppressedAutoExpandedParents,
-      expansionKey,
-    );
-    setExpandedParents(next.manual);
-    setSuppressedAutoExpandedParents(next.suppressedAutomatic);
-    try {
-      safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next.manual)));
-    } catch { /* ignored */ }
-  }, [autoExpandedParents, expandedParents, safeStorage, suppressedAutoExpandedParents]);
+    setExpandedParents((previous) => {
+      const next = toggleExpandedParentKey(previous, expansionKey);
+      try {
+        safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      } catch { /* ignored */ }
+      return next;
+    });
+  }, [safeStorage]);
 
   const createFolderAndStartRename = React.useCallback(
     (scopeKey: string, parentId?: string | null) => {
@@ -1086,9 +1050,20 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
-  const renderExpandedParents = React.useMemo(() => {
-    return mergeExpandedParentKeys(expandedParents, autoExpandedParents, suppressedAutoExpandedParents);
-  }, [autoExpandedParents, expandedParents, suppressedAutoExpandedParents]);
+  const projectExpandedParentsRef = React.useRef<Set<string>>(new Set());
+  const recentExpandedParentsRef = React.useRef<Set<string>>(new Set());
+  const projectExpandedParents = selectExpandedParentKeysForContext(
+    projectExpandedParentsRef.current,
+    expandedParents,
+    'project',
+  );
+  const recentExpandedParents = selectExpandedParentKeysForContext(
+    recentExpandedParentsRef.current,
+    expandedParents,
+    'recent',
+  );
+  projectExpandedParentsRef.current = projectExpandedParents;
+  recentExpandedParentsRef.current = recentExpandedParents;
 
   const sidebarRenderSources = {
     isVisible,
@@ -1130,7 +1105,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     editingId,
     editTitle,
     editingProjectDialogId,
-    expandedParents: renderExpandedParents,
+    expandedParents,
     collapsedProjects,
     visibleSessionCountByGroup,
     updateDialogOpen,
@@ -1492,7 +1467,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         projectId={projectId}
         archivedBucket={archivedBucket}
         pinnedSessionIds={pinnedSessionIds}
-        expandedParents={renderExpandedParents}
+        expandedParents={renderContext === 'recent' ? recentExpandedParents : projectExpandedParents}
         hasSessionSearchQuery={hasSessionSearchQuery}
         normalizedSessionSearchQuery={normalizedSessionSearchQuery}
         notifyOnSubtasks={notifyOnSubtasks}
@@ -1611,7 +1586,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         setRenameFolderDraft={setRenameFolderDraft}
         setRenamingFolderId={setRenamingFolderId}
         pinnedSessionIds={pinnedSessionIds}
-        expandedParents={renderExpandedParents}
+        expandedParents={projectExpandedParents}
         sessionOrderIndex={sessionOrderIndex}
         editingId={editingId}
         editTitle={editTitle}
@@ -1650,7 +1625,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       renamingFolderId,
       renameFolderDraft,
       pinnedSessionIds,
-      renderExpandedParents,
+      projectExpandedParents,
       sessionOrderIndex,
       editingId,
       editTitle,
@@ -1667,11 +1642,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         renderSessionNode={renderSessionNode}
         editingId={editingId}
         openSidebarMenuKey={openSidebarMenuKey}
-        expansionState={renderExpandedParents}
+        expansionState={recentExpandedParents}
         variant="section"
       />
     ) : null,
-    [activitySections, editingId, hasSessionSearchQuery, isVSCode, openSidebarMenuKey, renderExpandedParents, renderSessionNode, showRecentSection],
+    [activitySections, editingId, hasSessionSearchQuery, isVSCode, openSidebarMenuKey, recentExpandedParents, renderSessionNode, showRecentSection],
   );
   const isInlineEditing = Boolean(renamingFolderId || editingId || editingProjectDialogId);
 
@@ -1725,11 +1700,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         mobileVariant ? '' : 'bg-transparent',
       )}
     >
-      <CurrentSessionParentAutoExpandEffect
-        sessions={sessions}
-        setAutoExpandedParents={setAutoExpandedParents}
-        setSuppressedAutoExpandedParents={setSuppressedAutoExpandedParents}
-      />
       <SidebarBootstrapDemandEffect
         owner={bootstrapDemandOwner}
         childStores={childStores}
