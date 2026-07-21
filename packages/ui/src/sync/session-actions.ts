@@ -758,6 +758,24 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
   }
 }
 
+export async function unarchiveSession(sessionId: string): Promise<boolean> {
+  const sessionDirectory = getSessionDirectory(sessionId)
+  const globalSnapshot = getGlobalSessionSnapshot(sessionId)
+  useGlobalSessionsStore.getState().unarchiveSessions([sessionId])
+  try {
+    const restored = await opencodeClient.updateSession(sessionId, { time: { archived: undefined } }, sessionDirectory)
+    if (!restored) {
+      throw new Error("session.update failed: server did not return the restored session")
+    }
+    useGlobalSessionsStore.getState().upsertSession(restored)
+    return true
+  } catch (error) {
+    console.error("[session-actions] unarchiveSession failed", error)
+    restoreGlobalSessionSnapshot(globalSnapshot)
+    return false
+  }
+}
+
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   const sessionDirectory = getSessionDirectory(sessionId)
   const session = await opencodeClient.updateSession(sessionId, { title }, sessionDirectory)

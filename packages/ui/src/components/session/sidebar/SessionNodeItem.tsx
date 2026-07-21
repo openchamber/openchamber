@@ -30,6 +30,7 @@ import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './se
 import type { SessionNode } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
@@ -258,6 +259,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
+  const unarchiveSession = useSessionUIStore((state) => state.unarchiveSession);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   // VS Code always uses the minimal (single-line) layout: sessions are grouped
   // under workspace project headers, so the second metadata row (project/branch)
@@ -502,6 +504,15 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       console.warn('[session-sidebar] failed to open mini chat window', error);
     });
   }, [session.id, sessionDirectory]);
+
+  const handleRestoreSession = React.useCallback(async () => {
+    const ok = await unarchiveSession(session.id);
+    if (ok) {
+      toast.success(t('sessions.sidebar.session.restore.success'));
+    } else {
+      toast.error(t('sessions.sidebar.session.restore.error'));
+    }
+  }, [session.id, unarchiveSession, t]);
 
   // Capture outside-clicks to save edits — immune to focus-race with onBlur.
   React.useEffect(() => {
@@ -969,6 +980,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         <Item className="[&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
           <Icon name="inbox-archive" className="mr-1 h-4 w-4" />
           {t('sessions.sidebar.bulkActions.archive')}
+        </Item>
+      ) : null}
+      {archivedBucket ? (
+        <Item className="[&>svg]:mr-1" onClick={() => { void handleRestoreSession(); }}>
+          <Icon name="inbox-unarchive" className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.bulkActions.restore')}
         </Item>
       ) : null}
       <Item className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket, hardDelete: true })}>
