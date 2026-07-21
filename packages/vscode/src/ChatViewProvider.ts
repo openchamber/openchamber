@@ -213,6 +213,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  public addLineComment(payload: { filePath: string; relativePath: string; startLine: number; endLine: number; code: string; language: string; comment: string }) {
+    if (!this._view) return;
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'addLineComment',
+      payload,
+    });
+  }
+
   public addFileAttachments(files: Array<{ filePath: string; fileName: string; fileSize: number | null }>) {
     if (!this._view) {
       return;

@@ -20,10 +20,16 @@ export interface InlineCommentDraft {
 
 interface InlineCommentDraftState {
   drafts: Record<string, InlineCommentDraft[]>; // sessionKey -> drafts
+  // Transient (not persisted): id of a freshly-added draft whose editor should
+  // auto-open (e.g. the VS Code "Add Comment" flow drops the user straight into
+  // the multi-line editor instead of a single-line native input box).
+  autoEditDraftId: string | null;
 }
 
 interface InlineCommentDraftActions {
-  addDraft: (draft: Omit<InlineCommentDraft, 'id' | 'createdAt'>) => void;
+  // Returns the new draft id, or undefined when the draft is rejected (e.g. an
+  // empty terminal-context selection).
+  addDraft: (draft: Omit<InlineCommentDraft, 'id' | 'createdAt'>) => string | undefined;
   updateDraft: (sessionKey: string, draftId: string, updates: Partial<Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'>>) => void;
   removeDraft: (sessionKey: string, draftId: string) => void;
   clearDrafts: (sessionKey: string) => void;
@@ -32,6 +38,7 @@ interface InlineCommentDraftActions {
   restoreDrafts: (sessionKey: string, drafts: InlineCommentDraft[]) => void;
   getDraftCount: (sessionKey: string) => number;
   hasDrafts: (sessionKey: string) => boolean;
+  setAutoEditDraftId: (draftId: string | null) => void;
 }
 
 type InlineCommentDraftStore = InlineCommentDraftState & InlineCommentDraftActions;
@@ -107,6 +114,11 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
     persist(
       (set, get) => ({
         drafts: {},
+        autoEditDraftId: null,
+
+        setAutoEditDraftId: (draftId) => {
+          set({ autoEditDraftId: draftId });
+        },
 
         addDraft: (draft) => {
           if (draft.source === 'terminal' && !draft.code.trim()) return;
@@ -232,6 +244,8 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
         name: 'openchamber-inline-comment-drafts',
         storage: createDeferredSafeJSONStorage(),
         version: 1,
+        // autoEditDraftId is transient UI state — never persist it.
+        partialize: (state) => ({ drafts: state.drafts }),
         migrate: (persistedState: unknown) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return { drafts: {} };
