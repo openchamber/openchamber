@@ -101,6 +101,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenChamberEventClients,
       writeSseEvent,
       permissionAutoAcceptRuntime,
+      express,
       isRequestOriginAllowed,
     } = routeDependencies;
 
@@ -261,6 +262,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenCodeAuthHeaders,
       resolveProjectDirectory,
       isRequestOriginAllowed,
+      jsonParser: express.json({ limit: '16kb' }),
     });
     registerFsRoutes(app, {
       os,

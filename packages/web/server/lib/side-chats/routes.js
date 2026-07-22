@@ -51,6 +51,7 @@ export const registerSideChatRoutes = (app, dependencies) => {
     fetch: fetchImpl = globalThis.fetch,
     requestTimeoutMs = 15_000,
     isRequestOriginAllowed,
+    jsonParser,
   } = dependencies;
   const creationByParent = new Map();
 
@@ -189,7 +190,7 @@ export const registerSideChatRoutes = (app, dependencies) => {
     });
   };
 
-  app.post('/api/openchamber/side-chats', async (req, res) => {
+  const handleCreateSideChat = async (req, res) => {
     try {
       if (typeof isRequestOriginAllowed === 'function' && !await isRequestOriginAllowed(req)) {
         return res.status(403).json({ error: 'Request origin is not allowed' });
@@ -207,9 +208,9 @@ export const registerSideChatRoutes = (app, dependencies) => {
     } catch (error) {
       return handleFailure(res, error, 'Failed to create side chat');
     }
-  });
+  };
 
-  app.post('/api/openchamber/side-chats/:sessionId/promote', async (req, res) => {
+  const promoteSideChat = async (req, res) => {
     try {
       if (typeof isRequestOriginAllowed === 'function' && !await isRequestOriginAllowed(req)) {
         return res.status(403).json({ error: 'Request origin is not allowed' });
@@ -253,5 +254,8 @@ export const registerSideChatRoutes = (app, dependencies) => {
     } catch (error) {
       return handleFailure(res, error, 'Failed to promote side chat');
     }
-  });
+  };
+
+  app.post('/api/openchamber/side-chats', ...(jsonParser ? [jsonParser] : []), handleCreateSideChat);
+  app.post('/api/openchamber/side-chats/:sessionId/promote', ...(jsonParser ? [jsonParser] : []), promoteSideChat);
 };

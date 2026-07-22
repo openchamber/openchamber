@@ -13,8 +13,8 @@ export type SideChatRuntimeOperation = {
 };
 
 export const captureSideChatRuntimeOperation = (): SideChatRuntimeOperation => {
-  const runtimeKey = getRuntimeKey();
   const baseUrl = getRuntimeApiBaseUrl().replace(/\/+$/, '');
+  const runtimeKey = getRuntimeKey();
   const relay = getActiveRelayTunnel();
   const bearerToken = getRuntimeBearerTokenSync();
   const extraHeaders = { ...getRuntimeExtraHeadersSync() };

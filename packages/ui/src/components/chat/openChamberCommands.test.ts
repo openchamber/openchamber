@@ -4,6 +4,7 @@ import type { Message } from '@opencode-ai/sdk/v2/client';
 import {
   getOpenChamberCommands,
   getLatestCompletedAssistantMessageId,
+  getLatestCompletedAssistantMessageIdFromRecords,
   mergeOpenChamberCommands,
   parseSideChatCommand,
 } from './openChamberCommands';
@@ -64,5 +65,12 @@ describe('latest completed assistant selection', () => {
 
   test('returns null when no assistant completion exists', () => {
     expect(getLatestCompletedAssistantMessageId([message('msg1', 'user'), message('msg2', 'assistant')])).toBeNull();
+  });
+
+  test('selects completed assistant messages from API records', () => {
+    expect(getLatestCompletedAssistantMessageIdFromRecords([
+      { info: message('msg1', 'assistant', 100) },
+      { info: message('msg2', 'assistant') },
+    ])).toBe('msg1');
   });
 });

@@ -1535,6 +1535,7 @@ async function main(options = {}) {
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
     permissionAutoAcceptRuntime,
+    express,
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({

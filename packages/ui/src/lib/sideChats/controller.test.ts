@@ -4,6 +4,7 @@ import type { Message } from '@opencode-ai/sdk/v2';
 const requests: Array<Record<string, unknown>> = [];
 const sends: Array<Record<string, unknown>> = [];
 let messages: Message[] = [];
+let fetchedMessages: Message[] = [];
 let runtimeKey = 'runtime-a';
 let responseStatus = 201;
 let responseBody: Record<string, unknown> = {};
@@ -24,6 +25,7 @@ mock.module('@/lib/sideChats/runtimeOperation', () => ({
     }),
     client: {
       session: {
+        messages: mock(async () => ({ data: fetchedMessages.map((info) => ({ info, parts: [] })) })),
         promptAsync: mock(async (input: Record<string, unknown>) => { sends.push(input); return { data: true }; }),
       },
     },
@@ -62,6 +64,8 @@ const entries = new Map<string, never>();
 mock.module('@/stores/useDisposableSideChatsStore', () => ({
   useDisposableSideChatsStore: { getState: () => ({
     entries,
+    activeRuntimeKey: 'runtime-a',
+    resetForRuntimeSwitch: () => {},
     findByParent: () => existingSideSessionId ? {
       runtimeKey: 'runtime-a', directory: '/repo', parentSessionId: 'parent', sideSessionId: existingSideSessionId, phase: 'open',
     } : null,
@@ -80,6 +84,7 @@ describe('side chat controller', () => {
     requests.length = 0;
     sends.length = 0;
     messages = [];
+    fetchedMessages = [];
     runtimeKey = 'runtime-a';
     responseStatus = 201;
     responseBody = {
@@ -115,6 +120,16 @@ describe('side chat controller', () => {
       parentSessionId: 'parent', directory: '/repo', prompt: '', providerID: 'provider', modelID: 'model',
     })).rejects.toThrow('No completed assistant response');
     expect(requests).toEqual([]);
+  });
+
+  test('loads completed answer context when local messages are not materialized', async () => {
+    fetchedMessages = [{ id: 'completed-api', role: 'assistant', time: { created: 1, completed: 2 } } as Message];
+
+    await openDisposableSideChat({
+      parentSessionId: 'parent', directory: '/repo', prompt: '', providerID: 'provider', modelID: 'model',
+    });
+
+    expect(requests).toEqual([{ parentSessionID: 'parent', messageID: 'completed-api' }]);
   });
 
   test('sends a non-empty prompt to an existing side chat', async () => {

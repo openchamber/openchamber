@@ -1,6 +1,9 @@
 import type { Session } from '@opencode-ai/sdk/v2';
 
-import { getLatestCompletedAssistantMessageId } from '@/components/chat/openChamberCommands';
+import {
+  getLatestCompletedAssistantMessageId,
+  getLatestCompletedAssistantMessageIdFromRecords,
+} from '@/components/chat/openChamberCommands';
 import { focusEmbeddedSessionChatComposer } from '@/components/layout/contextPanelEmbeddedChat';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { captureSideChatRuntimeOperation, type SideChatRuntimeOperation } from '@/lib/sideChats/runtimeOperation';
@@ -68,15 +71,21 @@ const sendSideChatPrompt = async (
         messageID,
         parts: [{ type: 'text', text: input.prompt }],
       });
-      if (result.error) throw new Error('Side chat send failed');
+      if (result.response instanceof Response) {
+        if (!result.response.ok) throw new Error(`Side chat send failed (${result.response.status})`);
+      }
     },
   }));
 };
 
 export async function openDisposableSideChat(input: OpenDisposableSideChatInput): Promise<{ sessionId: string; created: boolean }> {
-  const runtimeKey = getRuntimeKey();
   const operation = captureSideChatRuntimeOperation();
-  const target = { runtimeKey, directory: input.directory, parentSessionId: input.parentSessionId };
+  const operationRuntimeKey = operation.runtimeKey;
+  const disposableStore = useDisposableSideChatsStore.getState();
+  if (disposableStore.activeRuntimeKey !== operationRuntimeKey) {
+    disposableStore.resetForRuntimeSwitch(operationRuntimeKey);
+  }
+  const target = { runtimeKey: operationRuntimeKey, directory: input.directory, parentSessionId: input.parentSessionId };
   const existing = useDisposableSideChatsStore.getState().findByParent(target);
   if (existing?.sideSessionId) {
     openDisposableSideChatPanel(input.directory, { id: existing.sideSessionId });
@@ -85,7 +94,16 @@ export async function openDisposableSideChat(input: OpenDisposableSideChatInput)
   }
   if (existing) throw new Error('Side chat is still opening');
 
-  const messageID = getLatestCompletedAssistantMessageId(getSyncMessages(input.parentSessionId, input.directory));
+  let messageID = getLatestCompletedAssistantMessageId(getSyncMessages(input.parentSessionId, input.directory));
+  if (!messageID) {
+    const response = await operation.client.session.messages({
+      sessionID: input.parentSessionId,
+      directory: input.directory,
+      limit: 50,
+    });
+    if (response.error) throw new Error('Could not load the parent conversation');
+    messageID = getLatestCompletedAssistantMessageIdFromRecords(response.data ?? []);
+  }
   if (!messageID) throw new Error('No completed assistant response is available');
 
   const openingKey = useDisposableSideChatsStore.getState().beginOpening(target);
@@ -103,10 +121,10 @@ export async function openDisposableSideChat(input: OpenDisposableSideChatInput)
     if (!response.ok) {
       const forkSessionID = typeof payload?.forkSessionID === 'string' ? payload.forkSessionID.trim() : '';
       if (payload?.cleanupRequired === true && forkSessionID) {
-        useDisposableSideChatsStore.getState().bindSideSession(openingKey, forkSessionID, runtimeKey);
+        useDisposableSideChatsStore.getState().bindSideSession(openingKey, forkSessionID, operationRuntimeKey);
         useDisposableSideChatsStore.getState().setPhase({ ...target, sideSessionId: forkSessionID }, 'cleanup-pending');
       } else {
-        useDisposableSideChatsStore.getState().cancelOpening(openingKey, runtimeKey);
+        useDisposableSideChatsStore.getState().cancelOpening(openingKey, operationRuntimeKey);
       }
       throw new Error(payload?.error || `Side chat request failed (${response.status})`);
     }
@@ -117,15 +135,15 @@ export async function openDisposableSideChat(input: OpenDisposableSideChatInput)
     session = successfulSession;
   } catch (error) {
     const owned = useDisposableSideChatsStore.getState().findByParent(target);
-    if (!owned?.sideSessionId) useDisposableSideChatsStore.getState().cancelOpening(openingKey, runtimeKey);
+    if (!owned?.sideSessionId) useDisposableSideChatsStore.getState().cancelOpening(openingKey, operationRuntimeKey);
     throw error;
   }
 
-  if (!useDisposableSideChatsStore.getState().bindSideSession(openingKey, session.id, runtimeKey)) {
+  if (!useDisposableSideChatsStore.getState().bindSideSession(openingKey, session.id, operationRuntimeKey)) {
     throw new Error('Side chat stopped because the runtime changed');
   }
 
-  if (getRuntimeKey() !== runtimeKey) {
+  if (getRuntimeKey() !== operationRuntimeKey) {
     throw new Error('Side chat was created on the previous runtime and is available for recovery there');
   }
 

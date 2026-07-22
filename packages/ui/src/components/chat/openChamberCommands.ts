@@ -61,3 +61,9 @@ export const getLatestCompletedAssistantMessageId = (messages: readonly Message[
   }
   return latest?.id ?? null;
 };
+
+export const getLatestCompletedAssistantMessageIdFromRecords = (
+  records: ReadonlyArray<{ info?: Message }>,
+): string | null => getLatestCompletedAssistantMessageId(
+  records.flatMap((record) => record.info ? [record.info] : []),
+);
