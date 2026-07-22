@@ -1515,7 +1515,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const attachments = stateWithData.attachments;
     const imageAttachments = React.useMemo(() => {
         if (!Array.isArray(attachments)) return [];
-        return attachments.filter((f): f is FilePart & { url: string } => f.type === 'file' && typeof f.mime === 'string' && f.mime.startsWith('image/') && typeof f.url === 'string');
+        return attachments.filter((f): f is FilePart => f.type === 'file' && typeof f.mime === 'string' && f.mime.startsWith('image/'));
     }, [attachments]);
 
     const otherAttachments = React.useMemo(() => {
@@ -2003,12 +2003,12 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     ) : null}
                     {otherAttachments.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5">
-                            {otherAttachments.map((file) => {
+                            {otherAttachments.map((file, index) => {
                                 const fileName = file.filename || t('chat.fileAttachment.fileFallback');
                                 const ext = fileName.split('.').pop() || '';
                                 return (
                                     <div
-                                        key={file.url || fileName}
+                                        key={file.url || `${fileName}-${index}`}
                                         className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg"
                                     >
                                         <FileTypeIcon filePath={fileName} extension={ext} className="text-muted-foreground h-3.5 w-3.5" />
