@@ -16,7 +16,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { isHiddenUserMessage } from './message/hiddenUserMessage';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
-import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
+import { streamPerfCount, streamPerfMark, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionParts } from '@/sync/sync-context';
@@ -885,6 +885,7 @@ const MessageListEntry = React.memo(({
     activeStreamingPhase,
     reviewTransferDirection,
 }: MessageListEntryProps) => {
+    streamPerfCount('ui.message_list_entry.render');
     if (entry.kind === 'ungrouped') {
         return (
             <UngroupedMessageRow
@@ -1264,6 +1265,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     scrollRef,
     directory,
 }, ref) => {
+    streamPerfMark('react.message_list_render');
     streamPerfCount('ui.message_list.render');
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);

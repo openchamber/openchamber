@@ -39,6 +39,18 @@ const createRuntime = async () => {
 };
 
 describe('settings runtime', () => {
+  it.skipIf(process.platform === 'win32')('writes settings with restrictive directory and file permissions', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await runtime.writeSettingsToDisk({ desktopUiPassword: 'secret' });
+
+      expect((await fsPromises.stat(tempRoot)).mode & 0o777).toBe(0o700);
+      expect((await fsPromises.stat(settingsFilePath)).mode & 0o777).toBe(0o600);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('only remaps project plan paths within the migrated storage directory', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {

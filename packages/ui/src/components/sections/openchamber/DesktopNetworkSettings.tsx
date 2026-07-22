@@ -42,6 +42,9 @@ export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
+  const isMacDesktop = isLocalDesktop
+    && typeof window !== 'undefined'
+    && window.__OPENCHAMBER_PLATFORM__ === 'darwin';
   const showWindowControlsPosition = usesFramelessElectronChrome();
   const desktopWindowControlsPosition = useUIStore((state) => state.desktopWindowControlsPosition);
   const setDesktopWindowControlsPosition = useUIStore((state) => state.setDesktopWindowControlsPosition);
@@ -60,6 +63,8 @@ export const DesktopNetworkSettings: React.FC = () => {
   const [minimizeToTraySupported, setMinimizeToTraySupported] = React.useState(false);
   const [minimizeToTrayEnabled, setMinimizeToTrayEnabled] = React.useState(false);
   const [isSavingMinimizeToTray, setIsSavingMinimizeToTray] = React.useState(false);
+  const [savedMacMenuBarEnabled, setSavedMacMenuBarEnabled] = React.useState(true);
+  const [draftMacMenuBarEnabled, setDraftMacMenuBarEnabled] = React.useState(true);
   const [keepAwakeSupported, setKeepAwakeSupported] = React.useState(false);
   const [keepAwakeEnabled, setKeepAwakeEnabled] = React.useState(false);
   const [isSavingKeepAwake, setIsSavingKeepAwake] = React.useState(false);
@@ -88,6 +93,7 @@ export const DesktopNetworkSettings: React.FC = () => {
           desktopUiPassword?: unknown;
           desktopLanAccessActive?: unknown;
           desktopLanAccessBlockedReason?: unknown;
+          desktopMacMenuBarEnabled?: unknown;
         };
         if (cancelled) {
           return;
@@ -103,6 +109,9 @@ export const DesktopNetworkSettings: React.FC = () => {
         setLanAccessBlockedReason(
           typeof data?.desktopLanAccessBlockedReason === 'string' ? data.desktopLanAccessBlockedReason : null
         );
+        const macMenuBarEnabled = data?.desktopMacMenuBarEnabled !== false;
+        setSavedMacMenuBarEnabled(macMenuBarEnabled);
+        setDraftMacMenuBarEnabled(macMenuBarEnabled);
         setError(null);
       } catch (cause) {
         if (!cancelled) {
@@ -203,7 +212,9 @@ export const DesktopNetworkSettings: React.FC = () => {
     };
   }, [draftValue, isLocalDesktop]);
 
-  const isDirty = draftValue !== savedValue || draftPassword !== savedPassword;
+  const isDirty = draftValue !== savedValue
+    || draftPassword !== savedPassword
+    || draftMacMenuBarEnabled !== savedMacMenuBarEnabled;
   const currentPort = React.useMemo(() => {
     if (typeof window === 'undefined') {
       return null;
@@ -329,6 +340,7 @@ export const DesktopNetworkSettings: React.FC = () => {
         body: JSON.stringify({
           desktopLanAccessEnabled: draftValue,
           desktopUiPassword: draftPassword,
+          desktopMacMenuBarEnabled: draftMacMenuBarEnabled,
         }),
       });
 
@@ -338,6 +350,7 @@ export const DesktopNetworkSettings: React.FC = () => {
 
       setSavedValue(draftValue);
       setSavedPassword(draftPassword);
+      setSavedMacMenuBarEnabled(draftMacMenuBarEnabled);
 
       const restarted = await restartDesktopApp();
       if (!restarted) {
@@ -347,7 +360,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.saveFailed'));
       setIsSaving(false);
     }
-  }, [draftPassword, draftValue, isDirty, t]);
+  }, [draftMacMenuBarEnabled, draftPassword, draftValue, isDirty, t]);
 
   if (!isLocalDesktop && !showWindowControlsPosition) {
     return null;
@@ -379,7 +392,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       {isLocalDesktop ? (
         <SettingsSection title={t('settings.openchamber.desktopNetwork.title')}>
           <div className="space-y-3">
-            {(launchAtLoginSupported || minimizeToTraySupported || keepAwakeSupported) ? (
+            {(launchAtLoginSupported || isMacDesktop || minimizeToTraySupported || keepAwakeSupported) ? (
               <div className={SETTINGS_OPTION_STACK_CLASS}>
                 {launchAtLoginSupported ? (
                   <SettingsCheckboxRow
@@ -393,6 +406,18 @@ export const DesktopNetworkSettings: React.FC = () => {
                     label={t('settings.openchamber.desktopNetwork.field.launchAtLogin')}
                     info={t('settings.openchamber.desktopNetwork.field.launchAtLoginDescription')}
                     ariaLabel={t('settings.openchamber.desktopNetwork.field.launchAtLoginAria')}
+                  />
+                ) : null}
+
+                {isMacDesktop ? (
+                  <SettingsCheckboxRow
+                    settingsItem="sessions.desktop-mac-menu-bar"
+                    checked={draftMacMenuBarEnabled}
+                    onChange={setDraftMacMenuBarEnabled}
+                    disabled={isLoading || isSaving}
+                    label={t('settings.openchamber.desktopNetwork.field.macMenuBar')}
+                    info={t('settings.openchamber.desktopNetwork.field.macMenuBarDescription')}
+                    ariaLabel={t('settings.openchamber.desktopNetwork.field.macMenuBarAria')}
                   />
                 ) : null}
 

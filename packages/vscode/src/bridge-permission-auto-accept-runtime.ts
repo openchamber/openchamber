@@ -9,6 +9,7 @@ type PolicyContext = {
 
 export type PermissionAutoAcceptSnapshot = {
   sessions: Record<string, boolean>;
+  revision: number;
 };
 
 const normalizeSnapshot = (value: unknown): PermissionAutoAcceptSnapshot => {
@@ -22,11 +23,33 @@ const normalizeSnapshot = (value: unknown): PermissionAutoAcceptSnapshot => {
   for (const [sessionId, enabled] of entries) {
     if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
   }
-  return { sessions };
+  const revision = Number.isSafeInteger((source as { revision?: unknown }).revision)
+    && Number((source as { revision?: unknown }).revision) >= 0
+    ? Number((source as { revision?: unknown }).revision)
+    : 0;
+  return { sessions, revision };
 };
 
 const readPermissionAutoAcceptPolicy = (context: PolicyContext) =>
   normalizeSnapshot(context.globalState.get(STORAGE_KEY));
+
+const operationQueues = new WeakMap<object, Promise<void>>();
+
+const serialize = async <T>(context: PolicyContext, operation: () => Promise<T>): Promise<T> => {
+  const owner = context.globalState as object;
+  const previous = operationQueues.get(owner) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  const queued = previous.catch(() => undefined).then(() => current);
+  operationQueues.set(owner, queued);
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (operationQueues.get(owner) === queued) operationQueues.delete(owner);
+  }
+};
 
 async function setPermissionAutoAcceptPolicy(
   context: PolicyContext,
@@ -34,13 +57,16 @@ async function setPermissionAutoAcceptPolicy(
   enabled: boolean,
   broadcast: (snapshot: PermissionAutoAcceptSnapshot) => PromiseLike<unknown>,
 ) {
-  const current = readPermissionAutoAcceptPolicy(context);
-  const snapshot = {
-    sessions: { ...current.sessions, [sessionId]: enabled },
-  };
-  await context.globalState.update(STORAGE_KEY, snapshot);
-  await broadcast(snapshot);
-  return snapshot;
+  return serialize(context, async () => {
+    const current = readPermissionAutoAcceptPolicy(context);
+    const snapshot = {
+      sessions: { ...current.sessions, [sessionId]: enabled },
+      revision: current.revision + 1,
+    };
+    await context.globalState.update(STORAGE_KEY, snapshot);
+    await broadcast(snapshot);
+    return snapshot;
+  });
 }
 
 export async function handlePermissionAutoAcceptBridgeMessage(
@@ -54,7 +80,8 @@ export async function handlePermissionAutoAcceptBridgeMessage(
   if (!context) return { id: message.id, type: message.type, success: false, error: 'Extension context is unavailable' };
 
   if (message.type === 'api:permission-auto-accept:get') {
-    return { id: message.id, type: message.type, success: true, data: readPermissionAutoAcceptPolicy(context) };
+    const snapshot = await serialize(context, async () => readPermissionAutoAcceptPolicy(context));
+    return { id: message.id, type: message.type, success: true, data: snapshot };
   }
 
   const payload = message.payload && typeof message.payload === 'object'

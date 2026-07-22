@@ -34,6 +34,7 @@ import {
   type ScheduledTaskStatus,
 } from '@/lib/scheduledTasksApi';
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
+import { canonicalizeTimezone } from '@/lib/timezones';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
@@ -59,7 +60,7 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
     if (task.schedule.timezone) {
       return t('sessions.scheduledTasks.dialog.schedule.dailyWithTimezone', {
         time: timesLabel,
-        timezone: task.schedule.timezone,
+        timezone: canonicalizeTimezone(task.schedule.timezone),
       });
     }
     return t('sessions.scheduledTasks.dialog.schedule.daily', { time: timesLabel });
@@ -72,7 +73,7 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
       return t('sessions.scheduledTasks.dialog.schedule.weeklyWithTimezone', {
         days,
         time: timesLabel,
-        timezone: task.schedule.timezone,
+        timezone: canonicalizeTimezone(task.schedule.timezone),
       });
     }
     return t('sessions.scheduledTasks.dialog.schedule.weekly', { days, time: timesLabel });
@@ -88,7 +89,7 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
       return t('sessions.scheduledTasks.dialog.schedule.onceWithTimezone', {
         date,
         time,
-        timezone: task.schedule.timezone,
+        timezone: canonicalizeTimezone(task.schedule.timezone),
       });
     }
     return t('sessions.scheduledTasks.dialog.schedule.once', { date, time });
@@ -96,7 +97,7 @@ const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t'])
   if (task.schedule.timezone) {
     return t('sessions.scheduledTasks.dialog.schedule.cronWithTimezone', {
       cron: task.schedule.cron || '',
-      timezone: task.schedule.timezone,
+      timezone: canonicalizeTimezone(task.schedule.timezone),
     });
   }
   return t('sessions.scheduledTasks.dialog.schedule.cron', { cron: task.schedule.cron || '' });

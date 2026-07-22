@@ -68,7 +68,9 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const connectSrc = uniqueTokens(['*', 'ws:', 'wss:', 'http:', 'https:', devServerOrigin]);
   const imgSrc = uniqueTokens([webview.cspSource, 'data:', 'https:', devServerOrigin]);
   const fontSrc = uniqueTokens([webview.cspSource, 'data:', devServerOrigin]);
-  const workerSrc = uniqueTokens([webview.cspSource, devServerOrigin]);
+  // fflate's async browser inflater creates blob-backed workers. Keep blob:
+  // scoped to worker-src so document decompression works without allowing blob scripts.
+  const workerSrc = uniqueTokens([webview.cspSource, 'blob:', devServerOrigin]);
 
   const themeKind = getThemeKindName(vscode.window.activeColorTheme.kind);
 

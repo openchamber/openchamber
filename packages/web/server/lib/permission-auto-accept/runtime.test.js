@@ -38,7 +38,16 @@ describe('permission auto-accept runtime', () => {
     const second = createRuntime({ stored: first.getSettings() });
     await expect(second.runtime.load()).resolves.toEqual({
       sessions: { root: true },
+      revision: 1,
     });
+  });
+
+  it('increments the authoritative policy revision', async () => {
+    const { runtime, getSettings } = createRuntime();
+
+    await expect(runtime.setSessionPolicy('root', true)).resolves.toMatchObject({ revision: 1 });
+    await expect(runtime.setSessionPolicy('child', false)).resolves.toMatchObject({ revision: 2 });
+    expect(getSettings().permissionAutoAccept.revision).toBe(2);
   });
 
   it('uses nearest explicit ancestor policy for subagents', async () => {
@@ -132,6 +141,6 @@ describe('permission auto-accept runtime', () => {
       .map(([url]) => new URL(url).pathname);
     expect(replyPaths).toEqual(['/permission/root-pending/reply']);
     expect(fetchImpl.mock.calls.some(([url]) => new URL(url).searchParams.get('directory') === '/project')).toBe(true);
-    expect(await runtime.load()).toEqual({ sessions: { root: true } });
+    expect(await runtime.load()).toEqual({ sessions: { root: true }, revision: 1 });
   });
 });

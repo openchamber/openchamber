@@ -50,17 +50,44 @@ Examples:
 
 These stores coordinate persistent project/session metadata across multiple views.
 
+`useGlobalSessionsStore.ts` owns cold/global active and archived session coverage, including `sessionsByDirectory`. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
+
+Global refresh rules:
+
+- Per-directory refresh is bounded to two requests across callers and prioritizes the current directory.
+- Each directory is an independent completeness scope. A failed directory preserves its previous sessions while successful directories reconcile normally.
+- Fetch failure must remain distinguishable from a successful empty list; failed scopes cannot destructively clear cached sessions.
+- Runtime switch increments the load generation and clears the previous runtime's snapshot so stale in-flight work cannot commit.
+- Live session mutations update the cache directly after successful SDK actions; they preserve stable directory metadata when lighter event payloads omit it.
+- Full and per-directory loads capture a mutation revision. At commit time they overlay only per-session create/update/archive/delete/move mutations newer than that baseline, including no-op deletion tombstones, so an older response cannot undo newer local authority.
+
+Permission auto-accept policy is authoritative in the active Web server or VS Code extension host. Owner snapshots carry a monotonic revision; the UI rejects lower revisions and any hydration or mutation completion captured before a runtime reset. Persisted UI policy is not live authority. The version-2 store retains an old unscoped policy only as a one-runtime legacy migration candidate, then removes it after successful migration.
+
+Shared safe storage treats durable failures per key. A quota or access failure creates an ephemeral override or tombstone for that key without disabling reads and writes for unrelated keys; later writes retry the durable backend. Deferred adapters retain failed operations for a later flush, and malformed Zustand JSON is removed and treated as missing so hydration can recover.
+
+Project and UI settings use successful settings synchronization as authority. Omitted fields in a complete snapshot reset to canonical client defaults, including an omitted project list becoming empty; transport or settings-load failure dispatches no synchronization event and preserves current state. Settings save responses are partial patches and must not clear unrelated in-memory preferences or local mirrors.
+
+Project ordering defaults to manual. Session display persistence v3 migrates the previously shipped `recent` project order to `manual` while preserving every other explicit sort mode.
+
+Session folders persist in runtime-specific v2 browser keys without silently evicting older runtime namespaces. Runtime switch, page hide, app freeze, and unload synchronously flush the pending browser snapshot before lifecycle suspension or namespace replacement. A runtime switch then cancels stale old-runtime disk work and starts generation-owned disk hydration. Missing or malformed server files are not authoritative empty snapshots; disk data may replace browser state only when it carries a real revision and no newer local folder mutation occurred. Server writes are serialized and reject non-newer revisions so delayed or duplicate requests cannot overwrite the current state. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
+
+Persisted session todos use a bounded composite key of runtime, normalized directory, and session ID. Ambiguous legacy todo entries are discarded rather than claimed by whichever runtime starts first. Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone.
+
+Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sessions use the same runtime/directory/session ownership rule. Chat drafts use a bounded shared envelope and notify mounted composers when authoritative deletion clears their identity, preventing unmount autosave from resurrecting deleted text. Inline drafts enforce per-session, global-session, and serialized-byte bounds. Pins retain every valid composite key across runtimes without silent age/count eviction and are never pruned from the first startup list. Confirmed local deletion and routed deletion events clear immediately; after an authoritative baseline exists, a later complete omission also cleans persisted state. Ambiguous session-only legacy drafts and pins are not claimed.
+
+Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
+
 ## Git / PR Stores
 
 The Git and PR stores are the most important stores to understand before editing this directory.
 
 ### `useGitStore.ts`
 
-`useGitStore` is a centralized per-directory Git cache.
+`useGitStore` is a centralized active-runtime, per-directory Git cache.
 
 Core model:
 
-- top-level keyed by `directory`
+- active runtime owns one `directories` map keyed by directory
 - each directory entry contains:
   - repo detection
   - status
@@ -77,11 +104,15 @@ Important properties:
 - loading state is per-directory, not global
 - `ensureStatus()` and `ensureAll()` are the preferred entry points for consumers
 - in-flight dedupe exists for status and `ensureAll()`
-- diff data is separately cached and capped with size + count limits
+- runtime reset replaces all live entries with that runtime's persisted branch seeds and invalidates old completions
+- status, branches, log, identity, repository probes, and prefetch diffs commit through runtime and per-channel generations
+- status mutations advance a revision so older refreshes cannot undo optimistic or confirmed index changes
+- branch persistence is versioned, bounded, runtime-scoped, and claims the ambiguous legacy cache once
+- diff data has per-directory and aggregate count/UTF-8-byte limits; oversized single entries are rejected
 
 ### `useGitHubPrStatusStore.ts`
 
-`useGitHubPrStatusStore` is a centralized PR cache keyed by `directory::branch`.
+`useGitHubPrStatusStore` is a centralized PR cache keyed by a collision-safe tuple of runtime, directory, branch, and requested remote.
 
 Core model:
 
@@ -98,9 +129,11 @@ Important properties:
 
 - `ensureEntry()` initializes a key lazily
 - `setParams()` attaches runtime context
+- parameter changes advance an entry revision; stale queued, successful, and failed requests cannot update a newer authority
 - `startWatching()` / `stopWatching()` are for true live PR consumers only
 - `refreshTargets()` supports one-shot multi-target bootstrap without turning on live watching
-- persisted cache is for page refresh continuity, not for broad background syncing
+- runtime reset disposes timers, watchers, API references, and request ownership while inert namespaced snapshots remain isolated
+- persisted cache is versioned, TTL-filtered, and bounded for page refresh continuity, not broad background syncing
 
 ## Ownership Rules
 
@@ -114,6 +147,8 @@ These rules are important. Breaking them tends to reintroduce idle CPU churn, st
 6. Header should not depend on PR store.
 7. Closed sidebar should not create live PR work.
 8. File tree Git status should update only when the file tree is visible.
+9. Global session refresh must remain bounded and failure-isolated per directory.
+10. Global session cache must not drive live activity indicators or message-loading state.
 
 ## Selector Rules
 

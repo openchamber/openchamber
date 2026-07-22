@@ -82,7 +82,7 @@ Use `package.json` scripts as the command source of truth.
 | Executable source | Focused tests plus package-scoped type-check and lint |
 | Cross-workspace/shared contract | Workspace-wide type-check and lint plus affected builds/tests |
 | Added/deleted/renamed source file, export/type/entrypoint/import shape | `bun run dead-code` in addition to relevant checks |
-| Persisted or external contract | Compatibility and round-trip tests; conversion/malformed-old-data tests when old data needs migration; failed-write/migration rollback tests |
+| Persisted or external contract | Compatibility and round-trip tests plus the applicable failure/ordering cases: missing-versus-empty, malformed data, stale reads versus newer mutations, out-of-order writes, lifecycle handling for debounced writes, conversion, and failed-write/migration rollback |
 | Dependency or lockfile | Workspace-wide checks and affected builds |
 | Generated asset | Regeneration check plus consumer build/test |
 | Docs-only or isolated config | Narrow syntax/schema/link validation; do not run unrelated full suites |

@@ -159,7 +159,6 @@ export const ProjectActionsButton = ({
   const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
   const terminalShell = useUIStore((state) => state.terminalShell);
   const terminalLoginShell = useUIStore((state) => state.terminalLoginShells.includes(state.terminalShell));
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsProjectsSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
@@ -396,7 +395,6 @@ export const ProjectActionsButton = ({
     setActiveTab(normalizedDirectory, tabId);
     if (options.revealTerminal !== false) {
       setBottomTerminalOpen(true);
-      setActiveMainTab('terminal');
     }
 
     const stateAfterTab = useTerminalStore.getState().getDirectoryState(normalizedDirectory);
@@ -409,7 +407,6 @@ export const ProjectActionsButton = ({
   }, [
     ensureDirectory,
     normalizedDirectory,
-    setActiveMainTab,
     setActiveTab,
     setBottomTerminalOpen,
     setTabIconKey,
