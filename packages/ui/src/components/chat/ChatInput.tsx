@@ -10,7 +10,8 @@ import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, typ
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { ACCEPTED_ATTACHMENT_EXTENSIONS, ATTACHMENT_ACCEPT, useInputStore } from '@/sync/input-store';
+import { useInputStore } from '@/sync/input-store';
+import { ACCEPTED_ATTACHMENT_EXTENSIONS, ATTACHMENT_ACCEPT } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import { useDirectorySync, useUserMessageHistory } from '@/sync/sync-context';
@@ -1215,8 +1216,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return () => observer.disconnect();
     }, []);
 
-    const sendableAttachedFiles = attachedFiles;
-
     const knownAgentNames = React.useMemo(
         () => new Set(agents.map((agent) => agent.name.toLowerCase())),
         [agents]
@@ -1317,18 +1316,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [inputMode, message, knownAgentNames]);
 
     const attachmentCitationRanges = React.useMemo<HighlightRange[]>(() => {
-        if (!message || !message.includes('[') || inputMode === 'shell' || sendableAttachedFiles.length === 0) {
+        if (!message || !message.includes('[') || inputMode === 'shell' || attachedFiles.length === 0) {
             return [];
         }
 
         return findAttachmentCitationRanges(
             message,
-            sendableAttachedFiles.map((file) => file.filename),
+            attachedFiles.map((file) => file.filename),
         ).map((range) => ({
             ...range,
             style: 'mentionFile' as const,
         }));
-    }, [inputMode, message, sendableAttachedFiles]);
+    }, [attachedFiles, inputMode, message]);
 
     // Combined source-mode highlight: markdown syntax + @mentions. Returns null
     // when there's nothing to highlight so the overlay stays off for plain text.
@@ -1757,7 +1756,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [pendingInputText, consumePendingInputText]);
 
-    const hasContent = message.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;
+    const hasContent = message.trim().length > 0 || attachedFiles.length > 0 || hasDrafts;
     const hasQueuedMessages = queuedMessages.length > 0;
     const canSend = hasContent || hasQueuedMessages;
 
@@ -1767,9 +1766,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const currentMessage = textareaRef.current?.value ?? message;
         return {
             message: currentMessage,
-            hasContent: currentMessage.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts,
+            hasContent: currentMessage.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
         };
-    }, [hasDrafts, message, sendableAttachedFiles.length]);
+    }, [attachedFiles.length, hasDrafts, message]);
 
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
@@ -1794,7 +1793,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (drafts.length > 0) {
             messageToQueue = appendInlineComments(messageToQueue, drafts);
         }
-        const attachmentsToQueue = sanitizeAttachmentsForSend(sendableAttachedFiles);
+        const attachmentsToQueue = sanitizeAttachmentsForSend(attachedFiles);
 
         addToQueue(messageQueueTarget, {
             content: messageToQueue,
@@ -1819,7 +1818,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             textareaRef.current?.focus();
         }
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inlineDraftTarget, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inlineDraftTarget, attachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);
@@ -1856,7 +1855,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const inputSnapshot = options?.presetText != null
             ? {
                 message: options.presetText,
-                hasContent: options.presetText.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts,
+                hasContent: options.presetText.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
             }
             : getCurrentInputSnapshot();
         const queuedMessagesToSend = queuedMessageId
@@ -1958,7 +1957,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const messageToSend = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
             const { sanitizedText, mention } = parseAgentMentions(messageToSend, agents);
             const { sanitizedText: messageText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
-            const attachmentsToSend = sanitizeAttachmentsForSend(sendableAttachedFiles);
+            const attachmentsToSend = sanitizeAttachmentsForSend(attachedFiles);
             addMentionedSkills(messageText);
 
             if (!agentMentionName && mention?.name) {
