@@ -2514,6 +2514,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Primary action for send/queue button — respects selected follow-up behavior
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
+        const isSideChatCommand = inputMode === 'normal'
+            && sideChatCommands.length > 0
+            && parseSideChatCommand(inputSnapshot.message) !== null;
+        if (isSideChatCommand) {
+            void handleSubmitRef.current();
+            return;
+        }
         const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
         if (followUpBehavior === 'queue' && canQueue) {
             handleQueueMessage();
@@ -2522,7 +2529,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage, sideChatCommands]);
 
     // Draft welcome presets: submit immediately.
     const submitPresetPrompt = React.useCallback((text: string) => {
@@ -2789,6 +2796,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
+
+            const isSideChatCommand = inputMode === 'normal'
+                && sideChatCommands.length > 0
+                && parseSideChatCommand(message) !== null;
+            if (isSideChatCommand) {
+                handleSubmit();
+                return;
+            }
 
             // Queueing / steering only works when there's an existing busy
             // session (or an active auto-review run).
