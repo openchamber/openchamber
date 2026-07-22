@@ -1515,7 +1515,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const attachments = stateWithData.attachments;
     const imageAttachments = React.useMemo(() => {
         if (!Array.isArray(attachments)) return [];
-        return attachments.filter((f): f is FilePart => f.type === 'file' && typeof f.mime === 'string' && f.mime.startsWith('image/'));
+        return attachments.filter((f): f is FilePart & { url: string } => f.type === 'file' && typeof f.mime === 'string' && f.mime.startsWith('image/') && typeof f.url === 'string');
     }, [attachments]);
 
     const otherAttachments = React.useMemo(() => {
