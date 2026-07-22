@@ -8,6 +8,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { TerminalShell } from '@/lib/api/types';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
@@ -20,6 +21,7 @@ export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
+export type DesktopWindowControlsPosition = 'auto' | 'left' | 'right';
 export type FileEditorKeymap = 'default' | 'vim';
 
 function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
@@ -574,6 +576,9 @@ interface UIStore {
   showReasoningTraces: boolean;
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
+  sessionGoalEnabled: boolean;
+  sessionGoalDefaultBudgetEnabled: boolean;
+  sessionGoalDefaultBudget: number;
   collapsibleThinkingBlocks: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
@@ -587,6 +592,8 @@ interface UIStore {
   // Global draft welcome starters; null = unset (use the default built-in set).
   globalDraftStarters: DraftStarterRef[] | null;
   terminalFontSize: number;
+  terminalShell: TerminalShell;
+  terminalLoginShells: TerminalShell[];
   editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
@@ -608,6 +615,7 @@ interface UIStore {
   diffWrapLines: boolean;
   gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
+  isPromptNavigatorPanelOpen: boolean;
   isImagePreviewOpen: boolean;
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
@@ -646,12 +654,15 @@ interface UIStore {
   showExpandedEditTools: boolean;
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
+  desktopWindowControlsPosition: DesktopWindowControlsPosition;
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
+  promptNavigatorEnabled: boolean;
   expandedEditorToolbar: boolean;
   showSplitAssistantMessageActions: boolean;
+  allowPromptingSubagentSessions: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
   mobileSessionPanelOpen: boolean;
   mobileSessionFilterProjectId: string | null;
@@ -725,6 +736,9 @@ interface UIStore {
   setShowReasoningTraces: (value: boolean) => void;
   setSessionRecapEnabled: (value: boolean) => void;
   setSessionSuggestionEnabled: (value: boolean) => void;
+  setSessionGoalEnabled: (value: boolean) => void;
+  setSessionGoalDefaultBudgetEnabled: (value: boolean) => void;
+  setSessionGoalDefaultBudget: (value: number) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
@@ -737,6 +751,8 @@ interface UIStore {
   setFontSize: (size: number) => void;
   setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
   setTerminalFontSize: (size: number) => void;
+  setTerminalShell: (shell: TerminalShell) => void;
+  setTerminalLoginShells: (shells: TerminalShell[]) => void;
   setEditorFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
@@ -771,6 +787,8 @@ interface UIStore {
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
+  setPromptNavigatorPanelOpen: (open: boolean) => void;
+  togglePromptNavigatorPanel: () => void;
   setImagePreviewOpen: (open: boolean) => void;
   setNativeNotificationsEnabled: (value: boolean) => void;
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
@@ -796,12 +814,15 @@ interface UIStore {
   setShowExpandedEditTools: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
+  setDesktopWindowControlsPosition: (value: DesktopWindowControlsPosition) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
+  setPromptNavigatorEnabled: (value: boolean) => void;
   setExpandedEditorToolbar: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
+  setAllowPromptingSubagentSessions: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
   setMobileSessionPanelOpen: (value: boolean) => void;
   setMobileSessionFilterProjectId: (value: string | null) => void;
@@ -873,6 +894,9 @@ export const useUIStore = create<UIStore>()(
         showReasoningTraces: true,
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
+        sessionGoalEnabled: true,
+        sessionGoalDefaultBudgetEnabled: false,
+        sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
@@ -884,7 +908,9 @@ export const useUIStore = create<UIStore>()(
         messageLimit: 200,
         fontSize: 100,
         globalDraftStarters: null,
-        terminalFontSize: 13,
+        terminalFontSize: 14,
+        terminalShell: 'auto',
+        terminalLoginShells: [],
         editorFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
@@ -904,6 +930,7 @@ export const useUIStore = create<UIStore>()(
         diffWrapLines: false,
         gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
+        isPromptNavigatorPanelOpen: false,
         isImagePreviewOpen: false,
         nativeNotificationsEnabled: false,
         notificationMode: 'hidden-only',
@@ -939,12 +966,15 @@ export const useUIStore = create<UIStore>()(
         showExpandedEditTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
+        desktopWindowControlsPosition: 'auto',
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
         stickyUserHeader: false,
+        promptNavigatorEnabled: true,
         expandedEditorToolbar: false,
         showSplitAssistantMessageActions: false,
+        allowPromptingSubagentSessions: false,
         isMobileSessionStatusBarCollapsed: false,
         mobileSessionPanelOpen: false,
         mobileSessionFilterProjectId: null,
@@ -1581,6 +1611,18 @@ export const useUIStore = create<UIStore>()(
           set({ sessionSuggestionEnabled: value });
         },
 
+        setSessionGoalEnabled: (value) => {
+          set({ sessionGoalEnabled: value });
+        },
+
+        setSessionGoalDefaultBudgetEnabled: (value) => {
+          set({ sessionGoalDefaultBudgetEnabled: value });
+        },
+
+        setSessionGoalDefaultBudget: (value) => {
+          set({ sessionGoalDefaultBudget: value });
+        },
+
         setCollapsibleThinkingBlocks: (value) => {
           set({ collapsibleThinkingBlocks: value });
         },
@@ -1634,6 +1676,14 @@ export const useUIStore = create<UIStore>()(
           const rounded = Math.round(size);
           const clamped = Math.max(9, Math.min(52, rounded));
           set({ terminalFontSize: clamped });
+        },
+
+        setTerminalShell: (shell) => {
+          set({ terminalShell: shell });
+        },
+
+        setTerminalLoginShells: (shells) => {
+          set({ terminalLoginShells: [...new Set(shells)] });
         },
 
         setEditorFontSize: (size) => {
@@ -2009,6 +2059,14 @@ export const useUIStore = create<UIStore>()(
           set({ isTimelineDialogOpen: open });
         },
 
+        setPromptNavigatorPanelOpen: (open) => {
+          set({ isPromptNavigatorPanelOpen: open });
+        },
+
+        togglePromptNavigatorPanel: () => {
+          set((state) => ({ isPromptNavigatorPanelOpen: !state.isPromptNavigatorPanelOpen }));
+        },
+
         setImagePreviewOpen: (open) => {
           set({ isImagePreviewOpen: open });
         },
@@ -2076,6 +2134,9 @@ export const useUIStore = create<UIStore>()(
         setWeekStartPreference: (value) => {
           set({ weekStartPreference: value });
         },
+        setDesktopWindowControlsPosition: (value) => {
+          set({ desktopWindowControlsPosition: value });
+        },
         setMermaidRenderingMode: (value) => {
           set({ mermaidRenderingMode: value });
         },
@@ -2088,11 +2149,17 @@ export const useUIStore = create<UIStore>()(
         setStickyUserHeader: (value) => {
           set({ stickyUserHeader: value });
         },
+        setPromptNavigatorEnabled: (value) => {
+          set({ promptNavigatorEnabled: value });
+        },
         setExpandedEditorToolbar: (value: boolean) => {
           set({ expandedEditorToolbar: value });
         },
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
+        },
+        setAllowPromptingSubagentSessions: (value) => {
+          set({ allowPromptingSubagentSessions: value });
         },
         setIsMobileSessionStatusBarCollapsed: (value) => {
           set({ isMobileSessionStatusBarCollapsed: value });
@@ -2154,12 +2221,17 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 10,
+        version: 11,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v10 -> v11: move the previous terminal font default forward.
+          if (version < 11 && state.terminalFontSize === 13) {
+            state.terminalFontSize = 14;
+          }
 
           // v9 -> v10: remove obsolete single-file diff view mode setting
           if (version < 10) {
@@ -2276,6 +2348,9 @@ export const useUIStore = create<UIStore>()(
           showReasoningTraces: state.showReasoningTraces,
           sessionRecapEnabled: state.sessionRecapEnabled,
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
+          sessionGoalEnabled: state.sessionGoalEnabled,
+          sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
+          sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
@@ -2288,6 +2363,8 @@ export const useUIStore = create<UIStore>()(
           fontSize: state.fontSize,
           globalDraftStarters: state.globalDraftStarters,
           terminalFontSize: state.terminalFontSize,
+          terminalShell: state.terminalShell,
+          terminalLoginShells: state.terminalLoginShells,
           editorFontSize: state.editorFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,
@@ -2327,12 +2404,15 @@ export const useUIStore = create<UIStore>()(
           showExpandedEditTools: state.showExpandedEditTools,
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
+          desktopWindowControlsPosition: state.desktopWindowControlsPosition,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,
+          promptNavigatorEnabled: state.promptNavigatorEnabled,
           expandedEditorToolbar: state.expandedEditorToolbar,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
+          allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,

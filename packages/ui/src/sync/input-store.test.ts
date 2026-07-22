@@ -135,4 +135,81 @@ describe("input-store attachments", () => {
 
     expect(useInputStore.getState().attachedFiles.map((attached) => attached.filename)).toEqual(["hello.txt"])
   })
+
+  testWithMockFileReader("normalizes code files to text/plain", async () => {
+    const addPromise = useInputStore.getState().addAttachedFile(
+      new File(["const value = 1"], "example.ts", { type: "text/typescript" })
+    )
+    expect(pendingReaders).toHaveLength(1)
+
+    resolveReader(pendingReaders[0], "data:text/typescript;base64,Y29uc3QgdmFsdWUgPSAx")
+
+    expect(await addPromise).toBe(true)
+    expect(useInputStore.getState().attachedFiles[0]?.filename).toBe("example.ts")
+    expect(useInputStore.getState().attachedFiles[0]?.mimeType).toBe("text/plain")
+    expect(useInputStore.getState().attachedFiles[0]?.dataUrl).toBe(
+      "data:text/plain;base64,Y29uc3QgdmFsdWUgPSAx"
+    )
+  })
+
+  testWithMockFileReader("normalizes structured text MIME types to text/plain", async () => {
+    const addPromise = useInputStore.getState().addAttachedFile(
+      new File(["{}"], "example.json", { type: "application/json" })
+    )
+    expect(pendingReaders).toHaveLength(1)
+
+    resolveReader(pendingReaders[0], "data:application/json;base64,e30=")
+
+    expect(await addPromise).toBe(true)
+    expect(useInputStore.getState().attachedFiles[0]?.mimeType).toBe("text/plain")
+    expect(useInputStore.getState().attachedFiles[0]?.dataUrl).toBe("data:text/plain;base64,e30=")
+  })
+
+  test("rejects an unknown binary file after inspecting its contents", async () => {
+    const attached = await useInputStore.getState().addAttachedFile(
+      new File([new Uint8Array([0, 1, 2, 3])], "archive.bin", { type: "application/octet-stream" })
+    )
+
+    expect(attached).toBe(false)
+    expect(pendingReaders).toHaveLength(0)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  test("rejects unknown content with too many control bytes", async () => {
+    const attached = await useInputStore.getState().addAttachedFile(
+      new File([new Uint8Array([1, 2, 3, 65])], "encoded.custom", { type: "application/octet-stream" })
+    )
+
+    expect(attached).toBe(false)
+    expect(pendingReaders).toHaveLength(0)
+  })
+
+  testWithMockFileReader("accepts an unknown MIME type when its contents are text", async () => {
+    const addPromise = useInputStore.getState().addAttachedFile(
+      new File(["custom text"], "example.custom", { type: "application/octet-stream" })
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(pendingReaders).toHaveLength(1)
+
+    resolveReader(pendingReaders[0], "data:application/octet-stream;base64,Y3VzdG9tIHRleHQ=")
+
+    expect(await addPromise).toBe(true)
+    expect(useInputStore.getState().attachedFiles[0]?.mimeType).toBe("text/plain")
+    expect(useInputStore.getState().attachedFiles[0]?.dataUrl).toBe(
+      "data:text/plain;base64,Y3VzdG9tIHRleHQ="
+    )
+  })
+
+  testWithMockFileReader("preserves supported image MIME types", async () => {
+    const addPromise = useInputStore.getState().addAttachedFile(
+      new File([new Uint8Array([1, 2, 3])], "image.webp", { type: "image/webp" })
+    )
+    expect(pendingReaders).toHaveLength(1)
+
+    resolveReader(pendingReaders[0], "data:image/webp;base64,AQID")
+
+    expect(await addPromise).toBe(true)
+    expect(useInputStore.getState().attachedFiles[0]?.mimeType).toBe("image/webp")
+    expect(useInputStore.getState().attachedFiles[0]?.dataUrl).toBe("data:image/webp;base64,AQID")
+  })
 })

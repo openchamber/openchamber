@@ -48,6 +48,7 @@
     --text-ui-label: 0.875rem;
     --text-meta: 0.875rem;
     --text-micro: 0.8125rem;
+    --text-settings-page-title: 1.125rem;
   }
 
   /* Force override with higher specificity */
@@ -58,6 +59,7 @@
     --text-ui-label: 0.875rem !important;
     --text-meta: 0.875rem !important;
     --text-micro: 0.8125rem !important;
+    --text-settings-page-title: 1.125rem !important;
   }
 
   /* Additional override for elements using typography classes */
@@ -613,6 +615,20 @@
    keyboard in the same moment, and animating both made the entrance jerky. */
 :root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap {
   transition: opacity 0.2s ease-out;
+}
+
+/* Bottom-sheet overlays live inside a keyboard-inset surface whose bottom is
+   lifted by the keyboard height, but their max-height is expressed in 100dvh —
+   which does NOT shrink in the Capacitor app (native keyboard resize is off).
+   Without this cap a sheet with the keyboard raised (typing inside it) can
+   grow past the top safe area and slide under the notch/status bar. Subtract
+   both the keyboard inset and the top safe area from the available height. */
+:root.oc-capacitor-app .pwa-overlay-panel {
+  max-height: calc(
+    100dvh
+    - var(--oc-keyboard-inset, 0px)
+    - max(0.75rem, env(safe-area-inset-top))
+  );
 }
 
 /* Full-screen scroll views (e.g. the connect/login screen) live outside the app

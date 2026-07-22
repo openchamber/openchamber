@@ -1,7 +1,35 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { isSessionPinned } from '@/stores/useSessionPinnedStore';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+
+import { normalizePath } from '@/lib/pathNormalization';
+export { normalizePath };
+
+export const selectExpandedParentKeysForContext = (
+  previous: Set<string>,
+  expanded: ReadonlySet<string>,
+  context: 'project' | 'recent',
+): Set<string> => {
+  const prefix = `${context}:`;
+  const next = new Set([...expanded].filter((key) => key.startsWith(prefix)));
+  if (previous.size === next.size && [...next].every((key) => previous.has(key))) {
+    return previous;
+  }
+  return next;
+};
+
+export const toggleExpandedParentKey = (
+  expanded: Set<string>,
+  key: string,
+): Set<string> => {
+  const next = new Set(expanded);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+};
 
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
@@ -77,17 +105,13 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
   return t('common.relative.yearsAgoCompact', { count: Math.floor(diff / year) });
 };
 
-export const normalizePath = (value?: string | null) => {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
-  return normalized.length === 0 ? '/' : normalized;
-};
-
 export const isPathWithinProject = (directory?: string | null, projectPath?: string | null): boolean => {
   const normalizedDirectory = normalizePath(directory);
   const normalizedProjectPath = normalizePath(projectPath);
+  return isNormalizedPathWithinProject(normalizedDirectory, normalizedProjectPath);
+};
+
+const isNormalizedPathWithinProject = (normalizedDirectory: string | null, normalizedProjectPath: string | null): boolean => {
   if (!normalizedDirectory || !normalizedProjectPath) return false;
   if (normalizedDirectory === normalizedProjectPath) return true;
   if (normalizedProjectPath === '/') return normalizedDirectory.startsWith('/');
@@ -133,8 +157,8 @@ export const compareSessionsByPinnedAndTime = (
   b: Session,
   pinnedSessionIds: Set<string>,
 ): number => {
-  const aPinned = pinnedSessionIds.has(a.id);
-  const bPinned = pinnedSessionIds.has(b.id);
+  const aPinned = isSessionPinned(pinnedSessionIds, resolveGlobalSessionDirectory(a), a.id);
+  const bPinned = isSessionPinned(pinnedSessionIds, resolveGlobalSessionDirectory(b), b.id);
   if (aPinned !== bPinned) {
     return aPinned ? -1 : 1;
   }
@@ -172,28 +196,6 @@ export const resolveArchivedFolderName = (session: Session, projectRoot: string 
   const segments = source.split('/').filter(Boolean);
   return segments[segments.length - 1] ?? 'unassigned';
 };
-
-export const isSessionRelatedToProject = (
-  session: Session,
-  projectRoot: string,
-  validDirectories?: Set<string>,
-): boolean => {
-  const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-  const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
-
-  if (projectWorktree && (projectWorktree === projectRoot || projectWorktree.startsWith(`${projectRoot}/`))) {
-    return true;
-  }
-
-  if (!sessionDirectory) {
-    return false;
-  }
-  if (validDirectories && validDirectories.has(sessionDirectory)) {
-    return true;
-  }
-  return sessionDirectory === projectRoot || sessionDirectory.startsWith(`${projectRoot}/`);
-};
-
 
 export const formatProjectLabel = (label: string): string => {
   return label

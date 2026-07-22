@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { execGit } from './bridge-git-process-runtime';
 
-const MAX_FILE_ATTACH_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_ATTACH_SIZE_BYTES = 20 * 1024 * 1024;
 
 const createGitCheckIgnoreTimeoutMs = () => {
   const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
@@ -99,7 +99,7 @@ export const readUriAsAttachment = async (
 
     const size = stat.size ?? 0;
     if (size > MAX_FILE_ATTACH_SIZE_BYTES) {
-      return { skipped: { name, reason: 'File exceeds 10MB limit' } };
+      return { skipped: { name, reason: 'File exceeds 20MB limit' } };
     }
 
     const bytes = await vscode.workspace.fs.readFile(uri);

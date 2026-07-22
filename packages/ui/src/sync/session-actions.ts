@@ -10,14 +10,11 @@ import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { opencodeClient } from "@/lib/opencode/client"
-import { mergeSessionDirectoryMetadata, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
-import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
-import { retry } from "./retry"
-import { isVSCodeRuntime } from "@/lib/desktop"
-import { isMobileSurfaceRuntime } from "@/lib/runtimeSurface"
+import { materializeSessionSnapshots } from "./materialization"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
 import {
@@ -27,6 +24,10 @@ import {
   withoutReviewSessionLink,
   type SessionMetadataRecord,
 } from "@/lib/sessionReviewMetadata"
+import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
+import { getImperativeSessionMessageLoader } from "./session-message-loader"
+import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
+import { getRuntimeKey } from "@/lib/runtime-switch"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -47,6 +48,37 @@ type OptimisticConfirmInput = OptimisticRemoveInput
 let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 let _optimisticConfirm: ((input: OptimisticConfirmInput) => void) | null = null
+
+function sessionMutationPatch(
+  state: ReturnType<DirectoryStoreApi["getState"]>,
+  sessionId: string,
+  deleted: boolean,
+) {
+  const revision = (state.sessionRevision ?? 0) + 1
+  const sessionEventRevision = { ...(state.sessionEventRevision ?? {}) }
+  const sessionDeletedRevision = { ...(state.sessionDeletedRevision ?? {}) }
+  if (deleted) {
+    sessionDeletedRevision[sessionId] = revision
+    delete sessionEventRevision[sessionId]
+  } else {
+    sessionEventRevision[sessionId] = revision
+    delete sessionDeletedRevision[sessionId]
+  }
+  return {
+    sessionListSource: "live" as const,
+    sessionRevision: revision,
+    sessionEventRevision,
+    sessionDeletedRevision,
+  }
+}
+
+function invalidateSessionLoads(sessionId: string, directories: Iterable<string | null | undefined>): void {
+  const loader = getImperativeSessionMessageLoader()
+  if (!loader) return
+  for (const directory of new Set(directories)) {
+    if (directory) loader.invalidateSession({ directory, sessionID: sessionId })
+  }
+}
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -191,6 +223,119 @@ export function mirrorSessionIntoLiveStores(session: Session, directory?: string
   updateLiveSession(session)
 }
 
+function moveRecordEntries<T>(
+  source: Record<string, T>,
+  destination: Record<string, T>,
+  keys: Iterable<string>,
+): { source: Record<string, T>; destination: Record<string, T> } {
+  let nextSource = source
+  let nextDestination = destination
+
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue
+    if (nextSource === source) nextSource = { ...source }
+    if (nextDestination === destination) nextDestination = { ...destination }
+    nextDestination[key] = source[key]
+    delete nextSource[key]
+  }
+
+  return { source: nextSource, destination: nextDestination }
+}
+
+function reconcileSessionMove(
+  session: Session,
+  sourceDirectory: string,
+  destinationDirectory: string,
+): Session {
+  const stores = _childStores
+  const sourceStore = stores?.getChild(sourceDirectory)
+  const destinationStore = stores?.ensureChild(destinationDirectory, { bootstrap: false })
+  const sourceState = sourceStore?.getState()
+  const destinationState = destinationStore?.getState()
+  const liveSession = sourceState?.session.find((candidate) => candidate.id === session.id) ?? session
+  const movedSession = { ...liveSession, directory: destinationDirectory } as Session
+
+  if (!destinationStore || !destinationState || sourceStore === destinationStore) {
+    return movedSession
+  }
+
+  const destinationSessionIndex = destinationState.session.findIndex((candidate) => candidate.id === session.id)
+  const destinationSessions = [...destinationState.session]
+  if (destinationSessionIndex === -1) destinationSessions.push(movedSession)
+  else destinationSessions[destinationSessionIndex] = movedSession
+
+  if (!sourceStore || !sourceState) {
+    destinationStore.setState({
+      session: destinationSessions,
+      sessionTotal: destinationSessionIndex === -1
+        ? destinationState.sessionTotal + 1
+        : destinationState.sessionTotal,
+    })
+    return movedSession
+  }
+
+  const sourceContainsSession = sourceState.session.some((candidate) => candidate.id === session.id)
+  const status = moveRecordEntries(sourceState.session_status, destinationState.session_status, [session.id])
+  const diffs = moveRecordEntries(sourceState.session_diff, destinationState.session_diff, [session.id])
+  const todos = moveRecordEntries(sourceState.todo, destinationState.todo, [session.id])
+  const permissions = moveRecordEntries(sourceState.permission, destinationState.permission, [session.id])
+  const questions = moveRecordEntries(sourceState.question, destinationState.question, [session.id])
+  const messages = moveRecordEntries(sourceState.message, destinationState.message, [session.id])
+  const messageIds = sourceState.message[session.id]?.map((message) => message.id) ?? []
+  const parts = moveRecordEntries(sourceState.part, destinationState.part, messageIds)
+
+  sourceStore.setState({
+    session: sourceState.session.filter((candidate) => candidate.id !== session.id),
+    sessionTotal: sourceContainsSession ? Math.max(0, sourceState.sessionTotal - 1) : sourceState.sessionTotal,
+    session_status: status.source,
+    session_diff: diffs.source,
+    todo: todos.source,
+    permission: permissions.source,
+    question: questions.source,
+    message: messages.source,
+    part: parts.source,
+    ...sessionMutationPatch(sourceState, session.id, true),
+  })
+  destinationStore.setState({
+    session: destinationSessions,
+    sessionTotal: destinationSessionIndex === -1
+      ? destinationState.sessionTotal + 1
+      : destinationState.sessionTotal,
+    session_status: status.destination,
+    session_diff: diffs.destination,
+    todo: todos.destination,
+    permission: permissions.destination,
+    question: questions.destination,
+    message: messages.destination,
+    part: parts.destination,
+    ...sessionMutationPatch(destinationState, session.id, false),
+  })
+
+  return movedSession
+}
+
+export async function moveSessionToDirectory(
+  session: Session,
+  sourceDirectory: string,
+  destinationDirectory: string,
+  moveChanges = true,
+): Promise<void> {
+  const result = await opencodeClient.getSdkClient().experimental.controlPlane.moveSession({
+    sessionID: session.id,
+    destination: { directory: destinationDirectory },
+    moveChanges,
+  })
+  assertSdkSuccess(result, "Move session")
+
+  invalidateSessionLoads(session.id, [sourceDirectory, destinationDirectory])
+
+  const moved = reconcileSessionMove(session, sourceDirectory, destinationDirectory)
+
+  registerSessionDirectory(session.id, destinationDirectory)
+  useGlobalSessionsStore.getState().upsertSession(moved)
+  useSessionUIStore.getState().setSessionDirectory(session.id, destinationDirectory)
+}
+
 function dir() {
   return _getDirectory() || undefined
 }
@@ -258,7 +403,6 @@ export async function waitForConnectionOrThrow(): Promise<void> {
 
 type SessionListSnapshot = {
   directory: string
-  sessions: Session[]
 }
 
 type DirectoryStoreApi = ReturnType<ChildStoreManager["ensureChild"]>
@@ -268,14 +412,11 @@ function getGlobalSessionSnapshot(sessionId: string): Session | null {
   return [...global.activeSessions, ...global.archivedSessions].find((session) => session.id === sessionId) ?? null
 }
 
-function restoreGlobalSessionSnapshot(session: Session | null): void {
-  if (!session) return
-  useGlobalSessionsStore.getState().upsertSession(session)
-}
-
 function getSessionDirectory(sessionId: string): string | undefined {
+  const globalSession = getGlobalSessionSnapshot(sessionId)
   return findSessionDirectoryInChildStores(sessionId)
     || useSessionUIStore.getState().getDirectoryForSession(sessionId)
+    || (globalSession ? resolveGlobalSessionDirectory(globalSession) ?? undefined : undefined)
     || dir()
 }
 
@@ -435,13 +576,19 @@ export async function createSession(
   metadata?: Record<string, unknown>,
 ): Promise<Session | null> {
   try {
+    // Capture the effective directory used for session creation so we can fall
+    // back to it when the server response omits the `directory` field.
+    // Without this, setCurrentSession would fall through to a stale
+    // opencodeClient.getDirectory() value and group the session under the
+    // wrong project (closes #1637, #2270).
+    const effectiveDirectory = directoryOverride ?? dir()
     const session = await opencodeClient.createSession({
       title,
       parentID: parentID ?? undefined,
       metadata,
-    }, directoryOverride ?? dir())
+    }, effectiveDirectory)
 
-    const sessionDirectory = (session as { directory?: string | null }).directory ?? null
+    const sessionDirectory = (session as { directory?: string | null }).directory ?? effectiveDirectory ?? null
     // Pre-populate routing index so SSE events arriving before session.created
     // can be routed to the correct child store
     if (sessionDirectory) {
@@ -472,6 +619,19 @@ export async function patchSessionMetadata(
   return updated
 }
 
+export async function setContextObligatoryMessage(
+  sessionId: string,
+  directory: string | null | undefined,
+  message: ContextObligatoryMessage,
+  pinned: boolean,
+): Promise<Session> {
+  const updated = await patchSessionMetadata(sessionId, directory, (metadata) =>
+    withContextObligatoryMessage(metadata, message, pinned))
+  const sessionDirectory = (updated as Session & { directory?: string | null }).directory ?? directory ?? undefined
+  mirrorSessionIntoLiveStores(updated, sessionDirectory ?? undefined)
+  return updated
+}
+
 async function cleanupReviewMetadataBeforeDelete(sessionId: string, directory?: string | null): Promise<void> {
   let session: Session
   try {
@@ -493,8 +653,8 @@ async function cleanupReviewMetadataBeforeDelete(sessionId: string, directory?: 
   }
 }
 
-/** Optimistically remove a session from every live child store that has it. */
-function optimisticRemoveSession(sessionId: string, preferredDirectory?: string): SessionListSnapshot[] {
+/** Remove a server-confirmed session from every live child store that has it. */
+function removeSessionFromLiveStores(sessionId: string, preferredDirectory?: string): SessionListSnapshot[] {
   if (!_childStores) return []
 
   const snapshots: SessionListSnapshot[] = []
@@ -519,45 +679,46 @@ function optimisticRemoveSession(sessionId: string, preferredDirectory?: string)
     if (!current.session.some((session) => session.id === sessionId)) {
       continue
     }
-    snapshots.push({ directory, sessions: current.session })
-    store.setState({ session: current.session.filter((session) => session.id !== sessionId) })
+    snapshots.push({ directory })
+    store.setState({
+      session: current.session.filter((session) => session.id !== sessionId),
+      ...sessionMutationPatch(current, sessionId, true),
+    })
   }
 
   return snapshots
-}
-
-function restoreSessionListSnapshots(snapshots: SessionListSnapshot[]): void {
-  if (!_childStores) return
-  for (const snapshot of snapshots) {
-    const store = _childStores.children.get(snapshot.directory)
-    if (!store) continue
-    store.setState({ session: snapshot.sessions })
-  }
 }
 
 function cleanupSessionWorktreeMetadata(sessionId: string): void {
   useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
 }
 
+function finalizeConfirmedSessionDeletion(sessionId: string, sessionDirectory?: string): void {
+  const snapshots = removeSessionFromLiveStores(sessionId, sessionDirectory)
+  invalidateSessionLoads(sessionId, [...snapshots.map((snapshot) => snapshot.directory), sessionDirectory])
+  useGlobalSessionsStore.getState().removeSessions([sessionId])
+  const ui = useSessionUIStore.getState()
+  if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
+  cleanupSessionWorktreeMetadata(sessionId)
+  if (sessionDirectory) {
+    cleanupPersistedSessionState({
+      runtimeKey: getRuntimeKey(),
+      directory: sessionDirectory,
+      sessionId,
+    })
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const snapshots = optimisticRemoveSession(sessionId, sessionDirectory)
-  const globalSnapshot = getGlobalSessionSnapshot(sessionId)
-  useGlobalSessionsStore.getState().removeSessions([sessionId])
-
-  const ui = useSessionUIStore.getState()
-  if (ui.currentSessionId === sessionId) {
-    ui.setCurrentSession(null)
-  }
   try {
     await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory)
     const deleted = await opencodeClient.deleteSession(sessionId, sessionDirectory)
     if (deleted !== true) {
       throw new Error("session.delete failed: server did not confirm deletion")
     }
-    useGlobalSessionsStore.getState().removeSessions([sessionId])
-    cleanupSessionWorktreeMetadata(sessionId)
+    finalizeConfirmedSessionDeletion(sessionId, sessionDirectory)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
@@ -565,66 +726,50 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     // Subsequent delete attempts for those children return 404; treat as
     // success since the session was already deleted by the cascade.
     if ((error as { status?: number })?.status === 404) {
-      cleanupSessionWorktreeMetadata(sessionId)
+      finalizeConfirmedSessionDeletion(sessionId, sessionDirectory)
       return true
     }
-    restoreSessionListSnapshots(snapshots)
-    restoreGlobalSessionSnapshot(globalSnapshot)
     return false
   }
 }
 
 /** Delete a session specifying which directory it lives in. Used by agent groups for cross-directory deletes. */
 export async function deleteSessionInDirectory(sessionId: string, directory: string): Promise<boolean> {
-  if (!_childStores) return false
-  const snapshots = optimisticRemoveSession(sessionId, directory)
-  const globalSnapshot = getGlobalSessionSnapshot(sessionId)
-  useGlobalSessionsStore.getState().removeSessions([sessionId])
-  const ui = useSessionUIStore.getState()
-  if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   try {
     await cleanupReviewMetadataBeforeDelete(sessionId, directory)
     const deleted = await opencodeClient.deleteSession(sessionId, directory)
     if (deleted !== true) {
       throw new Error("session.delete failed: server did not confirm deletion")
     }
-    useGlobalSessionsStore.getState().removeSessions([sessionId])
-    cleanupSessionWorktreeMetadata(sessionId)
+    finalizeConfirmedSessionDeletion(sessionId, directory)
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
     if ((error as { status?: number })?.status === 404) {
-      cleanupSessionWorktreeMetadata(sessionId)
+      finalizeConfirmedSessionDeletion(sessionId, directory)
       return true
     }
-    restoreSessionListSnapshots(snapshots)
-    restoreGlobalSessionSnapshot(globalSnapshot)
     return false
   }
 }
 
 export async function archiveSession(sessionId: string): Promise<boolean> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const snapshots = optimisticRemoveSession(sessionId, sessionDirectory)
-  const globalSnapshot = getGlobalSessionSnapshot(sessionId)
   const archivedAt = Date.now()
-  useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
-  const ui = useSessionUIStore.getState()
-  if (ui.currentSessionId === sessionId) {
-    ui.setCurrentSession(null)
-  }
   try {
     await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory)
     const archived = await opencodeClient.updateSession(sessionId, { time: { archived: archivedAt } }, sessionDirectory)
     if (!archived) {
       throw new Error("session.update failed: server did not return the archived session")
     }
+    const snapshots = removeSessionFromLiveStores(sessionId, sessionDirectory)
+    invalidateSessionLoads(sessionId, [...snapshots.map((snapshot) => snapshot.directory), sessionDirectory])
     useGlobalSessionsStore.getState().upsertSession(archived)
+    const ui = useSessionUIStore.getState()
+    if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
     return true
   } catch (error) {
     console.error("[session-actions] archiveSession failed", error)
-    restoreSessionListSnapshots(snapshots)
-    restoreGlobalSessionSnapshot(globalSnapshot)
     return false
   }
 }
@@ -1159,6 +1304,16 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
 export async function refetchSessionMessages(sessionId: string): Promise<void> {
   const { store, directory } = dirStoreForSession(sessionId)
+  const loader = getImperativeSessionMessageLoader()
+  if (loader && directory) {
+    await loader.refreshTail({ directory, sessionID: sessionId }, MESSAGE_REFETCH_LIMIT)
+    const snapshot = loader.getSnapshot({ directory, sessionID: sessionId })
+    if (snapshot.status === "error") throw snapshot.error ?? new Error("Session message refresh failed")
+    return
+  }
+
+  // Actions can run in isolated tests before SyncProvider binds the shared
+  // loader. The application runtime always takes the shared path above.
   const result = await sdk().session.messages({ sessionID: sessionId, directory, limit: MESSAGE_REFETCH_LIMIT })
   const records = (assertSdkSuccess(result, "session.messages") ?? [])
     .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
@@ -1264,75 +1419,11 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   restoreFilePartsToInput(fileParts)
 }
 
-// ---------------------------------------------------------------------------
-// Imperative fetch path — starts message loading on the same tick as
-// setCurrentSession, before the React commit cycle fires useEffect.
-// ---------------------------------------------------------------------------
-
-const FETCH_MESSAGES_LOADING = new Set<string>()
-const DESKTOP_INITIAL_PAGE_SIZE = 50
-const CONSTRAINED_INITIAL_PAGE_SIZE = 30
-
-const getFetchPageSize = () => {
-  if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return CONSTRAINED_INITIAL_PAGE_SIZE
-  return DESKTOP_INITIAL_PAGE_SIZE
-}
-
 export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {
   const resolvedDir = directory ?? dir()
   if (!resolvedDir) return
-
-  const loadingKey = `${resolvedDir}:${sessionID}`
-  if (FETCH_MESSAGES_LOADING.has(loadingKey)) return
-
-  FETCH_MESSAGES_LOADING.add(loadingKey)
-
-  try {
-    const s = sdk()
-    const store = directory
-      ? dirStoreForDirectory(directory)
-      : dirStore()
-
-    if (getSessionMaterializationStatus(store.getState(), sessionID).renderable) return
-
-    const result = await retry(async () => {
-      const response = await s.session.messages({
-        sessionID,
-        directory: resolvedDir,
-        limit: getFetchPageSize(),
-      })
-      return response
-    })
-
-    const records = (assertSdkSuccess(result, "session.messages") ?? [])
-      .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
-    if (records.length === 0) return
-
-    // Staleness guard: a rapid session switch may have moved the user off this
-    // session while the fetch was in flight. Skip the write so a slow fetch
-    // can't repopulate (and un-evict) a session already navigated away from.
-    if (useSessionUIStore.getState().currentSessionId !== sessionID) return
-
-    const latestState = store.getState()
-    const latestStatus = getSessionMaterializationStatus(latestState, sessionID)
-    if (latestStatus.renderable && (latestState.message[sessionID]?.length ?? 0) >= records.length) return
-
-    store.setState((state) => {
-      const materialized = materializeSessionSnapshots(
-        state,
-        sessionID,
-        records.map((record: { info: Message; parts?: Part[] }) => ({
-          info: stripMessageDiffSnapshots(record.info),
-          parts: record.parts ?? [],
-        })),
-        { skipPartTypes: MESSAGE_REFETCH_SKIP_PARTS },
-      )
-      if (!materialized.messagesChanged && !materialized.partsChanged) return state
-      return { message: materialized.message, part: materialized.part }
-    })
-  } catch {
-    // Transient failure — the reactive path in ChatContainer will retry
-  } finally {
-    FETCH_MESSAGES_LOADING.delete(loadingKey)
-  }
+  await getImperativeSessionMessageLoader()?.ensure(
+    { directory: resolvedDir, sessionID },
+    { reason: "navigation" },
+  )
 }

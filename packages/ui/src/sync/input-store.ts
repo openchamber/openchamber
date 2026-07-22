@@ -5,6 +5,7 @@
 
 import { create } from "zustand"
 import type { AttachedFile } from "@/stores/types/sessionTypes"
+import { prepareAttachmentFile } from "./attachment-files"
 
 const FILE_URI_PREFIX = "file://"
 const pendingVSCodeSelectionKeys = new Set<string>()
@@ -34,9 +35,13 @@ const toFileUrl = (filepath: string): string => {
 
 const getVSCodeSelectionKey = (path: string, filename: string): string => `${path}\u0000${filename}`
 
-const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+const readFileAsDataUrl = (file: File, mime: string): Promise<string> => new Promise((resolve, reject) => {
   const reader = new FileReader()
-  reader.onload = () => resolve(reader.result as string)
+  reader.onload = () => {
+    const value = typeof reader.result === "string" ? reader.result : ""
+    const commaIndex = value.indexOf(",")
+    resolve(commaIndex === -1 ? value : `data:${mime};base64,${value.slice(commaIndex + 1)}`)
+  }
   reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"))
   reader.onabort = () => reject(new Error("File read aborted"))
   reader.readAsDataURL(file)
@@ -103,7 +108,7 @@ export type InputState = {
   consumePendingPresetSubmit: () => string | null
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null) => void
   consumePendingSyntheticParts: () => SyntheticContextPart[] | null
-  addAttachedFile: (file: File) => Promise<void>
+  addAttachedFile: (file: File) => Promise<boolean>
   removeAttachedFile: (id: string) => void
   setAttachedFiles: (files: AttachedFile[]) => void
   clearAttachedFiles: () => void
@@ -154,23 +159,28 @@ export const useInputStore = create<InputState>()((set, get) => ({
   addAttachedFile: async (file: File) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
+    const preparedOrPending = prepareAttachmentFile(file)
+    // Keep the synchronous preparation path synchronous so FileReader starts before this action yields.
+    const prepared = preparedOrPending instanceof Promise ? await preparedOrPending : preparedOrPending
+    if (!prepared) return false
     let dataUrl: string
     try {
-      dataUrl = await readFileAsDataUrl(file)
+      dataUrl = await readFileAsDataUrl(prepared.file, prepared.mimeType)
     } catch {
-      return
+      return false
     }
-    if (generation !== attachmentReadGeneration) return
+    if (!dataUrl || generation !== attachmentReadGeneration) return false
     const attached: AttachedFile = {
       id,
-      file,
+      file: prepared.file,
       dataUrl,
-      mimeType: file.type,
-      filename: file.name,
-      size: file.size,
+      mimeType: prepared.mimeType,
+      filename: prepared.file.name,
+      size: prepared.file.size,
       source: "local",
     }
     set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
+    return true
   },
 
   removeAttachedFile: (id) =>
@@ -221,7 +231,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
     pendingVSCodeSelectionKeys.add(selectionKey)
     let dataUrl: string
     try {
-      dataUrl = await readFileAsDataUrl(file)
+      dataUrl = await readFileAsDataUrl(file, file.type)
     } catch {
       return
     } finally {

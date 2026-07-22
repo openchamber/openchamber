@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/ui",
-  "version": "1.15.0",
+  "version": "1.16.2",
   "private": true,
   "type": "module",
   "main": "src/main.tsx",
@@ -43,7 +43,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@lezer/highlight": "^1.2.3",
-    "@opencode-ai/sdk": "1.17.18",
+    "@opencode-ai/sdk": "1.18.4",
     "@pierre/diffs": "1.3.0-beta.6",
     "@replit/codemirror-vim": "^6.3.0",
     "@simplewebauthn/browser": "13.3.0",

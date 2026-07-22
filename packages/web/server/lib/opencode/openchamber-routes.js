@@ -39,6 +39,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         arch: parseString(req.query.arch),
         instanceMode: parseString(req.query.instanceMode),
         currentVersion: parseString(req.query.currentVersion),
+        installId: parseString(req.query.installId),
         reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
       });
       res.json(updateInfo);

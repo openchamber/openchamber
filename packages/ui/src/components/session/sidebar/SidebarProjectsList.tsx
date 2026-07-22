@@ -19,6 +19,7 @@ import { useI18n } from '@/lib/i18n';
 import type { MainTab } from '@/stores/useUIStore';
 import { getSessionNodesActivityState } from './collapsedActivityState';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
+import { streamPerfCount } from '@/stores/utils/streamDebug';
 
 type ProjectSection = {
   project: {
@@ -65,7 +66,7 @@ type Props = {
   setActiveProjectIdOnly: (id: string) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
   openNewWorktreeDialog: () => void;
   openProjectEditDialog: (id: string) => void;
   removeProject: (id: string) => void;
@@ -82,7 +83,8 @@ type Props = {
   notifyOnSubtasks: boolean;
 };
 
-export function SidebarProjectsList(props: Props): React.ReactNode {
+function SidebarProjectsListComponent(props: Props): React.ReactNode {
+  streamPerfCount('ui.sidebar_projects_list.render');
   const { t } = useI18n();
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -256,7 +258,10 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
                       props.setActiveMainTab('chat');
                       if (props.mobileVariant) props.setSessionSwitcherOpen(false);
-                      props.openNewSessionDraft({ directoryOverride: project.normalizedPath });
+                      props.openNewSessionDraft({
+                        selectedProjectId: projectKey,
+                        directoryOverride: project.normalizedPath,
+                      });
                     }}
                     onNewWorktreeSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
@@ -321,3 +326,5 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     </ScrollableOverlay>
   );
 }
+
+export const SidebarProjectsList = React.memo(SidebarProjectsListComponent);

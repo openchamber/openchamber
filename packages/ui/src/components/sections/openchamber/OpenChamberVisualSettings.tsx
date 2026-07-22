@@ -1,16 +1,13 @@
 import React from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { NumberInput } from '@/components/ui/number-input';
-import { Radio } from '@/components/ui/radio';
 import { Input } from '@/components/ui/input';
 import {
     Select,
@@ -33,6 +30,32 @@ import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
 } from '@/lib/directoryShowHidden';
+import {
+    SettingsSection,
+    SettingsTwoColumn,
+    SettingsControlGroup,
+    SettingsStackedField,
+    SettingsFieldRow,
+    SettingsInset,
+    SettingsCheckboxRow,
+    SettingsRadioGroup,
+    SettingsRadioOption,
+    SettingsChipGroup,
+    SETTINGS_SELECT_TRIGGER_CLASS,
+    SETTINGS_SELECT_SIZE,
+    SETTINGS_ICON_BUTTON_CLASS,
+    SETTINGS_CONTROL_CLUSTER_CLASS,
+    SETTINGS_CLUSTER_CONTROL_CLASS,
+    SETTINGS_NUMBER_STEPPER_ROW_CLASS,
+    SETTINGS_NUMBER_UNIT_CLASS,
+    SETTINGS_FIELDS_STACK_CLASS,
+    SETTINGS_OPTION_STACK_CLASS,
+} from '@/components/sections/shared/SettingsSection';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import type { TerminalShellOption } from '@/lib/api/types';
+import { isTerminalShell } from '@/lib/terminalShell';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
 interface Option<T extends string> {
     id: T;
@@ -40,18 +63,21 @@ interface Option<T extends string> {
     descriptionKey?: string;
 }
 
-const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string }> = [
+const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string; descriptionKey: string }> = [
     {
         value: 'system',
         labelKey: 'settings.openchamber.visual.option.themeMode.system',
+        descriptionKey: 'settings.openchamber.visual.option.themeMode.system.description',
     },
     {
         value: 'light',
         labelKey: 'settings.openchamber.visual.option.themeMode.light',
+        descriptionKey: 'settings.openchamber.visual.option.themeMode.light.description',
     },
     {
         value: 'dark',
         labelKey: 'settings.openchamber.visual.option.themeMode.dark',
+        descriptionKey: 'settings.openchamber.visual.option.themeMode.dark.description',
     },
 ];
 
@@ -245,7 +271,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -256,6 +282,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const { locale, locales, setLocale, label, t } = useI18n();
     const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
     const { isMobile } = useDeviceInfo();
+    const { terminal } = useRuntimeAPIs();
     const { browserTab } = usePwaDetection();
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
@@ -263,6 +290,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const sessionSuggestionEnabled = useUIStore(state => state.sessionSuggestionEnabled);
     const setSessionRecapEnabled = useUIStore(state => state.setSessionRecapEnabled);
     const setSessionSuggestionEnabled = useUIStore(state => state.setSessionSuggestionEnabled);
+    const sessionGoalEnabled = useUIStore(state => state.sessionGoalEnabled);
+    const setSessionGoalEnabled = useUIStore(state => state.setSessionGoalEnabled);
+    const sessionGoalDefaultBudgetEnabled = useUIStore(state => state.sessionGoalDefaultBudgetEnabled);
+    const setSessionGoalDefaultBudgetEnabled = useUIStore(state => state.setSessionGoalDefaultBudgetEnabled);
+    const sessionGoalDefaultBudget = useUIStore(state => state.sessionGoalDefaultBudget);
+    const setSessionGoalDefaultBudget = useUIStore(state => state.setSessionGoalDefaultBudget);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
     const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
     const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
@@ -274,7 +307,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const collapsibleUserMessages = useUIStore(state => state.collapsibleUserMessages);
     const setCollapsibleUserMessages = useUIStore(state => state.setCollapsibleUserMessages);
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
+    const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
     const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
+    const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const expandedEditorToolbar = useUIStore(state => state.expandedEditorToolbar);
     const setExpandedEditorToolbar = useUIStore(state => state.setExpandedEditorToolbar);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
@@ -289,6 +324,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setFontSize = useUIStore(state => state.setFontSize);
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
     const setTerminalFontSize = useUIStore(state => state.setTerminalFontSize);
+    const terminalShell = useUIStore(state => state.terminalShell);
+    const setTerminalShell = useUIStore(state => state.setTerminalShell);
+    const terminalLoginShells = useUIStore(state => state.terminalLoginShells);
+    const setTerminalLoginShells = useUIStore(state => state.setTerminalLoginShells);
     const editorFontSize = useUIStore(state => state.editorFontSize);
     const setEditorFontSize = useUIStore(state => state.setEditorFontSize);
     const uiFont = useUIStore(state => state.uiFont);
@@ -327,6 +366,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const showSplitAssistantMessageActions = useUIStore(state => state.showSplitAssistantMessageActions);
     const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
+    const allowPromptingSubagentSessions = useUIStore(state => state.allowPromptingSubagentSessions);
+    const setAllowPromptingSubagentSessions = useUIStore(state => state.setAllowPromptingSubagentSessions);
     const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
     const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
     const effectiveMessageStreamTransport = messageStreamTransport;
@@ -377,7 +418,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ reportUsage: enabled });
     }, [setReportUsage]);
 
-    const shouldAnimateChatPreview = isSettingsDialogOpen
+    const shouldAnimateChatPreview = (isSettingsDialogOpen || isMobile || isVSCodeRuntime())
         && (visibleSettings ? visibleSettings.includes('chatRenderMode') : true);
 
     React.useEffect(() => {
@@ -432,6 +473,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setStickyUserHeader(enabled);
         void updateDesktopSettings({ stickyUserHeader: enabled });
     }, [setStickyUserHeader]);
+
+    const handlePromptNavigatorEnabledChange = React.useCallback((enabled: boolean) => {
+        setPromptNavigatorEnabled(enabled);
+        void updateDesktopSettings({ promptNavigatorEnabled: enabled });
+    }, [setPromptNavigatorEnabled]);
 
     const handleExpandedEditorToolbarChange = React.useCallback((enabled: boolean) => {
         setExpandedEditorToolbar(enabled);
@@ -555,18 +601,21 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasAppearanceSettings = isVSCode
         ? hasLocalizationSettings
         : (shouldShow('theme') || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
-    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap') || shouldShow('expandedEditorToolbar');
+    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || (shouldShow('expandedEditorToolbar') && !isVSCode);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
+        || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
         || shouldShow('messageTransport')
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
+        || (shouldShow('promptNavigatorEnabled') && !isVSCode)
         || shouldShow('wideChatLayout')
         || shouldShow('codeBlockLineWrap')
         || shouldShow('splitAssistantMessageActions')
+        || shouldShow('subagentReadOnlyBanner')
         || shouldShow('diffLayout')
         || shouldShow('dotfiles')
         || shouldShow('fileViewerPreview')
@@ -576,10 +625,72 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('showToolFileIcons')
         || shouldShow('expandedTools')
         || (!isMobile && shouldShow('inputSpellcheck'));
+    const showBehaviorDisplaySettings = shouldShow('chatRenderMode')
+        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted');
+    const showTransportSection = shouldShow('messageTransport');
+    const showBehaviorMessageOptions = shouldShow('userMessageRendering')
+        || shouldShow('mermaidRendering')
+        || (shouldShow('diffLayout') && !isVSCode)
+        || shouldShow('followUpBehavior');
+    const showBehaviorFeatureCheckboxes = shouldShow('sessionAssist')
+        || (shouldShow('sessionGoal') && !isVSCode)
+        || shouldShow('subagentReadOnlyBanner')
+        || shouldShow('collapsibleUserMessages')
+        || shouldShow('stickyUserHeader')
+        || (shouldShow('promptNavigatorEnabled') && !isVSCode)
+        || shouldShow('wideChatLayout')
+        || shouldShow('codeBlockLineWrap')
+        || shouldShow('splitAssistantMessageActions')
+        || shouldShow('dotfiles')
+        || shouldShow('fileViewerPreview')
+        || shouldShow('persistDraft')
+        || shouldShow('showToolFileIcons')
+        || shouldShow('showTurnChangedFiles')
+        || (!isMobile && shouldShow('inputSpellcheck'))
+        || shouldShow('reasoning')
+        || shouldShow('expandedTools');
+    // First behavior section under the page header should not draw a top border on Chat-only;
+    // when Appearance (or earlier sections) already rendered, keep the default divider.
+    const behaviorSectionDivider = hasAppearanceSettings || hasLayoutSettings || hasNavigationSettings;
 
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const showMobileKeyboardModeSetting = shouldShow('mobileKeyboardMode') && isWebRuntime() && !isDesktopShell() && !isVSCode && supportsMobileKeyboardResizeContent();
+    const showTerminalShellSetting = (shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode;
+    const [availableTerminalShells, setAvailableTerminalShells] = React.useState<TerminalShellOption[]>([]);
+    const [terminalShellRuntimeEpoch, setTerminalShellRuntimeEpoch] = React.useState(0);
+    React.useEffect(() => subscribeRuntimeEndpointChanged(() => {
+        setAvailableTerminalShells([]);
+        setTerminalShellRuntimeEpoch((epoch) => epoch + 1);
+    }), []);
+    React.useEffect(() => {
+        let cancelled = false;
+        if (!showTerminalShellSetting || !terminal.listShells) return;
+        void terminal.listShells()
+            .then((shells) => {
+                if (!cancelled) setAvailableTerminalShells(shells);
+            })
+            .catch(() => {
+                if (!cancelled) setAvailableTerminalShells([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [showTerminalShellSetting, terminal, terminalShellRuntimeEpoch]);
+    const terminalShellOptions = React.useMemo(() => {
+        const explicitShells = availableTerminalShells.filter((shell) => shell.id !== 'auto');
+        if (terminalShell === 'auto' || explicitShells.some((shell) => shell.id === terminalShell)) {
+            return explicitShells;
+        }
+        return [{ id: terminalShell, name: terminalShell, supportsLogin: false }, ...explicitShells];
+    }, [availableTerminalShells, terminalShell]);
+    const terminalShellSupportsLogin = availableTerminalShells.find((shell) => shell.id === terminalShell)?.supportsLogin === true;
+    const terminalLoginShellEnabled = terminalLoginShells.includes(terminalShell);
+    const setTerminalLoginShellEnabled = (enabled: boolean) => {
+        setTerminalLoginShells(enabled
+            ? [...terminalLoginShells.filter((shell) => shell !== terminalShell), terminalShell]
+            : terminalLoginShells.filter((shell) => shell !== terminalShell));
+    };
     const [mobileLayoutPreference, setMobileLayoutPreference] = React.useState<MobileLayoutPreference>(() => getStoredMobileLayoutPreference());
     const [pwaInstallName, setPwaInstallName] = React.useState('');
     const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
@@ -713,160 +824,128 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     }, [setMobileKeyboardMode, showMobileKeyboardModeSetting, showPwaInstallNameSetting, showPwaOrientationSetting]);
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-0">
 
                 {/* --- Appearance & Themes --- */}
                 {hasAppearanceSettings && (
-                    <div className="mb-8 space-y-6">
+                    <div className="space-y-0">
                         {hasThemeSettings && (
-                            <section className="px-2 pb-2 pt-0 space-y-2">
-                                <div className="flex min-w-0 flex-col gap-1.5">
-                                    <span className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.colorMode')}</span>
-                                    <div className="flex flex-wrap items-center gap-1">
-                                        {THEME_MODE_OPTIONS.map((option) => (
-                                            <Button
-                                                key={option.value}
-                                                variant="chip"
-                                                size="xs"
-                                                aria-pressed={themeMode === option.value}
-                                                className="!font-normal"
-                                                onClick={() => setThemeMode(option.value)}
-                                            >
-                                                {tUnsafe(option.labelKey)}
-                                            </Button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {showMobileLayoutSetting && (
-                                    <div className="flex min-w-0 flex-col gap-1.5 py-1.5">
-                                        <span className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.mobileLayout')}</span>
-                                        <div className="flex flex-wrap items-center gap-1">
-                                            {MOBILE_LAYOUT_OPTIONS.map((option) => (
-                                                <Button
+                            <SettingsSection title={t('settings.openchamber.visual.section.colorModeAndTheme')} divider={false}>
+                                <SettingsTwoColumn>
+                                    <div className={SETTINGS_FIELDS_STACK_CLASS}>
+                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.colorMode')}>
+                                            {THEME_MODE_OPTIONS.map((option) => (
+                                                <SettingsRadioOption
                                                     key={option.value}
-                                                    variant="chip"
-                                                    size="xs"
-                                                    aria-pressed={mobileLayoutPreference === option.value}
-                                                    className="!font-normal"
-                                                    onClick={() => handleMobileLayoutPreferenceChange(option.value)}
-                                                >
-                                                    {tUnsafe(option.labelKey)}
-                                                </Button>
+                                                    selected={themeMode === option.value}
+                                                    onSelect={() => setThemeMode(option.value)}
+                                                    label={tUnsafe(option.labelKey)}
+                                                    ariaLabel={tUnsafe(option.labelKey)}
+                                                />
                                             ))}
-                                        </div>
-                                    </div>
-                                )}
+                                        </SettingsRadioGroup>
 
-                                <div className="grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
-                                    <div data-settings-item="appearance.light-theme" className="flex min-w-0 items-center gap-2">
-                                        <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.lightTheme')}</span>
-                                        <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectLightThemeAria')} className="w-fit">
-                                                <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
-                                                    {selectedLightTheme
-                                                        ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
-                                                        : undefined}
-                                                </SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {lightThemes.map((theme) => (
-                                                    <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                        {formatThemeLabel(theme.metadata.name, 'light')}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        {showMobileLayoutSetting && (
+                                            <SettingsInset>
+                                                <SettingsStackedField label={t('settings.openchamber.visual.section.mobileLayout')}>
+                                                    <SettingsChipGroup
+                                                        value={mobileLayoutPreference}
+                                                        options={MOBILE_LAYOUT_OPTIONS.map((option) => ({
+                                                            value: option.value,
+                                                            label: tUnsafe(option.labelKey),
+                                                        }))}
+                                                        onChange={handleMobileLayoutPreferenceChange}
+                                                        aria-label={t('settings.openchamber.visual.section.mobileLayout')}
+                                                    />
+                                                </SettingsStackedField>
+                                            </SettingsInset>
+                                        )}
                                     </div>
-                                    <div data-settings-item="appearance.dark-theme" className="flex min-w-0 items-center gap-2">
-                                        <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.darkTheme')}</span>
-                                        <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectDarkThemeAria')} className="w-fit">
-                                                <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
-                                                    {selectedDarkTheme
-                                                        ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
-                                                        : undefined}
-                                                </SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {darkThemes.map((theme) => (
-                                                    <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                        {formatThemeLabel(theme.metadata.name, 'dark')}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
 
-                                <div className="flex items-center gap-2 py-1.5">
-                                    <button
-                                        type="button"
-                                        disabled={customThemesLoading || themesReloading}
-                                        onClick={() => {
-                                            const startedAt = Date.now();
-                                            setThemesReloading(true);
-                                            void reloadCustomThemes().finally(() => {
-                                                const elapsed = Date.now() - startedAt;
-                                                if (elapsed < 500) {
-                                                    window.setTimeout(() => {
-                                                        setThemesReloading(false);
-                                                    }, 500 - elapsed);
-                                                    return;
-                                                }
-                                                setThemesReloading(false);
-                                            });
-                                        }}
-                                        className="inline-flex items-center typography-ui-label font-normal text-foreground underline decoration-[1px] underline-offset-2 hover:text-foreground/80 disabled:cursor-not-allowed disabled:text-muted-foreground/60"
-                                    >
-                                        {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
-                                    </button>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
+                                    <div className={SETTINGS_FIELDS_STACK_CLASS}>
+                                        <SettingsStackedField
+                                            label={t('settings.openchamber.visual.field.lightTheme')}
+                                            settingsItem="appearance.light-theme"
+                                        >
+                                            <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectLightThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                    <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
+                                                        {selectedLightTheme
+                                                            ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
+                                                            : undefined}
+                                                    </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {lightThemes.map((theme) => (
+                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
+                                                            {formatThemeLabel(theme.metadata.name, 'light')}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </SettingsStackedField>
+                                        <SettingsStackedField
+                                            label={t('settings.openchamber.visual.field.darkTheme')}
+                                            settingsItem="appearance.dark-theme"
+                                        >
+                                            <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectDarkThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                    <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
+                                                        {selectedDarkTheme
+                                                            ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
+                                                            : undefined}
+                                                    </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {darkThemes.map((theme) => (
+                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
+                                                            {formatThemeLabel(theme.metadata.name, 'dark')}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </SettingsStackedField>
+
+                                        <div className="flex items-center gap-2 pt-1">
                                             <button
                                                 type="button"
-                                                className="flex items-center justify-center rounded-md p-1 text-muted-foreground/70 hover:text-foreground"
-                                                aria-label={t('settings.openchamber.visual.field.themeImportInfoAria')}
+                                                disabled={customThemesLoading || themesReloading}
+                                                onClick={() => {
+                                                    const startedAt = Date.now();
+                                                    setThemesReloading(true);
+                                                    void reloadCustomThemes().finally(() => {
+                                                        const elapsed = Date.now() - startedAt;
+                                                        if (elapsed < 500) {
+                                                            window.setTimeout(() => {
+                                                                setThemesReloading(false);
+                                                            }, 500 - elapsed);
+                                                            return;
+                                                        }
+                                                        setThemesReloading(false);
+                                                    });
+                                                }}
+                                                className="typography-settings-link inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
                                             >
-                                                <Icon name="information" className="h-3.5 w-3.5" />
+                                                <Icon name="restart" className={cn('h-3.5 w-3.5', themesReloading && 'animate-spin')} />
+                                                {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
                                             </button>
-                                        </TooltipTrigger>
-                                        <TooltipContent sideOffset={8}>
-                                            {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
-                                        </TooltipContent>
-                                    </Tooltip>
-                                </div>
+                                            <SettingsInfoHint>
+                                                {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
+                                            </SettingsInfoHint>
+                                        </div>
+                                    </div>
+                                </SettingsTwoColumn>
 
                                 {macVibrancySupported && (
-                                    <div data-settings-item="appearance.window-transparency" className="flex flex-col gap-1.5 border-t border-border/40 pt-3">
-                                        <div
-                                            className="group flex cursor-pointer items-start gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={vibrancyChecked}
-                                            onClick={() => { if (!vibrancyRestarting) setVibrancyChecked(!vibrancyChecked); }}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    if (!vibrancyRestarting) setVibrancyChecked(!vibrancyChecked);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={vibrancyChecked}
-                                                onChange={setVibrancyChecked}
-                                                disabled={vibrancyRestarting}
-                                                ariaLabel={t('settings.openchamber.visual.field.macVibrancy')}
-                                            />
-                                            <div className="flex min-w-0 flex-col">
-                                                <span className="typography-ui-label text-foreground">
-                                                    {t('settings.openchamber.visual.field.macVibrancy')}
-                                                </span>
-                                                <span className="typography-meta text-muted-foreground">
-                                                    {t('settings.openchamber.visual.field.macVibrancyHint')}
-                                                </span>
-                                            </div>
-                                        </div>
+                                    <SettingsInset settingsItem="appearance.window-transparency" className="flex flex-col gap-1.5">
+                                        <SettingsCheckboxRow
+                                            checked={vibrancyChecked}
+                                            onChange={setVibrancyChecked}
+                                            disabled={vibrancyRestarting}
+                                            label={t('settings.openchamber.visual.field.macVibrancy')}
+                                            info={t('settings.openchamber.visual.field.macVibrancyHint')}
+                                            ariaLabel={t('settings.openchamber.visual.field.macVibrancy')}
+                                        />
                                         {vibrancyChecked !== macVibrancyEnabled && (
                                             <div className="pl-6">
                                                 <Button
@@ -884,260 +963,242 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 </Button>
                                             </div>
                                         )}
-                                    </div>
+                                    </SettingsInset>
                                 )}
 
                                 {dockBadgeSupported && (
-                                    <div data-settings-item="appearance.dock-badge" className="flex flex-col gap-1.5 border-t border-border/40 pt-3">
-                                        <div
-                                            className="group flex cursor-pointer items-start gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={dockBadgeEnabled}
-                                            onClick={() => setDockBadgeEnabled(!dockBadgeEnabled)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setDockBadgeEnabled(!dockBadgeEnabled);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={dockBadgeEnabled}
-                                                onChange={setDockBadgeEnabled}
-                                                ariaLabel={t('settings.openchamber.visual.field.dockBadge')}
-                                            />
-                                            <div className="flex min-w-0 flex-col">
-                                                <span className="typography-ui-label text-foreground">
-                                                    {t('settings.openchamber.visual.field.dockBadge')}
-                                                </span>
-                                                <span className="typography-meta text-muted-foreground">
-                                                    {t('settings.openchamber.visual.field.dockBadgeHint')}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
+                                    <SettingsInset settingsItem="appearance.dock-badge">
+                                        <SettingsCheckboxRow
+                                            checked={dockBadgeEnabled}
+                                            onChange={setDockBadgeEnabled}
+                                            label={t('settings.openchamber.visual.field.dockBadge')}
+                                            info={t('settings.openchamber.visual.field.dockBadgeHint')}
+                                            ariaLabel={t('settings.openchamber.visual.field.dockBadge')}
+                                        />
+                                    </SettingsInset>
                                 )}
-                            </section>
+                            </SettingsSection>
                         )}
 
                         {hasLocalizationSettings && (
-                            <section className="px-2 pb-2 pt-0 space-y-2">
-                                <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.localization')}</h4>
+                            <SettingsSection title={t('settings.openchamber.visual.section.localization')}>
+                                <SettingsTwoColumn>
+                                    <SettingsStackedField
+                                        label={t('settings.appearance.language.label')}
+                                        info={t('settings.appearance.language.description')}
+                                        settingsItem="appearance.language"
+                                    >
+                                        <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
+                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                <SelectValue>{label(locale)}</SelectValue>
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {locales.map((availableLocale) => (
+                                                    <SelectItem key={availableLocale} value={availableLocale}>
+                                                        {label(availableLocale)}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </SettingsStackedField>
 
-                                <div data-settings-item="appearance.language" className="grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
-                                    <div className="flex min-w-0 flex-col">
-                                        <span className="typography-ui-label text-foreground shrink-0">{t('settings.appearance.language.label')}</span>
-                                        <span className="typography-meta text-muted-foreground">{t('settings.appearance.language.description')}</span>
-                                    </div>
-                                    <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
-                                        <SelectTrigger aria-label={t('settings.appearance.language.select')} className="w-fit">
-                                            <SelectValue>{label(locale)}</SelectValue>
+                                    {(shouldShow('timeFormat') || shouldShow('weekStart')) && (
+                                        <div className={SETTINGS_FIELDS_STACK_CLASS}>
+                                            {shouldShow('timeFormat') && (
+                                                <SettingsStackedField
+                                                    label={t('settings.openchamber.visual.field.timeFormat')}
+                                                    settingsItem="appearance.time-format"
+                                                >
+                                                    <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                            <SelectValue>{selectedTimeFormatLabel}</SelectValue>
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {TIME_FORMAT_OPTIONS.map((option) => (
+                                                                <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </SettingsStackedField>
+                                            )}
+
+                                            {shouldShow('weekStart') && (
+                                                <SettingsStackedField
+                                                    label={t('settings.openchamber.visual.field.weekStartsOn')}
+                                                    settingsItem="appearance.week-start"
+                                                >
+                                                    <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                            <SelectValue>{selectedWeekStartLabel}</SelectValue>
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {WEEK_START_OPTIONS.map((option) => (
+                                                                <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </SettingsStackedField>
+                                            )}
+                                        </div>
+                                    )}
+                                </SettingsTwoColumn>
+                            </SettingsSection>
+                        )}
+
+                        {(showPwaInstallNameSetting || showPwaOrientationSetting || showMobileKeyboardModeSetting) && (
+                            <SettingsSection title={t('settings.openchamber.visual.section.appInstall')} contentClassName={SETTINGS_FIELDS_STACK_CLASS}>
+
+                            {showPwaInstallNameSetting && (
+                                <SettingsFieldRow
+                                    label={t('settings.openchamber.visual.field.installAppName')}
+                                    info={t('settings.openchamber.visual.field.installAppNameHint')}
+                                    settingsItem="appearance.pwa-install-name"
+                                    alignEnd={false}
+                                    controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
+                                >
+                                    <Input
+                                        value={pwaInstallName}
+                                        onChange={(event) => {
+                                            setPwaInstallName(event.target.value);
+                                        }}
+                                        onBlur={() => {
+                                            void applyPwaInstallName(pwaInstallName);
+                                        }}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter') {
+                                                event.preventDefault();
+                                                void applyPwaInstallName(pwaInstallName);
+                                            }
+                                        }}
+                                        className="min-w-0 flex-1"
+                                        maxLength={64}
+                                        aria-label={t('settings.openchamber.visual.field.pwaInstallAppNameAria')}
+                                    />
+                                    <Button size="sm"
+                                        type="button"
+                                        variant="ghost"
+                                        onClick={() => {
+                                            setPwaInstallName(DEFAULT_PWA_INSTALL_NAME);
+                                            void applyPwaInstallName('');
+                                        }}
+                                        className={SETTINGS_ICON_BUTTON_CLASS}
+                                        aria-label={t('settings.openchamber.visual.actions.resetInstallAppNameAria')}
+                                        title={t('settings.common.actions.reset')}
+                                    >
+                                        <Icon name="restart" className="h-3.5 w-3.5" />
+                                    </Button>
+                                </SettingsFieldRow>
+                            )}
+
+                            {showPwaOrientationSetting && (
+                                <SettingsFieldRow
+                                    label={t('settings.openchamber.visual.field.installOrientation')}
+                                    description={t('settings.openchamber.visual.field.installOrientationHint')}
+                                    settingsItem="appearance.pwa-orientation"
+                                    alignEnd={false}
+                                    controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
+                                >
+                                    <Select
+                                        value={pwaOrientation}
+                                        onValueChange={(value) => {
+                                            const orientation = normalizePwaOrientation(value);
+                                            setPwaOrientation(orientation);
+                                            void applyPwaOrientation(orientation);
+                                        }}
+                                    >
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
+                                            <SelectValue placeholder={t('settings.openchamber.visual.field.selectOrientationPlaceholder')}>
+                                                {selectedPwaOrientationLabel}
+                                            </SelectValue>
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {locales.map((availableLocale) => (
-                                                <SelectItem key={availableLocale} value={availableLocale}>
-                                                    {label(availableLocale)}
+                                            {PWA_ORIENTATION_OPTIONS.map((option) => (
+                                                <SelectItem key={option.id} value={option.id}>
+                                                    {tUnsafe(option.labelKey)}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                </div>
-
-                                {(shouldShow('timeFormat') || shouldShow('weekStart')) && (
-                                    <div className="grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
-                                        {shouldShow('timeFormat') && (
-                                            <div data-settings-item="appearance.time-format" className="flex min-w-0 items-center gap-2">
-                                                <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.timeFormat')}</span>
-                                                <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
-                                                    <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} className="w-fit">
-                                                        <SelectValue>{selectedTimeFormatLabel}</SelectValue>
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {TIME_FORMAT_OPTIONS.map((option) => (
-                                                            <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                        )}
-
-                                        {shouldShow('weekStart') && (
-                                            <div data-settings-item="appearance.week-start" className="flex min-w-0 items-center gap-2">
-                                                <span className="typography-ui-label text-foreground shrink-0">{t('settings.openchamber.visual.field.weekStartsOn')}</span>
-                                                <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
-                                                    <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} className="w-fit">
-                                                        <SelectValue>{selectedWeekStartLabel}</SelectValue>
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {WEEK_START_OPTIONS.map((option) => (
-                                                            <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </section>
-                        )}
-
-                        {(showPwaInstallNameSetting || showPwaOrientationSetting || showMobileKeyboardModeSetting) && (
-                            <section className="px-2 pb-2 pt-0 space-y-2">
-
-                            {showPwaInstallNameSetting && (
-                                <div data-settings-item="appearance.pwa-install-name" className="py-1.5 space-y-1.5">
-                                    <div className="flex min-w-0 flex-col">
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.installAppName')}</span>
-                                        <span className="typography-meta text-muted-foreground">{t('settings.openchamber.visual.field.installAppNameHint')}</span>
-                                    </div>
-                                    <div className="flex w-full max-w-[28rem] items-center gap-2">
-                                        <Input
-                                            value={pwaInstallName}
-                                            onChange={(event) => {
-                                                setPwaInstallName(event.target.value);
-                                            }}
-                                            onBlur={() => {
-                                                void applyPwaInstallName(pwaInstallName);
-                                            }}
-                                            onKeyDown={(event) => {
-                                                if (event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    void applyPwaInstallName(pwaInstallName);
-                                                }
-                                            }}
-                                            className="h-7"
-                                            maxLength={64}
-                                            aria-label={t('settings.openchamber.visual.field.pwaInstallAppNameAria')}
-                                        />
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => {
-                                                setPwaInstallName(DEFAULT_PWA_INSTALL_NAME);
-                                                void applyPwaInstallName('');
-                                            }}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetInstallAppNameAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {showPwaOrientationSetting && (
-                                <div data-settings-item="appearance.pwa-orientation" className="py-1.5 space-y-1.5">
-                                    <div className="flex min-w-0 flex-col">
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.installOrientation')}</span>
-                                        <span className="typography-meta text-muted-foreground">{t('settings.openchamber.visual.field.installOrientationHint')}</span>
-                                    </div>
-                                    <div className="flex w-full max-w-[18rem] items-center gap-2">
-                                        <Select
-                                            value={pwaOrientation}
-                                            onValueChange={(value) => {
-                                                const orientation = normalizePwaOrientation(value);
-                                                setPwaOrientation(orientation);
-                                                void applyPwaOrientation(orientation);
-                                            }}
-                                        >
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} className="w-full">
-                                                <SelectValue placeholder={t('settings.openchamber.visual.field.selectOrientationPlaceholder')}>
-                                                    {selectedPwaOrientationLabel}
-                                                </SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {PWA_ORIENTATION_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.id} value={option.id}>
-                                                        {tUnsafe(option.labelKey)}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => {
-                                                setPwaOrientation('system');
-                                                void applyPwaOrientation('system');
-                                            }}
-                                            disabled={pwaOrientation === 'system'}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetInstallOrientationAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
+                                    <Button size="sm"
+                                        type="button"
+                                        variant="ghost"
+                                        onClick={() => {
+                                            setPwaOrientation('system');
+                                            void applyPwaOrientation('system');
+                                        }}
+                                        disabled={pwaOrientation === 'system'}
+                                        className={SETTINGS_ICON_BUTTON_CLASS}
+                                        aria-label={t('settings.openchamber.visual.actions.resetInstallOrientationAria')}
+                                        title={t('settings.common.actions.reset')}
+                                    >
+                                        <Icon name="restart" className="h-3.5 w-3.5" />
+                                    </Button>
+                                </SettingsFieldRow>
                             )}
 
                             {showMobileKeyboardModeSetting && (
-                                <div data-settings-item="appearance.mobile-keyboard-mode" className="py-1.5 space-y-1.5">
-                                    <div className="flex min-w-0 flex-col">
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.mobileKeyboardMode')}</span>
-                                        <span className="typography-meta text-muted-foreground">{t('settings.openchamber.visual.field.mobileKeyboardModeHint')}</span>
-                                    </div>
-                                    <div className="flex w-full max-w-[18rem] items-center gap-2">
-                                        <Select
-                                            value={mobileKeyboardMode}
-                                            onValueChange={(value) => {
-                                                const mode = normalizeMobileKeyboardMode(value);
-                                                setMobileKeyboardMode(mode);
-                                                void updateDesktopSettings({ mobileKeyboardMode: mode });
-                                            }}
-                                        >
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} className="w-full">
-                                                <SelectValue placeholder={t('settings.openchamber.visual.field.selectMobileKeyboardModePlaceholder')}>
-                                                    {selectedMobileKeyboardModeLabel}
-                                                </SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {MOBILE_KEYBOARD_MODE_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.id} value={option.id}>
-                                                        {tUnsafe(option.labelKey)}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => {
-                                                setMobileKeyboardMode('native');
-                                                void updateDesktopSettings({ mobileKeyboardMode: 'native' });
-                                            }}
-                                            disabled={mobileKeyboardMode === 'native'}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetMobileKeyboardModeAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
+                                <SettingsFieldRow
+                                    label={t('settings.openchamber.visual.field.mobileKeyboardMode')}
+                                    info={t('settings.openchamber.visual.field.mobileKeyboardModeHint')}
+                                    settingsItem="appearance.mobile-keyboard-mode"
+                                    alignEnd={false}
+                                    controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
+                                >
+                                    <Select
+                                        value={mobileKeyboardMode}
+                                        onValueChange={(value) => {
+                                            const mode = normalizeMobileKeyboardMode(value);
+                                            setMobileKeyboardMode(mode);
+                                            void updateDesktopSettings({ mobileKeyboardMode: mode });
+                                        }}
+                                    >
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
+                                            <SelectValue placeholder={t('settings.openchamber.visual.field.selectMobileKeyboardModePlaceholder')}>
+                                                {selectedMobileKeyboardModeLabel}
+                                            </SelectValue>
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {MOBILE_KEYBOARD_MODE_OPTIONS.map((option) => (
+                                                <SelectItem key={option.id} value={option.id}>
+                                                    {tUnsafe(option.labelKey)}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <Button size="sm"
+                                        type="button"
+                                        variant="ghost"
+                                        onClick={() => {
+                                            setMobileKeyboardMode('native');
+                                            void updateDesktopSettings({ mobileKeyboardMode: 'native' });
+                                        }}
+                                        disabled={mobileKeyboardMode === 'native'}
+                                        className={SETTINGS_ICON_BUTTON_CLASS}
+                                        aria-label={t('settings.openchamber.visual.actions.resetMobileKeyboardModeAria')}
+                                        title={t('settings.common.actions.reset')}
+                                    >
+                                        <Icon name="restart" className="h-3.5 w-3.5" />
+                                    </Button>
+                                </SettingsFieldRow>
                             )}
-                            </section>
+                            </SettingsSection>
                         )}
                     </div>
                 )}
 
-                {/* --- UI Scaling & Layout --- */}
+                {/* --- Density & type --- */}
                 {hasLayoutSettings && (
-                    <div className="mb-8 space-y-3">
-                        <section className="p-2 space-y-0.5">
-                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.spacingAndLayout')}</h4>
-                            <div className="pl-2">
-
-                            {shouldShow('fontSize') && !isMobile && (
-                                <div data-settings-item="appearance.interface-font-size" className="flex items-center gap-8 py-1">
-                                    <div className="flex min-w-0 flex-col w-56 shrink-0">
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.interfaceFont')}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 w-fit">
+                    <SettingsSection title={t('settings.openchamber.visual.section.densityAndType')} contentClassName={SETTINGS_FIELDS_STACK_CLASS}>
+                        {(shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize') ? (
+                            <SettingsTwoColumn>
+                                {shouldShow('fontSize') && !isMobile && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.interfaceFont')}
+                                        settingsItem="appearance.interface-font-size"
+                                        controlClassName="w-full"
+                                    >
                                         <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} className="w-[13rem]">
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1153,24 +1214,21 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             variant="ghost"
                                             onClick={() => setUiFont(DEFAULT_UI_FONT)}
                                             disabled={uiFont === DEFAULT_UI_FONT}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                            className={SETTINGS_ICON_BUTTON_CLASS}
                                             aria-label={t('settings.openchamber.visual.actions.resetInterfaceFontAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
                                             <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {shouldShow('terminalFontSize') && (
-                                <div className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.codeFont')}</span>
-                                    </div>
-                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
+                                    </SettingsStackedField>
+                                )}
+                                {shouldShow('terminalFontSize') && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.codeFont')}
+                                        controlClassName="w-full"
+                                    >
                                         <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} className="w-[13rem]">
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1186,1043 +1244,745 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             variant="ghost"
                                             onClick={() => setMonoFont(DEFAULT_MONO_FONT)}
                                             disabled={monoFont === DEFAULT_MONO_FONT}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                            className={SETTINGS_ICON_BUTTON_CLASS}
                                             aria-label={t('settings.openchamber.visual.actions.resetCodeFontAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
                                             <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
-                                    </div>
-                                </div>
-                            )}
+                                    </SettingsStackedField>
+                                )}
+                            </SettingsTwoColumn>
+                        ) : null}
 
-                            {shouldShow('fontSize') && !isMobile && (
-                                <div className="flex items-center gap-8 py-1">
-                                    <div className="flex min-w-0 flex-col w-56 shrink-0">
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.interfaceFontSize')}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 w-fit">
-                                        <NumberInput
-                                            value={fontSize}
-                                            onValueChange={setFontSize}
-                                            min={50}
-                                            max={200}
-                                            step={5}
-                                            aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
-                                            className="w-16"
-                                        />
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setFontSize(100)}
-                                            disabled={fontSize === 100}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetFontSizeAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {shouldShow('terminalFontSize') && (
-                                <div data-settings-item="appearance.terminal-font-size" className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.terminalFontSize')}</span>
-                                    </div>
-                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                                        <NumberInput
-                                            value={terminalFontSize}
-                                            onValueChange={setTerminalFontSize}
-                                            min={9}
-                                            max={52}
-                                            step={1}
-                                            className="w-16"
-                                        />
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setTerminalFontSize(13)}
-                                            disabled={terminalFontSize === 13}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {shouldShow('editorFontSize') && (
-                                <div data-settings-item="appearance.editor-font-size" className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.editorFontSize')}</span>
-                                    </div>
-                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                                        <NumberInput
-                                            value={editorFontSize}
-                                            onValueChange={setEditorFontSize}
-                                            min={9}
-                                            max={32}
-                                            step={1}
-                                            className="w-16"
-                                        />
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setEditorFontSize(13)}
-                                            disabled={editorFontSize === 13}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetEditorFontSizeAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {shouldShow('spacing') && (
-                                <div data-settings-item="appearance.spacing-density" className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.spacingDensity')}</span>
-                                    </div>
-                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                                        <NumberInput
-                                            value={padding}
-                                            onValueChange={setPadding}
-                                            min={50}
-                                            max={200}
-                                            step={5}
-                                            className="w-16"
-                                        />
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setPadding(100)}
-                                            disabled={padding === 100}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetSpacingAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {shouldShow('inputBarOffset') && (
-                                <div data-settings-item="appearance.input-bar-offset" className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
-                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <div className="flex items-center gap-1.5">
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.inputBarOffset')}</span>
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                                                </TooltipTrigger>
-                                                <TooltipContent sideOffset={8} className="max-w-xs">
-                                                    {t('settings.openchamber.visual.field.inputBarOffsetTooltip')}
-                                                </TooltipContent>
-                                            </Tooltip>
+                        {(shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize') || shouldShow('editorFontSize') ? (
+                            <SettingsTwoColumn>
+                                {shouldShow('fontSize') && !isMobile && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.interfaceFontSize')}
+                                        controlClassName="w-full"
+                                    >
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+                                            <NumberInput
+                                                value={fontSize}
+                                                onValueChange={setFontSize}
+                                                min={50}
+                                                max={200}
+                                                step={5}
+                                                aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
+                                            />
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setFontSize(100)}
+                                                disabled={fontSize === 100}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetFontSizeAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
                                         </div>
-                                    </div>
-                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
-                                        <NumberInput
-                                            value={inputBarOffset}
-                                            onValueChange={setInputBarOffset}
-                                            min={0}
-                                            max={100}
-                                            step={5}
-                                            className="w-16"
-                                        />
-                                        <Button size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => setInputBarOffset(0)}
-                                            disabled={inputBarOffset === 0}
-                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label={t('settings.openchamber.visual.actions.resetInputBarOffsetAria')}
-                                            title={t('settings.common.actions.reset')}
-                                        >
-                                            <Icon name="restart" className="h-3.5 w-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
+                                    </SettingsStackedField>
+                                )}
+                                {shouldShow('terminalFontSize') && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.terminalFontSize')}
+                                        settingsItem="appearance.terminal-font-size"
+                                        controlClassName="w-full"
+                                    >
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+                                            <NumberInput
+                                                value={terminalFontSize}
+                                                onValueChange={setTerminalFontSize}
+                                                min={9}
+                                                max={52}
+                                                step={1}
+                                            />
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setTerminalFontSize(13)}
+                                                disabled={terminalFontSize === 13}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
+                                    </SettingsStackedField>
+                                )}
+                                {shouldShow('editorFontSize') && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.editorFontSize')}
+                                        settingsItem="appearance.editor-font-size"
+                                        controlClassName="w-full"
+                                    >
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+                                            <NumberInput
+                                                value={editorFontSize}
+                                                onValueChange={setEditorFontSize}
+                                                min={9}
+                                                max={32}
+                                                step={1}
+                                            />
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setEditorFontSize(13)}
+                                                disabled={editorFontSize === 13}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetEditorFontSizeAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
+                                    </SettingsStackedField>
+                                )}
+                            </SettingsTwoColumn>
+                        ) : null}
 
-                            </div>
-
-                        </section>
-                    </div>
+                        {shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile) ? (
+                            <SettingsTwoColumn>
+                                {shouldShow('spacing') && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.spacingDensity')}
+                                        settingsItem="appearance.spacing-density"
+                                        controlClassName="w-full"
+                                    >
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+                                            <NumberInput
+                                                value={padding}
+                                                onValueChange={setPadding}
+                                                min={50}
+                                                max={200}
+                                                step={5}
+                                            />
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setPadding(100)}
+                                                disabled={padding === 100}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetSpacingAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
+                                    </SettingsStackedField>
+                                )}
+                                {shouldShow('inputBarOffset') && isMobile && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.inputBarOffset')}
+                                        info={t('settings.openchamber.visual.field.inputBarOffsetTooltip')}
+                                        settingsItem="appearance.input-bar-offset"
+                                        controlClassName="w-full"
+                                    >
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+                                            <NumberInput
+                                                value={inputBarOffset}
+                                                onValueChange={setInputBarOffset}
+                                                min={0}
+                                                max={100}
+                                                step={5}
+                                            />
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>px</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setInputBarOffset(0)}
+                                                disabled={inputBarOffset === 0}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetInputBarOffsetAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
+                                    </SettingsStackedField>
+                                )}
+                            </SettingsTwoColumn>
+                        ) : null}
+                    </SettingsSection>
                 )}
 
                 {/* --- Navigation --- */}
                 {hasNavigationSettings && (
-                    <div className="space-y-3">
-                        <section className="px-2 pb-2 pt-0">
-                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.navigation')}</h4>
-                            {shouldShow('fileEditorKeymap') && (
-                                <div data-settings-item="appearance.file-editor-keymap" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-start sm:gap-8">
-                                    <span className="typography-ui-label text-foreground sm:w-56 shrink-0">
-                                        {t('settings.openchamber.visual.field.fileEditorKeymap')}
-                                    </span>
-                                    <div
-                                        role="radiogroup"
-                                        aria-label={t('settings.openchamber.visual.field.fileEditorKeymap')}
-                                        className="space-y-0"
-                                    >
-                                        {(['default', 'vim'] as const).map((keymap) => {
-                                            const selected = fileEditorKeymap === keymap;
-                                            const labelText = t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`);
-                                            return (
-                                                <button
-                                                    key={keymap}
-                                                    type="button"
-                                                    className="flex cursor-pointer items-center gap-2 py-0.5 text-left"
-                                                    role="radio"
-                                                    aria-checked={selected}
-                                                    onClick={() => setFileEditorKeymap(keymap)}
-                                                >
-                                                    <span
-                                                        aria-hidden
-                                                        className={cn(
-                                                            'relative flex h-[14px] w-[14px] min-h-[14px] min-w-[14px] shrink-0 self-center items-center justify-center rounded-full transition-[background-color,box-shadow] duration-200 ease-out',
-                                                            selected
-                                                                ? 'bg-[color-mix(in_srgb,var(--primary-base)_80%,transparent)] shadow-none'
-                                                                : 'bg-[var(--surface-muted)] shadow-[inset_0_0_0_1px_var(--interactive-border)]'
-                                                        )}
-                                                    >
-                                                        <span className={cn('block h-[5px] w-[5px] rounded-full bg-white', !selected && 'opacity-0')} />
-                                                    </span>
-                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                        {labelText}
-                                                    </span>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-                            {shouldShow('expandedEditorToolbar') && (
-                                <div
-                                    data-settings-item="appearance.expanded-editor-toolbar"
-                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
-                                    role="button"
-                                    tabIndex={0}
-                                    aria-pressed={expandedEditorToolbar}
-                                    onClick={() => handleExpandedEditorToolbarChange(!expandedEditorToolbar)}
-                                    onKeyDown={(event) => {
-                                        if (event.key === ' ' || event.key === 'Enter') {
-                                            event.preventDefault();
-                                            handleExpandedEditorToolbarChange(!expandedEditorToolbar);
-                                        }
-                                    }}
-                                >
-                                    <Checkbox
-                                        checked={expandedEditorToolbar}
-                                        onChange={handleExpandedEditorToolbarChange}
-                                        ariaLabel={t('settings.openchamber.visual.field.expandedEditorToolbarAria')}
-                                    />
-                                    <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.expandedEditorToolbar')}</span>
-                                </div>
+                    <SettingsSection title={t('settings.openchamber.visual.section.navigation')} contentClassName="space-y-4">
+                        {shouldShow('fileEditorKeymap') && (
+                            <SettingsControlGroup
+                                title={t('settings.openchamber.visual.field.fileEditorKeymap')}
+                                settingsItem="appearance.file-editor-keymap"
+                            >
+                                <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.fileEditorKeymap')}>
+                                    {(['default', 'vim'] as const).map((keymap) => (
+                                        <SettingsRadioOption
+                                            key={keymap}
+                                            selected={fileEditorKeymap === keymap}
+                                            onSelect={() => setFileEditorKeymap(keymap)}
+                                            label={t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`)}
+                                            ariaLabel={t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`)}
+                                        />
+                                    ))}
+                                </SettingsRadioGroup>
+                            </SettingsControlGroup>
+                        )}
+                        <div className={SETTINGS_OPTION_STACK_CLASS}>
+                            {shouldShow('expandedEditorToolbar') && !isVSCode && (
+                                <SettingsCheckboxRow
+                                    checked={expandedEditorToolbar}
+                                    onChange={handleExpandedEditorToolbarChange}
+                                    label={t('settings.openchamber.visual.field.expandedEditorToolbar')}
+                                    ariaLabel={t('settings.openchamber.visual.field.expandedEditorToolbarAria')}
+                                    settingsItem="appearance.expanded-editor-toolbar"
+                                />
                             )}
                             {shouldShow('terminalQuickKeys') && !isMobile && (
-                                <div
-                                    data-settings-item="appearance.terminal-quick-keys"
-                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
-                                    role="button"
-                                    tabIndex={0}
-                                    aria-pressed={showTerminalQuickKeysOnDesktop}
-                                    onClick={() => setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop)}
-                                    onKeyDown={(event) => {
-                                        if (event.key === ' ' || event.key === 'Enter') {
-                                            event.preventDefault();
-                                            setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop);
-                                        }
-                                    }}
-                                >
-                                    <Checkbox
-                                        checked={showTerminalQuickKeysOnDesktop}
-                                        onChange={setShowTerminalQuickKeysOnDesktop}
-                                        ariaLabel={t('settings.openchamber.visual.field.terminalQuickKeysAria')}
-                                    />
-                                    <div className="flex min-w-0 items-center gap-1.5">
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.terminalQuickKeys')}</span>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                                            </TooltipTrigger>
-                                            <TooltipContent sideOffset={8} className="max-w-xs">
-                                                {t('settings.openchamber.visual.field.terminalQuickKeysTooltip')}
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </div>
-                                </div>
+                                <SettingsCheckboxRow
+                                    checked={showTerminalQuickKeysOnDesktop}
+                                    onChange={setShowTerminalQuickKeysOnDesktop}
+                                    label={t('settings.openchamber.visual.field.terminalQuickKeys')}
+                                    ariaLabel={t('settings.openchamber.visual.field.terminalQuickKeysAria')}
+                                    settingsItem="appearance.terminal-quick-keys"
+                                    info={t('settings.openchamber.visual.field.terminalQuickKeysTooltip')}
+                                />
                             )}
-                        </section>
-                    </div>
+                            {showTerminalShellSetting && (
+                                <SettingsStackedField
+                                    label={t('settings.openchamber.visual.field.terminalShell')}
+                                    info={t('settings.openchamber.visual.field.terminalShellHint')}
+                                    settingsItem="appearance.terminal-shell"
+                                    className="pt-2"
+                                >
+                                    <Select value={terminalShell} onValueChange={(value) => { if (isTerminalShell(value)) setTerminalShell(value); }}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.terminalShellAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="auto">{t('settings.openchamber.visual.option.terminalShell.auto')}</SelectItem>
+                                            {terminalShellOptions.map((shell) => (
+                                                <SelectItem key={shell.id} value={shell.id}>{shell.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </SettingsStackedField>
+                            )}
+                            {showTerminalShellSetting && terminalShellSupportsLogin && (
+                                <SettingsCheckboxRow
+                                    checked={terminalLoginShellEnabled}
+                                    onChange={setTerminalLoginShellEnabled}
+                                    label={t('settings.openchamber.visual.field.terminalLoginShell')}
+                                    ariaLabel={t('settings.openchamber.visual.field.terminalLoginShell')}
+                                    settingsItem="appearance.terminal-login-shell"
+                                />
+                            )}
+                        </div>
+                    </SettingsSection>
                 )}
 
                 {hasBehaviorSettings && (
-                    <div className="space-y-3">
-
-                            {(shouldShow('userMessageRendering') || shouldShow('mermaidRendering') || shouldShow('chatRenderMode') || shouldShow('messageTransport') || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted') || (shouldShow('diffLayout') && !isVSCode) || shouldShow('followUpBehavior')) && (
-                                <div className="grid grid-cols-1 gap-y-2 md:grid-cols-[minmax(0,16rem)_minmax(0,16rem)] md:justify-start md:gap-x-2">
-                                    {shouldShow('chatRenderMode') && (
-                                        <section data-settings-item="chat.render-mode" className="p-2 md:col-span-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.chatRenderMode')}</h4>
-                                            <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.chatRenderModeAria')} className="mt-1 grid w-full max-w-[26rem] grid-cols-1 gap-3 sm:grid-cols-2">
-                                                {CHAT_RENDER_MODE_OPTIONS.map((option) => {
-                                                    const selected = chatRenderMode === option.id;
-                                                    const previewPhase = chatRenderPreviewTick % 12;
-                                                    return (
-                                                        <button
-                                                            key={option.id}
-                                                            type="button"
-                                                            onClick={() => handleChatRenderModeChange(option.id)}
-                                                            aria-pressed={selected}
-                                                            className={cn(
-                                                                'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
-                                                                selected
-                                                                    ? 'border-primary bg-primary/5'
-                                                                    : 'border-border hover:border-border/80 hover:bg-muted/50'
-                                                            )}
-                                                        >
-                                                            <span className={cn('typography-ui-label', selected ? 'text-foreground' : 'text-muted-foreground')}>
-                                                                {tUnsafe(option.labelKey)}
-                                                            </span>
-                                                            <div className="mt-2 w-full rounded-md border border-border/60 bg-muted/30 p-2">
-                                                                {option.id === 'live' ? (
-                                                                    <div className="space-y-1.5">
-                                                                        {[0, 1, 2].map((index) => {
-                                                                            const rowStart = index * 3 + 1;
-                                                                            const rowProgressPhase = previewPhase - rowStart + 1;
-                                                                            const rowProgress = rowProgressPhase <= 0
-                                                                                ? 0
-                                                                                : rowProgressPhase === 1
-                                                                                    ? 42
-                                                                                    : rowProgressPhase === 2
-                                                                                        ? 68
-                                                                                        : 92;
-                                                                            const visible = rowProgress > 0;
-                                                                            return (
-                                                                                <div
-                                                                                    key={index}
-                                                                                    className={cn(
-                                                                                        'flex items-center gap-1.5 transition-all duration-300 motion-reduce:transition-none',
-                                                                                        visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
-                                                                                    )}
-                                                                                >
-                                                                                    <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/55" />
-                                                                                    <span
-                                                                                        className="h-1.5 rounded bg-muted-foreground/30 transition-all duration-300 motion-reduce:transition-none"
-                                                                                        style={{ width: `${rowProgress}%` }}
-                                                                                    />
-                                                                                </div>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="space-y-1.5">
-                                                                        {[0, 1, 2].map((index) => {
-                                                                            const visible = previewPhase >= (index + 1) * 3;
-                                                                            return (
-                                                                                <div
-                                                                                    key={index}
-                                                                                    className={cn(
-                                                                                        'flex items-center gap-1.5 transition-all duration-300 motion-reduce:transition-none',
-                                                                                        visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
-                                                                                    )}
-                                                                                >
-                                                                                    <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/55" />
-                                                                                    <span
-                                                                                        className="h-1.5 rounded bg-muted-foreground/30"
-                                                                                        style={{ width: '92%' }}
-                                                                                    />
-                                                                                </div>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </section>
-                                    )}
-
-                                    {shouldShow('messageTransport') && (
-                                        <section data-settings-item="chat.message-transport" className="p-2 md:col-span-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.messageStreamTransport')}</h4>
-                                            <div className="mt-1 flex max-w-[24rem] flex-col gap-2">
-                                                <div className="flex flex-wrap items-center gap-1">
-                                                    {MESSAGE_STREAM_TRANSPORT_OPTIONS.map((option) => (
-                                                        <Button
-                                                            key={option.id}
-                                                            variant="chip"
-                                                            size="xs"
-                                                            aria-pressed={effectiveMessageStreamTransport === option.id}
-                                                            className="!font-normal"
-                                                            onClick={() => handleMessageStreamTransportChange(option.id)}
-                                                        >
+                    <>
+                        {showBehaviorDisplaySettings && (
+                            <SettingsSection
+                                title={t('settings.openchamber.visual.section.chatDisplay')}
+                                divider={behaviorSectionDivider}
+                                contentClassName="space-y-6"
+                            >
+                                {shouldShow('chatRenderMode') && (
+                                    <SettingsControlGroup
+                                        title={t('settings.openchamber.visual.section.chatRenderMode')}
+                                        settingsItem="chat.render-mode"
+                                    >
+                                        <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.chatRenderModeAria')} className="grid w-full max-w-[26rem] grid-cols-1 gap-3 @xl:grid-cols-2">
+                                            {CHAT_RENDER_MODE_OPTIONS.map((option) => {
+                                                const selected = chatRenderMode === option.id;
+                                                const previewPhase = chatRenderPreviewTick % 12;
+                                                return (
+                                                    <button
+                                                        key={option.id}
+                                                        type="button"
+                                                        onClick={() => handleChatRenderModeChange(option.id)}
+                                                        aria-pressed={selected}
+                                                        className={cn(
+                                                            'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
+                                                            selected
+                                                                ? 'border-primary bg-primary/5'
+                                                                : 'border-border hover:border-border/80 hover:bg-muted/50'
+                                                        )}
+                                                    >
+                                                        <span className={cn('typography-ui-label', selected ? 'text-foreground' : 'text-muted-foreground')}>
                                                             {tUnsafe(option.labelKey)}
-                                                        </Button>
-                                                    ))}
-                                                </div>
-                                                <span className="typography-meta text-muted-foreground">
-                                                    {(() => {
-                                                        const option = MESSAGE_STREAM_TRANSPORT_OPTIONS.find((item) => item.id === effectiveMessageStreamTransport);
-                                                        return option?.descriptionKey ? tUnsafe(option.descriptionKey) : '';
-                                                    })()}
-                                                </span>
-                                            </div>
-                                        </section>
-                                    )}
-
-                                    {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
-                                        <section className="p-2 md:col-span-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.activityDefault')}</h4>
-                                            <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.activityDefaultAria')} className="mt-0.5 space-y-0">
-                                                {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => {
-                                                    const selected = activityRenderMode === option.id;
-                                                    return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => handleActivityRenderModeChange(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    handleActivityRenderModeChange(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => handleActivityRenderModeChange(option.id)}
-                                                                ariaLabel={t('settings.openchamber.visual.field.activityDefaultModeAria', { option: tUnsafe(option.labelKey) })}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {tUnsafe(option.labelKey)}
-                                                            </span>
+                                                        </span>
+                                                        <div className="mt-2 w-full rounded-md border border-border/60 bg-muted/30 p-2">
+                                                            {option.id === 'live' ? (
+                                                                <div className="space-y-1.5">
+                                                                    {[0, 1, 2].map((index) => {
+                                                                        const rowStart = index * 3 + 1;
+                                                                        const rowProgressPhase = previewPhase - rowStart + 1;
+                                                                        const rowProgress = rowProgressPhase <= 0
+                                                                            ? 0
+                                                                            : rowProgressPhase === 1
+                                                                                ? 42
+                                                                                : rowProgressPhase === 2
+                                                                                    ? 68
+                                                                                    : 92;
+                                                                        const visible = rowProgress > 0;
+                                                                        return (
+                                                                            <div
+                                                                                key={index}
+                                                                                className={cn(
+                                                                                    'flex items-center gap-1.5 transition-all duration-300 motion-reduce:transition-none',
+                                                                                    visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
+                                                                                )}
+                                                                            >
+                                                                                <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/55" />
+                                                                                <span
+                                                                                    className="h-1.5 rounded bg-muted-foreground/30 transition-all duration-300 motion-reduce:transition-none"
+                                                                                    style={{ width: `${rowProgress}%` }}
+                                                                                />
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            ) : (
+                                                                <div className="space-y-1.5">
+                                                                    {[0, 1, 2].map((index) => {
+                                                                        const visible = previewPhase >= (index + 1) * 3;
+                                                                        return (
+                                                                            <div
+                                                                                key={index}
+                                                                                className={cn(
+                                                                                    'flex items-center gap-1.5 transition-all duration-300 motion-reduce:transition-none',
+                                                                                    visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
+                                                                                )}
+                                                                            >
+                                                                                <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/55" />
+                                                                                <span
+                                                                                    className="h-1.5 rounded bg-muted-foreground/30"
+                                                                                    style={{ width: '92%' }}
+                                                                                />
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
                                                         </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </section>
-                                    )}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </SettingsControlGroup>
+                                )}
 
-                                    {shouldShow('expandedTools') && (
-                                        <section className="p-2 md:col-span-2 space-y-0.5">
-                                            <div className="typography-ui-header font-medium text-foreground py-1.5">{t('settings.openchamber.visual.section.showToolsOpenedByDefault')}</div>
-
-                                            <div
-                                                className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                                role="button"
-                                                tabIndex={0}
-                                                aria-pressed={showExpandedBashTools}
-                                                onClick={() => handleShowExpandedBashToolsChange(!showExpandedBashTools)}
-                                                onKeyDown={(event) => {
-                                                    if (event.key === ' ' || event.key === 'Enter') {
-                                                        event.preventDefault();
-                                                        handleShowExpandedBashToolsChange(!showExpandedBashTools);
-                                                    }
-                                                }}
-                                            >
-                                                <Checkbox
-                                                    checked={showExpandedBashTools}
-                                                    onChange={handleShowExpandedBashToolsChange}
-                                                    ariaLabel={t('settings.openchamber.visual.field.showExpandedBashToolsAria')}
+                                {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
+                                    <SettingsControlGroup title={t('settings.openchamber.visual.section.activityDefault')}>
+                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.activityDefaultAria')}>
+                                            {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => (
+                                                <SettingsRadioOption
+                                                    key={option.id}
+                                                    selected={activityRenderMode === option.id}
+                                                    onSelect={() => handleActivityRenderModeChange(option.id)}
+                                                    label={tUnsafe(option.labelKey)}
+                                                    ariaLabel={t('settings.openchamber.visual.field.activityDefaultModeAria', { option: tUnsafe(option.labelKey) })}
                                                 />
-                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.bash')}</span>
-                                            </div>
+                                            ))}
+                                        </SettingsRadioGroup>
+                                    </SettingsControlGroup>
+                                )}
+                            </SettingsSection>
+                        )}
 
-                                            <div
-                                                className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                                role="button"
-                                                tabIndex={0}
-                                                aria-pressed={showExpandedEditTools}
-                                                onClick={() => handleShowExpandedEditToolsChange(!showExpandedEditTools)}
-                                                onKeyDown={(event) => {
-                                                    if (event.key === ' ' || event.key === 'Enter') {
-                                                        event.preventDefault();
-                                                        handleShowExpandedEditToolsChange(!showExpandedEditTools);
-                                                    }
-                                                }}
-                                            >
-                                                <Checkbox
-                                                    checked={showExpandedEditTools}
-                                                    onChange={handleShowExpandedEditToolsChange}
-                                                    ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
-                                                />
-                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.editTools')}</span>
-                                            </div>
-                                        </section>
-                                    )}
+                        {showTransportSection && (
+                            <SettingsSection
+                                title={t('settings.openchamber.visual.section.messageStreamTransport')}
+                                divider={showBehaviorDisplaySettings || behaviorSectionDivider}
+                                settingsItem="chat.message-transport"
+                                contentClassName="space-y-2"
+                            >
+                                <SettingsChipGroup
+                                    value={effectiveMessageStreamTransport}
+                                    options={MESSAGE_STREAM_TRANSPORT_OPTIONS.map((option) => ({
+                                        value: option.id,
+                                        label: tUnsafe(option.labelKey),
+                                    }))}
+                                    onChange={handleMessageStreamTransportChange}
+                                    aria-label={t('settings.openchamber.visual.section.messageStreamTransport')}
+                                />
+                                {(() => {
+                                    const option = MESSAGE_STREAM_TRANSPORT_OPTIONS.find((item) => item.id === effectiveMessageStreamTransport);
+                                    return option?.descriptionKey ? (
+                                        <span className="typography-meta text-muted-foreground">
+                                            {tUnsafe(option.descriptionKey)}
+                                        </span>
+                                    ) : null;
+                                })()}
+                            </SettingsSection>
+                        )}
 
+                        {showBehaviorMessageOptions && (
+                            <SettingsSection
+                                title={t('settings.openchamber.visual.section.chatMessageOptions')}
+                                divider={showBehaviorDisplaySettings || showTransportSection || behaviorSectionDivider}
+                            >
+                                {/* Flat 2×2 grid so row headers share a baseline (not stacked columns). */}
+                                <SettingsTwoColumn className="lg:gap-y-6">
                                     {shouldShow('userMessageRendering') && (
-                                        <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.userMessageRendering')}</h4>
-                                            <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.userMessageRenderingAria')} className="mt-0.5 space-y-0">
-                                                {USER_MESSAGE_RENDERING_OPTIONS.map((option) => {
-                                                    const selected = normalizeUserMessageRenderingMode(userMessageRenderingMode) === option.id;
-                                                    return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => handleUserMessageRenderingModeChange(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    handleUserMessageRenderingModeChange(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => handleUserMessageRenderingModeChange(option.id)}
-                                                                ariaLabel={t('settings.openchamber.visual.field.userMessageRenderingAria', { option: tUnsafe(option.labelKey) })}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {tUnsafe(option.labelKey)}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </section>
+                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.userMessageRendering')}>
+                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.userMessageRenderingAria')}>
+                                                {USER_MESSAGE_RENDERING_OPTIONS.map((option) => (
+                                                    <SettingsRadioOption
+                                                        key={option.id}
+                                                        selected={normalizeUserMessageRenderingMode(userMessageRenderingMode) === option.id}
+                                                        onSelect={() => handleUserMessageRenderingModeChange(option.id)}
+                                                        label={tUnsafe(option.labelKey)}
+                                                        ariaLabel={t('settings.openchamber.visual.field.userMessageRenderingAria', { option: tUnsafe(option.labelKey) })}
+                                                    />
+                                                ))}
+                                            </SettingsRadioGroup>
+                                        </SettingsControlGroup>
                                     )}
 
                                     {shouldShow('mermaidRendering') && (
-                                        <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.mermaidRendering')}</h4>
-                                            <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.mermaidRenderingAria')} className="mt-0.5 space-y-0">
-                                                {MERMAID_RENDERING_OPTIONS.map((option) => {
-                                                    const selected = mermaidRenderingMode === option.id;
-                                                    return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => handleMermaidRenderingModeChange(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    handleMermaidRenderingModeChange(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => handleMermaidRenderingModeChange(option.id)}
-                                                                ariaLabel={t('settings.openchamber.visual.field.mermaidRenderingAria', { option: tUnsafe(option.labelKey) })}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {tUnsafe(option.labelKey)}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </section>
+                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.mermaidRendering')}>
+                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.mermaidRenderingAria')}>
+                                                {MERMAID_RENDERING_OPTIONS.map((option) => (
+                                                    <SettingsRadioOption
+                                                        key={option.id}
+                                                        selected={mermaidRenderingMode === option.id}
+                                                        onSelect={() => handleMermaidRenderingModeChange(option.id)}
+                                                        label={tUnsafe(option.labelKey)}
+                                                        ariaLabel={t('settings.openchamber.visual.field.mermaidRenderingAria', { option: tUnsafe(option.labelKey) })}
+                                                    />
+                                                ))}
+                                            </SettingsRadioGroup>
+                                        </SettingsControlGroup>
                                     )}
 
                                     {shouldShow('diffLayout') && !isVSCode && (
-                                        <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.diffLayout')}</h4>
-                                            <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.diffLayoutAria')} className="mt-0.5 space-y-0">
-                                                {DIFF_LAYOUT_OPTIONS.map((option) => {
-                                                    const selected = diffLayoutPreference === option.id;
-                                                    return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => setDiffLayoutPreference(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    setDiffLayoutPreference(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => setDiffLayoutPreference(option.id)}
-                                                                ariaLabel={t('settings.openchamber.visual.field.diffLayoutAria', { option: tUnsafe(option.labelKey) })}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {tUnsafe(option.labelKey)}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </section>
+                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.diffLayout')}>
+                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.diffLayoutAria')}>
+                                                {DIFF_LAYOUT_OPTIONS.map((option) => (
+                                                    <SettingsRadioOption
+                                                        key={option.id}
+                                                        selected={diffLayoutPreference === option.id}
+                                                        onSelect={() => setDiffLayoutPreference(option.id)}
+                                                        label={tUnsafe(option.labelKey)}
+                                                        ariaLabel={t('settings.openchamber.visual.field.diffLayoutAria', { option: tUnsafe(option.labelKey) })}
+                                                    />
+                                                ))}
+                                            </SettingsRadioGroup>
+                                        </SettingsControlGroup>
                                     )}
 
                                     {shouldShow('followUpBehavior') && (
-                                        <section data-settings-item="chat.follow-up-behavior" className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.followUpBehavior')}</h4>
-                                            <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.followUpBehaviorAria')} className="mt-0.5 space-y-0">
-                                                {FOLLOW_UP_BEHAVIOR_OPTIONS.map((option) => {
-                                                    const selected = followUpBehavior === option.id;
-                                                    return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => setFollowUpBehavior(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    setFollowUpBehavior(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => setFollowUpBehavior(option.id)}
-                                                                ariaLabel={t('settings.openchamber.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {tUnsafe(option.labelKey)}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </section>
+                                        <SettingsControlGroup
+                                            title={t('settings.openchamber.visual.section.followUpBehavior')}
+                                            settingsItem="chat.follow-up-behavior"
+                                        >
+                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.followUpBehaviorAria')}>
+                                                {FOLLOW_UP_BEHAVIOR_OPTIONS.map((option) => (
+                                                    <SettingsRadioOption
+                                                        key={option.id}
+                                                        selected={followUpBehavior === option.id}
+                                                        onSelect={() => setFollowUpBehavior(option.id)}
+                                                        label={tUnsafe(option.labelKey)}
+                                                        ariaLabel={t('settings.openchamber.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
+                                                    />
+                                                ))}
+                                            </SettingsRadioGroup>
+                                        </SettingsControlGroup>
                                     )}
+                                </SettingsTwoColumn>
+                            </SettingsSection>
+                        )}
 
-                                </div>
-                            )}
-
-                            {(shouldShow('sessionAssist') || shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('codeBlockLineWrap') || shouldShow('splitAssistantMessageActions') || shouldShow('dotfiles') || shouldShow('fileViewerPreview') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
-                                <section className="p-2 space-y-0.5">
-                                    {shouldShow('sessionAssist') && (
-                                        <>
-                                        <div
-                                            data-settings-item="chat.session-recap"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={sessionRecapEnabled}
-                                            onClick={() => setSessionRecapEnabled(!sessionRecapEnabled)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setSessionRecapEnabled(!sessionRecapEnabled);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={sessionRecapEnabled}
-                                                onChange={setSessionRecapEnabled}
-                                                ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
+                        {showBehaviorFeatureCheckboxes && (
+                            <>
+                                {shouldShow('expandedTools') && (
+                                    <SettingsSection
+                                        title={t('settings.openchamber.visual.section.showToolsOpenedByDefault')}
+                                        divider={showBehaviorDisplaySettings || showTransportSection || showBehaviorMessageOptions || behaviorSectionDivider}
+                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                                    >
+                                        <SettingsCheckboxRow
+                                            checked={showExpandedBashTools}
+                                            onChange={handleShowExpandedBashToolsChange}
+                                            label={t('settings.openchamber.visual.field.bash')}
+                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedBashToolsAria')}
+                                        />
+                                        <SettingsCheckboxRow
+                                            checked={showExpandedEditTools}
+                                            onChange={handleShowExpandedEditToolsChange}
+                                            label={t('settings.openchamber.visual.field.editTools')}
+                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
+                                        />
+                                    </SettingsSection>
+                                )}
+                                {(shouldShow('sessionAssist') || shouldShow('subagentReadOnlyBanner')) && (
+                                    <SettingsSection
+                                        title={t('settings.openchamber.visual.section.sessionAssistance')}
+                                        settingsItem="chat.session-assistance"
+                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                                    >
+                                        {shouldShow('sessionAssist') && (
+                                            <>
+                                                <SettingsCheckboxRow
+                                                    checked={sessionRecapEnabled}
+                                                    onChange={setSessionRecapEnabled}
+                                                    label={t('settings.openchamber.visual.field.sessionRecap')}
+                                                    ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
+                                                    settingsItem="chat.session-recap"
+                                                />
+                                                <SettingsCheckboxRow
+                                                    checked={sessionSuggestionEnabled}
+                                                    onChange={setSessionSuggestionEnabled}
+                                                    label={t('settings.openchamber.visual.field.sessionSuggestion')}
+                                                    ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
+                                                    settingsItem="chat.session-suggestion"
+                                                />
+                                            </>
+                                        )}
+                                        {shouldShow('subagentReadOnlyBanner') && (
+                                            <SettingsCheckboxRow
+                                                checked={allowPromptingSubagentSessions}
+                                                onChange={setAllowPromptingSubagentSessions}
+                                                label={t('settings.openchamber.visual.field.allowPromptingSubagentSessions')}
+                                                ariaLabel={t('settings.openchamber.visual.field.allowPromptingSubagentSessionsAria')}
+                                                settingsItem="chat.subagent-read-only-banner"
                                             />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionRecap')}</span>
-                                        </div>
-                                        <div
-                                            data-settings-item="chat.session-suggestion"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={sessionSuggestionEnabled}
-                                            onClick={() => setSessionSuggestionEnabled(!sessionSuggestionEnabled)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setSessionSuggestionEnabled(!sessionSuggestionEnabled);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={sessionSuggestionEnabled}
-                                                onChange={setSessionSuggestionEnabled}
-                                                ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
+                                        )}
+                                    </SettingsSection>
+                                )}
+                                {/* The goal loop runs in the web server — VS Code only renders
+                                    goal state, so the settings section is hidden there too. */}
+                                {shouldShow('sessionGoal') && !isVSCode && (
+                                    <SettingsSection
+                                        title={t('settings.openchamber.visual.goal.sectionTitle')}
+                                        info={t('settings.openchamber.visual.goal.description')}
+                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                                    >
+                                        <SettingsCheckboxRow
+                                            checked={sessionGoalEnabled}
+                                            onChange={setSessionGoalEnabled}
+                                            label={t('settings.openchamber.visual.field.sessionGoal')}
+                                            ariaLabel={t('settings.openchamber.visual.field.sessionGoalAria')}
+                                            settingsItem="chat.session-goal"
+                                        />
+                                        <div data-settings-item="chat.session-goal-budget" className="flex items-center gap-2">
+                                            <SettingsCheckboxRow
+                                                checked={sessionGoalDefaultBudgetEnabled}
+                                                onChange={setSessionGoalDefaultBudgetEnabled}
+                                                disabled={!sessionGoalEnabled}
+                                                label={t('settings.openchamber.visual.goal.budgetLabel')}
+                                                ariaLabel={t('settings.openchamber.visual.goal.budgetAria')}
                                             />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionSuggestion')}</span>
+                                            {sessionGoalEnabled && sessionGoalDefaultBudgetEnabled ? (
+                                                <NumberInput
+                                                    value={sessionGoalDefaultBudget}
+                                                    onValueChange={(value) => {
+                                                        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+                                                            setSessionGoalDefaultBudget(Math.floor(value));
+                                                        }
+                                                    }}
+                                                    min={1000}
+                                                    max={100000000}
+                                                    step={50000}
+                                                />
+                                            ) : null}
                                         </div>
-                                        </>
-                                    )}
-                                    {shouldShow('reasoning') && (
-                                        <div
-                                            data-settings-item="chat.reasoning-traces"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showReasoningTraces}
-                                            onClick={() => setShowReasoningTraces(!showReasoningTraces)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setShowReasoningTraces(!showReasoningTraces);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showReasoningTraces}
-                                                onChange={setShowReasoningTraces}
-                                                ariaLabel={t('settings.openchamber.visual.field.showReasoningTracesAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showReasoningTraces')}</span>
-                                        </div>
-                                    )}
-
-                                    {shouldShow('reasoning') && showReasoningTraces && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={collapsibleThinkingBlocks}
-                                            onClick={() => setCollapsibleThinkingBlocks(!collapsibleThinkingBlocks)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setCollapsibleThinkingBlocks(!collapsibleThinkingBlocks);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
+                                    </SettingsSection>
+                                )}
+                                {shouldShow('reasoning') && (
+                                    <SettingsSection
+                                        title={t('settings.openchamber.visual.section.reasoning')}
+                                        settingsItem="chat.reasoning"
+                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                                    >
+                                        <SettingsCheckboxRow
+                                            checked={showReasoningTraces}
+                                            onChange={setShowReasoningTraces}
+                                            label={t('settings.openchamber.visual.field.showReasoningTraces')}
+                                            ariaLabel={t('settings.openchamber.visual.field.showReasoningTracesAria')}
+                                            settingsItem="chat.reasoning-traces"
+                                        />
+                                        {showReasoningTraces && (
+                                            <SettingsCheckboxRow
                                                 checked={collapsibleThinkingBlocks}
                                                 onChange={setCollapsibleThinkingBlocks}
+                                                label={t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}
                                                 ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
                                             />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}</span>
-                                        </div>
-                                    )}
+                                        )}
+                                    </SettingsSection>
+                                )}
 
-                                    {shouldShow('collapsibleUserMessages') && (
-                                        <div
-                                            data-settings-item="chat.collapsible-user-messages"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={collapsibleUserMessages}
-                                            onClick={() => handleCollapsibleUserMessagesChange(!collapsibleUserMessages)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleCollapsibleUserMessagesChange(!collapsibleUserMessages);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={collapsibleUserMessages}
-                                                onChange={handleCollapsibleUserMessagesChange}
-                                                ariaLabel={t('settings.openchamber.visual.field.collapsibleUserMessagesAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.collapsibleUserMessages')}</span>
-                                        </div>
-                                    )}
+                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
+                                <SettingsSection
+                                    title={t('settings.openchamber.visual.section.messageAppearance')}
+                                    settingsItem="chat.message-appearance"
+                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                                >
+                                {shouldShow('collapsibleUserMessages') && (
+                                    <SettingsCheckboxRow
+                                        checked={collapsibleUserMessages}
+                                        onChange={handleCollapsibleUserMessagesChange}
+                                        label={t('settings.openchamber.visual.field.collapsibleUserMessages')}
+                                        ariaLabel={t('settings.openchamber.visual.field.collapsibleUserMessagesAria')}
+                                        settingsItem="chat.collapsible-user-messages"
+                                    />
+                                )}
 
-                                    {shouldShow('stickyUserHeader') && (
-                                        <div
-                                            data-settings-item="chat.sticky-user-header"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={stickyUserHeader}
-                                            onClick={() => handleStickyUserHeaderChange(!stickyUserHeader)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleStickyUserHeaderChange(!stickyUserHeader);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={stickyUserHeader}
-                                                onChange={handleStickyUserHeaderChange}
-                                                ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.stickyUserHeader')}</span>
-                                        </div>
-                                    )}
+                                {shouldShow('stickyUserHeader') && (
+                                    <SettingsCheckboxRow
+                                        checked={stickyUserHeader}
+                                        onChange={handleStickyUserHeaderChange}
+                                        label={t('settings.openchamber.visual.field.stickyUserHeader')}
+                                        ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
+                                        settingsItem="chat.sticky-user-header"
+                                    />
+                                )}
 
-                                    {shouldShow('wideChatLayout') && (
-                                        <div
-                                            data-settings-item="chat.wide-layout"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={wideChatLayoutEnabled}
-                                            onClick={() => handleWideChatLayoutChange(!wideChatLayoutEnabled)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleWideChatLayoutChange(!wideChatLayoutEnabled);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={wideChatLayoutEnabled}
-                                                onChange={handleWideChatLayoutChange}
-                                                ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.wideChatLayout')}</span>
-                                        </div>
-                                    )}
+                                {shouldShow('promptNavigatorEnabled') && !isVSCode && (
+                                    <SettingsCheckboxRow
+                                        checked={promptNavigatorEnabled}
+                                        onChange={handlePromptNavigatorEnabledChange}
+                                        label={t('settings.openchamber.visual.field.promptNavigatorEnabled')}
+                                        ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
+                                        settingsItem="chat.prompt-navigator"
+                                    />
+                                )}
 
-                                    {shouldShow('splitAssistantMessageActions') && (
-                                        <div
-                                            data-settings-item="chat.inline-assistant-actions"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showSplitAssistantMessageActions}
-                                            onClick={() => handleShowSplitAssistantMessageActionsChange(!showSplitAssistantMessageActions)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleShowSplitAssistantMessageActionsChange(!showSplitAssistantMessageActions);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showSplitAssistantMessageActions}
-                                                onChange={handleShowSplitAssistantMessageActionsChange}
-                                                ariaLabel={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsAria')}
-                                            />
-                                            <div className="flex min-w-0 items-center gap-1.5">
-                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}</span>
-                                                <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                        <Icon name="information" className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
-                                                    </TooltipTrigger>
-                                                    <TooltipContent sideOffset={8} className="max-w-xs">
-                                                        {t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
-                                                    </TooltipContent>
-                                                </Tooltip>
-                                            </div>
-                                        </div>
-                                    )}
+                                {shouldShow('wideChatLayout') && (
+                                    <SettingsCheckboxRow
+                                        checked={wideChatLayoutEnabled}
+                                        onChange={handleWideChatLayoutChange}
+                                        label={t('settings.openchamber.visual.field.wideChatLayout')}
+                                        ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
+                                        settingsItem="chat.wide-layout"
+                                    />
+                                )}
 
-                                    {shouldShow('codeBlockLineWrap') && (
-                                        <div
-                                            data-settings-item="chat.code-block-line-wrap"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={codeBlockLineWrap}
-                                            onClick={() => setCodeBlockLineWrap(!codeBlockLineWrap)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setCodeBlockLineWrap(!codeBlockLineWrap);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={codeBlockLineWrap}
-                                                onChange={setCodeBlockLineWrap}
-                                                ariaLabel={t('settings.openchamber.visual.field.codeBlockLineWrapAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.codeBlockLineWrap')}</span>
-                                        </div>
-                                    )}
+                                {shouldShow('splitAssistantMessageActions') && (
+                                    <SettingsCheckboxRow
+                                        checked={showSplitAssistantMessageActions}
+                                        onChange={handleShowSplitAssistantMessageActionsChange}
+                                        label={t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}
+                                        ariaLabel={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsAria')}
+                                        settingsItem="chat.inline-assistant-actions"
+                                        info={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
+                                    />
+                                )}
 
-                                    {shouldShow('showToolFileIcons') && (
-                                        <div
-                                            data-settings-item="chat.tool-file-icons"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showToolFileIcons}
-                                            onClick={() => handleShowToolFileIconsChange(!showToolFileIcons)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleShowToolFileIconsChange(!showToolFileIcons);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showToolFileIcons}
-                                                onChange={handleShowToolFileIconsChange}
-                                                ariaLabel={t('settings.openchamber.visual.field.showToolFileIconsAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showToolFileIcons')}</span>
-                                        </div>
-                                    )}
+                                {shouldShow('codeBlockLineWrap') && (
+                                    <SettingsCheckboxRow
+                                        checked={codeBlockLineWrap}
+                                        onChange={setCodeBlockLineWrap}
+                                        label={t('settings.openchamber.visual.field.codeBlockLineWrap')}
+                                        ariaLabel={t('settings.openchamber.visual.field.codeBlockLineWrapAria')}
+                                        settingsItem="chat.code-block-line-wrap"
+                                    />
+                                )}
+                                </SettingsSection>
+                                )}
 
-                                    {shouldShow('showTurnChangedFiles') && (
-                                        <div
-                                            data-settings-item="chat.changed-files"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showTurnChangedFiles}
-                                            onClick={() => handleShowTurnChangedFilesChange(!showTurnChangedFiles)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleShowTurnChangedFilesChange(!showTurnChangedFiles);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showTurnChangedFiles}
-                                                onChange={handleShowTurnChangedFilesChange}
-                                                ariaLabel={t('settings.openchamber.visual.field.showTurnChangedFilesAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showTurnChangedFiles')}</span>
-                                        </div>
-                                    )}
+                                {(shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (shouldShow('dotfiles') && !isVSCodeRuntime()) || shouldShow('fileViewerPreview')) && (
+                                <SettingsSection
+                                    title={t('settings.openchamber.visual.section.toolsAndFiles')}
+                                    settingsItem="chat.tools-and-files"
+                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                                >
+                                {shouldShow('showToolFileIcons') && (
+                                    <SettingsCheckboxRow
+                                        checked={showToolFileIcons}
+                                        onChange={handleShowToolFileIconsChange}
+                                        label={t('settings.openchamber.visual.field.showToolFileIcons')}
+                                        ariaLabel={t('settings.openchamber.visual.field.showToolFileIconsAria')}
+                                        settingsItem="chat.tool-file-icons"
+                                    />
+                                )}
 
-                                    {shouldShow('dotfiles') && !isVSCodeRuntime() && (
-                                        <div
-                                            data-settings-item="chat.dotfiles"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={directoryShowHidden}
-                                            onClick={() => setDirectoryShowHidden(!directoryShowHidden)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setDirectoryShowHidden(!directoryShowHidden);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={directoryShowHidden}
-                                                onChange={setDirectoryShowHidden}
-                                                ariaLabel={t('settings.openchamber.visual.field.showDotfilesAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showDotfiles')}</span>
-                                        </div>
-                                    )}
+                                {shouldShow('showTurnChangedFiles') && (
+                                    <SettingsCheckboxRow
+                                        checked={showTurnChangedFiles}
+                                        onChange={handleShowTurnChangedFilesChange}
+                                        label={t('settings.openchamber.visual.field.showTurnChangedFiles')}
+                                        ariaLabel={t('settings.openchamber.visual.field.showTurnChangedFilesAria')}
+                                        settingsItem="chat.changed-files"
+                                    />
+                                )}
 
-                                    {shouldShow('fileViewerPreview') && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={settingsDefaultFileViewerPreview}
-                                            onClick={() => handleFileViewerPreviewChange(!settingsDefaultFileViewerPreview)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleFileViewerPreviewChange(!settingsDefaultFileViewerPreview);
-                                                }
-                                            }}
-                                        >
-                                            <span onClick={(event) => event.stopPropagation()}>
-                                                <Checkbox
-                                                    checked={settingsDefaultFileViewerPreview}
-                                                    onChange={handleFileViewerPreviewChange}
-                                                    ariaLabel={t('settings.openchamber.defaults.field.openFilesPreviewAria')}
-                                                />
-                                            </span>
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.openFilesPreview')}</span>
-                                        </div>
-                                    )}
+                                {shouldShow('dotfiles') && !isVSCodeRuntime() && (
+                                    <SettingsCheckboxRow
+                                        checked={directoryShowHidden}
+                                        onChange={setDirectoryShowHidden}
+                                        label={t('settings.openchamber.visual.field.showDotfiles')}
+                                        ariaLabel={t('settings.openchamber.visual.field.showDotfilesAria')}
+                                        settingsItem="chat.dotfiles"
+                                    />
+                                )}
 
-                                    {shouldShow('persistDraft') && (
-                                        <div
-                                            data-settings-item="chat.persist-drafts"
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={persistChatDraft}
-                                            onClick={() => setPersistChatDraft(!persistChatDraft)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setPersistChatDraft(!persistChatDraft);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={persistChatDraft}
-                                                onChange={setPersistChatDraft}
-                                                ariaLabel={t('settings.openchamber.visual.field.persistDraftMessagesAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.persistDraftMessages')}</span>
-                                        </div>
-                                    )}
+                                {shouldShow('fileViewerPreview') && (
+                                    <SettingsCheckboxRow
+                                        checked={settingsDefaultFileViewerPreview}
+                                        onChange={handleFileViewerPreviewChange}
+                                        label={t('settings.openchamber.defaults.field.openFilesPreview')}
+                                        ariaLabel={t('settings.openchamber.defaults.field.openFilesPreviewAria')}
+                                    />
+                                )}
+                                </SettingsSection>
+                                )}
 
-                                    {!isMobile && shouldShow('inputSpellcheck') && (
-                                        <div
-                                            data-settings-item="chat.spellcheck"
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={inputSpellcheckEnabled}
-                                            onClick={() => handleInputSpellcheckChange(!inputSpellcheckEnabled)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleInputSpellcheckChange(!inputSpellcheckEnabled);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={inputSpellcheckEnabled}
-                                                onChange={handleInputSpellcheckChange}
-                                                ariaLabel={t('settings.openchamber.visual.field.enableSpellcheckInTextInputsAria')}
-                                            />
-                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.enableSpellcheckInTextInputs')}</span>
-                                        </div>
-                                    )}
+                                {(shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck'))) && (
+                                <SettingsSection
+                                    title={t('settings.openchamber.visual.section.composer')}
+                                    settingsItem="chat.composer"
+                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                                >
+                                {shouldShow('persistDraft') && (
+                                    <SettingsCheckboxRow
+                                        checked={persistChatDraft}
+                                        onChange={setPersistChatDraft}
+                                        label={t('settings.openchamber.visual.field.persistDraftMessages')}
+                                        ariaLabel={t('settings.openchamber.visual.field.persistDraftMessagesAria')}
+                                        settingsItem="chat.persist-drafts"
+                                    />
+                                )}
 
-                                </section>
-                            )}
-
-                    </div>
+                                {!isMobile && shouldShow('inputSpellcheck') && (
+                                    <SettingsCheckboxRow
+                                        checked={inputSpellcheckEnabled}
+                                        onChange={handleInputSpellcheckChange}
+                                        label={t('settings.openchamber.visual.field.enableSpellcheckInTextInputs')}
+                                        ariaLabel={t('settings.openchamber.visual.field.enableSpellcheckInTextInputsAria')}
+                                        settingsItem="chat.spellcheck"
+                                    />
+                                )}
+                                </SettingsSection>
+                                )}
+                            </>
+                        )}
+                    </>
                 )}
 
                 {/* --- Privacy & Data --- */}
                 {shouldShow('reportUsage') && (
-                    <div className="space-y-3">
-                        <section className="px-2 pb-2 pt-0">
-                            <h4 className="typography-ui-header font-medium text-foreground mb-2">{t('settings.openchamber.visual.section.privacy')}</h4>
-                            <div data-settings-item="appearance.usage-reports" className="flex items-start gap-2 py-1.5">
-                                <Checkbox
-                                    checked={reportUsage}
-                                    onChange={handleReportUsageChange}
-                                    ariaLabel={t('settings.openchamber.visual.field.sendAnonymousUsageReportsAria')}
-                                />
-                                <div className="flex min-w-0 flex-col gap-0.5">
-                                    <div
-                                        className="group flex cursor-pointer"
-                                        role="button"
-                                        tabIndex={0}
-                                        aria-pressed={reportUsage}
-                                        onClick={() => handleReportUsageChange(!reportUsage)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === ' ' || event.key === 'Enter') {
-                                                event.preventDefault();
-                                                handleReportUsageChange(!reportUsage);
-                                            }
-                                        }}
-                                    >
-                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sendAnonymousUsageReports')}</span>
-                                    </div>
-                                    <span className="typography-meta text-muted-foreground pointer-events-none">
-                                        {t('settings.openchamber.visual.field.sendAnonymousUsageReportsHint')}
-                                    </span>
-                                </div>
-                            </div>
-                        </section>
-                    </div>
+                    <SettingsSection title={t('settings.openchamber.visual.section.privacy')}>
+                        <SettingsCheckboxRow
+                            checked={reportUsage}
+                            onChange={handleReportUsageChange}
+                            label={t('settings.openchamber.visual.field.sendAnonymousUsageReports')}
+                            info={t('settings.openchamber.visual.field.sendAnonymousUsageReportsHint')}
+                            ariaLabel={t('settings.openchamber.visual.field.sendAnonymousUsageReportsAria')}
+                            settingsItem="appearance.usage-reports"
+                        />
+                    </SettingsSection>
                 )}
 
             </div>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 import { toast } from '@/components/ui';
 import {
@@ -121,20 +122,23 @@ type FileTreeCache = {
 };
 const FILE_TREE_CACHE_MAX_ROOTS = 8;
 const fileTreeCacheByRoot = new Map<string, FileTreeCache>();
+const fileTreeCacheKey = (root: string): string => JSON.stringify([getRuntimeKey(), root]);
 
 const touchCache = (root: string): FileTreeCache | null => {
-  const entry = fileTreeCacheByRoot.get(root);
+  const key = fileTreeCacheKey(root);
+  const entry = fileTreeCacheByRoot.get(key);
   if (!entry) return null;
   entry.touchedAt = Date.now();
   // Touch on read promotes the key to the end of the Map's iteration order,
   // so the oldest (front) entry is the next eviction candidate.
-  fileTreeCacheByRoot.delete(root);
-  fileTreeCacheByRoot.set(root, entry);
+  fileTreeCacheByRoot.delete(key);
+  fileTreeCacheByRoot.set(key, entry);
   return entry;
 };
 
 const getOrCreateCache = (root: string): FileTreeCache => {
-  const existing = fileTreeCacheByRoot.get(root);
+  const key = fileTreeCacheKey(root);
+  const existing = fileTreeCacheByRoot.get(key);
   if (existing) {
     existing.touchedAt = Date.now();
     return existing;
@@ -151,12 +155,12 @@ const getOrCreateCache = (root: string): FileTreeCache => {
     loadedDirs: new Set(),
     touchedAt: Date.now(),
   };
-  fileTreeCacheByRoot.set(root, created);
+  fileTreeCacheByRoot.set(key, created);
   return created;
 };
 
 const dropCacheForRoot = (root: string): void => {
-  fileTreeCacheByRoot.delete(root);
+  fileTreeCacheByRoot.delete(fileTreeCacheKey(root));
 };
 
 const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
@@ -644,10 +648,8 @@ export const SidebarFilesTree: React.FC = () => {
       const pathsToRefresh = [root, ...normalizedExpanded];
 
       loadedDirsRef.current = new Set(loadedDirsRef.current);
-      inFlightDirsRef.current = new Set(inFlightDirsRef.current);
       for (const dirPath of pathsToRefresh) {
         loadedDirsRef.current.delete(dirPath);
-        inFlightDirsRef.current.delete(dirPath);
       }
 
       setLoadErrorsByDir((prev) => {
