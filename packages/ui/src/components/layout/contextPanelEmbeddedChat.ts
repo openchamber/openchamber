@@ -127,3 +127,27 @@ export const getEmbeddedSessionChatOriginSessionId = (): string | null => {
     return null;
   }
 };
+
+export const installEmbeddedSessionChatComposerFocusListener = (focus: () => void): (() => void) => {
+  if (typeof window === 'undefined' || !isEmbeddedSessionChat()) return () => {};
+  const listener = (event: MessageEvent) => {
+    if (event.source === window.parent && event.data?.type === 'openchamber:focus-chat-composer') focus();
+  };
+  window.addEventListener('message', listener);
+  return () => window.removeEventListener('message', listener);
+};
+
+export const focusEmbeddedSessionChatComposer = (sessionID: string): boolean => {
+  if (typeof document === 'undefined' || !sessionID) return false;
+  for (const iframe of document.querySelectorAll<HTMLIFrameElement>('iframe[src]')) {
+    try {
+      const url = new URL(iframe.src, window.location.href);
+      if (url.searchParams.get('ocPanel') !== 'session-chat' || url.searchParams.get('sessionId') !== sessionID) continue;
+      iframe.contentWindow?.postMessage({ type: 'openchamber:focus-chat-composer' }, url.origin);
+      return true;
+    } catch {
+      // Ignore unrelated iframes with invalid sources.
+    }
+  }
+  return false;
+};

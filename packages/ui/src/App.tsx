@@ -59,6 +59,7 @@ import { SyncAppEffects } from '@/apps/AppEffects';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
+import { DisposableSideChatRecoveryDialog } from '@/components/layout/DisposableSideChatRecoveryDialog';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
@@ -924,7 +925,8 @@ function App({ apis }: AppProps) {
                 <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
                   <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
                   <OpenCodeUpdateToast />
-                  <MainLayout />
+                   <MainLayout />
+                   <DisposableSideChatRecoveryDialog enabled={isInitialized && isConnected && !isSwitchingDirectory} />
                   <Toaster />
                   {!isBootShell && (
                     <>

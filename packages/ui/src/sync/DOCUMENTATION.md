@@ -47,6 +47,7 @@ So:
 | `session-ordering.ts` | Ephemeral lifecycle rank used by every user-visible session list | All known sessions in the active runtime |
 | `session-ui-store.ts` | Session selection, draft lifecycle, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
 | `useGlobalSessionsStore.ts` | Global active sessions, global archived sessions, `sessionsByDirectory` | All opened project/worktree session lists |
+| `useDisposableSideChatsStore.ts` | Bounded runtime/directory/parent/side lifecycle ownership and crash recovery | Persisted across runtimes; active mutations remain runtime-scoped |
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
 | `attachment-files.ts` | Attachment picker allowlists, MIME/content validation, structured-text sanitization, and HEIC conversion | Local chat attachments across shared UI runtimes |
 | `document-attachments.ts` | Bounded Office/OpenDocument extraction, document text serialization, embedded-image extraction, and positional citations | DOCX, PPTX, XLSX, ODT, ODP, and ODS chat attachments |
@@ -101,6 +102,8 @@ Session message loads use runtime, normalized directory, session ID, SDK epoch, 
 
 An authoritative `session.deleted` event also clears persisted UI state before routing metadata can be removed. Confirmed local deletion and accepted `404` deletion do the same directly instead of depending on the event echo. Cleanup is identity-owned by runtime, normalized directory, and session ID: queued messages, persisted todos, composer drafts, inline-comment drafts, and pins clear only that tuple, while the active runtime's folder store removes the session from every active or archived folder scope. Stale-runtime events and unresolved/global directory identities do not mutate persisted state.
 
+Deleting a disposable side-chat root uses captured-runtime operation authority so an endpoint switch during an awaited abort, send, promotion, or delete cannot retarget the mutation. The action captures the known session subtree before the upstream delete, then reconciles every known descendant from directory/global stores and persisted UI state only when that captured runtime is still active after the upstream cascade is confirmed. A failed delete retains recovery ownership; panel state is not cleared as if cleanup succeeded. Initial side-chat sends and close/promotion share one per-session operation tail so close cannot overtake optimistic busy publication.
+
 Persisted sidebar state is never reconciled destructively from the first successful startup list. That list establishes an authoritative active+archived baseline. Only a session present in that baseline and omitted from a later complete snapshot is treated as a missed external deletion. Archive and directory moves retain the session ID across snapshots and are not deletion cleanup. This favors harmless hidden stale metadata over irreversible user-state loss when startup data is incomplete.
 
 Session materialization recency is keyed by runtime and directory. Foreground loads and successful prefetches participate in the same bounded per-directory session LRU. Prefetch pagination metadata has a global count ceiling and is removed with session eviction, directory disposal, loader runtime reconfiguration, and loader disposal.
@@ -108,6 +111,8 @@ Session materialization recency is keyed by runtime and directory. Foreground lo
 ### Global session list
 
 Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
+
+Disposable side chats remain in directory sync state and the global store's direct-ID index so panel rendering, events, permissions, and deletion can address them. They are excluded from active, archived, and directory navigation projections by the shared disposable predicate. Parent-scoped `opening` ownership also suppresses an early create event before the server metadata response arrives. Authoritative marked session metadata reconstructs missing client registry ownership, including entries discovered after recovery UI first renders, and mutation overlays preserve newer direct-only entries across stale global snapshots.
 
 Current consumers:
 

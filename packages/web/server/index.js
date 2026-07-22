@@ -1527,6 +1527,7 @@ async function main(options = {}) {
     isUnsafeSkillRelativePath,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    isRequestOriginAllowed,
     getOpenCodePort: () => openCodePort,
     buildAugmentedPath,
     projectConfigRuntime,

@@ -118,6 +118,9 @@ import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
 import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
 import type { Part } from '@opencode-ai/sdk/v2/client';
+import { getOpenChamberCommands, parseSideChatCommand } from './openChamberCommands';
+import { installEmbeddedSessionChatComposerFocusListener, isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { openDisposableSideChat } from '@/lib/sideChats/controller';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -1112,6 +1115,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
     const agents = getVisibleAgents();
     const isMobile = useUIStore((state) => state.isMobile);
+    const sideChatCommands = React.useMemo(() => getOpenChamberCommands({
+        surface: isEmbeddedSessionChat() ? 'embedded' : 'main',
+        isMobile,
+        isVSCode: isVSCodeRuntime(),
+    }), [isMobile]);
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
@@ -1290,11 +1298,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const names = new Set<string>([
             'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'catch-up', 'debug', 'weigh', 'explore',
         ]);
+        for (const command of sideChatCommands) names.add(command.name);
         if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
         for (const skill of availableSkills) names.add(skill.name.toLowerCase());
         return names;
-    }, [availableCommands, availableSkills, isMobile]);
+    }, [availableCommands, availableSkills, isMobile, sideChatCommands]);
 
     // /command and /skill spans (primary color). Only tokens that match a known
     // command/skill name are highlighted — partial/unknown tokens stay plain.
@@ -1829,6 +1838,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         };
     }, [attachedFiles.length, hasDrafts, message]);
 
+    React.useEffect(() => installEmbeddedSessionChatComposerFocusListener(() => textareaRef.current?.focus()), []);
+
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
         queuedOnly?: boolean;
@@ -1939,6 +1950,31 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         if (!providerIdToSend || !modelIdToSend) {
             console.warn('Cannot send message: provider or model not selected');
+            return;
+        }
+
+        const sideChatCommand = !queuedOnly && inputMode === 'normal' && sideChatCommands.length > 0
+            ? parseSideChatCommand(inputSnapshot.message)
+            : null;
+        if (sideChatCommand && currentSessionId && currentDirectory) {
+            try {
+                await openDisposableSideChat({
+                    parentSessionId: currentSessionId,
+                    directory: currentDirectory,
+                    prompt: sideChatCommand.prompt,
+                    providerID: providerIdToSend,
+                    modelID: modelIdToSend,
+                    agent: agentNameToSend ?? undefined,
+                    variant: variantToSend ?? undefined,
+                });
+                setMessage('');
+                persistDraftImmediately(chatDraftIdentity, '');
+                setShowCommandAutocomplete(false);
+                setCommandQuery('');
+            } catch (error) {
+                console.error('Side chat command failed:', error);
+                toast.error(t('chat.chatInput.toast.messageSendFailed'));
+            }
             return;
         }
 

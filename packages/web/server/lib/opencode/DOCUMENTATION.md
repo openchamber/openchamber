@@ -25,6 +25,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/server-startup-runtime.js`: server listen/startup tunnel flow and process/signal handler orchestration runtime.
 - `packages/web/server/lib/opencode/static-routes-runtime.js`: static asset/SPA fallback route registration and manifest route wiring.
 - `packages/web/server/lib/opencode/feature-routes-runtime.js`: feature route composition runtime for dynamic import-backed config/skill/provider route registration.
+- `packages/web/server/lib/side-chats/routes.js`: authenticated disposable side-chat fork, marker rollback, and promotion lifecycle routes.
 - `packages/web/server/lib/opencode/opencode-resolution-runtime.js`: OpenCode binary resolution snapshot runtime for settings routes and diagnostics.
 - `packages/web/server/lib/opencode/tunnel-wiring-runtime.js`: tunnel service/routes composition runtime and active-port wiring for main server startup.
 - `packages/web/server/lib/opencode/startup-pipeline-runtime.js`: server startup tail orchestration runtime for terminal/proxy/static/start-listen flow.
@@ -295,6 +296,8 @@ The runtime maintains active-session count incrementally from idempotent activit
 - `createFeatureRoutesRuntime(dependencies)`: creates runtime for main feature route registration orchestration.
 - Returned API:
   - `registerRoutes(app, routeDependencies)`
+
+Side-chat routes are registered by this feature runtime after the shared `/api` authentication middleware and before the generic OpenCode proxy. `POST /api/openchamber/side-chats` serializes creation per directory and parent without a stale marked-session cache, reuses an existing marked side chat, forks at an explicit completed message when needed, validates the marked result, and deletes the fork if marking fails. Because supported external-OpenCode deployments can point multiple OpenChamber processes at one endpoint, every successful lookup/create authoritatively lists all marked forks for that parent, retains the lexicographically lowest session ID, and deletes duplicates before responding. This closes ordinary cross-process races after creation, while upstream still provides no atomic uniqueness primitive, so two processes can transiently create and each return a different fork if their final list requests overlap before either marker becomes visible. Cleanup failures return typed surviving-fork ownership. `POST /api/openchamber/side-chats/:sessionId/promote` removes only OpenChamber side-chat metadata, validates the promoted result, and is idempotent. Both mutation routes enforce the shared origin policy, resolve the request directory, bound upstream requests with timeouts, and forward the active runtime's OpenCode auth headers.
 
 ## Public exports (opencode-resolution-runtime.js)
 - `createOpenCodeResolutionRuntime(dependencies)`: creates runtime for OpenCode binary/source snapshot resolution.

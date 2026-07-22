@@ -15,6 +15,7 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
     getState: () => ({
       activeSessions: currentSessions,
       archivedSessions: [] as Session[],
+      getSessionById: (sessionId: string) => currentSessions.find((session) => session.id === sessionId) ?? null,
       upsertSession: (session: Session) => {
         upsertedSessions.push(session)
       },
@@ -47,6 +48,11 @@ const buildEvent = (session: Session): Event => ({
   properties: {
     info: session,
   },
+} as Event)
+
+const buildCreateEvent = (session: Session): Event => ({
+  type: "session.created",
+  properties: { info: session },
 } as Event)
 
 const buildDeleteEvent = (sessionId: string): Event => ({
@@ -115,5 +121,14 @@ describe("applySessionEventToGlobalSessions", () => {
     applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
 
     expect(upsertedSessions).toEqual([])
+  })
+
+  test("publishes disposable create events for direct-ID access", () => {
+    const session = buildSession("Side", { created: 1, updated: 10 }) as Session & { metadata?: unknown }
+    session.metadata = { openchamber: { sideChat: { disposable: true, parentSessionID: "parent" } } }
+
+    applySessionEventToGlobalSessions(buildCreateEvent(session))
+
+    expect(upsertedSessions).toEqual([session])
   })
 })
