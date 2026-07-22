@@ -1956,11 +1956,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const sideChatCommand = !queuedOnly && inputMode === 'normal' && sideChatCommands.length > 0
             ? parseSideChatCommand(inputSnapshot.message)
             : null;
-        if (sideChatCommand && currentSessionId && currentDirectory) {
+        const sideChatDirectory = currentSessionDirectoryForSync ?? currentDirectory;
+        if (sideChatCommand && currentSessionId && sideChatDirectory) {
             try {
                 await openDisposableSideChat({
                     parentSessionId: currentSessionId,
-                    directory: currentDirectory,
+                    directory: sideChatDirectory,
                     prompt: sideChatCommand.prompt,
                     providerID: providerIdToSend,
                     modelID: modelIdToSend,
@@ -1973,7 +1974,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 setCommandQuery('');
             } catch (error) {
                 console.error('Side chat command failed:', error);
-                toast.error(t('chat.chatInput.toast.messageSendFailed'));
+                toast.error(error instanceof Error ? error.message : t('sideChat.cleanup.error'));
             }
             return;
         }
