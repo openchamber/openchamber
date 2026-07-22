@@ -1585,11 +1585,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     }, [part.id]);
 
     const imageGallery = React.useMemo(() => {
-        return imageAttachments.map((f) => ({
-            url: f.url,
-            mimeType: f.mime,
-            filename: f.filename,
-        }));
+        return imageAttachments.flatMap((f) => {
+            if (!f.url) return [];
+            return [{ url: f.url, mimeType: f.mime, filename: f.filename }];
+        });
     }, [imageAttachments]);
 
     const handleAttachmentClick = React.useCallback((index: number) => {
