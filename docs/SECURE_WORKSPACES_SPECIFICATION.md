@@ -1,7 +1,7 @@
 # Secure Workspaces Production Specification
 
 Status: authoritative implementation and release specification
-Last audited: 2026-07-21
+Last audited: 2026-07-22
 
 ## 1. Purpose
 
@@ -9,7 +9,7 @@ Secure Workspaces provides isolated OpenCode execution environments managed thro
 
 This document is the only authoritative Secure Workspaces plan and acceptance contract. It replaces the former personal requirements, handoff, copied requirements, and test log. Historical command output is not evidence that the current implementation satisfies this specification.
 
-The target is one complete production product. There is no reduced "v1", prototype, experimental implementation milestone, or deferred security baseline.
+The target is one complete production product. Work may proceed through explicit certification milestones, but a milestone does not waive a final release gate and MUST NOT be described as full production readiness. There is no reduced security baseline.
 
 ## 2. Normative Language And Completion Rules
 
@@ -168,44 +168,78 @@ OpenCode remains authoritative for:
 
 OpenChamber and the plugin MUST use public OpenCode SDK/plugin contracts where they are sufficient. Any reliance on an internal experimental extension MUST be isolated, version-pinned, compatibility-tested, and documented.
 
-## 5. Current Audited Baseline
+## 5. Current Implementation And Release Status
 
-The existing implementation is useful source material but does not conform to this specification.
+This section records the audited state of the current commits. It is status evidence, not a substitute for rerunning validation after any code, dependency, workflow, image, or package-pin change.
 
-Verified current strengths include:
+### 5.1 Current Commits And Distribution
 
-- an external plugin repository and immutable Git dependency pin;
-- Docker, Kubernetes, and Apple Container provider implementations;
-- file-backed workspace endpoint tokens;
-- a runtime authentication proxy covering HTTP, SSE, and WebSocket inside the runtime;
-- Docker capability drop, `no-new-privileges`, internal networking, and localhost access-proxy concepts;
-- Kubernetes Secret, PVC, Deployment, Service, NetworkPolicy, port-forward, and hardened tar seeding concepts;
-- Apple Container host-only networking, loopback publishing, and gateway rewrite concepts;
-- OpenChamber compatibility, validation, export artifact, and selected-file apply route groundwork;
-- Electron plugin staging groundwork;
-- useful mocked provider and route tests.
+- Plugin repository `main`: `988c11dfbb3376e5e224596a7a4e39ceaf29171c`.
+- OpenChamber branch `feature/secure-workspaces-plugin`: `ef891e1020fd1d80b22dced709dd8766c085e26e`.
+- OpenChamber currently pins the plugin by immutable Git commit in web and Electron package manifests.
+- The current plugin package payload is independently packable and Electron stages and verifies the exact payload.
+- The next plugin CI repair commit will replace the current plugin pin before image digests are added to OpenChamber.
+- For the `v0.1.0` image/provider milestone, immutable Git SHA is the plugin distribution contract. npm trusted publishing is intentionally deferred to a later distribution milestone and no npm token is required now.
 
-Known current non-conformities include:
+### 5.2 Implemented Security And Correctness Invariants
 
-- the Workspaces page is not mounted in `SettingsView`;
-- all `secureWorkspaces*` settings are discarded by the server settings sanitizer;
-- the default runtime image is not publicly pullable;
-- production release workflows skip plugin staging;
-- `workspace.extra` controls sensitive provider operations;
-- broad OpenCode auth content is inspect-visible and can appear in process errors;
-- create retry can delete an existing workspace;
-- the token store is not atomic or concurrency-safe;
-- the seed baseline is wrong for dirty Git repositories;
-- raw patch apply bypasses artifact identity and expiration;
-- check-then-apply has no durable rollback;
-- required settings and daily workspace UX are incomplete;
-- start-session-in-workspace is not implemented;
-- status failure is converted to empty status state;
-- Kubernetes ingress is accepted but not provisioned;
-- policy fields such as TTL and secret mode are accepted without enforcement;
-- local recovery now safely adopts a `syncList`-allocated control-plane ID after provider and state verification; stable upstream discovery IDs remain preferred.
+The current implementation includes:
 
-The plugin has not been publicly released. Production code does not need compatibility aliases, old metadata migration, or the old token-store format. Local development resources may be removed with an explicit development cleanup tool, not a permanent production compatibility path.
+- typed plugin, operations, and contracts exports compiled against exact `@opencode-ai/plugin@1.18.4` contracts;
+- transactional Docker, Kubernetes, and Apple Container providers with authoritative resource ownership, immutable source baselines, independent mutable/baseline generation recovery, reconciliation, compensating credential rotation, cleanup tombstones, and explicit partial failure;
+- plugin-owned authenticated HTTP, SSE, and WebSocket compatibility transport with token injection, authoritative Origin rewriting, header stripping, smuggling protection, TLS verification, and credential rotation;
+- managed and external egress policy, separate runtime/gateway images, destination enforcement, and no direct fallback;
+- authoritative OpenCode workspace identity with immutable provider resource identity and verified recovery adoption;
+- exact-ID create compensation, provider cleanup before OpenCode row removal, provisional connected-state polling, and explicit retryable partial cleanup;
+- server-cached structured artifact v1, bounded review metadata, exact download bytes, file/hunk selection, conflict checks, atomic host apply, rollback journals, and startup recovery; the legacy raw patch boundary is removed;
+- immutable reviewed session handoff with complete cursor pagination, stale-source detection, deterministic insertion, hash verification, timeout recovery, source preservation, and cleanup-required recovery without persisted transcript text;
+- proof-bound host administration where the one-time proof binds principal, operation, project, nonce, expiry, and the exact submitted request body while persistence uses only the validated canonical copy;
+- process-attested Electron operator authority: persisted `desktop-local` and `native-electron` strings alone confer no authority, the `desktop-local` dedupe identity is reserved to the native mint, and all four native capabilities are immutable;
+- strict remote-client credential-store validation, version migration only for supported shapes, duplicate identity/hash rejection, private fsynced temporary writes, atomic replacement, and failure without authoritative-empty coercion;
+- a proof-bound Secure Workspace settings/plugin transaction with an atomic private prepared journal, exact rollback, startup recovery awaited before OpenCode launch, strict settings restoration, fsynced atomic settings/OpenCode config writes, and no non-atomic Windows copy fallback;
+- rejection of Secure Workspace mutations through generic settings and plugin routes, including package names and explicit, normalized, or symlink-equivalent plugin paths resolved by filesystem identity;
+- generic OpenCode proxy enforcement of `workspace.use`, authoritative upstream session workspace lookup, and interception of direct workspace lifecycle mutation;
+- project-scoped Workspaces UI on web, Electron, hosted mobile, and Capacitor, localized settings and workflow copy, capability-aware remote clients, and explicit VS Code unsupported behavior;
+- exact Electron plugin staging and packaged-payload verification across release workflows;
+- `OPENCODE_SKIP_START=true` authority that never silently launches or reuses managed OpenCode without an explicit external target.
+
+### 5.3 Validation Evidence At Current Commits
+
+- Plugin unit/contract suite: 94 passed, 2 environment-gated skipped.
+- OpenChamber web suite: 821 passed, 1 platform-specific skipped.
+- Workspace-wide type-check and lint passed.
+- Production web build, documentation validation, server syntax checks, and Electron plugin staging/package tests passed.
+- Electron staged plugin payload contains 29 verified files; packaging verifier tests passed 4/4.
+- Live Docker and k3s port-forward provider lifecycle/security certification passed locally.
+- Live host-to-host immutable handoff passed against OpenCode `1.18.4`, including pagination, restart, stale review, exact hashes, and timeout recovery.
+- Electron HMR and bundled custom-scheme runtime smoke passed; hosted mobile and Capacitor asset/CORS/runtime tests passed.
+- Independent final code/security audit found no reachable code blocker at the current commits.
+
+These results do not make the release ready because the remote image workflow is red and Apple Container/Kubernetes ingress live certification is incomplete.
+
+### 5.4 Current Remote CI Failure
+
+GitHub Actions run `29916187323` for plugin commit `988c11dfbb3376e5e224596a7a4e39ceaf29171c` is red: <https://github.com/openchamber/opencode-container-workspace/actions/runs/29916187323>.
+
+- `test` passed, including install, unit tests, lint, type-check, and `npm pack --dry-run`.
+- Both image builds and per-architecture runtime smoke passed.
+- `docker-live` failed because the workflow used Docker image config `.Id` as if it were a registry manifest digest; the provider correctly attempted an immutable pull and no such registry manifest existed.
+- Both image vulnerability jobs failed before scanning because Trivy 0.72 cannot consume the generated multi-architecture OCI tar through the current `--input` invocation.
+- No vulnerability result was produced, so the failure MUST NOT be described as a clean vulnerability scan.
+- `publish` was skipped because the run was a branch push rather than a release tag.
+
+The red workflow is a release blocker. A local green suite or code audit cannot override it.
+
+### 5.5 Remaining Immediate Gates
+
+- Repair and green the plugin test/image/Docker/Kubernetes workflows.
+- Run registry preflight without a production tag and confirm Actions can create both GHCR packages and make them public.
+- Publish signed public `v0.1.0` images and verify unauthenticated exact-digest pulls.
+- Pin the final plugin commit and both published image digests in OpenChamber.
+- Install Apple Container `1.1.0` and complete live provider certification.
+- Create an isolated reachable Colima ingress profile and complete HTTPS ingress certification for `existing-secret` and `cert-manager` modes.
+
+Native iOS, Android, Windows, and Linux application certification is intentionally sequenced after these immediate gates. This deferral does not waive the final product-release matrix and no milestone may be called the complete cross-platform production release until those gates pass.
 
 ## 6. OpenCode Upstream Compatibility Contract
 
@@ -226,7 +260,7 @@ Before every plugin or OpenChamber release, the compatibility matrix MUST record
 - exact OpenCode release and binary digest;
 - exact SDK version;
 - exact `@opencode-ai/plugin` version;
-- exact plugin package version;
+- exact plugin commit and package version;
 - runtime image OpenCode version;
 - workspace HTTP and routing compatibility-suite results.
 
@@ -297,18 +331,22 @@ Routed raw diff is not a complete production export source at the reviewed commi
 
 Canonical binary-safe and non-Git export therefore remains a plugin operations responsibility. OpenChamber host apply remains OpenChamber-owned.
 
-### 6.5 Authenticated WebSocket Blocker
+### 6.5 Authenticated WebSocket Compatibility Boundary
 
 Reviewed OpenCode overlays adapter target headers for HTTP/SSE proxying but does not pass target headers to the WebSocket proxy handshake. An authenticated remote workspace therefore rejects terminal and other WebSocket upgrades.
 
+The upstream limitation remains relevant, but it is no longer a release blocker for this product because the plugin now owns a loopback compatibility transport that authenticates and forwards HTTP, SSE, and WebSocket traffic without weakening workspace authentication.
+
 Release requirements:
 
-- OpenCode MUST forward adapter target headers during WebSocket proxy handshakes;
-- the fix MUST have an upstream test with a header-authenticated remote target;
+- the plugin-owned transport MUST preserve authenticated HTTP/SSE/WebSocket behavior against every supported OpenCode version;
+- target credentials MUST remain server-side and MUST NOT move to a long-lived URL token;
+- forwarded Origin, auth, hop-by-hop, and client-controlled proxy headers MUST be normalized or removed by the transport boundary;
+- TLS verification, rotation, reconnect, and credential stripping MUST be covered by contract and live tests;
 - OpenChamber MUST validate authenticated HTTP, SSE, terminal WebSocket, reconnect, and credential stripping;
-- workspace authentication MUST NOT be weakened or moved into a long-lived URL token as a workaround.
+- an upstream target-header fix remains desirable but MUST NOT be assumed by the released compatibility matrix.
 
-This is an upstream release blocker for complete authenticated remote workspaces.
+The released implementation uses the plugin-owned transport and does not depend on an unshipped upstream patch.
 
 ### 6.6 Create Failure Behavior
 
@@ -411,11 +449,11 @@ The plugin MUST treat this input as sensitive and MUST NOT automatically expose 
 - never log, include in command diagnostics, or store broad auth in metadata/state;
 - support revocation and cleanup.
 
-## 7. Plugin Redesign
+## 7. Plugin Architecture
 
-The plugin core SHOULD be rewritten before its first public release. Existing code may be reused only after it satisfies the contracts below.
+The plugin core has been rewritten around the contracts below. Future changes MUST preserve focused lifecycle, trust, provider, runtime, and artifact ownership rather than moving domain behavior into entrypoints.
 
-Recommended structure:
+Conceptual structure:
 
 ```text
 src/
@@ -800,15 +838,32 @@ interface KubernetesIngressPolicy {
 
 HTTPS is mandatory. Host/path templates use canonical resource identity. An annotation allowlist prevents arbitrary controller behavior. NetworkPolicy admits only configured controller selectors. Workspace auth remains mandatory over TLS. Ingress health uses the final public target. There is no silent fallback to port-forward.
 
+The existing `colima` validation context is intentionally minimal: it has no `IngressClass` or controller, uses `--disable=traefik`, has no Helm installation, and its VM address is not host-reachable. This is not an acceptable permanent external blocker. Certification uses a separate Colima profile so the existing port-forward validation cluster is not mutated.
+
+The dedicated profile MUST have a host-reachable address and sufficient CPU, memory, and disk for k3s, ingress-nginx, cert-manager, two workspace images, and lifecycle tests. ingress-nginx `controller-v1.15.1` and cert-manager `v1.21.0` are the currently selected releases; their manifests and images MUST be pinned and reviewed before installation. A local test CA and DNS host template bound to the reachable profile address validate both `existing-secret` and `cert-manager` modes without introducing production DNS or TLS secrets. Tests MUST reach the final HTTPS URL from the host, trust only the explicit test CA, authenticate the workspace request, verify controller selectors and NetworkPolicy, and remove all workspace resources.
+
 ### 14.4 Apple Container
 
 Each workspace MUST have mutable and baseline volumes, a per-workspace host-only network, a loopback-only collision-checked publish, and controlled gateway egress. Runtime images run non-root with dropped capabilities and the strongest available privilege control. Restart after `container system stop/start`, target recovery, network collision, volume collision, port collision, and cleanup MUST be live-tested.
 
 The absence of an exact Apple equivalent to Docker `no-new-privileges` is a documented platform property, not a hidden claim. Compensating controls and tests are mandatory.
 
+The current host is eligible for Apple Container certification (`arm64`, macOS `26.5.2`) but has no `container` binary installed. The approved installation target is Apple's signed `container-1.1.0-installer-signed.pkg` with expected SHA-256 `0ca1c42a2269c2557efb1d82b1b38ac553e6a3a3da1b1179c439bcee1e7d6714`. Installation requires interactive local administrator approval, followed by `container system start`. No administrator credential is stored or automated. Certification MUST use the published public arm64 image digests and cover create, target, authenticated HTTP/SSE/WebSocket, export, reconciliation, system stop/start recovery, collision handling, and cleanup.
+
 ## 15. Runtime Images
 
 The former default `ghcr.io/openchamber/opencode-workspace:1.0.0` is invalid for release because unauthenticated pull returned `denied`. It MUST be removed from defaults until a real public artifact exists.
+
+The first image release contract is:
+
+```text
+Git tag: v0.1.0
+Runtime package: ghcr.io/openchamber/opencode-workspace:0.1.0
+Gateway package: ghcr.io/openchamber/workspace-egress-gateway:0.1.0
+Production references: the same package names pinned as @sha256:<digest>
+```
+
+The packages do not currently exist as verified public artifacts. At the 2026-07-22 audit, unauthenticated manifest inspection returned `denied` for runtime tags `1.0.0` and `0.1.0` and gateway tag `0.1.0`. The first successful release push creates the real packages. OpenChamber MUST keep image defaults empty until public exact digests are available, then expose one authoritative server-owned default for each image; the UI MUST NOT duplicate image constants.
 
 The runtime image MUST:
 
@@ -825,6 +880,58 @@ The runtime image MUST:
 The image pipeline MUST use buildx, run per-architecture OpenCode health smoke, generate SBOM and provenance, enforce a vulnerability gate, sign with keyless Cosign, publish immutable semver tags and digests, and verify unauthenticated public pulls.
 
 OpenChamber production policy MUST default to a digest, not a mutable tag. The runtime OpenCode version, host OpenCode version, SDK, and plugin compatibility suite MUST agree.
+
+### 15.1 Image And Architecture Model
+
+There are exactly two Linux OCI products: runtime and managed egress gateway. Each product is one multi-architecture manifest containing `linux/amd64` and `linux/arm64`. There are no separate macOS, Windows, iOS, or Android images. Docker, Kubernetes, and Apple Container select the matching Linux architecture from the same manifest; Windows support uses a Linux-container backend when that platform is certified.
+
+The release MUST NOT publish or consume `latest`. Semver tags are discovery labels; the only production authority is the immutable digest recorded after publication.
+
+### 15.2 Deterministic Build Inputs
+
+- Base images and CI helper images MUST be pinned by reviewed digest in source, not resolved from a mutable tag during the release.
+- OpenCode in the runtime image is pinned to `1.18.4` for `v0.1.0`.
+- Trivy and every GitHub Action are pinned to reviewed versions/commits.
+- Builds include OCI source, revision, and version labels that link GHCR packages to `openchamber/opencode-container-workspace`.
+- Build logs and metadata record the exact base, runtime, gateway, OpenCode, and output digests.
+
+### 15.3 Branch And Pull-Request Image Gate
+
+For each architecture, CI MUST load a uniquely tagged local image, run the real runtime smoke, and scan that same loaded image. A multi-architecture OCI archive may be generated for structure/SBOM/provenance checks, but MUST NOT be passed to a scanner format it cannot consume.
+
+`docker-live` MUST start an ephemeral loopback registry inside the runner, push integration images, obtain actual registry manifest digests, and pass full `localhost:<port>/...@sha256:<manifest>` references to provider tests. Docker config IDs are not registry manifest digests. The ephemeral registry is destroyed with the job and is never a release destination.
+
+A repeatable Kubernetes live job MUST use pinned cluster/controller inputs and cover digest pulls, port-forward, HTTPS ingress, controller-scoped NetworkPolicy, lifecycle, export, reconciliation, and cleanup. The image publish job depends on all unit, image, Docker, and Kubernetes gates.
+
+### 15.4 Tag Publication
+
+On `v0.1.0`, each image is first pushed as a run-scoped candidate. The exact candidate digest MUST pass both architecture scans and smoke before promotion to `0.1.0`. The workflow then:
+
+1. records the exact digest;
+2. promotes only that digest to the semver tag;
+3. signs the digest with keyless Cosign using GitHub OIDC;
+4. verifies a narrowly scoped repository/workflow/tag certificate identity;
+5. verifies SBOM and provenance attestations;
+6. logs out of GHCR;
+7. pulls and inspects the exact digest without authentication;
+8. verifies both required architectures.
+
+No manual image upload, mutable production tag, Docker Hub credential, registry password, or long-lived signing key is part of the release design.
+
+### 15.5 GHCR Package Bootstrap And Visibility
+
+Before creating `v0.1.0`, a manually dispatched registry preflight MUST push run-scoped candidates without a production semver tag. It proves whether the repository-scoped Actions token can create both organization packages, link them to the repository, set public visibility, and pass unauthenticated pull.
+
+The publish job uses only job-scoped permissions:
+
+```yaml
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+```
+
+If organization policy prevents package creation or public visibility, the workflow fails explicitly. An organization owner or package administrator then changes the specific organization/package setting and the preflight is rerun. A personal access token MUST NOT be added as a workaround unless GitHub provides no repository-scoped mechanism and the exception is separately reviewed, minimally scoped, rotated, and documented.
 
 ## 16. Source Snapshot And Immutable Baseline
 
@@ -861,7 +968,7 @@ Artifacts MUST be stored server-side under a private OpenChamber data directory 
 
 ## 18. Visual Diff And Selection
 
-The current custom `diff --git` string splitter MUST NOT be the production selection boundary.
+The legacy custom `diff --git` string splitter has been removed and MUST NOT return as a production selection boundary.
 
 A reviewed structured diff implementation MUST produce stable text hunks and line/context hashes. Unknown, duplicate, overlapping, stale, or dependent selections are validated server-side. Binary content supports whole-file selection only. Large text may require whole-file selection with a visible explanation. Rename, mode, and symlink changes remain indivisible logical operations.
 
@@ -869,19 +976,24 @@ The browser receives review metadata and bounded content views, not authority to
 
 ## 19. OpenChamber Runtime API
 
-The production API SHOULD use side-effect-appropriate methods such as:
+The implemented production API uses explicit side-effect-appropriate routes registered before the generic OpenCode proxy:
 
 ```text
-POST   /api/workspaces/providers/:provider/validate
+GET    /api/workspaces/providers/validate
+POST   /api/workspaces/providers/validate
 GET    /api/workspaces/compatibility
-POST   /api/workspaces/configuration
-POST   /api/workspaces/:workspaceID/exports
-GET    /api/workspace-exports/:exportID
-GET    /api/workspace-exports/:exportID/files/:fileID
-POST   /api/workspace-exports/:exportID/validate
-POST   /api/workspace-exports/:exportID/apply
-GET    /api/workspace-exports/:exportID/download
-DELETE /api/workspace-exports/:exportID
+POST   /api/workspaces/create
+DELETE /api/workspaces/:workspaceID
+POST   /api/workspaces/:workspaceID/reconcile
+POST   /api/workspaces/settings
+GET    /api/workspaces/:workspaceID/export
+POST   /api/workspaces/exports/:exportID/apply
+GET    /api/workspaces/exports/:exportID/download
+DELETE /api/workspaces/exports/:exportID
+POST   /api/workspaces/handoffs/draft
+POST   /api/workspaces/handoffs/:operationID/commit
+GET    /api/workspaces/handoffs/:operationID
+DELETE /api/workspaces/handoffs/:operationID/target
 ```
 
 There MUST be no raw client patch apply route. A directory is accepted only after canonical project binding. Provider settings and executable/context overrides come only from persisted host-admin policy.
@@ -959,6 +1071,10 @@ host.apply
 
 Default paired clients do not receive admin or apply capabilities. Privileged remote operations require a short-lived one-time proof bound to client/user, operation type, target project, request-body hash, nonce, and expiration. WebAuthn is preferred with password fallback. Apply additionally requires explicit review confirmation. Replay is rejected.
 
+Native Electron operator authority is not inferred from a persisted client kind. Only the current Electron-host process may mint and attest the native local client. Persisted marker strings, legacy records, password login, pairing, and generic client-create requests cannot manufacture native authority. The reserved `desktop-local` dedupe identity cannot be replaced by remote issuance paths. The attested local client always has all four capabilities and capability mutation rejects rather than reducing them.
+
+Remote-client credential persistence MUST fail closed on malformed or unsupported structure, duplicate IDs, duplicate token hashes, and I/O failure. Supported legacy shape migration is explicit. Writes use private same-directory temporary files, file fsync, atomic replacement, and directory fsync where supported; a failed replacement preserves the prior credential store.
+
 ## 24. Settings And Product UX
 
 Settings MUST expose only enforced controls:
@@ -976,6 +1092,10 @@ Settings MUST expose only enforced controls:
 
 Every setting MUST have shared type, sanitizer, persisted format, response formatting, defaults, search metadata, localization, and round-trip tests. Configure runs only after confirmed persistence. Failed activation leaves a reconciled, explicit state.
 
+Secure Workspace settings are mutated only through `POST /api/workspaces/settings`. Reauthentication binds the exact submitted body and activation flag; only the separately validated canonical copy reaches persistence and plugin configuration. Generic settings mutation rejects every `secureWorkspaces*` field. Generic plugin CRUD treats the Secure Workspace package and its exact, normalized, or symlink-equivalent resolved filesystem path as reserved.
+
+Settings persistence and plugin-entry replacement form one serialized recoverable transaction. Before the first mutation, OpenChamber writes a private prepared journal containing only the prior Secure Workspace field family and reserved entries. Settings and OpenCode config files publish through fsynced same-directory temporary files and atomic rename. Recovery is awaited before OpenCode bootstrap; recovery failure blocks startup. Windows rename exhaustion fails while preserving the live file and never falls back to an in-place copy. The journal is removed only after the complete new state is durable; caught failure or interrupted startup restores the exact prior field family and plugin entries without erasing unrelated configuration.
+
 Daily workflow MUST not remain embedded in a settings component. A project/workspace surface provides provider/status badges, create, reconcile, cleanup, start session, reviewed continuation in a workspace or on the host, export, review, apply, and download. Mobile uses the same server contract in a responsive surface.
 
 OpenChamber implements this boundary with `SecureWorkspacesSettings` limited to activation/provider/policy controls and a project-scoped Workspaces surface in desktop web/Electron and hosted/Capacitor mobile navigation. The surface is intentionally hidden in VS Code, resets workspace/export state across runtime and directory changes, preserves same-scope authoritative list/status data on refresh failure, and keeps read/use available when capability-aware remote clients lack admin or host-apply grants.
@@ -986,7 +1106,9 @@ Errors distinguish no workspaces, unsupported platform, provider unavailable, un
 
 ### 25.1 Plugin
 
-The plugin MUST publish an exact npm version with provenance, built entrypoints, declarations, package-consumer tests, and no test files, secrets, local config, or sibling-checkout assumptions. Direct OpenCode installation is documented.
+For the `v0.1.0` image/provider milestone, OpenChamber consumes the public plugin repository by full immutable Git commit SHA. The pinned package MUST have built entrypoints/declarations, package-consumer tests, a clean `npm pack --dry-run`, and no test files, secrets, local config, or sibling-checkout assumptions. Electron stages and verifies that exact dependency payload.
+
+npm trusted publishing with provenance remains a later distribution milestone. When adopted, it MUST use an exact semver, npm trusted publishing/OIDC where available, and explicit npm organization authorization rather than a long-lived npm token by default. Deferring npm publication does not permit mutable Git branches or tags in OpenChamber dependencies.
 
 ### 25.2 Electron
 
@@ -1023,7 +1145,7 @@ Validate both image architectures where available, source/baseline isolation, no
 
 ### 26.4 Kubernetes Live
 
-Use kind with a NetworkPolicy-capable CNI and cover RBAC denial, PVC/Secret/rollout failure, policy enforcement, managed gateway, direct-egress denial, port-forward recovery, ingress controller, TLS, controller-only ingress, pod restart, sync restart, export, cleanup, and foreign collision.
+Use a pinned CI cluster with a NetworkPolicy-capable CNI and cover RBAC denial, PVC/Secret/rollout failure, policy enforcement, managed gateway, direct-egress denial, port-forward recovery, ingress controller, TLS, controller-only ingress, pod restart, sync restart, export, cleanup, and foreign collision. Local ingress certification uses the separate reachable Colima profile defined in section 14.3; the existing minimal port-forward cluster is not repurposed.
 
 ### 26.5 Apple Container Live
 
@@ -1039,15 +1161,24 @@ Cover navigation, settings persistence, provider validation, list/status/event r
 
 ### 26.8 Release
 
-Cover plugin tarball and clean consumer, public GHCR pulls, image signatures/SBOM/provenance, clean OpenChamber install, all Electron release workflows, macOS package and GUI, Windows package and GUI, Linux AppImage and GUI, hosted web, remote mobile, and exact compatibility matrix.
+Cover plugin tarball and clean consumer, immutable Git pin, registry preflight, public GHCR pulls, per-architecture manifests, exact-digest smoke, image signatures/SBOM/provenance, clean OpenChamber install, all Electron release workflows, hosted web, remote mobile, and the exact compatibility matrix.
+
+The current immediate certification milestone additionally covers Apple Container and Kubernetes ingress on dedicated local environments. Native iOS, Android, Windows, and Linux packaged-app validation is deliberately sequenced afterward and remains required for the complete cross-platform product release.
 
 ## 27. Release Gates
 
-Release is blocked until all of the following are true:
+### 27.1 Immediate `v0.1.0` Image And Provider Milestone
+
+The image/provider milestone is blocked until all of the following are true:
 
 - public pullable signed multi-arch runtime image;
 - public pullable signed egress gateway image;
-- exact published plugin package;
+- exact immutable plugin Git commit with verified package payload;
+- green plugin `test`, both `image`, `docker-live`, and `kubernetes-live` jobs at the tagged commit;
+- successful registry preflight proving package creation, public visibility, and unauthenticated pulls without a personal PAT;
+- exact candidate-digest vulnerability scans and smoke before semver promotion;
+- keyless Cosign verification with the expected repository/workflow/tag identity;
+- final runtime and gateway digests recorded as authoritative OpenChamber defaults;
 - exact supported OpenCode/SDK/plugin compatibility matrix;
 - plugin-owned authenticated HTTP/SSE/WebSocket compatibility transport validated against each supported OpenCode version;
 - safe create failure reconciliation;
@@ -1067,51 +1198,82 @@ Release is blocked until all of the following are true:
 - atomic rollback and crash recovery pass;
 - Docker, Kubernetes, and Apple Container live suites pass;
 - Electron packaged GUI smoke passes;
-- required macOS, Windows, and Linux matrix passes;
 - host-admin capability and reauthentication pass;
 - documentation matches released behavior.
 
+Passing this milestone certifies Secure Workspace images/providers and their currently validated OpenChamber integration. It is not the final cross-platform application release.
+
+### 27.2 Deferred Complete Product Release Gates
+
+The complete cross-platform product release additionally requires:
+
+- native iOS package/simulator/device validation;
+- native Android package/emulator/device validation;
+- native Windows package, GUI, process, Docker Desktop, and provider validation;
+- native Linux AppImage, GUI, and provider validation;
+- physical hosted/Capacitor mobile smoke where applicable;
+- release signing and notarization credentials for the platform artifacts that require them;
+- npm trusted publication only when the later npm distribution milestone is activated.
+
+These gates are deferred in execution order, not cancelled. Until they pass, status language MUST say `image/provider milestone ready` rather than `complete production release ready`.
+
 ## 28. Implementation Dependency Order
 
-This is execution order, not a sequence of partial product releases. Every item is mandatory before completion.
+The core implementation items are complete at the commits recorded in section 5. The remaining execution order is:
 
-1. Adopt this specification and remove contradictory plans.
-2. Establish the plugin-owned authenticated transport compatibility boundary and local reconciliation for unstable discovery/removal behavior. Upstream WebSocket target headers, stable discovery identity, and warp are not production dependencies.
-3. Replace plugin package contracts, schemas, build output, and compatibility tests.
-4. Implement plugin process, redaction, state, secret, ownership, and transaction core.
-5. Implement safe source snapshot, immutable baseline, and artifact core.
-6. Implement and publish pre-release runtime and managed egress images.
-7. Rewrite Docker provider against the new core.
-8. Rewrite Kubernetes provider, including real ingress.
-9. Rewrite Apple Container provider.
-10. Implement typed plugin server-side operations.
-11. Replace OpenChamber handwritten workspace SDK behavior with generated SDK contracts.
-12. Repair settings persistence and configuration transactions.
-13. Implement host capabilities and reauthentication.
-14. Implement export storage, structured review, and atomic host apply.
-15. Implement authoritative live workspace state and sync startup.
-16. Implement project/workspace product UI and mobile parity.
-17. Implement routed session create and immutable reviewed context handoff.
-18. Correct every Electron and release packaging path.
-19. Build all automated, failure-injection, live-provider, platform, and release tests.
-20. Perform an independent security and data-integrity review.
-21. Publish final plugin and signed images.
-22. Pin exact package versions and image digests.
-23. Run the complete release validation matrix.
-24. Release only when every gate is satisfied.
+1. Keep this specification synchronized with current implementation, evidence, and release decisions.
+2. Pin reviewed base-image, Trivy, registry-helper, and GitHub Action versions/digests in source.
+3. Repair Trivy scanning so each loaded architecture is actually scanned.
+4. Repair `docker-live` with an ephemeral registry and real manifest digest references.
+5. Add a repeatable Kubernetes live job covering digest pulls, port-forward, HTTPS ingress, TLS, controller-only NetworkPolicy, lifecycle, export, reconciliation, and cleanup.
+6. Push the plugin repair commit and require every branch gate to pass.
+7. Run a manual registry preflight without a production tag.
+8. If and only if preflight identifies an organization-policy block, request the narrow owner/package-admin action and rerun preflight.
+9. Install the official signed Apple Container `1.1.0` package after SHA-256 verification and start its system service.
+10. Create an isolated reachable Colima profile with pinned ingress-nginx, cert-manager, local test CA, and no dependency on the existing minimal validation cluster.
+11. Run Apple Container and Kubernetes ingress live certification, including restart and cleanup.
+12. Tag the final green plugin commit as `v0.1.0`.
+13. Build, scan, smoke, publish, sign, attest, and unauthenticated-pull both exact GHCR image digests.
+14. Update OpenChamber web/Electron plugin pins, lockfile, staged payload, and authoritative runtime/gateway digest defaults.
+15. Rerun OpenChamber tests, type-check, lint, docs, build, Electron staging/package verification, compatibility, and provider smoke.
+16. Record exact commits, image digests, signatures, attestations, workflow URLs, and remaining deferred platform gates.
+17. Declare only the image/provider milestone ready.
+18. Complete iOS, Android, Windows, Linux, physical-device, and platform-signing gates before the complete product release.
 
 ## 29. Validation Responsibilities
 
 The implementation reviewer should run all available automated suites, type-checks, lints, builds, package consumer tests, Git/non-Git fixtures, Docker/Colima tests, kind/CNI tests, Apple Container tests, macOS Electron package/GUI smoke, security inspections, and restart/failure-injection scenarios.
 
-The repository owner may need to provide or execute checks requiring protected infrastructure or credentials:
+### 29.1 Current Contributor Permissions
 
-- GitHub Actions permission for public GHCR publish and signing;
-- npm organization publication rights;
-- native Windows Docker Desktop and packaged-app validation;
-- native Linux AppImage and provider validation;
-- production-like Kubernetes storage, RBAC, ingress, TLS, and CNI validation;
-- physical mobile-device smoke;
-- release signing and notarization credentials.
+The current contributor account `yulia-ivashko` is an active `openchamber` organization member with `maintain`, `push`, `workflow`, and pull access to both repositories, but without repository `admin`. No plugin repository ruleset or branch protection was found at the audit time. These rights are sufficient to change code/workflows, push commits, manually dispatch workflows, and normally push the `v0.1.0` tag.
+
+The local `gh` OAuth token currently has `repo`, `workflow`, `read:org`, and `gist`, but not `read:packages` or `write:packages`. Therefore local CLI package listing/manual package administration is unavailable. This does not restrict the separate per-job Actions `GITHUB_TOKEN`.
+
+### 29.2 Secrets And Signing Model
+
+No personal registry secret, Docker Hub account, GHCR password, Cosign private key, or long-lived signing secret is required for the immediate image release:
+
+- GHCR push uses the ephemeral Actions `GITHUB_TOKEN` with `packages: write`;
+- keyless Cosign uses GitHub OIDC with `id-token: write`;
+- SBOM and provenance use build attestations without a private key;
+- public-pull verification runs after registry logout;
+- the CI registry is ephemeral and unauthenticated on runner loopback;
+- local Kubernetes certification uses an ephemeral local CA, not production DNS/TLS credentials;
+- Apple Container installation requires an interactive local administrator authorization, which MUST NOT be stored in GitHub or repository files;
+- npm credentials are not required while npm publication remains deferred.
+
+### 29.3 Owner Or Administrator Actions
+
+The contributor cannot inspect or change organization-level Actions/package policy; those APIs returned authorization failure without admin rights. An organization owner or package administrator is needed only if registry preflight proves that organization policy blocks one of the following:
+
+- repository Actions creating `ghcr.io/openchamber/opencode-workspace`;
+- repository Actions creating `ghcr.io/openchamber/workspace-egress-gateway`;
+- either package becoming public;
+- repository-scoped `packages: write` or OIDC signing.
+
+The preferred remedy is a one-time organization/package policy or visibility change. The owner MUST NOT share a personal token or password. A PAT secret is not the default design.
+
+Later complete-product gates may require owner-provided protected infrastructure or credentials for Apple application signing/notarization, native Windows/Linux release infrastructure, physical mobile devices, production-like Kubernetes environments, and npm organization trusted-publisher setup when npm distribution is activated.
 
 For every owner-run check, contributors MUST provide exact commands, prerequisites, expected results, cleanup steps, and evidence to record.
