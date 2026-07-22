@@ -26,7 +26,7 @@
     "@clack/prompts": "^1.1.0",
     "@octokit/rest": "^22.0.1",
     "@opencode-ai/sdk": "1.18.4",
-    "@simplewebauthn/server": "13.3.1",
+    "@simplewebauthn/server": "13.3.2",
     "adm-zip": "^0.5.16",
     "better-sqlite3": "^12.10.0",
     "bun-pty": "^0.4.5",
