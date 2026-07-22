@@ -37,6 +37,7 @@ class NotificationService: UNNotificationServiceExtension {
         guard let defaults = UserDefaults(suiteName: Self.appGroup) else { return }
 
         var snapshot: [String: Any] = [
+            "runtimeKey": request.content.userInfo["runtimeKey"] as? String ?? "",
             "attentionCount": 0,
             "recentSessions": [],
         ]
@@ -44,6 +45,16 @@ class NotificationService: UNNotificationServiceExtension {
            let data = json.data(using: .utf8),
            let stored = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             snapshot = stored
+        }
+
+        if let pushRuntimeKey = request.content.userInfo["runtimeKey"] as? String,
+           !pushRuntimeKey.isEmpty,
+           snapshot["runtimeKey"] as? String != pushRuntimeKey {
+            snapshot = [
+                "runtimeKey": pushRuntimeKey,
+                "attentionCount": 0,
+                "recentSessions": [],
+            ]
         }
 
         // Attention count: authoritative server value carried in aps.badge.

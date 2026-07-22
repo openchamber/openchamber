@@ -53,13 +53,14 @@ export const useTurnRecords = (
     const projection = React.useMemo(() => {
         const sessionKey = options.sessionKey ?? '';
         const mergeKey = options.planModeEnabled ? 'merge:plan' : 'merge';
-        const cached = getCachedProjection(
+        const cacheKey = buildProjectionCacheKey(
             sessionKey,
             messages,
             options.showTextJustificationActivity,
             options.showTurnChangedFiles,
             mergeKey,
         );
+        const cached = getCachedProjection(cacheKey);
         if (cached) {
             previousProjectionRef.current = cached;
             return cached;
@@ -74,13 +75,6 @@ export const useTurnRecords = (
             });
             previousProjectionRef.current = nextProjection;
 
-            const cacheKey = buildProjectionCacheKey(
-                sessionKey,
-                messages,
-                options.showTextJustificationActivity,
-                options.showTurnChangedFiles,
-                mergeKey,
-            );
             setCachedProjection(cacheKey, nextProjection);
 
             return nextProjection;

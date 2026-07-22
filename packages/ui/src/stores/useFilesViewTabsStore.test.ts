@@ -3,7 +3,7 @@ import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 
 describe('useFilesViewTabsStore', () => {
   beforeEach(() => {
-    useFilesViewTabsStore.setState({ byRoot: {} });
+    useFilesViewTabsStore.setState({ byRoot: {}, activeRuntimeKey: 'runtime-a', runtimeSnapshots: {} });
   });
 
   test('ignores runtime paths outside the requested root', () => {
@@ -46,5 +46,17 @@ describe('useFilesViewTabsStore', () => {
     const state = useFilesViewTabsStore.getState().byRoot[root];
     expect(state?.openPaths).toEqual(['/repo/src/index.ts']);
     expect(state?.expandedPaths).toEqual(['/repo/src', '/repo/other']);
+  });
+
+  test('restores independent active projections across runtime switches', () => {
+    useFilesViewTabsStore.getState().addOpenPath('/repo', '/repo/a.ts');
+    useFilesViewTabsStore.getState().resetForRuntimeSwitch('runtime-b');
+    expect(useFilesViewTabsStore.getState().byRoot).toEqual({});
+    useFilesViewTabsStore.getState().addOpenPath('/repo', '/repo/b.ts');
+
+    useFilesViewTabsStore.getState().resetForRuntimeSwitch('runtime-a');
+    expect(useFilesViewTabsStore.getState().byRoot['/repo']?.openPaths).toEqual(['/repo/a.ts']);
+    useFilesViewTabsStore.getState().resetForRuntimeSwitch('runtime-b');
+    expect(useFilesViewTabsStore.getState().byRoot['/repo']?.openPaths).toEqual(['/repo/b.ts']);
   });
 });

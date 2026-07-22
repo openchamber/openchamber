@@ -105,6 +105,9 @@ const isTrayPlatform = (): boolean => {
   return platform === 'darwin' || platform === 'win32';
 };
 
+const isTrayEnabled = (): boolean =>
+  typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.trayEnabled !== false;
+
 const permissionLabel = (request: PermissionRequest): string => {
   const head = typeof request.permission === 'string' ? request.permission : 'Permission';
   const pattern = Array.isArray(request.patterns) ? request.patterns.find((p) => typeof p === 'string' && p.trim()) : '';
@@ -359,7 +362,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   const resolveStatus = (id: string): TraySessionStatus => {
     const fromStores = live.statusById.get(id);
     if (fromStores && fromStores !== 'idle') return fromStores;
-    return globalStatusById.get(id)?.status ?? fromStores ?? 'idle';
+    return globalStatusById.get(id)?.status.type ?? fromStores ?? 'idle';
   };
 
   const rollupStatus = (family: string[]): TraySessionStatus => {
@@ -418,7 +421,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
 
 export const useTraySync = (): void => {
   React.useEffect(() => {
-    if (!isTrayPlatform() || !canUseElectronDesktopIPC()) return;
+    if (!isTrayPlatform() || !isTrayEnabled() || !canUseElectronDesktopIPC()) return;
 
     let disposed = false;
     let lastSerialized = '';
@@ -578,7 +581,7 @@ export const useTraySync = (): void => {
   }, []);
 
   React.useEffect(() => {
-    if (!isTrayPlatform() || typeof window === 'undefined') return;
+    if (!isTrayPlatform() || !isTrayEnabled() || typeof window === 'undefined') return;
     const bridge = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
     const listen = bridge?.listen;
     if (typeof listen !== 'function') return;

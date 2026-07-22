@@ -17,10 +17,11 @@ struct WidgetSession: Codable, Identifiable, Hashable {
 /// The session overview snapshot. Mirrors MobileWidgetSnapshot (same field names) so the
 /// JSON the app stores decodes directly.
 struct WidgetSnapshot: Codable {
+    var runtimeKey: String?
     let attentionCount: Int
     let recentSessions: [WidgetSession]
 
-    static let empty = WidgetSnapshot(attentionCount: 0, recentSessions: [])
+    static let empty = WidgetSnapshot(runtimeKey: nil, attentionCount: 0, recentSessions: [])
 }
 
 enum WidgetStore {

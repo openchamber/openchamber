@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
-import { getSessionMaterializationStatus, materializeSessionSnapshots } from "../materialization"
+import {
+  getSessionMaterializationRequestKey,
+  getSessionMaterializationStatus,
+  isSessionMaterializationStillNeeded,
+  materializeSessionSnapshots,
+} from "../materialization"
 
 function message(id: string, sessionID = "ses_1"): Message {
   return { id, sessionID, role: "assistant", time: { created: 1 } } as Message
@@ -13,6 +18,13 @@ function userMessage(id: string, sessionID = "ses_1"): Message {
 function part(id: string, messageID: string, type = "text", text = id): Part {
   return { id, messageID, sessionID: "ses_1", type, text } as Part
 }
+
+describe("getSessionMaterializationRequestKey", () => {
+  test("isolates the same directory and session identity across runtimes", () => {
+    expect(getSessionMaterializationRequestKey("runtime-a", "/repo", "ses_1"))
+      .not.toBe(getSessionMaterializationRequestKey("runtime-b", "/repo", "ses_1"))
+  })
+})
 
 describe("materializeSessionSnapshots", () => {
   test("marks an empty successful page as materialized", () => {
@@ -153,6 +165,228 @@ describe("materializeSessionSnapshots", () => {
     expect(mergedPart.state?.time?.start).toBe(1000)
     expect(mergedPart.state?.time?.end).toBe(2000)
   })
+
+  test("preserves state.attachments from existing part when completed snapshot lacks them", () => {
+    const livePart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: {
+        status: "completed",
+        output: "done",
+        time: { start: 100, end: 200 },
+        attachments: [{ id: "att-1", type: "file", mime: "image/png", url: "data:image/png,..." }],
+      },
+    } as unknown as Part
+    const snapshotPart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "completed", output: "done", time: { start: 100, end: 200 } },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [livePart] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotPart] }],
+    )
+
+    const mergedPart = result.part.msg_1[0] as { state?: { attachments?: Array<unknown> } }
+    expect(mergedPart.state?.attachments).toHaveLength(1)
+    expect((mergedPart.state?.attachments?.[0] as { id?: string })?.id).toBe("att-1")
+  })
+
+  test("preserves state.attachments during streaming merge when snapshot has no end time", () => {
+    const livePart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: {
+        status: "running",
+        time: { start: 100 },
+        attachments: [{ id: "att-1", type: "file", mime: "image/png", url: "data:image/png,..." }],
+      },
+    } as unknown as Part
+    const snapshotPart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "running", time: { start: 100 } },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [livePart] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotPart] }],
+    )
+
+    const mergedPart = result.part.msg_1[0] as { state?: { attachments?: Array<unknown> } }
+    expect(mergedPart.state?.attachments).toHaveLength(1)
+    expect((mergedPart.state?.attachments?.[0] as { id?: string })?.id).toBe("att-1")
+  })
+
+  test("preserves both state.attachments and state.time.start during streaming merge when snapshot lacks both", () => {
+    const livePart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: {
+        status: "running",
+        time: { start: 100 },
+        attachments: [{ id: "att-1", type: "file", mime: "image/png", url: "data:image/png,..." }],
+      },
+    } as unknown as Part
+    const snapshotPart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "running" },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [livePart] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotPart] }],
+    )
+
+    const mergedPart = result.part.msg_1[0] as { state?: { attachments?: Array<unknown>; time?: { start?: number; end?: number } } }
+    expect(mergedPart.state?.attachments).toHaveLength(1)
+    expect((mergedPart.state?.attachments?.[0] as { id?: string })?.id).toBe("att-1")
+    expect(mergedPart.state?.time?.start).toBe(100)
+  })
+
+  test("does not merge existing state.attachments when snapshot has its own", () => {
+    const livePart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: {
+        status: "completed",
+        output: "done",
+        time: { start: 100, end: 200 },
+        attachments: [{ id: "att-old", type: "file", mime: "image/png", url: "data:image/png,..." }],
+      },
+    } as unknown as Part
+    const snapshotPart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: {
+        status: "completed",
+        output: "done",
+        time: { start: 100, end: 200 },
+        attachments: [{ id: "att-new", type: "file", mime: "image/jpeg", url: "data:image/jpeg,..." }],
+      },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [livePart] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotPart] }],
+    )
+
+    const mergedPart = result.part.msg_1[0] as { state?: { attachments?: Array<unknown> } }
+    expect(mergedPart.state?.attachments).toHaveLength(1)
+    expect((mergedPart.state?.attachments?.[0] as { id?: string })?.id).toBe("att-new")
+  })
+
+  test("treats empty state.attachments in completed snapshot as authoritative", () => {
+    const livePart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: {
+        status: "completed",
+        output: "done",
+        time: { start: 100, end: 200 },
+        attachments: [{ id: "att-old", type: "file", mime: "image/png", url: "data:image/png,..." }],
+      },
+    } as unknown as Part
+    const snapshotPart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: {
+        status: "completed",
+        output: "done",
+        time: { start: 100, end: 200 },
+        attachments: [],
+      },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [livePart] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotPart] }],
+    )
+
+    const mergedPart = result.part.msg_1[0] as { state?: { attachments?: Array<unknown> } }
+    expect(mergedPart.state?.attachments).toEqual([])
+  })
+
+  test("treats empty state.attachments in streaming snapshot as authoritative", () => {
+    const livePart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: {
+        status: "running",
+        time: { start: 100 },
+        attachments: [{ id: "att-old", type: "file", mime: "image/png", url: "data:image/png,..." }],
+      },
+    } as unknown as Part
+    const snapshotPart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "running", time: { start: 100 }, attachments: [] },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [livePart] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotPart] }],
+    )
+
+    const mergedPart = result.part.msg_1[0] as { state?: { attachments?: Array<unknown> } }
+    expect(mergedPart.state?.attachments).toEqual([])
+  })
 })
 
 describe("getSessionMaterializationStatus", () => {
@@ -180,5 +414,49 @@ describe("getSessionMaterializationStatus", () => {
       renderable: true,
       missingPartMessageIDs: [],
     })
+  })
+})
+
+describe("isSessionMaterializationStillNeeded", () => {
+  test("skips empty-assistant recovery after a part bucket arrives", () => {
+    const state = { message: { ses_1: [message("msg_1")] }, part: { msg_1: [part("prt_1", "msg_1")] } }
+
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "empty-assistant-message",
+      messageID: "msg_1",
+    })).toBe(false)
+  })
+
+  test("treats an explicit empty part bucket as authoritative", () => {
+    const state = { message: { ses_1: [message("msg_1")] }, part: { msg_1: [] } }
+
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "empty-assistant-message",
+      messageID: "msg_1",
+    })).toBe(false)
+  })
+
+  test("skips missing-message and missing-part recovery after ordered events repair state", () => {
+    const state = { message: { ses_1: [message("msg_1")] }, part: { msg_1: [part("prt_1", "msg_1")] } }
+
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "missing-owning-message",
+      messageID: "msg_1",
+    })).toBe(false)
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "missing-delta-part",
+      messageID: "msg_1",
+      partID: "prt_1",
+    })).toBe(false)
+  })
+
+  test("keeps recovery active while the requested entity is still missing", () => {
+    const state = { message: { ses_1: [message("msg_1")] }, part: {} }
+
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "orphan-delta",
+      messageID: "msg_1",
+      partID: "prt_1",
+    })).toBe(true)
   })
 })

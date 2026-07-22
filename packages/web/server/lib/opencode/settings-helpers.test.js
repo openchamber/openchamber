@@ -124,6 +124,20 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts desktopMacMenuBarEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopMacMenuBarEnabled: true })).toEqual({
+      desktopMacMenuBarEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopMacMenuBarEnabled: false })).toEqual({
+      desktopMacMenuBarEnabled: false,
+    });
+    expect(helpers.formatSettingsResponse({ desktopMacMenuBarEnabled: false })).toMatchObject({
+      desktopMacMenuBarEnabled: false,
+    });
+  });
+
   it('sanitizes the persisted permission auto-accept policy', () => {
     const helpers = createTestHelpers();
 
@@ -134,6 +148,7 @@ describe('settings helpers', () => {
     })).toEqual({
       permissionAutoAccept: {
         sessions: { root: true, child: false },
+        revision: 0,
       },
     });
   });

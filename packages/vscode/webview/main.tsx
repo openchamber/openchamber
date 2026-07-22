@@ -1808,9 +1808,13 @@ onCommand('settingsSynced', () => {
 
 onCommand('permissionAutoAcceptSynced', (payload) => {
   if (!payload || typeof payload !== 'object') return;
-  const sessions = (payload as { sessions?: unknown }).sessions;
+  const snapshot = payload as { sessions?: unknown; revision?: unknown };
+  const sessions = snapshot.sessions;
   if (!sessions || typeof sessions !== 'object') return;
-  usePermissionStore.getState().applySnapshot({ sessions: sessions as Record<string, boolean> });
+  usePermissionStore.getState().applySnapshot({
+    sessions: sessions as Record<string, boolean>,
+    revision: typeof snapshot.revision === 'number' ? snapshot.revision : undefined,
+  });
 });
 
 // Listen for active editor file changes from the extension

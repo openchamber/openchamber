@@ -5,8 +5,10 @@ import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
 import { useUIStore } from '@/stores/useUIStore';
+import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import {
   applyPersistedHomeDirectoryToWindow,
+  getRuntimeSettingsMirrorStorageKey,
   getSettingsSaveState,
   invalidateSettingsCache,
   subscribeToSettingsSaveState,
@@ -313,6 +315,88 @@ describe('updateDesktopSettings', () => {
     });
     await firstSync;
     expect(useUIStore.getState().terminalShell).toBe('bash');
+  });
+
+  test('isolates local settings mirrors and removes values omitted by the next runtime', async () => {
+    getWindow();
+    localStorage.clear();
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://mirror-a.example', runtimeKey: 'mirror-a' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        themeId: 'theme-a',
+        directoryShowHidden: true,
+        sttModel: 'model-a',
+        draftStartersCraftGoalAdded: true,
+      },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://mirror-b.example', runtimeKey: 'mirror-b' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { draftStartersCraftGoalAdded: true },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    expect(localStorage.getItem('selectedThemeId')).toBeNull();
+    expect(localStorage.getItem('directoryTreeShowHidden')).toBeNull();
+    expect(localStorage.getItem('sttModel')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(getRuntimeSettingsMirrorStorageKey('mirror-a')) ?? '{}')).toEqual({
+      themeId: 'theme-a',
+      directoryShowHidden: true,
+      sttModel: 'model-a',
+    });
+    expect(JSON.parse(localStorage.getItem(getRuntimeSettingsMirrorStorageKey('mirror-b')) ?? '{}')).toEqual({});
+  });
+
+  test('resets in-memory preferences omitted by an authoritative runtime snapshot', async () => {
+    getWindow();
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-a.example', runtimeKey: 'preferences-a' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        showReasoningTraces: false,
+        terminalShell: 'fish',
+        favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
+        followUpBehavior: 'steer',
+        draftStarters: [{ type: 'command', name: 'runtime-a' }],
+        draftStartersCraftGoalAdded: true,
+      },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+    expect(useUIStore.getState().favoriteModels).toHaveLength(1);
+    expect(useUIStore.getState().globalDraftStarters).toEqual([{ type: 'command', name: 'runtime-a' }]);
+    expect(useMessageQueueStore.getState().followUpBehavior).toBe('steer');
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-b.example', runtimeKey: 'preferences-b' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { draftStartersCraftGoalAdded: true },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(true);
+    expect(useUIStore.getState().terminalShell).toBe('auto');
+    expect(useUIStore.getState().favoriteModels).toEqual([]);
+    expect(useUIStore.getState().globalDraftStarters).toBeNull();
+    expect(useMessageQueueStore.getState().followUpBehavior).toBe('queue');
+  });
+
+  test('treats settings save responses as partial patches', async () => {
+    getWindow();
+    localStorage.setItem('selectedThemeId', 'existing-theme');
+    useUIStore.getState().setTerminalShell('fish');
+    registerSettingsSave(async () => ({ showReasoningTraces: false }));
+
+    await updateDesktopSettings({ showReasoningTraces: false });
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+    expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
   });
 
   test('applies model selector settings from server settings', async () => {

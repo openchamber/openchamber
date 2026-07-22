@@ -1,12 +1,8 @@
 /**
- * Session prefetch TTL cache — prevents redundant session fetches
- * within a short window. Port of OpenCode's session-prefetch.ts.
- *
- * Tracks: last fetch time, pagination cursor, completeness.
- * Version counter invalidates stale inflight requests after eviction.
+ * Runtime-scoped pagination metadata shared with the session message loader.
  */
 
-const SESSION_PREFETCH_TTL = 15_000
+import { getRuntimeKey } from "@/lib/runtime-switch"
 
 type Meta = {
   limit: number
@@ -15,58 +11,20 @@ type Meta = {
   at: number
 }
 
-const compositeKey = (directory: string, sessionID: string) =>
-  `${directory}\n${sessionID}`
+const MAX_PREFETCH_ENTRIES = 200
+const compositeKey = (runtimeKey: string, directory: string, sessionID: string) =>
+  `${runtimeKey}\n${directory}\n${sessionID}`
 
 const cache = new Map<string, Meta>()
-const inflight = new Map<string, Promise<Meta | undefined>>()
-const rev = new Map<string, number>()
-const listeners = new Map<string, Set<() => void>>()
 
-const version = (id: string) => rev.get(id) ?? 0
-
-const notify = (id: string) => {
-  const callbacks = listeners.get(id)
-  if (!callbacks) return
-  callbacks.forEach((callback) => callback())
-}
-
-/** Check if a prefetch/sync can be skipped (recently fetched). */
-export function shouldSkipSessionPrefetch(input: {
-  hasMessages: boolean
-  info?: Meta
-  pageSize: number
-  now?: number
-}): boolean {
-  if (!input.hasMessages) {
-    return false
+export function getSessionPrefetch(directory: string, sessionID: string, runtimeKey = getRuntimeKey()): Meta | undefined {
+  const id = compositeKey(runtimeKey, directory, sessionID)
+  const value = cache.get(id)
+  if (value) {
+    cache.delete(id)
+    cache.set(id, value)
   }
-
-  const info = input.info
-  if (!info) return true
-  if (info.complete) return true
-  if (info.limit > input.pageSize) return true
-  if (info.limit < input.pageSize) return false
-  return (input.now ?? Date.now()) - info.at < SESSION_PREFETCH_TTL
-}
-
-export function getSessionPrefetch(directory: string, sessionID: string): Meta | undefined {
-  return cache.get(compositeKey(directory, sessionID))
-}
-
-export function subscribeSessionPrefetch(directory: string, sessionID: string, callback: () => void) {
-  if (!sessionID) return () => undefined
-  const id = compositeKey(directory, sessionID)
-  let callbacks = listeners.get(id)
-  if (!callbacks) {
-    callbacks = new Set()
-    listeners.set(id, callbacks)
-  }
-  callbacks.add(callback)
-  return () => {
-    callbacks?.delete(callback)
-    if (callbacks?.size === 0) listeners.delete(id)
-  }
+  return value
 }
 
 export function setSessionPrefetch(input: {
@@ -76,25 +34,42 @@ export function setSessionPrefetch(input: {
   cursor?: string
   complete: boolean
   at?: number
+  runtimeKey?: string
 }) {
-  const id = compositeKey(input.directory, input.sessionID)
+  const id = compositeKey(input.runtimeKey ?? getRuntimeKey(), input.directory, input.sessionID)
+  cache.delete(id)
   cache.set(id, {
     limit: input.limit,
     cursor: input.cursor,
     complete: input.complete,
     at: input.at ?? Date.now(),
   })
-  notify(id)
+  while (cache.size > MAX_PREFETCH_ENTRIES) {
+    const oldest = cache.keys().next().value
+    if (!oldest) break
+    cache.delete(oldest)
+  }
 }
 
 /** Invalidate cache for specific sessions (e.g. after eviction). */
-export function clearSessionPrefetch(directory: string, sessionIDs: Iterable<string>) {
+export function clearSessionPrefetch(directory: string, sessionIDs: Iterable<string>, runtimeKey = getRuntimeKey()) {
   for (const sessionID of sessionIDs) {
     if (!sessionID) continue
-    const id = compositeKey(directory, sessionID)
-    rev.set(id, version(id) + 1)
+    const id = compositeKey(runtimeKey, directory, sessionID)
     cache.delete(id)
-    inflight.delete(id)
-    notify(id)
+  }
+}
+
+export function clearDirectorySessionPrefetch(directory: string, runtimeKey = getRuntimeKey()) {
+  const prefix = `${runtimeKey}\n${directory}\n`
+  for (const id of cache.keys()) {
+    if (id.startsWith(prefix)) cache.delete(id)
+  }
+}
+
+export function clearRuntimeSessionPrefetch(runtimeKey: string) {
+  const prefix = `${runtimeKey}\n`
+  for (const id of cache.keys()) {
+    if (id.startsWith(prefix)) cache.delete(id)
   }
 }

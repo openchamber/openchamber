@@ -5,6 +5,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useNotificationStore } from '@/sync/notification-store';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 /**
  * Builds the lightweight session overview the native iOS widgets render (home medium,
@@ -26,6 +27,8 @@ export interface MobileWidgetSession {
 }
 
 export interface MobileWidgetSnapshot {
+  /** Runtime instance that owns all session IDs and paths in this snapshot. */
+  runtimeKey: string;
   /** Count of sessions needing attention — same signal that drives the app-icon badge. */
   attentionCount: number;
   /** Most-recently-updated top-level sessions, newest first (capped for the medium widget). */
@@ -97,7 +100,7 @@ export const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
     .slice(0, RECENT_LIMIT)
     .map(({ id, title, unread, project }) => ({ id, title, unread, project }));
 
-  return { attentionCount, recentSessions };
+  return { runtimeKey: getRuntimeKey(), attentionCount, recentSessions };
 };
 
 const SNAPSHOT_GLOBAL_KEY = '__OPENCHAMBER_WIDGET_SNAPSHOT__';

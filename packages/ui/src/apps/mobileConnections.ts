@@ -691,6 +691,30 @@ const deleteSecureToken = async (key: string): Promise<void> => {
 
 // One-time migration: a legacy localStorage record on native might still carry an
 // inline `clientToken`. Move it into the secure store and strip the metadata.
+export const migrateLegacyInlineTokenRecords = async (
+  records: unknown[],
+  migrateToken: (url: string, token: string) => Promise<boolean>,
+): Promise<{ records: unknown[]; migrated: number; failed: number }> => {
+  let migrated = 0;
+  let failed = 0;
+  const next = await Promise.all(records.map(async (item) => {
+    if (!item || typeof item !== 'object') return item;
+    const record = item as Record<string, unknown>;
+    const url = typeof record.url === 'string' ? record.url : null;
+    const token = typeof record.clientToken === 'string' ? record.clientToken.trim() : '';
+    if (!url || !token) return item;
+    if (!await migrateToken(url, token)) {
+      failed += 1;
+      return item;
+    }
+    migrated += 1;
+    const { clientToken: _removed, ...metadata } = record;
+    void _removed;
+    return { ...metadata, hasToken: true };
+  }));
+  return { records: next, migrated, failed };
+};
+
 const migrateLegacyInlineTokens = async (): Promise<void> => {
   if (typeof window === 'undefined' || !isCapacitorApp()) return;
   let parsed: unknown;
@@ -707,11 +731,20 @@ const migrateLegacyInlineTokens = async (): Promise<void> => {
     && Boolean((item as { clientToken: string }).clientToken.trim()));
   if (legacy.length === 0) return;
   logStorage('secure:migrate-start', { count: legacy.length });
-  for (const { url, clientToken } of legacy) {
-    await writeSecureToken(getConnectionStorageKey(url), clientToken);
+  const result = await migrateLegacyInlineTokenRecords(parsed, async (url, token) => {
+    const key = getConnectionStorageKey(url);
+    if (!await writeSecureToken(key, token)) return false;
+    return await readSecureToken(key) === token;
+  });
+  if (result.migrated > 0) {
+    try {
+      window.localStorage.setItem(MOBILE_CONNECTIONS_STORAGE_KEY, JSON.stringify(result.records));
+    } catch (error) {
+      console.warn('[mobile-storage] failed to finalize secure token migration', error);
+      return;
+    }
   }
-  writeConnections(readConnections());
-  logStorage('secure:migrate-done', { count: legacy.length });
+  logStorage('secure:migrate-done', { migrated: result.migrated, failed: result.failed });
 };
 
 export const loadMobileConnections = async (): Promise<MobileSavedConnection[]> => {

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import { loadMobileConnections, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -40,6 +40,18 @@ const testRelay: MobileRelayConfig = {
 };
 
 describe('mobile connection storage', () => {
+  test('removes inline tokens only after each secure migration succeeds', async () => {
+    const result = await migrateLegacyInlineTokenRecords([
+      { id: 'ok', url: 'http://ok.example', clientToken: 'token-ok' },
+      { id: 'failed', url: 'http://failed.example', clientToken: 'token-failed' },
+    ], async (url) => url.includes('ok.example'));
+
+    expect(result.migrated).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.records[0]).toEqual({ id: 'ok', url: 'http://ok.example', hasToken: true });
+    expect(result.records[1]).toEqual({ id: 'failed', url: 'http://failed.example', clientToken: 'token-failed' });
+  });
+
   test('entries persisted before candidates migrate to a single direct candidate', async () => {
     try {
       installTestWindow();

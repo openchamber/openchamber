@@ -1,6 +1,7 @@
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 const SESSION_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_ATTENTION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SESSION_ACTIVITY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 const extractSessionStatusUpdate = (payload) => {
@@ -37,26 +38,12 @@ const extractSessionStatusUpdate = (payload) => {
   };
 };
 
-const deriveSessionActivityTransitions = (payload) => {
-  const update = extractSessionStatusUpdate(payload);
-  if (!update) {
-    return [];
-  }
-
-  if (update.type === 'busy' || update.type === 'retry') {
-    return [{ sessionId: update.sessionId, phase: 'busy' }];
-  }
-  if (update.type === 'idle') {
-    return [{ sessionId: update.sessionId, phase: 'cooldown' }];
-  }
-  return [];
-};
-
 export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent }) => {
   const sessionActivityPhases = new Map();
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
   const sessionAttentionStates = new Map();
+  let activeSessionCount = 0;
 
   const getOrCreateAttentionState = (sessionId) => {
     if (!sessionId || typeof sessionId !== 'string') return null;
@@ -90,6 +77,11 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       sessionActivityCooldowns.delete(sessionId);
     }
 
+    const wasActive = current?.phase === 'busy';
+    const isActive = phase === 'busy';
+    if (wasActive !== isActive) {
+      activeSessionCount = Math.max(0, activeSessionCount + (isActive ? 1 : -1));
+    }
     sessionActivityPhases.set(sessionId, { phase, updatedAt: Date.now() });
 
     if (phase === 'cooldown') {
@@ -287,11 +279,14 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     return result;
   };
 
+  const getActiveSessionCount = () => activeSessionCount;
+
   const resetAllSessionActivityToIdle = () => {
     for (const timer of sessionActivityCooldowns.values()) {
       clearTimeout(timer);
     }
     sessionActivityCooldowns.clear();
+    activeSessionCount = 0;
     const now = Date.now();
     for (const [sessionId] of sessionActivityPhases) {
       sessionActivityPhases.set(sessionId, { phase: 'idle', updatedAt: now });
@@ -310,26 +305,33 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
         sessionAttentionStates.delete(sessionId);
       }
     }
+    for (const [sessionId, data] of sessionActivityPhases) {
+      if (now - data.updatedAt <= SESSION_ACTIVITY_MAX_AGE_MS) continue;
+      const timer = sessionActivityCooldowns.get(sessionId);
+      if (timer) clearTimeout(timer);
+      sessionActivityCooldowns.delete(sessionId);
+      sessionActivityPhases.delete(sessionId);
+      if (data.phase === 'busy') activeSessionCount = Math.max(0, activeSessionCount - 1);
+    }
   };
 
   const cleanupInterval = setInterval(cleanupOldSessionStates, SESSION_STATE_CLEANUP_INTERVAL_MS);
 
   const processOpenCodeSsePayload = (payload) => {
-    const transitions = deriveSessionActivityTransitions(payload);
-    for (const activity of transitions) {
-      setSessionActivityPhase(activity.sessionId, activity.phase);
+    const update = extractSessionStatusUpdate(payload);
+    if (!update) return;
+
+    if (update.type === 'busy' || update.type === 'retry') {
+      setSessionActivityPhase(update.sessionId, 'busy');
+    } else if (update.type === 'idle') {
+      setSessionActivityPhase(update.sessionId, 'cooldown');
     }
 
-    if (payload && payload.type === 'session.status') {
-      const update = extractSessionStatusUpdate(payload);
-      if (update) {
-        updateSessionState(update.sessionId, update.type, update.eventId || `sse-${Date.now()}`, {
-          attempt: update.attempt,
-          message: update.message,
-          next: update.next,
-        });
-      }
-    }
+    updateSessionState(update.sessionId, update.type, update.eventId || `sse-${Date.now()}`, {
+      attempt: update.attempt,
+      message: update.message,
+      next: update.next,
+    });
   };
 
   const dispose = () => {
@@ -338,11 +340,16 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       clearTimeout(timer);
     }
     sessionActivityCooldowns.clear();
+    sessionActivityPhases.clear();
+    sessionStates.clear();
+    sessionAttentionStates.clear();
+    activeSessionCount = 0;
   };
 
   return {
     processOpenCodeSsePayload,
     getSessionActivitySnapshot,
+    getActiveSessionCount,
     getSessionStateSnapshot,
     getSessionAttentionSnapshot,
     getSessionState,
