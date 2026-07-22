@@ -143,7 +143,7 @@ export async function openDisposableSideChat(input: OpenDisposableSideChatInput)
     throw new Error('Side chat stopped because the runtime changed');
   }
 
-  if (getRuntimeKey() !== operationRuntimeKey) {
+  if (!operation.isCurrent()) {
     throw new Error('Side chat was created on the previous runtime and is available for recovery there');
   }
 

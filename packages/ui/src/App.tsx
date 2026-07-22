@@ -180,7 +180,11 @@ const EmbeddedSessionChatContent: React.FC<{
 
     bootstrapKeyRef.current = bootstrapKey;
     setCurrentSession(embeddedSessionChat.sessionId, embeddedSessionChat.directory);
-    void sync.ensureSessionRenderable(embeddedSessionChat.sessionId, true);
+    void sync.ensureSessionRenderable(
+      embeddedSessionChat.sessionId,
+      true,
+      embeddedSessionChat.directory ?? undefined,
+    );
   }, [
     activeDirectory,
     currentSessionId,
@@ -875,7 +879,11 @@ function App({ apis }: AppProps) {
   if (embeddedSessionChat) {
     return (
       <ErrorBoundary>
-        <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+        <SyncProvider
+          key={runtimeEndpointEpoch}
+          sdk={opencodeClient.getSdkClient()}
+          directory={embeddedSessionChat.directory || currentDirectory || ''}
+        >
           <RuntimeAPIProvider apis={apis}>
             <TooltipProvider delayDuration={300} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
