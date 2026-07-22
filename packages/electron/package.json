@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.0",
-    "@openchamber/opencode-container-workspace": "github:openchamber/opencode-container-workspace#0b484cadb238ce8fc8f6dc60a08c63995ab1a28c",
+    "@openchamber/opencode-container-workspace": "github:openchamber/opencode-container-workspace#988c11dfbb3376e5e224596a7a4e39ceaf29171c",
     "electron": "^41.2.1",
     "electron-builder": "^26.0.0"
   },
@@ -40,10 +40,11 @@
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "test:architecture": "node --test ./scripts/target-architecture.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
+    "test:packaging": "node --test ./scripts/verify-workspace-plugin.test.mjs",
     "test:updater": "node --test ./updater-capability.test.mjs ./updater-check.test.mjs ./updater-feed.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
-    "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run stage:workspace-plugin && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
+    "package": "bun run stage:workspace-plugin && bun run build:web-assets && bun run prepare:opencode-cli && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
     "lint": "node -e \"process.exit(0)\"",
@@ -84,6 +85,7 @@
           "src/**",
           "!src/**/*.test.js",
           "runtime-image/**",
+          "egress-image/**",
           "package.json",
           "README.md",
           "LICENSE"

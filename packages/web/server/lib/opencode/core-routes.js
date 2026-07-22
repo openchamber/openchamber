@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 const parseLoopbackUrl = (rawUrl) => {
   if (typeof rawUrl !== 'string') {
     return null;
@@ -407,6 +409,8 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   const PAIRING_REDEEM_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
   const PAIRING_REDEEM_RATE_LIMIT_MAX_ATTEMPTS = 10;
   const pairingRedeemAttempts = new Map();
+  const isNativeDesktopLocalClient = (client) =>
+    remoteClientAuthRuntime?.isNativeDesktopLocalClient?.(client) === true;
 
   const runWithUiAuth = async (req, res, next, handler, options = {}) => {
     try {
@@ -455,7 +459,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         }
         if (context?.type === 'client') {
           const client = await clientRecordFromAuthContext(context);
-          if (client?.clientKind === 'desktop-local') {
+          if (isNativeDesktopLocalClient(client)) {
             await handler({ ...context, client });
             return;
           }
@@ -634,6 +638,38 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     return uiAuthController.handleSessionCreate(req, res);
   });
 
+  app.post('/auth/reauth', express.json({ limit: '16kb' }), async (req, res, next) => {
+    try {
+      await uiAuthController.handleReauthProof(req, res);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/auth/reauth/passkey/options', express.json({ limit: '16kb' }), async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey reauthentication is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.handlePasskeyReauthOptions(req, res);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/auth/reauth/passkey/verify', express.json({ limit: '64kb' }), async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey reauthentication is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.handlePasskeyReauthVerify(req, res);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post('/auth/url-token', async (req, res, next) => {
     try {
       await uiAuthController.handleUrlAuthToken(req, res);
@@ -743,7 +779,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         // The desktop shell's local client is the trusted operator of this
         // server; it manages devices just like a browser UI session. Every
         // other client token is scoped to its own record.
-        if (client?.clientKind !== 'desktop-local') {
+        if (!isNativeDesktopLocalClient(client)) {
           return res.json({ clients: client ? [client] : [] });
         }
       }
@@ -756,12 +792,43 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     await runWithClientCreateAuth(req, res, next, async () => {
       const result = await remoteClientAuthRuntime.createClient({
         label: req.body?.label,
-        clientKind: req.body?.clientKind,
+        clientKind: req.body?.clientKind === 'mobile' || req.body?.clientKind === 'desktop' ? req.body.clientKind : null,
         dedupeKey: req.body?.dedupeKey,
       });
       res.setHeader('Cache-Control', 'no-store');
       res.status(201).json(result);
     });
+  });
+
+  app.patch('/api/host-admin/clients/:id/capabilities', express.json({ limit: '16kb' }), async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ updated: false, error: 'Host administration is unavailable for tunnel sessions' });
+    }
+    await runWithUiAuth(req, res, next, async () => {
+      try {
+        const grant = Array.isArray(req.body?.grant) ? req.body.grant : [];
+        const revoke = Array.isArray(req.body?.revoke) ? req.body.revoke : [];
+        const binding = { grant, id: req.params?.id, revoke };
+        const validProof = await uiAuthController.consumeReauthProof?.(req, {
+          operation: 'host.capabilities',
+          project: 'host',
+          bodyHash: crypto.createHash('sha256').update(JSON.stringify(binding)).digest('hex'),
+        });
+        if (!validProof) {
+          return res.status(428).json({ updated: false, error: 'Reauthentication required', reauthRequired: true });
+        }
+        const result = await remoteClientAuthRuntime.updateClientCapabilities(req.params?.id, { grant, revoke });
+        if (!result.updated) return res.status(404).json({ updated: false, error: 'Client not found' });
+        return res.json(result);
+      } catch (error) {
+        return res.status(error?.statusCode || 400).json({ updated: false, error: error?.message || 'Invalid capabilities' });
+      }
+    }, { sessionOnly: true });
+  });
+
+  app.get('/api/host-admin/status', async (req, res, next) => {
+    await runWithUiAuth(req, res, next, async () => res.json({ hostSessionAuthorized: true }), { sessionOnly: true });
   });
 
   app.delete('/api/client-auth/clients/:id', async (req, res, next) => {
@@ -770,7 +837,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         const actingClient = await clientRecordFromAuthContext(authContext);
         // The desktop shell's local client manages every device; other client
         // tokens may only revoke themselves.
-        if (actingClient?.clientKind !== 'desktop-local') {
+        if (!isNativeDesktopLocalClient(actingClient)) {
           const clientId = clientIdFromAuthContext(authContext);
           if (!clientId || clientId !== req.params?.id) {
             return res.status(403).json({ revoked: false, error: 'Client tokens can only revoke themselves' });
@@ -792,7 +859,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         const actingClient = await clientRecordFromAuthContext(authContext);
         // Purging revoked devices is a whole-server management action; only the
         // trusted desktop shell client (or a UI session) may do it.
-        if (actingClient?.clientKind !== 'desktop-local') {
+        if (!isNativeDesktopLocalClient(actingClient)) {
           return res.status(403).json({ purged: 0, error: 'Client tokens cannot purge revoked devices' });
         }
       }

@@ -8,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
 const electronDir = path.join(repoRoot, 'packages/electron');
+const electronCli = fileURLToPath(import.meta.resolve('electron/cli.js'));
 const preferredHmrUiPort = Number(process.env.OPENCHAMBER_HMR_UI_PORT || '5173');
 const preferredHmrApiPort = Number(process.env.OPENCHAMBER_HMR_API_PORT || '3901');
 
@@ -199,7 +200,7 @@ async function main() {
     });
   }
 
-  const electron = spawnProcess('npx', ['electron', './main.mjs'], {
+  const electron = spawnProcess(process.execPath, [electronCli, './main.mjs'], {
     cwd: electronDir,
     env: {
       ...process.env,

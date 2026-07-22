@@ -10,6 +10,8 @@ Desktop starts the OpenChamber web server in the same Electron main process. The
 
 `main.mjs` imports `@openchamber/web/server/index.js` and calls `startWebUiServer()`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
+Immediately after startup, main uses the desktop-only in-process server controller to mint a deduped `desktop-local` client and persists its token in private Desktop settings. Main injects that token only into local renderer runtime configuration, including local LAN aliases of the embedded server. The mint is not an HTTP endpoint or renderer bridge; remote Desktop connections authenticate over HTTP and receive ordinary `desktop` clients.
+
 The preload bridge exposes desktop-only APIs to the web UI through `window.__OPENCHAMBER_DESKTOP__`. Privileged commands are checked in `main.mjs`, not only in the UI.
 
 ## Main Files
@@ -22,6 +24,7 @@ The preload bridge exposes desktop-only APIs to the web UI through `window.__OPE
 | `scripts/electron-dev.mjs` | Desktop dev launcher with Vite HMR support |
 | `scripts/build-web-assets.mjs` | Builds `packages/web` and stages UI assets into `resources/web-dist` |
 | `scripts/prepare-opencode-cli.mjs` | Downloads and stages the pinned OpenCode CLI into `resources/opencode-cli` |
+| `scripts/stage-workspace-plugin.mjs` | Stages and verifies the installed Secure Workspaces plugin release payload |
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/main.mjs` for packaging |
 | `scripts/rebuild-native.mjs` | Rebuilds native modules against the Electron runtime |
 | `scripts/package.mjs` | Runs `electron-builder`, with unsigned Windows builds when signing env is missing |
@@ -60,13 +63,16 @@ bun run electron:build
 
 That runs, in order:
 
-1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
-2. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
-3. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
-4. `rebuild:native` to rebuild native modules for Electron.
-5. `package.mjs` to run `electron-builder`.
+1. `stage:workspace-plugin` to copy the installed Secure Workspaces plugin into `packages/electron/resources/opencode-container-workspace` and verify its release payload.
+2. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
+3. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
+4. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
+5. `rebuild:native` to rebuild native modules for Electron.
+6. `package.mjs` to verify the staged plugin, run `electron-builder`, and verify the plugin in every unpacked packaged app.
 
 Build output goes to `packages/electron/dist`.
+
+The workspace plugin check compares the staged and final package name, version, declared entrypoints, source, runtime-image assets, and egress-image assets byte-for-byte with the installed dependency. Missing, changed, or unexpected files fail packaging; test files, `node_modules`, and files outside the package release payload are not staged. Release workflows must invoke `stage:workspace-plugin` before `package.mjs`, and must use `package.mjs` rather than calling `electron-builder` directly so the final resources cannot bypass verification.
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.
 
@@ -159,6 +165,7 @@ Development builds use a separate user data directory named `OpenChamber Dev`, s
 ```bash
 bun run type-check:electron
 bun run lint:electron
+bun run --cwd packages/electron test:packaging
 bun run electron:dev:bundled
 ```
 

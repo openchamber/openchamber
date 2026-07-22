@@ -4,6 +4,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import type { MainTab } from '@/stores/useUIStore';
+import { isMainTabAvailable } from '@/lib/router/types';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
@@ -89,7 +90,7 @@ export function useRouter(): void {
         }
 
         // 3. Apply tab
-        if (route.tab) {
+        if (route.tab && isMainTabAvailable(route.tab, { isVSCode })) {
           setActiveMainTab(route.tab);
         }
 
@@ -101,7 +102,7 @@ export function useRouter(): void {
         isApplyingRouteRef.current = false;
       }
     },
-    [setCurrentSession, setActiveMainTab, setSettingsDialogOpen, setSettingsPage, navigateToDiff]
+    [isVSCode, setCurrentSession, setActiveMainTab, setSettingsDialogOpen, setSettingsPage, navigateToDiff]
   );
 
   /**

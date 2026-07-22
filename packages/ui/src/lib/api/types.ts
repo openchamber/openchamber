@@ -759,36 +759,40 @@ export interface WorkspaceProviderValidationResult {
   error?: string;
 }
 
-interface WorkspacePatchFileSummary {
-  id?: string;
-  path: string;
-  oldPath?: string;
-  newPath?: string;
-  changeType?: string;
-  binary?: boolean;
-  additions: number;
-  deletions: number;
+interface WorkspaceArtifactTextHunk {
+  id: string;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  removed: string[];
+  added: string[];
 }
 
-export interface WorkspacePatchSummary {
-  files: WorkspacePatchFileSummary[];
+export interface WorkspaceArtifactFileReview {
+  id: string;
+  kind: 'add' | 'modify' | 'delete' | 'rename' | 'mode';
+  oldPath: string | null;
+  newPath: string | null;
+  binary: boolean;
+  entryType: 'file' | 'symlink' | 'directory';
+  oldMode: number | null;
+  newMode: number | null;
+  beforeText?: string;
+  afterText?: string;
+  textHunks: WorkspaceArtifactTextHunk[];
+}
+
+export interface WorkspaceArtifactReview {
+  files: WorkspaceArtifactFileReview[];
   totalFiles: number;
-  additions: number;
-  deletions: number;
 }
 
-export interface WorkspacePatchSummaryResult {
-  patchBytes: number;
-  summary: WorkspacePatchSummary;
-}
-
-export interface WorkspaceExportDiffResult {
-  patch: string;
+export interface WorkspaceExportResult {
   provider: WorkspaceProviderKind | string;
-  exportID?: string;
-  expiresAt?: string;
-  patchBytes?: number;
-  summary?: WorkspacePatchSummary;
+  exportID: string;
+  expiresAt: string;
+  review: WorkspaceArtifactReview;
 }
 
 export interface WorkspaceConfigureResult {
@@ -800,6 +804,7 @@ export interface WorkspaceConfigureResult {
   external?: boolean;
   manualRestartRequired?: boolean;
   compatibility?: WorkspaceCompatibilityResult;
+  settings?: SettingsPayload;
 }
 
 export interface WorkspaceCompatibilityResult {
@@ -810,22 +815,103 @@ export interface WorkspaceCompatibilityResult {
   spec?: string;
   status: 'active' | 'pending-activation' | 'not-configured';
   error?: string | null;
+  diagnostics?: string[];
+  handoffSupported?: boolean;
 }
 
-export interface WorkspacePatchApplyResult {
+export interface WorkspaceHandoffBinding {
+  projectID: string;
+  directory: string;
+  sourceSessionID: string;
+  sourceWorkspaceID: string | null;
+  targetWorkspaceID: string | null;
+}
+
+export interface WorkspaceHandoffDraft {
+  id: string;
+  revision: number;
+  hash: string;
+  text: string;
+  boundary: { through: string | null; hash: string; count: number };
+  omissions: Array<{ code: 'goal' | 'message' | 'text' | 'reasoning' | 'tool' | 'file' | 'subtask' | 'agent' | 'snapshot' | 'patch' | 'step-start' | 'step-finish' | 'retry' | 'compaction' | 'unknown' | 'truncated'; count: number }>;
+  warningCodes: Array<'not-exact-history' | 'excluded-content' | 'file-changes-excluded'>;
+}
+
+export interface WorkspaceHandoffOperation {
+  operationID: string;
+  state: 'drafted' | 'confirmed' | 'target-created' | 'context-inserted' | 'verified' | 'completed' | 'cleanup-required';
+  binding: WorkspaceHandoffBinding;
+  draft?: WorkspaceHandoffDraft;
+  targetSessionID: string | null;
+  cleanupRequired: boolean;
+}
+
+export interface WorkspaceApplyResult {
   applied: boolean;
   checkOnly: boolean;
-  summary?: WorkspacePatchSummary;
+  files?: string[];
   error?: string;
 }
 
+export interface WorkspaceLifecycleResult {
+  reconciled?: boolean;
+  cleaned?: boolean;
+  retryable?: boolean;
+  status?: string;
+  diagnostics: string[];
+  remainingResources?: string[];
+  error?: string;
+}
+
+export interface WorkspaceArtifactDownload {
+  blob: Blob;
+  fileName: string;
+}
+
+export interface WorkspaceApplySelection {
+  fileID: string;
+  hunkIDs?: string[];
+}
+
+export type WorkspacePrivilegedOperation =
+  | 'workspace.configure'
+  | 'workspace.validate'
+  | 'workspace.create'
+  | 'workspace.cleanup'
+  | 'workspace.reconcile'
+  | 'workspace.export'
+  | 'host.apply'
+  | 'host.capabilities';
+
+export interface WorkspaceReauthProofRequest {
+  operation: WorkspacePrivilegedOperation;
+  project: string;
+  payload: Record<string, unknown>;
+  password?: string;
+}
+
+export interface WorkspaceReauthProofResult {
+  proof: string;
+  nonce: string;
+  expiresAt: number;
+}
+
 export interface WorkspaceSecurityAPI {
-  validateProvider(input: WorkspaceProviderValidationInput): Promise<WorkspaceProviderValidationResult>;
+  reauthenticate(input: WorkspaceReauthProofRequest): Promise<WorkspaceReauthProofResult>;
+  validateProvider(input: WorkspaceProviderValidationInput & { reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceProviderValidationResult>;
   compatibility(input?: { directory?: string | null }): Promise<WorkspaceCompatibilityResult>;
-  configureFromSettings(input?: { activate?: boolean }): Promise<WorkspaceConfigureResult>;
-  exportDiff(input: { id: string; directory?: string | null }): Promise<WorkspaceExportDiffResult>;
-  summarizePatch(patch: string): Promise<WorkspacePatchSummaryResult>;
-  applyPatch(input: { directory: string; patch?: string; checkOnly?: boolean; exportID?: string; fileIDs?: string[]; workspaceID?: string }): Promise<WorkspacePatchApplyResult>;
+  updateSettings(input: { changes: Partial<SettingsPayload>; activate?: boolean; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceConfigureResult>;
+  create(input: { type: WorkspaceProviderKind; directory?: string | null; extra?: Record<string, unknown> | null; reauthProof?: string; reauthNonce?: string }): Promise<{ id: string; type: string; name: string; directory?: string | null; status: 'connected' | 'connecting'; provisional: boolean; retryable: boolean; diagnostics: string[] }>;
+  cleanup(input: { id: string; directory?: string | null; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceLifecycleResult>;
+  reconcileWorkspace(input: { id: string; directory?: string | null; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceLifecycleResult>;
+  exportWorkspace(input: { id: string; directory?: string | null; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceExportResult>;
+  downloadArtifact(input: { exportID: string; workspaceID: string }): Promise<WorkspaceArtifactDownload>;
+  discardArtifact(input: { exportID: string; workspaceID: string }): Promise<{ discarded: boolean }>;
+  applyExport(input: { directory: string; checkOnly?: boolean; exportID: string; selections: WorkspaceApplySelection[]; workspaceID: string; reauthProof?: string; reauthNonce?: string }): Promise<WorkspaceApplyResult>;
+  createHandoffDraft(input: WorkspaceHandoffBinding): Promise<WorkspaceHandoffOperation>;
+  commitHandoff(input: WorkspaceHandoffBinding & { operationID: string; draftID: string; draftRevision: number; draftHash: string; text: string }): Promise<WorkspaceHandoffOperation>;
+  inspectHandoff(operationID: string): Promise<WorkspaceHandoffOperation>;
+  cleanupHandoffTarget(operationID: string): Promise<WorkspaceHandoffOperation>;
 }
 
 export interface EditorAPI {
@@ -1201,6 +1287,7 @@ export interface RemoteClientRecord {
   revokedAt: string | null;
   expiresAt?: string | null;
   clientKind?: string | null;
+  capabilities: RemoteClientCapability[];
   authMethod?: string | null;
   /** Pairing session this client was created from, when authMethod is 'pairing'. */
   pairingId?: string | null;
@@ -1210,6 +1297,8 @@ export interface RemoteClientRecord {
   /** Transport that carried the device's most recent authenticated request. */
   lastTransport?: 'relay' | 'direct' | null;
 }
+
+export type RemoteClientCapability = 'workspace.read' | 'workspace.use' | 'workspace.admin' | 'host.apply';
 
 // A pairing link that has been created but not yet redeemed by a device.
 export interface PendingPairingRecord {
@@ -1271,6 +1360,9 @@ export interface ClientAuthAPI {
   }): Promise<PairingSessionCreateResult>;
   purgeRevokedClients(): Promise<RemoteClientPurgeRevokedResult>;
   revokeClient(id: string): Promise<RemoteClientRevokeResult>;
+  canManageCapabilities(): Promise<boolean>;
+  reauthenticate(input: WorkspaceReauthProofRequest): Promise<WorkspaceReauthProofResult>;
+  updateClientCapabilities(id: string, input: { grant?: RemoteClientCapability[]; revoke?: RemoteClientCapability[]; reauthProof?: string; reauthNonce?: string }): Promise<{ updated: boolean; client?: RemoteClientRecord }>;
   // Pairing links created but not yet redeemed (the "pending devices" list).
   listPendingPairings(): Promise<PendingPairingRecord[]>;
   cancelPairing(id: string): Promise<{ cancelled: boolean }>;

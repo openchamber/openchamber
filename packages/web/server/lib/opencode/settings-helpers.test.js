@@ -124,6 +124,81 @@ describe('settings helpers', () => {
     });
   });
 
+  it('round-trips every currently defined secure workspace setting', () => {
+    const helpers = createTestHelpers();
+    const input = {
+      secureWorkspacesEnabled: true,
+      secureWorkspacesDefaultProvider: 'kubernetes',
+      secureWorkspacesImage: ` registry.example/workspace@sha256:${'a'.repeat(64)} `,
+      secureWorkspacesAllowedImages: `registry.example/workspace@sha256:${'a'.repeat(64)}`,
+      secureWorkspacesGatewayImage: `gateway.example/proxy@sha256:${'b'.repeat(64)}`,
+      secureWorkspacesEgressMode: 'managed',
+      secureWorkspacesEgressPreset: 'custom',
+      secureWorkspacesEgressAllowedDomains: 'api.example.com',
+      secureWorkspacesEgressAllowedCIDRs: '203.0.113.0/24',
+      secureWorkspacesEgressAllowedPorts: '443',
+      secureWorkspacesKubernetesContext: ' production ',
+      secureWorkspacesKubernetesNamespace: ' workspaces ',
+      secureWorkspacesRequirePinnedImage: true,
+      secureWorkspacesEgressProxyUrl: ' http://proxy.example:3128 ',
+      secureWorkspacesEgressProxyCIDR: ' 10.0.0.4/32 ',
+      secureWorkspacesEgressDnsCIDRs: ' 10.0.0.53/32,10.0.0.54/32 ',
+      secureWorkspacesEgressNoProxy: ' localhost,127.0.0.1 ',
+      secureWorkspacesDockerMemoryLimit: '512m',
+      secureWorkspacesDockerCpuLimit: '2',
+      secureWorkspacesDockerPidsLimit: 256,
+      secureWorkspacesKubernetesConnectivity: 'ingress',
+      secureWorkspacesKubernetesStorage: '16Gi',
+      secureWorkspacesKubernetesCpuRequest: '500m',
+      secureWorkspacesKubernetesMemoryRequest: '1Gi',
+      secureWorkspacesKubernetesCpuLimit: '2',
+      secureWorkspacesKubernetesMemoryLimit: '4Gi',
+      secureWorkspacesKubernetesIngressClassName: 'nginx',
+      secureWorkspacesKubernetesIngressHostTemplate: '{resourceID}.example.com',
+      secureWorkspacesKubernetesIngressPathTemplate: '/',
+      secureWorkspacesKubernetesIngressTlsMode: 'existing-secret',
+      secureWorkspacesKubernetesIngressTlsSecretName: 'workspace-tls',
+      secureWorkspacesKubernetesIngressNamespaceSelector: '{"name":"ingress"}',
+      secureWorkspacesKubernetesIngressPodSelector: '{"app":"controller"}',
+      secureWorkspacesKubernetesIngressAnnotations: '{"nginx.ingress.kubernetes.io/proxy-read-timeout":"60"}',
+      secureWorkspacesAppleMemoryLimit: '4Gi',
+      secureWorkspacesAppleCpuLimit: '2',
+      secureWorkspacesRetentionPreserveOnDelete: true,
+      secureWorkspacesModelAuth: 'explicit-opencode-auth-content',
+    };
+
+    const sanitized = helpers.sanitizeSettingsUpdate(input);
+    expect(sanitized).toEqual({
+      ...input,
+      secureWorkspacesImage: input.secureWorkspacesImage.trim(),
+      secureWorkspacesKubernetesContext: input.secureWorkspacesKubernetesContext.trim(),
+      secureWorkspacesKubernetesNamespace: input.secureWorkspacesKubernetesNamespace.trim(),
+      secureWorkspacesEgressProxyUrl: input.secureWorkspacesEgressProxyUrl.trim(),
+      secureWorkspacesEgressProxyCIDR: input.secureWorkspacesEgressProxyCIDR.trim(),
+      secureWorkspacesEgressDnsCIDRs: input.secureWorkspacesEgressDnsCIDRs.trim(),
+      secureWorkspacesEgressNoProxy: input.secureWorkspacesEgressNoProxy.trim(),
+    });
+    expect(helpers.formatSettingsResponse(sanitized)).toMatchObject(sanitized);
+  });
+
+  it('rejects malformed secure workspace setting types and providers', () => {
+    const helpers = createTestHelpers();
+    expect(() => helpers.sanitizeSettingsUpdate({
+      secureWorkspacesEnabled: 'true',
+      secureWorkspacesDefaultProvider: 'shell',
+      secureWorkspacesImage: ['image'],
+      secureWorkspacesRequirePinnedImage: 1,
+    })).toThrow(/provider|digest enforcement/);
+  });
+
+  it('rejects malformed secure workspace policy values before persistence', () => {
+    const helpers = createTestHelpers();
+    expect(() => helpers.sanitizeSettingsUpdate({ secureWorkspacesImage: 'registry.example/workspace:latest' })).toThrow(/sha256 digest/);
+    expect(() => helpers.sanitizeSettingsUpdate({ secureWorkspacesEgressProxyUrl: 'http://user:secret@proxy.example' })).toThrow(/credentials/);
+    expect(() => helpers.sanitizeSettingsUpdate({ secureWorkspacesEgressDnsCIDRs: 'not-a-cidr' })).toThrow(/invalid CIDR/);
+    expect(() => helpers.sanitizeSettingsUpdate({ secureWorkspacesKubernetesIngressPodSelector: '[]' })).toThrow(/JSON object/);
+  });
+
   it('sanitizes the persisted permission auto-accept policy', () => {
     const helpers = createTestHelpers();
 

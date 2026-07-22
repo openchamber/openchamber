@@ -11,7 +11,7 @@ import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
-import { registerWorkspaceRoutes } from '../workspaces/routes.js';
+import { registerWorkspaceRoutes, resolveWorkspacePluginSpec } from '../workspaces/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
 import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
@@ -89,6 +89,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       readSettingsFromDisk,
       readSettingsFromDiskMigrated,
       persistSettings,
+      restoreSettingsFields,
+      sanitizeSettingsUpdate,
       sanitizeProjects,
       sanitizeSkillCatalogs,
       isUnsafeSkillRelativePath,
@@ -101,6 +103,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenChamberEventClients,
       writeSseEvent,
       permissionAutoAcceptRuntime,
+      uiAuthController,
+      tunnelAuthController,
+      getWorkspaceRuntimeBoundary,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
@@ -127,6 +132,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       refreshOpenCodeAfterConfigChange,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
+      uiAuthController,
+      tunnelAuthController,
     });
 
     registerProjectIconRoutes(app, {
@@ -151,9 +158,14 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       writeSseEvent,
     });
 
-    registerWorkspaceRoutes(app, {
+    await registerWorkspaceRoutes(app, {
       validateDirectoryPath,
       readSettingsFromDiskMigrated,
+      persistSettings,
+      restoreSettingsFields,
+      sanitizeSettingsUpdate,
+      sanitizeProjects,
+      openchamberDataDir,
       refreshOpenCodeAfterConfigChange,
       listPluginEntries,
       createPluginEntry,
@@ -161,6 +173,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       deletePluginEntry,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
+      uiAuthController,
+      tunnelAuthController,
+      getWorkspaceRuntimeBoundary,
     });
 
     registerConfigEntityRoutes(app, {
@@ -209,6 +224,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       parseNpmSpec,
       parsePathSpec,
       isExactSemver,
+      getWorkspacePluginSpec: resolveWorkspacePluginSpec,
     });
 
     const { getProfiles, getProfile } = await import('../git/index.js');

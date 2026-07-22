@@ -169,6 +169,9 @@ describe('core-routes', () => {
         handlePasskeyList: vi.fn(),
         handlePasskeyRevoke: vi.fn(),
         handleResetAuth: vi.fn(),
+        handlePasskeyReauthOptions: vi.fn(),
+        handlePasskeyReauthVerify: vi.fn(),
+        consumeReauthProof: vi.fn(async () => true),
       },
       readSettingsFromDiskMigrated: vi.fn(async () => ({})),
       normalizeTunnelSessionTtlMs: vi.fn(),
@@ -213,6 +216,9 @@ describe('core-routes', () => {
         handlePasskeyList: vi.fn(),
         handlePasskeyRevoke: vi.fn(),
         handleResetAuth: vi.fn(),
+        handlePasskeyReauthOptions: vi.fn(),
+        handlePasskeyReauthVerify: vi.fn(),
+        consumeReauthProof: vi.fn(async () => true),
       },
       readSettingsFromDiskMigrated: vi.fn(async () => ({})),
       normalizeTunnelSessionTtlMs: vi.fn(),
@@ -271,12 +277,14 @@ describe('core-routes', () => {
         handlePasskeyList: vi.fn(),
         handlePasskeyRevoke: vi.fn(),
         handleResetAuth: vi.fn(),
+        consumeReauthProof: vi.fn(async () => true),
       },
       remoteClientAuthRuntime: {
         listClients: vi.fn(async () => []),
         createClient: vi.fn(),
         revokeClient: vi.fn(),
         purgeRevokedClients: vi.fn(),
+        updateClientCapabilities: vi.fn(async () => ({ updated: true, client: { id: 'client-1', capabilities: ['workspace.admin'] } })),
       },
       clientPairingRuntime: {
         createPairingSession: vi.fn(async () => ({ pairing: { id: 'pair_1', secret: 'secret', expiresAt: '2099-01-01T00:00:00.000Z', fingerprint: 'ABCD-1234' } })),
@@ -313,6 +321,36 @@ describe('core-routes', () => {
       createdByClientId: null,
       usesRelay: false,
     });
+  });
+
+  it('updates capability grants only through session-authenticated host-admin routes', async () => {
+    const { app, dependencies } = createPairingRouteApp();
+    await request(app)
+      .patch('/api/host-admin/clients/client-1/capabilities')
+      .send({ grant: ['workspace.admin'], revoke: [] })
+      .expect(200);
+    expect(dependencies.uiAuthController.requireSessionAuth).toHaveBeenCalledTimes(1);
+    expect(dependencies.uiAuthController.consumeReauthProof).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      operation: 'host.capabilities',
+      project: 'host',
+    }));
+    expect(dependencies.remoteClientAuthRuntime.updateClientCapabilities).toHaveBeenCalledWith('client-1', {
+      grant: ['workspace.admin'],
+      revoke: [],
+    });
+
+    const denied = createPairingRouteApp({
+      uiAuthController: {
+        resolveAuthContext: vi.fn(async () => ({ type: 'client', clientId: 'client-1' })),
+        requireAuth: vi.fn((_req, _res, next) => next()),
+        requireSessionAuth: vi.fn((_req, res) => res.status(401).json({ error: 'UI session authentication required' })),
+      },
+    });
+    await request(denied.app)
+      .patch('/api/host-admin/clients/client-1/capabilities')
+      .send({ grant: ['host.apply'] })
+      .expect(401);
+    expect(denied.dependencies.remoteClientAuthRuntime.updateClientCapabilities).not.toHaveBeenCalled();
   });
 
   it('advertises the caller-supplied serverUrl as the direct candidate over the request origin', async () => {
@@ -524,6 +562,7 @@ describe('client auth routes', () => {
         handleResetAuth: (_req, res) => res.json({ cleared: true }),
       },
       remoteClientAuthRuntime: {
+        isNativeDesktopLocalClient: (client) => client?.clientKind === 'desktop-local' && client?.authMethod === 'native-electron',
         listClients: async () => clients,
         createClient: async ({ label, clientKind }) => {
           const client = {
@@ -647,6 +686,7 @@ describe('client auth routes', () => {
     const current = await request(app)
       .post('/api/client-auth/clients')
       .send({ label: 'OpenChamber Desktop', clientKind: 'desktop-local' });
+    expect(current.body.client.clientKind).toBe(null);
     const other = await request(app)
       .post('/api/client-auth/clients')
       .send({ label: 'Other device' });
@@ -671,7 +711,7 @@ describe('client auth routes', () => {
     expect(revoked.body.client.id).toBe(other.body.client.id);
   });
 
-  it('lets the local desktop client list and revoke every device', async () => {
+  it('does not grant local desktop authority from client-create payloads', async () => {
     const app = express();
     let authContext = { type: 'session' };
     const dependencies = createDependencies({
@@ -686,25 +726,21 @@ describe('client auth routes', () => {
       .post('/api/client-auth/clients')
       .send({ label: 'Other device' });
 
-    // The trusted desktop shell client manages all devices like a UI session.
+    expect(desktop.body.client.clientKind).toBe(null);
     authContext = { type: 'client', clientId: desktop.body.client.id, client: desktop.body.client };
 
     const listed = await request(app).get('/api/client-auth/clients');
     expect(listed.status).toBe(200);
-    const listedIds = listed.body.clients.map((client) => client.id).sort();
-    expect(listedIds).toEqual([desktop.body.client.id, other.body.client.id].sort());
+    expect(listed.body.clients).toEqual([desktop.body.client]);
 
     const revoked = await request(app).delete(`/api/client-auth/clients/${other.body.client.id}`);
-    expect(revoked.status).toBe(200);
-    expect(revoked.body.revoked).toBe(true);
-    expect(revoked.body.client.id).toBe(other.body.client.id);
+    expect(revoked.status).toBe(403);
 
     const purged = await request(app).delete('/api/client-auth/clients');
-    expect(purged.status).toBe(200);
-    expect(purged.body.purged).toBe(1);
+    expect(purged.status).toBe(403);
   });
 
-  it('allows only the local desktop client token to create remote client tokens', async () => {
+  it('does not let a forged local desktop client create remote client tokens', async () => {
     const app = express();
     let authContext = { type: 'session' };
     const dependencies = createDependencies({
@@ -715,6 +751,7 @@ describe('client auth routes', () => {
     const desktop = await request(app)
       .post('/api/client-auth/clients')
       .send({ label: 'OpenChamber Desktop', clientKind: 'desktop-local' });
+    expect(desktop.body.client.clientKind).toBe(null);
     const remote = await request(app)
       .post('/api/client-auth/clients')
       .send({ label: 'Phone' });
@@ -730,8 +767,39 @@ describe('client auth routes', () => {
     const created = await request(app)
       .post('/api/client-auth/clients')
       .send({ label: 'Mobile' });
-    expect(created.status).toBe(201);
-    expect(created.body.client.label).toBe('Mobile');
+    expect(created.status).toBe(403);
+  });
+
+  it('does not grant operator routes to legacy desktop-local records without native attestation', async () => {
+    const app = express();
+    const forged = { id: 'forged', clientKind: 'desktop-local', authMethod: 'password' };
+    const other = { id: 'other', clientKind: 'mobile' };
+    const dependencies = createDependencies({
+      resolveAuthContext: async () => ({ type: 'client', clientId: forged.id, client: forged }),
+    });
+    dependencies.testHooks.clients.push(forged, other);
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    expect((await request(app).get('/api/client-auth/clients')).body.clients).toEqual([forged]);
+    await request(app).post('/api/client-auth/clients').send({ label: 'Phone' }).expect(403);
+    await request(app).delete(`/api/client-auth/clients/${other.id}`).expect(403);
+    await request(app).delete('/api/client-auth/clients').expect(403);
+  });
+
+  it('grants operator routes only to native-attested desktop-local records', async () => {
+    const app = express();
+    const nativeDesktop = { id: 'native', clientKind: 'desktop-local', authMethod: 'native-electron' };
+    const other = { id: 'other', clientKind: 'mobile' };
+    const dependencies = createDependencies({
+      resolveAuthContext: async () => ({ type: 'client', clientId: nativeDesktop.id, client: nativeDesktop }),
+    });
+    dependencies.testHooks.clients.push(nativeDesktop, other);
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    expect((await request(app).get('/api/client-auth/clients')).body.clients).toEqual([nativeDesktop, other]);
+    await request(app).post('/api/client-auth/clients').send({ label: 'Phone' }).expect(201);
+    await request(app).delete(`/api/client-auth/clients/${other.id}`).expect(200);
+    await request(app).delete('/api/client-auth/clients').expect(200);
   });
 
   it('requires UI-session auth for passkey registration management routes', async () => {

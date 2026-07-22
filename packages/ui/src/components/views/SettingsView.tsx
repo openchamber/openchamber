@@ -37,6 +37,7 @@ import { GitPage } from '@/components/sections/git-identities/GitPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
+import { SecureWorkspacesSettings } from '@/components/sections/openchamber/SecureWorkspacesSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
   SETTINGS_SECTION_TITLE_CLASS,
@@ -94,6 +95,7 @@ const pageOrder: SettingsPageSlug[] = [
   // 'projects' group — Workspace
   'projects',
   'remote-instances',
+  'workspaces',
   'tunnel',
   'git',
   // 'opencode' group — OpenCode
@@ -179,6 +181,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'folders';
     case 'remote-instances':
       return 'computer';
+    case 'workspaces':
+      return 'shield-check';
     case 'appearance':
       return 'palette';
     case 'chat':
@@ -368,6 +372,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.projects.title');
       case 'remote-instances':
         return t('settings.page.remoteInstances.title');
+      case 'workspaces':
+        return t('settings.page.workspaces.title');
       case 'providers':
         return t('settings.page.providers.title');
       case 'usage':
@@ -661,6 +667,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProjectsPage />;
       case 'remote-instances':
         return <RemoteInstancesPage />;
+      case 'workspaces':
+        return runtimeCtx.isVSCode ? renderUnavailable() : <SecureWorkspacesSettings />;
       case 'agents':
         return <AgentsPage />;
       case 'behavior':

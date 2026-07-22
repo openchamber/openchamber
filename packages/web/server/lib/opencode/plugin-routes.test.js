@@ -289,6 +289,59 @@ describe('opencode plugin routes', () => {
     expect(response.body.error).toContain('already exists');
   });
 
+  test('generic entry mutations cannot change Secure Workspace plugin configuration', async () => {
+    const reservedSpec = '@openchamber/opencode-container-workspace';
+    const deniedCreate = await request(app)
+      .post('/api/config/plugins/entry')
+      .send({ spec: reservedSpec, scope: 'user' })
+      .expect(409);
+    expect(deniedCreate.body.error).toContain('workspace settings endpoint');
+
+    plugins.createPluginEntry({ spec: reservedSpec, options: { enabled: true }, scope: 'user' }, projectDir);
+    const listed = await request(app).get('/api/config/plugins').expect(200);
+    const id = listed.body.entries[0].id;
+
+    await request(app).patch(`/api/config/plugins/entry/${encodeURIComponent(id)}`).send({ options: { enabled: false } }).expect(409);
+    await request(app).delete(`/api/config/plugins/entry/${encodeURIComponent(id)}`).expect(409);
+    expect(plugins.getPluginEntry(id, projectDir)?.options).toEqual({ enabled: true });
+    expect(refreshOpenCodeAfterConfigChange).not.toHaveBeenCalled();
+  });
+
+  test('generic entry update cannot replace a regular plugin with the workspace plugin', async () => {
+    await createEntry('a');
+    const listed = await request(app).get('/api/config/plugins').expect(200);
+
+    await request(app)
+      .patch(`/api/config/plugins/entry/${encodeURIComponent(listed.body.entries[0].id)}`)
+      .send({ spec: '/tmp/opencode-container-workspace/src/plugin.js' })
+      .expect(409);
+
+    expect(plugins.getPluginEntry(listed.body.entries[0].id, projectDir)?.spec).toBe('a');
+  });
+
+  test('generic entry mutations reject an explicitly resolved workspace plugin path', async () => {
+    const explicitSpec = '/custom/plugin.js';
+    app = createApp({ getWorkspacePluginSpec: () => explicitSpec });
+    plugins.createPluginEntry({ spec: explicitSpec, scope: 'user' }, projectDir);
+    const listed = await request(app).get('/api/config/plugins').expect(200);
+    const id = listed.body.entries[0].id;
+
+    await request(app).patch(`/api/config/plugins/entry/${encodeURIComponent(id)}`).send({ options: {} }).expect(409);
+    await request(app).delete(`/api/config/plugins/entry/${encodeURIComponent(id)}`).expect(409);
+    await request(app).post('/api/config/plugins/entry').send({ spec: '/custom/../custom/plugin.js', scope: 'user' }).expect(409);
+  });
+
+  test('generic entry creation rejects a symlink to the resolved workspace plugin', async () => {
+    const pluginDirectory = fs.mkdtempSync(path.join(rootDir, 'workspace-plugin-'));
+    const explicitSpec = path.join(pluginDirectory, 'plugin.js');
+    const aliasSpec = path.join(pluginDirectory, 'alias.js');
+    fs.writeFileSync(explicitSpec, 'export default {}\n');
+    fs.symlinkSync(explicitSpec, aliasSpec);
+    app = createApp({ getWorkspacePluginSpec: () => explicitSpec });
+
+    await request(app).post('/api/config/plugins/entry').send({ spec: aliasSpec, scope: 'user' }).expect(409);
+  });
+
   test('PATCH /entry/:id updates entry in same array index', async () => {
     await createEntry('a');
     const before = await request(app).get('/api/config/plugins').expect(200);

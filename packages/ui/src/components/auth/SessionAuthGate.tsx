@@ -38,8 +38,6 @@ const STATUS_CHECK_ENDPOINT = '/auth/session';
 const TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
 const TRANSIENT_RETRY_BASE_DELAY_MS = 1_500;
 const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
-const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
-const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 
 const readLocalOrigin = (): string => {
   if (typeof window === 'undefined') return '';
@@ -59,7 +57,7 @@ const sameOrigin = (left: string, right: string): boolean => {
 };
 
 const shouldIssueDesktopClientToken = (): boolean => {
-  return isDesktopShell();
+  return isDesktopShell() && !isLocalDesktopRuntime();
 };
 
 const isLoopbackHostname = (hostname: string): boolean => {
@@ -71,10 +69,8 @@ const isLocalDesktopRuntime = (): boolean => {
   if (!isDesktopShell()) return false;
   const localOrigin = readLocalOrigin();
   if (!localOrigin) return false;
-  // An empty api base means same-origin requests against the page itself —
-  // which on desktop IS the embedded local server. Requiring an exact origin
-  // match here used to leave local client tokens untagged (no desktop-local
-  // clientKind), and the server's client-create gate then 403'd them.
+  // An empty API base means same-origin requests against the page itself,
+  // which on desktop is the embedded local server.
   const apiBaseUrl = getRuntimeApiBaseUrl();
   const effectiveTarget = apiBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
   if (sameOrigin(localOrigin, effectiveTarget)) return true;
@@ -86,14 +82,6 @@ const isLocalDesktopRuntime = (): boolean => {
   } catch {
     return false;
   }
-};
-
-const desktopClientAuthMetadata = (): { clientKind?: string; dedupeKey?: string } => {
-  if (!isLocalDesktopRuntime()) return {};
-  return {
-    clientKind: LOCAL_DESKTOP_CLIENT_KIND,
-    dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY,
-  };
 };
 
 const fetchSessionStatus = async (): Promise<Response> => {
@@ -128,7 +116,7 @@ const submitPassword = async (password: string, trustDevice: boolean): Promise<R
       trustDevice,
       issueClientToken,
       clientLabel: 'OpenChamber Desktop',
-      ...desktopClientAuthMetadata(),
+      ...(issueClientToken ? { clientKind: 'desktop' } : {}),
     }),
   });
   return response;
@@ -146,7 +134,7 @@ const issueDesktopClientToken = async (): Promise<string> => {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ label: 'OpenChamber Desktop', ...desktopClientAuthMetadata() }),
+    body: JSON.stringify({ label: 'OpenChamber Desktop', clientKind: 'desktop' }),
   }).catch(() => null);
   if (!response?.ok) {
     return '';
@@ -711,7 +699,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       const payload = await authenticateWithPasskey(trustDevice, {
         issueClientToken: shouldIssueDesktopClientToken(),
         clientLabel: 'OpenChamber Desktop',
-        ...desktopClientAuthMetadata(),
+        clientKind: 'desktop',
       }) as { clientToken?: unknown } | null;
       const clientToken = shouldIssueDesktopClientToken() && typeof payload?.clientToken === 'string' && payload.clientToken.trim()
         ? payload.clientToken.trim()

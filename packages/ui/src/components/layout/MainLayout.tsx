@@ -31,6 +31,7 @@ import { DiffView } from '@/components/views/DiffView';
 import { FilesView } from '@/components/views/FilesView';
 import { GitView } from '@/components/views/GitView';
 import { PlanView } from '@/components/views/PlanView';
+import { WorkspaceLifecycleView } from '@/components/workspaces/WorkspaceLifecycleView';
 
 // Keep TerminalView eager: the bottom dock reserves its height immediately, so
 // suspending here leaves a large blank panel on slower machines.
@@ -374,6 +375,8 @@ export const MainLayout: React.FC = () => {
                 return <React.Suspense fallback={null}><ProjectContextPanel /></React.Suspense>;
             case 'diagram':
                 return <React.Suspense fallback={null}><DiagramView /></React.Suspense>;
+            case 'workspaces':
+                return <WorkspaceLifecycleView />;
             default:
                 return null;
         }

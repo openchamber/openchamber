@@ -1,5 +1,11 @@
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
-import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
+import type {
+  PermissionV2Request,
+  PermissionV2Effect,
+  PermissionV2Source,
+  Workspace,
+  WorkspaceEventConnectionStatus,
+} from "@opencode-ai/sdk/v2/client";
 import type { FilesAPI } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
@@ -236,47 +242,12 @@ type DirectorySwitchResult = {
   models?: unknown[];
 };
 
-type ExperimentalWorkspaceProvider = 'docker' | 'kubernetes' | string;
-
-type ExperimentalWorkspaceInfo = {
-  id: string;
-  type: string;
-  name: string;
-  branch?: string | null;
-  directory?: string | null;
-  extra?: unknown | null;
-  projectID: string;
-  timeUsed: number | string;
-};
-
-type ExperimentalWorkspaceAdapterInfo = {
-  type: string;
-  name: string;
-  description: string;
-};
-
-type ExperimentalWorkspaceStatus = {
-  workspaceID: string;
-  status: 'connected' | 'connecting' | 'disconnected' | 'error';
-};
-
 type ExperimentalWorkspaceCreateInput = {
-  type: ExperimentalWorkspaceProvider;
+  type: string;
+  id?: string;
   branch?: string | null;
   extra?: unknown | null;
   directory?: string | null;
-};
-
-type ExperimentalWorkspaceWarpInput = {
-  id: string | null;
-  sessionID: string;
-  copyChanges?: boolean;
-  directory?: string | null;
-};
-
-type ExperimentalWorkspaceExportDiffResult = {
-  patch: string;
-  provider: string;
 };
 
 const normalizeFsPath = (path: string): string => path.replace(/\\/g, "/");
@@ -357,76 +328,43 @@ class OpencodeService {
     return scoped;
   }
 
-  private async requestExperimentalWorkspace<T>(path: string, options: RequestInit & { directory?: string | null } = {}): Promise<T> {
-    const query: Record<string, string> = {};
-    const directory = this.normalizeCandidatePath(options.directory ?? this.currentDirectory);
-    if (directory) query.directory = directory;
-    const response = await runtimeFetch(path, {
-      ...options,
-      query,
-      headers: {
-        Accept: 'application/json',
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(options.headers ?? {}),
-      },
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null) as { error?: string; data?: { message?: string }; message?: string } | null;
-      const message = payload?.data?.message || payload?.message || payload?.error || response.statusText;
-      const error = new Error(`OpenCode workspace request failed (${response.status}): ${message}`) as Error & { status?: number };
-      error.status = response.status;
-      throw error;
-    }
-    if (response.status === 204) return undefined as T;
-    return await response.json() as T;
-  }
-
   experimentalWorkspaces = {
-    listAdapters: (directory?: string | null): Promise<ExperimentalWorkspaceAdapterInfo[]> => (
-      this.requestExperimentalWorkspace('/api/experimental/workspace/adapter', { method: 'GET', directory })
-    ),
-    list: (directory?: string | null): Promise<ExperimentalWorkspaceInfo[]> => (
-      this.requestExperimentalWorkspace('/api/experimental/workspace', { method: 'GET', directory })
-    ),
-    syncList: (directory?: string | null): Promise<void> => (
-      this.requestExperimentalWorkspace('/api/experimental/workspace/sync-list', { method: 'POST', directory })
-    ),
-    status: (directory?: string | null): Promise<ExperimentalWorkspaceStatus[]> => (
-      this.requestExperimentalWorkspace('/api/experimental/workspace/status', { method: 'GET', directory })
-    ),
-    create: (input: ExperimentalWorkspaceCreateInput): Promise<ExperimentalWorkspaceInfo> => (
-      this.requestExperimentalWorkspace('/api/experimental/workspace', {
-        method: 'POST',
-        directory: input.directory,
-        body: JSON.stringify({ type: input.type, branch: input.branch ?? null, extra: input.extra ?? null }),
-      })
-    ),
-    remove: (id: string, directory?: string | null): Promise<ExperimentalWorkspaceInfo | undefined> => (
-      this.requestExperimentalWorkspace(`/api/experimental/workspace/${encodeURIComponent(id)}`, { method: 'DELETE', directory })
-    ),
-    exportDiff: (id: string, directory?: string | null): Promise<ExperimentalWorkspaceExportDiffResult> => {
-      const query: Record<string, string> = {};
-      const resolvedDirectory = this.normalizeCandidatePath(directory ?? this.currentDirectory);
-      if (resolvedDirectory) query.directory = resolvedDirectory;
-      return runtimeFetch(`/api/workspaces/${encodeURIComponent(id)}/export-diff`, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        query,
-      }).then(async (response) => {
-        if (!response.ok) {
-          const payload = await response.json().catch(() => null) as { error?: string } | null;
-          throw new Error(payload?.error || `Failed to export workspace diff: ${response.statusText}`);
-        }
-        return await response.json() as ExperimentalWorkspaceExportDiffResult;
-      });
+    listAdapters: async (directory?: string | null) => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.adapter.list(requestDirectory ? { directory: requestDirectory } : undefined);
+      return unwrapSdkData(result, 'experimental.workspace.adapter.list');
     },
-    warp: (input: ExperimentalWorkspaceWarpInput): Promise<void> => (
-      this.requestExperimentalWorkspace('/api/experimental/workspace/warp', {
-        method: 'POST',
-        directory: input.directory,
-        body: JSON.stringify({ id: input.id, sessionID: input.sessionID, copyChanges: input.copyChanges }),
-      })
-    ),
+    list: async (directory?: string | null): Promise<Workspace[]> => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.list(requestDirectory ? { directory: requestDirectory } : undefined);
+      return unwrapSdkData(result, 'experimental.workspace.list');
+    },
+    syncList: async (directory?: string | null): Promise<void> => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.syncList(requestDirectory ? { directory: requestDirectory } : undefined);
+      unwrapSdkOptional(result, 'experimental.workspace.syncList');
+    },
+    status: async (directory?: string | null): Promise<WorkspaceEventConnectionStatus[]> => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.status(requestDirectory ? { directory: requestDirectory } : undefined);
+      return unwrapSdkData(result, 'experimental.workspace.status');
+    },
+    create: async (input: ExperimentalWorkspaceCreateInput): Promise<Workspace> => {
+      const requestDirectory = this.normalizeCandidatePath(input.directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.create({
+        ...(requestDirectory ? { directory: requestDirectory } : {}),
+        ...(input.id ? { id: input.id } : {}),
+        type: input.type,
+        branch: input.branch ?? null,
+        extra: input.extra ?? null,
+      });
+      return unwrapSdkData(result, 'experimental.workspace.create');
+    },
+    remove: async (id: string, directory?: string | null): Promise<Workspace> => {
+      const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
+      const result = await this.client.experimental.workspace.remove({ id, ...(requestDirectory ? { directory: requestDirectory } : {}) });
+      return unwrapSdkData(result, 'experimental.workspace.remove');
+    },
   };
 
   private normalizeCandidatePath(path?: string | null): string | null {
@@ -635,10 +573,11 @@ class OpencodeService {
     return Array.isArray(response.data) ? response.data : [];
   }
 
-  async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown> }, directory?: string | null): Promise<Session> {
+  async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown>; workspace?: string }, directory?: string | null): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.create({
       ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(params?.workspace ? { workspace: params.workspace } : {}),
       parentID: params?.parentID,
       title: params?.title,
       metadata: params?.metadata,
@@ -646,11 +585,12 @@ class OpencodeService {
     return unwrapSdkData(response, 'session.create');
   }
 
-  async getSession(id: string, directory?: string | null): Promise<Session> {
+  async getSession(id: string, directory?: string | null, workspace?: string | null): Promise<Session> {
     const requestDirectory = this.normalizeCandidatePath(directory) ?? this.currentDirectory;
     const response = await this.client.session.get({
       sessionID: id,
-      ...(requestDirectory ? { directory: requestDirectory } : {})
+      ...(requestDirectory ? { directory: requestDirectory } : {}),
+      ...(workspace ? { workspace } : {}),
     });
     return unwrapSdkData(response, 'session.get');
   }

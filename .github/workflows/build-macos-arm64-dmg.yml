@@ -81,12 +81,13 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           ELECTRON_BUILDER_ARCH: arm64
         run: |
+          bun run stage:workspace-plugin
           bun run build:web-assets
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
           bun run bundle:main
           bun run rebuild:native
-          ./node_modules/.bin/electron-builder --mac --arm64 --publish=never
+          node ./scripts/package.mjs --mac --arm64 --publish=never
           bun run verify:opencode-cli:packaged
 
       - name: Prepare DMG artifact

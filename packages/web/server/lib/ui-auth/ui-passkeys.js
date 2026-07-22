@@ -118,6 +118,8 @@ export const createUiPasskeys = ({
   storeFile = PASSKEY_STORE_FILE,
   rpName = DEFAULT_RP_NAME,
   challengeTtlMs = DEFAULT_CHALLENGE_TTL_MS,
+  generateAuthenticationOptionsFn = generateAuthenticationOptions,
+  verifyAuthenticationResponseFn = verifyAuthenticationResponse,
 } = {}) => {
   const registrationChallenges = new Map();
   const authenticationChallenges = new Map();
@@ -423,7 +425,7 @@ export const createUiPasskeys = ({
     };
   };
 
-  const beginAuthentication = async (req) => {
+  const beginAuthentication = async (req, { binding = null } = {}) => {
     assertEnabled();
     cleanupChallengeMap(authenticationChallenges);
 
@@ -437,7 +439,7 @@ export const createUiPasskeys = ({
       throw error;
     }
 
-    const options = await generateAuthenticationOptions({
+    const options = await generateAuthenticationOptionsFn({
       rpID,
       userVerification: 'required',
       allowCredentials: passkeys.map((passkey) => ({
@@ -453,6 +455,7 @@ export const createUiPasskeys = ({
       expectedRPIDs: [rpID],
       createdAt: Date.now(),
       expiresAt: Date.now() + challengeTtlMs,
+      binding,
     });
 
     return {
@@ -485,7 +488,7 @@ export const createUiPasskeys = ({
 
     authenticationChallenges.delete(requestId);
 
-    const verification = await verifyAuthenticationResponse({
+    const verification = await verifyAuthenticationResponseFn({
       response,
       expectedChallenge: matchingRecord.challenge,
       expectedOrigin: matchingRecord.expectedOrigins,
@@ -521,7 +524,7 @@ export const createUiPasskeys = ({
       passkeys: nextPasskeys,
     });
 
-    return { verified: true };
+    return { verified: true, binding: matchingRecord.binding ?? null };
   };
 
   const dispose = () => {

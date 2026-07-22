@@ -1,12 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveInstalledWorkspacePlugin, verifyStagedWorkspacePlugin } from './verify-workspace-plugin.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const electronDir = path.resolve(__dirname, '..');
 const destination = path.join(electronDir, 'resources', 'opencode-container-workspace');
-const packageName = '@openchamber/opencode-container-workspace';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -39,27 +39,18 @@ async function copyDir(src, dst, { skipTests = false } = {}) {
   }
 }
 
-function packageRootFromResolvedEntry(resolved) {
-  const entryPath = fileURLToPath(resolved);
-  return path.resolve(path.dirname(entryPath), '..');
-}
-
-let packageRoot;
-try {
-  packageRoot = packageRootFromResolvedEntry(import.meta.resolve(packageName));
-} catch (error) {
-  console.error(`[electron] failed to resolve ${packageName}. Run bun install before packaging.`);
-  throw error;
-}
+const packageRoot = resolveInstalledWorkspacePlugin();
 
 await removeDir(destination);
 await fs.mkdir(destination, { recursive: true });
 
 await copyDir(path.join(packageRoot, 'src'), path.join(destination, 'src'), { skipTests: true });
 await copyDir(path.join(packageRoot, 'runtime-image'), path.join(destination, 'runtime-image'));
+await copyDir(path.join(packageRoot, 'egress-image'), path.join(destination, 'egress-image'));
 
 for (const file of ['package.json', 'README.md', 'LICENSE']) {
   await fs.copyFile(path.join(packageRoot, file), path.join(destination, file));
 }
 
-console.log(`[electron] workspace plugin staged: ${destination}`);
+const result = verifyStagedWorkspacePlugin({ electronRoot: electronDir, installedRoot: packageRoot });
+console.log(`[electron] workspace plugin staged and verified (${result.fileCount} files): ${destination}`);

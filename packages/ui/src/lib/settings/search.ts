@@ -51,6 +51,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'workspaces.image',
+    page: 'workspaces',
+    titleKey: 'settings.workspaces.image',
+    descriptionKey: 'settings.workspaces.requirePinnedImage',
+    keywords: ['runtime image', 'digest', 'allowlist'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'workspaces.compatibility',
     page: 'workspaces',
     titleKey: 'settings.workspaces.compatibility.title',
@@ -67,11 +75,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'workspaces.export',
+    id: 'workspaces.policy',
     page: 'workspaces',
-    titleKey: 'settings.workspaces.export.title',
-    descriptionKey: 'settings.workspaces.export.description',
-    keywords: ['export', 'patch', 'apply', 'diff', 'review'],
+    titleKey: 'settings.workspaces.policy.title',
+    descriptionKey: 'settings.workspaces.credentials.modelAuthHint',
+    keywords: ['credentials', 'model auth', 'retention', 'preserve storage', 'resources', 'ingress'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

@@ -14,6 +14,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ChatView } from '@/components/views/ChatView';
 import { SettingsView } from '@/components/views/SettingsView';
 import { TerminalView } from '@/components/views/TerminalView';
+import { WorkspaceLifecycleView } from '@/components/workspaces/WorkspaceLifecycleView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
@@ -78,6 +79,7 @@ const MOBILE_SETTINGS_PAGES = [
   'chat',
   'notifications',
   'sessions',
+  'workspaces',
   'git',
   'magic-prompts',
   'behavior',
@@ -660,7 +662,7 @@ const getProjectLabel = (path: string): string => {
 };
 
 type OverflowItem = {
-  key: 'files' | 'changes' | 'terminal' | 'mcp' | 'instances' | 'update' | 'settings';
+  key: 'files' | 'changes' | 'terminal' | 'workspaces' | 'mcp' | 'instances' | 'update' | 'settings';
   icon?: IconName;
   iconNode?: React.ReactNode;
   label: string;
@@ -2067,6 +2069,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [filesOpen, setFilesOpen] = React.useState(false);
   const [changesOpen, setChangesOpen] = React.useState(false);
   const [terminalOpen, setTerminalOpen] = React.useState(false);
+  const [workspacesOpen, setWorkspacesOpen] = React.useState(false);
   const [mcpOpen, setMcpOpen] = React.useState(false);
   const [instancesOpen, setInstancesOpen] = React.useState(false);
   const [isMcpRefreshing, setIsMcpRefreshing] = React.useState(false);
@@ -2253,6 +2256,14 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       closeChanges();
       return true;
     }
+    if (terminalOpen) {
+      setTerminalOpen(false);
+      return true;
+    }
+    if (workspacesOpen) {
+      setWorkspacesOpen(false);
+      return true;
+    }
     if (mcpOpen) {
       setMcpOpen(false);
       return true;
@@ -2270,7 +2281,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       return true;
     }
     return false;
-  }, [changesOpen, closeChanges, filesOpen, instancesOpen, mcpOpen, overflowOpen, sessionsSheetOpen, settingsOpen, updateOpen]);
+  }, [changesOpen, closeChanges, filesOpen, instancesOpen, mcpOpen, overflowOpen, sessionsSheetOpen, settingsOpen, terminalOpen, updateOpen, workspacesOpen]);
 
   useNativeAndroidBackButton(handleNativeBack);
 
@@ -2343,6 +2354,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           },
         );
       }
+      items.push({
+        key: 'workspaces',
+        icon: 'shield-check',
+        label: t('settings.page.workspaces.title'),
+        onSelect: () => setWorkspacesOpen(true),
+      });
       items.push({
         key: 'terminal',
         icon: 'terminal',
@@ -2580,6 +2597,25 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           >
             <ErrorBoundary>
               <TerminalView visible />
+            </ErrorBoundary>
+          </MobileSurfaceShell>
+        ) : null}
+
+        {workspacesOpen ? (
+          <MobileSurfaceShell
+            open
+            onClose={() => setWorkspacesOpen(false)}
+            ariaLabel={t('settings.workspaces.title')}
+            headerless
+            disableSwipeDismiss
+          >
+            <ErrorBoundary>
+              <WorkspaceLifecycleView onSessionStarted={() => setWorkspacesOpen(false)} onOpenSettings={() => {
+                setSettingsPage('workspaces');
+                setSettingsInitialMobileStage('page-content');
+                setWorkspacesOpen(false);
+                setSettingsOpen(true);
+              }} />
             </ErrorBoundary>
           </MobileSurfaceShell>
         ) : null}

@@ -14,6 +14,7 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import { mintAndPersistDesktopLocalClient } from './desktop-local-client.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
@@ -169,8 +170,6 @@ const MINI_CHAT_MIN_WINDOW_WIDTH = 360;
 const MINI_CHAT_MIN_WINDOW_HEIGHT = 480;
 const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
 const LOCAL_HOST_ID = 'local';
-const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
-const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 // Remote hosts get a regular 'desktop' client (NOT 'desktop-local' — that kind
 // grants whole-server device management and must never be issued to a desktop
 // connecting to someone else's server).
@@ -630,11 +629,8 @@ const isLocalRuntimeUrl = (targetUrl) => {
   const localUrl = state.sidecarUrl || state.localOrigin || '';
   if (!localUrl) return false;
   if (sameOrigin(targetUrl, localUrl)) return true;
-  // The embedded server bound to 0.0.0.0 for LAN access is still THIS
-  // machine's server when addressed via any of its own interfaces on the same
-  // port — the minted client token must carry the desktop-local kind, or the
-  // server's client-create gate rejects it (the "Local — Auth required" +
-  // unreachable-screen regression).
+  // The embedded server bound to 0.0.0.0 for LAN access is still this process's
+  // local runtime when addressed through another interface on the same port.
   try {
     const target = new URL(targetUrl);
     const local = new URL(localUrl);
@@ -1393,11 +1389,26 @@ const spawnLocalServer = async () => {
     }),
   });
 
+  let localClientToken;
+  try {
+    localClientToken = await mintAndPersistDesktopLocalClient({
+      serverHandle: handle,
+      metadata: desktopDeviceMetadata(),
+      persistToken: (token) => mutateSettingsRoot((root) => {
+        root.desktopLocalClientToken = token;
+      }),
+    });
+  } catch (error) {
+    await handle.stop({ exitProcess: false }).catch(() => {});
+    throw error;
+  }
+
   const port = handle.getPort();
   const url = buildLocalUrl(port);
 
   state.serverHandle = handle;
   state.sidecarUrl = url;
+  state.clientToken = localClientToken;
 
   await mutateSettingsRoot((root) => {
     root.desktopLocalPort = port;
@@ -1707,12 +1718,11 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
   if (!baseUrl) throw new Error('Invalid URL');
   if (!candidatePassword) throw new Error('Password is required');
 
-  // Stable client identity so re-login reuses the same device record. Local
-  // uses the fixed desktop-local identity; remote uses this install's id with a
-  // regular 'desktop' kind.
-  const clientIdentity = isLocalRuntimeUrl(baseUrl)
-    ? { clientKind: LOCAL_DESKTOP_CLIENT_KIND, dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY, ...desktopDeviceMetadata() }
-    : { clientKind: REMOTE_DESKTOP_CLIENT_KIND, dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`, ...desktopDeviceMetadata() };
+  const clientIdentity = {
+    clientKind: REMOTE_DESKTOP_CLIENT_KIND,
+    dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`,
+    ...desktopDeviceMetadata(),
+  };
 
   const loginResponse = await fetch(new URL('/auth/session', `${baseUrl}/`).toString(), {
     method: 'POST',

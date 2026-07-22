@@ -196,6 +196,7 @@ jobs:
           # cross-building (runner is arm64; x64 matrix needs the hint).
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         run: |
+          bun run stage:workspace-plugin
           bun run build:web-assets
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
@@ -205,7 +206,7 @@ jobs:
           # target Electron ABI before packaging, otherwise better-sqlite3/
           # node-pty/bun-pty crash on require inside the packaged app.
           bun run rebuild:native
-          bunx electron-builder --mac --${{ matrix.arch }} --publish=never
+          node ./scripts/package.mjs --mac --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
 
       - name: Verify signature + entitlements + notarization
@@ -310,6 +311,10 @@ jobs:
           key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
           restore-keys: |
             opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: Stage workspace plugin
+        working-directory: packages/electron
+        run: bun run stage:workspace-plugin
 
       - name: Build web assets
         working-directory: packages/electron
@@ -427,6 +432,7 @@ jobs:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          bun run stage:workspace-plugin
           bun run build:web-assets
           bun run prepare:opencode-cli
           bun run verify:opencode-cli

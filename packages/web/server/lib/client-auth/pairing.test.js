@@ -70,6 +70,37 @@ describe('client auth pairing runtime', () => {
     })).rejects.toThrow('Invalid or expired pairing session');
   });
 
+  it('never accepts desktop-local authority from a pairing redeem payload', async () => {
+    const { runtime, remoteClientAuthRuntime } = await makeRuntime();
+    const created = await runtime.createPairingSession();
+    await runtime.redeemPairingSession({
+      pairingId: created.pairing.id,
+      secret: created.pairing.secret,
+      clientKind: 'desktop-local',
+    });
+    expect(remoteClientAuthRuntime.createClient).toHaveBeenCalledWith(expect.objectContaining({ clientKind: 'mobile' }));
+  });
+
+  it('cannot consume the reserved desktop dedupe identity', async () => {
+    const createClient = vi.fn(async (input) => {
+      if (input.dedupeKey === 'desktop-local') throw new Error('Desktop local client identity is reserved');
+      return { client: { id: 'client-1' }, token: 'token-1' };
+    });
+    const { runtime } = await makeRuntime({ remoteClientAuthRuntime: { createClient } });
+    const created = await runtime.createPairingSession();
+
+    await expect(runtime.redeemPairingSession({
+      pairingId: created.pairing.id,
+      secret: created.pairing.secret,
+      dedupeKey: 'desktop-local',
+    })).rejects.toThrow('Desktop local client identity is reserved');
+
+    await expect(runtime.redeemPairingSession({
+      pairingId: created.pairing.id,
+      secret: created.pairing.secret,
+    })).resolves.toMatchObject({ token: 'token-1' });
+  });
+
   it('rejects expired, cancelled, wrong-secret, and disallowed-kind redemption', async () => {
     const { runtime: expiredRuntime } = await makeRuntime({ ttlMs: -1000 });
     const expired = await expiredRuntime.createPairingSession();

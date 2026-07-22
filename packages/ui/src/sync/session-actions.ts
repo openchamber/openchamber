@@ -573,6 +573,28 @@ export async function createSession(
   }
 }
 
+export async function createSessionInWorkspace(
+  workspaceID: string,
+  title?: string,
+  directoryOverride?: string | null,
+): Promise<Session> {
+  const effectiveDirectory = directoryOverride ?? dir()
+  const created = await opencodeClient.createSession({ title, workspace: workspaceID }, effectiveDirectory)
+  const session = created.workspaceID === workspaceID
+    ? created
+    : await opencodeClient.getSession(created.id, effectiveDirectory, workspaceID)
+  if (session.workspaceID !== workspaceID) {
+    throw new Error("Session creation did not confirm workspace routing")
+  }
+
+  const sessionDirectory = session.directory ?? effectiveDirectory ?? null
+  if (sessionDirectory) registerSessionDirectory(session.id, sessionDirectory)
+  useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+  useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
+  useGlobalSessionsStore.getState().upsertSession(session)
+  return session
+}
+
 export async function patchSessionMetadata(
   sessionId: string,
   directory: string | null | undefined,

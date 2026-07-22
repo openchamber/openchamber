@@ -1759,6 +1759,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'diff', label: t('layout.mainTab.diff'), icon: 'diff' },
         { id: 'files', label: t('layout.mainTab.files'), icon: "folder-6" },
         { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
+        { id: 'workspaces', label: t('settings.page.workspaces.title'), icon: "shield-check" },
         { id: 'context', label: t('layout.mainTab.context'), icon: "file-list-2" },
         { id: 'diagram', label: t('layout.mainTab.diagram'), icon: 'file' },
       );
@@ -2079,6 +2080,14 @@ export const Header: React.FC<HeaderProps> = ({
         remoteUpdateError={remoteUpdateError}
         onOpenRemoteUpdate={openRemoteInstanceUpdate}
         timeFormatPreference={timeFormatPreference}
+      />
+      <HeaderIconActionButton
+        visible={!isVSCode}
+        title={t('settings.workspaces.title')}
+        ariaLabel={t('settings.workspaces.title')}
+        onClick={() => setActiveMainTab('workspaces')}
+        pressed={activeMainTab === 'workspaces'}
+        Icon={'shield-check'}
       />
       <HeaderIconActionButton
         title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}

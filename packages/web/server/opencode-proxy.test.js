@@ -574,4 +574,72 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(response.status).toBe(504);
     await expect(response.json()).resolves.toMatchObject({ error: 'OpenCode upstream timed out' });
   });
+
+  it('requires workspace.use for direct workspace session creation', async () => {
+    let createCalls = 0;
+    const upstream = express();
+    upstream.post('/session', (_req, res) => { createCalls += 1; res.json({ id: 'ses_1', workspaceID: 'workspace-1' }); });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const app = express();
+    app.use('/api', express.json());
+    registerOpenCodeProxy(app, {
+      fs: {}, os: {}, path, OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({ openCodePort: upstreamPort, isOpenCodeReady: true, openCodeNotReadySince: 0, isRestartingOpenCode: false }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+      uiAuthController: { resolveAuthContext: async () => ({ type: 'client', client: { capabilities: ['workspace.read'] } }) },
+      tunnelAuthController: { classifyRequestScope: () => 'local' },
+    });
+    proxyServer = await listen(app);
+    const response = await fetch(`http://127.0.0.1:${proxyServer.address().port}/api/session?workspace=workspace-1`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
+    expect(response.status).toBe(403);
+    expect(createCalls).toBe(0);
+
+    const directWorkspaceCreate = await fetch(`http://127.0.0.1:${proxyServer.address().port}/api/experimental/workspace`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'docker' }),
+    });
+    expect(directWorkspaceCreate.status).toBe(403);
+    await expect(directWorkspaceCreate.json()).resolves.toMatchObject({ error: expect.stringContaining('orchestration') });
+  });
+
+  it('authoritatively resolves existing session workspaces before routed calls', async () => {
+    let mutationCalls = 0;
+    const upstream = express();
+    upstream.get('/session/workspace-session', (_req, res) => res.json({ id: 'workspace-session', workspaceID: 'workspace-1' }));
+    upstream.post('/session/workspace-session/revert', (_req, res) => { mutationCalls += 1; res.json({ ok: true }); });
+    upstream.get('/session/local-session', (_req, res) => res.json({ id: 'local-session' }));
+    upstream.post('/session/local-session/revert', (_req, res) => { mutationCalls += 1; res.json({ ok: true }); });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    let context = { type: 'client', client: { capabilities: ['workspace.read'] } };
+    const app = express();
+    app.use('/api', express.json());
+    registerOpenCodeProxy(app, {
+      fs: {}, os: {}, path, OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({ openCodePort: upstreamPort, isOpenCodeReady: true, openCodeNotReadySince: 0, isRestartingOpenCode: false }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+      uiAuthController: { resolveAuthContext: async () => context },
+      tunnelAuthController: { classifyRequestScope: () => 'local' },
+    });
+    proxyServer = await listen(app);
+    const base = `http://127.0.0.1:${proxyServer.address().port}`;
+    const denied = await fetch(`${base}/api/session/workspace-session/revert`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(denied.status).toBe(403);
+    expect(mutationCalls).toBe(0);
+
+    const localSession = await fetch(`${base}/api/session/local-session/revert`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(localSession.status).toBe(200);
+    expect(mutationCalls).toBe(1);
+
+    context = { type: 'session', client: { capabilities: [] } };
+    const localHost = await fetch(`${base}/api/session/workspace-session/revert`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(localHost.status).toBe(200);
+    expect(mutationCalls).toBe(2);
+  });
 });
