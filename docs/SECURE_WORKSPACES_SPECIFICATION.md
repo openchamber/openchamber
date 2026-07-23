@@ -206,7 +206,7 @@ The current implementation includes:
 
 ### 5.3 Validation Evidence At Current Commits
 
-- Plugin unit/contract suite after the local certification fixes: 95 passed, 3 environment-gated skipped.
+- Plugin unit/contract suite after the local certification fixes: 96 passed, 3 environment-gated skipped.
 - OpenChamber web suite after release-artifact pinning: 836 passed, 1 platform-specific skipped.
 - Workspace-wide type-check and lint passed.
 - Production web build, documentation validation, server syntax checks, and Electron plugin staging/package tests passed.
@@ -216,7 +216,7 @@ The current implementation includes:
 - Electron HMR and bundled custom-scheme runtime smoke passed; hosted mobile and Capacitor asset/CORS/runtime tests passed.
 - Independent final code/security audit found no reachable code blocker at the current commits.
 
-These results establish the release artifacts and public-digest provider lifecycle but do not complete the image/provider milestone until the remaining authenticated SSE/WebSocket, volume/port collision, credential rotation, and failure-injection matrix is complete.
+These results complete the image/provider milestone, including authenticated SSE/WebSocket transport, foreign volume and occupied-port collision handling, credential rotation with old-token rejection, deterministic rollback failure injection, and public-digest provider lifecycle coverage.
 
 ### 5.4 Current Remote CI And Registry Status
 
@@ -226,10 +226,10 @@ Historical registry preflight run `29927614258` proved candidate creation, exact
 
 Tag `v0.1.0` points to plugin commit `eedfd5b3a08e99285f3f167c7e7d83799844c03d`. Release run `30022813361` passed every branch gate and both publish jobs: exact candidates were scanned, promoted to semver tags, signed with keyless Cosign, signature-verified, and pulled anonymously. The workflow generated SBOM and provenance attestations for both multi-architecture images.
 
-### 5.5 Remaining Immediate Gates
+### 5.5 Milestone Status And Deferred Gates
 
-- Complete the remaining authenticated SSE/WebSocket, volume/port collision, credential rotation, and failure-injection matrix.
-- Record the final public-digest provider evidence and declare only the image/provider milestone ready.
+- The image/provider milestone is ready at the commits and immutable image digests recorded in this section.
+- This status covers the provider, transport, isolation, artifact, handoff, release-image, and packaging contracts validated above; it is not a claim that the complete cross-platform product release is ready.
 
 Native iOS, Android, Windows, and Linux application certification is intentionally sequenced after these immediate gates. This deferral does not waive the final product-release matrix and no milestone may be called the complete cross-platform production release until those gates pass.
 
