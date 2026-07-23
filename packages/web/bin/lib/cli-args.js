@@ -93,6 +93,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     project: undefined,
     task: undefined,
     session: undefined,
+    message: undefined,
     prompt: undefined,
     model: undefined,
     daily: undefined,
@@ -273,6 +274,12 @@ function parseArgs(argv = process.argv.slice(2)) {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
         options.session = typeof value === 'string' ? value : options.session;
+        break;
+      }
+      case 'message': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.message = typeof value === 'string' ? value : options.message;
         break;
       }
       case 'prompt': {

@@ -13,6 +13,7 @@ import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
 import { buildTaskPayload, formatGoal } from './lib/commands-schedule.js';
 import {
   buildSessionCreatePayload,
+  buildSessionPromptPayload,
   buildSessionListEndpoint,
   buildSessionMessagesEndpoint,
   buildSessionStatusEndpoint,
@@ -572,6 +573,58 @@ describe('cli args', () => {
     expect(list.options.withStatus).toBe(true);
   });
 
+  it('parses session send and fork actions', () => {
+    const send = parseArgs([
+      'session', 'send', '--session', 'ses_123', '--dir', '/repo', '--prompt', 'Continue',
+      '--goal', '--wait', '--last-assistant',
+    ]);
+    expect(send.sessionAction).toBe('send');
+    expect(send.options).toMatchObject({
+      session: 'ses_123',
+      directory: '/repo',
+      prompt: 'Continue',
+      goal: true,
+      wait: true,
+      lastAssistant: true,
+    });
+
+    const fork = parseArgs([
+      'session', 'fork', '--session', 'ses_123', '--dir', '/repo', '--message', 'msg_123',
+      '--prompt', 'Try another approach',
+    ]);
+    expect(fork.sessionAction).toBe('fork');
+    expect(fork.options.message).toBe('msg_123');
+  });
+
+  it('builds session send and fork prompt payloads', () => {
+    expect(buildSessionPromptPayload({
+      session: 'ses_123',
+      directory: '/repo',
+      prompt: 'Continue',
+      model: 'openai/gpt-5.5',
+      agent: 'build',
+      goal: true,
+      goalTokenBudget: '200000',
+    }, 'send')).toEqual({
+      directory: '/repo',
+      prompt: 'Continue',
+      model: 'openai/gpt-5.5',
+      agent: 'build',
+      goal: true,
+      goalTokenBudget: 200000,
+    });
+    expect(buildSessionPromptPayload({
+      session: 'ses_123',
+      directory: '/repo',
+      message: 'msg_123',
+      prompt: 'Try another approach',
+    }, 'fork')).toEqual({
+      directory: '/repo',
+      messageId: 'msg_123',
+      prompt: 'Try another approach',
+    });
+  });
+
   it('builds directory-scoped session read endpoints', () => {
     expect(buildSessionStatusEndpoint('/repo worktree')).toBe('/api/session/status?directory=%2Frepo+worktree');
     expect(buildSessionMessagesEndpoint('ses_123', '/repo worktree', 10)).toBe(
@@ -638,6 +691,12 @@ describe('cli args', () => {
       .rejects.toThrow('--last-assistant requires --wait for session create.');
     await expect(sessionCommand({ directory: '/repo', timeout: '30' }, 'create'))
       .rejects.toThrow('--timeout requires --wait.');
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo' }, 'send'))
+      .rejects.toThrow('Missing required --prompt.');
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', prompt: 'Run', message: 'msg_1' }, 'send'))
+      .rejects.toThrow('--message is only valid for session fork.');
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', prompt: 'Run', lastAssistant: true }, 'fork'))
+      .rejects.toThrow('--last-assistant requires --wait for session fork.');
   });
 
   it('validates session wait timeout seconds', () => {

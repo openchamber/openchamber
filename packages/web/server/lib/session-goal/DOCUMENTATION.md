@@ -186,6 +186,13 @@ scheduled goals. Slash commands retain command dispatch semantics and cannot
 carry the synthetic prompt part; the goal metadata is still installed before
 the command runs.
 
+`openchamber session send --goal` and `openchamber session fork --goal` use
+the same server-owned prompt orchestration. Send installs a fresh goal on the
+target session; fork first uses the official OpenCode fork operation (at the
+optional message boundary), then installs the goal on the new session. Both
+preserve the objective-file-before-metadata and metadata-before-dispatch
+ordering used by create and scheduled goals.
+
 ## Limitations
 
 - Web-server feature: VS Code (extension-only) renders goal state via

@@ -24,7 +24,13 @@ const asNonEmptyString = (value) => {
 
 const assertOk = (response, body, fallback) => {
   if (response?.ok) return;
-  const message = asNonEmptyString(body?.error) || fallback;
+  const partialSessionId = body?.partial === true ? asNonEmptyString(body?.sessionId) : null;
+  const partialDirectory = body?.partial === true ? asNonEmptyString(body?.directory) : null;
+  const partialSubject = body?.partialAction === 'goal-configured' ? 'Goal on session' : 'Forked session';
+  const partial = partialSessionId
+    ? ` ${partialSubject} ${partialSessionId} remains available${partialDirectory ? ` in ${partialDirectory}` : ''}.`
+    : '';
+  const message = `${asNonEmptyString(body?.error) || fallback}${partial}`;
   const exitCode = response?.status === 400 || response?.status === 404
     ? EXIT_CODE.USAGE_ERROR
     : EXIT_CODE.GENERAL_ERROR;
@@ -132,6 +138,19 @@ const waitForSessionIdle = async ({
       );
     }
     await wait(Math.min(pollIntervalMs, remainingMs));
+  }
+};
+
+const waitForIdleWithSpinner = async (options, waitOptions) => {
+  const spin = createSpinner(options);
+  spin?.start('Waiting for session to become idle');
+  try {
+    const status = await waitForSessionIdle(waitOptions);
+    spin?.stop('Session is idle');
+    return status;
+  } catch (error) {
+    spin?.stop('Wait failed');
+    throw error;
   }
 };
 
@@ -277,9 +296,87 @@ const buildSessionCreatePayload = (options = {}) => {
   };
 };
 
+const buildSessionPromptPayload = (options = {}, action) => {
+  const { directory } = assertSessionTarget(options);
+  const prompt = asNonEmptyString(options.prompt);
+  if (!prompt) throw new TunnelCliError('Missing required --prompt.', EXIT_CODE.USAGE_ERROR);
+  const model = validateModel(options.model);
+  const agent = asNonEmptyString(options.agent);
+  const variant = asNonEmptyString(options.variant);
+  const messageId = asNonEmptyString(options.message);
+  if (messageId && action !== 'fork') {
+    throw new TunnelCliError('--message is only valid for session fork.', EXIT_CODE.USAGE_ERROR);
+  }
+  const goalEnabled = options.goal === true;
+  const goalTokenBudget = parseGoalTokenBudget(options);
+  return {
+    directory,
+    prompt,
+    ...(messageId ? { messageId } : {}),
+    ...(model ? { model } : {}),
+    ...(agent ? { agent } : {}),
+    ...(variant ? { variant } : {}),
+    ...(goalEnabled ? { goal: true } : {}),
+    ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
+  };
+};
+
+const validateActionWaitOptions = (options, action) => {
+  if (options.timeout !== undefined && !options.wait) {
+    throw new TunnelCliError('--timeout requires --wait.', EXIT_CODE.USAGE_ERROR);
+  }
+  if (options.lastAssistant && !options.wait) {
+    throw new TunnelCliError(`--last-assistant requires --wait for session ${action}.`, EXIT_CODE.USAGE_ERROR);
+  }
+};
+
+const waitForDispatchedSession = async ({ options, port, body, waitStartedAt }) => {
+  if (!options.wait) return { sessionStatus: null, lastAssistantMessage: null };
+  const sessionId = asNonEmptyString(body?.sessionId);
+  const directory = asNonEmptyString(body?.directory);
+  if (!sessionId || !directory) {
+    throw new TunnelCliError('Session response is missing sessionId or directory.', EXIT_CODE.GENERAL_ERROR);
+  }
+  const timeoutMs = normalizeWaitTimeoutMs(options.timeout);
+  const baselineAssistantMessageId = asNonEmptyString(body?.baselineAssistantMessageId);
+  const sessionStatus = await waitForIdleWithSpinner(options, {
+    timeoutMs,
+    requireActivity: body?.promptDispatched === true,
+    fetchStatus: () => fetchSessionStatus(port, sessionId, directory, options),
+    hasCompletedResult: async () => {
+      const messages = await fetchSessionTextMessages({
+        port,
+        sessionId,
+        directory,
+        role: 'assistant',
+        limit: 1,
+        options,
+      });
+      const message = messages[0];
+      if (!message?.completedAt) return false;
+      return baselineAssistantMessageId
+        ? message.id !== baselineAssistantMessageId
+        : message.completedAt >= waitStartedAt;
+    },
+  });
+  let lastAssistantMessage = null;
+  if (options.lastAssistant) {
+    const messages = await fetchSessionTextMessages({
+      port,
+      sessionId,
+      directory,
+      role: 'assistant',
+      limit: 1,
+      options,
+    });
+    lastAssistantMessage = messages[0] || null;
+  }
+  return { sessionStatus, lastAssistantMessage };
+};
+
 async function sessionCommand(options = {}, action = 'help') {
   if (action === 'help') {
-    process.stdout.write(`OpenChamber Session Commands\n\nUSAGE:\n  openchamber session list [--dir <path>] [--limit <count>] [--with-status] [OPTIONS]\n  openchamber session create --dir <path> [--title <title>] [--wait] [OPTIONS]\n  openchamber session create --project <projectId> [--title <title>] [--wait] [OPTIONS]\n  openchamber session status --session <id> --dir <path> [OPTIONS]\n  openchamber session messages --session <id> --dir <path> [--wait] [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n  --with-status           Include authoritative idle/busy/retry status\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --prompt <text>         Send an initial prompt after session creation\n  --model <provider/model>  Model for the initial prompt (defaults to configured selection)\n  --agent <id>            Agent for the initial prompt (defaults to configured selection)\n  --variant <id>          Model variant for the initial prompt\n  --goal                  Continue the session toward the initial prompt as a goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --wait                  Wait for the current session activity to become idle\n  --last-assistant        Include the last assistant text after waiting\n  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)\n  --name <title>          Alias for --title\n\nSTATUS/MESSAGES OPTIONS:\n  --session <id>          Session id\n  --dir <path>            Session directory (required for authoritative scope)\n  --wait                  Wait for current activity to become idle before reading\n  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)\n  --last                  Return only the latest text-bearing message\n  --last-assistant        Shorthand for --last --role assistant\n  --limit <count>         Maximum text messages to return (default: 10)\n  --all                   Return all text-bearing messages\n  --role <role>           Filter messages: all, user, assistant\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
+    process.stdout.write(`OpenChamber Session Commands\n\nUSAGE:\n  openchamber session list [--dir <path>] [--limit <count>] [--with-status] [OPTIONS]\n  openchamber session create --dir <path> [--title <title>] [--wait] [OPTIONS]\n  openchamber session create --project <projectId> [--title <title>] [--wait] [OPTIONS]\n  openchamber session send --session <id> --dir <path> --prompt <text> [--wait] [OPTIONS]\n  openchamber session fork --session <id> --dir <path> --prompt <text> [--message <id>] [--wait] [OPTIONS]\n  openchamber session status --session <id> --dir <path> [OPTIONS]\n  openchamber session messages --session <id> --dir <path> [--wait] [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n  --with-status           Include authoritative idle/busy/retry status\n\nACTION OPTIONS:\n  --session <id>          Source or target session id\n  --dir <path>            Authoritative session directory\n  --prompt <text>         Prompt to send to the session\n  --message <id>          Fork from this message (fork only; default: latest)\n  --model <provider/model>  Model for the prompt (defaults to configured selection)\n  --agent <id>            Agent for the prompt (defaults to configured selection)\n  --variant <id>          Model variant for the prompt\n  --goal                  Run the prompt as a new goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --wait                  Wait for the dispatched activity to become idle\n  --last-assistant        Include the last assistant text after waiting\n  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --name <title>          Alias for --title\n\nSTATUS/MESSAGES OPTIONS:\n  --last                  Return only the latest text-bearing message\n  --last-assistant        Shorthand for --last --role assistant\n  --limit <count>         Maximum text messages to return (default: 10)\n  --all                   Return all text-bearing messages\n  --role <role>           Filter messages: all, user, assistant\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
     return;
   }
 
@@ -356,18 +453,10 @@ async function sessionCommand(options = {}, action = 'help') {
     const port = await resolveTargetPort(options);
     if (options.wait) {
       const timeoutMs = normalizeWaitTimeoutMs(options.timeout);
-      const spin = createSpinner(options);
-      spin?.start('Waiting for session to become idle');
-      try {
-        await waitForSessionIdle({
-          timeoutMs,
-          fetchStatus: () => fetchSessionStatus(port, sessionId, directory, options),
-        });
-        spin?.stop('Session is idle');
-      } catch (error) {
-        spin?.stop('Wait failed');
-        throw error;
-      }
+      await waitForIdleWithSpinner(options, {
+        timeoutMs,
+        fetchStatus: () => fetchSessionStatus(port, sessionId, directory, options),
+      });
     }
     const messages = await fetchSessionTextMessages({ port, sessionId, directory, role, limit, options });
     if (isJsonMode(options)) {
@@ -386,18 +475,60 @@ async function sessionCommand(options = {}, action = 'help') {
     return;
   }
 
+  if (action === 'send' || action === 'fork') {
+    const { sessionId } = assertSessionTarget(options);
+    const payload = buildSessionPromptPayload(options, action);
+    validateActionWaitOptions(options, action);
+    const waitStartedAt = Date.now();
+    const port = await resolveTargetPort(options);
+    const { response, body } = await requestJson(
+      port,
+      `/api/openchamber/sessions/${encodeURIComponent(sessionId)}/${action}`,
+      { ...options, method: 'POST', body: JSON.stringify(payload) },
+    );
+    assertOk(response, body, `Failed to ${action} session`);
+    const { sessionStatus, lastAssistantMessage } = await waitForDispatchedSession({
+      options,
+      port,
+      body,
+      waitStartedAt,
+    });
+    const publicBody = { ...(body || {}) };
+    delete publicBody.baselineAssistantMessageId;
+    const result = {
+      ...publicBody,
+      ...(sessionStatus ? { sessionStatus } : {}),
+      ...(options.lastAssistant ? { lastAssistantMessage } : {}),
+    };
+    if (isJsonMode(options)) {
+      printJson(result);
+      return;
+    }
+    if (isQuietMode(options)) {
+      process.stdout.write(`${body?.sessionId || ''}\n`);
+      if (lastAssistantMessage?.text) process.stdout.write(`${lastAssistantMessage.text}\n`);
+      return;
+    }
+    clackIntro(action === 'fork' ? 'Session Forked' : 'Session Prompt Sent');
+    logStatus('success', body?.sessionId || `${action} completed`, `directory: ${body?.directory || 'unknown'}`);
+    if (body?.promptDispatched) {
+      logStatus('info', body.dispatchedAsCommand ? 'command dispatched' : 'prompt dispatched');
+    }
+    if (body?.goalEnabled) {
+      logStatus('info', 'goal mode active', body.goalTokenBudget ? `budget: ${body.goalTokenBudget}` : undefined);
+    }
+    if (sessionStatus) logStatus('info', `session status: ${sessionStatus.type}`);
+    clackOutro(action === 'fork' ? 'forked' : 'sent');
+    if (lastAssistantMessage) process.stdout.write(`\n${formatTextMessage(lastAssistantMessage)}\n`);
+    return;
+  }
+
   if (action !== 'create') {
     throw new TunnelCliError(`Unknown session command '${action}'.`, EXIT_CODE.USAGE_ERROR);
   }
 
   const payload = buildSessionCreatePayload(options);
-  if (options.timeout !== undefined && !options.wait) {
-    throw new TunnelCliError('--timeout requires --wait.', EXIT_CODE.USAGE_ERROR);
-  }
-  if (options.lastAssistant && !options.wait) {
-    throw new TunnelCliError('--last-assistant requires --wait for session create.', EXIT_CODE.USAGE_ERROR);
-  }
-  const timeoutMs = options.wait ? normalizeWaitTimeoutMs(options.timeout) : null;
+  validateActionWaitOptions(options, 'create');
   const waitStartedAt = Date.now();
   const port = await resolveTargetPort(options);
   const { response, body } = await requestJson(port, '/api/openchamber/sessions', {
@@ -407,50 +538,12 @@ async function sessionCommand(options = {}, action = 'help') {
   });
   assertOk(response, body, 'Failed to create session');
 
-  let sessionStatus = null;
-  let lastAssistantMessage = null;
-  if (options.wait) {
-    const sessionId = asNonEmptyString(body?.sessionId);
-    const directory = asNonEmptyString(body?.directory);
-    if (!sessionId || !directory) {
-      throw new TunnelCliError('Session create response is missing sessionId or directory.', EXIT_CODE.GENERAL_ERROR);
-    }
-    const spin = createSpinner(options);
-    spin?.start('Waiting for session to become idle');
-    try {
-      sessionStatus = await waitForSessionIdle({
-        timeoutMs,
-        requireActivity: body?.promptDispatched === true,
-        fetchStatus: () => fetchSessionStatus(port, sessionId, directory, options),
-        hasCompletedResult: async () => {
-          const messages = await fetchSessionTextMessages({
-            port,
-            sessionId,
-            directory,
-            role: 'assistant',
-            limit: 1,
-            options,
-          });
-          return Boolean(messages[0]?.completedAt && messages[0].completedAt >= waitStartedAt);
-        },
-      });
-      spin?.stop('Session is idle');
-    } catch (error) {
-      spin?.stop('Wait failed');
-      throw error;
-    }
-    if (options.lastAssistant) {
-      const messages = await fetchSessionTextMessages({
-        port,
-        sessionId,
-        directory,
-        role: 'assistant',
-        limit: 1,
-        options,
-      });
-      lastAssistantMessage = messages[0] || null;
-    }
-  }
+  const { sessionStatus, lastAssistantMessage } = await waitForDispatchedSession({
+    options,
+    port,
+    body,
+    waitStartedAt,
+  });
 
   const result = {
     ...(body || {}),
@@ -491,6 +584,7 @@ async function sessionCommand(options = {}, action = 'help') {
 export {
   sessionCommand,
   buildSessionCreatePayload,
+  buildSessionPromptPayload,
   formatSessionLine,
   buildSessionListEndpoint,
   buildSessionStatusEndpoint,

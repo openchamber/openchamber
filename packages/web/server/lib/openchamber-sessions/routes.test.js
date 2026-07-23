@@ -9,6 +9,10 @@ const createWorktreeMock = vi.fn(async () => ({
   path: '/repo/worktrees/side-task',
 }));
 const sessionCreateMock = vi.fn(async () => ({ data: { id: 'ses_123' } }));
+const sessionForkMock = vi.fn(async () => ({ data: { id: 'ses_fork', title: 'Forked session' } }));
+const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
+const sessionCommandMock = vi.fn(async () => ({ data: {} }));
+const commandListMock = vi.fn(async () => ({ data: [] }));
 globalThis.__openchamberCreateWorktreeMock = createWorktreeMock;
 
 let registerOpenChamberSessionRoutes;
@@ -17,10 +21,12 @@ vi.mock('@opencode-ai/sdk/v2', () => ({
   createOpencodeClient: () => ({
     session: {
       create: sessionCreateMock,
-      command: vi.fn(async () => ({ data: {} })),
+      fork: sessionForkMock,
+      messages: sessionMessagesMock,
+      command: sessionCommandMock,
     },
     command: {
-      list: vi.fn(async () => ({ data: [] })),
+      list: commandListMock,
     },
   }),
 }));
@@ -55,6 +61,13 @@ describe('openchamber session routes', () => {
   beforeEach(() => {
     createWorktreeMock.mockClear();
     sessionCreateMock.mockClear();
+    sessionForkMock.mockClear();
+    sessionMessagesMock.mockReset();
+    sessionMessagesMock.mockResolvedValue({ data: [] });
+    sessionCommandMock.mockReset();
+    sessionCommandMock.mockResolvedValue({ data: {} });
+    commandListMock.mockReset();
+    commandListMock.mockResolvedValue({ data: [] });
   });
 
   it('creates a session for a directory', async () => {
@@ -299,6 +312,214 @@ describe('openchamber session routes', () => {
         'http://opencode.test/session/ses_123/prompt_async?directory=%2Frepo%2Fworktrees%2Fside-task',
         expect.objectContaining({ method: 'POST' }),
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('sends a goal prompt to an existing session after creating goal metadata', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '' }));
+    const createSessionGoal = vi.fn(async () => undefined);
+    globalThis.fetch = fetchMock;
+    try {
+      sessionMessagesMock.mockResolvedValue({
+        data: [{ info: { id: 'msg_before', role: 'assistant', time: { created: 10, completed: 20 } } }],
+      });
+      const { app } = createApp({ createSessionGoal });
+      const response = await request(app)
+        .post('/api/openchamber/sessions/ses_source/send')
+        .send({
+          directory: '/repo/app',
+          prompt: 'Apply and verify the review feedback',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+          variant: 'high',
+          goal: true,
+          goalTokenBudget: 200000,
+        })
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        action: 'send',
+        sessionId: 'ses_source',
+        directory: '/repo/app',
+        promptDispatched: true,
+        goalEnabled: true,
+        baselineAssistantMessageId: 'msg_before',
+      });
+      expect(createSessionGoal).toHaveBeenCalledWith(expect.objectContaining({
+        sessionID: 'ses_source',
+        directory: '/repo/app',
+        objective: 'Apply and verify the review feedback',
+      }));
+      const promptCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/prompt_async'));
+      expect(promptCall?.[0]).toBe('http://opencode.test/session/ses_source/prompt_async?directory=%2Frepo%2Fapp');
+      expect(createSessionGoal.mock.invocationCallOrder[0]).toBeLessThan(fetchMock.mock.invocationCallOrder.at(-1));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('forks from a message, dispatches the prompt, and emits the new session', async () => {
+    const originalFetch = globalThis.fetch;
+    const emitSessionCreatedEvent = vi.fn();
+    globalThis.fetch = vi.fn(async () => ({ ok: true, text: async () => '' }));
+    try {
+      const { app } = createApp({ emitSessionCreatedEvent });
+      const response = await request(app)
+        .post('/api/openchamber/sessions/ses_source/fork')
+        .send({
+          directory: '/repo/app',
+          messageId: 'msg_branch_point',
+          prompt: 'Try the alternative implementation',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+          variant: 'high',
+        })
+        .expect(200);
+
+      expect(sessionForkMock).toHaveBeenCalledWith({
+        sessionID: 'ses_source',
+        directory: '/repo/app',
+        messageID: 'msg_branch_point',
+      });
+      expect(response.body).toMatchObject({
+        action: 'fork',
+        sourceSessionId: 'ses_source',
+        sessionId: 'ses_fork',
+        directory: '/repo/app',
+        promptDispatched: true,
+      });
+      expect(sessionMessagesMock).toHaveBeenCalledWith({
+        sessionID: 'ses_fork',
+        directory: '/repo/app',
+        limit: 100,
+      });
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://opencode.test/session/ses_fork/prompt_async?directory=%2Frepo%2Fapp',
+        expect.objectContaining({ method: 'POST' }),
+      );
+      expect(emitSessionCreatedEvent).toHaveBeenCalledWith(expect.objectContaining({
+        sessionID: 'ses_fork',
+        sourceSessionID: 'ses_source',
+        directory: '/repo/app',
+        promptDispatched: true,
+      }));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects send and fork requests without a prompt before calling OpenCode', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions/ses_source/send')
+        .send({ directory: '/repo/app' })
+        .expect(400, { error: 'prompt is required' });
+      await request(app)
+        .post('/api/openchamber/sessions/ses_source/fork')
+        .send({ directory: '/repo/app' })
+        .expect(400, { error: 'prompt is required' });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(sessionForkMock).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('reports the forked session when prompt dispatch fails', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 500, text: async () => 'dispatch failed' }));
+    try {
+      const { app } = createApp();
+      const response = await request(app)
+        .post('/api/openchamber/sessions/ses_source/fork')
+        .send({
+          directory: '/repo/app',
+          prompt: 'Try another approach',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+          variant: 'high',
+        })
+        .expect(500);
+
+      expect(response.body).toMatchObject({
+        partial: true,
+        partialAction: 'fork-created',
+        sessionId: 'ses_fork',
+        directory: '/repo/app',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not apply a default variant to an explicitly requested model', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => {
+      const text = String(url);
+      if (text.includes('/prompt_async')) return { ok: true, text: async () => '' };
+      if (text.includes('/config/providers')) {
+        return {
+          ok: true,
+          json: async () => ({
+            providers: [
+              { id: 'openai', models: { requested: { id: 'requested' }, default: { id: 'default', variants: { high: {} } } } },
+            ],
+          }),
+        };
+      }
+      if (text.includes('/agent')) return { ok: true, json: async () => [{ name: 'build', mode: 'primary' }] };
+      if (text.includes('/config')) return { ok: true, json: async () => ({}) };
+      return { ok: true, json: async () => ({ id: 'ses_123' }) };
+    });
+    globalThis.fetch = fetchMock;
+    try {
+      const { app } = createApp({
+        readSettingsFromDiskMigrated: async () => ({
+          defaultModel: 'openai/default',
+          defaultVariant: 'high',
+          projects: [{ id: 'proj_1', path: '/repo/app' }],
+        }),
+      });
+      await request(app)
+        .post('/api/openchamber/sessions/ses_source/send')
+        .send({ directory: '/repo/app', prompt: 'Continue', model: 'openai/requested', agent: 'build' })
+        .expect(200);
+
+      const promptCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/prompt_async'));
+      expect(JSON.parse(promptCall[1].body)).not.toHaveProperty('variant');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not retry a failed slash command as a normal prompt', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn();
+    commandListMock.mockResolvedValue({ data: [{ name: 'review' }] });
+    sessionCommandMock.mockRejectedValue(new Error('command response failed'));
+    globalThis.fetch = fetchMock;
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions/ses_source/send')
+        .send({
+          directory: '/repo/app',
+          prompt: '/review fix this',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+          variant: 'high',
+        })
+        .expect(500);
+
+      expect(sessionCommandMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = originalFetch;
     }
