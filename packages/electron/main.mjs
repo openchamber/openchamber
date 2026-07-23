@@ -2379,6 +2379,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     try {
       const url = new URL(raw);
       if (url.protocol === 'devtools:') return true;
+      if (url.protocol === `${UI_PROTOCOL}:`) return true;
       if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
       if (state.localOrigin) {
         try {
