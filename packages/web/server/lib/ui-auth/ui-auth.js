@@ -406,7 +406,7 @@ function persistJwtSecret(secret) {
 
 export const createUiAuth = ({
   password,
-  cookieName = SESSION_COOKIE_NAME,
+  cookieName = process.env.OPENCHAMBER_SESSION_COOKIE_NAME || SESSION_COOKIE_NAME,
   sessionTtlMs = SESSION_TTL_MS,
   readSettingsFromDiskMigrated,
   clientAuthController = null,

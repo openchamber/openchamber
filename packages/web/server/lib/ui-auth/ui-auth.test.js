@@ -44,6 +44,65 @@ const createResponse = () => {
   };
 };
 
+describe('ui auth session cookie', () => {
+  it('uses the configured cookie name to isolate sibling instances', async () => {
+    const originalCookieName = process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
+    const createUiAuth = await loadCreateUiAuth();
+    let firstAuth;
+    let secondAuth;
+
+    try {
+      process.env.OPENCHAMBER_SESSION_COOKIE_NAME = 'oc_ui_session_3000';
+      firstAuth = createUiAuth({ password: 'first-secret' });
+
+      process.env.OPENCHAMBER_SESSION_COOKIE_NAME = 'oc_ui_session_3001';
+      secondAuth = createUiAuth({ password: 'second-secret' });
+
+      const firstLoginResponse = createResponse();
+      await firstAuth.handleSessionCreate(
+        { method: 'POST', headers: {}, body: { password: 'first-secret' } },
+        firstLoginResponse,
+      );
+      const firstCookie = String(firstLoginResponse.getHeader('set-cookie') || '').split(';', 1)[0];
+
+      const secondLoginResponse = createResponse();
+      await secondAuth.handleSessionCreate(
+        { method: 'POST', headers: {}, body: { password: 'second-secret' } },
+        secondLoginResponse,
+      );
+      const secondCookie = String(secondLoginResponse.getHeader('set-cookie') || '').split(';', 1)[0];
+
+      expect(firstCookie.startsWith('oc_ui_session_3000=')).toBe(true);
+      expect(secondCookie.startsWith('oc_ui_session_3001=')).toBe(true);
+
+      const mismatchedRequest = {
+        method: 'GET',
+        path: '/api/config/settings',
+        headers: { cookie: secondCookie },
+      };
+      const mismatchedResponse = createResponse();
+      let called = false;
+      await firstAuth.requireAuth(mismatchedRequest, mismatchedResponse, () => {
+        called = true;
+      });
+
+      expect(called).toBe(false);
+      expect(mismatchedResponse.statusCode).toBe(401);
+      expect(
+        String(mismatchedResponse.getHeader('set-cookie') || '').startsWith('oc_ui_session_3000='),
+      ).toBe(true);
+    } finally {
+      firstAuth?.dispose();
+      secondAuth?.dispose();
+      if (originalCookieName === undefined) {
+        delete process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
+      } else {
+        process.env.OPENCHAMBER_SESSION_COOKIE_NAME = originalCookieName;
+      }
+    }
+  });
+});
+
 describe('ui auth client credential seam', () => {
   it('accepts bearer client credentials when UI password auth is enabled', async () => {
     const createUiAuth = await loadCreateUiAuth();

@@ -14,7 +14,7 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
 - `packages/web/server/lib/client-auth/pairing.js`: short-lived Pairing v2 sessions and one-time secret redemption into trusted-device client tokens.
 
 ## Public exports (ui-auth.js)
-- `createUiAuth({ password, cookieName, sessionTtlMs, readSettingsFromDiskMigrated })`: creates UI auth controller with methods:
+- `createUiAuth({ password, cookieName, sessionTtlMs, readSettingsFromDiskMigrated })`: creates UI auth controller. `cookieName` defaults to `OPENCHAMBER_SESSION_COOKIE_NAME` when set, otherwise `oc_ui_session`, so sibling instances on one host can keep browser sessions isolated. The controller exposes:
   - `enabled`
   - `requireAuth(req, res, next)`
   - `handleSessionStatus(req, res)`
