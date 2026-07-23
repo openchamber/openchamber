@@ -29,6 +29,7 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Implements `openchamber session create`, `list`, `status`, and `messages`.
   - Uses OpenChamber session orchestration for create/worktree/prompt flows, including optional Goal Mode, and official directory-scoped OpenCode APIs for authoritative status and text-only message reads.
   - Message projection matches Export Markdown semantics: only ordered `text` parts are exposed; tool, reasoning, file, and other parts are omitted.
+  - `--wait` composes with create and messages. Create waits through the initial idle race until activity is observed or a newly completed assistant message exists; `--last-assistant` returns that text in the same result. Wait timeouts are explicit failures and never fabricate an idle result.
 
 - `commands-schedule.js`
   - Implements scheduled task status/list/create/run/delete/enable/disable.

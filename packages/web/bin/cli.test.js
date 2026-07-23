@@ -19,8 +19,10 @@ import {
   extractTextMessages,
   filterVisibleSessions,
   formatSessionLine,
+  normalizeWaitTimeoutMs,
   resolveSessionStatus,
   sessionCommand,
+  waitForSessionIdle,
 } from './lib/commands-session.js';
 import { formatModelsOutput } from './lib/commands-models.js';
 import { formatProjectLine } from './lib/commands-projects.js';
@@ -550,6 +552,22 @@ describe('cli args', () => {
     expect(messages.options.last).toBe(true);
     expect(messages.options.role).toBe('assistant');
 
+    const waiting = parseArgs([
+      'session',
+      'messages',
+      '--session',
+      'ses_123',
+      '--dir',
+      '/repo',
+      '--wait',
+      '--timeout',
+      '30',
+      '--last-assistant',
+    ]);
+    expect(waiting.options.wait).toBe(true);
+    expect(waiting.options.timeout).toBe('30');
+    expect(waiting.options.lastAssistant).toBe(true);
+
     const list = parseArgs(['session', 'list', '--dir', '/repo', '--with-status']);
     expect(list.options.withStatus).toBe(true);
   });
@@ -614,6 +632,58 @@ describe('cli args', () => {
       .rejects.toThrow('--role must be one of: all, user, assistant.');
     await expect(sessionCommand({ session: 'ses_123' }, 'status'))
       .rejects.toThrow('Missing required --dir.');
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', timeout: '30' }, 'messages'))
+      .rejects.toThrow('--timeout requires --wait.');
+    await expect(sessionCommand({ directory: '/repo', lastAssistant: true }, 'create'))
+      .rejects.toThrow('--last-assistant requires --wait for session create.');
+    await expect(sessionCommand({ directory: '/repo', timeout: '30' }, 'create'))
+      .rejects.toThrow('--timeout requires --wait.');
+  });
+
+  it('validates session wait timeout seconds', () => {
+    expect(normalizeWaitTimeoutMs(undefined)).toBe(600_000);
+    expect(normalizeWaitTimeoutMs('30')).toBe(30_000);
+    for (const value of ['0', '1.5', 'nope', '86401']) {
+      expect(() => normalizeWaitTimeoutMs(value)).toThrow();
+    }
+  });
+
+  it('waits through active status until the session becomes idle', async () => {
+    const statuses = [{ type: 'busy' }, { type: 'retry' }, { type: 'idle' }];
+    let elapsed = 0;
+    await expect(waitForSessionIdle({
+      timeoutMs: 10_000,
+      fetchStatus: async () => statuses.shift(),
+      now: () => elapsed,
+      wait: async (duration) => { elapsed += duration; },
+    })).resolves.toEqual({ type: 'idle' });
+  });
+
+  it('does not accept initial idle for a newly dispatched prompt without completion evidence', async () => {
+    let elapsed = 0;
+    let completionChecks = 0;
+    await expect(waitForSessionIdle({
+      timeoutMs: 10_000,
+      requireActivity: true,
+      fetchStatus: async () => ({ type: 'idle' }),
+      hasCompletedResult: async () => {
+        completionChecks += 1;
+        return completionChecks >= 2;
+      },
+      now: () => elapsed,
+      wait: async (duration) => { elapsed += duration; },
+    })).resolves.toEqual({ type: 'idle' });
+    expect(completionChecks).toBe(2);
+  });
+
+  it('fails a session wait after its deadline', async () => {
+    let elapsed = 0;
+    await expect(waitForSessionIdle({
+      timeoutMs: 1_000,
+      fetchStatus: async () => ({ type: 'busy' }),
+      now: () => elapsed,
+      wait: async (duration) => { elapsed += duration; },
+    })).rejects.toThrow('Session did not become idle within 1 seconds.');
   });
 
   it('parses models command', () => {

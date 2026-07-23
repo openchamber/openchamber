@@ -109,6 +109,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     directory: undefined,
     role: undefined,
     last: false,
+    wait: false,
+    timeout: undefined,
+    lastAssistant: false,
     withStatus: false,
   };
 
@@ -402,6 +405,18 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'last':
         options.last = true;
         break;
+      case 'last-assistant':
+        options.lastAssistant = true;
+        break;
+      case 'wait':
+        options.wait = true;
+        break;
+      case 'timeout': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.timeout = typeof value === 'string' ? value : options.timeout;
+        break;
+      }
       case 'with-status':
         options.withStatus = true;
         break;
