@@ -5,7 +5,7 @@ import { readAuthFile } from '../opencode/auth.js';
 import { readConfigLayers } from '../opencode/shared.js';
 import { getModelCatalog } from './catalog.js';
 import { resolveSmallModel, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
-import { callSmallModel } from './call.js';
+import { callSmallModel, listConfigCredentialProviders } from './call.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -79,6 +79,7 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
       configSmallModel: readConfiguredSmallModel(directory),
       preferredProviderID,
       preferredModelID,
+      configCredentialProviders: listConfigCredentialProviders(directory),
     });
 
   if (!resolved) {
@@ -163,6 +164,7 @@ export async function describeSmallModel({ directory, preferredProviderID, prefe
     configSmallModel: readConfiguredSmallModel(directory),
     preferredProviderID,
     preferredModelID,
+    configCredentialProviders: listConfigCredentialProviders(directory),
   });
   return resolved;
 }

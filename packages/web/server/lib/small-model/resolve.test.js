@@ -194,4 +194,50 @@ describe('resolveSmallModel', () => {
     });
     expect(result).toEqual({ providerID: 'mistral', modelID: 'mistral-large-latest', source: 'session-model' });
   });
+
+  // Config-only providers (#2269): no auth.json entry, still callable.
+  it('treats a session provider with a config-supplied credential as usable', () => {
+    const result = resolveSmallModel({
+      auth: {},
+      catalog,
+      configSmallModel: null,
+      preferredProviderID: 'my-custom',
+      preferredModelID: 'audit-model',
+      configCredentialProviders: ['my-custom'],
+    });
+    expect(result).toEqual({ providerID: 'my-custom', modelID: 'audit-model', source: 'session-model' });
+  });
+
+  it('family-scans a preferred catalog provider whose credential comes from config', () => {
+    const result = resolveSmallModel({
+      auth: {},
+      catalog,
+      configSmallModel: null,
+      preferredProviderID: 'anthropic',
+      configCredentialProviders: ['anthropic'],
+    });
+    expect(result).toEqual({ providerID: 'anthropic', modelID: 'claude-haiku-4-5', source: 'family-scan' });
+  });
+
+  it('includes config-credential providers in the global scan', () => {
+    const result = resolveSmallModel({
+      auth: {},
+      catalog,
+      configSmallModel: null,
+      configCredentialProviders: ['google'],
+    });
+    expect(result).toEqual({ providerID: 'google', modelID: 'gemini-2.5-flash', source: 'family-scan' });
+  });
+
+  it('still ignores a preferred provider with neither a login nor a config credential', () => {
+    const result = resolveSmallModel({
+      auth: {},
+      catalog,
+      configSmallModel: null,
+      preferredProviderID: 'my-custom',
+      preferredModelID: 'audit-model',
+      configCredentialProviders: [],
+    });
+    expect(result).toBeNull();
+  });
 });
