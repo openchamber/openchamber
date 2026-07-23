@@ -4,8 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { createUiPasskeys } from './ui-passkeys.js';
+import { resolveUiSessionCookieName } from './ui-session-cookie.js';
 
-const SESSION_COOKIE_NAME = 'oc_ui_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const TRUSTED_DEVICE_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const URL_AUTH_TOKEN_TTL_MS = 60 * 1000;
@@ -406,7 +406,7 @@ function persistJwtSecret(secret) {
 
 export const createUiAuth = ({
   password,
-  cookieName = process.env.OPENCHAMBER_SESSION_COOKIE_NAME || SESSION_COOKIE_NAME,
+  cookieName = resolveUiSessionCookieName(),
   sessionTtlMs = SESSION_TTL_MS,
   readSettingsFromDiskMigrated,
   clientAuthController = null,

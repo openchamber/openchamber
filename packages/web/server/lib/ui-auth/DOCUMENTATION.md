@@ -9,6 +9,7 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
 
 ## Entrypoints and structure
 - `packages/web/server/lib/ui-auth/ui-auth.js`: UI auth controller runtime, cookie/session issuance, rate limiting, and auth route handlers.
+- `packages/web/server/lib/ui-auth/ui-session-cookie.js`: side-effect-free UI session cookie-name default and resolver shared by UI auth, request security, and CLI HTTP authentication.
 - `packages/web/server/lib/ui-auth/ui-passkeys.js`: passkey store and WebAuthn registration/authentication verification helpers.
 - `packages/web/server/lib/client-auth/remote-clients.js`: trusted-device client token storage, bearer authentication, last-used tracking, and revocation.
 - `packages/web/server/lib/client-auth/pairing.js`: short-lived Pairing v2 sessions and one-time secret redemption into trusted-device client tokens.
@@ -29,6 +30,9 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
   - `handleResetAuth(req, res)`
   - `ensureSessionToken(req, res)`
   - `dispose()`
+
+## Public exports (ui-session-cookie.js)
+- `resolveUiSessionCookieName(env)`: resolves `OPENCHAMBER_SESSION_COOKIE_NAME` at call time and falls back to the internal compatibility default, `oc_ui_session`.
 
 ## Public exports (ui-passkeys.js)
 - `createUiPasskeys({ passwordBinding, readSettingsFromDiskMigrated, storeFile, rpName, challengeTtlMs })`: creates passkey runtime with methods:

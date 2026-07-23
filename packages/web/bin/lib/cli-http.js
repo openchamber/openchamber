@@ -1,14 +1,14 @@
 import { buildLocalUrl } from './cli-network.js';
 import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
+import { resolveUiSessionCookieName } from '../../server/lib/ui-auth/ui-session-cookie.js';
 
-const UI_SESSION_COOKIE_NAME = 'oc_ui_session';
-
-function extractUiSessionCookie(response) {
+function extractUiSessionCookie(response, cookieName = resolveUiSessionCookieName()) {
   const setCookie = response?.headers?.get?.('set-cookie');
   if (typeof setCookie !== 'string' || setCookie.length === 0) {
     return null;
   }
-  const match = setCookie.match(new RegExp(`(?:^|,\\s*)(${UI_SESSION_COOKIE_NAME}=[^;]+)`));
+  const escapedCookieName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = setCookie.match(new RegExp(`(?:^|,\\s*)(${escapedCookieName}=[^;]+)`));
   return match?.[1] || null;
 }
 
@@ -22,7 +22,12 @@ async function resolveUiPasswordForPort(port, options = {}) {
     : null;
 }
 
-async function createUiSessionCookie(port, password, timeoutMs) {
+async function createUiSessionCookie(
+  port,
+  password,
+  timeoutMs,
+  cookieName = resolveUiSessionCookieName(),
+) {
   if (typeof password !== 'string' || password.length === 0) {
     return null;
   }
@@ -41,7 +46,7 @@ async function createUiSessionCookie(port, password, timeoutMs) {
     if (!response.ok) {
       return null;
     }
-    return extractUiSessionCookie(response);
+    return extractUiSessionCookie(response, cookieName);
   } catch {
     return null;
   } finally {
