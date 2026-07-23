@@ -24,6 +24,8 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMac: boolean;
   // Windows desktop shell — for controls that only render on win32.
   isWindows: boolean;
+  // Linux desktop shell — for controls that only render on linux.
+  isLinux: boolean;
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -311,7 +313,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'sessions',
     titleKey: 'settings.openchamber.desktopNetwork.field.launchAtLogin',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
-    keywords: ['desktop', 'startup', 'login'],
+    keywords: ['desktop', 'startup', 'login', 'launch', 'background', 'autostart'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
@@ -319,8 +321,8 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'sessions',
     titleKey: 'settings.openchamber.desktopNetwork.field.minimizeToTray',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription',
-    keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows'],
-    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && ctx.isWindows,
+    keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows', 'linux'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && (ctx.isWindows || ctx.isLinux),
   },
   {
     id: 'sessions.desktop-keep-awake',
