@@ -1806,15 +1806,6 @@ export const MessengerSection: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-medium text-foreground">Messenger Sync</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Chat with your assistant from Discord and mirror project updates into your server.
-          </p>
-        </div>
-      </div>
-
       {/* Suppress only the connect-card flash until rehydrate; never blank the page. */}
       {hasHydrated && view === 'connect-card' && (
         <DiscordConnectCard onConnect={() => startOnboarding('discord')} />

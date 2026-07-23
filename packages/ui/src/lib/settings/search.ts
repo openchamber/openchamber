@@ -879,6 +879,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['background', 'push'],
     isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
   },
+  {
+    id: 'integrations.discord',
+    page: 'integrations',
+    titleKey: 'settings.page.integrations.title',
+    keywords: ['discord', 'messenger', 'bot', 'slack', 'chat', 'connect', 'bridge'],
+  },
 ] as const;
 
 interface BuildSettingsSearchResultsOptions {

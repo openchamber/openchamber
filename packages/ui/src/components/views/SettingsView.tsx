@@ -90,6 +90,7 @@ const pageOrder: SettingsPageSlug[] = [
   'sessions',
   'shortcuts',
   'voice',
+  'integrations',
   'usage',
   'about',
   // 'projects' group — Workspace

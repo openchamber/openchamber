@@ -824,6 +824,106 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
 
+    // Discord integration block (bot token + listener/bridge prefs).
+    // `null` clears the whole block (used by Disconnect).
+    if (candidate.discord === null) {
+      result.discord = null;
+    } else if (candidate.discord && typeof candidate.discord === 'object' && !Array.isArray(candidate.discord)) {
+      const sanitizedDiscord = sanitizeDiscordConfig(candidate.discord);
+      if (sanitizedDiscord) {
+        result.discord = sanitizedDiscord;
+      }
+    }
+
+    return result;
+  };
+
+  const sanitizeDiscordConfig = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const result = {};
+    if (typeof value.botToken === 'string') {
+      const token = value.botToken.trim();
+      if (token.length > 0) {
+        result.botToken = token;
+      }
+    }
+    if (typeof value.guildId === 'string') {
+      const guildId = value.guildId.trim();
+      if (guildId.length > 0) {
+        result.guildId = guildId;
+      }
+    }
+    if (typeof value.defaultChannelId === 'string') {
+      const channelId = value.defaultChannelId.trim();
+      if (channelId.length > 0) {
+        result.defaultChannelId = channelId;
+      }
+    }
+    if (typeof value.defaultUserId === 'string') {
+      const userId = value.defaultUserId.trim();
+      if (userId.length > 0) {
+        result.defaultUserId = userId;
+      }
+    }
+    if (typeof value.autoReply === 'boolean') {
+      result.autoReply = value.autoReply;
+    }
+    if (typeof value.scopeToGuild === 'boolean') {
+      result.scopeToGuild = value.scopeToGuild;
+    }
+    if (value.defaultReplyMode === 'always' || value.defaultReplyMode === 'mention') {
+      result.defaultReplyMode = value.defaultReplyMode;
+    }
+    if (value.guildPolicies && typeof value.guildPolicies === 'object' && !Array.isArray(value.guildPolicies)) {
+      const guildPolicies = {};
+      for (const [guildId, entry] of Object.entries(value.guildPolicies)) {
+        if (typeof guildId !== 'string' || guildId.length === 0) {
+          continue;
+        }
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          continue;
+        }
+        const policy = {};
+        if (typeof entry.enabled === 'boolean') {
+          policy.enabled = entry.enabled;
+        }
+        if (entry.replyMode === 'always' || entry.replyMode === 'mention' || entry.replyMode === 'inherit') {
+          policy.replyMode = entry.replyMode;
+        }
+        if (Object.keys(policy).length > 0) {
+          guildPolicies[guildId] = policy;
+        }
+      }
+      if (Object.keys(guildPolicies).length > 0) {
+        result.guildPolicies = guildPolicies;
+      }
+    }
+    if (typeof value.bridgeEnabled === 'boolean') {
+      result.bridgeEnabled = value.bridgeEnabled;
+    }
+    // Absent means "start by default"; only an explicit false is sticky-stopped.
+    if (typeof value.listenerEnabled === 'boolean') {
+      result.listenerEnabled = value.listenerEnabled;
+    }
+    if (typeof value.registerDynamicSlashCommands === 'boolean') {
+      result.registerDynamicSlashCommands = value.registerDynamicSlashCommands;
+    }
+    if (Array.isArray(value.trustedBotIds)) {
+      result.trustedBotIds = value.trustedBotIds
+        .map((id) => (typeof id === 'string' ? id.trim() : String(id ?? '').trim()))
+        .filter((id) => id.length > 0);
+    }
+    if (Array.isArray(value.projectBindings)) {
+      result.projectBindings = value.projectBindings
+        .filter((binding) => binding && typeof binding === 'object' && binding.channelId && binding.projectPath)
+        .map((binding) => ({
+          channelId: String(binding.channelId),
+          projectPath: String(binding.projectPath),
+          ...(binding.projectLabel ? { projectLabel: String(binding.projectLabel) } : {}),
+        }));
+    }
     return result;
   };
 
@@ -852,12 +952,23 @@ export const createSettingsHelpers = (dependencies) => {
       typographySizes: nextTypographySizes
     };
 
+    // Explicit null clears Discord config from disk (Disconnect).
+    if (Object.prototype.hasOwnProperty.call(changes, 'discord') && changes.discord === null) {
+      delete next.discord;
+    }
+
     return next;
   };
 
   const formatSettingsResponse = (settings) => {
     const sanitized = sanitizeSettingsUpdate(settings);
     delete sanitized.managedRemoteTunnelToken;
+    // Never expose the Discord bot token through the generic settings API.
+    if (sanitized.discord && typeof sanitized.discord === 'object') {
+      const discord = { ...sanitized.discord };
+      delete discord.botToken;
+      sanitized.discord = discord;
+    }
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
     const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');

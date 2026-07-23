@@ -10,7 +10,6 @@ import {
   executeMessengerCommand,
   parseLeadingCommand,
   isKnownMessengerCommand,
-  stripBtwSuffix,
   stripQueueSuffix,
 } from './messenger-commands.js';
 import { DEFAULT_VERBOSITY, normalizeVerbosity } from './messenger-verbosity.js';
@@ -3311,12 +3310,10 @@ export function createMessengerOpencodeBridge({
    * (`routeInbound` step 0) and the native slash-command pipeline
    * (`runCommand`) delegate here so the two can never drift apart.
    */
-  // Per-surface caches so `/resume <n>` and `/fork <n>` indices stay stable
-  // between the listing reply and the follow-up pick.
+  // Per-surface cache so `/resume <n>` indices stay stable between the
+  // listing reply and the follow-up pick.
   /** @type {Map<string, Array<{ id: string }>>} */
   const resumeCandidatesCache = new Map();
-  /** @type {Map<string, Array<{ id: string }>>} */
-  const forkCandidatesCache = new Map();
 
   function firstTextOfMessage(message) {
     const parts = Array.isArray(message?.parts) ? message.parts : [];
@@ -3894,35 +3891,22 @@ export function createMessengerOpencodeBridge({
         };
       },
 
-      async listForkCandidates() {
-        if (!stored?.sessionId) return [];
-        const messages = await opencodeAdapter.listMessages(stored.sessionId, stored?.projectPath ?? undefined);
-        const candidates = (messages ?? [])
-          .filter((m) => (m?.info?.role ?? m?.role) === 'user')
-          .map((m) => {
-            const id = m?.info?.id ?? m?.id ?? null;
-            const created = m?.info?.time?.created ?? m?.time?.created ?? null;
-            const preview = clipBlock(firstTextOfMessage(m) || '(no text)', 80);
-            return id ? { id, preview, when: created ? new Date(created).toLocaleString() : '' } : null;
-          })
-          .filter(Boolean)
-          // Hide synthetic / injected messages (memory + scheduling blocks).
-          .filter((m) => !m.preview.startsWith('<project-memory>') && !m.preview.startsWith('<scheduling>'))
-          .slice(-25);
-        forkCandidatesCache.set(surfaceCacheKey, candidates);
-        return candidates;
-      },
-
-      async forkSession({ index }) {
+      async forkSession() {
         if (!stored?.sessionId) return { ok: false, error: 'no session bound to this conversation.' };
-        const cached = forkCandidatesCache.get(surfaceCacheKey)
-          ?? await this.listForkCandidates();
-        const target = cached[index - 1];
-        if (!target) return { ok: false, error: `no message #${index} in the /fork list.` };
+        const messages = await opencodeAdapter.listMessages(stored.sessionId, stored?.projectPath ?? undefined);
+        // Branch from the most recent genuine user message — synthetic
+        // injections (memory + scheduling blocks) are skipped.
+        const lastUserMessage = [...(messages ?? [])].reverse().find((m) => {
+          if ((m?.info?.role ?? m?.role) !== 'user') return false;
+          const preview = firstTextOfMessage(m);
+          return !preview.startsWith('<project-memory>') && !preview.startsWith('<scheduling>');
+        });
+        const messageId = lastUserMessage?.info?.id ?? lastUserMessage?.id ?? null;
+        if (!messageId) return { ok: false, error: 'no user message found in this session to fork from.' };
 
         const forked = await opencodeAdapter.forkSession(
           stored.sessionId,
-          target.id,
+          messageId,
           stored?.projectPath ?? undefined,
         );
         if (!forked.ok) return forked;
@@ -3937,76 +3921,6 @@ export function createMessengerOpencodeBridge({
         });
         if (!thread.ok) return thread;
         return { ok: true, threadId: thread.threadId };
-      },
-
-      async btwQuestion({ text }) {
-        if (!stored?.sessionId) return { ok: false, error: 'no session bound to this conversation.' };
-        ensureSubscribed();
-        const forked = await opencodeAdapter.forkSession(
-          stored.sessionId,
-          null,
-          stored?.projectPath ?? undefined,
-        );
-        if (!forked.ok) return forked;
-
-        const thread = await createBoundThread({
-          name: `BTW: ${clipBlock(text.replace(/\s+/g, ' ').trim(), 80)}`,
-          sessionId: forked.sessionId,
-          projectPath: stored?.projectPath ?? null,
-          projectLabel: stored?.projectLabel ?? null,
-        });
-        if (!thread.ok) return thread;
-
-        const forkSurface = {
-          type,
-          token,
-          channelId: thread.threadId,
-          threadId: null,
-        };
-        const ctx = {
-          sessionId: forked.sessionId,
-          type,
-          token,
-          channelId: thread.threadId,
-          threadId: null,
-          projectPath: stored?.projectPath ?? null,
-          sentPartIds: new Set(),
-          startedAt: Date.now(),
-          lastError: null,
-          verbosity: resolveVerbosity(forkSurface),
-          from,
-          source: type,
-        };
-        sessionContexts.set(forked.sessionId, ctx);
-        startTypingPulse(ctx);
-        rememberMessengerInbound(forked.sessionId, text);
-
-        const modelOverride = stored?.modelOverride ?? projectDefaults?.modelDefault ?? globals.model ?? null;
-        const variantOverride = stored?.variantOverride ?? projectDefaults?.variantDefault ?? globals.variant ?? null;
-        const agentOverride = stored?.agentOverride ?? projectDefaults?.agentDefault ?? globals.agent ?? null;
-        try {
-          await sendOpencodePrompt({
-            sessionId: forked.sessionId,
-            projectPath: stored?.projectPath ?? null,
-            text,
-            modelOverride,
-            agentOverride,
-            variantOverride,
-          });
-        } catch (err) {
-          stopTypingPulse(ctx);
-          return { ok: false, error: err?.message ?? 'prompt failed' };
-        }
-
-        broadcastEvent?.('messenger.bridge.btw', {
-          type,
-          channelId,
-          threadId: thread.threadId,
-          sourceSessionId: stored.sessionId,
-          sessionId: forked.sessionId,
-          text,
-        });
-        return { ok: true, threadId: thread.threadId, sessionId: forked.sessionId };
       },
 
       async queueMessage({ text }) {
@@ -4493,30 +4407,6 @@ export function createMessengerOpencodeBridge({
         return { ok: true, handledCommand: parsedCmd.name };
       }
       // null → unknown command; fall through.
-    }
-
-    const btwSuffix = stripBtwSuffix(text);
-    if (btwSuffix) {
-      const surface = { type, token, channelId, threadId: threadId ?? null };
-      const result = await executeSurfaceCommand({
-        command: { name: 'btw', args: btwSuffix.text, body: '' },
-        type,
-        token,
-        channelId,
-        threadId: threadId ?? null,
-        sourceMessageId,
-        from,
-      });
-      if (result) {
-        await postMessengerSurface(surface, result.reply);
-        broadcastEvent?.('messenger.bridge.command_handled', {
-          type,
-          channelId,
-          threadId,
-          command: 'btw',
-        });
-        return { ok: true, handledCommand: 'btw' };
-      }
     }
 
     const queueSuffix = stripQueueSuffix(text);

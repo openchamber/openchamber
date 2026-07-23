@@ -2203,16 +2203,37 @@ describe('plain message supersedes an in-flight turn', () => {
     expect(sentBodies).toEqual(['first', 'second']);
   });
 
-  it('forks a suffix-marked btw question into a new thread without aborting the source session', async () => {
+  it('forks at the last user message into a new thread', async () => {
     const calls = [];
     globalThis.fetch = vi.fn(async (url, init = {}) => {
       calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body });
       const u = String(url);
-      if (u.includes('/session/ses-btw/fork')) {
-        return { ok: true, status: 200, json: async () => ({ id: 'ses-btw-side' }), text: async () => '' };
+      if (u.includes('/session/ses-fork/message')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            { info: { id: 'msg-1', role: 'user' }, parts: [{ type: 'text', text: 'first' }] },
+            { info: { id: 'msg-2', role: 'assistant' }, parts: [{ type: 'text', text: 'ok' }] },
+            { info: { id: 'msg-3', role: 'user' }, parts: [{ type: 'text', text: 'second' }] },
+            { info: { id: 'msg-4', role: 'assistant' }, parts: [{ type: 'text', text: 'done' }] },
+          ],
+          text: async () => '',
+        };
       }
-      if (u.includes('/channels/chan-btw/threads')) {
-        return { ok: true, status: 200, json: async () => ({ id: 'thread-btw' }), text: async () => '' };
+      if (u.includes('/session/ses-fork/fork')) {
+        return { ok: true, status: 200, json: async () => ({ id: 'ses-forked' }), text: async () => '' };
+      }
+      if (u.includes('/session/ses-fork?') || u.endsWith('/session/ses-fork')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ id: 'ses-fork', title: 'Feature work' }),
+          text: async () => '',
+        };
+      }
+      if (u.includes('/channels/chan-fork/threads')) {
+        return { ok: true, status: 200, json: async () => ({ id: 'thread-fork' }), text: async () => '' };
       }
       return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
     });
@@ -2222,39 +2243,35 @@ describe('plain message supersedes an in-flight turn', () => {
       store: {
         ...makeFakeStore(),
         lookup: ({ targetKey }) =>
-          targetKey === 'chan-btw'
-            ? { sessionId: 'ses-btw', projectPath: '/p', projectLabel: 'P' }
+          targetKey === 'chan-fork'
+            ? { sessionId: 'ses-fork', projectPath: '/p', projectLabel: 'P' }
             : null,
         bind: (row) => binds.push(row),
       },
     });
 
-    const result = await bridge.routeInbound({
+    const result = await bridge.runCommand({
       type: 'discord',
       token: 'bot-token',
-      channelId: 'chan-btw',
+      channelId: 'chan-fork',
       threadId: null,
-      text: 'Should we add a migration. btw',
+      commandName: 'fork',
+      args: '',
       from: { id: 'user-1', username: 'alice' },
     });
 
-    expect(result).toMatchObject({ ok: true, handledCommand: 'btw' });
-    expect(calls.filter((c) => c.url.includes('/session/ses-btw/abort'))).toHaveLength(0);
-    expect(calls.filter((c) => c.url.includes('/session/ses-btw/fork'))).toHaveLength(1);
+    expect(result.reply).toContain('Session forked from your last message');
+    expect(result.reply).toContain('<#thread-fork>');
+
+    const forkCall = calls.find((c) => c.method === 'POST' && c.url.includes('/session/ses-fork/fork'));
+    expect(forkCall).toBeTruthy();
+    expect(JSON.parse(forkCall.body)).toEqual({ messageID: 'msg-3' });
+
     expect(binds).toContainEqual(expect.objectContaining({
-      targetKey: 'thread-btw',
-      sessionId: 'ses-btw-side',
+      targetKey: 'thread-fork',
+      sessionId: 'ses-forked',
       projectPath: '/p',
     }));
-
-    const sidePrompt = calls.find((c) => c.url.includes('/session/ses-btw-side/prompt_async'));
-    expect(sidePrompt).toBeTruthy();
-    expect(JSON.parse(sidePrompt.body).parts).toEqual([
-      { type: 'text', text: 'Should we add a migration' },
-    ]);
-
-    const reply = calls.find((c) => c.url.includes('/channels/chan-btw/messages'));
-    expect(JSON.parse(reply.body).content).toContain('<#thread-btw>');
   });
 
   it('suppresses a trailing abort error from the superseded turn (no false failure)', async () => {

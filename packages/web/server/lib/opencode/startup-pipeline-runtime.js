@@ -3,6 +3,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
     createTerminalRuntime,
     createDictationRuntime,
     createMessageStreamWsRuntime,
+    createOpenChamberAgentEventsWebSocketRuntime,
     createServerStartupRuntime,
   } = dependencies;
 
@@ -97,6 +98,13 @@ export const createStartupPipelineRuntime = (dependencies) => {
       upstreamStallTimeoutMs,
     });
 
+    const openChamberAgentEventsWebSocketRuntime = createOpenChamberAgentEventsWebSocketRuntime({
+      server,
+      uiAuthController,
+      isRequestOriginAllowed,
+      rejectWebSocketUpgrade,
+    });
+
     setupProxy(app);
     scheduleOpenCodeApiDetection();
     void bootstrapOpenCodeAtStartup();
@@ -139,6 +147,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       terminalRuntime,
       dictationRuntime,
       messageStreamRuntime,
+      openChamberAgentEventsWebSocketRuntime,
     };
   };
 

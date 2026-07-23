@@ -2,7 +2,6 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   parseLeadingCommand,
   executeMessengerCommand,
-  stripBtwSuffix,
   stripQueueSuffix,
 } from './messenger-commands.js';
 
@@ -66,24 +65,6 @@ describe('parseLeadingCommand', () => {
 });
 
 describe('suffix parsers', () => {
-  it('detects btw only at supported suffix positions', () => {
-    expect(stripBtwSuffix('Can you check the logs. btw')).toEqual({
-      text: 'Can you check the logs',
-      suffix: 'punctuation',
-    });
-    expect(stripBtwSuffix('Is the rollback risky! btw')).toMatchObject({
-      text: 'Is the rollback risky',
-    });
-    expect(stripBtwSuffix('What about metrics btw.')).toMatchObject({
-      text: 'What about metrics',
-    });
-    expect(stripBtwSuffix('Can you test this?\nbtw')).toMatchObject({
-      text: 'Can you test this?',
-      suffix: 'final-line',
-    });
-    expect(stripBtwSuffix('btw fix this')).toBeNull();
-  });
-
   it('detects queue only as punctuation plus queue suffix', () => {
     expect(stripQueueSuffix('Add the tests. queue')).toEqual({
       text: 'Add the tests',
@@ -503,56 +484,26 @@ describe('/resume', () => {
 describe('/fork', () => {
   const binding = { sessionId: 'ses-1', projectPath: '/p' };
   it('requires a session', async () => {
-    const { result } = await run('/fork', { bridgeOps: { forkSession: vi.fn(), listForkCandidates: vi.fn() } });
+    const { result } = await run('/fork', { bridgeOps: { forkSession: vi.fn() } });
     expect(result.reply).toMatch(/No session/);
   });
-  it('lists user messages with no args', async () => {
+  it('forks from the last user message straight away', async () => {
+    const forkSession = vi.fn(async () => ({ ok: true, threadId: 'th-2' }));
     const { result } = await run('/fork', {
       binding,
-      bridgeOps: {
-        forkSession: vi.fn(),
-        listForkCandidates: async () => [{ preview: 'Add auth', when: 'now' }],
-      },
+      bridgeOps: { forkSession },
     });
-    expect(result.reply).toContain('Fork this session');
-    expect(result.reply).toContain('Add auth');
+    expect(forkSession).toHaveBeenCalledWith();
+    expect(result.reply).toContain('Session forked from your last message');
+    expect(result.reply).toContain('<#th-2>');
   });
-  it('forks from the selected message', async () => {
-    const forkSession = vi.fn(async () => ({ ok: true, threadId: 'th-2' }));
-    const { result } = await run('/fork 2', {
+  it('surfaces a fork failure', async () => {
+    const { result } = await run('/fork', {
       binding,
-      bridgeOps: { forkSession, listForkCandidates: vi.fn() },
+      bridgeOps: { forkSession: async () => ({ ok: false, error: 'no user message found' }) },
     });
-    expect(forkSession).toHaveBeenCalledWith({ index: 2 });
-    expect(result.reply).toContain('Session forked');
-  });
-  it('rejects a non-numeric pick', async () => {
-    const { result } = await run('/fork abc', {
-      binding,
-      bridgeOps: { forkSession: vi.fn(), listForkCandidates: vi.fn() },
-    });
-    expect(result.reply).toMatch(/Usage/);
-  });
-});
-
-describe('/btw', () => {
-  it('starts a side thread without aborting the current session', async () => {
-    const btwQuestion = vi.fn(async () => ({ ok: true, threadId: 'th-side' }));
-    const { result } = await run('/btw should we add a migration?', {
-      binding: { sessionId: 'ses-1', projectPath: '/p' },
-      bridgeOps: { btwQuestion },
-    });
-    expect(btwQuestion).toHaveBeenCalledWith({ text: 'should we add a migration?' });
-    expect(result.reply).toContain('<#th-side>');
-    expect(result.reply).toContain('left alone');
-  });
-
-  it('requires an active session', async () => {
-    const { result } = await run('/btw side task', {
-      binding: { sessionId: null },
-      bridgeOps: { btwQuestion: vi.fn() },
-    });
-    expect(result.reply).toMatch(/No session/);
+    expect(result.reply).toContain('Fork failed');
+    expect(result.reply).toContain('no user message found');
   });
 });
 
@@ -645,10 +596,24 @@ describe('/shell command', () => {
   });
 });
 
-describe('/help lists the extended command set', () => {
-  it('mentions queue, fork, share, resume, worktrees and mention-mode', async () => {
+describe('/help lists Discord slash commands', () => {
+  it('mentions the registered slash set and points to /help all for text commands', async () => {
     const { result } = await run('/help');
-    for (const cmd of ['/queue', '/btw', '/fork', '/share', '/resume', '/new-worktree', '/merge-worktree', '/mention-mode', '/clear-queue', '/session', '/shell']) {
+    expect(result.reply).toContain('**Discord slash commands**');
+    for (const cmd of ['/queue', '/fork', '/share', '/resume', '/new-worktree', '/merge-worktree', '/mention-mode', '/clear-queue', '/session', '/shell']) {
+      expect(result.reply).toContain(cmd);
+    }
+    expect(result.reply).toContain('/help all');
+    // Text-only commands stay off the default Discord /help surface.
+    expect(result.reply).not.toContain('/add-project');
+    expect(result.reply).not.toContain('/compact');
+    expect(result.reply).not.toContain('/tunnel');
+  });
+
+  it('/help all lists the full messenger catalog including text-only commands', async () => {
+    const { result } = await run('/help all');
+    expect(result.reply).toContain('**OpenChamber agent messenger commands**');
+    for (const cmd of ['/add-project', '/compact', '/tunnel', '/worktrees', '/mcp', '/queue']) {
       expect(result.reply).toContain(cmd);
     }
   });

@@ -195,6 +195,78 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts discord config and clears it with null', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      discord: {
+        botToken: ' tok ',
+        guildId: '123',
+        listenerEnabled: false,
+        autoReply: true,
+        projectBindings: [{ channelId: 'c1', projectPath: '/p', projectLabel: 'P' }],
+      },
+    })).toEqual({
+      discord: {
+        botToken: 'tok',
+        guildId: '123',
+        listenerEnabled: false,
+        autoReply: true,
+        projectBindings: [{ channelId: 'c1', projectPath: '/p', projectLabel: 'P' }],
+      },
+    });
+
+    expect(helpers.sanitizeSettingsUpdate({ discord: null })).toEqual({ discord: null });
+
+    const merged = helpers.mergePersistedSettings(
+      { themeId: 'default', discord: { botToken: 'tok' } },
+      { discord: null },
+    );
+    expect(merged.discord).toBeUndefined();
+    expect(merged.themeId).toBe('default');
+  });
+
+  it('normalizes discord defaultReplyMode and guildPolicies, dropping invalid entries', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      discord: {
+        botToken: 'tok',
+        defaultReplyMode: 'mention',
+        guildPolicies: {
+          '111': { enabled: true, replyMode: 'always' },
+          '222': { enabled: false },
+          '333': { replyMode: 'inherit' },
+          '': { enabled: true },
+          '444': { replyMode: 'bogus', enabled: 'yes' },
+          '555': {},
+        },
+      },
+    })).toEqual({
+      discord: {
+        botToken: 'tok',
+        defaultReplyMode: 'mention',
+        guildPolicies: {
+          '111': { enabled: true, replyMode: 'always' },
+          '222': { enabled: false },
+          '333': { replyMode: 'inherit' },
+        },
+      },
+    });
+
+    expect(helpers.sanitizeSettingsUpdate({
+      discord: {
+        botToken: 'tok',
+        defaultReplyMode: 'bogus',
+        guildPolicies: null,
+      },
+    })).toEqual({
+      discord: {
+        botToken: 'tok',
+      },
+    });
+  });
+
   it('accepts shortcut overrides as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 

@@ -89,6 +89,12 @@ import { createNotificationTemplateRuntime } from './lib/notifications/template-
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { createMessengerSyncRouter } from './lib/messenger/messenger-sync.js';
+import { syncSystemSkills } from './lib/opencode/system-skills.js';
+import {
+  createOpenChamberAgentEventsWebSocketRuntime,
+  broadcast as openChamberAgentEventsBroadcast,
+} from './lib/messenger/websocket.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
@@ -502,6 +508,7 @@ let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
 let dictationRuntime = null;
 let messageStreamRuntime = null;
+let openChamberAgentEventsWebSocketRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
   hmrState,
@@ -992,6 +999,7 @@ const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
   createDictationRuntime,
   createMessageStreamWsRuntime,
+  createOpenChamberAgentEventsWebSocketRuntime,
   createServerStartupRuntime,
 });
 
@@ -1142,6 +1150,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getMessageStreamRuntime: () => messageStreamRuntime,
   setMessageStreamRuntime: (value) => {
     messageStreamRuntime = value;
+  },
+  getOpenChamberAgentEventsWebSocketRuntime: () => openChamberAgentEventsWebSocketRuntime,
+  setOpenChamberAgentEventsWebSocketRuntime: (value) => {
+    openChamberAgentEventsWebSocketRuntime = value;
   },
   shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode,
   getOpenCodePort: () => openCodePort,
@@ -1536,6 +1548,45 @@ async function main(options = {}) {
     permissionAutoAcceptRuntime,
   });
 
+  // Discord messenger bridge routes. The bridge plumbing lets the Discord
+  // listener forward inbound messages to OpenCode and mirror streamed
+  // responses back into the originating channel/thread.
+  const { router: messengerRouter, discordListener } = createMessengerSyncRouter({
+    // Bridge approval button clicks to both the WS clients (UI) and
+    // the global event hub (so the bridge's initApprovalListener can
+    // respond to OpenCode).
+    broadcastEvent: (type, data) => {
+      try { openChamberAgentEventsBroadcast(type, data); } catch {}
+      try { globalMessageStreamHub?.publishEvent?.(type, data); } catch {}
+    },
+    globalEventHub: globalMessageStreamHub,
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders,
+    listProjects: async () => {
+      const settings = await readSettingsFromDiskMigrated();
+      return sanitizeProjects(settings?.projects || []);
+    },
+    readSettings: readSettingsFromDiskMigrated,
+    persistSettings,
+    sanitizeProjects,
+    // Lets the bridge tell agents how to reach the scheduling API locally.
+    getLocalApiBaseUrl: () => `http://127.0.0.1:${tunnelRuntimeContext.getActivePort() || port}`,
+    // Discord /schedule writes into the SAME per-project scheduler the web
+    // UI's Scheduled-tasks dialog manages, so both stay in sync.
+    projectConfigRuntime,
+    scheduledTasksRuntime,
+    startTunnelWithNormalizedRequest,
+    refreshOpenCodeAfterConfigChange,
+    // Mirroring (parts, permissions, questions, todos, title fallback) rides
+    // on the shared global event hub — start it when a listener starts so a
+    // headless server doesn't depend on a browser client connecting first.
+    ensureEventStream: () => ensureGlobalWatcherStarted(),
+  });
+  app.use('/api/messenger', messengerRouter);
+  // Legacy aliases — same router, kept for in-flight clients / system skills.
+  app.use('/api/openchamber-agent/messenger', messengerRouter);
+  app.use('/api/otto/messenger', messengerRouter);
+
   const previewProxyRuntime = createPreviewProxyRuntime({
     crypto,
     URL,
@@ -1603,12 +1654,154 @@ async function main(options = {}) {
   terminalRuntime = startupPipelineResult.terminalRuntime;
   dictationRuntime = startupPipelineResult.dictationRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
+  openChamberAgentEventsWebSocketRuntime = startupPipelineResult.openChamberAgentEventsWebSocketRuntime;
 
   try {
     await scheduledTasksRuntime.start();
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
   }
+
+  // Install / refresh OpenChamber-managed system skills (e.g. create-project)
+  // in the user skill dir so OpenCode sessions can load them natively. Runs
+  // after the startup pipeline so the embedded API base URL uses the final
+  // bound port. Best-effort — a failure here must never block startup.
+  try {
+    const results = syncSystemSkills({
+      apiBaseUrl: `http://127.0.0.1:${tunnelRuntimeContext.getActivePort() || port}`,
+    });
+    const changed = results.filter((r) => r.action === 'installed' || r.action === 'updated');
+    if (changed.length > 0) {
+      console.log(
+        '[SystemSkills] Synced:',
+        changed.map((r) => `${r.name} (${r.action})`).join(', '),
+      );
+    }
+  } catch (error) {
+    console.warn('[SystemSkills] Failed to sync system skills:', error?.message || error);
+  }
+
+  // Auto-start Discord Gateway listener if a bot token is saved in settings.
+  // This lets the integration survive server restarts without manual re-start.
+  // The bridge is enabled by default, routing all incoming messages through OpenCode
+  // and streaming responses back into the originating channel/thread.
+  // Includes retry logic and periodic health checks to recover from disconnects.
+  (async () => {
+    const AUTO_START_RETRIES = 5;
+    const AUTO_START_RETRY_DELAY_MS = 3000;
+    const HEALTH_CHECK_INTERVAL_MS = 60_000;
+
+    // Resolve project bindings once, outside the retry loop.
+    let projects = [];
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      projects = sanitizeProjects(settings?.projects || []);
+    } catch {
+      // ignore — defaults to empty
+    }
+
+    const resolveProject = () => {
+      if (projects.length === 1) {
+        const p = projects[0];
+        return p?.path ? { path: p.path, label: p.label ?? p.path } : null;
+      }
+      return null;
+    };
+
+    // Try auto-start with retries
+    for (let attempt = 1; attempt <= AUTO_START_RETRIES; attempt++) {
+      try {
+        const settings = await readSettingsFromDiskMigrated();
+        const discordConfig = settings?.discord;
+        if (discordConfig?.botToken) {
+          if (discordConfig.listenerEnabled === false) {
+            console.log('[Discord] Listener disabled in saved config — skipping auto-start');
+            break;
+          }
+          const result = discordListener.start(discordConfig.botToken, {
+            guildId: discordConfig.guildId || undefined,
+            autoReply: discordConfig.autoReply !== false,
+            scopeToGuild: Boolean(discordConfig.scopeToGuild),
+            bridgeEnabled: true,
+            resolveProject,
+            trustedBotIds: discordConfig.trustedBotIds,
+            registerDynamicSlashCommands: Boolean(discordConfig.registerDynamicSlashCommands),
+            defaultReplyMode: discordConfig.defaultReplyMode,
+            guildPolicies: discordConfig.guildPolicies,
+          });
+          console.log(
+            '[Discord] Listener auto-start:',
+            result?.alreadyRunning ? 'already running' : 'started',
+            '(connected=' + result?.connected + ')'
+          );
+          // The bridge needs the shared global event hub running to mirror
+          // OpenCode output into Discord — don't wait for a browser client.
+          void ensureGlobalWatcherStarted().catch((error) => {
+            console.warn('[Discord] Global event watcher startup failed:', error?.message ?? error);
+          });
+          break; // Success — exit retry loop
+        } else {
+          console.log('[Discord] No bot token in saved config — skipping auto-start');
+          break; // No token, nothing to retry
+        }
+      } catch (err) {
+        const isLastAttempt = attempt === AUTO_START_RETRIES;
+        console.warn(
+          `[Discord] Auto-start attempt ${attempt}/${AUTO_START_RETRIES} failed:`, err?.message ?? err,
+          isLastAttempt ? ' — giving up' : ` — retrying in ${AUTO_START_RETRY_DELAY_MS}ms`,
+        );
+        if (isLastAttempt) break;
+        await new Promise((r) => setTimeout(r, AUTO_START_RETRY_DELAY_MS));
+      }
+    }
+
+    // Periodic health check — re-reads settings each tick so Disconnect /
+    // Stop listening are respected (never restart from a stale boot-time
+    // closed-over config). Recovers only when listening is still enabled.
+    const healthCheckTimer = setInterval(async () => {
+      try {
+        const settings = await readSettingsFromDiskMigrated();
+        const cfg = settings?.discord;
+        if (!cfg?.botToken) return;
+
+        if (cfg.listenerEnabled === false) {
+          const status = discordListener.status(cfg.botToken);
+          if (status.running) {
+            console.log('[Discord] Health check: listener disabled in settings — stopping');
+            discordListener.stop(cfg.botToken);
+          }
+          return;
+        }
+
+        const status = discordListener.status(cfg.botToken);
+        if (!status.running || !status.connected) {
+          console.log(
+            '[Discord] Health check: listener not connected (running=' + status.running +
+            ', connected=' + status.connected + ') — restarting...'
+          );
+          discordListener.stop(cfg.botToken);
+          const startResult = discordListener.start(cfg.botToken, {
+            guildId: cfg.guildId || undefined,
+            autoReply: cfg.autoReply !== false,
+            scopeToGuild: Boolean(cfg.scopeToGuild),
+            bridgeEnabled: true,
+            resolveProject,
+            trustedBotIds: cfg.trustedBotIds,
+            registerDynamicSlashCommands: Boolean(cfg.registerDynamicSlashCommands),
+            defaultReplyMode: cfg.defaultReplyMode,
+            guildPolicies: cfg.guildPolicies,
+          });
+          console.log(
+            '[Discord] Health check: restart result — running=' + startResult.running +
+            ', connected=' + startResult.connected
+          );
+        }
+      } catch (err) {
+        console.warn('[Discord] Health check error:', err?.message ?? err);
+      }
+    }, HEALTH_CHECK_INTERVAL_MS);
+    healthCheckTimer.unref();
+  })();
 
   // Only opens a relay control socket when the user opted in (config enabled).
   // Reconcile the relay lifecycle from demand on startup: run it if any relay

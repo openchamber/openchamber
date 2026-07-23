@@ -30,6 +30,7 @@
  */
 
 import crypto from 'node:crypto';
+import { buildSlashCommandDefinitions } from './discord-commands.js';
 import { parseVerbosityLevel, VERBOSITY_LEVELS } from './messenger-verbosity.js';
 import {
   parsePermissionMode,
@@ -46,7 +47,7 @@ const VERBOSITY_DESCRIPTIONS = {
 
 // Commands we recognise. The `usage` text is shown by /help so order matters.
 const COMMAND_HELP = [
-  { name: 'help', usage: '/help', summary: 'Show this list' },
+  { name: 'help', usage: '/help [all]', summary: 'List Discord slash commands (or all messenger text commands with `/help all`)' },
   {
     name: 'status',
     usage: '/status',
@@ -160,13 +161,8 @@ const COMMAND_HELP = [
   },
   {
     name: 'fork',
-    usage: '/fork [n]',
-    summary: 'Branch from an earlier user message — `/fork` lists messages, `/fork 2` forks in a new thread',
-  },
-  {
-    name: 'btw',
-    usage: '/btw <side question>',
-    summary: 'Fork the current session into a new thread and answer a side question without interrupting this run',
+    usage: '/fork',
+    summary: 'Branch this session from your last message into a new thread',
   },
   { name: 'share', usage: '/share', summary: 'Generate a public URL for the current session' },
   { name: 'unshare', usage: '/unshare', summary: 'Revoke the public URL for the current session' },
@@ -288,29 +284,6 @@ export function parseLeadingCommand(text, { allowBang = false } = {}) {
   };
 }
 
-export function stripBtwSuffix(text) {
-  if (typeof text !== 'string') return null;
-  const original = text.trim();
-  if (!original) return null;
-
-  const finalLineMatch = original.match(/^(?<body>[\s\S]*?)\n\s*btw\s*$/i);
-  if (finalLineMatch?.groups?.body?.trim()) {
-    return { text: finalLineMatch.groups.body.trim(), suffix: 'final-line' };
-  }
-
-  const punctuationMatch = original.match(/^(?<body>[\s\S]*?)[.!]\s+btw\s*$/i);
-  if (punctuationMatch?.groups?.body?.trim()) {
-    return { text: punctuationMatch.groups.body.trim(), suffix: 'punctuation' };
-  }
-
-  const trailingSentenceMatch = original.match(/^(?<body>[\s\S]*?)\s+btw\.\s*$/i);
-  if (trailingSentenceMatch?.groups?.body?.trim()) {
-    return { text: trailingSentenceMatch.groups.body.trim(), suffix: 'trailing-sentence' };
-  }
-
-  return null;
-}
-
 export function stripQueueSuffix(text) {
   if (typeof text !== 'string') return null;
   const original = text.trim();
@@ -392,6 +365,29 @@ export async function executeMessengerCommand({
 
   switch (cmd) {
     case 'help': {
+      const wantAll = command.args.trim().toLowerCase() === 'all';
+      // Discord /help defaults to the registered slash set so it matches what
+      // Discord autocomplete shows. `/help all` (and non-Discord surfaces) keep
+      // the full messenger text-command catalog.
+      if (ctx?.type === 'discord' && !wantAll) {
+        const byName = new Map(COMMAND_HELP.map((c) => [c.name, c]));
+        const lines = ['**Discord slash commands**', ''];
+        for (const slash of buildSlashCommandDefinitions()) {
+          if (COMMAND_ALIASES.has(slash.name)) {
+            lines.push(`\`/${slash.name}\` — ${slash.description}`);
+            continue;
+          }
+          const help = byName.get(slash.name);
+          lines.push(`\`${help?.usage ?? `/${slash.name}`}\` — ${help?.summary ?? slash.description}`);
+        }
+        lines.push('');
+        lines.push('Additional text-only messenger commands: `/help all`.');
+        lines.push(
+          'Free text is sent to OpenCode as a normal chat prompt. The mapped project, model and agent are picked from the channel/thread automatically.',
+        );
+        return { reply: lines.join('\n') };
+      }
+
       const lines = ['**OpenChamber agent messenger commands**', ''];
       for (const c of COMMAND_HELP) lines.push(`\`${c.usage}\` — ${c.summary}`);
       lines.push('');
@@ -1061,47 +1057,13 @@ export async function executeMessengerCommand({
 
     case 'fork': {
       if (!sessionId) return { reply: '✗ No session is active on this conversation — nothing to fork.' };
-      if (!bridgeOps?.forkSession || !bridgeOps?.listForkCandidates) {
+      if (!bridgeOps?.forkSession) {
         return { reply: '✗ `/fork` is not available on this surface.' };
       }
-      const arg = command.args.trim();
-      if (!arg) {
-        const candidates = await bridgeOps.listForkCandidates().catch(() => []);
-        if (!candidates || candidates.length === 0) {
-          return { reply: '_(no user messages found in this session to fork from)_' };
-        }
-        const lines = ['**Fork this session** — reply `/fork <n>` to branch from that message', ''];
-        candidates.slice(0, 25).forEach((m, i) => {
-          lines.push(`**${i + 1}.** ${m.preview} — _${m.when ?? ''}_`);
-        });
-        return { reply: lines.join('\n') };
-      }
-      const index = Number.parseInt(arg, 10);
-      if (!Number.isFinite(index) || index < 1) {
-        return { reply: '✗ Usage: `/fork <n>` where `n` comes from the `/fork` list.' };
-      }
-      const r = await bridgeOps.forkSession({ index });
+      const r = await bridgeOps.forkSession();
       if (!r.ok) return { reply: `✗ Fork failed: ${r.error ?? 'unknown error'}` };
       return {
-        reply: `✓ Session forked${r.threadId ? ` — continue in <#${r.threadId}>` : ''}. The fork continues as if later messages were never sent.`,
-      };
-    }
-
-    case 'btw': {
-      const text = [command.args, command.body].filter(Boolean).join('\n').trim();
-      if (!text) {
-        return { reply: '✗ Usage: `/btw <side question>` — e.g. `/btw how should we test this?`.' };
-      }
-      if (!sessionId) {
-        return { reply: '✗ No session is active on this conversation — send a regular message first, then ask a side question with `/btw`.' };
-      }
-      if (!bridgeOps?.btwQuestion) {
-        return { reply: '✗ `/btw` is not available on this surface.' };
-      }
-      const r = await bridgeOps.btwQuestion({ text });
-      if (!r.ok) return { reply: `✗ Could not start side thread: ${r.error ?? 'unknown error'}` };
-      return {
-        reply: `↪ Side thread started${r.threadId ? ` in <#${r.threadId}>` : ''}. The current run was left alone.`,
+        reply: `✓ Session forked from your last message${r.threadId ? ` — continue in <#${r.threadId}>` : ''}.`,
       };
     }
 

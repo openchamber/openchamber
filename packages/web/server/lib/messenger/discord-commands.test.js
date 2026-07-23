@@ -28,12 +28,18 @@ describe('buildSlashCommandDefinitions', () => {
       'login',
       'help',
       'status',
-      'btw',
+      'fork',
       'queue',
       'reload-opencode',
     ]) {
       expect(names).toContain(name);
     }
+  });
+
+  it('keeps /help description aligned with the slash-only help surface', () => {
+    const help = defs.find((d) => d.name === 'help');
+    expect(help?.description).toMatch(/slash commands/i);
+    expect(help?.description).toMatch(/help all/i);
   });
 
   it('does not register stub or low-frequency parity commands as native slash', () => {
@@ -76,9 +82,7 @@ describe('buildSlashCommandDefinitions', () => {
     const withOptions = defs.filter((d) => Array.isArray(d.options) && d.options.length > 0);
     expect(withOptions.map((d) => d.name).sort()).toEqual(
       [
-        'btw',
         'clear-queue',
-        'fork',
         'new-worktree',
         'queue',
         'resume',

@@ -7,10 +7,10 @@
  * gateway READY so a fresh bot — or a bot that gained a new command after an
  * update — works out of the box with autocomplete suggestions and dropdowns.
  *
- * Broader messenger commands remain available as text/`!` commands via
- * `messenger-commands.js` `/help`. Keeping the Discord slash surface small
- * preserves room under Discord's 100-command hard limit for optional dynamic
- * OpenCode `-cmd` / `-skill` registration.
+ * Broader messenger text commands remain available via plain messages and
+ * `/help all`. Keeping the Discord slash surface small preserves room under
+ * Discord's 100-command hard limit for optional dynamic OpenCode `-cmd` /
+ * `-skill` registration.
  *
  * Registration is guild-scoped when a guildId is known (instant propagation),
  * otherwise global (can take up to an hour to appear). Both are idempotent:
@@ -51,7 +51,7 @@ export function sanitizeDiscordCommandName(name, suffix = '') {
  */
 export function buildSlashCommandDefinitions() {
   return [
-    { name: 'help', description: 'List OpenChamber agent messenger commands' },
+    { name: 'help', description: 'List Discord slash commands (/help all for every text command)' },
     { name: 'status', description: 'Show the session, project, model and agent for this conversation' },
     { name: 'abort', description: 'Stop the current OpenCode turn' },
     { name: 'new', description: 'Drop the current session and start fresh on the next message' },
@@ -78,20 +78,7 @@ export function buildSlashCommandDefinitions() {
         { type: STRING_OPTION, name: 'session', description: 'List number or session id (leave empty to list)', required: false },
       ],
     },
-    {
-      name: 'fork',
-      description: 'Branch the session from an earlier user message',
-      options: [
-        { type: STRING_OPTION, name: 'message', description: 'List number from /fork (leave empty to list)', required: false },
-      ],
-    },
-    {
-      name: 'btw',
-      description: 'Ask a side question in a new forked thread without interrupting this run',
-      options: [
-        { type: STRING_OPTION, name: 'question', description: 'The side question for the forked thread', required: true },
-      ],
-    },
+    { name: 'fork', description: 'Branch this session from your last message' },
     {
       name: 'queue',
       description: 'Queue a message to send after the current response finishes',
