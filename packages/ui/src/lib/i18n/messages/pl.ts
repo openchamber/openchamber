@@ -1695,6 +1695,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.switchToTreeView': 'Przełącz na widok drzewa',
   'filesView.error.jsonViewerUnavailable': 'Podgląd JSON jest niedostępny',
   'filesView.error.previewUnavailable': 'Podgląd jest niedostępny',
+  'filesView.documentPreview.unavailable': 'Tego dokumentu nie można wyświetlić jako tekstu.',
+  'filesView.editor.saveOriginal': 'Zapisz oryginał',
   'filesView.error.readFileFailed': 'Nie udało się odczytać pliku',
   'filesView.error.switchToEditMode': 'Przełącz do trybu edycji, aby naprawić problem.',
   'filesView.error.switchToTextMode': 'Przełącz do trybu tekstowego, aby zobaczyć surową zawartość.',

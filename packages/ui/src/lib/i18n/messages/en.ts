@@ -1212,6 +1212,8 @@ export const dict = {
   'filesView.error.switchToTextMode': 'Switch to text mode to view raw content.',
   'filesView.warning.largeFilePreviewLimited': 'This file is large ({sizeKb}KB). Preview may be limited.',
   'filesView.error.previewUnavailable': 'Preview unavailable',
+  'filesView.documentPreview.unavailable': 'This document cannot be previewed as text.',
+  'filesView.editor.saveOriginal': 'Save original',
   'filesView.error.switchToEditMode': 'Switch to edit mode to fix the issue.',
   'filesView.error.readFileFailed': 'Failed to read file',
   'filesView.editor.htmlPreviewTitle': 'HTML Preview',

@@ -1040,6 +1040,8 @@ export const dict = {
   'filesView.error.switchToTextMode': 'Passez en mode texte pour afficher le contenu brut.',
   'filesView.warning.largeFilePreviewLimited': 'Ce fichier est volumineux ({sizeKb}KB). L\'aperçu peut être limité.',
   'filesView.error.previewUnavailable': 'Aperçu indisponible',
+  'filesView.documentPreview.unavailable': 'Ce document ne peut pas être prévisualisé sous forme de texte.',
+  'filesView.editor.saveOriginal': 'Enregistrer l’original',
   'filesView.error.switchToEditMode': 'Passez en mode édition pour résoudre le problème.',
   'filesView.error.readFileFailed': 'Échec de la lecture du fichier',
   'filesView.editor.htmlPreviewTitle': 'Aperçu HTML',
