@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isAutoFollowReleaseKey, isMiddleButtonAutoScrollIntent, shouldRepinReleasedAutoFollow } from "./useChatAutoFollow"
+import { isAutoFollowReleaseKey, isMiddleButtonAutoScrollIntent, scheduleAutoFollowRepin, shouldRepinReleasedAutoFollow } from "./useChatAutoFollow"
 
 class MockElement {
   parent: MockElement | null = null
@@ -80,5 +80,40 @@ describe("useChatAutoFollow intent helpers", () => {
     expect(shouldRepinReleasedAutoFollow(false, false)).toBe(false)
     expect(shouldRepinReleasedAutoFollow(true, false)).toBe(true)
     expect(shouldRepinReleasedAutoFollow(false, true)).toBe(true)
+  })
+
+  test("waits and re-checks the delayed re-pin sequence", () => {
+    const container = new MockElement() as unknown as HTMLElement
+    let nearBottom = true
+    let elapsed = 0
+    let repins = 0
+    let scheduledDelay = 0
+    let scheduledCallback = () => {}
+    const schedule = () => scheduleAutoFollowRepin({
+      delayMs: 1200,
+      getContainer: () => container,
+      shouldRepin: () => nearBottom,
+      onElapsed: () => { elapsed += 1 },
+      repin: () => { repins += 1 },
+      scheduleTimer: (callback, delayMs) => {
+        scheduledCallback = callback
+        scheduledDelay = delayMs
+        return 1 as unknown as ReturnType<typeof setTimeout>
+      },
+    })
+
+    schedule()
+    expect(scheduledDelay).toBe(1200)
+    expect(repins).toBe(0)
+    nearBottom = false
+    scheduledCallback()
+    expect(elapsed).toBe(1)
+    expect(repins).toBe(0)
+
+    nearBottom = true
+    schedule()
+    scheduledCallback()
+    expect(elapsed).toBe(2)
+    expect(repins).toBe(1)
   })
 })

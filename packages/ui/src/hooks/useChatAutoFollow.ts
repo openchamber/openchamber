@@ -162,6 +162,24 @@ export const shouldRepinReleasedAutoFollow = (scrollingDown: boolean, atTrueBott
     return scrollingDown || atTrueBottom;
 };
 
+interface DelayedRepinOptions {
+    delayMs: number;
+    getContainer: () => HTMLElement | null;
+    shouldRepin: (container: HTMLElement) => boolean;
+    onElapsed: () => void;
+    repin: () => void;
+    scheduleTimer?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
+}
+
+export const scheduleAutoFollowRepin = ({ delayMs, getContainer, shouldRepin, onElapsed, repin, scheduleTimer = setTimeout }: DelayedRepinOptions): ReturnType<typeof setTimeout> => {
+    return scheduleTimer(() => {
+        onElapsed();
+        const container = getContainer();
+        if (!container || !shouldRepin(container)) return;
+        repin();
+    }, Math.max(0, delayMs));
+};
+
 const nestedScrollableCanConsumeUp = (root: HTMLElement, target: EventTarget | null): boolean => {
     const nested = nestedScrollableTarget(root, target);
     if (!nested) return false;
@@ -451,15 +469,18 @@ export const useChatAutoFollow = ({
 
     const scheduleRepinAfterGrace = React.useCallback((delayMs: number) => {
         if (delayedRepinTimerRef.current !== null) return;
-        delayedRepinTimerRef.current = setTimeout(() => {
-            delayedRepinTimerRef.current = null;
-            const container = scrollRef.current;
-            if (!container) return;
-            if (stateRef.current !== 'released') return;
-            if (!isNearBottom(container, isMobileRef.current)) return;
-            setStateValue('following');
-            scrollToBottom(true);
-        }, Math.max(0, delayMs));
+        delayedRepinTimerRef.current = scheduleAutoFollowRepin({
+            delayMs,
+            getContainer: () => scrollRef.current,
+            shouldRepin: (container) => stateRef.current === 'released' && isNearBottom(container, isMobileRef.current),
+            onElapsed: () => {
+                delayedRepinTimerRef.current = null;
+            },
+            repin: () => {
+                setStateValue('following');
+                scrollToBottom(true);
+            },
+        });
     }, [scrollToBottom, setStateValue]);
 
     // ── per-session snapshot persistence (kept; restore still goes to bottom) ─
