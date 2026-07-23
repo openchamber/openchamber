@@ -3,7 +3,7 @@ index 0000000000000000000000000000000000000000..11111111111111111111111111111111
 --- a/node_modules/ghostty-web/dist/ghostty-web.js
 +++ b/node_modules/ghostty-web/dist/ghostty-web.js
 @@ -1538,1 +1538,1 @@
--    if (A.grapheme_len > 0 && ((k = this.currentBuffer) != null && k.getGraphemeString) ? N = this.currentBuffer.getGraphemeString(g, B) : N = A.codepoint == null || A.codepoint <= 0 || A.codepoint > 1114111 || A.codepoint >= 55296 && A.codepoint <= 57343 ? " " : String.fromCodePoint(A.codepoint), this.ctx.fillText(N, w, s), A.flags & e.FAINT && (this.ctx.globalAlpha = 1), A.flags & e.UNDERLINE) {
+-    if (A.grapheme_len > 0 && ((k = this.currentBuffer) != null && k.getGraphemeString) ? N = this.currentBuffer.getGraphemeString(g, B) : N = String.fromCodePoint(A.codepoint || 32), this.ctx.fillText(N, w, s), A.flags & e.FAINT && (this.ctx.globalAlpha = 1), A.flags & e.UNDERLINE) {
 +    if (A.grapheme_len > 0 && ((k = this.currentBuffer) != null && k.getGraphemeString) ? N = this.currentBuffer.getGraphemeString(g, B) : N = A.codepoint == null || A.codepoint <= 0 || A.codepoint > 1114111 || A.codepoint >= 55296 && A.codepoint <= 57343 ? " " : String.fromCodePoint(A.codepoint), this.renderBlockChar(A.codepoint || 32, E, C, I) || this.ctx.fillText(N, w, s), A.flags & e.FAINT && (this.ctx.globalAlpha = 1), A.flags & e.UNDERLINE) {
 @@ -1557,5 +1557,40 @@
    }
