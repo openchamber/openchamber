@@ -3,6 +3,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
 import {
   buildEmbeddedSessionChatURL,
+  focusEmbeddedSessionChatComposer,
   getOrCreateEmbeddedSessionChatURL,
   getEmbeddedSessionChatOriginSessionId,
   isEmbeddedSessionChat,
@@ -11,6 +12,7 @@ import {
 } from './contextPanelEmbeddedChat';
 
 const originalWindow = globalThis.window;
+const originalDocument = globalThis.document;
 
 const installWindowLocation = (href = 'http://127.0.0.1:5173/app') => {
   const url = new URL(href);
@@ -46,6 +48,10 @@ afterAll(() => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: originalWindow,
+  });
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: originalDocument,
   });
 });
 
@@ -171,5 +177,22 @@ describe('getEmbeddedSessionChatOriginSessionId', () => {
     installWindowLocation('http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=%20%20ses_child%20%20');
     resetEmbeddedSessionChatCache();
     expect(getEmbeddedSessionChatOriginSessionId()).toBe('ses_child');
+  });
+});
+
+describe('focusEmbeddedSessionChatComposer', () => {
+  test('focuses the matching embedded chat iframe composer', () => {
+    const focusCalls: string[] = [];
+    const iframe = {
+      contentWindow: { postMessage: (message: { type: string }) => focusCalls.push(message.type) },
+      src: 'http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=ses_side',
+    } as unknown as HTMLIFrameElement;
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: { querySelectorAll: () => [iframe] },
+    });
+
+    expect(focusEmbeddedSessionChatComposer('ses_side')).toBe(true);
+    expect(focusCalls).toEqual(['openchamber:focus-chat-composer']);
   });
 });

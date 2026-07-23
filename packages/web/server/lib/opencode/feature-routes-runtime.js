@@ -6,6 +6,7 @@ import { registerGitHubRoutes } from '../github/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
+import { registerSideChatRoutes } from '../side-chats/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
@@ -100,6 +101,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenChamberEventClients,
       writeSseEvent,
       permissionAutoAcceptRuntime,
+      express,
+      isRequestOriginAllowed,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
@@ -253,6 +256,13 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       fsPromises,
       path,
       openchamberDataDir,
+    });
+    registerSideChatRoutes(app, {
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      resolveProjectDirectory,
+      isRequestOriginAllowed,
+      jsonParser: express.json({ limit: '16kb' }),
     });
     registerFsRoutes(app, {
       os,

@@ -24,6 +24,15 @@ W czacie wpisz `/` jako **pierwszy** znak wiadomości, aby otworzyć polecenia, 
 
 Wbudowane polecenia `init` i `review` można zresetować, ale nie usunąć.
 
+## Polecenia sterujące OpenChamber
+
+OpenChamber udostępnia też polecenia sterujące, które wykonują działania w aplikacji zamiast rozwijać zapisany prompt. Nie zarządza się nimi w **Settings → Commands**.
+
+- `/side [wiadomość]` — otwiera tymczasowy czat obok bieżącej rozmowy w aplikacji komputerowej lub webowej. Tekst po poleceniu jest wysyłany od razu. Zamknięcie czatu bocznego usuwa rozmowę, chyba że najpierw wybierzesz **Zachowaj**.
+- `/btw [wiadomość]` — alias `/side`.
+
+Dla jednej rozmowy może być otwarty tylko jeden czat boczny. Te polecenia są niedostępne na urządzeniach mobilnych, w VS Code i wewnątrz czatu bocznego.
+
 ## Fragmenty
 
 Fragment to wielokrotnego użytku tekst, do którego odwołujesz się w treści hasztagiem, jak `#signoff`. Zarządzaj nimi w **Settings → Snippets**.

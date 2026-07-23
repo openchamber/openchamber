@@ -6,6 +6,8 @@ import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
 import { normalizePath } from '@/lib/pathNormalization';
 import { mapWithConcurrency } from '@/lib/concurrency';
+import { filterDiscoverableSessions, useDisposableSideChatsStore } from '@/stores/useDisposableSideChatsStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -19,6 +21,7 @@ type GlobalSessionsState = {
   archivedSessions: Session[];
   sessionsByDirectory: Map<string, Session[]>;
   reviewTransferBySessionId: Map<string, ReviewTransferDirection>;
+  sessionsById: Map<string, Session>;
   mutationRevision: number;
   mutationRevisionBySessionId: Map<string, number>;
   hasLoaded: boolean;
@@ -30,6 +33,7 @@ type GlobalSessionsState = {
   upsertSessions: (sessions: Session[]) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
+  getSessionById: (sessionId: string) => Session | null;
   /** Drop every session from the previous runtime instance and go back to the
       unloaded state, so a fresh load runs against the new endpoint. */
   resetForRuntimeSwitch: () => void;
@@ -359,7 +363,19 @@ const applySnapshot = (
   activeSessions: Session[],
   archivedSessions: Session[],
   status: GlobalSessionsStatus,
+  baselineRevision?: number,
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
+  const sessionsById = new Map([...activeSessions, ...archivedSessions].map((session) => [session.id, session]));
+  if (baselineRevision !== undefined) {
+    for (const [sessionId, revision] of state.mutationRevisionBySessionId) {
+      if (revision <= baselineRevision || sessionsById.has(sessionId)) continue;
+      const current = state.sessionsById.get(sessionId);
+      if (current) sessionsById.set(sessionId, current);
+    }
+  }
+  useDisposableSideChatsStore.getState().reconcileSessions([...sessionsById.values()], getRuntimeKey());
+  activeSessions = filterDiscoverableSessions(activeSessions);
+  archivedSessions = filterDiscoverableSessions(archivedSessions);
   const nextActiveSessions = sameSessionList(state.activeSessions, activeSessions)
     ? state.activeSessions
     : activeSessions;
@@ -378,6 +394,8 @@ const applySnapshot = (
     && nextArchivedSessions === state.archivedSessions
     && nextSessionsByDirectory === state.sessionsByDirectory
     && nextReviewTransferMap === state.reviewTransferBySessionId
+    && state.sessionsById.size === sessionsById.size
+    && [...sessionsById].every(([id, session]) => state.sessionsById.get(id) === session)
     && state.hasLoaded
     && state.status === status
   ) {
@@ -389,6 +407,7 @@ const applySnapshot = (
     archivedSessions: nextArchivedSessions,
     sessionsByDirectory: nextSessionsByDirectory,
     reviewTransferBySessionId: nextReviewTransferMap,
+    sessionsById,
     hasLoaded: true,
     status,
   };
@@ -430,8 +449,15 @@ const applySessionUpserts = (state: GlobalSessionsState, sessions: Session[]): P
   const revisionPatch = mutationRevisionPatch(state, sessions.map((session) => session.id));
   let nextActiveSessions = state.activeSessions;
   let nextArchivedSessions = state.archivedSessions;
+  const sessionsById = new Map(state.sessionsById);
 
   for (const session of sessions) {
+    sessionsById.set(session.id, session);
+    if (filterDiscoverableSessions([session]).length === 0) {
+      nextActiveSessions = removeSessionFromList(nextActiveSessions, session.id);
+      nextArchivedSessions = removeSessionFromList(nextArchivedSessions, session.id);
+      continue;
+    }
     const existingSession = nextActiveSessions.find((candidate) => candidate.id === session.id)
       ?? nextArchivedSessions.find((candidate) => candidate.id === session.id)
       ?? null;
@@ -449,7 +475,7 @@ const applySessionUpserts = (state: GlobalSessionsState, sessions: Session[]): P
     nextActiveSessions === state.activeSessions
     && nextArchivedSessions === state.archivedSessions
   ) {
-    return revisionPatch;
+    return { ...revisionPatch, sessionsById };
   }
 
   return {
@@ -462,6 +488,7 @@ const applySessionUpserts = (state: GlobalSessionsState, sessions: Session[]): P
       ? state.reviewTransferBySessionId
       : buildReviewTransferMap(nextActiveSessions),
     ...revisionPatch,
+    sessionsById,
   };
 };
 
@@ -485,6 +512,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   archivedSessions: [],
   sessionsByDirectory: new Map(),
   reviewTransferBySessionId: new Map(),
+  sessionsById: new Map(),
   mutationRevision: 0,
   mutationRevisionBySessionId: new Map(),
   hasLoaded: false,
@@ -502,6 +530,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       archivedSessions: [],
       sessionsByDirectory: new Map(),
       reviewTransferBySessionId: new Map(),
+      sessionsById: new Map(),
       mutationRevision: 0,
       mutationRevisionBySessionId: new Map(),
       hasLoaded: false,
@@ -549,7 +578,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
             ? archivedResult.value
             : state.archivedSessions;
           const reconciled = overlayMutationsSince(state, fetchedActive, fetchedArchived, baselineRevision);
-          return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, status);
+          return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, status, baselineRevision);
         });
         const committed = get();
         return { activeSessions: committed.activeSessions, archivedSessions: committed.archivedSessions };
@@ -565,7 +594,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
             state.archivedSessions,
             baselineRevision,
           );
-          return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, 'error');
+          return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, 'error', baselineRevision);
         });
         const committed = get();
         return { activeSessions: committed.activeSessions, archivedSessions: committed.archivedSessions };
@@ -610,13 +639,31 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
 
     set((state) => {
-      let nextActiveSessions = replaceSessionsForDirectories(state.activeSessions, active.sessions, active.directories);
+      const currentDirectorySessions = [...state.sessionsById.values()];
+      const nextSessionsById = new Map(state.sessionsById);
+      for (const session of currentDirectorySessions) {
+        const directory = resolveGlobalSessionDirectory(session);
+        const mutationRevision = state.mutationRevisionBySessionId.get(session.id) ?? 0;
+        if (mutationRevision <= baselineRevision && directory && (active.directories.has(directory) || archived.directories.has(directory))) {
+          nextSessionsById.delete(session.id);
+        }
+      }
+      for (const session of [...active.sessions, ...archived.sessions]) nextSessionsById.set(session.id, session);
+      for (const [sessionId, revision] of state.mutationRevisionBySessionId) {
+        if (revision <= baselineRevision) continue;
+        const current = state.sessionsById.get(sessionId);
+        if (current) nextSessionsById.set(sessionId, current);
+        else nextSessionsById.delete(sessionId);
+      }
+      useDisposableSideChatsStore.getState().reconcileSessions([...nextSessionsById.values()], getRuntimeKey());
+
+      let nextActiveSessions = replaceSessionsForDirectories(state.activeSessions, filterDiscoverableSessions(active.sessions), active.directories);
       nextActiveSessions = mergeSessionLists(nextActiveSessions, fallbackActive);
       if (sameSessionList(state.activeSessions, nextActiveSessions)) {
         nextActiveSessions = state.activeSessions;
       }
 
-      let nextArchivedSessions = replaceSessionsForDirectories(state.archivedSessions, archived.sessions, archived.directories);
+      let nextArchivedSessions = replaceSessionsForDirectories(state.archivedSessions, filterDiscoverableSessions(archived.sessions), archived.directories);
       if (sameSessionList(state.archivedSessions, nextArchivedSessions)) {
         nextArchivedSessions = state.archivedSessions;
       }
@@ -624,6 +671,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       const reconciled = overlayMutationsSince(state, nextActiveSessions, nextArchivedSessions, baselineRevision);
       nextActiveSessions = reconciled.activeSessions;
       nextArchivedSessions = reconciled.archivedSessions;
+      const sessionsById = nextSessionsById;
 
       const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
         ? state.sessionsByDirectory
@@ -633,6 +681,8 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         nextActiveSessions === state.activeSessions
         && nextArchivedSessions === state.archivedSessions
         && nextSessionsByDirectory === state.sessionsByDirectory
+        && state.sessionsById.size === sessionsById.size
+        && [...sessionsById].every(([id, session]) => state.sessionsById.get(id) === session)
       ) {
         return state;
       }
@@ -644,6 +694,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         reviewTransferBySessionId: nextActiveSessions === state.activeSessions
           ? state.reviewTransferBySessionId
           : buildReviewTransferMap(nextActiveSessions),
+        sessionsById,
       };
     });
 
@@ -652,13 +703,17 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 
   upsertSession: (session) => {
+    useDisposableSideChatsStore.getState().reconcileSessions([session], getRuntimeKey());
     set((state) => applySessionUpserts(state, [session]));
   },
 
   upsertSessions: (sessions) => {
     if (sessions.length === 0) return;
+    useDisposableSideChatsStore.getState().reconcileSessions(sessions, getRuntimeKey());
     set((state) => applySessionUpserts(state, sessions));
   },
+
+  getSessionById: (sessionId) => get().sessionsById.get(sessionId) ?? null,
 
   removeSessions: (ids) => {
     const idSet = ids instanceof Set ? ids : new Set(ids);
@@ -670,12 +725,14 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       const revisionPatch = mutationRevisionPatch(state, idSet);
       const nextActiveSessions = state.activeSessions.filter((session) => !idSet.has(session.id));
       const nextArchivedSessions = state.archivedSessions.filter((session) => !idSet.has(session.id));
+      const sessionsById = new Map(state.sessionsById);
+      for (const id of idSet) sessionsById.delete(id);
 
       if (
         nextActiveSessions.length === state.activeSessions.length
         && nextArchivedSessions.length === state.archivedSessions.length
       ) {
-        return revisionPatch;
+        return { ...revisionPatch, sessionsById };
       }
 
       return {
@@ -683,6 +740,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         archivedSessions: nextArchivedSessions,
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
         reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
+        sessionsById,
         ...revisionPatch,
       };
     });
@@ -697,23 +755,26 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     set((state) => {
       const revisionPatch = mutationRevisionPatch(state, idSet);
       const movedSessions: Session[] = [];
+      const sessionsById = new Map(state.sessionsById);
       const nextActiveSessions = state.activeSessions.filter((session) => {
         if (!idSet.has(session.id)) {
           return true;
         }
 
-        movedSessions.push({
+        const archivedSession = {
           ...session,
           time: {
             ...session.time,
             archived: archivedAt,
           },
-        });
+        };
+        movedSessions.push(archivedSession);
+        sessionsById.set(session.id, archivedSession);
         return false;
       });
 
       if (movedSessions.length === 0) {
-        return revisionPatch;
+        return { ...revisionPatch, sessionsById };
       }
 
       const remainingArchivedSessions = state.archivedSessions.filter((session) => !idSet.has(session.id));
@@ -723,6 +784,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         archivedSessions: [...movedSessions, ...remainingArchivedSessions],
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
         reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
+        sessionsById,
         ...revisionPatch,
       };
     });

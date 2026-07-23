@@ -24,6 +24,15 @@ Dans le chat, tapez `/` comme **premier** caractère du message pour afficher le
 
 Les commandes intégrées `init` et `review` peuvent être réinitialisées mais pas supprimées.
 
+## Commandes de contrôle OpenChamber
+
+OpenChamber fournit aussi des commandes de contrôle qui déclenchent des actions de l’application au lieu de développer un prompt enregistré. Elles ne se gèrent pas dans **Paramètres → Commandes**.
+
+- `/side [message]` — ouvre un chat temporaire à côté de la conversation actuelle sur ordinateur ou sur le web. Le texte après la commande est envoyé immédiatement. Fermer le chat latéral supprime sa conversation, sauf si vous choisissez d’abord **Conserver**.
+- `/btw [message]` — alias de `/side`.
+
+Une conversation ne peut avoir qu’un seul chat latéral ouvert. Ces commandes ne sont pas disponibles sur mobile, dans VS Code ni à l’intérieur d’un chat latéral.
+
 ## Snippets
 
 Un snippet est un texte réutilisable que vous référencez inline avec un hashtag, comme `#signoff`. Gérez-les dans **Paramètres → Snippets**.

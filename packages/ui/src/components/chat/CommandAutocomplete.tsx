@@ -10,6 +10,8 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { getOpenChamberCommands, mergeOpenChamberCommands } from './openChamberCommands';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 type CommandSource = 'openchamber' | 'opencode' | 'skill';
 
@@ -70,6 +72,13 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const canStartSessionCommand = hasSession || hasNewSessionDraft;
   const isMobile = useUIStore((state) => state.isMobile);
   const canUseReviewHandoffFlow = hasSession && !isMobile && !isVSCodeRuntime();
+  const sideChatCommands = React.useMemo(() => getOpenChamberCommands({
+    surface: !hasSession || isEmbeddedSessionChat() ? 'embedded' : 'main',
+    isMobile,
+    isVSCode: isVSCodeRuntime(),
+    sideChatDescription: t('chat.commandAutocomplete.command.sideDescription'),
+    btwDescription: t('chat.commandAutocomplete.command.btwDescription'),
+  }), [hasSession, isMobile, t]);
 
   const [commands, setCommands] = React.useState<CommandInfo[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -187,7 +196,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             : []
           ),
         ];
-        const allCommands = [...builtInCommands, ...customCommands, ...skillCommands];
+        const allCommands = mergeOpenChamberCommands(sideChatCommands, [...builtInCommands, ...customCommands, ...skillCommands]);
 
         const allowInitCommand = !hasMessagesInCurrentSession;
         const filtered = (searchQuery
@@ -262,11 +271,11 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         ];
 
         const filtered = (searchQuery
-          ? builtInCommands.filter(cmd =>
+          ? mergeOpenChamberCommands(sideChatCommands, builtInCommands).filter(cmd =>
               fuzzyMatch(cmd.name, searchQuery) ||
               (cmd.description && fuzzyMatch(cmd.description, searchQuery))
             )
-          : builtInCommands).filter(cmd => allowInitCommand || cmd.name !== 'init');
+          : mergeOpenChamberCommands(sideChatCommands, builtInCommands)).filter(cmd => allowInitCommand || cmd.name !== 'init');
 
         setCommands(filtered);
       } finally {
@@ -275,7 +284,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
 
     loadCommands();
-  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, skills, t]);
+  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, skills, sideChatCommands, t]);
 
   React.useEffect(() => {
     setSelectedIndex(0);
