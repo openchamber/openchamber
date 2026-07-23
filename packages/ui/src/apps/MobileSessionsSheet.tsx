@@ -32,6 +32,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
+import { deriveRecentSessions } from '@/components/session/sidebar/activitySections';
 import { Icon } from '@/components/icon/Icon';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { Button } from '@/components/ui/button';
@@ -49,6 +50,7 @@ import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSess
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
@@ -521,6 +523,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -549,6 +552,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const [gitProjectPaths, setGitProjectPaths] = React.useState<Set<string>>(new Set());
   const [editingOrder, setEditingOrder] = React.useState(false);
   const [confirmingDeleteId, setConfirmingDeleteId] = React.useState<string | null>(null);
+  const [visibleRecentCount, setVisibleRecentCount] = React.useState(SESSIONS_PER_BUCKET);
   // Per-bucket count of sessions revealed past the default page. Ephemeral —
   // resets when the sheet closes or when a group/project is toggled. Expand
   // state itself lives in useMobileSessionTreeStore (persisted).
@@ -560,6 +564,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       setQuery('');
       setEditingOrder(false);
       setConfirmingDeleteId(null);
+      setVisibleRecentCount(SESSIONS_PER_BUCKET);
       setVisibleCountByBucket(new Map());
       setEditingProjectId(null);
       setConfirmingArchiveSessionId(null);
@@ -645,6 +650,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   }, [globalActiveSessions, liveSessions]);
 
   const normalizedQuery = query.trim().toLowerCase();
+
+  const recentSessions = React.useMemo(() => deriveRecentSessions(sessions), [sessions]);
+  const visibleRecentSessions = React.useMemo(
+    () => recentSessions.slice(0, visibleRecentCount),
+    [recentSessions, visibleRecentCount],
+  );
+  const remainingRecentCount = recentSessions.length - visibleRecentSessions.length;
+  const canShowFewerRecentSessions =
+    recentSessions.length > SESSIONS_PER_BUCKET && remainingRecentCount === 0;
 
   const projectNodes = React.useMemo<ProjectNode[]>(() => {
     const nodes: ProjectNode[] = projectsMeta.map((project) => ({
@@ -1149,6 +1163,39 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           ) : (
             <div className="flex flex-col">
+              {showRecentSection && !normalizedQuery && recentSessions.length > 0 ? (
+                <section className="border-b border-border/30 pb-2 pt-2">
+                  <div className="px-4 pb-1.5">
+                    <span className="typography-micro font-semibold uppercase tracking-wider text-muted-foreground">
+                      {t('sessions.sidebar.activity.recentTitle')}
+                    </span>
+                  </div>
+                  <div>
+                    {visibleRecentSessions.map((session) => (
+                      <SessionRow
+                        key={`recent-${session.id}`}
+                        session={session}
+                        active={currentSessionId === session.id}
+                        indent={12}
+                        contextLabel={buildSessionContextLabel(session)}
+                        confirmingArchive={confirmingArchiveSessionId === session.id}
+                        onSelect={() => handleSelectSession(session)}
+                        onRequestArchive={() => handleRequestArchive(session.id)}
+                        onConfirmArchive={() => void handleConfirmArchive(session)}
+                      />
+                    ))}
+                    {remainingRecentCount > 0 ? (
+                      <ShowMoreRow
+                        indent={12}
+                        onClick={() => setVisibleRecentCount((count) => count + SESSIONS_PER_BUCKET)}
+                      />
+                    ) : null}
+                    {canShowFewerRecentSessions ? (
+                      <ShowFewerRow indent={12} onClick={() => setVisibleRecentCount(SESSIONS_PER_BUCKET)} />
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
               {orderedNodes.map((node, nodeIndex) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
