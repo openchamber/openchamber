@@ -206,7 +206,7 @@ The current implementation includes:
 ### 5.3 Validation Evidence At Current Commits
 
 - Plugin unit/contract suite after the local certification fixes: 95 passed, 3 environment-gated skipped.
-- OpenChamber web suite: 821 passed, 1 platform-specific skipped.
+- OpenChamber web suite: 835 passed, 1 platform-specific skipped.
 - Workspace-wide type-check and lint passed.
 - Production web build, documentation validation, server syntax checks, and Electron plugin staging/package tests passed.
 - Electron staged plugin payload contains 29 verified files; packaging verifier tests passed 4/4.
@@ -215,19 +215,18 @@ The current implementation includes:
 - Electron HMR and bundled custom-scheme runtime smoke passed; hosted mobile and Capacitor asset/CORS/runtime tests passed.
 - Independent final code/security audit found no reachable code blocker at the current commits.
 
-These results do not make the release ready because plugin commit `6cb95913f1abd5ea6ef7d92219658f1bee9db43e` is not yet pushed or remotely validated, the GHCR packages are private, and no signed public release image digest exists.
+These results do not make the release ready because the GHCR packages are private and no signed public release image digest exists.
 
 ### 5.4 Current Remote CI And Registry Status
 
-The original failures at run `29916187323` were repaired. GitHub Actions run `29925151247` passed the test, multi-architecture build/smoke/vulnerability, Docker live, and Kubernetes port-forward/HTTPS ingress jobs. Push run `29926186376` also passed.
+The original failures at run `29916187323` were repaired. GitHub Actions run `29925151247` passed the test, multi-architecture build/smoke/vulnerability, Docker live, and Kubernetes port-forward/HTTPS ingress jobs. Push run `29926186376` also passed. Current plugin commit `eedfd5b3a08e99285f3f167c7e7d83799844c03d` passed the same complete gate matrix in run `30017797840`.
 
 Registry preflight run `29927614258` then proved that the repository-scoped Actions token can create and push both run-scoped GHCR candidates and that both exact amd64/arm64 candidate digests pass vulnerability scans and runtime smokes. Both matrix jobs fail only when `GITHUB_TOKEN` attempts to change package visibility to public. The package pages still return `404` anonymously. This is the narrowly proven organization/package-administration blocker that requires an owner or package administrator; no personal registry credential is required or accepted.
 
-Plugin commit `3bb90898aa173915e11bb51b95d3bf63564c4472` contains the remote workflow repairs. Local commit `6cb95913f1abd5ea6ef7d92219658f1bee9db43e` adds the cert-manager cleanup and Apple Container compatibility fixes described below, but is not yet pushed or covered by remote CI, so the green historical run cannot be used as evidence for that commit.
+Plugin commit `eedfd5b3a08e99285f3f167c7e7d83799844c03d` contains the cert-manager cleanup, Apple Container compatibility fixes, repository guardrails, and registry-preflight handling for owner-managed public visibility described below. It is pushed and covered by remote CI run `30017797840`. Anonymous GHCR token requests still return `401` for both packages, so visibility remains the external blocker.
 
 ### 5.5 Remaining Immediate Gates
 
-- Push plugin commit `6cb95913f1abd5ea6ef7d92219658f1bee9db43e`, then require every branch gate to pass again.
 - Have an organization owner or package administrator make both created GHCR packages public or grant the repository package-administration permission, then rerun registry preflight and verify anonymous exact-digest pulls.
 - Publish signed public `v0.1.0` images and verify unauthenticated exact-digest pulls.
 - Pin the final plugin commit and both published image digests in OpenChamber.
