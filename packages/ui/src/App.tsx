@@ -152,32 +152,34 @@ const isMcpOAuthCallbackPath = (): boolean => {
 
 const EmbeddedSessionChatContent: React.FC<{
   embeddedSessionChat: EmbeddedSessionChatConfig;
-  isVSCodeRuntime: boolean;
   embeddedBackgroundWorkEnabled: boolean;
-}> = ({ embeddedSessionChat, isVSCodeRuntime, embeddedBackgroundWorkEnabled }) => {
+}> = ({ embeddedSessionChat, embeddedBackgroundWorkEnabled }) => {
+  return (
+    <>
+      <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+      <OpenCodeUpdateToast />
+      <ChatView autoOpenDraft={false} readOnly={embeddedSessionChat.readOnly} />
+      <Toaster />
+    </>
+  );
+};
+
+const EmbeddedSessionChatBootstrap: React.FC<{
+  embeddedSessionChat: EmbeddedSessionChatConfig;
+  isVSCodeRuntime: boolean;
+}> = ({ embeddedSessionChat, isVSCodeRuntime }) => {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const sync = useSync();
   const bootstrapKeyRef = React.useRef<string | null>(null);
-
   const expectedDirectory = normalizeEmbeddedDirectory(embeddedSessionChat.directory);
   const activeDirectory = normalizeEmbeddedDirectory(currentDirectory);
 
   React.useEffect(() => {
-    if (isVSCodeRuntime) return;
-    if (expectedDirectory && activeDirectory !== expectedDirectory) return;
-
+    if (isVSCodeRuntime || (expectedDirectory && activeDirectory !== expectedDirectory)) return;
     const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.sessionId}`;
-    // Skip if this session was already bootstrapped and a session is still
-    // active — allows in-place navigation (e.g. "Open subtask") to change
-    // currentSessionId without this effect forcing it back. Only re-bootstrap
-    // when currentSessionId was cleared (store init, draft, delete/archive,
-    // runtime-switch remount).
-    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId) {
-      return;
-    }
-
+    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId) return;
     bootstrapKeyRef.current = bootstrapKey;
     setCurrentSession(embeddedSessionChat.sessionId, embeddedSessionChat.directory);
     void sync.ensureSessionRenderable(
@@ -185,29 +187,9 @@ const EmbeddedSessionChatContent: React.FC<{
       true,
       embeddedSessionChat.directory ?? undefined,
     );
-  }, [
-    activeDirectory,
-    currentSessionId,
-    embeddedSessionChat.directory,
-    embeddedSessionChat.sessionId,
-    expectedDirectory,
-    isVSCodeRuntime,
-    setCurrentSession,
-    sync,
-  ]);
+  }, [activeDirectory, currentSessionId, embeddedSessionChat, expectedDirectory, isVSCodeRuntime, setCurrentSession, sync]);
 
-  if (expectedDirectory && activeDirectory !== expectedDirectory) {
-    return null;
-  }
-
-  return (
-    <>
-      <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-      <OpenCodeUpdateToast />
-      <ChatView readOnly={embeddedSessionChat.readOnly} />
-      <Toaster />
-    </>
-  );
+  return null;
 };
 
 function App({ apis }: AppProps) {
@@ -885,11 +867,11 @@ function App({ apis }: AppProps) {
           directory={embeddedSessionChat.directory || currentDirectory || ''}
         >
           <RuntimeAPIProvider apis={apis}>
+            <EmbeddedSessionChatBootstrap embeddedSessionChat={embeddedSessionChat} isVSCodeRuntime={isVSCodeRuntime} />
             <TooltipProvider delayDuration={300} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
                 <EmbeddedSessionChatContent
                   embeddedSessionChat={embeddedSessionChat}
-                  isVSCodeRuntime={isVSCodeRuntime}
                   embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled}
                 />
               </div>
