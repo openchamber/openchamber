@@ -106,7 +106,7 @@ export default defineConfig({
         mobile: path.resolve(__dirname, 'mobile.html'),
         miniChat: path.resolve(__dirname, 'mini-chat.html'),
       },
-      external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
+      external: ['node:child_process', 'node:fs', 'node:path', 'node:url', '@capacitor/app', '@capacitor/core', '@capacitor/keyboard', '@capacitor/push-notifications', '@capacitor/status-bar', '@aparajita/capacitor-secure-storage'],
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;

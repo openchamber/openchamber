@@ -600,8 +600,58 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     const sessionPermissions = useScopedBlockingPermissions(currentSessionId, effectiveSessionDirectory);
     const sessionQuestions = useScopedBlockingQuestions(currentSessionId, effectiveSessionDirectory);
 
+    // When the sync store has no pending questions, reconstruct from message
+    // history. This handles the case where the OpenCode server lost the pending
+    // question state on SSE reconnection — the tool call remains in the message
+    // history, so we can rebuild the QuestionRequest from its input.
+    const reconstructedQuestions = React.useMemo<QuestionRequest[]>(() => {
+        if (sessionQuestions.length > 0 || !currentSessionId || sessionMessages.length === 0) {
+            return [];
+        }
+
+        const lastMessage = sessionMessages[sessionMessages.length - 1];
+        if (!lastMessage || lastMessage.info.role !== 'assistant') return [];
+
+        // Only reconstruct if the assistant message hasn't completed (tool still running)
+        const completedTime = (lastMessage.info as { time?: { completed?: number } }).time?.completed;
+        if (typeof completedTime === 'number') return [];
+
+        for (const part of lastMessage.parts) {
+            if (part.type !== 'tool') continue;
+            const toolPart = part as { type: 'tool'; tool: string; callID: string; messageID: string; state: { status: string; input: unknown } };
+            if (toolPart.tool !== 'question') continue;
+            if (toolPart.state.status !== 'running' && toolPart.state.status !== 'pending') continue;
+
+            const input = toolPart.state.input as { questions?: Array<{ question?: string; header?: string; options?: Array<{ label: string; description: string }>; multiple?: boolean }> } | undefined;
+            if (!input?.questions || !Array.isArray(input.questions) || input.questions.length === 0) continue;
+
+            return [{
+                id: `recon-${toolPart.callID}`,
+                sessionID: currentSessionId,
+                questions: input.questions.map((q) => ({
+                    question: q.question ?? '',
+                    header: q.header ?? '',
+                    options: (q.options ?? []).map((o) => ({
+                        label: o.label,
+                        description: o.description ?? '',
+                    })),
+                    multiple: q.multiple ?? false,
+                })),
+                tool: {
+                    messageID: lastMessage.info.id,
+                    callID: toolPart.callID,
+                },
+            }];
+        }
+
+        return [];
+    }, [sessionQuestions, currentSessionId, sessionMessages]);
+
+    // Merge: prefer sync store questions, fall back to reconstructed ones
+    const effectiveQuestions = sessionQuestions.length > 0 ? sessionQuestions : reconstructedQuestions;
+
     const sessionIsWorking = React.useMemo(() => {
-        if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
+        if (!currentSessionId || sessionPermissions.length > 0 || effectiveQuestions.length > 0) {
             return false;
         }
 
@@ -616,7 +666,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
             && lastMessage.role === 'assistant'
             && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
         );
-    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionQuestions.length, sessionStatusForCurrent.type]);
+    }, [currentSessionId, sessionMessages, sessionPermissions.length, effectiveQuestions.length, sessionStatusForCurrent.type]);
     const activeRetryStatus = React.useMemo(() => {
         if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
             return null;
@@ -813,11 +863,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
     }, [timelineController.handleActiveTurnChange]);
 
     React.useEffect(() => {
-        if (sessionPermissions.length === 0 && sessionQuestions.length === 0) {
+        if (sessionPermissions.length === 0 && effectiveQuestions.length === 0) {
             return;
         }
         handleMessageContentChange('permission');
-    }, [handleMessageContentChange, sessionPermissions, sessionQuestions]);
+    }, [handleMessageContentChange, sessionPermissions, effectiveQuestions]);
 
     const navigation = useChatTurnNavigation({
         sessionId: currentSessionId,
@@ -1152,7 +1202,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
                 getAnimationHandlers={getAnimationHandlers}
                 handleHistoryScroll={timelineController.handleHistoryScroll}
                 scrollToBottom={resumeToLatestInstant}
-                sessionQuestions={sessionQuestions}
+                sessionQuestions={effectiveQuestions}
                 sessionPermissions={sessionPermissions}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
                 showLoadOlderButton={showLoadOlderButton}

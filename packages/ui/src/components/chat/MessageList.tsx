@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
-import { elementScroll, useVirtualizer as useTanstackVirtualizer, type ReactVirtualizer, type VirtualItem } from '@tanstack/react-virtual';
+import { elementScroll, useVirtualizer as useTanstackVirtualizer, Virtualizer, type VirtualItem } from '@tanstack/react-virtual';
 
 import ChatMessage from './ChatMessage';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
@@ -47,7 +47,7 @@ const sameKeys = (a: readonly string[] | undefined, b: readonly string[] | undef
 // preservation, and native iOS touch/momentum deferral for scroll
 // adjustments — the failure modes that historically forced virtua off on
 // mobile and required manual prepend compensation on desktop.
-type TanstackVirtualizerInstance = ReactVirtualizer<HTMLDivElement, HTMLDivElement>;
+type TanstackVirtualizerInstance = Virtualizer<HTMLDivElement, HTMLDivElement>;
 type HistoryEngine = 'none' | 'tanstack';
 
 const TANSTACK_ESTIMATED_ENTRY_SIZE = 320;
@@ -113,7 +113,7 @@ const writeTanstackTimelineCache = (
 ): void => {
     if (!virtualizer || keys.length === 0) return;
     tanstackTimelineCache.delete(sessionKey);
-    tanstackTimelineCache.set(sessionKey, { keys: keys.slice(), items: virtualizer.takeSnapshot() });
+    tanstackTimelineCache.set(sessionKey, { keys: keys.slice(), items: virtualizer.getVirtualItems() });
     while (tanstackTimelineCache.size > TIMELINE_CACHE_LIMIT) {
         const oldest = tanstackTimelineCache.keys().next().value;
         if (typeof oldest !== 'string') break;
@@ -1064,7 +1064,6 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
         // Bottom-anchored chat semantics: prepending older entries above the
         // viewport must not move what the user is reading, and iOS-specific
         // touch/momentum deferral for those adjustments lives in the core.
-        anchorTo: 'end',
         initialOffset: () => Number.MAX_SAFE_INTEGER,
         initialMeasurementsCache: initialMeasurements,
     });
@@ -1075,20 +1074,22 @@ const StaticHistoryList = React.memo(({ entries, engine, contentRef, scrollRef, 
     // app-level auto-follow owns pinning, so skip there too instead of
     // double-writing. (This is an instance field, not a constructor option.)
     tanstackVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
-        if (instance.isAtEnd(TANSTACK_AT_END_THRESHOLD_PX)) return false;
+        const isAtEnd = instance.scrollOffset != null && instance.scrollRect != null
+            && instance.scrollOffset + instance.scrollRect.height >= instance.getTotalSize() - TANSTACK_AT_END_THRESHOLD_PX;
+        if (isAtEnd) return false;
         const firstVisibleIndex = instance.range?.startIndex;
         return firstVisibleIndex !== undefined && item.index < firstVisibleIndex;
     };
 
     React.useEffect(() => {
         if (!isTanstack) return;
-        const sizes = tanstackVirtualizer.itemSizeCache;
-        if (sizes.size >= TANSTACK_ESTIMATE_MIN_SAMPLES) {
+        const sizes = tanstackVirtualizer.measurementsCache;
+        if (sizes.length >= TANSTACK_ESTIMATE_MIN_SAMPLES) {
             let total = 0;
-            for (const size of sizes.values()) total += size;
+            for (const item of sizes) total += item.size;
             estimatedEntrySizeRef.current = Math.min(
                 TANSTACK_ESTIMATE_MAX,
-                Math.max(TANSTACK_ESTIMATE_MIN, Math.round(total / sizes.size)),
+                Math.max(TANSTACK_ESTIMATE_MIN, Math.round(total / sizes.length)),
             );
         }
     });
@@ -1783,7 +1784,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
             scrollToBottom: () => {
                 if (shouldVirtualizeHistory && historyEntries.length > 0 && tanstackVirtualizerRef.current) {
-                    tanstackVirtualizerRef.current.scrollToEnd();
+                    tanstackVirtualizerRef.current.scrollToIndex(historyEntries.length - 1, { align: 'end' });
                     return;
                 }
                 const container = resolveScrollContainer();
