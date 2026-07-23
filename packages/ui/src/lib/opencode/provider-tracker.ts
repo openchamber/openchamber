@@ -8,6 +8,8 @@
  * Inspired by HiveMind (arXiv:2604.17111) OS-inspired scheduling primitives.
  */
 
+import { getRuntimeKey } from '@/lib/runtime-switch'
+
 const DEFAULT_CIRCUIT_BREAK_THRESHOLD = 3
 const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000
 const DEFAULT_RETRY_BASE_DELAY_MS = 1000
@@ -15,6 +17,7 @@ const DEFAULT_RETRY_MAX_DELAY_MS = 32_000
 const DEFAULT_RETRY_MAX_ATTEMPTS = 3
 const PROVIDER_EVICTION_TTL_MS = 60 * 60 * 1000
 const PROVIDER_EVICTION_INTERVAL_MS = 10 * 60 * 1000
+const PROVIDER_MAX_ENTRIES = 200
 
 const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504])
 
@@ -27,15 +30,14 @@ type ProviderState = {
 }
 
 const providers = new Map<string, ProviderState>()
+const providerKey = (providerID: string): string => JSON.stringify([getRuntimeKey(), providerID])
 
 function evictStaleProviders(): void {
   const now = Date.now()
-  for (const [providerID, state] of providers) {
-    if (
-      state.consecutiveErrors === 0 &&
-      now - state.lastErrorAt > PROVIDER_EVICTION_TTL_MS
-    ) {
-      providers.delete(providerID)
+  for (const [key, state] of providers) {
+    const lastActivityAt = Math.max(state.lastErrorAt, state.circuitOpenAt)
+    if (now - lastActivityAt > PROVIDER_EVICTION_TTL_MS) {
+      providers.delete(key)
     }
   }
 }
@@ -46,7 +48,8 @@ if (typeof setInterval !== 'undefined') {
 }
 
 function getOrCreateProvider(providerID: string): ProviderState {
-  let state = providers.get(providerID)
+  const key = providerKey(providerID)
+  let state = providers.get(key)
   if (!state) {
     state = {
       consecutiveErrors: 0,
@@ -55,17 +58,19 @@ function getOrCreateProvider(providerID: string): ProviderState {
       circuitOpenAt: 0,
       circuitCooldownMs: DEFAULT_CIRCUIT_COOLDOWN_MS,
     }
-    providers.set(providerID, state)
+    providers.set(key, state)
+    while (providers.size > PROVIDER_MAX_ENTRIES) {
+      const oldest = providers.keys().next().value
+      if (!oldest) break
+      providers.delete(oldest)
+    }
   }
   return state
 }
 
 export function recordProviderSuccess(providerID: string): void {
   if (!providerID) return
-  const state = providers.get(providerID)
-  if (!state) return
-  state.consecutiveErrors = 0
-  state.lastErrorAt = 0
+  providers.delete(providerKey(providerID))
 }
 
 export function recordProviderError(providerID: string, status?: number): void {
@@ -91,7 +96,7 @@ function isCircuitBreakerStatus(status?: number): boolean {
 }
 
 function isCircuitOpen(providerID: string): boolean {
-  const state = providers.get(providerID)
+  const state = providers.get(providerKey(providerID))
   if (!state?.circuitOpen) return false
 
   const elapsed = Date.now() - state.circuitOpenAt

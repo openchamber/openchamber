@@ -154,15 +154,5 @@ export function createGlobalMessageStreamHub({
       const index = replay.findIndex((entry) => entry.eventId === eventId);
       return index === -1 ? [] : replay.slice(index + 1);
     },
-    /**
-     * Publish a local event to all subscribers (bypasses the SSE stream).
-     * Used by the Discord/Telegram listeners to notify the bridge of
-     * approval button clicks.
-     */
-    publishEvent(eventType, data) {
-      for (const subscriber of Array.from(eventSubscribers)) {
-        notifySubscriber('event', subscriber, { envelope: {}, payload: { type: eventType, ...data } });
-      }
-    },
   };
 }

@@ -1,4 +1,5 @@
 import React from 'react';
+import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
@@ -35,6 +36,8 @@ export const useKeyboardShortcuts = () => {
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
   const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
+  const togglePromptNavigatorPanel = useUIStore((s) => s.togglePromptNavigatorPanel);
+  const setPromptNavigatorPanelOpen = useUIStore((s) => s.setPromptNavigatorPanelOpen);
   const toggleExpandedInput = useUIStore((s) => s.toggleExpandedInput);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
@@ -60,17 +63,6 @@ export const useKeyboardShortcuts = () => {
 
   React.useEffect(() => {
     const combo = (actionId: string) => getEffectiveShortcutCombo(actionId, shortcutOverrides);
-    const isTerminalEventTarget = (target: EventTarget | null) => {
-      if (!(target instanceof Element)) {
-        return false;
-      }
-
-      return Boolean(
-        target.closest('.terminal-viewport-container') ||
-        target.getAttribute('data-terminal-hidden-input') === 'true'
-      );
-    };
-
     const dropdownTargetSelector = [
       '[data-slot="dropdown-menu-content"]',
       '[data-slot="select-content"]',
@@ -139,6 +131,42 @@ export const useKeyboardShortcuts = () => {
       if (eventMatchesShortcut(e, combo('open_timeline_dialog'))) {
         e.preventDefault();
         setTimelineDialogOpen(true);
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('toggle_prompt_navigator'))) {
+        const {
+          activeMainTab,
+          promptNavigatorEnabled,
+          isSettingsDialogOpen,
+          isCommandPaletteOpen,
+          isHelpDialogOpen,
+          isSessionSwitcherOpen,
+          isAboutDialogOpen,
+          isTimelineDialogOpen,
+          isMultiRunLauncherOpen,
+          isImagePreviewOpen,
+        } = useUIStore.getState();
+
+        if (!promptNavigatorEnabled || isMobile || isVSCodeRuntime() || activeMainTab !== 'chat') {
+          return;
+        }
+
+        const hasOverlay = isSettingsDialogOpen
+          || isCommandPaletteOpen
+          || isHelpDialogOpen
+          || isSessionSwitcherOpen
+          || isAboutDialogOpen
+          || isTimelineDialogOpen
+          || isMultiRunLauncherOpen
+          || isImagePreviewOpen;
+
+        if (hasOverlay) {
+          return;
+        }
+
+        e.preventDefault();
+        togglePromptNavigatorPanel();
         return;
       }
 
@@ -474,14 +502,23 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      if (eventMatchesShortcut(e, combo('toggle_dictation'))) {
+        const { activeMainTab, isCommandPaletteOpen, isHelpDialogOpen, isSessionSwitcherOpen, isSettingsDialogOpen } = useUIStore.getState();
+        if (activeMainTab !== 'chat' || isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isSettingsDialogOpen) {
+          return;
+        }
+        e.preventDefault();
+        // Dictation state lives inside the composer's isolated component;
+        // toggle it via an event instead of subscribing this hot hook to it.
+        window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+        return;
+      }
+
       if (e.key === 'Escape') {
         const target = e.target as Element | null;
         const isInsideDialog = Boolean(target?.closest('[role="dialog"]'));
         const isSettingsMounted = Boolean(document.querySelector('[data-settings-view="true"]'));
-        const isInsideTerminal = Boolean(
-          target?.closest('.terminal-viewport-container') ||
-          target?.getAttribute('data-terminal-hidden-input') === 'true'
-        );
+        const isInsideTerminal = isTerminalEventTarget(target);
         const hasDropdownInteraction = isDropdownEventTarget(target) || hasOpenDropdown();
 
         const {
@@ -493,9 +530,17 @@ export const useKeyboardShortcuts = () => {
           isMultiRunLauncherOpen,
           isImagePreviewOpen,
           activeMainTab,
+          isPromptNavigatorPanelOpen,
         } = useUIStore.getState();
 
         if (isInsideDialog || isInsideTerminal || hasDropdownInteraction) {
+          resetAbortPriming();
+          return;
+        }
+
+        if (isPromptNavigatorPanelOpen) {
+          e.preventDefault();
+          setPromptNavigatorPanelOpen(false);
           resetAbortPriming();
           return;
         }
@@ -582,6 +627,8 @@ export const useKeyboardShortcuts = () => {
     setSettingsDialogOpen,
     setModelSelectorOpen,
     setTimelineDialogOpen,
+    togglePromptNavigatorPanel,
+    setPromptNavigatorPanelOpen,
     toggleExpandedInput,
     setThemeMode,
     working,

@@ -21,9 +21,7 @@ interface MobileSessionStatusBarProps {
 
 interface SessionWithStatus extends Session {
   _statusType?: 'busy' | 'retry' | 'idle';
-  _hasRunningChildren?: boolean;
   _runningChildrenCount?: number;
-  _childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }
 
 // Cross-project session source. Mirrors the dedicated MobileSessionsSheet:
@@ -84,12 +82,14 @@ function useSessionGrouping(
     const map = new Map<string, Session[]>();
     const allIds = new Set(sessions.map((s) => s.id));
 
-    sessions.forEach((session) => {
+    for (const session of sessions) {
       const parentID = (session as { parentID?: string }).parentID;
       if (parentID && allIds.has(parentID)) {
-        map.set(parentID, [...(map.get(parentID) || []), session]);
+        const children = map.get(parentID);
+        if (children) children.push(session);
+        else map.set(parentID, [session]);
       }
-    });
+    }
     return map;
   }, [sessions]);
 
@@ -98,24 +98,6 @@ function useSessionGrouping(
     if (status?.type === 'busy' || status?.type === 'retry') return status.type;
     return 'idle';
   }, [sessionStatus]);
-
-  const hasRunningChildren = React.useCallback((sessionId: string): boolean => {
-    const children = parentChildMap.get(sessionId) || [];
-    return children.some((child) => getStatusType(child.id) !== 'idle');
-  }, [parentChildMap, getStatusType]);
-
-  const getRunningChildrenCount = React.useCallback((sessionId: string): number => {
-    const children = parentChildMap.get(sessionId) || [];
-    return children.filter((child) => getStatusType(child.id) !== 'idle').length;
-  }, [parentChildMap, getStatusType]);
-
-  const getChildIndicators = React.useCallback((sessionId: string): Array<{ session: Session; isRunning: boolean }> => {
-    const children = parentChildMap.get(sessionId) || [];
-    return children
-      .filter((child) => getStatusType(child.id) !== 'idle')
-      .map((child) => ({ session: child, isRunning: true }))
-      .slice(0, 3);
-  }, [parentChildMap, getStatusType]);
 
   const processedSessions = React.useMemo(() => {
     const sessionIds = new Set(sessions.map((s) => s.id));
@@ -129,20 +111,18 @@ function useSessionGrouping(
 
     topLevel.forEach((session) => {
       const statusType = getStatusType(session.id);
-      const hasRunning = hasRunningChildren(session.id);
+      const runningChildrenCount = (parentChildMap.get(session.id) ?? [])
+        .filter((child) => getStatusType(child.id) !== 'idle')
+        .length;
       const attention = (unseenCounts[session.id] ?? 0) > 0;
 
       const enriched: SessionWithStatus = {
         ...session,
         _statusType: statusType,
-        _hasRunningChildren: hasRunning,
-        _runningChildrenCount: getRunningChildrenCount(session.id),
-        _childIndicators: getChildIndicators(session.id),
+        _runningChildrenCount: runningChildrenCount,
       };
 
-      if (statusType !== 'idle' || hasRunning) {
-        running.push(enriched);
-      } else if (attention) {
+      if (statusType !== 'idle' || runningChildrenCount > 0 || attention) {
         running.push(enriched);
       } else {
         viewed.push(enriched);
@@ -159,7 +139,7 @@ function useSessionGrouping(
     viewed.sort(sortByUpdated);
 
     return [...running, ...viewed];
-  }, [sessions, getStatusType, hasRunningChildren, getRunningChildrenCount, getChildIndicators, unseenCounts]);
+  }, [sessions, getStatusType, parentChildMap, unseenCounts]);
 
   const totalRunning = processedSessions.reduce((sum, s) => {
     const selfRunning = s._statusType !== 'idle' ? 1 : 0;
@@ -188,7 +168,6 @@ function useSessionHelpers() {
 
 // Per-project status indicators (running / unread) for the filter chips.
 function useProjectStatus(
-  sessions: Session[],
   sessionStatus: Record<string, { type: string }> | undefined,
   currentSessionId: string | null
 ) {
@@ -450,12 +429,11 @@ export const MobileSessionPanelTrigger: React.FC<MobileSessionPanelTriggerProps>
   );
 };
 
-export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
+const MobileSessionStatusOpenPanel: React.FC<MobileSessionStatusBarProps> = ({
   onSessionSwitch,
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
-  const isMobile = useUIStore((state) => state.isMobile);
   const sessions = useAllProjectSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessionStatus = useAllSessionStatuses();
@@ -469,7 +447,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
 
   const { sessions: sortedSessions, totalRunning, totalUnread } = useSessionGrouping(sessions, sessionStatus);
   const { getSessionTitle, needsAttention } = useSessionHelpers();
-  const getProjectStatus = useProjectStatus(sessions, sessionStatus, currentSessionId);
+  const getProjectStatus = useProjectStatus(sessionStatus, currentSessionId);
   const resolveProjectRoots = useProjectRootsResolver();
 
   // Project filter, persisted in the UI store so the choice survives closing and
@@ -605,10 +583,6 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
     </div>
   ), [t, totalRunning, totalUnread, projects, filterProjectId, setFilterProjectId, formatProjectLabel, currentTheme, getProjectStatus, handleNewChat, setOpen]);
 
-  if (!isMobile) {
-    return null;
-  }
-
   return (
     <MobileOverlayPanel
       open={open}
@@ -638,4 +612,12 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
       </div>
     </MobileOverlayPanel>
   );
+};
+
+export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = (props) => {
+  const isMobile = useUIStore((state) => state.isMobile);
+  const open = useUIStore((state) => state.mobileSessionPanelOpen);
+
+  if (!isMobile || !open) return null;
+  return <MobileSessionStatusOpenPanel {...props} />;
 };

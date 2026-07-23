@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 import { toast } from '@/components/ui';
 import {
@@ -121,20 +122,23 @@ type FileTreeCache = {
 };
 const FILE_TREE_CACHE_MAX_ROOTS = 8;
 const fileTreeCacheByRoot = new Map<string, FileTreeCache>();
+const fileTreeCacheKey = (root: string): string => JSON.stringify([getRuntimeKey(), root]);
 
 const touchCache = (root: string): FileTreeCache | null => {
-  const entry = fileTreeCacheByRoot.get(root);
+  const key = fileTreeCacheKey(root);
+  const entry = fileTreeCacheByRoot.get(key);
   if (!entry) return null;
   entry.touchedAt = Date.now();
   // Touch on read promotes the key to the end of the Map's iteration order,
   // so the oldest (front) entry is the next eviction candidate.
-  fileTreeCacheByRoot.delete(root);
-  fileTreeCacheByRoot.set(root, entry);
+  fileTreeCacheByRoot.delete(key);
+  fileTreeCacheByRoot.set(key, entry);
   return entry;
 };
 
 const getOrCreateCache = (root: string): FileTreeCache => {
-  const existing = fileTreeCacheByRoot.get(root);
+  const key = fileTreeCacheKey(root);
+  const existing = fileTreeCacheByRoot.get(key);
   if (existing) {
     existing.touchedAt = Date.now();
     return existing;
@@ -151,12 +155,12 @@ const getOrCreateCache = (root: string): FileTreeCache => {
     loadedDirs: new Set(),
     touchedAt: Date.now(),
   };
-  fileTreeCacheByRoot.set(root, created);
+  fileTreeCacheByRoot.set(key, created);
   return created;
 };
 
 const dropCacheForRoot = (root: string): void => {
-  fileTreeCacheByRoot.delete(root);
+  fileTreeCacheByRoot.delete(fileTreeCacheKey(root));
 };
 
 const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
@@ -437,6 +441,7 @@ export const SidebarFilesTree: React.FC = () => {
   const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
+  const refreshAbortRef = React.useRef<AbortController | null>(null);
 
   // Hydrate the per-root cache on mount or root change. The cache is
   // module-scoped so it survives close-and-reopen of the right sidebar;
@@ -623,12 +628,60 @@ export const SidebarFilesTree: React.FC = () => {
   const refreshRoot = React.useCallback(async () => {
     if (!root) return;
 
-    loadedDirsRef.current = new Set();
-    inFlightDirsRef.current = new Set();
-    setLoadErrorsByDir({});
-    setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+    // Cancel any previous refresh so stale results for the old root don't
+    // land after the user switches projects.
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
 
-    await loadDirectory(root);
+    try {
+      // Refresh root and every expanded directory under it, but keep the
+      // cached children visible while re-fetching so the tree stays expanded
+      // and does not flash/collapse. Read expanded paths from the store at
+      // call time so this callback stays stable when directories are toggled.
+      const currentExpanded = useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths ?? [];
+      const normalizedExpanded = currentExpanded
+        .map((p) => normalizePath(p))
+        .filter((normalized): normalized is string =>
+          Boolean(normalized) && normalized !== root && normalized.startsWith(`${root}/`),
+        );
+      const pathsToRefresh = [root, ...normalizedExpanded];
+
+      loadedDirsRef.current = new Set(loadedDirsRef.current);
+      for (const dirPath of pathsToRefresh) {
+        loadedDirsRef.current.delete(dirPath);
+      }
+
+      setLoadErrorsByDir((prev) => {
+        if (Object.keys(prev).length === 0) return prev;
+        const next = { ...prev };
+        let changed = false;
+        for (const dirPath of pathsToRefresh) {
+          if (dirPath in next) {
+            delete next[dirPath];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+
+      const isCancelled = () => controller.signal.aborted;
+
+      // Load root first, then expanded children with the same 3-at-a-time
+      // concurrency limit used on startup to avoid API stampede.
+      await loadDirectory(root, isCancelled);
+      for (let i = 0; i < normalizedExpanded.length && !controller.signal.aborted; i += 3) {
+        const batch = normalizedExpanded.slice(i, i + 3);
+        await Promise.all(batch.map((dirPath) => loadDirectory(dirPath, isCancelled)));
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      console.error('Failed to refresh sidebar tree:', error);
+    } finally {
+      if (refreshAbortRef.current === controller) {
+        refreshAbortRef.current = null;
+      }
+    }
   }, [loadDirectory, root]);
 
   /**
@@ -652,6 +705,9 @@ export const SidebarFilesTree: React.FC = () => {
   React.useEffect(() => {
     if (!root) return;
 
+    // Cancel any pending refresh so stale directory listings don't land after
+    // the user switches projects or toggles showHidden / showGitignored.
+    refreshAbortRef.current?.abort();
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
     setLoadErrorsByDir({});

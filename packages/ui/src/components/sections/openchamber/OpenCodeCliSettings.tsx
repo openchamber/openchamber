@@ -1,9 +1,15 @@
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SettingsCheckboxRow,
+  SettingsInset,
+  SETTINGS_ICON_BUTTON_CLASS,
+  SETTINGS_OPTION_STACK_CLASS,
+} from '@/components/sections/shared/SettingsSection';
 import { isDesktopShell, requestFileAccess } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
@@ -71,7 +77,15 @@ export const OpenCodeCliSettings: React.FC = () => {
   const handleSaveAndReload = React.useCallback(async () => {
     setIsSaving(true);
     try {
-      await updateDesktopSettings({ opencodeBinary: value.trim() });
+      // Strip a wrapping quote pair (Windows "Copy as path" pastes) — literal
+      // quotes are never part of a real path.
+      const trimmed = value.trim();
+      const unquoted = trimmed.length >= 2
+        && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
+          || (trimmed.startsWith("'") && trimmed.endsWith("'")))
+        ? trimmed.slice(1, -1).trim()
+        : trimmed;
+      await updateDesktopSettings({ opencodeBinary: unquoted });
       await reloadOpenCodeConfiguration({
         message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
         mode: 'projects',
@@ -88,90 +102,69 @@ export const OpenCodeCliSettings: React.FC = () => {
   }, [setShowOpenCodeUpdateNotifications]);
 
   return (
-    <div className="mb-8">
-      <div className="mb-1 px-1">
-        <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-medium text-foreground">
-            {t('settings.openchamber.opencodeCli.title')}
-          </h3>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8} className="max-w-xs">
-              {t('settings.openchamber.opencodeCli.tooltipPrefix')}
+    <SettingsSection title={t('settings.openchamber.opencodeCli.title')}>
+      <div className="space-y-0.5">
+        <SettingsFieldRow
+          settingsItem="sessions.opencode-binary"
+          label={t('settings.openchamber.opencodeCli.field.binaryPath')}
+          info={(
+            <>
+              {t('settings.openchamber.opencodeCli.tipPrefix')}
               {' '}
-              <code className="font-mono text-xs">opencode</code>
-              {t('settings.openchamber.opencodeCli.tooltipSuffix')}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
-      <section className="px-2 pb-2 pt-0 space-y-0.5">
-        <div data-settings-item="sessions.opencode-binary" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-3">
-          <div className="flex min-w-0 flex-col shrink-0">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.opencodeCli.field.binaryPath')}</span>
-          </div>
-          <div className="flex min-w-0 items-center gap-2 sm:w-[20rem]">
-            <Input
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder={t('settings.openchamber.opencodeCli.field.binaryPathPlaceholder')}
-              disabled={isLoading || isSaving}
-              className="h-7 min-w-0 flex-1 font-mono text-xs"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              onClick={handleBrowse}
-              disabled={isLoading || isSaving || !isDesktopShell()}
-              className="h-7 w-7 p-0"
-              aria-label={t('settings.openchamber.opencodeCli.actions.browseAria')}
-              title={t('settings.openchamber.opencodeCli.actions.browse')}
-            >
-              <Icon name="folder" className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-
-        <div className="py-1.5">
-          <div className="typography-micro text-muted-foreground/70">
-            {t('settings.openchamber.opencodeCli.tipPrefix')}
-            {' '}
-            <span className="font-mono">OPENCODE_BINARY</span>
-            {' '}
-            {t('settings.openchamber.opencodeCli.tipMiddle')}
-            {' '}
-            <span className="font-mono">~/.config/openchamber/settings.json</span>
-            {'.'}
-          </div>
-        </div>
-
-        <label data-settings-item="sessions.opencode-update-notifications" className="flex cursor-pointer items-center gap-2 py-1.5">
-          <Checkbox
-            checked={showOpenCodeUpdateNotifications}
-            onChange={handleShowUpdateNotificationsChange}
-            ariaLabel={t('settings.openchamber.opencodeCli.field.showUpdateNotificationsAria')}
+              <span className="font-mono">OPENCODE_BINARY</span>
+              {' '}
+              {t('settings.openchamber.opencodeCli.tipMiddle')}
+              {' '}
+              <span className="font-mono">~/.config/openchamber/settings.json</span>
+              {'.'}
+            </>
+          )}
+          alignEnd={false}
+          controlClassName="@xl:w-[20rem]"
+        >
+          <Input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={t('settings.openchamber.opencodeCli.field.binaryPathPlaceholder')}
+            disabled={isLoading || isSaving}
+            className="h-8 min-w-0 flex-1 font-mono text-xs"
           />
-          <span className="typography-ui-label text-foreground">
-            {t('settings.openchamber.opencodeCli.field.showUpdateNotifications')}
-          </span>
-        </label>
-
-        <div className="flex justify-start py-1.5">
           <Button
             type="button"
+            variant="outline"
             size="xs"
-            onClick={handleSaveAndReload}
-            disabled={isLoading || isSaving}
-            className="shrink-0 !font-normal"
+            onClick={handleBrowse}
+            disabled={isLoading || isSaving || !isDesktopShell()}
+            className={SETTINGS_ICON_BUTTON_CLASS}
+            aria-label={t('settings.openchamber.opencodeCli.actions.browseAria')}
+            title={t('settings.openchamber.opencodeCli.actions.browse')}
           >
-            {isSaving ? t('settings.common.actions.saving') : t('settings.openchamber.opencodeCli.actions.saveAndReload')}
+            <Icon name="folder" className="h-4 w-4" />
           </Button>
-        </div>
-      </section>
-    </div>
+        </SettingsFieldRow>
+
+        <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>
+          <SettingsCheckboxRow
+            settingsItem="sessions.opencode-update-notifications"
+            checked={showOpenCodeUpdateNotifications}
+            onChange={handleShowUpdateNotificationsChange}
+            label={t('settings.openchamber.opencodeCli.field.showUpdateNotifications')}
+            ariaLabel={t('settings.openchamber.opencodeCli.field.showUpdateNotificationsAria')}
+          />
+
+          <div className="flex justify-start py-1.5">
+            <Button
+              type="button"
+              size="xs"
+              onClick={handleSaveAndReload}
+              disabled={isLoading || isSaving}
+              className="shrink-0 !font-normal"
+            >
+              {isSaving ? t('settings.common.actions.saving') : t('settings.openchamber.opencodeCli.actions.saveAndReload')}
+            </Button>
+          </div>
+        </SettingsInset>
+      </div>
+    </SettingsSection>
   );
 };

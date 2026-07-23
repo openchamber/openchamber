@@ -14,7 +14,7 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { useI18n } from '@/lib/i18n';
@@ -24,12 +24,12 @@ import { cn } from '@/lib/utils';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
-    sessionId: string;
+    target: MessageQueueTarget;
     onEdit: (message: QueuedMessage) => void;
     onSend: (message: QueuedMessage) => void;
 }
 
-const QueuedMessageChip = memo(({ message, sessionId, onEdit, onSend }: QueuedMessageChipProps) => {
+const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessageChipProps) => {
     const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: message.id });
@@ -89,7 +89,7 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit, onSend }: QueuedMe
             </Button>
             <button
                 type="button"
-                onClick={() => removeFromQueue(sessionId, message.id)}
+                onClick={() => removeFromQueue(target, message.id)}
                 className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                 aria-label={t('chat.queuedMessage.removeAria')}
             >
@@ -111,13 +111,16 @@ const EMPTY_QUEUE: QueuedMessage[] = [];
 export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
     const { t } = useI18n();
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+    const target = currentSessionId ? createMessageQueueTarget(currentSessionId, currentSessionDirectory) : null;
+    const queueKey = target ? getMessageQueueKey(target) : null;
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
-                if (!currentSessionId) return EMPTY_QUEUE;
-                return state.queuedMessages[currentSessionId] ?? EMPTY_QUEUE;
+                if (!queueKey) return EMPTY_QUEUE;
+                return state.queuedMessages[queueKey] ?? EMPTY_QUEUE;
             },
-            [currentSessionId]
+            [queueKey]
         )
     );
     const popToInput = useMessageQueueStore((state) => state.popToInput);
@@ -132,14 +135,14 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
 
     const handleDragEnd = React.useCallback((event: DragEndEvent) => {
         const { active, over } = event;
-        if (!over || active.id === over.id || !currentSessionId) return;
-        reorderQueue(currentSessionId, String(active.id), String(over.id));
-    }, [currentSessionId, reorderQueue]);
+        if (!over || active.id === over.id || !target) return;
+        reorderQueue(target, String(active.id), String(over.id));
+    }, [target, reorderQueue]);
 
     const handleEdit = React.useCallback((message: QueuedMessage) => {
-        if (!currentSessionId) return;
+        if (!target) return;
         
-        const popped = popToInput(currentSessionId, message.id);
+        const popped = popToInput(target, message.id);
         if (popped) {
             if (popped.attachments && popped.attachments.length > 0) {
                 const currentAttachments = useInputStore.getState().attachedFiles;
@@ -147,13 +150,13 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
             }
             onEditMessage(popped.content, popped.attachments);
         }
-    }, [currentSessionId, popToInput, onEditMessage]);
+    }, [target, popToInput, onEditMessage]);
 
     const handleSend = React.useCallback((message: QueuedMessage) => {
         onSendMessage(message.id);
     }, [onSendMessage]);
 
-    if (queuedMessages.length === 0 || !currentSessionId) {
+    if (queuedMessages.length === 0 || !target) {
         return null;
     }
 
@@ -180,7 +183,7 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
                                 <QueuedMessageChip
                                     key={message.id}
                                     message={message}
-                                    sessionId={currentSessionId}
+                                    target={target}
                                     onEdit={handleEdit}
                                     onSend={handleSend}
                                 />

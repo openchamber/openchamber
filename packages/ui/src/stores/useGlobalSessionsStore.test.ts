@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 
-import { resolveGlobalSessionDirectory, mergeLiveSessionWithGlobalSession, getSessionShareUrl, isSessionShared, useGlobalSessionsStore } from './useGlobalSessionsStore';
+import {
+  isGlobalSessionRecencyOnlyUpdate,
+  resolveGlobalSessionDirectory,
+  mergeLiveSessionWithGlobalSession,
+  useGlobalSessionsStore,
+} from './useGlobalSessionsStore';
 
 type SessionExtra = Partial<Session> & {
   directory?: string | null;
@@ -78,6 +83,44 @@ describe('useGlobalSessionsStore', () => {
     expect(useGlobalSessionsStore.getState().activeSessions).toEqual([]);
     expect(resolveGlobalSessionDirectory(useGlobalSessionsStore.getState().archivedSessions[0])).toBe('/repo/app');
   });
+
+  test('preserves the opposite session-list reference during an upsert', () => {
+    const active = buildSession('https://share.example/active');
+    const archived = buildSession('https://share.example/archived', {
+      id: 'ses_archived',
+      time: { created: 1, updated: 2, archived: 3 },
+    });
+    useGlobalSessionsStore.getState().applySnapshot([active], [archived]);
+
+    const archivedSessions = useGlobalSessionsStore.getState().archivedSessions;
+    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/active-updated', {
+      time: { created: 1, updated: 3 },
+    }));
+    expect(useGlobalSessionsStore.getState().archivedSessions).toBe(archivedSessions);
+
+    const activeSessions = useGlobalSessionsStore.getState().activeSessions;
+    useGlobalSessionsStore.getState().upsertSession({
+      ...archived,
+      time: { created: 1, updated: 4, archived: 3 },
+    });
+    expect(useGlobalSessionsStore.getState().activeSessions).toBe(activeSessions);
+  });
+
+  test('applies a batch of session upserts in one store publication', () => {
+    let publications = 0;
+    const unsubscribe = useGlobalSessionsStore.subscribe(() => {
+      publications += 1;
+    });
+
+    useGlobalSessionsStore.getState().upsertSessions([
+      buildSession('https://share.example/a'),
+      buildSession('https://share.example/b', { id: 'ses_2' }),
+    ]);
+
+    unsubscribe();
+    expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id)).toEqual(['ses_2', 'ses_1']);
+    expect(publications).toBe(1);
+  });
 });
 
 describe('mergeLiveSessionWithGlobalSession', () => {
@@ -107,15 +150,51 @@ describe('mergeLiveSessionWithGlobalSession', () => {
   });
 });
 
-describe('session share helpers', () => {
-  test('getSessionShareUrl returns null for missing or empty share urls', () => {
-    expect(getSessionShareUrl({ id: 'ses_1', time: { created: 1 } } as Session)).toBe(null);
-    expect(getSessionShareUrl({ id: 'ses_1', time: { created: 1 }, share: null } as unknown as Session)).toBe(null);
-    expect(getSessionShareUrl(buildSession('   '))).toBe(null);
+describe('isGlobalSessionRecencyOnlyUpdate', () => {
+  test('accepts an updated timestamp while preserving omitted directory metadata', () => {
+    const existing = buildSession('https://share.example/s', {
+      directory: '/repo/app',
+      time: { created: 1, updated: 2 },
+    });
+    const incoming = buildSession('https://share.example/s', {
+      time: { created: 1, updated: 3 },
+    });
+
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, incoming)).toBe(true);
   });
 
-  test('isSessionShared reflects a valid share url', () => {
-    expect(isSessionShared(buildSession('https://share.example/a'))).toBe(true);
-    expect(isSessionShared({ id: 'ses_1', time: { created: 1 } } as Session)).toBe(false);
+  test('rejects title and archive changes as structural updates', () => {
+    const existing = buildSession('https://share.example/s', { time: { created: 1, updated: 2 } });
+    const renamed = buildSession('https://share.example/s', {
+      title: 'Renamed',
+      time: { created: 1, updated: 3 },
+    });
+    const archived = buildSession('https://share.example/s', {
+      time: { created: 1, updated: 3, archived: 4 },
+    });
+
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, renamed)).toBe(false);
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, archived)).toBe(false);
+  });
+
+  test('rejects parent and slug changes as structural updates', () => {
+    const existing = buildSession('https://share.example/s', {
+      parentID: 'parent-a',
+      slug: 'slug-a',
+      time: { created: 1, updated: 2 },
+    });
+    const reparented = buildSession('https://share.example/s', {
+      parentID: 'parent-b',
+      slug: 'slug-a',
+      time: { created: 1, updated: 3 },
+    });
+    const reslugged = buildSession('https://share.example/s', {
+      parentID: 'parent-a',
+      slug: 'slug-b',
+      time: { created: 1, updated: 3 },
+    });
+
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, reparented)).toBe(false);
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, reslugged)).toBe(false);
   });
 });

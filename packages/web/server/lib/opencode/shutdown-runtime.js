@@ -8,6 +8,9 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     syncToHmrState,
     openCodeWatcherRuntime,
     sessionRuntime,
+    sessionAssistRuntime,
+    sessionGoalRuntime,
+    contextObligatoryRuntime,
     scheduledTasksRuntime,
     getHealthCheckInterval,
     clearHealthCheckInterval,
@@ -15,8 +18,6 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     setTerminalRuntime,
     getMessageStreamRuntime,
     setMessageStreamRuntime,
-    getOpenChamberAgentEventsWebSocketRuntime,
-    setOpenChamberAgentEventsWebSocketRuntime,
     shouldSkipOpenCodeStop,
     getOpenCodePort,
     getOpenCodeProcess,
@@ -43,6 +44,9 @@ export const createGracefulShutdownRuntime = (dependencies) => {
 
     openCodeWatcherRuntime.stop();
     sessionRuntime.dispose();
+    sessionAssistRuntime?.stop?.();
+    sessionGoalRuntime?.stop?.();
+    contextObligatoryRuntime?.stop?.();
     scheduledTasksRuntime?.stop?.();
 
     const healthCheckInterval = getHealthCheckInterval();
@@ -67,16 +71,6 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       } catch {
       } finally {
         setMessageStreamRuntime(null);
-      }
-    }
-
-    const openChamberAgentEventsWebSocketRuntime = getOpenChamberAgentEventsWebSocketRuntime?.();
-    if (openChamberAgentEventsWebSocketRuntime) {
-      try {
-        await openChamberAgentEventsWebSocketRuntime.close();
-      } catch {
-      } finally {
-        setOpenChamberAgentEventsWebSocketRuntime?.(null);
       }
     }
 

@@ -4,14 +4,15 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
+import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
-import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
+import type { ToolPart as ToolPartType, ToolState as ToolStateUnion, FilePart } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
+import { useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -24,32 +25,42 @@ import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
-import type { MessageRecord } from '@/lib/messageCompletion';
 
 import {
     formatEditOutput,
     detectLanguageFromOutput,
     formatInputForDisplay,
+    renderTodoOutput,
     tryParseJsonOutput,
+    coerceToText,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
+import { JsonSummaryView } from './JsonSummaryView';
 import { Icon } from "@/components/icon/Icon";
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
-import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
-import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
+import {
+    buildTaskSummaryEntriesFromSession,
+    normalizeTaskSummaryEntries,
+    parseTaskMetadataBlock,
+    readTaskSessionIdFromOutput,
+    readTaskSessionIdFromRecord,
+    stripTaskMetadataFromOutput,
+    type TaskToolSummaryEntry,
+} from './taskToolModel';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
-import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
+import { getDiffPatchEntries, getPatchText, type DiffPatchEntry } from './toolDiffUtils';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
-type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
+type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number }; attachments?: Array<FilePart> };
 
 interface ToolPartProps {
     part: ToolPartType;
@@ -160,7 +171,6 @@ const normalizeToolName = (toolName: string | undefined | null): string => {
 };
 
 const MAX_DURATION_MS = 5 * 60 * 1000; // 5 minutes cap
-const TASK_TOOL_FALLBACK_RETRY_MS = 3000;
 const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'bash',
     'edit',
@@ -848,17 +858,17 @@ const ToolScrollableTextOutput: React.FC<{
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
-    const [jsonViewMode, setJsonViewMode] = React.useState<'formatted' | 'raw'>('formatted');
+    const [jsonViewMode, setJsonViewMode] = React.useState<'summary' | 'formatted' | 'raw'>('summary');
     const [copiedJson, setCopiedJson] = React.useState(false);
 
     React.useEffect(() => {
-        setJsonViewMode('formatted');
+        setJsonViewMode('summary');
         setCopiedJson(false);
     }, [renderedOutput]);
 
-    const handleToggleJsonView = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const handleJsonViewChange = React.useCallback((view: 'summary' | 'formatted' | 'raw', event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
-        setJsonViewMode((prev) => prev === 'formatted' ? 'raw' : 'formatted');
+        setJsonViewMode(view);
     }, []);
 
     const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -881,13 +891,35 @@ const ToolScrollableTextOutput: React.FC<{
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
-                        onClick={handleToggleJsonView}
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'summary' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('summary', event)}
                         onPointerDown={(event) => event.stopPropagation()}
-                        aria-label={jsonViewMode === 'formatted' ? t('chat.toolPart.showRawJson') : t('chat.toolPart.showFormattedJson')}
-                        title={jsonViewMode === 'formatted' ? t('chat.toolPart.showRawJson') : t('chat.toolPart.showFormattedJson')}
+                        aria-label={t('chat.toolPart.showNavigableJson')}
+                        title={t('chat.toolPart.showNavigableJson')}
                     >
-                        <Icon name={jsonViewMode === 'formatted' ? 'code-box' : 'list-check-2'} className="h-3.5 w-3.5" />
+                        <Icon name="list-unordered" className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'formatted' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('formatted', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showFormattedJson')}
+                        title={t('chat.toolPart.showFormattedJson')}
+                    >
+                        <Icon name="node-tree" className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'raw' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('raw', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showRawJson')}
+                        title={t('chat.toolPart.showRawJson')}
+                    >
+                        <Icon name="code-box" className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                         variant="ghost"
@@ -901,7 +933,9 @@ const ToolScrollableTextOutput: React.FC<{
                         <Icon name={copiedJson ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
                     </Button>
                 </div>
-                {jsonViewMode === 'formatted' ? (
+                {jsonViewMode === 'summary' ? (
+                    <JsonSummaryView data={jsonResult.data} />
+                ) : jsonViewMode === 'formatted' ? (
                     <JsonTreeViewer
                         data={jsonResult.data}
                         initiallyExpandedDepth={1}
@@ -937,94 +971,6 @@ const ToolScrollableTextOutput: React.FC<{
 
 ToolScrollableTextOutput.displayName = 'ToolScrollableTextOutput';
 
-type TaskToolSummaryEntry = {
-    id?: string;
-    tool?: string;
-    state?: {
-        status?: string;
-        title?: string;
-        input?: Record<string, unknown>;
-    };
-};
-
-type SessionMessageWithParts = MessageRecord;
-
-const normalizeSessionIdCandidate = (value: unknown): string | undefined => {
-    if (typeof value !== 'string') {
-        return undefined;
-    }
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
-};
-
-const readTaskSessionIdFromRecord = (value: unknown): string | undefined => {
-    if (!value || typeof value !== 'object') {
-        return undefined;
-    }
-
-    const record = value as Record<string, unknown>;
-    return (
-        normalizeSessionIdCandidate(record.sessionID)
-        ?? normalizeSessionIdCandidate(record.sessionId)
-    );
-};
-
-const readTaskSessionIdFromOutput = (output: string | undefined): string | undefined => {
-    if (typeof output !== 'string' || output.trim().length === 0) {
-        return undefined;
-    }
-    const parsedMetadata = parseTaskMetadataBlock(output);
-    if (parsedMetadata.sessionId) {
-        return parsedMetadata.sessionId;
-    }
-    const taskMatch = output.match(/task_id\s*:\s*([^\s<"']+)/i);
-    const sessionMatch = output.match(/session[_\s-]?id\s*:\s*([^\s<"']+)/i);
-    const candidate = taskMatch?.[1] ?? sessionMatch?.[1];
-    if (candidate) {
-        return normalizeSessionIdCandidate(candidate);
-    }
-
-    // OpenCode tool output may wrap child session id in <task id="ses_xxx">
-    const taskTagSessionId = readTaskTagSessionIdFromOutput(output);
-    if (taskTagSessionId) {
-        return normalizeSessionIdCandidate(taskTagSessionId);
-    }
-    return undefined;
-};
-
-const buildTaskSummaryEntriesFromSession = (messages: SessionMessageWithParts[]): TaskToolSummaryEntry[] => {
-    const entries: TaskToolSummaryEntry[] = [];
-
-    for (const message of messages) {
-        if (message?.info?.role !== 'assistant') {
-            continue;
-        }
-        const parts = Array.isArray(message.parts) ? message.parts : [];
-        for (const part of parts) {
-            if (part?.type !== 'tool') {
-                continue;
-            }
-            const toolName = normalizeToolName(part.tool);
-            if (!toolName || toolName === 'task' || toolName === 'todowrite' || toolName === 'todoread') {
-                continue;
-            }
-            const partState = part.state as { status?: string; title?: string; input?: unknown } | undefined;
-            entries.push({
-                id: part.id,
-                tool: part.tool,
-                state: {
-                    status: partState?.status,
-                    title: partState?.title,
-                    input: partState?.input && typeof partState.input === 'object'
-                        ? (partState.input as Record<string, unknown>)
-                        : undefined,
-                },
-            });
-        }
-    }
-
-    return entries;
-};
 
 const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
     const title = entry.state?.title;
@@ -1221,105 +1167,6 @@ const TaskSummaryEntriesList = React.memo(({
 
 TaskSummaryEntriesList.displayName = 'TaskSummaryEntriesList';
 
-const stripTaskMetadataFromOutput = (output: string): string => {
-    // Strip only a trailing <task_metadata>...</task_metadata> block.
-    return output.replace(/\n*<task_metadata>[\s\S]*?<\/task_metadata>\s*$/i, '').trimEnd();
-};
-
-const normalizeTaskSummaryEntries = (value: unknown): TaskToolSummaryEntry[] => {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-
-    const normalized: TaskToolSummaryEntry[] = [];
-    for (const entry of value) {
-        if (typeof entry === 'string') {
-            normalized.push({
-                tool: 'tool',
-                state: { status: 'completed', title: entry },
-            });
-            continue;
-        }
-
-        if (!entry || typeof entry !== 'object') {
-            continue;
-        }
-
-        const record = entry as {
-            id?: unknown;
-            tool?: unknown;
-            title?: unknown;
-            status?: unknown;
-            state?: { status?: unknown; title?: unknown; input?: unknown };
-        };
-
-        const stateStatus = typeof record.state?.status === 'string' ? record.state.status : undefined;
-        const stateTitle = typeof record.state?.title === 'string' ? record.state.title : undefined;
-        const status = stateStatus ?? (typeof record.status === 'string' ? record.status : undefined);
-        const title = stateTitle ?? (typeof record.title === 'string' ? record.title : undefined);
-
-        normalized.push({
-            id: typeof record.id === 'string' ? record.id : undefined,
-            tool: typeof record.tool === 'string' ? record.tool : 'tool',
-            state: {
-                status,
-                title,
-                input: record.state?.input && typeof record.state.input === 'object'
-                    ? (record.state.input as Record<string, unknown>)
-                    : undefined,
-            },
-        });
-    }
-
-    return normalized;
-};
-
-const parseTaskMetadataBlock = (output: string | undefined): {
-    sessionId?: string;
-    summaryEntries: TaskToolSummaryEntry[];
-} => {
-    if (typeof output !== 'string' || output.trim().length === 0) {
-        return { summaryEntries: [] };
-    }
-
-    const blockMatch = output.match(/<task_metadata>\s*([\s\S]*?)\s*<\/task_metadata>/i);
-    if (!blockMatch?.[1]) {
-        return { summaryEntries: [] };
-    }
-
-    const raw = blockMatch[1].trim();
-    if (!raw) {
-        return { summaryEntries: [] };
-    }
-
-    try {
-        const parsed = JSON.parse(raw) as {
-            sessionId?: unknown;
-            sessionID?: unknown;
-            summary?: unknown;
-            entries?: unknown;
-            tools?: unknown;
-            calls?: unknown;
-        };
-
-        const summaryEntries = normalizeTaskSummaryEntries(
-            parsed.summary ?? parsed.entries ?? parsed.tools ?? parsed.calls
-        );
-
-        const sessionId =
-            (typeof parsed.sessionId === 'string' && parsed.sessionId.trim().length > 0
-                ? parsed.sessionId.trim()
-                : undefined) ??
-            (typeof parsed.sessionID === 'string' && parsed.sessionID.trim().length > 0
-                ? parsed.sessionID.trim()
-                : undefined);
-
-        return { sessionId, summaryEntries };
-    } catch {
-        return { summaryEntries: [] };
-    }
-};
-
 const TaskToolSummary: React.FC<{
     entries: TaskToolSummaryEntry[];
     isExpanded: boolean;
@@ -1347,7 +1194,10 @@ const TaskToolSummary: React.FC<{
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
         if (sessionId && currentDirectory) {
-            if (isMobile || runtime?.runtime.isVSCode) {
+            // In contexts with no ContextPanel (embedded session-chat iframe)
+            // or single-surface layouts (mobile, VS Code), navigate in place.
+            // Otherwise open a new side-panel tab.
+            if (isEmbeddedSessionChat() || isMobile || runtime?.runtime.isVSCode) {
                 setCurrentSession(sessionId, currentDirectory);
                 return;
             }
@@ -1654,6 +1504,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     onShowPopup,
 }) => {
     const { t } = useI18n();
+    const runtime = React.useContext(RuntimeAPIContext);
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const stateWithData = state as ToolStateWithMetadata;
@@ -1662,6 +1513,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const rawOutput = stateWithData.output;
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
+    const attachments = stateWithData.attachments;
 
     const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
     const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
@@ -1699,6 +1551,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     }, [input, part.tool]);
     const hasInputText = !hideToolInputPreview && inputTextContent.trim().length > 0;
     const isWriteLikeTool = part.tool === 'write' || part.tool === 'create' || part.tool === 'file_write';
+    const isTodoTool = part.tool === 'todowrite' || part.tool === 'todoread';
+    const todoContent = React.useMemo(() => {
+        if (Array.isArray(input?.todos)) {
+            return JSON.stringify(input.todos);
+        }
+        return outputString;
+    }, [input?.todos, outputString]);
     const writeLikeInputPatch = React.useMemo(() => {
         if (!isWriteLikeTool || !hasInputText) {
             return undefined;
@@ -1732,6 +1591,36 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     );
 
     const renderResultContent = () => {
+        const getEntryAbsolutePath = (entry: DiffPatchEntry) => (
+            entry.title.startsWith('/') ? entry.title : `${currentDirectory}/${entry.title}`.replace(/\/+/g, '/')
+        );
+        const openEntryFile = (entry: DiffPatchEntry, event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            const line = extractFirstChangedLineFromDiff(entry.patch);
+            const absolutePath = getEntryAbsolutePath(entry);
+            if (runtime?.editor && runtime.runtime.isVSCode) {
+                void runtime.editor.openFile(absolutePath, line);
+                return;
+            }
+            useUIStore.getState().openContextFileAtLine(currentDirectory, absolutePath, line ?? 1, 1);
+        };
+        const openEntryDiff = (entry: DiffPatchEntry, event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            const line = extractFirstChangedLineFromDiff(entry.patch);
+            const absolutePath = getEntryAbsolutePath(entry);
+            if (runtime?.editor && runtime.runtime.isVSCode) {
+                void runtime.editor.openDiff('', absolutePath, `${getRelativePath(absolutePath, currentDirectory)} (changes)`, { line, patch: entry.patch });
+                return;
+            }
+            const store = useUIStore.getState();
+            const relativePath = getRelativePath(absolutePath, currentDirectory);
+            if (store.isMobile) {
+                store.navigateToDiff(relativePath);
+                store.setRightSidebarOpen(false);
+                return;
+            }
+            store.openContextDiff(currentDirectory, relativePath);
+        };
         const renderDiagnosticsSection = () => {
             if (!diagnosticSection) {
                 return null;
@@ -1804,7 +1693,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             color: 'var(--status-error)',
                             borderColor: 'var(--status-error-border)',
                         }}>
-                            {state.error}
+                            {coerceToText(state.error)}
                         </div>
                     </div>
                 );
@@ -1820,14 +1709,14 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         {questionInput.questions.map((q, index) => (
                             <div key={index} className="space-y-0.5">
                                 {q.header ? (
-                                    <div className="typography-micro text-muted-foreground">{q.header}</div>
+                                    <div className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
                                 ) : null}
-                                <div className="typography-meta text-foreground">{q.question}</div>
+                                <div className="typography-meta text-foreground">{coerceToText(q.question)}</div>
                                 {Array.isArray(q.options) && q.options.length > 0 ? (
                                     <div className="flex flex-wrap gap-1 mt-0.5">
                                         {q.options.map((opt) => (
-                                            <span key={opt.label} className="typography-micro px-1.5 py-0.5 rounded bg-muted/30 border border-border/30 text-muted-foreground">
-                                                {opt.label}
+                                            <span key={coerceToText(opt.label)} className="typography-micro px-1.5 py-0.5 rounded bg-muted/30 border border-border/30 text-muted-foreground">
+                                                {coerceToText(opt.label)}
                                             </span>
                                         ))}
                                     </div>
@@ -1845,7 +1734,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (part.tool === 'task' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
+                    <SimpleMarkdownRenderer content={coerceToText(outputString)} variant="tool" onShowPopup={onShowPopup} />
                 </div>
             );
         }
@@ -1855,11 +1744,31 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
                         <div key={entry.id} className="w-full min-w-0">
-                            {diffEntries.length > 1 ? (
-                                <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground rounded-lg mb-1">
+                            <div className="mb-1 flex min-w-0 items-center gap-1 px-2 py-1">
+                                <div className="min-w-0 flex-1 typography-meta font-medium text-muted-foreground">
                                     {renderPathLikeGitChanges(entry.title)}
                                 </div>
-                            ) : null}
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                                    onClick={(event) => openEntryFile(entry, event)}
+                                    aria-label={t('chat.toolPart.openFileAtFirstChange')}
+                                    title={t('chat.toolPart.openFileAtFirstChange')}
+                                >
+                                    <Icon name="file-edit" className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                                    onClick={(event) => openEntryDiff(entry, event)}
+                                    aria-label={t('chat.toolPart.openFileDiff')}
+                                    title={t('chat.toolPart.openFileDiff')}
+                                >
+                                    <Icon name="git-pull-request" className="h-3.5 w-3.5" />
+                                </Button>
+                            </div>
                             {entry.renderMode === 'diff' ? (
                                 <DiffPreview
                                     diff={entry.patch}
@@ -1894,7 +1803,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (hasStringOutput && outputString.trim()) {
             return renderScrollableBlock(
                 <ToolScrollableTextOutput
-                    output={outputString}
+                    output={coerceToText(outputString)}
                     part={part}
                     metadata={metadata}
                     input={input}
@@ -1911,6 +1820,47 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             { maxHeightClass: 'max-h-60' }
         );
     };
+
+    if (isTodoTool) {
+        if (state.status === 'error' && 'error' in state) {
+            return (
+                <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-4">
+                    <div className="typography-meta font-medium text-muted-foreground/80 mb-1">{t('chat.toolPart.error')}</div>
+                    <div className="typography-meta p-2 rounded-xl border" style={{
+                        backgroundColor: 'var(--status-error-background)',
+                        color: 'var(--status-error)',
+                        borderColor: 'var(--status-error-border)',
+                    }}>
+                        {state.error}
+                    </div>
+                </div>
+            );
+        }
+
+        const todoOutput = renderTodoOutput(todoContent, {
+            total: t('chat.todo.total'),
+            inProgress: t('chat.todo.inProgress'),
+            pending: t('chat.todo.pending'),
+            completed: t('chat.todo.completed'),
+            cancelled: t('chat.todo.cancelled'),
+        }, { unstyled: true });
+
+        return (
+            <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-4">
+                {renderScrollableBlock(
+                    todoOutput ?? (
+                        <ToolScrollableTextOutput
+                            output={todoContent}
+                            part={part}
+                            metadata={metadata}
+                            input={input}
+                        />
+                    ),
+                    { className: 'p-2', maxHeightClass: 'max-h-[46vh]' },
+                )}
+            </div>
+        );
+    }
 
     return (
         <div
@@ -1972,12 +1922,16 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                 color: 'var(--status-error)',
                                 borderColor: 'var(--status-error-border)',
                             }}>
-                                {state.error}
+                                {coerceToText(state.error)}
                             </div>
                         </div>
                     )}
                 </>
             )}
+
+            {Array.isArray(attachments) && attachments.length > 0 && state.status === 'completed' ? (
+                <MessageFilesDisplay files={attachments} onShowPopup={onShowPopup} compact />
+            ) : null}
         </div>
     );
 });
@@ -1996,7 +1950,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useEffectiveDirectory() ?? '';
-    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
@@ -2128,16 +2081,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return Math.min(...candidates);
     }, [localStartAt, pinnedTime.start, time?.start]);
 
-    const taskSessionResolutionStart = React.useMemo(() => {
-        if (typeof pinnedTime.start === 'number') {
-            return pinnedTime.start;
-        }
-        if (typeof time?.start === 'number') {
-            return time.start;
-        }
-        return localStartAt;
-    }, [localStartAt, pinnedTime.start, time?.start]);
-
     const taskOutputString = React.useMemo(() => {
         return typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
     }, [stateWithData.output]);
@@ -2145,10 +2088,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const parsedTaskMetadata = React.useMemo(() => {
         return parseTaskMetadataBlock(taskOutputString);
     }, [taskOutputString]);
-
-    // Track whether fallback session resolution has failed at least once.
-    // When true, resolveFallbackTaskSessionId widens its time window (3s → 8s).
-    const [taskFallbackRetried, setTaskFallbackRetried] = React.useState(false);
 
     const metadataTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
         if (!isTaskTool) {
@@ -2168,11 +2107,13 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const hasFinalMetadataTaskSummary = isFinalized && metadataTaskSummaryEntries.length > 0;
 
-    const explicitTaskSessionId = React.useMemo<string | undefined>(() => {
+    const taskSessionId = React.useMemo<string | undefined>(() => {
         if (!isTaskTool) {
             return undefined;
         }
 
+        // Current OpenCode publishes this authoritative join while the Task is
+        // running. The remaining sources only support older persisted parts.
         const metadataSessionId = readTaskSessionIdFromRecord(metadata);
         if (metadataSessionId) {
             return metadataSessionId;
@@ -2189,25 +2130,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return readTaskSessionIdFromOutput(taskOutputString);
     }, [isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
 
-    const fallbackTaskSessionId = useDirectorySync(
-        React.useCallback((storeState) => {
-            if (explicitTaskSessionId) {
-                return undefined;
-            }
-
-            return resolveFallbackTaskSessionId({
-                isTaskTool,
-                parentSessionId: currentSessionId ?? undefined,
-                taskStartTime: taskSessionResolutionStart,
-                sessions: storeState.session,
-                sessionStatusMap: storeState.session_status,
-                hasRetried: taskFallbackRetried,
-            });
-        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, taskFallbackRetried]),
-        currentDirectory,
-    );
-
-    const taskSessionId = explicitTaskSessionId ?? fallbackTaskSessionId;
     const childSessionLookupId = hasFinalMetadataTaskSummary ? '' : (taskSessionId ?? '');
 
     const childSessionMessages = useSessionMessageRecords(childSessionLookupId, currentDirectory);
@@ -2222,43 +2144,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         return buildTaskSummaryEntriesFromSession(childSessionMessages);
     }, [childSessionMessages, isTaskTool, taskSessionId]);
-
-    React.useEffect(() => {
-        setTaskFallbackRetried(false);
-    }, [taskSessionId]);
-
-    // Widen fallback resolution window only after a real retry boundary.
-    React.useEffect(() => {
-        if (!isTaskTool || taskFallbackRetried || explicitTaskSessionId != null || taskSessionId != null || isFinalized) {
-            return;
-        }
-
-        const sinceStart =
-            typeof taskSessionResolutionStart === 'number'
-                ? Date.now() - taskSessionResolutionStart
-                : 0;
-        const delay = Math.max(0, TASK_TOOL_FALLBACK_RETRY_MS - sinceStart);
-
-        if (typeof window === 'undefined') {
-            setTaskFallbackRetried(true);
-            return;
-        }
-
-        const timer = window.setTimeout(() => {
-            setTaskFallbackRetried(true);
-        }, delay);
-
-        return () => {
-            window.clearTimeout(timer);
-        };
-    }, [
-        explicitTaskSessionId,
-        isFinalized,
-        isTaskTool,
-        taskFallbackRetried,
-        taskSessionId,
-        taskSessionResolutionStart,
-    ]);
 
     React.useEffect(() => {
         if (typeof time?.end === 'number' || typeof pinnedTime.end === 'number') {

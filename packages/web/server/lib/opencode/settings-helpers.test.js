@@ -78,6 +78,19 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ messageStreamTransport: 'websocket' })).toEqual({});
   });
 
+  it('sanitizes the persisted terminal shell', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: ' ZSH ' })).toEqual({ terminalShell: 'zsh' });
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: 'auto' })).toEqual({ terminalShell: 'auto' });
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: '/bin/zsh' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ terminalShell: 'zsh -c whoami' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ terminalLoginShells: [' ZSH ', 'bash', 'zsh', '/bin/fish', 42] })).toEqual({
+      terminalLoginShells: ['zsh', 'bash'],
+    });
+    expect(helpers.sanitizeSettingsUpdate({ terminalLoginShells: [] })).toEqual({ terminalLoginShells: [] });
+  });
+
   it('accepts desktopLanAccessEnabled as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -97,6 +110,46 @@ describe('settings helpers', () => {
     });
     expect(helpers.sanitizeSettingsUpdate({ desktopKeepAwakeEnabled: false })).toEqual({
       desktopKeepAwakeEnabled: false,
+    });
+  });
+
+  it('accepts desktopMinimizeToTrayEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopMinimizeToTrayEnabled: true })).toEqual({
+      desktopMinimizeToTrayEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopMinimizeToTrayEnabled: false })).toEqual({
+      desktopMinimizeToTrayEnabled: false,
+    });
+  });
+
+  it('accepts desktopMacMenuBarEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopMacMenuBarEnabled: true })).toEqual({
+      desktopMacMenuBarEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopMacMenuBarEnabled: false })).toEqual({
+      desktopMacMenuBarEnabled: false,
+    });
+    expect(helpers.formatSettingsResponse({ desktopMacMenuBarEnabled: false })).toMatchObject({
+      desktopMacMenuBarEnabled: false,
+    });
+  });
+
+  it('sanitizes the persisted permission auto-accept policy', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      permissionAutoAccept: {
+        sessions: { root: true, child: false, invalid: 'true' },
+      },
+    })).toEqual({
+      permissionAutoAccept: {
+        sessions: { root: true, child: false },
+        revision: 0,
+      },
     });
   });
 
@@ -139,78 +192,6 @@ describe('settings helpers', () => {
     });
     expect(helpers.sanitizeSettingsUpdate({ collapsibleThinkingBlocks: false })).toEqual({
       collapsibleThinkingBlocks: false,
-    });
-  });
-
-  it('accepts discord config and clears it with null', () => {
-    const helpers = createTestHelpers();
-
-    expect(helpers.sanitizeSettingsUpdate({
-      discord: {
-        botToken: ' tok ',
-        guildId: '123',
-        listenerEnabled: false,
-        autoReply: true,
-        projectBindings: [{ channelId: 'c1', projectPath: '/p', projectLabel: 'P' }],
-      },
-    })).toEqual({
-      discord: {
-        botToken: 'tok',
-        guildId: '123',
-        listenerEnabled: false,
-        autoReply: true,
-        projectBindings: [{ channelId: 'c1', projectPath: '/p', projectLabel: 'P' }],
-      },
-    });
-
-    expect(helpers.sanitizeSettingsUpdate({ discord: null })).toEqual({ discord: null });
-
-    const merged = helpers.mergePersistedSettings(
-      { themeId: 'default', discord: { botToken: 'tok' } },
-      { discord: null },
-    );
-    expect(merged.discord).toBeUndefined();
-    expect(merged.themeId).toBe('default');
-  });
-
-  it('normalizes discord defaultReplyMode and guildPolicies, dropping invalid entries', () => {
-    const helpers = createTestHelpers();
-
-    expect(helpers.sanitizeSettingsUpdate({
-      discord: {
-        botToken: 'tok',
-        defaultReplyMode: 'mention',
-        guildPolicies: {
-          '111': { enabled: true, replyMode: 'always' },
-          '222': { enabled: false },
-          '333': { replyMode: 'inherit' },
-          '': { enabled: true },
-          '444': { replyMode: 'bogus', enabled: 'yes' },
-          '555': {},
-        },
-      },
-    })).toEqual({
-      discord: {
-        botToken: 'tok',
-        defaultReplyMode: 'mention',
-        guildPolicies: {
-          '111': { enabled: true, replyMode: 'always' },
-          '222': { enabled: false },
-          '333': { replyMode: 'inherit' },
-        },
-      },
-    });
-
-    expect(helpers.sanitizeSettingsUpdate({
-      discord: {
-        botToken: 'tok',
-        defaultReplyMode: 'bogus',
-        guildPolicies: null,
-      },
-    })).toEqual({
-      discord: {
-        botToken: 'tok',
-      },
     });
   });
 

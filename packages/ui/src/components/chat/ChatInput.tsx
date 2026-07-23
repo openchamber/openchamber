@@ -1,23 +1,40 @@
 import React from 'react';
+import { flushSync } from 'react-dom';
+import { isCapacitorApp } from '@/lib/platform';
 import { Textarea } from '@/components/ui/textarea';
-import { BrowserVoiceButton } from '@/components/voice';
+import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
+import {
+    ACCEPTED_ATTACHMENT_EXTENSIONS,
+    ATTACHMENT_ACCEPT,
+    getUnsupportedAttachmentInputs,
+    type AttachmentInputModality,
+} from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import { useDirectorySync, useUserMessageHistory } from '@/sync/sync-context';
-import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import {
+    createChatDraftIdentity,
+    getChatDraftIdentityKey,
+    readChatDraft,
+    subscribeChatDraftDeletion,
+    writeChatDraft,
+    type ChatDraftIdentity,
+    type ChatDraftSnapshot,
+} from '@/lib/chatDraftPersistence';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import ToolOutputDialog from './message/ToolOutputDialog';
@@ -53,6 +70,8 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
@@ -71,6 +90,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { usePermissionStore } from '@/stores/permissionStore';
+import { togglePermissionAutoAccept } from './permissionAutoAccept';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -94,6 +114,9 @@ import {
     findAttachmentCitationRanges,
 } from './attachmentCitations';
 import { getFileMentionAutocompleteQuery, type FileMentionAutocompleteInputSource } from './fileMentionAutocompleteState';
+import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
+import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
+import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
 import type { Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
@@ -103,6 +126,9 @@ const FILE_MENTION_TOKEN = /^@[^\s]+$/;
 const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
 const INLINE_SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
 const CHAT_DRAFT_PERSIST_DEBOUNCE_MS = 500;
+const getChatDraftSnapshotSignature = (text: string, confirmedMentions: Iterable<string>): string => (
+    `${text}\u0000${[...confirmedMentions].sort().join('\u0000')}`
+);
 const COMPACT_CHAT_PLACEHOLDER_MAX_WIDTH = 560;
 const VS_CODE_DROP_DATA_TYPES = [
     'CodeFiles',
@@ -381,7 +407,7 @@ const getProjectIconColor = (projectColor?: string | null): string | undefined =
 };
 
 const MemoModelControls = React.memo(ModelControls);
-const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton);
+const MemoComposerDictation = React.memo(ComposerDictation);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 const MemoMobileModelButton = React.memo(MobileModelButton);
 const MemoStatusRow = React.memo(StatusRow);
@@ -522,12 +548,13 @@ type ComposerAttachmentControlsProps = {
     isVSCode: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
-    fileInputRef: React.RefObject<HTMLInputElement | null>;
-    handleLocalFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void | Promise<void>;
     handlePickLocalFiles: () => void;
     openIssuePicker: () => void;
     openPrPicker: () => void;
     onOpenSettings?: () => void;
+    onMenuOpenChange?: (open: boolean) => void;
+    /** Mobile: open the attachment bottom sheet instead of the dropdown menu. */
+    onOpenMobileSheet?: () => void;
 };
 
 const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
@@ -536,8 +563,6 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
         isVSCode,
         footerIconButtonClass,
         iconSizeClass,
-        fileInputRef,
-        handleLocalFileSelect,
         handlePickLocalFiles,
         openIssuePicker,
         openPrPicker,
@@ -546,17 +571,28 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
 
     return (
         <div className="flex items-center gap-x-1.5">
-            <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={handleLocalFileSelect}
-                accept="*/*"
-            />
-
             <div className="relative inline-flex">
-                {isVSCode ? (
+                {props.onOpenMobileSheet ? (
+                    <button
+                        type="button"
+                        className={footerIconButtonClass}
+                        onClick={props.onOpenMobileSheet}
+                        // Same guard as PermissionAutoAcceptButton: keep the tap
+                        // from dismissing the keyboard. On Android's
+                        // resizes-content viewport the keyboard-close relayout
+                        // moves this button mid-tap and the click never lands.
+                        onMouseDown={(event) => event.preventDefault()}
+                        onPointerDownCapture={(event) => {
+                            if (event.pointerType === 'touch') {
+                                event.preventDefault();
+                            }
+                        }}
+                        title={t('chat.chatInput.actions.addAttachment')}
+                        aria-label={t('chat.chatInput.actions.addAttachment')}
+                    >
+                        <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
+                    </button>
+                ) : isVSCode ? (
                     <button
                         type="button"
                         className={footerIconButtonClass}
@@ -567,7 +603,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                         <Icon name="attachment-2" className={cn(iconSizeClass, 'text-current')} />
                     </button>
                 ) : (
-                    <DropdownMenu>
+                    <DropdownMenu onOpenChange={props.onMenuOpenChange}>
                         <DropdownMenuTrigger asChild>
                             <button
                                 type="button"
@@ -626,12 +662,14 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.iconSizeClass === next.iconSizeClass
     && prev.onOpenSettings === next.onOpenSettings
+    && prev.onMenuOpenChange === next.onMenuOpenChange
+    && prev.onOpenMobileSheet === next.onOpenMobileSheet
 ));
 
 type PermissionAutoAcceptButtonProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
-    permissionScopeSessionId: string | null;
+    isInteractive: boolean;
     permissionAutoAcceptEnabled: boolean;
     handlePermissionAutoAcceptToggle: () => void;
     withTooltip?: boolean;
@@ -642,7 +680,7 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
     const {
         footerIconButtonClass,
         iconSizeClass,
-        permissionScopeSessionId,
+        isInteractive,
         permissionAutoAcceptEnabled,
         handlePermissionAutoAcceptToggle,
         withTooltip = false,
@@ -662,7 +700,7 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
             className={cn(
                 footerIconButtonClass,
                 'rounded-md hover:bg-transparent',
-                !permissionScopeSessionId && 'opacity-30',
+                !isInteractive && 'opacity-30',
             )}
             onMouseDown={(event) => {
                 event.preventDefault();
@@ -898,81 +936,35 @@ type AutocompleteOverlayPosition = {
     maxHeight: number;
 };
 
-// Per-session draft key — preserves in-progress messages across project switches
-const getDraftKey = (sessionId: string | null): string =>
-    `openchamber_chat_input_draft_${sessionId ?? 'new'}`;
-
-// Helper to safely read from localStorage for a given session
-const getStoredDraft = (sessionId: string | null): string => {
-    try {
-        return localStorage.getItem(getDraftKey(sessionId)) ?? '';
-    } catch {
-        return '';
-    }
-};
-
-// Helper to safely write/clear a per-session draft
-const saveStoredDraft = (sessionId: string | null, draft: string): void => {
-    try {
-        if (draft) {
-            localStorage.setItem(getDraftKey(sessionId), draft);
-        } else {
-            localStorage.removeItem(getDraftKey(sessionId));
-        }
-    } catch {
-        // Ignore localStorage errors
-    }
-};
-
-// Per-session confirmed mentions key — tracks which @mentions are confirmed (blue) vs plain text
-const getConfirmedMentionsKey = (sessionId: string | null): string =>
-    `openchamber_chat_confirmed_mentions_${sessionId ?? 'new'}`;
-
-const saveConfirmedMentions = (sessionId: string | null, mentions: Set<string>): void => {
-    try {
-        if (mentions.size > 0) {
-            localStorage.setItem(getConfirmedMentionsKey(sessionId), JSON.stringify([...mentions]));
-        } else {
-            localStorage.removeItem(getConfirmedMentionsKey(sessionId));
-        }
-    } catch {
-        // Ignore localStorage errors
-    }
-};
-
-const loadConfirmedMentions = (sessionId: string | null): Set<string> => {
-    try {
-        const raw = localStorage.getItem(getConfirmedMentionsKey(sessionId));
-        if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-                return new Set(parsed.filter((v): v is string => typeof v === 'string'));
-            }
-        }
-    } catch {
-        // Ignore localStorage errors
-    }
-    return new Set();
+const resolveChatDraftIdentity = (sessionId: string | null): ChatDraftIdentity | null => {
+    const sessionState = useSessionUIStore.getState();
+    const newSessionDirectory = sessionState.newSessionDraft?.open
+        ? sessionState.newSessionDraft.bootstrapPendingDirectory ?? sessionState.newSessionDraft.directoryOverride
+        : null;
+    const directory = sessionId
+        ? sessionState.getDirectoryForSession(sessionId) ?? sessionState.currentSessionDirectory
+        : newSessionDirectory ?? useDirectoryStore.getState().currentDirectory;
+    return createChatDraftIdentity(getRuntimeKey(), directory, sessionId);
 };
 
 const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
     const { t } = useI18n();
     // Track if we restored a draft on mount (for text selection)
     const initialDraftRef = React.useRef<string | null>(null);
-    // Track initial session ID (captured at mount time for draft restoration)
-    const initialSessionIdRef = React.useRef<string | null>(null);
+    const initialDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(null);
+    const initialDraftSnapshotRef = React.useRef<ChatDraftSnapshot>({ text: '', confirmedMentions: new Set() });
     const [message, setMessage] = React.useState(() => {
-        // Read per-session draft at mount time using the current session from the store
         const sessionId = useSessionUIStore.getState().currentSessionId;
-        initialSessionIdRef.current = sessionId;
-        const draft = getStoredDraft(sessionId);
-        if (draft) {
-            initialDraftRef.current = draft;
+        const identity = resolveChatDraftIdentity(sessionId);
+        const snapshot = readChatDraft(identity);
+        initialDraftIdentityRef.current = identity;
+        initialDraftSnapshotRef.current = snapshot;
+        if (snapshot.text) {
+            initialDraftRef.current = snapshot.text;
         }
-        return draft;
+        return snapshot.text;
     });
-    // Restore confirmed mentions from localStorage on mount
-    const confirmedMentionsRef = React.useRef<Set<string>>(loadConfirmedMentions(initialSessionIdRef.current));
+    const confirmedMentionsRef = React.useRef<Set<string>>(initialDraftSnapshotRef.current.confirmedMentions);
     // Helper: check if a mention path looks like a file/folder (has path separators, extension, or was explicitly confirmed)
     const isConfirmedFilePath = (text: string): boolean =>
         text.includes('/') || text.includes('\\') || text.includes('.') || confirmedMentionsRef.current.has(text);
@@ -989,6 +981,44 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [snippetQuery, setSnippetQuery] = React.useState('');
     const [textareaSize, setTextareaSize] = React.useState<{ height: number; maxHeight: number } | null>(null);
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
+    // Mobile pill composer: when the keyboard is closed the composer collapses
+    // into a narrow pill (+ / placeholder / mic) with a round new-session button
+    // beside it. Any interaction expands back into the full composer. The swap
+    // is deliberately INSTANT and synchronized with the keyboard choreography,
+    // so the chat compensates keyboard + composer height in a single motion.
+    const [mobileComposerExpanded, setMobileComposerExpanded] = React.useState(false);
+    const [mobileTextareaFocused, setMobileTextareaFocused] = React.useState(false);
+    // Mobile browser / installed PWA: tapping a composer control while the
+    // keyboard is up blurs the textarea first, and the keyboard-resize reflow
+    // moves the control out from under the finger BEFORE the browser
+    // synthesizes the click — the tap dismisses the keyboard but the control's
+    // onClick never fires. Defer the blur-driven state flip so the pinned
+    // composer holds still through the tap; a refocus cancels it. Capacitor
+    // keeps the immediate flip.
+    const mobileBlurTimerRef = React.useRef<number | null>(null);
+    React.useEffect(() => () => {
+        if (mobileBlurTimerRef.current !== null) {
+            window.clearTimeout(mobileBlurTimerRef.current);
+        }
+    }, []);
+    const [mobileDictationActive, setMobileDictationActive] = React.useState(false);
+    const [mobileAttachMenuOpen, setMobileAttachMenuOpen] = React.useState(false);
+    const [mobileDraftPicker, setMobileDraftPicker] = React.useState<'project' | 'branch' | null>(null);
+    const [mobileDraftPickerQuery, setMobileDraftPickerQuery] = React.useState('');
+    // True while ANY MobileOverlayPanel is open (sessions sheet, model/agent
+    // panels, pickers...). Opening one closes the keyboard, which must not
+    // collapse the composer into the pill under the overlay.
+    const [mobileOverlayHostBusy, setMobileOverlayHostBusy] = React.useState(false);
+    // Set while an expansion is settling (focus/dictation not yet active) so the
+    // collapse watcher doesn't immediately fold the composer back into the pill.
+    const mobileExpandIntentRef = React.useRef<'focus' | null>(null);
+    // Keyboard restore across overlays: opening an overlay closes the keyboard;
+    // if it was open at that moment, reopen it when the overlay closes.
+    const lastMobileBlurAtRef = React.useRef(0);
+    const restoreKeyboardAfterOverlayRef = React.useRef(false);
+    // Pill ↔ full composer morph: the wrapper FLIP-animates its height between
+    // the two shapes while the swapped content fades in.
+    const composerHandleTouchRef = React.useRef<{ startY: number; fired: boolean } | null>(null);
     // Message history navigation state (up/down arrow to recall previous messages)
     const [historyIndex, setHistoryIndex] = React.useState(-1); // -1 = not browsing, 0+ = index from most recent
     const [draftMessage, setDraftMessage] = React.useState(''); // Preserves input when entering history mode
@@ -1012,7 +1042,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const draftPersistTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const skipNextDraftPersistRef = React.useRef(false);
     const lastPersistedDraftRef = React.useRef<Map<string, string>>(new Map());
-    const currentSessionIdForDraftRef = React.useRef<string | null>(null);
+    const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
 
     // TODO: port sendMessage to session-actions (complex — creates sessions, handles attachments, etc.)
@@ -1026,9 +1056,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const currentSessionDirectoryForSync = useSessionUIStore(
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
+    const activeRuntimeKey = getRuntimeKey();
+    const chatDraftIdentity = React.useMemo(
+        () => createChatDraftIdentity(
+            activeRuntimeKey,
+            currentSessionDirectoryForSync ?? currentDirectory,
+            currentSessionId,
+        ),
+        [activeRuntimeKey, currentDirectory, currentSessionDirectoryForSync, currentSessionId],
+    );
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
+    const draftPermissionAutoAcceptEnabled = useSessionUIStore((s) => (
+        s.newSessionDraft?.open ? s.newSessionDraft.permissionAutoAcceptEnabled === true : false
+    ));
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
+    const setDraftPermissionAutoAcceptEnabled = useSessionUIStore((s) => s.setDraftPermissionAutoAcceptEnabled);
+    const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
     const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
@@ -1055,6 +1099,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
     const currentModelId = useConfigStore((state) => state.currentModelId);
+    const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
+    // Subscribe to both sources read by getModelMetadata so async metadata and provider updates are observed.
+    useConfigStore((state) => state.modelsMetadata);
+    useConfigStore((state) => state.providers);
+    const currentModelMetadata = currentProviderId && currentModelId
+        ? getModelMetadata(currentProviderId, currentModelId)
+        : undefined;
     const currentVariant = useConfigStore((state) => state.currentVariant);
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const setAgent = useConfigStore((state) => state.setAgent);
@@ -1090,6 +1141,53 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         title: '',
         content: '',
     });
+    const attachmentCompatibilityRef = React.useRef({
+        modelKey: `${currentProviderId ?? ''}/${currentModelId ?? ''}`,
+        modalitySignature: currentModelMetadata?.modalities?.input?.slice().sort().join(',') ?? null,
+        attachmentIds: new Set<string>(),
+    });
+
+    React.useEffect(() => {
+        const modelKey = `${currentProviderId ?? ''}/${currentModelId ?? ''}`;
+        const inputModalities = currentModelMetadata?.modalities?.input;
+        const modalitySignature = inputModalities?.slice().sort().join(',') ?? null;
+        const previous = attachmentCompatibilityRef.current;
+        const modelChanged = previous.modelKey !== modelKey;
+        const metadataBecameAvailable = previous.modalitySignature === null && modalitySignature !== null;
+        const filesToCheck = modelChanged || metadataBecameAvailable
+            ? attachedFiles
+            : attachedFiles.filter((file) => !previous.attachmentIds.has(file.id));
+
+        attachmentCompatibilityRef.current = {
+            modelKey,
+            modalitySignature,
+            attachmentIds: new Set(attachedFiles.map((file) => file.id)),
+        };
+
+        if (!inputModalities || filesToCheck.length === 0) return;
+
+        const incompatibleFiles = getUnsupportedAttachmentInputs(filesToCheck, inputModalities);
+        if (incompatibleFiles.length === 0) return;
+
+        const unsupportedModalities = Array.from(new Set(incompatibleFiles.map(({ modality }) => modality)));
+        const modalityLabels: Record<AttachmentInputModality, string> = {
+            text: t('chat.modelControls.modality.text'),
+            image: t('chat.modelControls.modality.image'),
+            pdf: t('chat.modelControls.modality.pdf'),
+            audio: t('chat.modelControls.modality.audio'),
+            video: t('chat.modelControls.modality.video'),
+        };
+        const filenames = incompatibleFiles.map(({ attachment }) => attachment.filename);
+        const fileSummary = filenames.length > 3
+            ? `${filenames.slice(0, 3).join(', ')} (+${filenames.length - 3})`
+            : filenames.join(', ');
+
+        toast.warning(t('chat.chatInput.toast.unsupportedAttachmentModalities', {
+            model: currentModelMetadata.name ?? currentModelId ?? '',
+            modalities: unsupportedModalities.map((modality) => modalityLabels[modality]).join(', '),
+            files: fileSummary,
+        }), { id: `attachment-modalities:${modelKey}` });
+    }, [attachedFiles, currentModelId, currentModelMetadata, currentProviderId, t]);
 
     const handleShowAttachmentPreview = React.useCallback((content: ToolPopupContent) => {
         if (!content.image) return;
@@ -1146,6 +1244,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [currentSessionId, currentDirectory, t]);
 
     const isDesktopExpanded = isExpandedInput && !isMobile;
+    // Mobile fullscreen composer (entered via the drag handle's swipe-up).
+    const isMobileExpanded = isExpandedInput && isMobile;
+    const isComposerExpanded = isDesktopExpanded || isMobileExpanded;
     // Rounder composer on mobile (touch UI reads better with a softer corner).
     const chatInputRadius = isMobile ? '1.5rem' : 'var(--radius-xl)';
     const useCompactChatPlaceholder = isMobile || isNarrowComposer;
@@ -1174,8 +1275,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return () => observer.disconnect();
     }, []);
 
-    const sendableAttachedFiles = attachedFiles;
-
     const knownAgentNames = React.useMemo(
         () => new Set(agents.map((agent) => agent.name.toLowerCase())),
         [agents]
@@ -1189,7 +1288,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const availableSkills = useSkillsStore((s) => s.skills);
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
-            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'catch-up', 'debug', 'weigh', 'explore',
+            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'catch-up', 'debug', 'weigh', 'explore',
         ]);
         if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
@@ -1276,18 +1375,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [inputMode, message, knownAgentNames]);
 
     const attachmentCitationRanges = React.useMemo<HighlightRange[]>(() => {
-        if (!message || !message.includes('[') || inputMode === 'shell' || sendableAttachedFiles.length === 0) {
+        if (!message || !message.includes('[') || inputMode === 'shell' || attachedFiles.length === 0) {
             return [];
         }
 
         return findAttachmentCitationRanges(
             message,
-            sendableAttachedFiles.map((file) => file.filename),
+            attachedFiles.map((file) => file.filename),
         ).map((range) => ({
             ...range,
             style: 'mentionFile' as const,
         }));
-    }, [inputMode, message, sendableAttachedFiles]);
+    }, [attachedFiles, inputMode, message]);
 
     // Combined source-mode highlight: markdown syntax + @mentions. Returns null
     // when there's nothing to highlight so the overlay stays off for plain text.
@@ -1421,14 +1520,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     } | null>(null);
 
     // Message queue
+    const messageQueueTarget = currentSessionId
+        ? createMessageQueueTarget(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory)
+        : null;
+    const messageQueueKey = messageQueueTarget ? getMessageQueueKey(messageQueueTarget) : null;
     const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
-                if (!currentSessionId) return EMPTY_QUEUE;
-                return state.queuedMessages[currentSessionId] ?? EMPTY_QUEUE;
+                if (!messageQueueKey) return EMPTY_QUEUE;
+                return state.queuedMessages[messageQueueKey] ?? EMPTY_QUEUE;
             },
-            [currentSessionId]
+            [messageQueueKey]
         )
     );
     const addToQueue = useMessageQueueStore((state) => state.addToQueue);
@@ -1436,59 +1539,68 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
 
     // Inline comment drafts
+    const inlineDraftSessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
+    const inlineDraftDirectory = currentSessionDirectoryForSync ?? currentDirectory;
+    const inlineDraftTarget = React.useMemo<InlineCommentDraftTarget | null>(
+        () => inlineDraftSessionKey && inlineDraftDirectory
+            ? { directory: inlineDraftDirectory, sessionKey: inlineDraftSessionKey }
+            : null,
+        [inlineDraftDirectory, inlineDraftSessionKey],
+    );
+    const inlineDraftKey = inlineDraftTarget
+        ? getInlineCommentDraftKey(activeRuntimeKey, inlineDraftTarget.directory, inlineDraftTarget.sessionKey)
+        : null;
     const draftCount = useInlineCommentDraftStore(
         React.useCallback(
-            (state) => {
-                const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
-                if (!sessionKey) return 0;
-                return (state.drafts[sessionKey] ?? []).length;
-            },
-            [currentSessionId, newSessionDraftOpen]
+            (state) => inlineDraftKey ? (state.drafts[inlineDraftKey] ?? []).length : 0,
+            [inlineDraftKey]
         )
     );
     const draftSourceKey = useInlineCommentDraftStore(
         React.useCallback(
             (state) => {
-                const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
-                const drafts = sessionKey ? (state.drafts[sessionKey] ?? []) : [];
+                const drafts = inlineDraftKey ? (state.drafts[inlineDraftKey] ?? []) : [];
                 let previewConsole = 0;
                 let previewAnnotation = 0;
                 let review = 0;
+                let terminal = 0;
                 for (const draft of drafts) {
                     if (draft.source === 'preview-console') previewConsole += 1;
                     else if (draft.source === 'preview-annotation') previewAnnotation += 1;
+                    else if (draft.source === 'terminal') terminal += 1;
                     else review += 1;
                 }
-                return `${previewConsole}:${previewAnnotation}:${review}`;
+                return `${previewConsole}:${previewAnnotation}:${review}:${terminal}`;
             },
-            [currentSessionId, newSessionDraftOpen]
+            [inlineDraftKey]
         )
     );
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const removeInlineCommentDraft = useInlineCommentDraftStore((state) => state.removeDraft);
     const hasDrafts = draftCount > 0;
-    const [previewConsoleCount, previewAnnotationCount, reviewCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const [previewConsoleCount, previewAnnotationCount, reviewCount, terminalContextCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
+    const terminalContextDrafts = terminalContextCount > 0
+        ? (inlineDraftKey ? useInlineCommentDraftStore.getState().drafts[inlineDraftKey] ?? [] : []).filter((draft) => draft.source === 'terminal')
+        : [];
     const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation') => {
-        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
-        if (!sessionKey) return;
-        const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
+        if (!inlineDraftTarget) return;
+        const drafts = useInlineCommentDraftStore.getState().getDrafts(inlineDraftTarget);
         for (const draft of drafts) {
             if (draft.source === source) {
-                removeInlineCommentDraft(sessionKey, draft.id);
+                removeInlineCommentDraft(inlineDraftTarget, draft.id);
             }
         }
-    }, [currentSessionId, newSessionDraftOpen, removeInlineCommentDraft]);
+    }, [inlineDraftTarget, removeInlineCommentDraft]);
     // Review comments are the inline-comment drafts that aren't preview sources.
     const removeReviewDrafts = React.useCallback(() => {
-        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
-        if (!sessionKey) return;
-        const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
+        if (!inlineDraftTarget) return;
+        const drafts = useInlineCommentDraftStore.getState().getDrafts(inlineDraftTarget);
         for (const draft of drafts) {
-            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation') {
-                removeInlineCommentDraft(sessionKey, draft.id);
+            if (draft.source !== 'preview-console' && draft.source !== 'preview-annotation' && draft.source !== 'terminal') {
+                removeInlineCommentDraft(inlineDraftTarget, draft.id);
             }
         }
-    }, [currentSessionId, newSessionDraftOpen, removeInlineCommentDraft]);
+    }, [inlineDraftTarget, removeInlineCommentDraft]);
 
     // User message history for up/down arrow navigation.
     // Keep this on a narrow hook instead of full session message records.
@@ -1500,17 +1612,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [message]);
 
     React.useEffect(() => {
-        currentSessionIdForDraftRef.current = currentSessionId;
-    }, [currentSessionId]);
+        currentChatDraftIdentityRef.current = chatDraftIdentity;
+    }, [chatDraftIdentity]);
 
-    const persistDraftImmediately = React.useCallback((sessionId: string | null, draft: string) => {
-        const key = getDraftKey(sessionId);
-        const lastPersisted = lastPersistedDraftRef.current.get(key);
-        if (lastPersisted === draft) {
-            return;
-        }
-
-        saveStoredDraft(sessionId, draft);
+    const persistDraftImmediately = React.useCallback((identity: ChatDraftIdentity | null, draft: string) => {
+        if (!identity) return;
+        const key = getChatDraftIdentityKey(identity);
         // Only persist confirmed mentions that are actually present in the draft text
         const activeMentions = new Set<string>();
         for (const mention of confirmedMentionsRef.current) {
@@ -1519,8 +1626,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
         confirmedMentionsRef.current = activeMentions;
-        saveConfirmedMentions(sessionId, activeMentions);
-        lastPersistedDraftRef.current.set(key, draft);
+        const signature = getChatDraftSnapshotSignature(draft, activeMentions);
+        const lastPersisted = lastPersistedDraftRef.current.get(key);
+        if (lastPersisted === signature) {
+            return;
+        }
+        writeChatDraft(identity, draft, activeMentions);
+        lastPersistedDraftRef.current.set(key, signature);
     }, []);
 
     const clearPendingDraftPersist = React.useCallback(() => {
@@ -1543,11 +1655,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!persistChatDraft) {
             // Setting disabled - clear the restored draft
             setMessage('');
-            try {
-                localStorage.removeItem(getDraftKey(initialSessionIdRef.current));
-            } catch {
-                // Ignore
-            }
+            writeChatDraft(initialDraftIdentityRef.current, '', []);
         } else {
             // Setting enabled - select all text
             requestAnimationFrame(() => {
@@ -1556,24 +1664,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [persistChatDraft]);
 
-    // Handle session switching: save draft for old session, restore draft for new session
-    const prevSessionIdRef = React.useRef(currentSessionId);
+    // Handle identity switching: save the old draft and restore the new runtime/directory/session draft.
+    const prevChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
     React.useEffect(() => {
-        if (prevSessionIdRef.current !== currentSessionId) {
-            const oldSessionId = prevSessionIdRef.current;
-            prevSessionIdRef.current = currentSessionId;
+        const previousIdentity = prevChatDraftIdentityRef.current;
+        const previousKey = previousIdentity ? getChatDraftIdentityKey(previousIdentity) : null;
+        const currentKey = chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null;
+        if (previousKey !== currentKey) {
+            prevChatDraftIdentityRef.current = chatDraftIdentity;
             setInputMode('normal');
             clearPendingDraftPersist();
             skipNextDraftPersistRef.current = true;
 
             if (persistChatDraft) {
-                // Save current draft for the session we're leaving
-                persistDraftImmediately(oldSessionId, messageRef.current);
-                // Restore draft for the session we're entering
-                const newDraft = getStoredDraft(currentSessionId);
-                setMessage(newDraft);
-                confirmedMentionsRef.current = loadConfirmedMentions(currentSessionId);
-                if (newDraft) {
+                persistDraftImmediately(previousIdentity, messageRef.current);
+                const nextSnapshot = readChatDraft(chatDraftIdentity);
+                setMessage(nextSnapshot.text);
+                confirmedMentionsRef.current = nextSnapshot.confirmedMentions;
+                if (nextSnapshot.text) {
                     requestAnimationFrame(() => {
                         textareaRef.current?.select();
                     });
@@ -1584,7 +1692,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 confirmedMentionsRef.current = new Set();
             }
         }
-    }, [clearPendingDraftPersist, currentSessionId, persistChatDraft, persistDraftImmediately]);
+    }, [chatDraftIdentity, clearPendingDraftPersist, persistChatDraft, persistDraftImmediately]);
+
+    React.useEffect(() => subscribeChatDraftDeletion((deletedIdentity) => {
+        const deletedKey = getChatDraftIdentityKey(deletedIdentity);
+        lastPersistedDraftRef.current.set(deletedKey, getChatDraftSnapshotSignature('', []));
+        const currentIdentity = currentChatDraftIdentityRef.current;
+        if (!currentIdentity || getChatDraftIdentityKey(currentIdentity) !== deletedKey) return;
+        clearPendingDraftPersist();
+        skipNextDraftPersistRef.current = true;
+        messageRef.current = '';
+        confirmedMentionsRef.current = new Set();
+        setMessage('');
+    }), [clearPendingDraftPersist]);
 
     // Focus textarea when new session draft is opened
     const prevNewSessionDraftOpenRef = React.useRef(newSessionDraftOpen);
@@ -1607,7 +1727,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     React.useEffect(() => {
         if (!persistChatDraft) {
             clearPendingDraftPersist();
-            persistDraftImmediately(currentSessionId, '');
+            persistDraftImmediately(chatDraftIdentity, '');
             return;
         }
 
@@ -1618,23 +1738,36 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         clearPendingDraftPersist();
         const draftSnapshot = message;
-        const sessionSnapshot = currentSessionId;
+        const identitySnapshot = chatDraftIdentity;
         draftPersistTimerRef.current = setTimeout(() => {
             draftPersistTimerRef.current = null;
-            persistDraftImmediately(sessionSnapshot, draftSnapshot);
+            persistDraftImmediately(identitySnapshot, draftSnapshot);
         }, CHAT_DRAFT_PERSIST_DEBOUNCE_MS);
 
         return () => {
             clearPendingDraftPersist();
         };
-    }, [clearPendingDraftPersist, currentSessionId, message, persistChatDraft, persistDraftImmediately]);
+    }, [chatDraftIdentity, clearPendingDraftPersist, message, persistChatDraft, persistDraftImmediately]);
 
     React.useEffect(() => {
-        return () => {
+        const flushCurrentDraft = () => {
             clearPendingDraftPersist();
             if (persistChatDraft) {
-                persistDraftImmediately(currentSessionIdForDraftRef.current, messageRef.current);
+                persistDraftImmediately(currentChatDraftIdentityRef.current, messageRef.current);
             }
+        };
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') flushCurrentDraft();
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        document.addEventListener('freeze', flushCurrentDraft);
+        window.addEventListener('pagehide', flushCurrentDraft);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            document.removeEventListener('freeze', flushCurrentDraft);
+            window.removeEventListener('pagehide', flushCurrentDraft);
+            flushCurrentDraft();
         };
     }, [clearPendingDraftPersist, persistChatDraft, persistDraftImmediately]);
 
@@ -1650,10 +1783,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             return;
         }
+        // Set the panel state BEFORE blurring: the collapse watcher and the
+        // overlay-host observer must already see the overlay as open when the
+        // keyboard-close lands, otherwise the composer folds into the pill
+        // under the sheet.
+        setMobileControlsPanel(panel);
         textareaRef.current?.blur();
-        requestAnimationFrame(() => {
-            setMobileControlsPanel(panel);
-        });
     }, [isMobile]);
 
     // Consume pending input text (e.g., from revert action)
@@ -1680,7 +1815,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [pendingInputText, consumePendingInputText]);
 
-    const hasContent = message.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;
+    const hasContent = message.trim().length > 0 || attachedFiles.length > 0 || hasDrafts;
     const hasQueuedMessages = queuedMessages.length > 0;
     const canSend = hasContent || hasQueuedMessages;
 
@@ -1690,32 +1825,36 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const currentMessage = textareaRef.current?.value ?? message;
         return {
             message: currentMessage,
-            hasContent: currentMessage.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts,
+            hasContent: currentMessage.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
         };
-    }, [hasDrafts, message, sendableAttachedFiles.length]);
+    }, [attachedFiles.length, hasDrafts, message]);
 
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
         queuedOnly?: boolean;
         queuedMessageId?: string;
         delivery?: 'steer';
+        /** Submit this text instead of the composer input. Used by preset
+            starter chips: on mobile the collapsed pill has no mounted textarea,
+            so the DOM-first input snapshot would read empty content. */
+        presetText?: string;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
     // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        if (!inputSnapshot.hasContent || !currentSessionId) return;
+        if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
-        const drafts = consumeDrafts(currentSessionId);
+        const drafts = inlineDraftTarget ? consumeDrafts(inlineDraftTarget) : [];
 
         let messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
         if (drafts.length > 0) {
             messageToQueue = appendInlineComments(messageToQueue, drafts);
         }
-        const attachmentsToQueue = sanitizeAttachmentsForSend(sendableAttachedFiles);
+        const attachmentsToQueue = sanitizeAttachmentsForSend(attachedFiles);
 
-        addToQueue(currentSessionId, {
+        addToQueue(messageQueueTarget, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
             sendConfig: currentProviderId && currentModelId ? {
@@ -1738,7 +1877,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             textareaRef.current?.focus();
         }
-    }, [getCurrentInputSnapshot, currentSessionId, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inlineDraftTarget, attachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);
@@ -1772,7 +1911,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
-        const inputSnapshot = getCurrentInputSnapshot();
+        const inputSnapshot = options?.presetText != null
+            ? {
+                message: options.presetText,
+                hasContent: options.presetText.trim().length > 0 || attachedFiles.length > 0 || hasDrafts,
+            }
+            : getCurrentInputSnapshot();
         const queuedMessagesToSend = queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages;
@@ -1872,7 +2016,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const messageToSend = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
             const { sanitizedText, mention } = parseAgentMentions(messageToSend, agents);
             const { sanitizedText: messageText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
-            const attachmentsToSend = sanitizeAttachmentsForSend(sendableAttachedFiles);
+            const attachmentsToSend = sanitizeAttachmentsForSend(attachedFiles);
             addMentionedSkills(messageText);
 
             if (!agentMentionName && mention?.name) {
@@ -1892,10 +2036,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+        const consumedDraftTarget = inlineDraftTarget;
         let drafts: InlineCommentDraft[] = [];
-        if (!queuedOnly && sessionKey) {
-            drafts = consumeDrafts(sessionKey);
+        if (!queuedOnly && consumedDraftTarget) {
+            drafts = consumeDrafts(consumedDraftTarget);
         }
 
         if (drafts.length > 0) {
@@ -1950,17 +2094,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
 
         // Clear queue and input
-        if (currentSessionId && queuedMessageId) {
-            removeFromQueue(currentSessionId, queuedMessageId);
-        } else if (currentSessionId && hasQueuedMessages) {
-            clearQueue(currentSessionId);
+        if (messageQueueTarget && queuedMessageId) {
+            removeFromQueue(messageQueueTarget, queuedMessageId);
+        } else if (messageQueueTarget && hasQueuedMessages) {
+            clearQueue(messageQueueTarget);
         }
         if (!queuedOnly) {
             setMessage('');
             confirmedMentionsRef.current.clear();
             // Clear per-session draft on submit
-            saveStoredDraft(currentSessionId, '');
-            saveConfirmedMentions(currentSessionId, confirmedMentionsRef.current);
+            persistDraftImmediately(chatDraftIdentity, '');
             // Reset message history navigation state
             setHistoryIndex(-1);
             setDraftMessage('');
@@ -2085,6 +2228,32 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     scrollToBottom?.();
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.planFeatureFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'craft-goal' && (currentSessionId || newSessionDraftOpen)) {
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const idea = normalizedCommand.replace(/^\/craft-goal\b/i, '').trim();
+                    const visibleText = await renderMagicPrompt('session.craftGoal.visible', {
+                        idea_block: idea ? `\n\nHere is my initial idea:\n${idea}` : '',
+                    });
+                    const instructionsText = await renderMagicPrompt('session.craftGoal.instructions');
+                    await sendMessage(
+                        visibleText,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        variantToSend,
+                        inputMode,
+                        sendMessageOptions,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.craftGoalFailed'));
                 }
                 return;
             }
@@ -2224,6 +2393,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             inputMode,
             sendMessageOptions,
         );
+        const restoreConsumedDrafts = () => {
+            if (consumedDraftTarget && drafts.length > 0) {
+                useInlineCommentDraftStore.getState().restoreDrafts(consumedDraftTarget, drafts);
+            }
+        };
 
         if (typeof window === 'undefined') {
             scrollToBottom?.();
@@ -2251,6 +2425,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const normalized = rawMessage.toLowerCase();
 
             console.error('Message send failed:', rawMessage || error);
+            restoreConsumedDrafts();
+
+            const currentInput = textareaRef.current?.value ?? messageRef.current;
+            if (newSessionDraftOpen && inputSnapshot.message && (!currentInput || currentInput === inputSnapshot.message)) {
+                setMessage(inputSnapshot.message);
+                writeChatDraft(chatDraftIdentity, inputSnapshot.message, confirmedMentionsRef.current);
+            }
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
@@ -2306,16 +2487,39 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
 
-    // Draft welcome presets: populate the composer and submit immediately.
-    // getCurrentInputSnapshot reads textareaRef.current.value first, so setting it
-    // synchronously lets handleSubmit pick up the preset text in the same tick.
+    // Draft welcome presets: submit immediately.
     const submitPresetPrompt = React.useCallback((text: string) => {
-        const textarea = textareaRef.current;
-        if (textarea) {
-            textarea.value = text;
-        }
-        setMessage(text);
-        void handleSubmitRef.current();
+        // The text goes straight into the submit (see SubmitOptions.presetText)
+        // instead of through the composer input — the collapsed mobile pill has
+        // no mounted textarea to stage it in.
+        const draft = (textareaRef.current?.value ?? messageRef.current).trim();
+        const presetText = draft ? `${text}\n${draft}` : text;
+        void handleSubmitRef.current({ presetText });
+    }, []);
+
+    // Dictation: insert the transcript inline; optionally submit immediately.
+    // getCurrentInputSnapshot reads textareaRef.current.value first, so setting
+    // it synchronously lets handleSubmit pick up the text in the same tick.
+    const handleDictationInsert = React.useCallback((text: string) => {
+        setMessage((prev) => {
+            const next = appendInlineText(prev, text);
+            const textarea = textareaRef.current;
+            if (textarea) {
+                textarea.value = next;
+            }
+            return next;
+        });
+        setTimeout(() => {
+            textareaRef.current?.focus();
+        }, 0);
+    }, []);
+
+    const handleDictationInsertAndSend = React.useCallback((text: string) => {
+        // Same as preset chips: the composed text goes into the submit as an
+        // explicit override instead of being staged in the textarea, which may
+        // not be mounted (collapsed mobile pill).
+        const next = appendInlineText(textareaRef.current?.value ?? messageRef.current, text);
+        void handleSubmitRef.current({ presetText: next });
     }, []);
 
     // Preset chips rendered outside this component (e.g. under the welcome
@@ -2725,6 +2929,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [agents, currentAgentName, currentSessionId, setAgent, saveSessionAgentSelection]);
 
+    // Height the dictation transcript needs (null when idle): the overlay sits
+    // absolutely over the composer, so the underlying textarea must grow for
+    // the composer to grow — feed this into the autosize below.
+    const dictationContentHeightRef = React.useRef<number | null>(null);
+    const [dictationContentHeight, setDictationContentHeight] = React.useState<number | null>(null);
+    const handleDictationContentHeightChange = React.useCallback((height: number | null) => {
+        setDictationContentHeight((prev) => (prev === height ? prev : height));
+    }, []);
+
     const adjustTextareaHeight = React.useCallback((options?: { allowShrink?: boolean }) => {
         const textarea = textareaRef.current;
         if (!textarea) {
@@ -2733,7 +2946,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const previousScrollTop = textarea.scrollTop;
 
-        if (isDesktopExpanded) {
+        if (isComposerExpanded) {
             textarea.style.height = '100%';
             textarea.style.maxHeight = 'none';
             setTextareaSize(null);
@@ -2760,7 +2973,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const targetLineHeight = Number.isNaN(lineHeight) ? fallbackLineHeight : lineHeight;
         const maxHeight = targetLineHeight * MAX_VISIBLE_TEXTAREA_LINES + paddingTotal;
         const scrollHeight = textarea.scrollHeight || textarea.offsetHeight;
-        const nextHeight = Math.min(scrollHeight, maxHeight);
+        const dictationHeight = dictationContentHeightRef.current ?? 0;
+        const nextHeight = Math.min(Math.max(scrollHeight, dictationHeight), maxHeight);
 
         textarea.style.height = `${nextHeight}px`;
         textarea.style.maxHeight = `${maxHeight}px`;
@@ -2774,13 +2988,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
             return { height: nextHeight, maxHeight };
         });
-    }, [isDesktopExpanded]);
+    }, [isComposerExpanded]);
 
     React.useLayoutEffect(() => {
         const allowShrink = message.length < previousMessageLengthRef.current;
         previousMessageLengthRef.current = message.length;
         adjustTextareaHeight({ allowShrink });
     }, [adjustTextareaHeight, message, isMobile]);
+
+    React.useLayoutEffect(() => {
+        dictationContentHeightRef.current = dictationContentHeight;
+        // Growing transcript never shrinks mid-recording (matches typing);
+        // dictation ending (null) releases the height back to the message.
+        adjustTextareaHeight({ allowShrink: dictationContentHeight === null });
+    }, [adjustTextareaHeight, dictationContentHeight]);
 
     const updateAutocompleteState = React.useCallback((
         value: string,
@@ -3553,14 +3774,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         if (files.length > 0) {
+            let attached = false;
             for (const file of files) {
                 try {
-                    await addAttachedFile(file);
+                    attached = (await addAttachedFile(file)) || attached;
                 } catch (error) {
                     console.error('File attach failed', error);
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.attachFileFailed'));
                 }
             }
+            if (!attached) toast.error(t('chat.chatInput.toast.attachFileFailed'));
         }
         clearDropTextSuppression();
     };
@@ -3581,20 +3803,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const attachFiles = React.useCallback(async (files: FileList | File[]) => {
         const list = Array.isArray(files) ? files : Array.from(files);
+        let attached = false;
 
         for (const file of list) {
             try {
-                await addAttachedFile(file);
+                attached = (await addAttachedFile(file)) || attached;
             } catch (error) {
                 console.error('File attach failed', error);
-                toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.attachFileFailed'));
             }
+        }
+        if (list.length > 0 && !attached) {
+            toast.error(t('chat.chatInput.toast.attachFileFailed'));
         }
     }, [addAttachedFile, t]);
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
-            const data = (await vscodeApi?.pickFiles?.()) as {
+            const data = (await vscodeApi?.pickFiles?.({ extensions: ACCEPTED_ATTACHMENT_EXTENSIONS })) as {
                 files?: Array<{ name: string; mimeType?: string; dataUrl?: string }>;
                 skipped?: Array<{ name?: string; reason?: string }>;
             } | undefined;
@@ -3956,6 +4181,453 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         });
     }, [draftBranchItems, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget, showDraftTargetSelectors]);
 
+    // ── Mobile pill composer state machine ─────────────────────────────────
+    const expandMobileComposer = React.useCallback((intent: 'focus') => {
+        mobileExpandIntentRef.current = intent;
+        // flushSync so the textarea exists NOW and focus() still runs inside
+        // the user gesture's call stack: mobile browsers only open the soft
+        // keyboard for focus calls made synchronously from the tap (an rAF
+        // here worked in the Capacitor WebView but not in Safari/Chrome).
+        flushSync(() => {
+            setMobileComposerExpanded(true);
+        });
+        // Capacitor: our keyboard choreography positions everything, so the
+        // browser's own scroll-into-view must stay off. Mobile BROWSERS have no
+        // choreography — the native reveal (viewport pan that lifts the focused
+        // field above the keyboard) is the only thing that moves the composer.
+        textareaRef.current?.focus({ preventScroll: isCapacitorApp() });
+    }, []);
+
+    const applyAssistSuggestion = React.useCallback((text: string) => {
+        setMessage(text);
+        if (isMobile && !mobileComposerExpanded) {
+            expandMobileComposer('focus');
+        } else {
+            requestAnimationFrame(() => textareaRef.current?.focus());
+        }
+    }, [expandMobileComposer, isMobile, mobileComposerExpanded]);
+
+
+    const handleMobileNewSession = React.useCallback(() => {
+        if (newSessionDraftOpen) return;
+        openNewSessionDraft(currentDirectory ? { directoryOverride: currentDirectory } : undefined);
+    }, [newSessionDraftOpen, openNewSessionDraft, currentDirectory]);
+
+    const openMobileAttachSheet = React.useCallback(() => {
+        // Same order as handleOpenMobilePanel: mark the sheet open BEFORE the
+        // blur so the collapse watcher sees an overlay when the keyboard-close
+        // lands. The trigger button blocks the tap's own focus transfer, so
+        // the keyboard must be dismissed explicitly here.
+        setMobileAttachMenuOpen(true);
+        textareaRef.current?.blur();
+    }, []);
+
+    const mobileComposerExpandedRef = React.useRef(mobileComposerExpanded);
+    React.useEffect(() => {
+        mobileComposerExpandedRef.current = mobileComposerExpanded;
+    });
+
+    const handleMobileDictationActiveChange = React.useCallback((active: boolean) => {
+        setMobileDictationActive(active);
+        if (active) {
+            mobileExpandIntentRef.current = null;
+            // Dictation engine went live (possibly started from the pill):
+            // switch straight into the voice variant of the full composer.
+            if (!mobileComposerExpandedRef.current) {
+                setMobileComposerExpanded(true);
+            }
+            return;
+        }
+        // Dictation ended. The insert flow hands focus back to the textarea a
+        // tick later — if that happened, stay expanded; otherwise (cancel,
+        // discard, insert-and-send) collapse straight back to the pill without
+        // parking on the normal composer for the usual grace period.
+        window.setTimeout(() => {
+            if (!mobileComposerExpandedRef.current) return;
+            if (document.activeElement === textareaRef.current) return;
+            setMobileComposerExpanded(false);
+            setExpandedInput(false);
+        }, 30);
+    }, [setExpandedInput]);
+
+    // Watch the shared overlay portal root: any mounted MobileOverlayPanel
+    // (sessions sheet, model/agent panels, draft pickers, ...) counts as busy.
+    // Observing the host catches overlays whose open-state lives in other
+    // components without threading their state here.
+    React.useEffect(() => {
+        if (!isMobile || typeof document === 'undefined') return;
+        let host = document.getElementById('mobile-overlay-root');
+        if (!host) {
+            // Same lazy-create contract as MobileOverlayPanel's ensureOverlayRoot.
+            host = document.createElement('div');
+            host.id = 'mobile-overlay-root';
+            document.body.appendChild(host);
+        }
+        const hostEl = host;
+        const update = () => setMobileOverlayHostBusy(hostEl.childElementCount > 0);
+        update();
+        const observer = new MutationObserver(update);
+        observer.observe(hostEl, { childList: true });
+        return () => observer.disconnect();
+    }, [isMobile]);
+
+    // If the keyboard was open (or closed just moments ago by the overlay's own
+    // blur) when an overlay appeared, bring it back once every overlay is gone.
+    // The attach dropdown and the GitHub issue/PR pickers join the same chain,
+    // so menu → picker → close restores the keyboard at the end of the flow.
+    const mobileOverlayOpen = mobileOverlayHostBusy
+        || Boolean(mobileControlsPanel)
+        || mobileAttachMenuOpen
+        || issuePickerOpen
+        || prPickerOpen;
+    // Installed PWA (standalone): a focus() from a bare timeout is outside the
+    // user gesture and iOS refuses to raise the keyboard for it (Safari
+    // in-browser is lenient). MobileOverlayPanel dispatches
+    // 'oc:mobile-overlay-closed' synchronously from the same React flush as
+    // the click that closed it — refocus right there, while the gesture is
+    // still live. Chained flows (attach menu → GitHub picker) set the skip ref
+    // so the keyboard doesn't flash open under the next overlay.
+    const mobilePickerDialogsOpenRef = React.useRef(false);
+    mobilePickerDialogsOpenRef.current = issuePickerOpen || prPickerOpen;
+    const skipNextOverlayCloseRestoreRef = React.useRef(false);
+    const openSheetCountRef = React.useRef(0);
+    const holdComposerFocusUntilRef = React.useRef(0);
+    React.useEffect(() => {
+        if (!isMobile || isCapacitorApp() || typeof window === 'undefined') return;
+        if (!window.matchMedia?.('(display-mode: standalone)')?.matches) return;
+        const handleOverlayOpened = () => {
+            openSheetCountRef.current += 1;
+        };
+        const handleOverlayClosed = () => {
+            // Counter instead of a DOM check: the close event fires from a
+            // layout-effect cleanup, when the closing sheet's portal nodes may
+            // still be attached — the DOM can't tell "this sheet going away"
+            // from "another sheet still up".
+            openSheetCountRef.current = Math.max(0, openSheetCountRef.current - 1);
+            if (skipNextOverlayCloseRestoreRef.current) {
+                skipNextOverlayCloseRestoreRef.current = false;
+                return;
+            }
+            if (!restoreKeyboardAfterOverlayRef.current) return;
+            if (mobilePickerDialogsOpenRef.current) return;
+            if (openSheetCountRef.current > 0) return;
+            restoreKeyboardAfterOverlayRef.current = false;
+            // iOS can still dismiss the freshly-raised keyboard when the tap
+            // that closed the overlay finishes over non-input content — hold
+            // focus through that window (see the onBlur guard).
+            holdComposerFocusUntilRef.current = Date.now() + 600;
+            textareaRef.current?.focus();
+            // The native focus lands mid-commit; React's delegated onFocus may
+            // not make it into this flush, leaving mobileComposerBusy false for
+            // a beat — enough for the pill-collapse timer to unmount the
+            // focused textarea and kill the rising keyboard. Set the state
+            // explicitly instead of relying on the synthetic event.
+            if (document.activeElement === textareaRef.current) {
+                setMobileTextareaFocused(true);
+            }
+            // iOS reveals a field above the keyboard only for user-initiated
+            // focus; a programmatic one leaves the composer parked behind it
+            // (the chat screen has no viewport pin of its own — the draft
+            // screen's pinned form ignores these no-op scrolls). Reveal once
+            // the keyboard has mostly risen, and again after it settles.
+            const reveal = () => {
+                const ta = textareaRef.current;
+                if (!ta || document.activeElement !== ta) return;
+                // Align the BOTTOM of the whole composer form with the visible
+                // bottom: 'nearest' on the textarea alone leaves the footer
+                // icon row parked behind the keyboard accessory bar.
+                (composerFormRef.current ?? ta).scrollIntoView({ block: 'end' });
+            };
+            window.setTimeout(reveal, 300);
+            window.setTimeout(reveal, 650);
+        };
+        window.addEventListener('oc:mobile-overlay-opened', handleOverlayOpened);
+        window.addEventListener('oc:mobile-overlay-closed', handleOverlayClosed);
+        return () => {
+            window.removeEventListener('oc:mobile-overlay-opened', handleOverlayOpened);
+            window.removeEventListener('oc:mobile-overlay-closed', handleOverlayClosed);
+        };
+    }, [isMobile]);
+    React.useEffect(() => {
+        if (!isMobile) return;
+        if (mobileOverlayOpen) {
+            if (mobileTextareaFocused || Date.now() - lastMobileBlurAtRef.current < 800) {
+                restoreKeyboardAfterOverlayRef.current = true;
+            }
+            return;
+        }
+        if (!restoreKeyboardAfterOverlayRef.current) return;
+        // Debounced: overlay chains hand off with a frame of "nothing open"
+        // between steps (attach sheet closes → issue/PR picker opens a frame
+        // later). Restoring instantly in that gap would pop the keyboard open
+        // inside the next overlay — wait out the gap and cancel if another
+        // overlay appears.
+        const timer = window.setTimeout(() => {
+            restoreKeyboardAfterOverlayRef.current = false;
+            // Browsers need their native scroll-into-view (see expandMobileComposer).
+            textareaRef.current?.focus({ preventScroll: isCapacitorApp() });
+        }, 180);
+        return () => window.clearTimeout(timer);
+    }, [isMobile, mobileOverlayOpen, mobileTextareaFocused]);
+
+    // Fold the full composer back into the pill once nothing keeps it open:
+    // keyboard closed (textarea blurred), no dictation, no sheet/menu/dialog.
+    // The short delay bridges focus moving between composer controls.
+    const mobileComposerBusy = mobileTextareaFocused
+        || mobileOverlayHostBusy
+        || mobileDictationActive
+        || Boolean(mobileControlsPanel)
+        || mobileAttachMenuOpen
+        || mobileDraftPicker !== null
+        || issuePickerOpen
+        || prPickerOpen
+        || isDragging;
+    React.useEffect(() => {
+        if (!isMobile || !mobileComposerExpanded || mobileComposerBusy) return;
+        const timer = window.setTimeout(() => {
+            // Authoritative DOM check: the React focus state can lag a
+            // programmatic refocus (overlay-close keyboard restore). Collapsing
+            // would unmount the focused textarea and kill the keyboard.
+            if (document.activeElement === textareaRef.current) return;
+            mobileExpandIntentRef.current = null;
+            setMobileComposerExpanded(false);
+            setExpandedInput(false);
+        }, 250);
+        return () => window.clearTimeout(timer);
+    }, [isMobile, mobileComposerExpanded, mobileComposerBusy, setExpandedInput]);
+
+    const mobileComposerBusyRef = React.useRef(false);
+    mobileComposerBusyRef.current = mobileComposerBusy;
+
+    // Browser counterpart of Capacitor's oc-keyboard-open root class (which is
+    // driven by native keyboard events): the focused composer textarea is the
+    // best keyboard proxy a browser has. CSS keyed on it hides the draft
+    // starters while typing, mirroring the native app.
+    React.useEffect(() => {
+        if (!isMobile || isCapacitorApp() || typeof document === 'undefined') return;
+        const root = document.documentElement;
+        if (mobileTextareaFocused) {
+            root.classList.add('oc-browser-keyboard-open');
+        } else {
+            root.classList.remove('oc-browser-keyboard-open');
+            // Installed PWA (standalone): after the keyboard dismisses, WebKit
+            // can leave the layout viewport stuck smaller / panned (content
+            // shifted up with a dead strip at the bottom) until something
+            // forces it to recompute. A zero scroll after the keyboard's exit
+            // animation settles snaps it back; harmless when nothing is stuck.
+            if (window.matchMedia?.('(display-mode: standalone)')?.matches) {
+                window.setTimeout(() => {
+                    if (root.classList.contains('oc-browser-keyboard-open')) return;
+                    window.scrollTo(0, 0);
+                    document.body.scrollTop = 0;
+                    root.scrollTop = 0;
+                }, 350);
+            }
+        }
+        return () => root.classList.remove('oc-browser-keyboard-open');
+    }, [isMobile, mobileTextareaFocused]);
+
+    // Capacitor: collapse in the SAME frame the keyboard starts hiding. The
+    // hide choreography dispatches oc:keyboard-intent BEFORE restoring the
+    // shell layout and measuring the chat compensation; flushSync commits the
+    // pill swap first, so keyboard land + composer shrink are measured (and
+    // compensated) as ONE motion instead of a two-step staircase. The delayed
+    // effect above stays as the fallback for non-Capacitor and for overlays
+    // closing without a keyboard transition.
+    React.useEffect(() => {
+        if (!isMobile || typeof window === 'undefined') return;
+        const handleIntent = (event: Event) => {
+            const detail = (event as CustomEvent<{ open?: boolean }>).detail;
+            if (!detail || detail.open !== false) return;
+            if (!mobileComposerExpandedRef.current) return;
+            // Something still holds the composer open (dictation, an overlay
+            // that closed the keyboard, drag) — the fallback path handles it.
+            if (mobileComposerBusyRef.current) return;
+            mobileExpandIntentRef.current = null;
+            flushSync(() => {
+                setMobileComposerExpanded(false);
+                setExpandedInput(false);
+            });
+        };
+        window.addEventListener('oc:keyboard-intent', handleIntent);
+        return () => window.removeEventListener('oc:keyboard-intent', handleIntent);
+    }, [isMobile, setExpandedInput]);
+
+    // Reset the picker search whenever a draft picker sheet opens/closes.
+    React.useEffect(() => {
+        setMobileDraftPickerQuery('');
+    }, [mobileDraftPicker]);
+
+
+    // ── Composer drag handle (mobile): swipe up = fullscreen, swipe down =
+    // leave fullscreen or dismiss the keyboard. ────────────────────────────
+    const handleComposerHandleTouchStart = React.useCallback((event: React.TouchEvent) => {
+        const touch = event.touches.item(0);
+        composerHandleTouchRef.current = touch ? { startY: touch.clientY, fired: false } : null;
+    }, []);
+    const handleComposerHandleTouchMove = React.useCallback((event: React.TouchEvent) => {
+        const state = composerHandleTouchRef.current;
+        if (!state || state.fired) return;
+        const touch = event.touches.item(0);
+        if (!touch) return;
+        const dy = touch.clientY - state.startY;
+        if (dy <= -28) {
+            state.fired = true;
+            if (!isExpandedInput) setExpandedInput(true);
+        } else if (dy >= 28) {
+            state.fired = true;
+            if (isExpandedInput) {
+                setExpandedInput(false);
+            } else {
+                textareaRef.current?.blur();
+            }
+        }
+    }, [isExpandedInput, setExpandedInput]);
+    const handleComposerHandleTouchEnd = React.useCallback(() => {
+        composerHandleTouchRef.current = null;
+    }, []);
+
+    // Fullscreen composer in a mobile BROWSER: the page layout doesn't shrink
+    // for the keyboard there — Safari pans/scrolls instead, so any flow-based
+    // sizing ends up partly off-screen or under the keyboard (the chat page is
+    // usually already panned when fullscreen is entered). Pin the form to the
+    // VISUAL viewport directly: fixed at its offset with its height, updated
+    // as the browser pans. Capacitor is excluded — its shell already resizes
+    // via the keyboard choreography.
+    const composerFormRef = React.useRef<HTMLFormElement | null>(null);
+    React.useLayoutEffect(() => {
+        if (!isMobile || !isMobileExpanded || isCapacitorApp()) return;
+        const vv = window.visualViewport;
+        const form = composerFormRef.current;
+        const textarea = textareaRef.current;
+        if (!vv || !form) return;
+        // The form is trapped inside lower stacking contexts (the composer
+        // wrapper's z-10), so it cannot out-stack the app header with z-index
+        // alone — hide the header for the duration via a root class instead.
+        document.documentElement.classList.add('oc-browser-kb-fullscreen');
+        const apply = () => {
+            const top = Math.max(0, Math.floor(vv.offsetTop));
+            // Same stale-visualViewport guard as the draft pin below: when the
+            // layout viewport is keyboard-resized (interactive-widget), its
+            // clientHeight is the authoritative above-keyboard height.
+            const layoutHeight = document.documentElement.clientHeight;
+            form.style.position = 'fixed';
+            form.style.left = '0';
+            form.style.right = '0';
+            form.style.top = `${top}px`;
+            form.style.height = `${Math.floor(Math.min(vv.height, layoutHeight - top))}px`;
+            form.style.zIndex = '40';
+            form.style.background = 'var(--background)';
+        };
+        apply();
+        vv.addEventListener('resize', apply);
+        vv.addEventListener('scroll', apply);
+        window.addEventListener('resize', apply);
+        window.addEventListener('scroll', apply, true);
+        return () => {
+            vv.removeEventListener('resize', apply);
+            vv.removeEventListener('scroll', apply);
+            window.removeEventListener('resize', apply);
+            window.removeEventListener('scroll', apply, true);
+            document.documentElement.classList.remove('oc-browser-kb-fullscreen');
+            form.style.position = '';
+            form.style.left = '';
+            form.style.right = '';
+            form.style.top = '';
+            form.style.height = '';
+            form.style.zIndex = '';
+            form.style.background = '';
+            // Back in flow: the browser panned/scrolled for the fullscreen
+            // session and won't re-reveal the (still focused) field on its own,
+            // which left the composer parked behind the keyboard.
+            requestAnimationFrame(() => {
+                if (textarea && document.activeElement === textarea) {
+                    textarea.scrollIntoView({ block: 'nearest' });
+                }
+            });
+        };
+    }, [isMobile, isMobileExpanded]);
+
+    // Draft screen in a mobile BROWSER with the keyboard open: Safari's own
+    // focused-field reveal is unreliable there (leaving the composer behind
+    // the keyboard, e.g. after collapsing from fullscreen), so the NORMAL
+    // composer is pinned to the visual viewport too — anchored to its visible
+    // bottom at its natural height. The chat screen doesn't need this (its
+    // reveal works) and Capacitor has the keyboard choreography.
+    React.useLayoutEffect(() => {
+        if (!isMobile || isCapacitorApp()) return;
+        if (!newSessionDraftOpen || isMobileExpanded || !mobileTextareaFocused) return;
+        const vv = window.visualViewport;
+        const form = composerFormRef.current;
+        if (!vv || !form) return;
+        // Keep the in-flow horizontal geometry (page paddings) while fixed.
+        const rect = form.getBoundingClientRect();
+        form.style.position = 'fixed';
+        form.style.left = `${Math.floor(rect.left)}px`;
+        form.style.width = `${Math.floor(rect.width)}px`;
+        form.style.zIndex = '40';
+        form.style.background = 'var(--background)';
+        // Safari's visualViewport events are unreliable mid keyboard pan (they
+        // can simply not fire), so track the pan with a rAF loop instead —
+        // cheap math per frame, a style write only when the value changes.
+        let lastTop = Number.NaN;
+        let frame = 0;
+        const track = () => {
+            // iOS standalone (PWA) can serve stale visualViewport metrics after
+            // the keyboard rises (full pre-keyboard height, intermittently),
+            // parking the form behind the keyboard. When interactive-widget
+            // resizes the layout viewport, documentElement.clientHeight is the
+            // true above-keyboard bottom — anchor to whichever is smaller. In
+            // pan-mode browsers clientHeight stays full height, so the min
+            // keeps the visual-viewport anchor there.
+            const layoutBottom = document.documentElement.clientHeight;
+            const vvBottom = vv.offsetTop + vv.height;
+            const top = Math.max(0, Math.floor(Math.min(vvBottom, layoutBottom) - form.offsetHeight));
+            if (top !== lastTop) {
+                lastTop = top;
+                form.style.top = `${top}px`;
+            }
+            frame = requestAnimationFrame(track);
+        };
+        track();
+        return () => {
+            cancelAnimationFrame(frame);
+            form.style.position = '';
+            form.style.left = '';
+            form.style.width = '';
+            form.style.top = '';
+            form.style.zIndex = '';
+            form.style.background = '';
+        };
+    }, [isMobile, isMobileExpanded, newSessionDraftOpen, mobileTextareaFocused]);
+
+    // Shared drag handle: rendered at the top of the full composer AND inside
+    // the dictation overlay, so swipe-expand/collapse works in Listening mode.
+    // Memoized so the always-mounted dictation instance's memo stays effective.
+    const mobileComposerHandle = React.useMemo(() => isMobile ? (
+        <div
+            // Generous hit area (~28px tall, full width); the visible bar stays
+            // slim inside it.
+            className="relative z-10 flex touch-none items-center justify-center py-2"
+            onTouchStart={handleComposerHandleTouchStart}
+            onTouchMove={handleComposerHandleTouchMove}
+            onTouchEnd={handleComposerHandleTouchEnd}
+            onTouchCancel={handleComposerHandleTouchEnd}
+            aria-hidden="true"
+        >
+            <div
+                className="h-1.5 w-12 rounded-full"
+                style={{ backgroundColor: currentTheme.colors.interactive.border }}
+            />
+        </div>
+    ) : null, [
+        isMobile,
+        handleComposerHandleTouchStart,
+        handleComposerHandleTouchMove,
+        handleComposerHandleTouchEnd,
+        currentTheme.colors.interactive.border,
+    ]);
+
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
     const buttonSizeClass = isMobile ? 'h-8 w-8' : (isVSCode ? 'h-5 w-5' : 'h-6 w-6');
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
@@ -3967,22 +4639,32 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const permissionScopeSessionId = currentSessionId ?? currentManagementSessionId;
     const permissionAutoAcceptEnabled = usePermissionStore((state) => {
         if (!permissionScopeSessionId) {
-            return false;
+            return draftPermissionAutoAcceptEnabled;
         }
         return state.isSessionAutoAccepting(permissionScopeSessionId);
     });
+    const isPermissionAutoAcceptInteractive = Boolean(permissionScopeSessionId || newSessionDraftOpen);
 
     const handlePermissionAutoAcceptToggle = React.useCallback(() => {
-        if (!permissionScopeSessionId) {
-            toast.error(t('chat.chatInput.toast.openSessionFirst'));
-            return;
-        }
-
-        const nextEnabled = !permissionAutoAcceptEnabled;
-        setSessionAutoAccept(permissionScopeSessionId, nextEnabled).catch(() => {
-            toast.error(t('chat.chatInput.toast.togglePermissionAutoAcceptFailed'));
+        togglePermissionAutoAccept({
+            permissionScopeSessionId,
+            newSessionDraftOpen,
+            draftPermissionAutoAcceptEnabled,
+            permissionAutoAcceptEnabled,
+            setDraftPermissionAutoAcceptEnabled,
+            setSessionAutoAccept,
+            onOpenSessionFirst: () => toast.error(t('chat.chatInput.toast.openSessionFirst')),
+            onToggleFailed: () => toast.error(t('chat.chatInput.toast.togglePermissionAutoAcceptFailed')),
         });
-    }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept, t]);
+    }, [
+        draftPermissionAutoAcceptEnabled,
+        newSessionDraftOpen,
+        permissionAutoAcceptEnabled,
+        permissionScopeSessionId,
+        setDraftPermissionAutoAcceptEnabled,
+        setSessionAutoAccept,
+        t,
+    ]);
 
     React.useEffect(() => {
         const pendingAbortBanner = Boolean(abortPromptSessionId) && abortPromptSessionId === currentSessionId;
@@ -4013,10 +4695,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     return (
         <>
         <form
+            ref={composerFormRef}
             onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
             className={cn(
                 "relative w-full pt-0 pb-4",
                 isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
+                isMobileExpanded && 'flex h-full min-h-0 flex-col pt-2',
                 isMobile && 'bottom-safe-area oc-mobile-composer'
             )}
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
@@ -4033,7 +4717,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     </h1>
                 </div>
             ) : null}
-            <div className={cn('chat-input-column relative overflow-visible', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+            <div className={cn('chat-input-column relative overflow-visible', isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
                 <AttachedFilesList onShowPopup={handleShowAttachmentPreview} />
                 <QueuedMessageChips
                     onEditMessage={handleQueuedMessageEdit}
@@ -4042,6 +4726,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
+                        {terminalContextDrafts.map((draft) => (
+                            <div key={draft.id} className="inline-flex max-w-full items-center gap-1.5 rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2.5 py-1" title={draft.code}>
+                                <Icon name="terminal" className="h-3.5 w-3.5" />
+                                <span className="truncate text-xs font-medium text-[var(--surface-mutedForeground)]">
+                                    {t('chat.chatInput.terminalContext', { terminal: draft.fileLabel, start: draft.startLine, end: draft.endLine })}
+                                </span>
+                                <button type="button" className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]" onClick={() => inlineDraftTarget && removeInlineCommentDraft(inlineDraftTarget, draft.id)} aria-label={t('chat.chatInput.terminalContextRemove')} title={t('chat.chatInput.terminalContextRemove')}>
+                                    <Icon name="close" className="h-3 w-3" />
+                                </button>
+                            </div>
+                        ))}
                         {reviewCount > 0 ? (
                             <div
                                 className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1"
@@ -4225,7 +4920,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     showTodos
                     leftAccessory={newSessionDraftOpen || !hasPendingChanges ? null : <PendingChangesBar />}
                 />
-                {showDraftTargetSelectors && selectedDraftProject ? (
+                {!isMobile && showDraftTargetSelectors && selectedDraftProject ? (
                     <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">
                         <Select
                             value={selectedDraftProject.id}
@@ -4299,11 +4994,144 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         ) : null}
                     </div>
                 ) : null}
+                {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
+                    <div className="mb-1.5 flex min-w-0 items-center gap-x-2 px-0.5">
+                        <button
+                            type="button"
+                            className="inline-flex h-7 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                            onClick={() => setMobileDraftPicker('project')}
+                        >
+                            {renderProjectLabelWithIcon(selectedDraftProject)}
+                            <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                        </button>
+                        {shouldShowDraftBranchSelector ? (
+                            <button
+                                type="button"
+                                className="inline-flex h-7 min-w-0 max-w-[48vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                                onClick={() => setMobileDraftPicker('branch')}
+                            >
+                                <span className="truncate">{selectedDraftBranchLabel ?? t('chat.chatInput.branch')}</span>
+                                <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                            </button>
+                        ) : null}
+                    </div>
+                ) : null}
+                <div
+                    // Desktop: layout-transparent. Mobile: positioning host for
+                    // the wrapper-level dictation overlay across pill/full states.
+                    className={cn(
+                        !isMobile && 'contents',
+                        isMobile && 'relative',
+                        isMobileExpanded && 'flex min-h-0 flex-1 flex-col',
+                    )}
+                >
+                {isMobile && !mobileComposerExpanded ? (
+                    <div className="flex flex-col">
+                    <SessionGoalRow
+                        sessionId={currentSessionId}
+                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                        className="mb-1.5"
+                    />
+                    <SessionSuggestionChip
+                        sessionId={currentSessionId}
+                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                        hidden={hasContent || newSessionDraftOpen}
+                        onApply={applyAssistSuggestion}
+                        className="mb-1.5"
+                    />
+                    <div className="flex items-center gap-2">
+                        <div
+                            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
+                            style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
+                        >
+                            <MobileSessionPanelTrigger
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                            />
+                            <ComposerAttachmentControls
+                                isVSCode={isVSCode}
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                                handlePickLocalFiles={handlePickLocalFiles}
+                                openIssuePicker={openIssuePicker}
+                                openPrPicker={openPrPicker}
+                                onOpenMobileSheet={openMobileAttachSheet}
+                            />
+                            <button
+                                type="button"
+                                className="flex h-full min-w-0 flex-1 cursor-text items-center px-1.5 text-left"
+                                onClick={() => expandMobileComposer('focus')}
+                            >
+                                <span
+                                    className={cn(
+                                        'truncate typography-ui-label',
+                                        message.trim() ? 'text-foreground' : 'text-muted-foreground',
+                                    )}
+                                >
+                                    {message.trim()
+                                        ? message
+                                        : currentSessionId || newSessionDraftOpen
+                                            ? t('chat.chatInput.placeholder.chatCompact')
+                                            : t('chat.chatInput.placeholder.selectSession')}
+                                </span>
+                            </button>
+                            <button
+                                type="button"
+                                className={footerIconButtonClass}
+                                onClick={() => {
+                                    // Start recording in place; the composer morphs
+                                    // into the voice variant once dictation is live
+                                    // (handleMobileDictationActiveChange).
+                                    window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+                                }}
+                                title={t('chat.dictation.start')}
+                                aria-label={t('chat.dictation.start')}
+                            >
+                                <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
+                            </button>
+                        </div>
+                        {/* New-session button: fades/shrinks away when the draft is
+                            already open, letting the pill expand into its place. */}
+                        <div
+                            className={cn(
+                                'flex-shrink-0 transition-all duration-200 ease-out',
+                                newSessionDraftOpen ? 'w-0 opacity-0 overflow-hidden' : 'w-11 opacity-100',
+                            )}
+                        >
+                            <button
+                                type="button"
+                                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
+                                style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
+                                onClick={handleMobileNewSession}
+                                disabled={newSessionDraftOpen}
+                                title={t('mobile.sessions.newChat')}
+                                aria-label={t('mobile.sessions.newChat')}
+                            >
+                                <Icon name="add" className="h-5 w-5 text-current" />
+                            </button>
+                        </div>
+                    </div>
+                    </div>
+                ) : (
+                <>
+                <SessionGoalRow
+                    sessionId={currentSessionId}
+                    directory={currentSessionDirectoryForSync ?? currentDirectory}
+                    className="mb-1.5"
+                />
+                <SessionSuggestionChip
+                    sessionId={currentSessionId}
+                    directory={currentSessionDirectoryForSync ?? currentDirectory}
+                    hidden={hasContent || newSessionDraftOpen}
+                    onApply={applyAssistSuggestion}
+                    className="mb-1.5"
+                />
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",
-                        isDesktopExpanded && 'flex-1 min-h-0',
+                        isComposerExpanded && 'flex-1 min-h-0',
                         "border border-border/80",
+                        "shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]",
                         "focus-within:ring-1",
                         inputMode === 'shell'
                             ? 'focus-within:ring-[var(--status-info)]'
@@ -4420,19 +5248,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 : undefined}
                         />
                     )}
-                    <div className={cn("overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                    {/* Positioning context for the dictation overlay: covers the
+                        text area + footer exactly, excluding MobileSessionStatusBar. */}
+                    <div className={cn('relative flex flex-col', isComposerExpanded && 'flex-1 min-h-0')}>
+                    <div className={cn("overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                        {mobileComposerHandle}
+                        {isMobile ? (
+                            <div className="scrollbar-none relative z-10 flex items-center gap-x-2 overflow-x-auto px-3 pb-0.5 pt-1.5">
+                                <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="flex-shrink-0" />
+                                <MemoMobileAgentButton
+                                    onOpenAgentPanel={handleOpenAgentPanel}
+                                    onCycleAgent={handleCycleAgent}
+                                    className="flex-shrink-0"
+                                />
+                            </div>
+                        ) : null}
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
                             <AttachedVSCodeFileChips onShowPopup={handleShowAttachmentPreview} />
                             <ActiveEditorFileSuggestion />
                         </div>
-                        <div className={cn("relative overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
-                            {highlightedComposerContent && (
+                        <div className={cn("relative overflow-hidden", isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                            {/* No highlight mirror on mobile: over wrapped text its
+                                layout drifts from the real textarea, which visually
+                                misplaces the caret. Plain textarea text keeps caret
+                                and text in the same layout. */}
+                            {highlightedComposerContent && !isMobile && (
                                 <div
                                     aria-hidden
                                     className={cn(
                                         'pointer-events-none absolute inset-0 z-0 whitespace-pre-wrap break-words px-3 rounded-b-none',
-                                        isDesktopExpanded
-                                            ? 'h-full min-h-0 py-4'
+                                        isComposerExpanded
+                                            ? cn('h-full min-h-0', isMobile ? 'py-2.5' : 'py-4')
                                             : isMobile
                                                 ? 'py-2.5'
                                                 : 'pt-4 pb-2',
@@ -4478,6 +5324,60 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     cursorPosRef.current = ta.selectionStart ?? 0;
                                     updateAutocompleteOverlayPosition();
                                 }}
+                                onFocus={() => {
+                                    if (!isMobile) return;
+                                    if (mobileBlurTimerRef.current !== null) {
+                                        window.clearTimeout(mobileBlurTimerRef.current);
+                                        mobileBlurTimerRef.current = null;
+                                    }
+                                    mobileExpandIntentRef.current = null;
+                                    setMobileTextareaFocused(true);
+                                }}
+                                onBlur={() => {
+                                    if (!isMobile) return;
+                                    // Focus hold after an overlay-close restore:
+                                    // iOS may retract the rising keyboard as the
+                                    // closing tap settles — take the focus right
+                                    // back instead of accepting the blur.
+                                    if (Date.now() < holdComposerFocusUntilRef.current) {
+                                        const ta = textareaRef.current;
+                                        if (ta) {
+                                            ta.focus();
+                                            window.setTimeout(() => {
+                                                if (Date.now() < holdComposerFocusUntilRef.current
+                                                    && document.activeElement !== ta) {
+                                                    ta.focus();
+                                                }
+                                            }, 50);
+                                            return;
+                                        }
+                                    }
+                                    lastMobileBlurAtRef.current = Date.now();
+                                    // Mobile browsers and installed PWAs share the
+                                    // blur race: the keyboard-dismiss reflow moves
+                                    // composer buttons before the tap's synthesized
+                                    // click lands, so the click misses its target.
+                                    // Capacitor's WebView does not need the hold.
+                                    if (isCapacitorApp()) {
+                                        setMobileTextareaFocused(false);
+                                        return;
+                                    }
+                                    // See mobileBlurTimerRef: hold the pinned
+                                    // composer still until the tap's click has
+                                    // been delivered.
+                                    if (mobileBlurTimerRef.current !== null) {
+                                        window.clearTimeout(mobileBlurTimerRef.current);
+                                    }
+                                    // 120ms is enough to outlive the tap's
+                                    // synthesized click (which lands within a
+                                    // few ms of the blur) while keeping the
+                                    // padding's return visually tied to the
+                                    // keyboard dismissal.
+                                    mobileBlurTimerRef.current = window.setTimeout(() => {
+                                        mobileBlurTimerRef.current = null;
+                                        setMobileTextareaFocused(false);
+                                    }, 120);
+                                }}
                                 placeholder={currentSessionId || newSessionDraftOpen
                                     ? inputMode === 'shell'
                                         ? t('chat.chatInput.placeholder.shell')
@@ -4487,22 +5387,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 autoCorrect={isMobile ? "on" : "off"}
                                 autoCapitalize={isMobile ? "sentences" : "off"}
                                 spellCheck={isMobile || inputSpellcheckEnabled}
-                                fillContainer={isDesktopExpanded}
-                                outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isDesktopExpanded && 'flex-1 min-h-0')}
+                                fillContainer={isComposerExpanded}
+                                outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isComposerExpanded && 'flex-1 min-h-0')}
                                 className={cn(
                                     'min-h-[52px] resize-none border-0 px-3 rounded-b-none appearance-none hover:border-transparent bg-transparent relative z-10',
-                                    isDesktopExpanded
-                                        ? 'h-full min-h-0 py-4'
+                                    isComposerExpanded
+                                        ? cn('h-full min-h-0', isMobile ? 'py-2.5' : 'py-4')
                                         : isMobile
                                             ? 'py-2.5'
                                             : 'pt-4 pb-2',
                                     inputMode === 'shell' && 'font-mono',
-                                    highlightedComposerContent && 'text-transparent caret-[var(--surface-foreground)]',
+                                    highlightedComposerContent && !isMobile && 'text-transparent caret-[var(--surface-foreground)]',
                                 )}
                                 style={{
-                                    flex: isDesktopExpanded ? '1 1 auto' : 'none',
-                                    height: !isDesktopExpanded && textareaSize ? `${textareaSize.height}px` : undefined,
-                                    maxHeight: !isDesktopExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
+                                    flex: isComposerExpanded ? '1 1 auto' : 'none',
+                                    height: !isComposerExpanded && textareaSize ? `${textareaSize.height}px` : undefined,
+                                    maxHeight: !isComposerExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
                                     borderTopLeftRadius: chatInputRadius,
                                     borderTopRightRadius: chatInputRadius,
                                 }}
@@ -4534,32 +5434,52 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             isVSCode={isVSCode}
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
-                                            fileInputRef={fileInputRef}
-                                            handleLocalFileSelect={handleLocalFileSelect}
                                             handlePickLocalFiles={handlePickLocalFiles}
                                             openIssuePicker={openIssuePicker}
                                             openPrPicker={openPrPicker}
                                             onOpenSettings={onOpenSettings}
+                                            onOpenMobileSheet={openMobileAttachSheet}
                                         />
                                         <PermissionAutoAcceptButton
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
-                                            permissionScopeSessionId={permissionScopeSessionId}
+                                            isInteractive={isPermissionAutoAcceptInteractive}
                                             permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                             handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         />
+                                        <SessionGoalButton
+                                            sessionId={currentSessionId}
+                                            directory={currentSessionDirectoryForSync ?? currentDirectory}
+                                            draftOpen={newSessionDraftOpen}
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                        />
+                                        <SessionGoalObjectiveCounter length={message.length} />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
-                                        <div className="flex items-center gap-x-2 min-w-0 max-w-[60vw] flex-shrink">
-                                            <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 flex-shrink" />
-                                            <MemoMobileAgentButton
-                                                onOpenAgentPanel={handleOpenAgentPanel}
-                                                onCycleAgent={handleCycleAgent}
-                                                className="min-w-0 flex-shrink"
-                                            />
-                                        </div>
                                         <div className="flex items-center gap-x-1 flex-shrink-0">
-                                            <MemoBrowserVoiceButton />
+                                            <button
+                                                type="button"
+                                                className={footerIconButtonClass}
+                                                // Keep the soft keyboard open (same guard as
+                                                // PermissionAutoAcceptButton); the recording
+                                                // engine lives in the wrapper-level
+                                                // ComposerDictation instance.
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onPointerDownCapture={(event) => {
+                                                    if (event.pointerType === 'touch') {
+                                                        event.preventDefault();
+                                                    }
+                                                }}
+                                                onClick={() => {
+                                                    window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+                                                }}
+                                                disabled={mobileDictationActive}
+                                                title={t('chat.dictation.start')}
+                                                aria-label={t('chat.dictation.start')}
+                                            >
+                                                <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
+                                            </button>
                                             <ComposerActionButtons
                                                 isMobile={isMobile}
                                                 footerIconButtonClass={footerIconButtonClass}
@@ -4577,11 +5497,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         </div>
                                     </div>
                                 </div>
-                                <MemoModelControls
-                                    className="hidden"
-                                    mobilePanel={mobileControlsPanel}
-                                    onMobilePanelChange={setMobileControlsPanel}
-                                />
                             </>
                         ) : (
                             <>
@@ -4590,8 +5505,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         isVSCode={isVSCode}
                                         footerIconButtonClass={footerIconButtonClass}
                                         iconSizeClass={iconSizeClass}
-                                        fileInputRef={fileInputRef}
-                                        handleLocalFileSelect={handleLocalFileSelect}
                                         handlePickLocalFiles={handlePickLocalFiles}
                                         openIssuePicker={openIssuePicker}
                                         openPrPicker={openPrPicker}
@@ -4606,15 +5519,34 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     <PermissionAutoAcceptButton
                                         footerIconButtonClass={footerIconButtonClass}
                                         iconSizeClass={iconSizeClass}
-                                        permissionScopeSessionId={permissionScopeSessionId}
+                                        isInteractive={isPermissionAutoAcceptInteractive}
                                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                         handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         withTooltip
                                     />
+                                    <SessionGoalButton
+                                        sessionId={currentSessionId}
+                                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                                        draftOpen={newSessionDraftOpen}
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        withTooltip
+                                    />
+                                    <SessionGoalObjectiveCounter length={message.length} />
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
                                     <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />
-                                    <MemoBrowserVoiceButton />
+                                    <MemoComposerDictation
+                                        radius={chatInputRadius}
+                                        isMobile={isMobile}
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        footerPaddingClass={footerPaddingClass}
+                                        iconSizeClass={iconSizeClass}
+                                        sendIconSizeClass={sendIconSizeClass}
+                                        onInsert={handleDictationInsert}
+                                        onInsertAndSend={handleDictationInsertAndSend}
+                                        onContentHeightChange={handleDictationContentHeightChange}
+                                    />
                                     <ComposerActionButtons
                                         isMobile={isMobile}
                                         footerIconButtonClass={footerIconButtonClass}
@@ -4633,10 +5565,46 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             </>
                         )}
                     </div>
+                    </div>
 
-                    {/* Mobile session panel: slide-up overlay toggled by MobileSessionPanelTrigger. */}
-                    {isMobile && <MobileSessionStatusBar />}
                 </div>
+                </>
+                )}
+                {/* Wrapper-level dictation engine + overlay: stays mounted across
+                    the pill ↔ composer swap so a recording started from the pill
+                    survives the morph. Its absolute overlay covers whichever
+                    shape the wrapper currently has. */}
+                {isMobile ? (
+                    <MemoComposerDictation
+                        radius={chatInputRadius}
+                        isMobile={isMobile}
+                        footerIconButtonClass={footerIconButtonClass}
+                        footerPaddingClass={footerPaddingClass}
+                        iconSizeClass={iconSizeClass}
+                        sendIconSizeClass={sendIconSizeClass}
+                        onInsert={handleDictationInsert}
+                        onInsertAndSend={handleDictationInsertAndSend}
+                        onActiveChange={handleMobileDictationActiveChange}
+                        onContentHeightChange={handleDictationContentHeightChange}
+                        renderTrigger={false}
+                        topAccessory={mobileComposerHandle}
+                    />
+                ) : null}
+                </div>
+                {/* Mobile session panel: slide-up overlay toggled by
+                    MobileSessionPanelTrigger. Mounted outside the pill
+                    conditional so the pill's trigger works too. */}
+                {isMobile && <MobileSessionStatusBar />}
+                {/* Hidden host for the model/agent/variant bottom sheets. Kept
+                    outside the pill conditional so an open panel survives (and
+                    stays visible over) the collapsed composer. */}
+                {isMobile ? (
+                    <MemoModelControls
+                        className="hidden"
+                        mobilePanel={mobileControlsPanel}
+                        onMobilePanelChange={setMobileControlsPanel}
+                    />
+                ) : null}
             </div>
             {newSessionDraftOpen && !isDesktopExpanded && !isMobile && !isVSCode && !isMiniChatSurface ? (
                 <DraftPresetChips onSubmit={submitPresetPrompt} className="chat-input-column mt-4" />
@@ -4673,6 +5641,191 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             onOpenChange={handleAttachmentPreviewOpenChange}
             isMobile={isMobile}
         />
+
+        {/* Single always-mounted picker input. It must NOT live inside
+            ComposerAttachmentControls: that component mounts once per composer
+            variant (pill / expanded footer), so a shared ref got nulled when a
+            variant unmounted, and a variant swap while the OS file picker was
+            open detached the clicked input — its change event was silently
+            lost and the picked files never attached. */}
+        <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleLocalFileSelect}
+            accept={ATTACHMENT_ACCEPT}
+        />
+
+        {/* Mobile attachment sheet: replaces the dropdown (which stole focus and
+            dismissed the keyboard) and leaves room for more actions later. */}
+        {isMobile ? (
+            <MobileOverlayPanel
+                open={mobileAttachMenuOpen}
+                title={t('chat.chatInput.actions.addAttachment')}
+                onClose={() => setMobileAttachMenuOpen(false)}
+            >
+                <div className="flex flex-col px-3 pb-4 pt-1">
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            // The native file/photo picker takes over next — restoring
+                            // the keyboard in between would flash it open and shut.
+                            restoreKeyboardAfterOverlayRef.current = false;
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(handlePickLocalFiles);
+                        }}
+                    >
+                        <Icon name="attachment-2" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.attachFiles')}
+                    </button>
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            // Hand-off to the picker: don't sync-restore the
+                            // keyboard under the overlay that opens next frame.
+                            skipNextOverlayCloseRestoreRef.current = true;
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(openIssuePicker);
+                        }}
+                    >
+                        <Icon name="github" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.linkGithubIssue')}
+                    </button>
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            skipNextOverlayCloseRestoreRef.current = true;
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(openPrPicker);
+                        }}
+                    >
+                        <Icon name="git-pull-request" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.linkGithubPr')}
+                    </button>
+                </div>
+            </MobileOverlayPanel>
+        ) : null}
+
+        {/* Mobile draft target pickers: bottom sheets replacing the inline
+            project/branch Selects (which desktop keeps). */}
+        {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
+            <>
+                <MobileOverlayPanel
+                    open={mobileDraftPicker === 'project'}
+                    title={t('chat.chatInput.draftPicker.projectTitle')}
+                    onClose={() => setMobileDraftPicker(null)}
+                >
+                    <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
+                        <Input
+                            value={mobileDraftPickerQuery}
+                            onChange={(event) => setMobileDraftPickerQuery(event.target.value)}
+                            placeholder={t('chat.chatInput.draftPicker.searchProjects')}
+                            className="h-9"
+                        />
+                        <div className="flex flex-col">
+                            {projects
+                                .filter((project) => {
+                                    const query = mobileDraftPickerQuery.trim().toLowerCase();
+                                    if (!query) return true;
+                                    return getProjectDisplayLabel(project).toLowerCase().includes(query)
+                                        || project.path.toLowerCase().includes(query);
+                                })
+                                .map((project) => (
+                                    <button
+                                        key={project.id}
+                                        type="button"
+                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                        onClick={() => {
+                                            handleDraftProjectChange(project.id);
+                                            setMobileDraftPicker(null);
+                                        }}
+                                    >
+                                        <span className="min-w-0 flex-1">{renderProjectLabelWithIcon(project)}</span>
+                                        {project.id === selectedDraftProject.id ? (
+                                            <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                        ) : null}
+                                    </button>
+                                ))}
+                        </div>
+                    </div>
+                </MobileOverlayPanel>
+                <MobileOverlayPanel
+                    open={mobileDraftPicker === 'branch'}
+                    title={t('chat.chatInput.branch')}
+                    onClose={() => setMobileDraftPicker(null)}
+                >
+                    <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
+                        <Input
+                            value={mobileDraftPickerQuery}
+                            onChange={(event) => setMobileDraftPickerQuery(event.target.value)}
+                            placeholder={t('chat.chatInput.draftPicker.searchBranches')}
+                            className="h-9"
+                        />
+                        <div className="flex flex-col">
+                            {(() => {
+                                const query = mobileDraftPickerQuery.trim().toLowerCase();
+                                const matches = (label: string) => !query || label.toLowerCase().includes(query);
+                                const selectedValue = selectedDraftDirectory
+                                    ?? draftBranchItems[0]?.value
+                                    ?? normalizePath(selectedDraftProject.path)
+                                    ?? '';
+                                const renderRow = (value: string, label: React.ReactNode, key?: string) => (
+                                    <button
+                                        key={key ?? value}
+                                        type="button"
+                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                        onClick={() => {
+                                            handleDraftDirectoryChange(value);
+                                            setMobileDraftPicker(null);
+                                        }}
+                                    >
+                                        <span className="min-w-0 flex-1 truncate">{label}</span>
+                                        {value === selectedValue ? (
+                                            <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                        ) : null}
+                                    </button>
+                                );
+                                return (
+                                    <>
+                                        {projectRootBranchOption && matches(projectRootBranchOption.label) ? (
+                                            <>
+                                                <div className="px-2 pb-1 pt-1.5 text-muted-foreground typography-meta">
+                                                    {t('chat.chatInput.projectRoot')}
+                                                </div>
+                                                {renderRow(projectRootBranchOption.value, projectRootBranchOption.label)}
+                                            </>
+                                        ) : null}
+                                        <div className="flex items-center justify-between px-2 pb-1 pt-2">
+                                            <span className="text-muted-foreground typography-meta">{t('chat.chatInput.worktrees')}</span>
+                                            <button
+                                                type="button"
+                                                className="cursor-pointer text-muted-foreground typography-meta hover:text-foreground"
+                                                onClick={() => {
+                                                    setMobileDraftPicker(null);
+                                                    void createWorktreeDraft();
+                                                }}
+                                            >
+                                                {t('chat.chatInput.worktreeNew')}
+                                            </button>
+                                        </div>
+                                        {worktreeBranchOptions
+                                            .filter((option) => matches(option.label))
+                                            .map((option) => renderRow(option.value, `${option.pending ? '⏳ ' : ''}${option.label}`))}
+                                        {selectedDraftDirectory && !selectedDraftBranchIsKnown && matches(selectedDraftBranchLabel ?? '')
+                                            ? renderRow(selectedDraftDirectory, selectedDraftBranchLabel, 'unknown-current')
+                                            : null}
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                </MobileOverlayPanel>
+            </>
+        ) : null}
         </>
     );
 };

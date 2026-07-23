@@ -1,8 +1,8 @@
 export const createStartupPipelineRuntime = (dependencies) => {
   const {
     createTerminalRuntime,
+    createDictationRuntime,
     createMessageStreamWsRuntime,
-    createOpenChamberAgentEventsWebSocketRuntime,
     createServerStartupRuntime,
   } = dependencies;
 
@@ -53,6 +53,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       tunnelRuntimeContext,
       attachSignals,
       apiOnly,
+      dictationModelsDir,
     } = options;
 
     const terminalRuntime = createTerminalRuntime({
@@ -72,6 +73,16 @@ export const createStartupPipelineRuntime = (dependencies) => {
       TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW: terminalMaxRebindsPerWindow,
     });
 
+    const dictationRuntime = createDictationRuntime({
+      app,
+      server,
+      express,
+      uiAuthController,
+      isRequestOriginAllowed,
+      rejectWebSocketUpgrade,
+      modelsDir: dictationModelsDir,
+    });
+
     const messageStreamRuntime = createMessageStreamWsRuntime({
       server,
       uiAuthController,
@@ -84,13 +95,6 @@ export const createStartupPipelineRuntime = (dependencies) => {
       wsClients: messageStreamWsClients,
       triggerHealthCheck,
       upstreamStallTimeoutMs,
-    });
-
-    const openChamberAgentEventsWebSocketRuntime = createOpenChamberAgentEventsWebSocketRuntime({
-      server,
-      uiAuthController,
-      isRequestOriginAllowed,
-      rejectWebSocketUpgrade,
     });
 
     setupProxy(app);
@@ -133,8 +137,8 @@ export const createStartupPipelineRuntime = (dependencies) => {
 
     return {
       terminalRuntime,
+      dictationRuntime,
       messageStreamRuntime,
-      openChamberAgentEventsWebSocketRuntime,
     };
   };
 

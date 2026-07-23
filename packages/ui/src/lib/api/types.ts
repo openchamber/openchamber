@@ -18,35 +18,27 @@ interface Subscription {
   close: () => void;
 }
 
-interface RetryPolicy {
-  maxRetries: number;
-  initialDelayMs: number;
-  maxDelayMs: number;
-}
-
-interface TerminalTransportCapability {
-  preferred?: 'ws' | 'http' | 'sse';
-  transports?: Array<'ws' | 'http' | 'sse'>;
-  ws?: {
-    path: string;
-    v?: number;
-    enc?: string;
-  };
-}
-
 export interface TerminalSession {
   sessionId: string;
   cols: number;
   rows: number;
-  capabilities?: {
-    input?: TerminalTransportCapability;
-    stream?: TerminalTransportCapability;
-  };
+  status: 'running' | 'exited' | 'error';
+}
+
+export type TerminalShell = 'auto' | 'bash' | 'zsh' | 'sh' | 'fish' | 'pwsh' | 'powershell' | 'cmd' | 'dash' | 'ksh' | 'nu';
+
+export interface TerminalShellOption {
+  id: TerminalShell;
+  name: string;
+  supportsLogin: boolean;
 }
 
 export interface TerminalStreamEvent {
-  type: 'connected' | 'data' | 'exit' | 'reconnecting';
+  type: 'snapshot' | 'data' | 'exit' | 'reconnecting';
+  sequence?: number;
   data?: string;
+  replayData?: string;
+  status?: 'running' | 'exited' | 'error';
   exitCode?: number;
   signal?: number | null;
   attempt?: number;
@@ -56,15 +48,20 @@ export interface TerminalStreamEvent {
   ptyBackend?: string;
 }
 
-export interface CreateTerminalOptions {
-  cwd: string;
-  cols?: number;
-  rows?: number;
+export interface TerminalError extends Error {
+  code?: string;
 }
 
-export interface TerminalStreamOptions {
-  retry?: Partial<RetryPolicy>;
-  connectionTimeoutMs?: number;
+export interface CreateTerminalOptions {
+  cwd: string;
+  sessionId?: string;
+  cols?: number;
+  rows?: number;
+  themeMode?: 'light' | 'dark';
+  terminalBackground?: string;
+  terminalForeground?: string;
+  shell?: TerminalShell;
+  loginShell?: boolean;
 }
 
 export interface ResizeTerminalPayload {
@@ -75,7 +72,7 @@ export interface ResizeTerminalPayload {
 
 export interface TerminalHandlers {
   onEvent: (event: TerminalStreamEvent) => void;
-  onError?: (error: Error, fatal?: boolean) => void;
+  onError?: (error: TerminalError, fatal?: boolean) => void;
 }
 
 export interface ForceKillOptions {
@@ -84,10 +81,12 @@ export interface ForceKillOptions {
 }
 
 export interface TerminalAPI {
+  listShells?(): Promise<TerminalShellOption[]>;
   createSession(options: CreateTerminalOptions): Promise<TerminalSession>;
-  connect(sessionId: string, handlers: TerminalHandlers, options?: TerminalStreamOptions): Subscription;
+  connect(sessionId: string, handlers: TerminalHandlers): Subscription;
   sendInput(sessionId: string, input: string): Promise<void>;
   resize(payload: ResizeTerminalPayload): Promise<void>;
+  updateAppearance?(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>): Promise<void>;
   close(sessionId: string): Promise<void>;
   restartSession?(currentSessionId: string, options: CreateTerminalOptions): Promise<TerminalSession>;
   forceKill?(options: ForceKillOptions): Promise<void>;
@@ -358,6 +357,7 @@ export interface GitWorktreeValidationResult {
 
 export interface GitWorktreeBootstrapStatus {
   status: 'pending' | 'ready' | 'failed';
+  phase?: 'directory-created' | 'git-ready' | 'setup-ready';
   error: string | null;
   updatedAt: number;
 }
@@ -612,6 +612,7 @@ export interface ProjectEntry {
   } | null;
   iconBackground?: string | null;
   color?: string | null;
+  defaultModel?: string;
   addedAt?: number;
   lastOpenedAt?: number;
   sidebarCollapsed?: boolean;
@@ -645,6 +646,7 @@ export interface SettingsPayload {
   showOpenCodeUpdateNotifications?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
+  codeBlockLineWrap?: boolean;
   showTurnChangedFiles?: boolean;
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
@@ -655,6 +657,9 @@ export interface SettingsPayload {
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  terminalShell?: TerminalShell;
+  terminalLoginShells?: TerminalShell[];
+  editorFontSize?: number;
   uiFont?: string;
   monoFont?: string;
   padding?: number;
@@ -671,6 +676,7 @@ export interface SettingsPayload {
   pwaAppName?: string;
   mobileKeyboardMode?: 'native' | 'resize-content';
   draftStarters?: DraftStarterRef[];
+  draftStartersCraftGoalAdded?: boolean;
 
   [key: string]: unknown;
 }
@@ -747,7 +753,7 @@ export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
   openAgentManager(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
-  pickFiles?(): Promise<unknown>;
+  pickFiles?(options?: { extensions?: string[] }): Promise<unknown>;
   saveImage?(payload: unknown): Promise<unknown>;
   saveMarkdown?(payload: unknown): Promise<unknown>;
 }
@@ -1106,6 +1112,23 @@ export interface RemoteClientRecord {
   revokedAt: string | null;
   expiresAt?: string | null;
   clientKind?: string | null;
+  authMethod?: string | null;
+  /** Pairing session this client was created from, when authMethod is 'pairing'. */
+  pairingId?: string | null;
+  deviceName?: string | null;
+  devicePlatform?: string | null;
+  usesRelay?: boolean;
+  /** Transport that carried the device's most recent authenticated request. */
+  lastTransport?: 'relay' | 'direct' | null;
+}
+
+// A pairing link that has been created but not yet redeemed by a device.
+export interface PendingPairingRecord {
+  id: string;
+  label?: string;
+  fingerprint?: string | null;
+  expiresAt?: string;
+  usesRelay?: boolean;
 }
 
 export interface RemoteClientCreateResult {
@@ -1122,11 +1145,49 @@ export interface RemoteClientPurgeRevokedResult {
   purged: number;
 }
 
+export interface PairingSessionCreateResult {
+  pairing: {
+    id: string;
+    label?: string;
+    fingerprint?: string | null;
+    expiresAt?: string;
+    secret: string;
+  };
+  server: {
+    label: string;
+    // Transport candidates for the pairing-v2 payload. Shape matches
+    // PairingEndpointCandidate in `@/lib/connectionPayload` (direct lan/tunnel or
+    // relay); left as a structural type here so this contract file stays leaf.
+    candidates: Array<Record<string, unknown>>;
+  };
+}
+
 export interface ClientAuthAPI {
   listClients(): Promise<RemoteClientRecord[]>;
   createClient(input?: { label?: string }): Promise<RemoteClientCreateResult>;
+  // Creates a one-time pairing session (pairing v2). `serverUrl` is the
+  // externally reachable URL to advertise as the direct candidate (the desktop
+  // UI talks to its server over loopback, so it must supply the LAN URL); the
+  // server folds in a relay candidate when its relay host is enabled.
+  createPairingSession(input?: {
+    label?: string;
+    allowedClientKinds?: Array<'mobile' | 'desktop'>;
+    serverUrl?: string;
+    // Per-link transport choice. `includeRelay: true` adds the relay candidate
+    // and enables the relay host on demand; `false` omits it; omitted keeps the
+    // legacy "relay only if already enabled" behavior. `includeDirect: false`
+    // produces a relay-only link (no direct candidate).
+    includeRelay?: boolean;
+    includeDirect?: boolean;
+  }): Promise<PairingSessionCreateResult>;
   purgeRevokedClients(): Promise<RemoteClientPurgeRevokedResult>;
   revokeClient(id: string): Promise<RemoteClientRevokeResult>;
+  // Pairing links created but not yet redeemed (the "pending devices" list).
+  listPendingPairings(): Promise<PendingPairingRecord[]>;
+  cancelPairing(id: string): Promise<{ cancelled: boolean }>;
+  // Direct transports the server can be reached on, for the create-device dialog.
+  // LAN reflects the server's actual bind, independent of the UI origin.
+  getPairingTransports(): Promise<{ local: string | null; lan: string | null; relayAvailable: boolean }>;
 }
 
 export interface RuntimeAPIs {

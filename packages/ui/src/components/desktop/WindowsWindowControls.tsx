@@ -4,12 +4,17 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { invokeDesktop } from '@/lib/desktop';
+import type { DesktopWindowControlsSide } from '@/lib/desktop';
 
 type WindowsWindowControlsProps = {
   visible: boolean;
+  position?: DesktopWindowControlsSide;
 };
 
-export const WindowsWindowControls = React.memo(function WindowsWindowControls({ visible }: WindowsWindowControlsProps) {
+export const WindowsWindowControls = React.memo(function WindowsWindowControls({
+  visible,
+  position = 'right',
+}: WindowsWindowControlsProps) {
   const { t } = useI18n();
   const [isMaximized, setIsMaximized] = React.useState(false);
 
@@ -44,9 +49,12 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
   }
 
   const buttonClassName = 'app-region-no-drag inline-flex h-12 w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+  const containerClassName = position === 'left'
+    ? 'app-region-no-drag -ml-3 mr-2 flex h-12 shrink-0 items-center'
+    : 'app-region-no-drag -mr-3 ml-2 flex h-12 shrink-0 items-center';
 
   return (
-    <div className="app-region-no-drag -mr-3 ml-2 flex h-12 shrink-0 items-center" aria-label={t('header.windowControls.groupAria')}>
+    <div className={containerClassName} aria-label={t('header.windowControls.groupAria')}>
       <button
         type="button"
         className={buttonClassName}

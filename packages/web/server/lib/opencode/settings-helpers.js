@@ -26,6 +26,7 @@ export const createSettingsHelpers = (dependencies) => {
   const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
@@ -181,6 +182,34 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
       result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
     }
+    if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+      result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
+    }
+    if (typeof candidate.desktopMacMenuBarEnabled === 'boolean') {
+      result.desktopMacMenuBarEnabled = candidate.desktopMacMenuBarEnabled;
+    }
+    if (typeof candidate.desktopWindowControlsPosition === 'string') {
+      const mode = candidate.desktopWindowControlsPosition.trim();
+      if (mode === 'auto' || mode === 'left' || mode === 'right') {
+        result.desktopWindowControlsPosition = mode;
+      }
+    }
+    if (candidate.permissionAutoAccept && typeof candidate.permissionAutoAccept === 'object' && !Array.isArray(candidate.permissionAutoAccept)) {
+      const sessions = {};
+      const sourceSessions = candidate.permissionAutoAccept.sessions;
+      if (sourceSessions && typeof sourceSessions === 'object' && !Array.isArray(sourceSessions)) {
+        for (const [sessionId, enabled] of Object.entries(sourceSessions)) {
+          if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
+        }
+      }
+      result.permissionAutoAccept = {
+        sessions,
+        revision: Number.isSafeInteger(candidate.permissionAutoAccept.revision)
+          && candidate.permissionAutoAccept.revision >= 0
+          ? candidate.permissionAutoAccept.revision
+          : 0,
+      };
+    }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
     }
@@ -244,6 +273,21 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
+    }
+    if (typeof candidate.sessionRecapEnabled === 'boolean') {
+      result.sessionRecapEnabled = candidate.sessionRecapEnabled;
+    }
+    if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
+      result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
+    }
+    if (typeof candidate.sessionGoalEnabled === 'boolean') {
+      result.sessionGoalEnabled = candidate.sessionGoalEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
+      result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget) && candidate.sessionGoalDefaultBudget > 0) {
+      result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
     }
     if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
       result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
@@ -374,6 +418,13 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.defaultAgent.trim();
       result.defaultAgent = trimmed.length > 0 ? trimmed : undefined;
     }
+    if (typeof candidate.smallModelUseDefault === 'boolean') {
+      result.smallModelUseDefault = candidate.smallModelUseDefault;
+    }
+    if (typeof candidate.smallModelOverride === 'string') {
+      const trimmed = candidate.smallModelOverride.trim();
+      result.smallModelOverride = trimmed.length > 0 ? trimmed : undefined;
+    }
     if (typeof candidate.defaultGitIdentityId === 'string') {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;
@@ -489,6 +540,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }
+    if (typeof candidate.promptNavigatorEnabled === 'boolean') {
+      result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
+    }
     if (typeof candidate.expandedEditorToolbar === 'boolean') {
       result.expandedEditorToolbar = candidate.expandedEditorToolbar;
     }
@@ -500,6 +554,16 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
       result.terminalFontSize = Math.max(9, Math.min(52, Math.round(candidate.terminalFontSize)));
+    }
+    if (typeof candidate.terminalShell === 'string') {
+      const shell = candidate.terminalShell.trim().toLowerCase();
+      if (TERMINAL_SHELL_VALUES.has(shell)) result.terminalShell = shell;
+    }
+    if (Array.isArray(candidate.terminalLoginShells)) {
+      result.terminalLoginShells = [...new Set(candidate.terminalLoginShells
+        .filter((shell) => typeof shell === 'string')
+        .map((shell) => shell.trim().toLowerCase())
+        .filter((shell) => TERMINAL_SHELL_VALUES.has(shell)))];
     }
     if (typeof candidate.padding === 'number' && Number.isFinite(candidate.padding)) {
       result.padding = Math.max(50, Math.min(200, Math.round(candidate.padding)));
@@ -721,10 +785,18 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
 
+    if (typeof candidate.dictationEnabled === 'boolean') {
+      result.dictationEnabled = candidate.dictationEnabled;
+    }
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
-      if (provider === 'browser' || provider === 'server' || provider === 'wasm') {
+      if (provider === 'local' || provider === 'openai-compatible') {
         result.sttProvider = provider;
+      } else if (provider === 'server') {
+        // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
+        result.sttProvider = 'openai-compatible';
+      } else if (provider === 'browser' || provider === 'wasm') {
+        result.sttProvider = 'local';
       }
     }
     if (typeof candidate.sttServerUrl === 'string') {
@@ -739,10 +811,10 @@ export const createSettingsHelpers = (dependencies) => {
         result.sttModel = trimmed;
       }
     }
-    if (typeof candidate.wasmSttModel === 'string') {
-      const trimmed = candidate.wasmSttModel.trim();
-      if (trimmed.length <= 256) {
-        result.wasmSttModel = trimmed;
+    if (typeof candidate.sttLocalModel === 'string') {
+      const trimmed = candidate.sttLocalModel.trim();
+      if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
+        result.sttLocalModel = trimmed;
       }
     }
     if (typeof candidate.sttLanguage === 'string') {
@@ -751,116 +823,7 @@ export const createSettingsHelpers = (dependencies) => {
         result.sttLanguage = trimmed;
       }
     }
-    if (typeof candidate.sttSilenceThresholdDb === 'number' && Number.isFinite(candidate.sttSilenceThresholdDb)) {
-      result.sttSilenceThresholdDb = Math.max(-100, Math.min(0, candidate.sttSilenceThresholdDb));
-    }
-    if (typeof candidate.sttSilenceHoldMs === 'number' && Number.isFinite(candidate.sttSilenceHoldMs)) {
-      result.sttSilenceHoldMs = Math.max(250, Math.min(10000, Math.round(candidate.sttSilenceHoldMs)));
-    }
-    if (typeof candidate.sttTranscribeOnStop === 'boolean') {
-      result.sttTranscribeOnStop = candidate.sttTranscribeOnStop;
-    }
 
-    // Discord integration block (bot token + listener/bridge prefs).
-    // `null` clears the whole block (used by Disconnect).
-    if (candidate.discord === null) {
-      result.discord = null;
-    } else if (candidate.discord && typeof candidate.discord === 'object' && !Array.isArray(candidate.discord)) {
-      const sanitizedDiscord = sanitizeDiscordConfig(candidate.discord);
-      if (sanitizedDiscord) {
-        result.discord = sanitizedDiscord;
-      }
-    }
-
-    return result;
-  };
-
-  const sanitizeDiscordConfig = (value) => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return null;
-    }
-    const result = {};
-    if (typeof value.botToken === 'string') {
-      const token = value.botToken.trim();
-      if (token.length > 0) {
-        result.botToken = token;
-      }
-    }
-    if (typeof value.guildId === 'string') {
-      const guildId = value.guildId.trim();
-      if (guildId.length > 0) {
-        result.guildId = guildId;
-      }
-    }
-    if (typeof value.defaultChannelId === 'string') {
-      const channelId = value.defaultChannelId.trim();
-      if (channelId.length > 0) {
-        result.defaultChannelId = channelId;
-      }
-    }
-    if (typeof value.defaultUserId === 'string') {
-      const userId = value.defaultUserId.trim();
-      if (userId.length > 0) {
-        result.defaultUserId = userId;
-      }
-    }
-    if (typeof value.autoReply === 'boolean') {
-      result.autoReply = value.autoReply;
-    }
-    if (typeof value.scopeToGuild === 'boolean') {
-      result.scopeToGuild = value.scopeToGuild;
-    }
-    if (value.defaultReplyMode === 'always' || value.defaultReplyMode === 'mention') {
-      result.defaultReplyMode = value.defaultReplyMode;
-    }
-    if (value.guildPolicies && typeof value.guildPolicies === 'object' && !Array.isArray(value.guildPolicies)) {
-      const guildPolicies = {};
-      for (const [guildId, entry] of Object.entries(value.guildPolicies)) {
-        if (typeof guildId !== 'string' || guildId.length === 0) {
-          continue;
-        }
-        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-          continue;
-        }
-        const policy = {};
-        if (typeof entry.enabled === 'boolean') {
-          policy.enabled = entry.enabled;
-        }
-        if (entry.replyMode === 'always' || entry.replyMode === 'mention' || entry.replyMode === 'inherit') {
-          policy.replyMode = entry.replyMode;
-        }
-        if (Object.keys(policy).length > 0) {
-          guildPolicies[guildId] = policy;
-        }
-      }
-      if (Object.keys(guildPolicies).length > 0) {
-        result.guildPolicies = guildPolicies;
-      }
-    }
-    if (typeof value.bridgeEnabled === 'boolean') {
-      result.bridgeEnabled = value.bridgeEnabled;
-    }
-    // Absent means "start by default"; only an explicit false is sticky-stopped.
-    if (typeof value.listenerEnabled === 'boolean') {
-      result.listenerEnabled = value.listenerEnabled;
-    }
-    if (typeof value.registerDynamicSlashCommands === 'boolean') {
-      result.registerDynamicSlashCommands = value.registerDynamicSlashCommands;
-    }
-    if (Array.isArray(value.trustedBotIds)) {
-      result.trustedBotIds = value.trustedBotIds
-        .map((id) => (typeof id === 'string' ? id.trim() : String(id ?? '').trim()))
-        .filter((id) => id.length > 0);
-    }
-    if (Array.isArray(value.projectBindings)) {
-      result.projectBindings = value.projectBindings
-        .filter((binding) => binding && typeof binding === 'object' && binding.channelId && binding.projectPath)
-        .map((binding) => ({
-          channelId: String(binding.channelId),
-          projectPath: String(binding.projectPath),
-          ...(binding.projectLabel ? { projectLabel: String(binding.projectLabel) } : {}),
-        }));
-    }
     return result;
   };
 
@@ -889,23 +852,12 @@ export const createSettingsHelpers = (dependencies) => {
       typographySizes: nextTypographySizes
     };
 
-    // Explicit null clears Discord config from disk (Disconnect).
-    if (Object.prototype.hasOwnProperty.call(changes, 'discord') && changes.discord === null) {
-      delete next.discord;
-    }
-
     return next;
   };
 
   const formatSettingsResponse = (settings) => {
     const sanitized = sanitizeSettingsUpdate(settings);
     delete sanitized.managedRemoteTunnelToken;
-    // Never expose the Discord bot token through the generic settings API.
-    if (sanitized.discord && typeof sanitized.discord === 'object') {
-      const discord = { ...sanitized.discord };
-      delete discord.botToken;
-      sanitized.discord = discord;
-    }
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
     const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');

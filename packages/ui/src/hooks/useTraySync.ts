@@ -27,12 +27,12 @@ import { toast } from '@/components/ui';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 
-// macOS menu bar bridge. The Electron main process owns the Tray UI; this hook
+// Native tray/menu bar bridge. The Electron main process owns the Tray UI; this hook
 // streams a compact snapshot of live session/approval state to it via the
 // `desktop_tray_update` IPC command, and routes tray clicks back into the app.
 //
-// Only meaningful on the macOS desktop shell — main.mjs no-ops the command on
-// other platforms, but we still gate here to avoid pointless work.
+// Only meaningful on desktop platforms with a native tray/menu bar — main.mjs
+// no-ops the command elsewhere, but we still gate here to avoid pointless work.
 
 const TRAY_ACTION_EVENT = 'openchamber:tray-action';
 // Event-driven updates do the real work; this is just a slow safety net.
@@ -99,10 +99,14 @@ type DesktopBridgeGlobal = {
   ) => Promise<() => void>;
 };
 
-const isMac = (): boolean => {
+const isTrayPlatform = (): boolean => {
   if (typeof window === 'undefined') return false;
-  return (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin';
+  const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
+  return platform === 'darwin' || platform === 'win32';
 };
+
+const isTrayEnabled = (): boolean =>
+  typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.trayEnabled !== false;
 
 const permissionLabel = (request: PermissionRequest): string => {
   const head = typeof request.permission === 'string' ? request.permission : 'Permission';
@@ -358,7 +362,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   const resolveStatus = (id: string): TraySessionStatus => {
     const fromStores = live.statusById.get(id);
     if (fromStores && fromStores !== 'idle') return fromStores;
-    return globalStatusById.get(id)?.status ?? fromStores ?? 'idle';
+    return globalStatusById.get(id)?.status.type ?? fromStores ?? 'idle';
   };
 
   const rollupStatus = (family: string[]): TraySessionStatus => {
@@ -417,7 +421,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
 
 export const useTraySync = (): void => {
   React.useEffect(() => {
-    if (!isMac() || !canUseElectronDesktopIPC()) return;
+    if (!isTrayPlatform() || !isTrayEnabled() || !canUseElectronDesktopIPC()) return;
 
     let disposed = false;
     let lastSerialized = '';
@@ -577,7 +581,7 @@ export const useTraySync = (): void => {
   }, []);
 
   React.useEffect(() => {
-    if (!isMac() || typeof window === 'undefined') return;
+    if (!isTrayPlatform() || !isTrayEnabled() || typeof window === 'undefined') return;
     const bridge = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
     const listen = bridge?.listen;
     if (typeof listen !== 'function') return;
