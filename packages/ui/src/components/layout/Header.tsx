@@ -21,12 +21,12 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
-import { useAllLiveSessions, useSession, useSessionMessagesResolved } from '@/sync/sync-context';
-import { getAllSyncSessions } from '@/sync/sync-refs';
+import { useSessionMessagesResolved } from '@/sync/sync-context';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
@@ -74,7 +74,7 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import type { Session } from '@opencode-ai/sdk/v2/client';
+import { useShallow } from 'zustand/react/shallow';
 import type { IconName } from "@/components/icon/icons";
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
@@ -703,12 +703,20 @@ interface HeaderProps {
   rightDrawerOpen?: boolean;
 }
 
+type HeaderSessionSnapshot = {
+  title: string | null;
+  directory: string | null;
+  created: number | null;
+  slug: string | null;
+};
+
 export const Header: React.FC<HeaderProps> = ({
   onToggleLeftDrawer,
   onToggleRightDrawer,
   leftDrawerOpen,
   rightDrawerOpen,
 }) => {
+  streamPerfCount('ui.header.render');
   const { t } = useI18n();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
@@ -720,7 +728,6 @@ export const Header: React.FC<HeaderProps> = ({
   const openContextBrowser = useUIStore((state) => state.openContextBrowser);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
-  const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
@@ -734,15 +741,28 @@ export const Header: React.FC<HeaderProps> = ({
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
-  const currentSyncedSession = useSession(currentSessionId ?? null);
-  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const liveSessions = useAllLiveSessions();
-  const activeProject = useProjectsStore((state) => {
+  const currentGlobalSession = useGlobalSessionsStore(useShallow(React.useCallback(
+    (state): HeaderSessionSnapshot | null => {
+      if (!currentSessionId) return null;
+      const session = state.activeSessions.find((candidate) => candidate.id === currentSessionId);
+      if (!session) return null;
+      const record = session as typeof session & { directory?: string | null; slug?: string | null };
+      return {
+        title: session.title ?? null,
+        directory: record.directory ?? null,
+        created: session.time?.created ?? null,
+        slug: record.slug ?? null,
+      };
+    },
+    [currentSessionId],
+  )));
+  const activeProject = useProjectsStore(useShallow((state) => {
     if (!state.activeProjectId) {
       return null;
     }
-    return state.projects.find((project) => project.id === state.activeProjectId) ?? null;
-  });
+    const project = state.projects.find((candidate) => candidate.id === state.activeProjectId);
+    return project ? { id: project.id, path: project.path, label: project.label } : null;
+  }));
   const activeProjectLabel = React.useMemo(() => {
     if (!activeProject) {
       return null;
@@ -1130,18 +1150,13 @@ export const Header: React.FC<HeaderProps> = ({
     });
   }, [fetchAllQuotas, isUsageRefreshSpinning]);
 
-  const currentSessionLive = React.useMemo(() => {
-    if (!currentSessionId) return null;
-    return liveSessions.find((s) => s.id === currentSessionId)
-      ?? globalActiveSessions.find((s) => s.id === currentSessionId)
-      ?? currentSyncedSession
-      ?? getAllSyncSessions().find((s) => s.id === currentSessionId)
-      ?? null;
-  }, [currentSessionId, currentSyncedSession, globalActiveSessions, liveSessions]);
+  const currentSessionSnapshot = currentSessionId
+    ? currentGlobalSession ?? null
+    : null;
 
   const lastResolvedSessionRef = React.useRef<{
     sessionId: string;
-    session: Session;
+    session: HeaderSessionSnapshot;
     expiresAt: number;
   } | null>(null);
   const [sessionFallbackVersion, setSessionFallbackVersion] = React.useState(0);
@@ -1155,10 +1170,10 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    if (currentSessionLive) {
+    if (currentSessionSnapshot) {
       lastResolvedSessionRef.current = {
         sessionId: currentSessionId,
-        session: currentSessionLive,
+        session: currentSessionSnapshot,
         expiresAt: Date.now() + 2000,
       };
       return;
@@ -1186,12 +1201,12 @@ export const Header: React.FC<HeaderProps> = ({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [currentSessionId, currentSessionLive]);
+  }, [currentSessionId, currentSessionSnapshot]);
 
   void sessionFallbackVersion;
   const currentSession = (() => {
-    if (currentSessionLive) {
-      return currentSessionLive;
+    if (currentSessionSnapshot) {
+      return currentSessionSnapshot;
     }
 
     if (!currentSessionId) {
@@ -1256,6 +1271,10 @@ export const Header: React.FC<HeaderProps> = ({
   const openDirectory = React.useMemo(() => {
     return worktreeDirectory || sessionDirectory || draftDirectory;
   }, [draftDirectory, sessionDirectory, worktreeDirectory]);
+  const activeContextMode = useUIStore(React.useCallback((state) => {
+    const directory = normalize(openDirectory || '');
+    return directory ? getActiveContextMode(state.contextPanelByDirectory[directory]) : null;
+  }, [openDirectory]));
 
   const catalogWorktreeBranch = useSessionUIStore((state) => {
     const candidateDirectory = normalize(worktreeDirectory || sessionDirectory || '');
@@ -1336,7 +1355,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     if (!currentSessionId) return;
 
-    const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.time?.created || 0}:${currentSession?.slug || 'none'}`;
+    const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.created || 0}:${currentSession?.slug || 'none'}`;
     if (lastPlanSessionKeyRef.current !== sessionKey) {
       lastPlanSessionKeyRef.current = sessionKey;
     }
@@ -1349,7 +1368,7 @@ export const Header: React.FC<HeaderProps> = ({
     planModeEnabled,
     planTabAvailable,
     currentSession?.slug,
-    currentSession?.time?.created,
+    currentSession?.created,
     currentSessionId,
     sessionDirectory,
   ]);
@@ -1449,23 +1468,16 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'context') {
       closeContextPanel(directory);
       return;
     }
 
     openContextOverview(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextOverview, openDirectory]);
+  }, [closeContextPanel, openContextOverview, openDirectory]);
 
-  const isContextPanelActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'context';
-  }, [contextPanelByDirectory, openDirectory]);
+  const isContextPanelActive = activeContextMode === 'context';
 
   const handleOpenContextPlan = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -1473,14 +1485,14 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'plan') {
       closeContextPanel(directory);
       return;
     }
 
     openContextPlan(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextPlan, openDirectory]);
+  }, [closeContextPanel, openContextPlan, openDirectory]);
 
   const handleOpenContextChanges = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -1488,14 +1500,14 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'diff') {
       closeContextPanel(directory);
       return;
     }
 
     openContextPanelTab(directory, { mode: 'diff', stagedDiff: false });
-  }, [closeContextPanel, contextPanelByDirectory, openContextPanelTab, openDirectory]);
+  }, [closeContextPanel, openContextPanelTab, openDirectory]);
 
   const handleOpenContextBrowser = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -1503,41 +1515,18 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'browser') {
       closeContextPanel(directory);
       return;
     }
 
     openContextBrowser(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextBrowser, openDirectory]);
+  }, [closeContextPanel, openContextBrowser, openDirectory]);
 
-  const isContextPlanActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'plan';
-  }, [contextPanelByDirectory, openDirectory]);
-
-  const isContextChangesActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'diff';
-  }, [contextPanelByDirectory, openDirectory]);
-
-  const isContextBrowserActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'browser';
-  }, [contextPanelByDirectory, openDirectory]);
+  const isContextPlanActive = activeContextMode === 'plan';
+  const isContextChangesActive = activeContextMode === 'diff';
+  const isContextBrowserActive = activeContextMode === 'browser';
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;

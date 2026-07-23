@@ -1,6 +1,7 @@
 import React from 'react';
 
 type Args = {
+  enabled?: boolean;
   isSessionSearchOpen: boolean;
   setIsSessionSearchOpen: (open: boolean) => void;
   sessionSearchInputRef: React.RefObject<HTMLInputElement | null>;
@@ -8,13 +9,14 @@ type Args = {
 };
 
 export const useSessionSearchEffects = ({
+  enabled = true,
   isSessionSearchOpen,
   setIsSessionSearchOpen,
   sessionSearchInputRef,
   sessionSearchContainerRef,
 }: Args): void => {
   React.useEffect(() => {
-    if (!isSessionSearchOpen || typeof window === 'undefined') {
+    if (!enabled || !isSessionSearchOpen || typeof window === 'undefined') {
       return;
     }
     const raf = window.requestAnimationFrame(() => {
@@ -22,10 +24,10 @@ export const useSessionSearchEffects = ({
       sessionSearchInputRef.current?.select();
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [isSessionSearchOpen, sessionSearchInputRef]);
+  }, [enabled, isSessionSearchOpen, sessionSearchInputRef]);
 
   React.useEffect(() => {
-    if (!isSessionSearchOpen || typeof document === 'undefined') {
+    if (!enabled || !isSessionSearchOpen || typeof document === 'undefined') {
       return;
     }
     const handlePointerDown = (event: MouseEvent) => {
@@ -38,5 +40,5 @@ export const useSessionSearchEffects = ({
     };
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [isSessionSearchOpen, setIsSessionSearchOpen, sessionSearchContainerRef]);
+  }, [enabled, isSessionSearchOpen, setIsSessionSearchOpen, sessionSearchContainerRef]);
 };

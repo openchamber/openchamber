@@ -39,6 +39,8 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
     - dropped-file parsing and attachment reading
     - models metadata fetch helper
 
+The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can run bounded local decompression off the main thread. Blob scripts remain disallowed by `script-src`.
+
 - `bridge-localfs-proxy-runtime.ts`
   - Local `/api/fs/read` and `/api/fs/raw` proxy helpers and shared proxy utility helpers.
 
@@ -59,7 +61,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
-  - Broadcasts policy snapshots to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.
+  - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.
 
 ## Extension guideline
 

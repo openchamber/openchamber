@@ -6,6 +6,29 @@ import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { normalizePath } from '@/lib/pathNormalization';
 export { normalizePath };
 
+export const selectExpandedParentKeysForContext = (
+  previous: Set<string>,
+  expanded: ReadonlySet<string>,
+  context: 'project' | 'recent',
+): Set<string> => {
+  const prefix = `${context}:`;
+  const next = new Set([...expanded].filter((key) => key.startsWith(prefix)));
+  if (previous.size === next.size && [...next].every((key) => previous.has(key))) {
+    return previous;
+  }
+  return next;
+};
+
+export const toggleExpandedParentKey = (
+  expanded: Set<string>,
+  key: string,
+): Set<string> => {
+  const next = new Set(expanded);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+};
+
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
 
@@ -104,45 +127,6 @@ export const normalizeForBranchComparison = (value: string): string => {
 export const isBranchDifferentFromLabel = (branch: string | null, label: string): boolean => {
   if (!branch) return false;
   return normalizeForBranchComparison(branch) !== normalizeForBranchComparison(label);
-};
-
-const toFiniteNumber = (value: unknown): number | undefined => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
-};
-
-const getSessionCreatedAt = (session: Session): number => {
-  return toFiniteNumber(session.time?.created) ?? 0;
-};
-
-const getSessionUpdatedAt = (session: Session): number => {
-  return toFiniteNumber(session.time?.updated) ?? toFiniteNumber(session.time?.created) ?? 0;
-};
-
-export const compareSessionsByPinnedAndTime = (
-  a: Session,
-  b: Session,
-  pinnedSessionIds: Set<string>,
-): number => {
-  const aPinned = pinnedSessionIds.has(a.id);
-  const bPinned = pinnedSessionIds.has(b.id);
-  if (aPinned !== bPinned) {
-    return aPinned ? -1 : 1;
-  }
-
-  if (aPinned && bPinned) {
-    return getSessionCreatedAt(b) - getSessionCreatedAt(a);
-  }
-
-  return getSessionUpdatedAt(b) - getSessionUpdatedAt(a);
 };
 
 export const dedupeSessionsById = (sessions: Session[]): Session[] => {

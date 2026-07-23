@@ -163,12 +163,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const { currentTheme } = useThemeSystem();
     const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
 
-    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-
     const getAgentModelForSession = useSelectionStore((s) => s.getAgentModelForSession);
     const getSessionModelSelection = useSelectionStore((s) => s.getSessionModelSelection);
-    const revertToMessage = useSessionUIStore((s) => s.revertToMessage);
-    const forkFromMessage = useSessionUIStore((s) => s.forkFromMessage);
 
     streamPerfCount('ui.chat_message.render');
     if (isInActiveTurn) {
@@ -185,12 +181,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             showExpandedEditTools: state.showExpandedEditTools,
         }))
     );
-
-    React.useEffect(() => {
-        if (currentSessionId) {
-            MessageFreshnessDetector.getInstance().recordSessionStart(currentSessionId);
-        }
-    }, [currentSessionId]);
 
     const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
     const [copiedMessage, setCopiedMessage] = React.useState(false);
@@ -580,8 +570,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const shouldAnimateMessage = React.useMemo(() => {
         if (isUser) return false;
         const freshnessDetector = MessageFreshnessDetector.getInstance();
-        return freshnessDetector.shouldAnimateMessage(message.info, currentSessionId || message.info.sessionID);
-    }, [message.info, currentSessionId, isUser]);
+        return freshnessDetector.shouldAnimateMessage(message.info, message.info.sessionID);
+    }, [message.info, isUser]);
 
     const [hasStartedStreamingHeader, setHasStartedStreamingHeader] = React.useState(false);
 
@@ -794,14 +784,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const handleRevert = React.useCallback(() => {
         if (!sessionId || !message.info.id) return;
-        revertToMessage(sessionId, message.info.id);
-    }, [sessionId, message.info.id, revertToMessage]);
+        useSessionUIStore.getState().revertToMessage(sessionId, message.info.id);
+    }, [sessionId, message.info.id]);
 
     // NEW: Fork handler
     const handleFork = React.useCallback(() => {
         if (!sessionId || !message.info.id) return;
-        forkFromMessage(sessionId, message.info.id);
-    }, [sessionId, message.info.id, forkFromMessage]);
+        useSessionUIStore.getState().forkFromMessage(sessionId, message.info.id);
+    }, [sessionId, message.info.id]);
 
     const handleToggleTool = React.useCallback((toolId: string) => {
         const isDefaultOpen = defaultOpenToolIds.has(toolId);

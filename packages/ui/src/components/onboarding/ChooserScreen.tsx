@@ -21,6 +21,7 @@ type OnboardingPlatform = 'macos' | 'linux' | 'windows' | 'unknown';
 type ChooserScreenProps = {
   /** Callback when CLI becomes available */
   onCliAvailable?: () => void;
+  localAvailable?: boolean;
 };
 
 function BashCommand({ onCopy, copyTitle }: { onCopy: () => void; copyTitle: string }) {
@@ -45,7 +46,7 @@ function BashCommand({ onCopy, copyTitle }: { onCopy: () => void; copyTitle: str
   );
 }
 
-export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
+export function ChooserScreen({ onCliAvailable, localAvailable = true }: ChooserScreenProps) {
   const { t } = useI18n();
   const [copied, setCopied] = React.useState(false);
   const [isDesktopApp, setIsDesktopApp] = React.useState(false);
@@ -53,7 +54,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
   const [isManualChecking, setIsManualChecking] = React.useState(false);
   const [opencodeBinary, setOpencodeBinary] = React.useState('');
   const [platform, setPlatform] = React.useState<OnboardingPlatform>('unknown');
-  const [activeTab, setActiveTab] = React.useState<'local' | 'remote'>('local');
+  const [activeTab, setActiveTab] = React.useState<'local' | 'remote'>(() => localAvailable ? 'local' : 'remote');
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [troubleOpen, setTroubleOpen] = React.useState(false);
 
@@ -136,7 +137,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
   // whether the OpenCode CLI is reachable. As soon as it is, transition
   // automatically — the user doesn't have to click anything.
   React.useEffect(() => {
-    if (activeTab !== 'local') return;
+    if (!localAvailable || activeTab !== 'local') return;
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -164,7 +165,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [activeTab, checkCliAvailability, announceAvailable]);
+  }, [activeTab, checkCliAvailability, announceAvailable, localAvailable]);
 
   const handleManualCheck = React.useCallback(async () => {
     setIsManualChecking(true);
@@ -223,7 +224,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
         ? '/home/you/.bun/bin/opencode'
         : '/Users/you/.bun/bin/opencode';
 
-  const showLocal = !isDesktopApp || activeTab === 'local';
+  const showLocal = localAvailable && (!isDesktopApp || activeTab === 'local');
 
   return (
     <div
@@ -240,7 +241,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
           </p>
         </header>
 
-        {isDesktopApp && (
+        {isDesktopApp && localAvailable && (
           <div className="app-region-no-drag flex gap-1.5">
             <button
               type="button"
@@ -272,9 +273,10 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
         {isDesktopApp && activeTab === 'remote' ? (
           <div className="app-region-no-drag">
             <RemoteConnectionForm
-              onBack={() => setActiveTab('local')}
+              onBack={() => localAvailable && setActiveTab('local')}
               showBackButton={false}
-              onSwitchToLocal={() => setActiveTab('local')}
+              showInstancePicker={!localAvailable}
+              onSwitchToLocal={localAvailable ? () => setActiveTab('local') : undefined}
             />
           </div>
         ) : null}

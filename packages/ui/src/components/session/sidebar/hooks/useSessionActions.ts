@@ -4,6 +4,8 @@ import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import type { MainTab } from '@/stores/useUIStore';
+import { streamPerfMark } from '@/stores/utils/streamDebug';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   session: Session;
@@ -20,9 +22,6 @@ type DeleteSessionSource = {
 };
 
 type Args = {
-  activeProjectId: string | null;
-  currentDirectory: string | null;
-  currentSessionId: string | null;
   mobileVariant: boolean;
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
@@ -30,8 +29,6 @@ type Args = {
   sessionSearchQuery: string;
   setSessionSearchQuery: (value: string) => void;
   setIsSessionSearchOpen: (open: boolean) => void;
-  setActiveProjectIdOnly: (id: string) => void;
-  setDirectory: (directory: string, options?: { showOverlay?: boolean }) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => void;
@@ -66,7 +63,8 @@ export const useSessionActions = (args: Args) => {
   }, []);
 
   const handleSessionSelect = React.useCallback(
-    (sessionId: string, sessionDirectory?: string | null, projectId?: string | null) => {
+    (sessionId: string, sessionDirectory?: string | null) => {
+      streamPerfMark('navigation.session_select');
       const resetSessionSearch = () => {
         if (!args.isSessionSearchOpen && args.sessionSearchQuery.length === 0) {
           return;
@@ -75,26 +73,19 @@ export const useSessionActions = (args: Args) => {
         args.setIsSessionSearchOpen(false);
       };
 
-      if (projectId && projectId !== args.activeProjectId) {
-        args.setActiveProjectIdOnly(projectId);
-      }
-
-      if (sessionDirectory && sessionDirectory !== args.currentDirectory) {
-        args.setDirectory(sessionDirectory, { showOverlay: false });
-      }
-
       if (args.mobileVariant) {
         args.setActiveMainTab('chat');
         args.setSessionSwitcherOpen(false);
       }
 
-      if (sessionId === args.currentSessionId) {
+      if (sessionId === useSessionUIStore.getState().currentSessionId) {
         if (args.allowReselect) {
           args.onSessionSelected?.(sessionId);
         }
         resetSessionSearch();
         return;
       }
+      streamPerfMark('navigation.session_state_set');
       args.setCurrentSession(sessionId, sessionDirectory ?? null);
       args.onSessionSelected?.(sessionId);
       resetSessionSearch();

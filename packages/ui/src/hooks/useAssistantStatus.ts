@@ -3,7 +3,7 @@ import type { Message, Part, ReasoningPart, TextPart, ToolPart } from '@opencode
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSessionPermissions, useSessionQuestions, useSessionStatus } from '@/sync/sync-context';
+import { useDirectorySync, useSessionMessages, useSessionPermissions, useSessionQuestions, useSessionStatus } from '@/sync/sync-context';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { useCurrentSessionActivity } from './useSessionActivity';
 
@@ -37,8 +37,19 @@ interface FormingSummary {
 }
 
 export interface AssistantStatusSnapshot {
+    activeModel: ActiveAssistantModel | null;
     forming: FormingSummary;
     working: WorkingSummary;
+}
+
+interface ActiveAssistantModel {
+    providerId: string;
+    modelId: string;
+}
+
+interface ActiveAssistantContext {
+    assistantId: string | null;
+    model: ActiveAssistantModel | null;
 }
 
 const DEFAULT_WORKING: WorkingSummary = {
@@ -63,7 +74,6 @@ const DEFAULT_WORKING: WorkingSummary = {
     retryInfo: null,
 };
 
-const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_PARTS: Part[] = [];
 const STATUS_SIGNATURE_SEPARATOR = '\u0000';
 const EDITING_TOOLS = new Set(['edit', 'write', 'multiedit', 'apply_patch']);
@@ -247,28 +257,63 @@ const getToolDisplayName = (part: ToolPart): string => {
     return typeof candidate.name === 'string' ? candidate.name : 'tool';
 };
 
+export const getActiveAssistantContext = (messages: Message[]): ActiveAssistantContext => {
+    let assistantId: string | null = null;
+    let parentId: string | null = null;
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message?.role !== 'assistant') continue;
+
+        const candidate = message as Message & { parentID?: unknown };
+        assistantId = message.id;
+        parentId = typeof candidate.parentID === 'string' && candidate.parentID.trim().length > 0
+            ? candidate.parentID
+            : null;
+        break;
+    }
+
+    if (!assistantId || !parentId) {
+        return { assistantId, model: null };
+    }
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message?.role !== 'user' || message.id !== parentId) continue;
+
+        const candidate = message as Message & {
+            model?: { providerID?: unknown; modelID?: unknown };
+        };
+        const providerId = typeof candidate.model?.providerID === 'string'
+            ? candidate.model.providerID.trim()
+            : '';
+        const modelId = typeof candidate.model?.modelID === 'string'
+            ? candidate.model.modelID.trim()
+            : '';
+
+        return {
+            assistantId,
+            model: providerId && modelId ? { providerId, modelId } : null,
+        };
+    }
+
+    return { assistantId, model: null };
+};
+
 export function useAssistantStatus(): AssistantStatusSnapshot {
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
 
-    const rawSessionMessages = useDirectorySync(
-        React.useCallback((state) => {
-            if (!currentSessionId) {
-                return EMPTY_MESSAGES;
-            }
-            return state.message[currentSessionId] ?? EMPTY_MESSAGES;
-        }, [currentSessionId]),
+    const rawSessionMessages = useSessionMessages(
+        currentSessionId ?? '',
         currentSessionDirectory ?? undefined,
     );
 
-    // Only subscribe to parts for the last assistant message — avoids re-render
-    // on every part delta for earlier messages.
-    const lastAssistantId = React.useMemo(() => {
-        for (let i = rawSessionMessages.length - 1; i >= 0; i--) {
-            if (rawSessionMessages[i].role === 'assistant') return rawSessionMessages[i].id;
-        }
-        return null;
-    }, [rawSessionMessages]);
+    const activeAssistant = React.useMemo(
+        () => getActiveAssistantContext(rawSessionMessages),
+        [rawSessionMessages],
+    );
+    const lastAssistantId = activeAssistant.assistantId;
 
     const lastAssistantStatusSignature = useDirectorySync(
         React.useCallback((state) => {
@@ -412,6 +457,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     }, [baseWorking, sessionPermissionRequests, sessionQuestionRequests]);
 
     return {
+        activeModel: activeAssistant.model,
         forming,
         working,
     };

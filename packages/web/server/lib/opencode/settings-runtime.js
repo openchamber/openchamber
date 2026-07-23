@@ -495,7 +495,9 @@ export const createSettingsRuntime = (deps) => {
     const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     let handle;
     try {
-      await fsPromises.mkdir(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
+      const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
+      await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
+      if (process.platform !== 'win32') await fsPromises.chmod(settingsDirectory, 0o700);
       // Atomic write: Electron main and ssh-manager read this file via plain
       // readFile + JSON.parse and silently coerce parse errors to {}. A
       // partial read during a non-atomic writeFile would make their next
@@ -506,6 +508,7 @@ export const createSettingsRuntime = (deps) => {
       await handle.close();
       handle = null;
       await replaceFile(tmp, SETTINGS_FILE_PATH);
+      if (process.platform !== 'win32') await fsPromises.chmod(SETTINGS_FILE_PATH, 0o600);
       try {
         const directoryHandle = await fsPromises.open(path.dirname(SETTINGS_FILE_PATH), 'r');
         try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }

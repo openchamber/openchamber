@@ -928,7 +928,7 @@ export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
   openAgentManager(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
-  pickFiles?(): Promise<unknown>;
+  pickFiles?(options?: { extensions?: string[] }): Promise<unknown>;
   saveImage?(payload: unknown): Promise<unknown>;
   saveMarkdown?(payload: unknown): Promise<unknown>;
 }

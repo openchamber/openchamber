@@ -382,8 +382,8 @@ export const PullRequestSection: React.FC<{
   const canShow = Boolean(directory && branch && baseBranch && (branch !== baseBranch || isFork));
 
   const prStatusKey = React.useMemo(
-    () => getGitHubPrStatusKey(directory, branch),
-    [directory, branch],
+    () => getGitHubPrStatusKey(directory, branch, selectedRemote?.name ?? null),
+    [directory, branch, selectedRemote?.name],
   );
   const statusEntry = useGitHubPrStatusStore((state) => state.entries[prStatusKey]);
 

@@ -14,7 +14,10 @@ let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
 let workspaceCreatedResult: Session | null = null
 let workspaceSessionResult: Session | null = null
+let sessionDeleteError: unknown | null = null
 const globalUpsertedSessions: unknown[] = []
+const globalRemovedSessionIds: string[] = []
+const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 
 const mockScopedClient = {
@@ -145,6 +148,11 @@ mock.module("@/lib/opencode/client", () => ({
       replyCalls.push({ method: "session.update", params: { sessionID: sessionId, ...changes, directory } })
       return Promise.resolve(sessionUpdateResult.data)
     }),
+    deleteSession: mock((sessionId: string, directory?: string | null) => {
+      replyCalls.push({ method: "session.delete", params: { sessionID: sessionId, directory } })
+      if (sessionDeleteError) throw sessionDeleteError
+      return Promise.resolve(true)
+    }),
   },
 }))
 
@@ -167,6 +175,8 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
+      currentSessionId: null,
+      setWorktreeMetadata: () => {},
       setSessionDirectory: (sessionID: string, directory: string) => {
         movedSessionDirectories.push({ sessionID, directory })
       },
@@ -197,6 +207,7 @@ mock.module("./input-store", () => ({
 }))
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
+  resolveGlobalSessionDirectory: (session: SessionWithDirectory) => session.directory ?? session.project?.worktree ?? null,
   mergeSessionDirectoryMetadata: (incoming: Session, existing?: SessionWithDirectory | null): SessionWithDirectory => {
     if (!existing) return incoming as SessionWithDirectory
     const next = { ...(incoming as SessionWithDirectory) }
@@ -209,10 +220,21 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
   },
   useGlobalSessionsStore: {
     getState: () => ({
+      activeSessions: [],
+      archivedSessions: [],
       upsertSession: (session: unknown) => {
         globalUpsertedSessions.push(session)
       },
+      removeSessions: (ids: Iterable<string>) => {
+        globalRemovedSessionIds.push(...ids)
+      },
     }),
+  },
+}))
+
+mock.module("./session-deletion-cleanup", () => ({
+  cleanupPersistedSessionState: (identity: { runtimeKey: string; directory: string; sessionId: string }) => {
+    deletedCleanupIdentities.push(identity)
   },
 }))
 
@@ -374,7 +396,75 @@ describe("secure workspace session routing", () => {
     expect(replyCalls.find((call) => call.method === "session.get")?.params.workspace).toBe("workspace-a")
     expect(globalUpsertedSessions).toEqual([workspaceSessionResult])
   })
+})
 
+describe("confirmed session removal", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    globalRemovedSessionIds.length = 0
+    deletedCleanupIdentities.length = 0
+    sessionDeleteError = null
+    sessionUpdateResult = {}
+  })
+
+  test("does not remove live or persisted state when delete fails", async () => {
+    sessionDeleteError = new Error("delete failed")
+    const source = createStore({}, {
+      session: [{ id: "session-a", directory: "/test/project", time: { created: 1 } } as Session],
+    })
+    const { deleteSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await deleteSession("session-a")).toBe(false)
+    expect(source.getState().session.map((item) => item.id)).toEqual(["session-a"])
+    expect(globalRemovedSessionIds).toEqual([])
+    expect(deletedCleanupIdentities).toEqual([])
+  })
+
+  test("cleans persisted state after the server confirms deletion", async () => {
+    const source = createStore({}, {
+      session: [{ id: "session-a", directory: "/test/project", time: { created: 1 } } as Session],
+    })
+    const { deleteSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await deleteSession("session-a")).toBe(true)
+    expect(source.getState().session).toEqual([])
+    expect(globalRemovedSessionIds).toEqual(["session-a"])
+    expect(deletedCleanupIdentities).toHaveLength(1)
+    expect({
+      directory: deletedCleanupIdentities[0]?.directory,
+      sessionId: deletedCleanupIdentities[0]?.sessionId,
+    }).toEqual({ directory: "/test/project", sessionId: "session-a" })
+  })
+
+  test("does not archive locally until the server returns the archived session", async () => {
+    const source = createStore({}, {
+      session: [{ id: "session-a", directory: "/test/project", time: { created: 1 } } as Session],
+    })
+    const { archiveSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await archiveSession("session-a")).toBe(false)
+    expect(source.getState().session.map((item) => item.id)).toEqual(["session-a"])
+    expect(globalUpsertedSessions).toEqual([])
+  })
+
+  test("moves the session to archived state after server confirmation", async () => {
+    sessionUpdateResult = {
+      data: { id: "session-a", directory: "/test/project", time: { created: 1, archived: 2 } } as Session,
+    }
+    const source = createStore({}, {
+      session: [{ id: "session-a", directory: "/test/project", time: { created: 1 } } as Session],
+    })
+    const { archiveSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await archiveSession("session-a")).toBe(true)
+    expect(source.getState().session).toEqual([])
+    expect((globalUpsertedSessions[0] as Session)?.time?.archived).toBe(2)
+  })
 })
 
 describe("fetchMessagesForSession startup race", () => {

@@ -49,7 +49,13 @@ import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSess
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
+import {
+  EMPTY_SESSION_ORDER_RANKS,
+  orderSessionsByLifecycleScopes,
+  useSessionOrderingStore,
+} from '@/sync/session-ordering';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -64,6 +70,8 @@ type MobileSessionsSheetProps = {
       'sidebar' renders the same content inline for the iPad persistent sidebar. */
   variant?: 'sheet' | 'sidebar';
 };
+
+const EMPTY_PINNED_SESSION_IDS = new Set<string>();
 
 type ProjectMeta = {
   id: string;
@@ -519,6 +527,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const { git } = useRuntimeAPIs();
   const liveSessions = useAllLiveSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
+    (state) => open || variant === 'sidebar' ? state.ids : EMPTY_PINNED_SESSION_IDS,
+    [open, variant],
+  ));
+  const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
+    (state) => open || variant === 'sidebar' ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
+    [open, variant],
+  ));
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -691,7 +707,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
     for (const node of nodes) {
       for (const bucket of node.buckets) {
-        bucket.sessions.sort((a, b) => getSessionTimestamp(b) - getSessionTimestamp(a));
+        bucket.sessions = orderSessionsByLifecycleScopes(bucket.sessions, pinnedSessionIds, sessionOrderRanks);
         for (const session of bucket.sessions) {
           if (!getParentId(session)) node.totalSessions += 1;
         }
@@ -699,7 +715,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, projectsMeta, sessions]);
+  }, [activeProjectId, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessions]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -923,14 +939,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // Flat lists used only by the dedicated search-results view.
   const searchSessionMatches = React.useMemo(() => {
     if (!normalizedQuery) return [] as Session[];
-    return sessions
-      .filter((session) => {
+    return orderSessionsByLifecycleScopes(
+      sessions.filter((session) => {
         const directory = getSessionDirectory(session);
         const project = findExactProjectMatch(projectsMeta, directory);
         return sessionMatchesQuery(session, project?.label ?? '', normalizedQuery);
-      })
-      .sort((a, b) => getSessionTimestamp(b) - getSessionTimestamp(a));
-  }, [normalizedQuery, projectsMeta, sessions]);
+      }),
+      pinnedSessionIds,
+      sessionOrderRanks,
+    );
+  }, [normalizedQuery, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessions]);
 
   const searchProjectMatches = React.useMemo(() => {
     if (!normalizedQuery) return [] as Array<ProjectMeta & { sessionCount: number }>;

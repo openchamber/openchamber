@@ -615,9 +615,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const handleAttachSelection = React.useCallback(() => {
         const selection = terminalControllerRef.current?.getSelection();
         const sessionKey = currentSessionId ?? (newSessionDraft?.open ? 'draft' : null);
-        if (!selection || !sessionKey || !activeTab) return;
-        addContextDraft({
-            sessionKey,
+        if (!selection || !sessionKey || !activeTab || !effectiveDirectory) return;
+        addContextDraft({ directory: effectiveDirectory, sessionKey }, {
             source: 'terminal',
             fileLabel: activeTab.label,
             startLine: selection.startLine,
@@ -626,7 +625,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
             language: activeTab.terminalSessionId ?? activeTab.id,
             text: '',
         });
-    }, [activeTab, addContextDraft, currentSessionId, newSessionDraft?.open]);
+    }, [activeTab, addContextDraft, currentSessionId, effectiveDirectory, newSessionDraft?.open]);
 
     const handleSelectTab = React.useCallback(
         (tabId: string) => {
