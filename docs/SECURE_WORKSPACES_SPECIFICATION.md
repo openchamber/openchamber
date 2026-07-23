@@ -174,8 +174,9 @@ This section records the audited state of the current commits. It is status evid
 
 ### 5.1 Current Commits And Distribution
 
-- Plugin repository `main` and release tag `v0.1.0`: `eedfd5b3a08e99285f3f167c7e7d83799844c03d`.
-- OpenChamber release-artifact pin commit: `aa0ed4bd37140d59c4fa5d08de791285414aa48b`.
+- Plugin repository `main` and OpenChamber dependency pin: `d9567f00fa5d1c2115fed613d8fe5b9aafe69cbb`.
+- Release tag `v0.1.0`: `eedfd5b3a08e99285f3f167c7e7d83799844c03d`.
+- Initial OpenChamber release-artifact pin commit: `aa0ed4bd37140d59c4fa5d08de791285414aa48b`.
 - OpenChamber currently pins the plugin by immutable Git commit in web and Electron package manifests.
 - The current plugin package payload is independently packable and Electron stages and verifies the exact payload.
 - OpenChamber server policy owns the exact signed runtime and gateway manifest defaults recorded in section 15; the UI does not duplicate them.
@@ -219,7 +220,7 @@ These results establish the release artifacts and public-digest provider lifecyc
 
 ### 5.4 Current Remote CI And Registry Status
 
-The original failures at run `29916187323` were repaired. GitHub Actions run `29925151247` passed the test, multi-architecture build/smoke/vulnerability, Docker live, and Kubernetes port-forward/HTTPS ingress jobs. Push run `29926186376` also passed. Current plugin commit `eedfd5b3a08e99285f3f167c7e7d83799844c03d` passed the same complete gate matrix in run `30017797840`.
+The original failures at run `29916187323` were repaired. GitHub Actions run `29925151247` passed the test, multi-architecture build/smoke/vulnerability, Docker live, and Kubernetes port-forward/HTTPS ingress jobs. Push run `29926186376` also passed. Plugin commit `eedfd5b3a08e99285f3f167c7e7d83799844c03d` passed the same complete gate matrix in run `30017797840`. Current plugin commit `d9567f00fa5d1c2115fed613d8fe5b9aafe69cbb` adds transactional Apple Container credential rotation and expanded live transport/collision certification; local published-digest Apple Container certification passed, and push run `30027172196` passed all branch gates after retrying a transient Docker Hub timeout during k3d registry setup.
 
 Historical registry preflight run `29927614258` proved candidate creation, exact amd64/arm64 scans and smokes, and the narrow package-visibility blocker. After an organization owner made both packages public, run `30021486938` passed the complete branch gate matrix and both registry-preflight jobs, including anonymous exact-digest pulls without a personal PAT.
 
