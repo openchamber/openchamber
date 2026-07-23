@@ -15,12 +15,12 @@
 // unlock guarantees the token is actually persisted (no fire-and-forget).
 
 import { SecureStorage } from '@aparajita/capacitor-secure-storage';
-import { Capacitor } from '@capacitor/core';
 import React from 'react';
 
 import { useI18n } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
-import { isCapacitorApp } from '@/lib/platform';
+import { getNativeMobileAdapter, NativeMobileStorageError, type NativeMobileSecureStorage } from '@/lib/native-mobile';
+import { getClientPlatform, isCapacitorApp, isNativeMobileApp } from '@/lib/platform';
 import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -52,15 +52,10 @@ const getMobileDeviceId = (): string => {
 // Server-side client dedupe key for this device (shared across pairing + login).
 const mobileClientDedupeKey = (): string => `mobile:${getMobileDeviceId()}`;
 
-// Display-only device metadata shown in the server's device list ("iOS",
-// "Android"). Capacitor knows the native platform; no extra plugin needed.
+// Display-only device metadata shown in the server's device list.
 const mobileDevicePlatform = (): string | undefined => {
-  try {
-    const platform = Capacitor.getPlatform();
-    return platform === 'ios' || platform === 'android' ? platform : undefined;
-  } catch {
-    return undefined;
-  }
+  const platform = getClientPlatform();
+  return platform === 'ios' || platform === 'android' || platform === 'harmony' ? platform : undefined;
 };
 const MOBILE_CONNECTIONS_LIMIT = 12;
 const MOBILE_CONNECT_TIMEOUT_MS = 8000;
@@ -140,7 +135,7 @@ type MobileSessionStatus = {
 type PairingRedeemResponse = {
   ok?: boolean;
   clientToken?: unknown;
-  client?: { label?: unknown } | null;
+  client?: { id?: unknown; label?: unknown } | null;
   server?: { label?: unknown; url?: unknown } | null;
 };
 
@@ -525,7 +520,7 @@ const readConnections = (): MobileSavedConnection[] => {
     return [];
   }
   if (!Array.isArray(parsed)) return [];
-  const native = isCapacitorApp();
+  const native = isNativeMobileApp();
   return parsed
     .flatMap((item): MobileSavedConnection[] => {
       if (!item || typeof item !== 'object') return [];
@@ -558,7 +553,7 @@ const serializeCandidate = (c: MobileTransportCandidate): unknown =>
 
 const writeConnections = (connections: MobileSavedConnection[]): void => {
   if (typeof window === 'undefined') return;
-  const native = isCapacitorApp();
+  const native = isNativeMobileApp();
   const serialized = connections.slice(0, MOBILE_CONNECTIONS_LIMIT).map((c) => {
     // grant/token never land here — only transport metadata.
     const shared = {
@@ -585,7 +580,7 @@ const upsertConnectionInList = (
   const existing = connections.find(
     (item) => (draft.id && item.id === draft.id) || candidateSetsMatch(item.candidates, draft.candidates),
   );
-  const native = isCapacitorApp();
+  const native = isNativeMobileApp();
   const next: MobileSavedConnection = {
     id: draft.id || existing?.id || crypto.randomUUID(),
     label: draft.label,
@@ -621,6 +616,29 @@ type NativeSecureStorage = {
 const nativeSecure = SecureStorage as unknown as NativeSecureStorage;
 const KEYCHAIN_ACCESS_WHEN_UNLOCKED = 0; // KeychainAccess.whenUnlocked
 
+const capacitorSecureStorage: NativeMobileSecureStorage = {
+  async get(key) {
+    return (await nativeSecure.internalGetItem({ prefixedKey: key, sync: false })).data;
+  },
+  async set(key, value) {
+    await nativeSecure.internalSetItem({
+      prefixedKey: key,
+      data: value,
+      sync: false,
+      access: KEYCHAIN_ACCESS_WHEN_UNLOCKED,
+    });
+  },
+  async remove(key) {
+    await nativeSecure.internalRemoveItem({ prefixedKey: key, sync: false });
+  },
+};
+
+const getNativeSecureStorage = (): NativeMobileSecureStorage | null => {
+  const harmonyStorage = getNativeMobileAdapter()?.secureStorage;
+  if (harmonyStorage) return harmonyStorage;
+  return isCapacitorApp() ? capacitorSecureStorage : null;
+};
+
 // `key` is a connection storage key (connectionKeyOf): the normalized URL for
 // direct connections (unchanged historical format, existing tokens stay valid)
 // or the relay identity key for relay connections.
@@ -639,50 +657,68 @@ const withTimeout = async <T,>(operation: Promise<T>, fallback: T): Promise<T> =
   }
 };
 
-// Bound a native Keychain call so a stalled/failed bridge can never hang the flow.
-const boundedSecure = async <T,>(label: string, run: () => Promise<T>, fallback: T): Promise<T> => {
-  if (!isCapacitorApp()) return fallback;
-  return withTimeout(
-    run().catch((error) => {
-      console.warn(`[mobile-storage] ${label} failed`, error);
-      return fallback;
-    }),
-    fallback,
-  );
-};
+type SecureTokenReadResult =
+  | { available: true; token?: string }
+  | { available: false };
 
-const readSecureToken = async (key: string): Promise<string | undefined> => {
+const readSecureToken = async (key: string): Promise<SecureTokenReadResult> => {
   logStorage('secure:read-start', { key });
-  const value = await boundedSecure(
-    'secure:read',
-    async () => (await nativeSecure.internalGetItem({ prefixedKey: prefixedTokenKey(key), sync: false })).data,
-    null,
+  const storage = getNativeSecureStorage();
+  if (!storage) return { available: false };
+  const result = await withTimeout(
+    storage.get(prefixedTokenKey(key))
+      .then((value) => ({ available: true as const, value }))
+      .catch(() => {
+        console.warn('[mobile-storage] secure:read failed');
+        return { available: false as const };
+      }),
+    { available: false as const },
   );
-  const token = typeof value === 'string' && value.trim() ? value : undefined;
-  logStorage('secure:read', { key, hasToken: Boolean(token) });
-  return token;
+  if (!result.available) {
+    logStorage('secure:read', { key, available: false });
+    return result;
+  }
+  const token = typeof result.value === 'string' && result.value.trim() ? result.value : undefined;
+  logStorage('secure:read', { key, available: true, hasToken: Boolean(token) });
+  return { available: true, token };
 };
 
-const writeSecureToken = async (key: string, token: string): Promise<boolean> => {
+type SecureTokenWriteResult =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+const secureStorageFailureReason = (error: unknown): string =>
+  error instanceof NativeMobileStorageError ? error.reason : 'operation-failed';
+
+const writeSecureToken = async (key: string, token: string): Promise<SecureTokenWriteResult> => {
   logStorage('secure:write-start', { key });
-  const ok = await boundedSecure('secure:write', async () => {
-    await nativeSecure.internalSetItem({
-      prefixedKey: prefixedTokenKey(key),
-      data: token,
-      sync: false,
-      access: KEYCHAIN_ACCESS_WHEN_UNLOCKED,
-    });
-    return true;
-  }, false);
-  logStorage('secure:write', { key, ok });
-  return ok;
+  const storage = getNativeSecureStorage();
+  if (!storage) return { ok: false, reason: 'unavailable' };
+  const result = await withTimeout<SecureTokenWriteResult>(
+    storage.set(prefixedTokenKey(key), token)
+      .then(() => ({ ok: true as const }))
+      .catch((error) => ({ ok: false as const, reason: secureStorageFailureReason(error) })),
+    { ok: false, reason: 'timeout' },
+  );
+  logStorage('secure:write', { key, ok: result.ok, ...(!result.ok ? { reason: result.reason } : {}) });
+  return result;
 };
 
 const deleteSecureToken = async (key: string): Promise<void> => {
-  await boundedSecure('secure:delete', async () => {
-    await nativeSecure.internalRemoveItem({ prefixedKey: prefixedTokenKey(key), sync: false });
-    return true;
-  }, false);
+  const storage = getNativeSecureStorage();
+  if (!storage) throw new NativeMobileStorageError('storage-unavailable');
+
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new NativeMobileStorageError('storage-unavailable'));
+    }, MOBILE_SECURE_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([storage.remove(prefixedTokenKey(key)), timeout]);
+  } finally {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -716,7 +752,7 @@ export const migrateLegacyInlineTokenRecords = async (
 };
 
 const migrateLegacyInlineTokens = async (): Promise<void> => {
-  if (typeof window === 'undefined' || !isCapacitorApp()) return;
+  if (typeof window === 'undefined' || !isNativeMobileApp()) return;
   let parsed: unknown;
   try {
     parsed = JSON.parse(window.localStorage.getItem(MOBILE_CONNECTIONS_STORAGE_KEY) || '[]');
@@ -733,8 +769,9 @@ const migrateLegacyInlineTokens = async (): Promise<void> => {
   logStorage('secure:migrate-start', { count: legacy.length });
   const result = await migrateLegacyInlineTokenRecords(parsed, async (url, token) => {
     const key = getConnectionStorageKey(url);
-    if (!await writeSecureToken(key, token)) return false;
-    return await readSecureToken(key) === token;
+    if (!(await writeSecureToken(key, token)).ok) return false;
+    const stored = await readSecureToken(key);
+    return stored.available && stored.token === token;
   });
   if (result.migrated > 0) {
     try {
@@ -755,20 +792,23 @@ export const loadMobileConnections = async (): Promise<MobileSavedConnection[]> 
 export const upsertMobileConnection = async (
   connection: { id?: string; label: string; candidates: MobileTransportCandidate[]; clientToken?: string },
 ): Promise<MobileSavedConnection[]> => {
+  if (isNativeMobileApp() && connection.clientToken) {
+    const stored = await writeSecureToken(secureTokenKeyOf({ candidates: connection.candidates }), connection.clientToken);
+    if (!stored.ok) throw new Error('Native secure storage write failed');
+  }
   const next = upsertConnectionInList(readConnections(), connection);
   writeConnections(next);
-  if (isCapacitorApp() && connection.clientToken) {
-    await writeSecureToken(secureTokenKeyOf({ candidates: connection.candidates }), connection.clientToken);
-  }
   return next;
 };
 
 export const deleteMobileConnection = async (id: string): Promise<MobileSavedConnection[]> => {
   const connections = readConnections();
   const removed = connections.find((connection) => connection.id === id) ?? null;
+  if (removed?.hasToken && isNativeMobileApp()) {
+    await deleteSecureToken(secureTokenKeyOf(removed));
+  }
   const next = connections.filter((connection) => connection.id !== id);
   writeConnections(next);
-  if (removed && isCapacitorApp()) await deleteSecureToken(secureTokenKeyOf(removed));
   return next;
 };
 
@@ -839,7 +879,7 @@ const probeConnectionCandidates = async (
       // and not auth-disabled) is not enough — the native runtime transport needs a
       // bearer token, so fall through to the password flow to mint one.
       const authDisabled = status?.disabled === true;
-      if (!token && isCapacitorApp() && !authDisabled && status?.scope !== 'client') return { status: 'needs-login' };
+      if (!token && isNativeMobileApp() && !authDisabled && status?.scope !== 'client') return { status: 'needs-login' };
       return { status: 'ok', transport: { kind: 'direct', url } };
     }
     return { status: 'unreachable' };
@@ -970,9 +1010,11 @@ export const autoConnectLastInstance = async (): Promise<boolean> => {
   // The runtime transport needs a bearer token; only auto-connect when one is
   // already saved. A missing/expired token must go through the login UI.
   let token: string | undefined;
-  if (isCapacitorApp()) {
+  if (isNativeMobileApp()) {
     if (!candidate.hasToken) return false;
-    token = await readSecureToken(secureTokenKeyOf(candidate));
+    const stored = await readSecureToken(secureTokenKeyOf(candidate));
+    if (!stored.available) return false;
+    token = stored.token;
     if (!token) return false;
   } else {
     token = candidate.clientToken;
@@ -1017,6 +1059,26 @@ export const validateMobileConnectionSession = async (input: {
 type LiveTransport =
   | { kind: 'direct'; url: string }
   | { kind: 'relay'; relay: MobileRelayConfig; tunnel: ReturnType<typeof createRelayTunnelClient> };
+
+// A password or pairing exchange creates the server-side client before the
+// native secure-store write. If that write fails, use the just-issued token to
+// revoke only its own record so the server is not left with an unusable device.
+const rollbackIssuedClient = async (
+  transport: LiveTransport,
+  token: string,
+  clientId: unknown,
+): Promise<void> => {
+  if (typeof clientId !== 'string' || !clientId.trim()) return;
+  const path = `/api/client-auth/clients/${encodeURIComponent(clientId.trim())}`;
+  const init = {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  } as const;
+  const response = transport.kind === 'relay'
+    ? await raceWithTimeout(MOBILE_FAST_PROBE_TIMEOUT_MS, transport.tunnel.fetch(path, init).catch(() => null))
+    : await requestWithTimeout(`${transport.url}${path}`, init, { totalTimeoutMs: MOBILE_FAST_PROBE_TIMEOUT_MS });
+  logConnect('client-token:rollback', { transport: transport.kind, ok: response?.ok === true });
+};
 
 // Convert pairing-payload candidates into ordered mobile transport candidates:
 // priority number ascending, relay last on ties (relay is the fallback), invalid
@@ -1130,8 +1192,12 @@ export const reprobeActiveConnection = async (): Promise<ReprobeOutcome> => {
   if (!active) return 'no-connection';
 
   let token: string | undefined;
-  if (isCapacitorApp()) {
-    token = active.hasToken ? await readSecureToken(secureTokenKeyOf(active)) : undefined;
+  if (isNativeMobileApp()) {
+    if (active.hasToken) {
+      const stored = await readSecureToken(secureTokenKeyOf(active));
+      if (!stored.available) return 'unreachable';
+      token = stored.token;
+    }
   } else {
     token = active.clientToken;
   }
@@ -1366,8 +1432,15 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       let token = input.clientToken?.trim() || undefined;
       const tokenIsNew = Boolean(token);
       if (!token) {
-        if (isCapacitorApp()) {
-          if (saved?.hasToken) token = await readSecureToken(secureTokenKeyOf({ candidates }));
+        if (isNativeMobileApp()) {
+          if (saved?.hasToken) {
+            const stored = await readSecureToken(secureTokenKeyOf({ candidates }));
+            if (!stored.available) {
+              setError(t('mobile.connect.error.authRequired'));
+              return;
+            }
+            token = stored.token;
+          }
         } else {
           token = saved?.clientToken;
         }
@@ -1395,8 +1468,12 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
 
       // Connected. Persist a user-supplied token before switching so a cold
       // restart won't re-prompt.
-      if (token && tokenIsNew && isCapacitorApp()) {
-        await writeSecureToken(secureTokenKeyOf({ candidates }), token);
+      if (token && tokenIsNew && isNativeMobileApp()) {
+        const stored = await writeSecureToken(secureTokenKeyOf({ candidates }), token);
+        if (!stored.ok) {
+          setError(t('mobile.connect.error.secureStorageFailed', { reason: stored.reason }));
+          return;
+        }
       }
       persistMetadata({ id: saved?.id, label, candidates, clientToken: token });
       switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf({ candidates }), grant });
@@ -1466,10 +1543,11 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       // 3. Persist the device with ALL its candidates + one token, then switch to
       // whichever transport answered. Reconnect re-probes the full set so the
       // device works at home (direct) and away (relay) with no re-pairing.
-      if (isCapacitorApp()) {
+      if (isNativeMobileApp()) {
         const stored = await writeSecureToken(secureTokenKeyOf({ candidates: deviceCandidates }), issuedToken);
-        if (!stored) {
-          setError(t('mobile.connect.error.authRequired'));
+        if (!stored.ok) {
+          await rollbackIssuedClient(chosen, issuedToken, result?.client?.id);
+          setError(t('mobile.connect.error.secureStorageFailed', { reason: stored.reason }));
           return;
         }
       }
@@ -1527,7 +1605,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         setError(t('mobile.connect.error.passwordFailed'));
         return;
       }
-      const body = await response.json().catch(() => null) as { clientToken?: unknown } | null;
+      const body = await response.json().catch(() => null) as { clientToken?: unknown; client?: { id?: unknown } | null } | null;
       const issuedToken = typeof body?.clientToken === 'string' ? body.clientToken.trim() : '';
       logConnect('password:token', { issued: Boolean(issuedToken) });
 
@@ -1535,7 +1613,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       // the native runtime transport; a cookie-only success is only enough for a
       // direct connection in a browser.
       if (!issuedToken) {
-        if (chosen.kind === 'direct' && !isCapacitorApp()) {
+        if (chosen.kind === 'direct' && !isNativeMobileApp()) {
           persistMetadata({ id, label, candidates });
           setPendingConnection(null);
           switchToTransport({ kind: 'direct', url: chosen.url }, null, { runtimeKey: secureTokenKeyOf({ candidates }) });
@@ -1547,8 +1625,13 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       }
 
       // Persist the token BEFORE switching (no fire-and-forget).
-      if (isCapacitorApp()) {
-        await writeSecureToken(secureTokenKeyOf({ candidates }), issuedToken);
+      if (isNativeMobileApp()) {
+        const stored = await writeSecureToken(secureTokenKeyOf({ candidates }), issuedToken);
+        if (!stored.ok) {
+          await rollbackIssuedClient(chosen, issuedToken, body?.client?.id);
+          setError(t('mobile.connect.error.secureStorageFailed', { reason: stored.reason }));
+          return;
+        }
       }
       persistMetadata({ id, label, candidates, clientToken: issuedToken });
       setPendingConnection(null);
@@ -1601,18 +1684,32 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     const clientToken = input.clientToken?.trim() || undefined;
     const label = input.label?.trim() || getConnectionLabel(connectionDisplayUrl({ candidates }));
     // Awaited token writes so "Save" truly persisted the secret before returning.
-    if (isCapacitorApp()) {
+    if (isNativeMobileApp()) {
       const nextKey = secureTokenKeyOf({ candidates });
       if (clientToken) {
-        await writeSecureToken(nextKey, clientToken);
+        const written = await writeSecureToken(nextKey, clientToken);
+        if (!written.ok) {
+          setError(t('mobile.connect.error.secureStorageFailed', { reason: written.reason }));
+          return null;
+        }
       } else if (existing?.hasToken) {
         // No new token typed but the edit changed the token key (e.g. a
         // direct-only instance got a new URL): move the stored token to the
         // new key instead of leaving it stranded under the old one.
         const previousKey = secureTokenKeyOf(existing);
         if (previousKey && nextKey && previousKey !== nextKey) {
-          const storedToken = await readSecureToken(previousKey);
-          if (storedToken) await writeSecureToken(nextKey, storedToken);
+          const stored = await readSecureToken(previousKey);
+          if (!stored.available) {
+            setError(t('mobile.connect.error.authRequired'));
+            return null;
+          }
+          if (stored.token) {
+            const written = await writeSecureToken(nextKey, stored.token);
+            if (!written.ok) {
+              setError(t('mobile.connect.error.secureStorageFailed', { reason: written.reason }));
+              return null;
+            }
+          }
         }
       }
     }
@@ -1622,10 +1719,15 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
 
   const removeConnection = React.useCallback(async (id: string): Promise<MobileSavedConnection | null> => {
     const removed = connectionsRef.current.find((connection) => connection.id === id) ?? null;
-    const next = await deleteMobileConnection(id);
-    applyConnections(next);
-    return removed;
-  }, [applyConnections]);
+    try {
+      const next = await deleteMobileConnection(id);
+      applyConnections(next);
+      return removed;
+    } catch (error) {
+      setError(t('mobile.connect.error.secureStorageFailed', { reason: secureStorageFailureReason(error) }));
+      return null;
+    }
+  }, [applyConnections, t]);
 
   return {
     connections,

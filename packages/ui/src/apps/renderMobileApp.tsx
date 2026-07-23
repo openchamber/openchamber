@@ -16,6 +16,7 @@ import { initializeLocale, I18nProvider } from '@/lib/i18n';
 import { initializeAppearancePreferences, syncDesktopSettings } from '@/lib/persistence';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startTypographyWatcher } from '@/lib/typographyWatcher';
+import { isNativeMobileApp } from '@/lib/platform';
 import { preloadMarkdownRenderer } from '@/components/chat/markdownRendererLoader';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
 import { MobileApp } from './MobileApp';
@@ -67,13 +68,12 @@ export function renderMobileApp(apis: RuntimeAPIs) {
   // notifications API: scheduling local notifications can't tell foreground from background
   // in a WKWebView and leaked while the app was open. (The Web Notifications API the web
   // runtime uses also doesn't display inside a WKWebView.)
-  const capacitor = (window as typeof window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-  const isNativeShell = capacitor?.isNativePlatform?.() === true || window.location.protocol === 'capacitor:';
+  const isNativeShell = isNativeMobileApp();
   const resolvedApis = isNativeShell
     ? { ...apis, notifications: { notifyAgentCompletion: async () => false, canNotify: () => false } }
     : apis;
 
-  // Auth gating differs by shell: the native Capacitor app authenticates via
+  // Auth gating differs by shell: native mobile apps authenticate via
   // its own instance-connect flow (MobileConnectionWelcome asks for the
   // password per instance), while the plain mobile BROWSER against a
   // --ui-password server must keep the classic SessionAuthGate unlock page.

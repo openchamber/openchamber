@@ -65,6 +65,7 @@ export const dict = {
   'mobile.connect.error.unreachable': 'Could not reach that OpenChamber server.',
   'mobile.connect.error.authRequired': 'This server needs a password or client token.',
   'mobile.connect.error.passwordFailed': 'Could not unlock that server. Check the password.',
+  'mobile.connect.error.secureStorageFailed': 'Could not securely save the client token on this device. ({reason})',
   'mobile.instances.addTitle': 'Add instance',
   'mobile.instances.addManual': 'Add by address',
   'mobile.instances.editTitle': 'Edit instance',

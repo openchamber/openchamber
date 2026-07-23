@@ -30,7 +30,8 @@ import { opencodeClient } from '@/lib/opencode/client';
 import type { ProjectEntry, RuntimeAPIs } from '@/lib/api/types';
 import { useOrientation } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
-import { isIPadApp } from '@/lib/platform';
+import { getNativeMobileAdapter } from '@/lib/native-mobile';
+import { isCapacitorApp, isIPadApp, isNativeMobileApp as isNativeMobileShell } from '@/lib/platform';
 import { resolveProjectForDirectory, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
@@ -206,18 +207,9 @@ const IpadSidebarResizeHandle: React.FC<{
   </div>
 );
 
-const isCapacitorMobileApp = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  const maybeCapacitor = (window as typeof window & {
-    Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string };
-  }).Capacitor;
-  if (maybeCapacitor?.isNativePlatform?.() === true) return true;
-  return window.location.protocol === 'capacitor:';
-};
-
 const useNativeMobileChrome = (): void => {
   React.useEffect(() => {
-    if (!isCapacitorMobileApp()) return;
+    if (!isCapacitorApp()) return;
 
     let disposed = false;
     const cleanup: Array<() => void> = [];
@@ -548,7 +540,9 @@ const useNativeMobileLifecycle = (onResume: () => void): void => {
   const wasInactiveRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (!isCapacitorMobileApp()) return;
+    const capacitor = isCapacitorApp();
+    const harmonyLifecycle = capacitor ? undefined : getNativeMobileAdapter()?.lifecycle;
+    if (!capacitor && !harmonyLifecycle) return;
 
     let disposed = false;
     const cleanup: Array<() => void> = [];
@@ -558,38 +552,53 @@ const useNativeMobileLifecycle = (onResume: () => void): void => {
       onResume();
     };
 
-    // Belt-and-suspenders resume detection. Capacitor's `appStateChange` is the
-    // primary signal, but on iOS it can be missed after a long suspend, so the
-    // webview's own `visibilitychange` is a second trigger — either one flips
-    // wasInactiveRef and fires onResume exactly once per background→foreground.
+    // Capacitor keeps its existing belt-and-suspenders resume detection: its
+    // appStateChange is primary, while visibilitychange covers long iOS
+    // suspends. Harmony uses the Ability callback as the authoritative resume
+    // below; visibility only records that the page became inactive there.
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         wasInactiveRef.current = true;
         return;
       }
-      resumeAfterInactive();
+      if (capacitor) resumeAfterInactive();
     };
     document.addEventListener('visibilitychange', handleVisibility);
     cleanup.push(() => document.removeEventListener('visibilitychange', handleVisibility));
 
-    void import('@capacitor/app').then(async ({ App }) => {
-      if (disposed) return;
-      const state = await App.addListener('appStateChange', ({ isActive }) => {
-        document.documentElement.classList.toggle('oc-native-app-active', isActive);
-        if (!isActive) {
-          wasInactiveRef.current = true;
-          return;
-        }
-        resumeAfterInactive();
-      });
-      const resume = await App.addListener('resume', resumeAfterInactive);
-      if (disposed) {
-        void state.remove();
-        void resume.remove();
+    const handleAppStateChange = (isActive: boolean) => {
+      document.documentElement.classList.toggle('oc-native-app-active', isActive);
+      if (!isActive) {
+        wasInactiveRef.current = true;
         return;
       }
-      cleanup.push(() => void state.remove(), () => void resume.remove());
-    }).catch(() => undefined);
+      if (harmonyLifecycle) {
+        // The native channel suppresses duplicate foreground notifications.
+        // Re-probe even if ArkWeb suspended before it could receive background.
+        wasInactiveRef.current = false;
+        onResume();
+        return;
+      }
+      resumeAfterInactive();
+    };
+
+    if (harmonyLifecycle) {
+      cleanup.push(harmonyLifecycle.onAppStateChange(handleAppStateChange));
+    } else {
+      void import('@capacitor/app').then(async ({ App }) => {
+        if (disposed) return;
+        const state = await App.addListener('appStateChange', ({ isActive }) => {
+          handleAppStateChange(isActive);
+        });
+        const resume = await App.addListener('resume', resumeAfterInactive);
+        if (disposed) {
+          void state.remove();
+          void resume.remove();
+          return;
+        }
+        cleanup.push(() => void state.remove(), () => void resume.remove());
+      }).catch(() => undefined);
+    }
 
     return () => {
       disposed = true;
@@ -600,7 +609,7 @@ const useNativeMobileLifecycle = (onResume: () => void): void => {
 
 const useNativeAndroidBackButton = (onBack: () => boolean): void => {
   React.useEffect(() => {
-    if (!isCapacitorMobileApp()) return;
+    if (!isCapacitorApp()) return;
 
     let disposed = false;
     let remove: (() => void) | null = null;
@@ -2080,7 +2089,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const updateAvailable = useUpdateStore((state) => state.available);
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
-  const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
+  const showNativeMobileFeatures = React.useMemo(() => isNativeMobileShell(), []);
   const mcpServers = useMcpConfigStore((state) => state.mcpServers);
   const setMcpDraft = useMcpConfigStore((state) => state.setMcpDraft);
   const setSelectedMcp = useMcpConfigStore((state) => state.setSelectedMcp);
@@ -2355,7 +2364,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         label: t('mobile.menu.mcp'),
         onSelect: () => setMcpOpen(true),
       });
-      if (showCapacitorOnlyFeatures) {
+      if (showNativeMobileFeatures) {
         items.push({
           key: 'instances',
           icon: 'server',
@@ -2382,7 +2391,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       });
       return items;
     },
-    [dirtyChangeCount, isIPad, openChangesSurface, openFilesSurface, showCapacitorOnlyFeatures, showUpdateItem, t],
+    [dirtyChangeCount, isIPad, openChangesSurface, openFilesSurface, showNativeMobileFeatures, showUpdateItem, t],
   );
 
   return (
@@ -2640,7 +2649,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           </MobileOverlayPanel>
         ) : null}
 
-        {instancesOpen && showCapacitorOnlyFeatures ? (
+        {instancesOpen && showNativeMobileFeatures ? (
           <MobileSurfaceShell
             open
             onClose={() => setInstancesOpen(false)}
@@ -2723,7 +2732,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   // after a same-device transport swap — reconnects the sync layer in place with
   // no remount. The value itself is unused; only the re-render matters.
   const [, bumpTransportSwitch] = React.useReducer((count: number) => count + 1, 0);
-  const isNativeMobileApp = React.useMemo(() => isCapacitorMobileApp(), []);
+  const isNativeMobileApp = React.useMemo(() => isNativeMobileShell(), []);
   const lastNativeResumeSyncEventAtRef = React.useRef(0);
   const nativeResumeValidationSeqRef = React.useRef(0);
 

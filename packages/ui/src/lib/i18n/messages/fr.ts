@@ -2596,6 +2596,7 @@ export const dict = {
   'mobile.connect.error.unreachable': 'Impossible de joindre ce serveur OpenChamber.',
   'mobile.connect.error.authRequired': 'Ce serveur nécessite un mot de passe ou un jeton client.',
   'mobile.connect.error.passwordFailed': 'Impossible de déverrouiller ce serveur. Vérifiez le mot de passe.',
+  'mobile.connect.error.secureStorageFailed': 'Impossible d’enregistrer de manière sécurisée le jeton client sur cet appareil. ({reason})',
   'mobile.instances.addTitle': 'Ajouter une instance',
   'mobile.instances.addManual': 'Ajouter par adresse',
   'mobile.instances.editTitle': 'Modifier l\'instance',

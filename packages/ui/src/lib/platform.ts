@@ -1,4 +1,5 @@
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { getNativeMobileAdapter } from '@/lib/native-mobile';
 
 /** True when running inside the native Capacitor shell (iOS/Android app), not the web/PWA. */
 export const isCapacitorApp = (): boolean => {
@@ -6,6 +7,12 @@ export const isCapacitorApp = (): boolean => {
   const capacitor = (window as typeof window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
   return capacitor?.isNativePlatform?.() === true || window.location.protocol === 'capacitor:';
 };
+
+/** True only when the trusted Harmony ArkWeb bridge is present. */
+export const isHarmonyApp = (): boolean => getNativeMobileAdapter()?.platform === 'harmony';
+
+/** True for a supported native mobile shell, without implying Capacitor APIs exist. */
+export const isNativeMobileApp = (): boolean => isCapacitorApp() || isHarmonyApp();
 
 /**
  * True when running inside the native Capacitor shell on an iPad.
@@ -22,7 +29,7 @@ export const isIPadApp = (): boolean => {
     || (/Macintosh|MacIntel/i.test(userAgent) && maxTouchPoints > 1);
 };
 
-export type ClientPlatform = 'ios' | 'android' | 'vscode' | 'desktop' | 'web';
+export type ClientPlatform = 'ios' | 'android' | 'harmony' | 'vscode' | 'desktop' | 'web';
 
 /**
  * The runtime surface this client is. Used by the push presence model: only 'ios'/'android'
@@ -34,6 +41,7 @@ export const getClientPlatform = (): ClientPlatform => {
     const capacitor = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor;
     const native = capacitor?.getPlatform?.();
     if (native === 'ios' || native === 'android') return native;
+    if (isHarmonyApp()) return 'harmony';
   }
   if (isVSCodeRuntime()) return 'vscode';
   if (isDesktopShell()) return 'desktop';

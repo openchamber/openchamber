@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import { loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { autoConnectLastInstance, deleteMobileConnection, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -14,7 +14,7 @@ const createLocalStorageStub = () => {
   };
 };
 
-const installTestWindow = () => {
+const installTestWindow = (extra: Record<string, unknown> = {}) => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
@@ -22,8 +22,16 @@ const installTestWindow = () => {
       clearTimeout: globalThis.clearTimeout.bind(globalThis),
       location: { protocol: 'https:' },
       localStorage: createLocalStorageStub(),
+      ...extra,
     },
   });
+};
+
+const respondToHarmonyRequest = (requestId: string, result: object): void => {
+  const receiver = (window as typeof window & {
+    __openChamberHarmonyBridgeResult?: (requestId: unknown, value: unknown) => void;
+  }).__openChamberHarmonyBridgeResult;
+  receiver?.(requestId, JSON.stringify(result));
 };
 
 const restoreGlobals = () => {
@@ -108,6 +116,136 @@ describe('mobile connection storage', () => {
 
       const connections = await loadMobileConnections();
       expect(connections[0]?.candidates.map((c) => c.kind)).toEqual(['direct', 'relay']);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a Harmony connection stores its token only through the secure bridge', async () => {
+    const secureValues = new Map<string, string>();
+    try {
+      installTestWindow({
+        openChamberHarmony: {
+          getPlatform: () => 'harmony',
+          getCapabilities: () => JSON.stringify({ secureStorage: true }),
+          secureStorageGet: (requestId: string, key: string) => {
+            respondToHarmonyRequest(requestId, { ok: true, value: secureValues.get(key) ?? null });
+          },
+          secureStorageSet: (requestId: string, key: string, value: string) => {
+            secureValues.set(key, value);
+            respondToHarmonyRequest(requestId, { ok: true });
+          },
+          secureStorageRemove: (requestId: string, key: string) => {
+            secureValues.delete(key);
+            respondToHarmonyRequest(requestId, { ok: true });
+          },
+        },
+      });
+
+      await upsertMobileConnection({
+        label: 'Harmony Server',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.8:2606' }],
+        clientToken: 'harmony-secret',
+      });
+
+      const raw = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') as Array<Record<string, unknown>>;
+      expect(raw[0]?.hasToken).toBe(true);
+      expect(raw[0]?.clientToken).toBe(undefined);
+      expect(JSON.stringify(raw)).not.toContain('harmony-secret');
+      expect([...secureValues.values()]).toEqual(['harmony-secret']);
+
+      const loaded = await loadMobileConnections();
+      expect(loaded[0]?.hasToken).toBe(true);
+      expect(loaded[0]?.clientToken).toBe(undefined);
+
+      await deleteMobileConnection(loaded[0]!.id);
+      expect(await loadMobileConnections()).toEqual([]);
+      expect(secureValues.size).toBe(0);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a failed Harmony secure write does not persist token metadata', async () => {
+    try {
+      installTestWindow({
+        openChamberHarmony: {
+          getPlatform: () => 'harmony',
+          getCapabilities: () => JSON.stringify({ secureStorage: true }),
+          secureStorageGet: (requestId: string) => respondToHarmonyRequest(requestId, { ok: true, value: null }),
+          secureStorageSet: (requestId: string) => respondToHarmonyRequest(requestId, { ok: false }),
+          secureStorageRemove: (requestId: string) => respondToHarmonyRequest(requestId, { ok: true }),
+        },
+      });
+
+      await expect(upsertMobileConnection({
+        label: 'Unavailable Store',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.9:2606' }],
+        clientToken: 'must-not-persist',
+      })).rejects.toThrow('secure storage write failed');
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a failed Harmony secure delete preserves the connection and failure reason', async () => {
+    try {
+      installTestWindow({
+        openChamberHarmony: {
+          getPlatform: () => 'harmony',
+          getCapabilities: () => JSON.stringify({ secureStorage: true }),
+          secureStorageGet: (requestId: string) => respondToHarmonyRequest(requestId, { ok: true, value: null }),
+          secureStorageSet: (requestId: string) => respondToHarmonyRequest(requestId, { ok: true }),
+          secureStorageRemove: (requestId: string) => {
+            respondToHarmonyRequest(requestId, { ok: false, error: 'invalid-secret' });
+          },
+        },
+      });
+
+      await upsertMobileConnection({
+        label: 'Delete failure',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.11:2606' }],
+        clientToken: 'must-remain-protected',
+      });
+      const [saved] = await loadMobileConnections();
+
+      try {
+        await deleteMobileConnection(saved!.id);
+        throw new Error('Expected secure delete to fail');
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        expect((error as { reason?: unknown }).reason).toBe('invalid-secret');
+      }
+      expect(await loadMobileConnections()).toHaveLength(1);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a failed Harmony secure read does not masquerade as a missing saved token', async () => {
+    try {
+      installTestWindow({
+        openChamberHarmony: {
+          getPlatform: () => 'harmony',
+          getCapabilities: () => JSON.stringify({ secureStorage: true }),
+          secureStorageGet: (requestId: string) => respondToHarmonyRequest(requestId, { ok: false }),
+          secureStorageSet: (requestId: string) => respondToHarmonyRequest(requestId, { ok: true }),
+          secureStorageRemove: (requestId: string) => respondToHarmonyRequest(requestId, { ok: true }),
+        },
+      });
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{
+        id: 'saved',
+        label: 'Saved Harmony Server',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+        lastUsedAt: 1,
+        hasToken: true,
+      }]));
+
+      expect(await autoConnectLastInstance()).toBe(false);
+      const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') as Array<Record<string, unknown>>;
+      expect(saved[0]?.hasToken).toBe(true);
+      expect(saved[0]?.id).toBe('saved');
     } finally {
       restoreGlobals();
     }

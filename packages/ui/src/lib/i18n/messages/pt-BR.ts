@@ -66,6 +66,7 @@ export const dict: Record<I18nKey, string> = {
   "mobile.connect.error.unreachable": "Não foi possível acessar esse servidor OpenChamber.",
   "mobile.connect.error.authRequired": "Este servidor requer uma senha ou token do cliente.",
   "mobile.connect.error.passwordFailed": "Não foi possível desbloquear esse servidor. Verifique a senha.",
+  "mobile.connect.error.secureStorageFailed": "Não foi possível salvar com segurança o token do cliente neste dispositivo. ({reason})",
   "mobile.instances.addTitle": "Adicionar instância",
   "mobile.instances.addManual": "Adicionar por endereço",
   "mobile.instances.editTitle": "Editar instância",

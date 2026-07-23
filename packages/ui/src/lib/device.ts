@@ -1,6 +1,6 @@
 import React from 'react';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
-import { isCapacitorApp } from '@/lib/platform';
+import { isNativeMobileApp } from '@/lib/platform';
 
 type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
@@ -128,8 +128,8 @@ export function getDeviceInfo(): DeviceInfo {
     isTablet = false;
     isDesktop = true;
     deviceType = 'desktop';
-  } else if (isCapacitorApp()) {
-    // The Capacitor shell IS the phone UI: every surface in that bundle is
+  } else if (isNativeMobileApp()) {
+    // A native mobile shell IS the phone UI: every surface in that bundle is
     // built mobile-first, so wide devices (iPad, Android tablets) must not
     // fall into tablet/desktop branches scattered across shared components.
     // iPad-specific layout upgrades gate on isIPadApp()/orientation instead.

@@ -66,6 +66,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.connect.error.unreachable': '해당 OpenChamber 서버에 연결할 수 없습니다.',
   'mobile.connect.error.authRequired': '이 서버에는 비밀번호 또는 클라이언트 토큰이 필요합니다.',
   'mobile.connect.error.passwordFailed': '서버 잠금을 해제할 수 없습니다. 비밀번호를 확인하세요.',
+  'mobile.connect.error.secureStorageFailed': '이 기기에 클라이언트 토큰을 안전하게 저장하지 못했습니다. ({reason})',
   'mobile.instances.addTitle': '인스턴스 추가',
   'mobile.instances.addManual': '주소로 추가',
   'mobile.instances.editTitle': '인스턴스 편집',

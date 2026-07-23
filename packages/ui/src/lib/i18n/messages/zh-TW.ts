@@ -66,6 +66,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.connect.error.unreachable': '無法連線至該 OpenChamber 伺服器。',
   'mobile.connect.error.authRequired': '此伺服器需要密碼或用戶端權杖。',
   'mobile.connect.error.passwordFailed': '無法解鎖該伺服器。請檢查密碼。',
+  'mobile.connect.error.secureStorageFailed': '無法在此裝置上安全儲存用戶端權杖。（{reason}）',
   'mobile.instances.addTitle': '新增執行個體',
   'mobile.instances.addManual': '透過位址新增',
   'mobile.instances.editTitle': '編輯執行個體',
