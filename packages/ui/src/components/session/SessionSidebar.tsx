@@ -489,6 +489,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const [resolvedWorktreeTopologyKey, setResolvedWorktreeTopologyKey] = React.useState<string | null>(
     isVSCode ? projectWorktreeDiscoveryKey : null,
   );
+  const [worktreeDiscoveryRevision, requestWorktreeDiscovery] = React.useReducer((revision) => revision + 1, 0);
   const isWorktreeTopologyLoading = !isVSCode && resolvedWorktreeTopologyKey !== projectWorktreeDiscoveryKey;
   const [unresolvedWorktreeProjectPaths, setUnresolvedWorktreeProjectPaths] = React.useState<ReadonlySet<string>>(new Set());
 
@@ -586,19 +587,35 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey]);
+  }, [isVSCode, projectWorktreeDiscoveryKey, runtimeKey, worktreeDiscoveryRevision]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
+    let needsGlobalRefresh = false;
+    const sessionDirectories = new Set<string>();
     const unsubscribe = subscribeOpenchamberEvents((event) => {
-      if (event.type !== 'scheduled-task-ran') {
-        return;
+      if (event.type === 'scheduled-task-ran') {
+        needsGlobalRefresh = true;
+      } else {
+        sessionDirectories.add(event.directory);
+        requestWorktreeDiscovery();
       }
       if (refreshTimeout) {
         clearTimeout(refreshTimeout);
       }
       refreshTimeout = setTimeout(() => {
-        void refreshGlobalSessions(syncSessionsSnapshotRef.current);
+        refreshTimeout = null;
+        if (needsGlobalRefresh) {
+          needsGlobalRefresh = false;
+          sessionDirectories.clear();
+          void refreshGlobalSessions(syncSessionsSnapshotRef.current);
+          return;
+        }
+        const directories = [...sessionDirectories];
+        sessionDirectories.clear();
+        if (directories.length > 0) {
+          void refreshGlobalSessionsForDirectories(directories, syncSessionsSnapshotRef.current);
+        }
       }, 500);
     });
     return () => {
