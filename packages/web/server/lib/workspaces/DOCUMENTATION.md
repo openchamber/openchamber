@@ -5,6 +5,7 @@
 ## Trust And Identity
 
 - `createWorkspaceProviderOperations` is instantiated only on demand with policy from persisted settings and `sourceDirectory` from a validated persisted project. Browser policy, source-directory, image, context, and provider metadata never configure provider operations.
+- `policy.js` owns the authoritative runtime and managed-gateway defaults. Empty persisted image settings resolve to the signed public `v0.1.0` multi-architecture manifest digests; explicit settings remain digest-validated, and the UI does not duplicate these defaults.
 - The operations entrypoint is lazy-loaded. A pinned package without `./operations` does not prevent server startup; provider validation, cleanup, and export return an explicit unavailable response until a compatible package is pinned. Tests inject the operations factory directly.
 - Workspace records are loaded through the generated OpenCode v2 SDK workspace list method.
 - The authoritative workspace ID, project ID, and provider come from the OpenCode record. Versioned metadata must bind that record to its immutable provider resource ID; provider operations independently enforce resource ownership. A `syncList` recovery ID mismatch is accepted only through trusted `operations.adoptWorkspace`, which verifies the old metadata against provider resources and locked plugin state before rebinding the current OpenCode ID. Provider resource, project, provider, and original audit identity remain immutable.

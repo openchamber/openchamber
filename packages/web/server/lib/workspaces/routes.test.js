@@ -4,11 +4,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { registerWorkspaceRoutes, resolveWorkspacePluginSpec } from './routes.js';
-import { sanitizeWorkspaceSettingsUpdate } from './policy.js';
+import { buildPluginOptions, readWorkspaceSettings, sanitizeWorkspaceSettingsUpdate } from './policy.js';
 
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const canonical = (value) => JSON.stringify(Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))));
 const runtimeImage = `registry.example/workspace@sha256:${'a'.repeat(64)}`;
+
+describe('workspace release defaults', () => {
+  it('uses the signed public release digests when image settings are empty', () => {
+    const settings = readWorkspaceSettings({ secureWorkspacesEgressDnsCIDRs: '10.0.0.53/32' });
+    const options = buildPluginOptions(settings, { requireComplete: true });
+
+    expect(options.defaultImage).toBe('ghcr.io/openchamber/opencode-workspace@sha256:8bf416c08e3e8ca3b540ee0b834a818770b701bc03be1fac74b919e0c992376c');
+    expect(options.allowedImages).toEqual([options.defaultImage]);
+    expect(options.egress.gatewayImage).toBe('ghcr.io/openchamber/workspace-egress-gateway@sha256:e12d6c43d598a994cd1825eb0b1f838df7a57c2186b9c4e013c61c30ef7e1b94');
+  });
+});
 
 function routeRegistry() {
   const routes = new Map();

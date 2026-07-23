@@ -10,6 +10,8 @@ const MODEL_AUTH_MODES = new Set(['none', 'explicit-opencode-auth-content']);
 const DIGEST_IMAGE = /@sha256:[a-f0-9]{64}$/i;
 const RESOURCE_QUANTITY = /^(?:0|[1-9]\d*)(?:\.\d+)?(?:m|Ki|Mi|Gi|Ti)?$/;
 const DOCKER_MEMORY = /^(?:0|[1-9]\d*)(?:\.\d+)?(?:[bkmg]i?b?)?$/i;
+const DEFAULT_WORKSPACE_IMAGE = 'ghcr.io/openchamber/opencode-workspace@sha256:8bf416c08e3e8ca3b540ee0b834a818770b701bc03be1fac74b919e0c992376c';
+const DEFAULT_GATEWAY_IMAGE = 'ghcr.io/openchamber/workspace-egress-gateway@sha256:e12d6c43d598a994cd1825eb0b1f838df7a57c2186b9c4e013c61c30ef7e1b94';
 
 const STRING_FIELDS = [
   'secureWorkspacesImage',
@@ -194,9 +196,9 @@ export function readWorkspaceSettings(settings = {}) {
   return {
     enabled: settings.secureWorkspacesEnabled === true,
     defaultProvider: PROVIDERS.has(settings.secureWorkspacesDefaultProvider) ? settings.secureWorkspacesDefaultProvider : 'docker',
-    image: optionalString(settings.secureWorkspacesImage) ?? '',
+    image: optionalString(settings.secureWorkspacesImage) ?? DEFAULT_WORKSPACE_IMAGE,
     allowedImages: list(settings.secureWorkspacesAllowedImages),
-    gatewayImage: optionalString(settings.secureWorkspacesGatewayImage),
+    gatewayImage: optionalString(settings.secureWorkspacesGatewayImage) ?? DEFAULT_GATEWAY_IMAGE,
     egressMode: EGRESS_MODES.has(settings.secureWorkspacesEgressMode) ? settings.secureWorkspacesEgressMode : 'managed',
     egressPreset: EGRESS_PRESETS.has(settings.secureWorkspacesEgressPreset) ? settings.secureWorkspacesEgressPreset : 'restricted',
     egressAllowedDomains: list(settings.secureWorkspacesEgressAllowedDomains),
