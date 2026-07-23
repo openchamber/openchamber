@@ -709,6 +709,8 @@ Please review the latest state again and report any remaining issues.
 
 Run this as a dialogue, not a one-shot answer.
 
+Whenever you ask the user a question, use the \`question\` tool. Do not ask questions in plain assistant text.
+
 1. Understand before asking. Once the user describes the idea, first investigate the codebase yourself — read the relevant files, existing patterns, data flow, and constraints. Ground every question in what the code actually shows, not in assumptions.
 
 2. Ask in small batches. Ask at most 3 clarifying questions at a time — a number a person can comfortably answer in one reply. Prefer concrete, decision-oriented questions (option A/B/C, edge cases, scope boundaries) over vague open-ended ones. Number them.
@@ -743,6 +745,8 @@ Respond in the same language the user uses.`,
 A Goal is a persistent completion contract, not an implementation plan and not a larger one-shot prompt. Help the user define what "done" means clearly enough that another agent can work toward it, verify it against evidence, continue through uncertain intermediate steps, and stop honestly when completion is blocked.
 
 Run this as a guided dialogue, not a one-shot answer.
+
+Whenever you ask the user a question, use the \`question\` tool. Do not ask questions in plain assistant text.
 
 1. Start from the user's intent. If the visible message includes an initial idea, use it immediately. Otherwise ask what they want to accomplish. Do not ask them to formulate the Goal themselves.
 
@@ -839,6 +843,8 @@ Respond in the same language the user uses.`,
     description: 'Hidden instructions attached to the /debug command. Runs a guided root-cause investigation before proposing a fix.',
     template: `The user wants help debugging an issue. Drive this as a focused root-cause investigation — not a plan, and not an immediate fix.
 
+Whenever you ask the user a question, use the \`question\` tool. Do not ask questions in plain assistant text.
+
 1. Get the symptom. When the user describes the problem, capture exactly what is observed versus expected — error messages, stack traces, failing behavior, and when it started. If a key detail is missing to even begin, ask for it briefly.
 
 2. Form hypotheses. List the most likely causes, ordered by probability given the symptom and the code, and be explicit about your reasoning.
@@ -866,6 +872,8 @@ Respond in the same language the user uses.`,
     group: 'Session',
     description: 'Hidden instructions attached to the /weigh command. Investigates the code, then compares distinct approaches with trade-offs and a recommendation — no plan, no code.',
     template: `The user knows WHAT they want to do but not HOW to approach it. Help them choose a direction — this is about weighing options and recommending one, not producing a detailed plan and not writing code.
+
+Whenever you ask the user a question, use the \`question\` tool. Do not ask questions in plain assistant text.
 
 First, investigate. Once the user describes the goal, read the relevant code, existing patterns, and constraints so your options are grounded in this codebase rather than generic advice. Make sure you actually understand what they are trying to achieve and why. Ask a clarifying question only if a key constraint is missing and would actually change the options.
 

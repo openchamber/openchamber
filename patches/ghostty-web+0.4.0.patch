@@ -2,29 +2,47 @@ diff --git a/node_modules/ghostty-web/dist/ghostty-web.js b/node_modules/ghostty
 index 0000000000000000000000000000000000000000..1111111111111111111111111111111111111111 100644
 --- a/node_modules/ghostty-web/dist/ghostty-web.js
 +++ b/node_modules/ghostty-web/dist/ghostty-web.js
-@@ -1299,1 +1299,1 @@
--      C === 0 || C < 32 ? B.push(" ") : B.push(String.fromCodePoint(C));
-+      C === 0 || C < 32 || C > 1114111 || C >= 55296 && C <= 57343 ? B.push(" ") : B.push(String.fromCodePoint(C));
-@@ -1341,1 +1341,1 @@
--    this.ctx = g, this.fontSize = B.fontSize ?? 15, this.fontFamily = B.fontFamily ?? "monospace", this.cursorStyle = B.cursorStyle ?? "block", this.cursorBlink = B.cursorBlink ?? !1, this.theme = { ...f, ...B.theme }, this.devicePixelRatio = B.devicePixelRatio ?? window.devicePixelRatio ?? 1, this.palette = [
-+    this.ctx = g, this.fontSize = B.fontSize ?? 15, this.fontFamily = B.fontFamily ?? "monospace", this.lineHeight = B.lineHeight ?? 1, this.cursorStyle = B.cursorStyle ?? "block", this.cursorBlink = B.cursorBlink ?? !1, this.theme = { ...f, ...B.theme }, this.devicePixelRatio = B.devicePixelRatio ?? window.devicePixelRatio ?? 1, this.palette = [
-@@ -1366,1 +1366,1 @@
--    const g = B.measureText("M"), E = Math.ceil(g.width), C = g.actualBoundingBoxAscent || this.fontSize * 0.8, I = g.actualBoundingBoxDescent || this.fontSize * 0.2, D = Math.ceil(C + I) + 2, i = Math.ceil(C) + 1;
-+    const g = B.measureText("M"), E = Math.ceil(g.width), C = g.actualBoundingBoxAscent || this.fontSize * 0.8, I = g.actualBoundingBoxDescent || this.fontSize * 0.2, D0 = Math.ceil(C + I), extra = Math.max(0, Math.round((this.lineHeight - 1) * D0)), D = D0 + 2 + extra, i = Math.ceil(C) + 1;
 @@ -1538,1 +1538,1 @@
 -    if (A.grapheme_len > 0 && ((k = this.currentBuffer) != null && k.getGraphemeString) ? N = this.currentBuffer.getGraphemeString(g, B) : N = String.fromCodePoint(A.codepoint || 32), this.ctx.fillText(N, w, s), A.flags & e.FAINT && (this.ctx.globalAlpha = 1), A.flags & e.UNDERLINE) {
-+    if (A.grapheme_len > 0 && ((k = this.currentBuffer) != null && k.getGraphemeString) ? N = this.currentBuffer.getGraphemeString(g, B) : N = A.codepoint == null || A.codepoint <= 0 || A.codepoint > 1114111 || A.codepoint >= 55296 && A.codepoint <= 57343 ? " " : String.fromCodePoint(A.codepoint), this.ctx.fillText(N, w, s), A.flags & e.FAINT && (this.ctx.globalAlpha = 1), A.flags & e.UNDERLINE) {
-@@ -1780,1 +1780,1 @@
--        if (a && a.codepoint !== 0) {
-+        if (a && a.codepoint !== 0 && a.codepoint <= 1114111 && !(a.codepoint >= 55296 && a.codepoint <= 57343)) {
-@@ -2054,1 +2054,1 @@
--      if (!D || D.codepoint === 0)
-+      if (!D || D.codepoint === 0 || D.codepoint > 1114111 || D.codepoint >= 55296 && D.codepoint <= 57343)
-@@ -2205,1 +2205,2 @@
--      fontFamily: A.fontFamily ?? "monospace",
-+      fontFamily: A.fontFamily ?? "monospace",
-+      lineHeight: A.lineHeight ?? 1,
-@@ -2340,1 +2341,2 @@
--        fontFamily: this.options.fontFamily,
-+        fontFamily: this.options.fontFamily,
-+        lineHeight: this.options.lineHeight,
++    if (A.grapheme_len > 0 && ((k = this.currentBuffer) != null && k.getGraphemeString) ? N = this.currentBuffer.getGraphemeString(g, B) : N = A.codepoint == null || A.codepoint <= 0 || A.codepoint > 1114111 || A.codepoint >= 55296 && A.codepoint <= 57343 ? " " : String.fromCodePoint(A.codepoint), this.renderBlockChar(A.codepoint || 32, E, C, I) || this.ctx.fillText(N, w, s), A.flags & e.FAINT && (this.ctx.globalAlpha = 1), A.flags & e.UNDERLINE) {
+@@ -1557,5 +1557,40 @@
+   }
++  renderBlockChar(A, B, g, E) {
++    const C = this.metrics.height, I = E / 2, D = C / 2;
++    switch (A) {
++      case 9600: this.ctx.fillRect(B, g, E, D); return !0;
++      case 9601: this.ctx.fillRect(B, g + C * 7 / 8, E, C / 8); return !0;
++      case 9602: this.ctx.fillRect(B, g + C * 3 / 4, E, C / 4); return !0;
++      case 9603: this.ctx.fillRect(B, g + C * 5 / 8, E, C * 3 / 8); return !0;
++      case 9604: this.ctx.fillRect(B, g + D, E, D); return !0;
++      case 9605: this.ctx.fillRect(B, g + C * 3 / 8, E, C * 5 / 8); return !0;
++      case 9606: this.ctx.fillRect(B, g + C / 4, E, C * 3 / 4); return !0;
++      case 9607: this.ctx.fillRect(B, g + C / 8, E, C * 7 / 8); return !0;
++      case 9608: this.ctx.fillRect(B, g, E, C); return !0;
++      case 9609: this.ctx.fillRect(B, g, E * 7 / 8, C); return !0;
++      case 9610: this.ctx.fillRect(B, g, E * 3 / 4, C); return !0;
++      case 9611: this.ctx.fillRect(B, g, E * 5 / 8, C); return !0;
++      case 9612: this.ctx.fillRect(B, g, I, C); return !0;
++      case 9613: this.ctx.fillRect(B, g, E * 3 / 8, C); return !0;
++      case 9614: this.ctx.fillRect(B, g, E / 4, C); return !0;
++      case 9615: this.ctx.fillRect(B, g, E / 8, C); return !0;
++      case 9616: this.ctx.fillRect(B + I, g, I, C); return !0;
++      case 9620: this.ctx.fillRect(B, g, E, C / 8); return !0;
++      case 9621: this.ctx.fillRect(B + E * 7 / 8, g, E / 8, C); return !0;
++      case 9622: this.ctx.fillRect(B, g + D, I, D); return !0;
++      case 9623: this.ctx.fillRect(B + I, g + D, I, D); return !0;
++      case 9624: this.ctx.fillRect(B, g, I, D); return !0;
++      case 9625: this.ctx.fillRect(B, g, I, C); this.ctx.fillRect(B + I, g + D, I, D); return !0;
++      case 9626: this.ctx.fillRect(B, g, I, D); this.ctx.fillRect(B + I, g + D, I, D); return !0;
++      case 9627: this.ctx.fillRect(B, g, E, D); this.ctx.fillRect(B, g + D, I, D); return !0;
++      case 9628: this.ctx.fillRect(B, g, E, D); this.ctx.fillRect(B + I, g + D, I, D); return !0;
++      case 9629: this.ctx.fillRect(B + I, g, I, D); return !0;
++      case 9630: this.ctx.fillRect(B + I, g, I, D); this.ctx.fillRect(B, g + D, I, D); return !0;
++      case 9631: this.ctx.fillRect(B + I, g, I, C); this.ctx.fillRect(B, g + D, I, D); return !0;
++      default: return !1;
++    }
++  }
+   /**
+    * Render cursor
+    */
+   renderCursor(A, B) {

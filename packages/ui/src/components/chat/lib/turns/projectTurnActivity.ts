@@ -36,6 +36,10 @@ const getMessageFinish = (message: ChatMessageEntry): string | undefined => {
     return typeof finish === 'string' ? finish : undefined;
 };
 
+const isCompactionSummaryMessage = (message: ChatMessageEntry): boolean => {
+    return (message.info as { summary?: unknown }).summary === true;
+};
+
 const buildTurnPartRecord = (
     turnId: string,
     messageId: string,
@@ -93,6 +97,7 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
     input.assistantMessages.forEach((message) => {
         const finish = getMessageFinish(message);
         const messageHasTool = message.parts.some((part) => part.type === 'tool');
+        const messageIsCompactionSummary = isCompactionSummaryMessage(message);
 
         message.parts.forEach((part, partIndex) => {
             const isTool = part.type === 'tool';
@@ -132,8 +137,13 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
                 input.showTextJustificationActivity
                 && part.type === 'text'
                 && text
-                && !isConfirmedSummaryText
-                && (messageHasTool || (typeof finish === 'string' && finish !== 'stop'))
+                && (
+                    messageIsCompactionSummary
+                    || (
+                        !isConfirmedSummaryText
+                        && (messageHasTool || (typeof finish === 'string' && finish !== 'stop'))
+                    )
+                )
             ) {
                 kind = 'justification';
             }

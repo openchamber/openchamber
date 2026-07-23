@@ -1,5 +1,8 @@
 import React from 'react';
 import { BusyDots } from './BusyDots';
+import { useI18n } from '@/lib/i18n';
+import { useProviderLogo } from '@/hooks/useProviderLogo';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
 
 interface WorkingPlaceholderProps {
   isWorking: boolean;
@@ -8,6 +11,8 @@ interface WorkingPlaceholderProps {
   isWaitingForPermission?: boolean;
   retryInfo?: { attempt?: number; next?: number } | null;
   agentName?: string;
+  modelName?: string | null;
+  providerId?: string | null;
 }
 
 const STATUS_DISPLAY_TIME_MS = 1200;
@@ -58,7 +63,13 @@ export function WorkingPlaceholder({
   isGenericStatus,
   isWaitingForPermission,
   retryInfo,
+  modelName,
+  providerId,
 }: WorkingPlaceholderProps) {
+  const { t } = useI18n();
+  const { src: providerLogoSrc, onError: handleProviderLogoError, hasLogo: hasProviderLogo } = useProviderLogo(providerId ?? null);
+  const { currentTheme } = useThemeSystem();
+  const isDarkTheme = currentTheme?.metadata.variant === 'dark';
   const [displayedText, setDisplayedText] = React.useState<string | null>(null);
   const [displayedPermission, setDisplayedPermission] = React.useState<boolean>(false);
   const displayedTextRef = React.useRef(displayedText);
@@ -211,7 +222,10 @@ export function WorkingPlaceholder({
     return null;
   }
 
-  const label = displayedText.charAt(0).toUpperCase() + displayedText.slice(1);
+  const trimmedModelName = typeof modelName === 'string' ? modelName.trim() : '';
+  const label = trimmedModelName.length > 0
+    ? t('chat.statusRow.modelStatus', { model: trimmedModelName, status: displayedText })
+    : displayedText.charAt(0).toUpperCase() + displayedText.slice(1);
 
   return (
     <div
@@ -224,6 +238,18 @@ export function WorkingPlaceholder({
       data-waiting={displayedPermission ? 'true' : undefined}
     >
       <span className="typography-ui-header">
+        {hasProviderLogo && providerLogoSrc ? (
+          <img
+            src={providerLogoSrc}
+            alt=""
+            aria-hidden="true"
+            className="inline-block h-3.5 w-3.5 mr-1.5 align-[-2px]"
+            style={{
+              filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
+            }}
+            onError={handleProviderLogoError}
+          />
+        ) : null}
         {label}
         <BusyDots />
       </span>

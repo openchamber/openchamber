@@ -36,21 +36,23 @@ import { useStreamingStore } from '@/sync/streaming';
 import {
     useSessionMessageCount,
     useSessionMessageRecords,
+    useSessionMessageLoadState,
     useSyncDirectory,
-    useDirectorySync,
+    useSessionRenderable,
     useSessionStatus,
     useScopedBlockingPermissions,
     useScopedBlockingQuestions,
     useParentSession,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
-import { getSessionPrefetch, subscribeSessionPrefetch } from '@/sync/session-prefetch-cache';
-import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
+import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
+import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
+import { findShellCommandForMessage, isUserShellMarkerMessage } from './lib/shellBridge';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -206,13 +208,51 @@ const ChatViewport = React.memo(({
 }: ChatViewportProps) => {
     const { t } = useI18n();
     const promptPreviewsByTurnIdRef = React.useRef<Map<string, Part[]>>(new Map());
+    // Cache normalized parts per source array so unchanged messages keep the
+    // same reference and the memo below can bail out to the previous map.
+    const normalizedPromptPartsCache = React.useRef(new WeakMap<Part[], Part[]>());
+    // Shell-mode prompts show their extracted command; cache by message id so
+    // the parts array reference is stable while the command is unchanged.
+    const shellPreviewCache = React.useRef(new Map<string, { command: string; parts: Part[] }>());
+    const shellPreviewSessionRef = React.useRef(currentSessionId);
+    if (shellPreviewSessionRef.current !== currentSessionId) {
+        shellPreviewSessionRef.current = currentSessionId;
+        shellPreviewCache.current.clear();
+    }
     const promptPreviewsByTurnId = React.useMemo(() => {
         const next = new Map<string, Part[]>();
-        for (const message of renderedMessages) {
+        for (let index = 0; index < renderedMessages.length; index += 1) {
+            const message = renderedMessages[index];
             if (message.info.role !== 'user') {
                 continue;
             }
-            next.set(message.info.id, message.parts);
+            if (isUserShellMarkerMessage(message)) {
+                const command = findShellCommandForMessage(renderedMessages, index) ?? '';
+                const cached = shellPreviewCache.current.get(message.info.id);
+                if (cached && cached.command === command) {
+                    next.set(message.info.id, cached.parts);
+                } else {
+                    const parts = [{ type: 'text', text: command ? `$ ${command}` : '/shell' } as Part];
+                    shellPreviewCache.current.set(message.info.id, { command, parts });
+                    next.set(message.info.id, parts);
+                }
+                continue;
+            }
+            // Other fully synthetic user messages (loop continuations,
+            // plan-mode injections) are not prompts the user typed — keep
+            // them out of the navigator entirely.
+            if (isFullySyntheticMessage(message.parts)) {
+                continue;
+            }
+            let displayParts = normalizedPromptPartsCache.current.get(message.parts);
+            if (!displayParts) {
+                displayParts = normalizeUserDisplayParts(message.parts);
+                normalizedPromptPartsCache.current.set(message.parts, displayParts);
+            }
+            if (displayParts.length === 0) {
+                continue;
+            }
+            next.set(message.info.id, displayParts);
         }
         const prev = promptPreviewsByTurnIdRef.current;
         if (prev.size === next.size) {
@@ -230,6 +270,27 @@ const ChatViewport = React.memo(({
         promptPreviewsByTurnIdRef.current = next;
         return next;
     }, [renderedMessages]);
+    // Only real (non-synthetic) prompts become rail entries; selection still
+    // targets the same turn anchors as the timeline.
+    const promptTurnIds = React.useMemo(
+        () => turnIds.filter((id) => promptPreviewsByTurnId.has(id)),
+        [promptPreviewsByTurnId, turnIds],
+    );
+    // If the viewport sits in a filtered-out (synthetic) turn, treat the
+    // nearest preceding real prompt as active so the rail doesn't jump.
+    const railActiveTurnId = React.useMemo(() => {
+        if (!activeTurnId || promptPreviewsByTurnId.has(activeTurnId)) {
+            return activeTurnId;
+        }
+        const activeIndex = turnIds.indexOf(activeTurnId);
+        for (let index = activeIndex - 1; index >= 0; index -= 1) {
+            const turnId = turnIds[index];
+            if (promptPreviewsByTurnId.has(turnId)) {
+                return turnId;
+            }
+        }
+        return null;
+    }, [activeTurnId, promptPreviewsByTurnId, turnIds]);
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
             return;
@@ -282,6 +343,7 @@ const ChatViewport = React.memo(({
                             </div>
                         )}
                         <MessageList
+                            key={currentSessionId}
                             ref={messageListRef}
                             sessionKey={currentSessionId}
                             disableStaging={pendingRevealWork}
@@ -318,11 +380,11 @@ const ChatViewport = React.memo(({
                     </div>
                 </ScrollShadow>
                 <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
-                {showPromptNavigator ? (
+                {showPromptNavigator && promptTurnIds.length >= 2 ? (
                     <PromptNavigatorRail
-                        turnIds={turnIds}
+                        turnIds={promptTurnIds}
                         previewsByTurnId={promptPreviewsByTurnId}
-                        activeTurnId={activeTurnId}
+                        activeTurnId={railActiveTurnId}
                         onSelectTurn={onSelectTurn}
                         canLoadEarlier={canLoadEarlierPrompts}
                         isLoadingOlder={isLoadingOlderPrompts}
@@ -430,12 +492,42 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
     );
 };
 
+const DraftWelcome: React.FC = () => {
+    const { t } = useI18n();
+    const selectedProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId ?? null);
+    const projectLabel = useProjectsStore(React.useCallback((state) => {
+        const projectId = selectedProjectId ?? state.activeProjectId;
+        const project = (projectId
+            ? state.projects.find((candidate) => candidate.id === projectId)
+            : null) ?? state.projects[0] ?? null;
+        return project ? getProjectDisplayLabel(project) : null;
+    }, [selectedProjectId]));
+
+    return (
+        <div className="oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+            <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
+                {renderDraftTitle(
+                    projectLabel
+                        ? t('chat.emptyState.draftTitleWithProject', { project: projectLabel })
+                        : t('chat.emptyState.draftTitle'),
+                    projectLabel,
+                )}
+            </h1>
+            <DraftPresetChips
+                onSubmit={(text) => useInputStore.getState().requestPresetSubmit(text)}
+                className="oc-draft-starters mt-8 max-w-md"
+            />
+        </div>
+    );
+};
+
 type ChatContainerProps = {
+    active?: boolean;
     autoOpenDraft?: boolean;
     readOnly?: boolean;
 };
 
-export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = true, readOnly = false }) => {
+export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, autoOpenDraft = true, readOnly = false }) => {
     const { t } = useI18n();
     // Session UI state
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -443,16 +535,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
-    const projects = useProjectsStore((s) => s.projects);
-    const activeProjectId = useProjectsStore((s) => s.activeProjectId);
 
     // Sync actions
     const sync = useSync();
     const syncDirectory = useSyncDirectory();
     const effectiveSessionDirectory = currentSessionDirectory ?? syncDirectory;
     const ensureSessionRenderable = React.useCallback(
-        (sessionId: string) => sync.ensureSessionRenderable(sessionId),
-        [sync],
+        (sessionId: string) => sync.ensureSessionRenderable(sessionId, false, effectiveSessionDirectory),
+        [effectiveSessionDirectory, sync],
     );
     const loadMoreMessages = React.useCallback(
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -485,31 +575,17 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         ),
     );
     const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '', effectiveSessionDirectory);
-    const hasRenderableSessionSnapshot = useDirectorySync(
-        React.useCallback(
-            (state) => (currentSessionId ? getSessionMaterializationStatus(state, currentSessionId).renderable : false),
-            [currentSessionId],
-        ),
-        effectiveSessionDirectory,
-    );
+    const hasRenderableSessionSnapshot = useSessionRenderable(currentSessionId ?? '', effectiveSessionDirectory);
     // Messages from sync system
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', effectiveSessionDirectory, {
+        enabled: active,
         suspendPartUpdates: Boolean(streamingMessageId),
         suspendPartUpdatesForMessageId: streamingMessageId,
     });
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
-    const sessionPrefetchInfo = React.useSyncExternalStore(
-        React.useCallback(
-            (notify) => currentSessionId
-                ? subscribeSessionPrefetch(effectiveSessionDirectory, currentSessionId, notify)
-                : () => undefined,
-            [currentSessionId, effectiveSessionDirectory],
-        ),
-        React.useCallback(
-            () => currentSessionId ? getSessionPrefetch(effectiveSessionDirectory, currentSessionId) : undefined,
-            [currentSessionId, effectiveSessionDirectory],
-        ),
-        React.useCallback(() => undefined, []),
+    const sessionMessageLoadState = useSessionMessageLoadState(
+        currentSessionId ?? '',
+        effectiveSessionDirectory,
     );
 
     // Plan detection - watches messages for plan creation and signals store
@@ -586,20 +662,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // History metadata — use sync's hasMore/isLoading
     const historyMeta = React.useMemo(() => {
         if (!currentSessionId) return null;
-        // Sync's meta is authoritative once a fetch has confirmed the history
-        // is fully loaded — a stale prefetch-cache entry (cursor recorded at
-        // the initial page) must not keep the "load older" affordance alive
-        // after the user has already reached the top.
-        const syncComplete = sync.isComplete(currentSessionId);
-        const prefetchHasMore = !syncComplete
-            && Boolean(sessionPrefetchInfo?.cursor)
-            && sessionPrefetchInfo?.complete !== true;
         return {
             limit: sessionMessages.length,
-            complete: syncComplete || !(sync.hasMore(currentSessionId) || prefetchHasMore),
-            loading: sync.isLoading(currentSessionId),
+            complete: sessionMessageLoadState.complete || !sessionMessageLoadState.cursor,
+            loading: sessionMessageLoadState.status === 'loading',
         };
-    }, [currentSessionId, sessionMessages.length, sessionPrefetchInfo, sync]);
+    }, [currentSessionId, sessionMessageLoadState.complete, sessionMessageLoadState.cursor, sessionMessageLoadState.status, sessionMessages.length]);
 
     const { isMobile } = useDeviceInfo();
     const isVSCode = isVSCodeRuntime();
@@ -611,17 +679,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const isDesktopExpandedInput = isExpandedInput;
     const useCompactDraftLayout = isMobile || isVSCode || chatSurfaceMode === 'mini-chat';
     const messageListRef = React.useRef<MessageListHandle | null>(null);
-    const draftProjectLabel = React.useMemo(() => {
-        const selectedProject = newSessionDraft?.selectedProjectId
-            ? projects.find((project) => project.id === newSessionDraft.selectedProjectId) ?? null
-            : null;
-        const activeProject = activeProjectId
-            ? projects.find((project) => project.id === activeProjectId) ?? null
-            : null;
-        const project = selectedProject ?? activeProject ?? projects[0] ?? null;
-        return project ? getProjectDisplayLabel(project) : null;
-    }, [activeProjectId, newSessionDraft?.selectedProjectId, projects]);
-
     const parentSession = useParentSession(currentSessionId, effectiveSessionDirectory);
 
     // In the embedded session-chat iframe, hide "Return to parent" when
@@ -658,10 +715,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const promptReadOnly = parentSession ? !allowPromptingSubagentSessions : readOnly;
 
     React.useEffect(() => {
-        if (typeof window === 'undefined' || window.parent === window) {
+        // VS Code/Cursor/Positron webviews delete window.parent (and window.top).
+        // The old `window.parent === window` check does not catch that, so
+        // `window.parent.postMessage(...)` threw on chat open:
+        // TypeError: Cannot read properties of undefined (reading 'postMessage')
+        if (typeof window === 'undefined' || !window.parent || window.parent === window) {
             return;
         }
 
+        const parentWindow = window.parent;
         const applySetting = (value: boolean) => {
             useUIStore.getState().setAllowPromptingSubagentSessions(value);
         };
@@ -672,7 +734,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             applySetting(payload.allowPromptingSubagentSessions);
         };
         const handleMessage = (event: MessageEvent) => {
-            if (event.source !== window.parent || event.origin !== window.location.origin) return;
+            if (event.source !== parentWindow || event.origin !== window.location.origin) return;
             const data = event.data as { type?: unknown; payload?: { allowPromptingSubagentSessions?: unknown } };
             if (data?.type !== 'openchamber:chat-settings-sync'
                 || typeof data.payload?.allowPromptingSubagentSessions !== 'boolean') return;
@@ -681,7 +743,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
         scopedWindow.__openchamberApplyChatSettingsSync = applySync;
         window.addEventListener('message', handleMessage);
-        window.parent.postMessage({ type: 'openchamber:chat-settings-request' }, window.location.origin);
+        parentWindow.postMessage({ type: 'openchamber:chat-settings-request' }, window.location.origin);
         return () => {
             window.removeEventListener('message', handleMessage);
             if (scopedWindow.__openchamberApplyChatSettingsSync === applySync) {
@@ -880,9 +942,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const isSessionHydrating =
         Boolean(currentSessionId)
         && !hasRenderableSessionSnapshot;
+    const retrySessionLoad = React.useCallback(() => {
+        if (!active || !currentSessionId) return;
+        void sync.ensureSessionRenderable(currentSessionId, true, effectiveSessionDirectory);
+    }, [active, currentSessionId, effectiveSessionDirectory, sync]);
 
     React.useEffect(() => {
-        if (!currentSessionId) return;
+        if (!active || !currentSessionId) return;
         if (lastScrolledSessionRef.current === currentSessionId) return;
 
         const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
@@ -901,14 +967,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         } else {
             window.requestAnimationFrame(run);
         }
-    }, [currentSessionId, releaseAutoFollow, restoreSnapshot]);
+    }, [active, currentSessionId, releaseAutoFollow, restoreSnapshot]);
 
     React.useEffect(() => {
-        if (!currentSessionId) return;
+        if (!active || !currentSessionId) return;
         if (hasRenderableSessionSnapshot) return;
-        if (effectiveSessionDirectory !== syncDirectory) return;
         void ensureSessionRenderable(currentSessionId);
-    }, [currentSessionId, effectiveSessionDirectory, ensureSessionRenderable, hasRenderableSessionSnapshot, syncDirectory]);
+    }, [active, currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot]);
 
 	if (!currentSessionId && !draftOpen) {
 		// With auto-open, the draft welcome opens on the next tick (effect below),
@@ -931,22 +996,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 			// the fullscreen composer's position:fixed visual-viewport pinning in
 			// mobile browsers (see ChatInput's composerFormRef effect).
 			<div className="relative flex h-full flex-col bg-background">
-				{useCompactDraftLayout && !isDesktopExpandedInput ? (
-					<div className="oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-						<h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
-							{renderDraftTitle(
-								draftProjectLabel
-									? t('chat.emptyState.draftTitleWithProject', { project: draftProjectLabel })
-									: t('chat.emptyState.draftTitle'),
-								draftProjectLabel,
-							)}
-						</h1>
-						<DraftPresetChips
-							onSubmit={(text) => useInputStore.getState().requestPresetSubmit(text)}
-							className="oc-draft-starters mt-8 max-w-md"
-						/>
-					</div>
-				) : null}
+				{useCompactDraftLayout && !isDesktopExpandedInput ? <DraftWelcome /> : null}
 				<div
 					className={cn(
 						'relative z-10 flex min-h-0',
@@ -968,6 +1018,28 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }
 
 	if (isSessionHydrating && sessionMessages.length === 0 && !sessionIsWorking) {
+		if (sessionMessageLoadState.status === 'error') {
+			return (
+				<div className="relative flex h-full flex-col bg-background">
+					{returnToParentButton}
+					<div className="flex min-h-0 flex-1 items-center justify-center px-6">
+						<div className="max-w-sm text-center">
+							<div className="mx-auto mb-3 flex size-9 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--status-error)_10%,transparent)] text-[var(--status-error)]">
+								<Icon name="error-warning" className="size-4" />
+							</div>
+							<p className="typography-ui-label font-medium text-foreground">{t('chat.container.sessionLoadError.title')}</p>
+							<p className="typography-meta mt-1 text-muted-foreground">{t('chat.container.sessionLoadError.description')}</p>
+							<Button variant="outline" size="sm" className="mt-4" onClick={retrySessionLoad}>
+								{t('chat.container.sessionLoadError.retry')}
+							</Button>
+						</div>
+					</div>
+					<div className="relative z-10 bg-background">
+						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={scrollToBottomOnSend} />}
+					</div>
+				</div>
+			);
+		}
 		return (
 			<div className="relative flex flex-col h-full bg-background">
 				{returnToParentButton}
@@ -1062,7 +1134,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 		<div className="relative flex flex-col h-full bg-background">
 			{returnToParentButton}
 			<ChatViewport
-				key={currentSessionId}
 				currentSessionId={currentSessionId}
                 isDesktopExpandedInput={isDesktopExpandedInput}
                 isMobile={isMobile}

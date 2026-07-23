@@ -21,9 +21,19 @@ Style rules:
 - Use area prefixes when helpful for grouping in the main @CHANGELOG.md (e.g., "Chat:", "VSCode:", "Settings:", "Git:", "Terminal:", "Mobile:", "UI:").
 - Credit contributors inline using "(thanks to @username)" at the end of the bullet. Find contributor usernames from commit authors (not email, but a github username) or PR metadata when available. Skip if contributor is btriapitsyn, since this is a repo owner.
 
+Highlights and ordering:
+- Review several recent release sections before drafting. Match how they reserve bold area prefixes for release highlights and order the remaining bullets by user importance.
+- Sort bullets by user impact, not commit order. Put breaking changes first, then the most significant new capabilities or broad user-visible improvements, followed by smaller features, fixes, and visual polish.
+- Mark only the strongest release highlights with a bold area prefix, such as `- **Chat attachments:** ...`. Usually this is the first 1-3 bullets, but use fewer when the release does not contain enough substantial changes and more only when clearly justified.
+- Treat a change as a highlight when it introduces a substantial user-facing capability, materially changes a common workflow, or fixes a severe/widespread user-facing problem. Do not bold a bullet merely because it is first, has a large diff, or was difficult to implement.
+- Keep related platform bullets together only when that does not push a more important change too far down the list.
+- Rank highlights independently in the main and VS Code changelogs. A main-app highlight is not automatically a VS Code highlight, and the extension may have different top changes.
+
 Quality checks before editing:
 - For every bullet, ask: "Could a user point to this in the UI or behavior?" If not, rewrite it or drop it.
 - For every VS Code bullet, verify the change applies to the extension, not just shared web UI or server code. When unsure, leave it out of @packages/vscode/CHANGELOG.md.
+- For every bold bullet, ask: "Would a user reasonably describe this as one of the release's headline changes?" If not, remove the bold styling or move it lower.
+- Read the finished list top to bottom and confirm that each bullet is no more important than the bullets above it, except where keeping closely related platform bullets together improves readability.
 - Do not mention low-level mechanics such as "local refs first", "source of truth", "route", "store", "cache", "payload", or "ref resolution". Translate only when there is a clear user-facing symptom.
 - Do not bundle unrelated changes just to reduce bullet count. It is better to omit minor internal fixes than to create a vague catch-all sentence.
 - Avoid LinkedIn-style language. Bad: "commit review is faster and branch history is more reliable." Better: "commit history can now show file diffs inline." Bad: "installed-state accuracy is improved." Better: "the skills list now matches OpenCode's installed skills more closely."

@@ -2,6 +2,8 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /**
@@ -12,7 +14,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
  * - Right edge → centre = next session (the older one)
  *
  * Navigation walks the same ranked list the rest of the mobile UI uses: top-level sessions
- * (no subtasks) across all projects, newest-first by `time.updated`. The order is computed at
+ * (no subtasks) across all projects, lifecycle-ranked with timestamp fallback. The order is computed at
  * gesture time from the store (not subscribed) so it's always fresh and never re-attaches.
  *
  * Only `touchstart`/`touchend` are observed (both passive), so this never interferes with
@@ -28,15 +30,16 @@ const MAX_OFF_AXIS_RATIO = 0.7; // |dy| must stay below |dx| * this (keep it hor
 const parentIdOf = (session: Session): string | null =>
   (session as Session & { parentID?: string | null }).parentID ?? null;
 
-const updatedAt = (session: Session): number => session.time?.updated ?? session.time?.created ?? 0;
-
-/** Top-level sessions across all projects, newest-first — the list the swipe walks. */
-const orderedTopLevelSessions = (): Session[] =>
-  useGlobalSessionsStore
+/** Top-level sessions across all projects in shared display order. */
+const orderedTopLevelSessions = (): Session[] => {
+  const pinnedSessionIds = useSessionPinnedStore.getState().ids;
+  const sessionOrderRanks = useSessionOrderingStore.getState().rankById;
+  return useGlobalSessionsStore
     .getState()
     .activeSessions.filter((session) => parentIdOf(session) === null)
     .slice()
-    .sort((a, b) => updatedAt(b) - updatedAt(a));
+    .sort((a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks));
+};
 
 /**
  * Switch to the session `step` positions away from the current one (clamped — no wrap).

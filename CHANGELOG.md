@@ -4,7 +4,44 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- **Desktop/Linux:** official AppImage releases for x86_64 and arm64, with in-app window controls (position follows OS defaults or Settings → Sessions), writable-AppImage auto-update, and clearer updater errors when the AppImage is missing or read-only. Linux does not yet include system tray or launch-at-login.
+## [1.16.3] - 2026-07-22
+
+- **Chat attachments:** added Office and OpenDocument files (`.docx`, `.pptx`, `.xlsx`, `.odt`, `.odp`, and `.ods`), with readable text and supported embedded images extracted before sending. Attachments also support more source-code formats, notebooks, HAR files with credentials and cookies removed, SVG and Draw.io files, and HEIC/HEIF images; the composer warns when the selected model may ignore an attachment type.
+- **Performance:** opening and switching sessions now prioritizes the selected and visible chats in large workspaces. Failed refreshes keep the existing session list, parent sessions no longer disappear when their sub-sessions load first, and session data no longer crosses between instances, projects, or worktrees.
+- **Sessions/Worktrees**: idle root sessions can now be moved with their sub-sessions and uncommitted changes into a new worktree. Worktree creation also recovers when an earlier Git operation left the repository locked.
+- Desktop: the app can now start directly with a saved remote instance, URL, or pairing link without requiring a local OpenCode installation or local server.
+- Scheduled Tasks: tasks can now start with permission auto-accept enabled, and the permission and Run as goal controls use the same compact toggles as the chat composer.
+- Chat: assistant turns now show model, agent, thinking level, duration, and time together in the footer, and replies separated by hidden system or subagent prompts display as one continuous turn. The working indicator shows the model actually producing the active response, streaming at the bottom no longer jitters, and new user messages finish their entry animation instead of snapping into place.
+- Chat/Tools: attachments returned by plugin and custom tools remain visible after streaming and refreshes, with the same image previews and file chips as chat attachments (thanks to @FrostiDrinks).
+- Sidebar: projects now default to manual ordering instead of recent-activity order; explicit sorting choices remain unchanged.
+- Desktop/macOS: added a setting to hide the menu bar item.
+- Desktop/Windows: SSH remote instances now connect through native Windows OpenSSH without relying on unsupported connection sharing. Password authentication and port forwarding work through hidden background processes, and connection failures now show the underlying SSH error instead of a generic message.
+- VSCode/Cursor: opening a chat no longer crashes when the editor webview does not expose its usual messaging APIs, and disposed editor tabs no longer receive late streaming messages (thanks to @makeittech).
+- VSCode: the active workspace is now detected before startup state is restored, preventing projects outside the editor workspace from replacing it.
+- Mobile/Terminal: opening the terminal in a mobile browser or PWA now focuses its input and opens the keyboard without an extra tap (thanks to @bashrusakh).
+- Context Panel: delayed file-open requests no longer switch the panel back to a file after you select another tab.
+
+## [1.16.2] - 2026-07-18
+
+- **Terminal:** rebuilt terminal sessions across the Web, Desktop, and Mobile apps with faster rendering, retained scrollback after reconnecting, shell and login-shell selection, restart and selected-output attachment actions, live theme changes, and more accurate Unicode and full-screen app rendering. Mobile now includes a full-screen terminal workspace with touch scrolling and selection, quick keys, and Ctrl/Alt input.
+- **Pinned messages:** pin important user or assistant messages to restore their text to the agent after conversation compaction.
+- **Settings:** pages now use a consistent responsive layout, navigation is grouped into OpenChamber, Workspace, OpenCode, and Library sections, and save failures are shown in the page header. Agent tool permissions now distinguish inherited and explicit rules and show session-granted rules separately (thanks to @makeittech).
+- Session goals: audits now wait while direct subagents are still active, and goal details show the model used for the latest successful evaluation.
+- Chat: if creating a session fails, the new-session draft stays open and restores the submitted prompt instead of discarding it.
+- Sessions: new drafts and sessions now stay with the project selected in the sidebar, including workspaces with nested or sibling projects (thanks to @bashrusakh).
+- Small Model: provider API keys referenced through environment variables or files now work for summaries, goal audits, and other Small Model features; Gemini 3 Flash models now use their supported thinking setting.
+- VSCode: per-session permission auto-accept works again, persists across extension restarts, and applies to subagent sessions while an OpenChamber view is open.
+- Mobile/Android: update downloads now select an APK when a release also includes an Android App Bundle.
+
+## [1.16.1] - 2026-07-14
+
+- **Performance:** large session sidebars stay responsive while chats stream, including setups with many projects, worktrees, and sessions. Opening a long chat after an empty or aborted agent turn also no longer repeatedly loads larger portions of its history.
+- Chat: an optional Prompt Navigator adds a marker rail beside desktop chats; hover to preview prompts, click to jump between them, or assign a shortcut in Keyboard Shortcuts settings (thanks to @makeittech).
+- Chat: shell-mode command cards now update their status and output while the command runs, with syntax highlighting for the command and output.
+- Chat/Subagents: task cards now track the correct subagent when several run at once, preventing one subagent's activity or "Open subtask" action from pointing to another session.
+- Chat/Subagents: "Open subtask" now works for nested subagents inside the side-panel chat, with a Parent action to return to the previous subagent (thanks to @ameshkov).
+- Sessions: temporary project lookup failures no longer remove worktree groups from the sidebar.
+- Small Model: custom OpenAI-compatible providers now use the base URL and API key from OpenCode configuration (thanks to @ameshkov).
 
 ## [1.16.0] - 2026-07-13
 

@@ -1,9 +1,11 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   desktopHostsGet,
   desktopHostsSet,
   desktopHostProbe,
   resolveDesktopHostUrl,
+  importDesktopHostPairing,
+  type DesktopHost,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
 import { Button } from '@/components/ui/button';
@@ -27,6 +29,7 @@ export interface RemoteConnectionFormProps {
   onConnect?: () => void;
   /** Optional: callback when user wants to switch to local setup */
   onSwitchToLocal?: () => void;
+  showInstancePicker?: boolean;
 }
 
 type ProbeStatus = HostProbeResult['status'] | null;
@@ -62,6 +65,7 @@ export function RemoteConnectionForm({
   isRecoveryMode = false,
   onConnect,
   onSwitchToLocal,
+  showInstancePicker = false,
 }: RemoteConnectionFormProps) {
   const { t } = useI18n();
   const [url, setUrl] = useState(initialUrl);
@@ -69,6 +73,16 @@ export function RemoteConnectionForm({
   const [state, setState] = useState<ConnectionState>('idle');
   const [probeResult, setProbeResult] = useState<HostProbeResult | null>(null);
   const [error, setError] = useState('');
+  const [hosts, setHosts] = useState<DesktopHost[]>([]);
+  const [view, setView] = useState<'instances' | 'add' | 'import'>(() => showInstancePicker ? 'instances' : 'add');
+  const [connectLink, setConnectLink] = useState('');
+
+  useEffect(() => {
+    if (!showInstancePicker) return;
+    void desktopHostsGet().then((config) => setHosts(config.hosts)).catch((err) => {
+      setError(err instanceof Error ? err.message : String(err));
+    });
+  }, [showInstancePicker]);
 
   const resolvedUrl = resolveDesktopHostUrl(url);
   const normalizedUrl = resolvedUrl?.persistedUrl ?? null;
@@ -162,6 +176,38 @@ export function RemoteConnectionForm({
     }
   }, [resolvedUrl, label, onConnect, t]);
 
+  const selectHost = useCallback(async (hostId: string) => {
+    const config = await desktopHostsGet();
+    await desktopHostsSet({
+      hosts: config.hosts,
+      defaultHostId: hostId,
+      initialHostChoiceCompleted: true,
+    });
+    await restartDesktopApp();
+  }, []);
+
+  const handleImport = useCallback(async () => {
+    setState('testing');
+    setError('');
+    try {
+      const config = await desktopHostsGet();
+      const imported = await importDesktopHostPairing(connectLink, config.hosts);
+      await desktopHostsSet({
+        hosts: imported.hosts,
+        defaultHostId: imported.hostId,
+        initialHostChoiceCompleted: true,
+      });
+      await restartDesktopApp();
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message === 'invalid-connect-link'
+          ? t('settings.remoteInstances.direct.error.invalidConnectLink')
+          : t('onboarding.remoteConnection.errors.failedToSaveConnection'),
+      );
+      setState('error');
+    }
+  }, [connectLink, t]);
+
   const isTesting = state === 'testing';
   const canTest = normalizedUrl !== null && !isTesting;
   const canConnect = normalizedUrl !== null && !isTesting && !isBlockingStatus(probeResult?.status ?? null);
@@ -172,12 +218,81 @@ export function RemoteConnectionForm({
   const isAuth = probeResult?.status === 'auth';
   const isBlocking = isBlockingStatus(probeResult?.status ?? null);
 
+  if (showInstancePicker && view === 'instances') {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8">
+        <div className="w-full max-w-md space-y-6">
+          <div className="space-y-2 text-center">
+            <h1 className="typography-ui-header text-xl font-semibold text-foreground">
+              {t('desktopHostSwitcher.actions.switchInstance')}
+            </h1>
+            <p className="text-muted-foreground text-sm">{t('settings.remoteInstances.direct.description')}</p>
+          </div>
+          {error ? <div className="text-sm text-[var(--status-error)]">{error}</div> : null}
+          <div className="space-y-2">
+            {hosts.length === 0 ? (
+              <div className="py-4 text-center text-sm text-muted-foreground">
+                {t('settings.remoteInstances.direct.state.empty')}
+              </div>
+            ) : hosts.map((host) => (
+              <Button
+                key={host.id}
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => void selectHost(host.id)}
+              >
+                <span className="min-w-0 truncate">{host.label}</span>
+              </Button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setView('import')}>
+              {t('settings.remoteInstances.direct.import.action')}
+            </Button>
+            <Button className="flex-1" onClick={() => setView('add')}>
+              {t('settings.remoteInstances.direct.actions.add')}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (showInstancePicker && view === 'import') {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8">
+        <div className="w-full max-w-md space-y-6">
+          <Button variant="ghost" onClick={() => setView('instances')} className="p-0 text-muted-foreground">
+            {t('onboarding.common.actions.back')}
+          </Button>
+          <div className="space-y-2 text-center">
+            <h1 className="typography-ui-header text-xl font-semibold text-foreground">
+              {t('settings.remoteInstances.direct.import.action')}
+            </h1>
+            <p className="text-muted-foreground text-sm">{t('settings.remoteInstances.direct.import.description')}</p>
+          </div>
+          <Input
+            value={connectLink}
+            onChange={(event) => setConnectLink(event.target.value)}
+            placeholder={t('settings.remoteInstances.direct.import.placeholder')}
+            disabled={isTesting}
+            autoFocus
+          />
+          {error ? <div className="text-sm text-[var(--status-error)]">{error}</div> : null}
+          <Button onClick={() => void handleImport()} disabled={isTesting || !connectLink.trim()}>
+            {t('settings.remoteInstances.direct.import.action')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center h-full p-8">
       <div className="w-full max-w-md space-y-6">
-        {showBackButton && (
+        {(showBackButton || showInstancePicker) && (
           <div className="flex items-center">
-            <Button variant="ghost" onClick={onBack} className="p-0 text-muted-foreground hover:text-foreground">
+            <Button variant="ghost" onClick={showInstancePicker ? () => setView('instances') : onBack} className="p-0 text-muted-foreground hover:text-foreground">
               {t('onboarding.common.actions.back')}
             </Button>
           </div>

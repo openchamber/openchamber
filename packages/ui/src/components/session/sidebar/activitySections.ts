@@ -22,13 +22,10 @@ const getSessionUpdatedAt = (session: Session): number => {
   return 0;
 };
 
-const sortSessionsByUpdated = (sessions: Session[]): Session[] => {
-  return [...sessions].sort((a, b) => getSessionUpdatedAt(b) - getSessionUpdatedAt(a));
-};
-
 // Recent sessions are simply every non-archived, top-level session updated
 // within the last RECENT_SESSION_MAX_AGE_MS. No persisted history or live-busy
-// tracking — membership is derived directly from session timestamps.
+// tracking: membership is timestamp-derived, while the caller applies shared
+// lifecycle ordering.
 export const deriveRecentSessions = (
   sessions: Session[],
   now = Date.now(),
@@ -40,5 +37,5 @@ export const deriveRecentSessions = (
     }
     return getSessionUpdatedAt(session) >= minUpdatedAt;
   });
-  return sortSessionsByUpdated(recent);
+  return recent;
 };
