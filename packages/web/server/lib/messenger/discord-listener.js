@@ -142,6 +142,26 @@ async function lookupChannelName(state, channelId) {
   return name;
 }
 
+const guildBotRolesCache = new Map(); // guildId → { at, roleIds: Set<string> }
+
+async function lookupBotRoleIds(state, guildId) {
+  if (!guildId || !state.botId) return new Set();
+  const cached = guildBotRolesCache.get(guildId);
+  if (cached && Date.now() - cached.at < MENTION_LOOKUP_TTL_MS) {
+    return cached.roleIds;
+  }
+  const r = await restCall(
+    state.token,
+    'GET',
+    `/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(state.botId)}`,
+  );
+  const roleIds = new Set(
+    r.ok && Array.isArray(r.body?.roles) ? r.body.roles.map((id) => String(id)) : [],
+  );
+  guildBotRolesCache.set(guildId, { at: Date.now(), roleIds });
+  return roleIds;
+}
+
 async function lookupGuildOwnerId(state, guildId) {
   if (!guildId) return null;
   const cached = guildOwnerCache.get(guildId);
@@ -283,10 +303,19 @@ async function dispatchMessageCreate(state, message, broadcastEvent, bridge) {
   const guildReplyMode = effectiveGuildReplyMode(state, guildId);
   const mentionRequired = text.length > 0 && (Boolean(channelMentionMode) || guildReplyMode === 'mention');
   if (mentionRequired) {
-    const mentionsBot =
+    let mentionsBot =
       (state.botId && (Array.isArray(message.mentions) ? message.mentions : []).some((u) => u?.id === state.botId)) ||
       (state.botId && text.includes(`<@${state.botId}>`)) ||
       (state.botId && text.includes(`<@!${state.botId}>`));
+    // A mention of the bot's own role (`<@&roleId>`) counts too — Discord puts
+    // role ids in `mention_roles`, not the `mentions` user array, so the
+    // user-mention check alone silently drops "hey @BotRole …" in
+    // mention-only mode.
+    const mentionRoles = Array.isArray(message.mention_roles) ? message.mention_roles : [];
+    if (!mentionsBot && mentionRoles.length > 0 && guildId) {
+      const botRoleIds = await lookupBotRoleIds(state, guildId);
+      mentionsBot = mentionRoles.some((roleId) => botRoleIds.has(String(roleId)));
+    }
     const hasBinding = bridge.hasSurfaceBinding?.({
       type: 'discord',
       token: state.token,
@@ -294,6 +323,21 @@ async function dispatchMessageCreate(state, message, broadcastEvent, bridge) {
       threadId: null,
     });
     if (!mentionsBot && !hasBinding) {
+      // DEBUG: log raw payload to diagnose mention detection failure
+      console.log('[DISCORD] MENTION DEBUG — message dropped:', {
+        botId: state.botId,
+        botUsername: state.botUsername,
+        contentLen: text.length,
+        content: text.slice(0, 300),
+        mentionsCount: Array.isArray(message.mentions) ? message.mentions.length : 'NOT_AN_ARRAY',
+        mentionsPreview: Array.isArray(message.mentions) ? message.mentions.map((u) => ({ id: u?.id, username: u?.username })).slice(0, 5) : String(message.mentions).slice(0, 200),
+        mentionRoles: mentionRoles.map(String),
+        channelId: message.channel_id,
+        guildId: message.guild_id ?? null,
+        channelMentionMode,
+        guildReplyMode,
+        hasBinding,
+      });
       return; // ignored by design — user must @mention the bot here
     }
     // Strip the bot mention from the prompt so the model doesn't see it.

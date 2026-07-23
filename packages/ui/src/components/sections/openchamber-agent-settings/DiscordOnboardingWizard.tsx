@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -9,6 +9,7 @@ import {
   type MessengerConnection,
 } from '@/stores/useMessengerStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDiscordGuildMembershipPoll } from './useDiscordGuildMembershipPoll';
 
 const TOTAL_STEPS = 4;
 const DEVELOPER_PORTAL_URL = 'https://discord.com/developers/applications';
@@ -65,37 +66,9 @@ export function DiscordOnboardingWizard({
 
   // Invite step: poll guild membership while empty so authorizing the bot
   // updates the list without hunting for Refresh (Servers block is hidden
-  // while the wizard is exclusive).
-  useEffect(() => {
-    if (step !== 1) return;
-    if (hasGuilds) return;
-    if (!conn.botToken) return;
-
-    let cancelled = false;
-    let attempts = 0;
-    const maxAttempts = 12;
-
-    const tick = async () => {
-      if (cancelled) return;
-      if (useMessengerStore.getState().discordGuildsRefreshing) return;
-      attempts += 1;
-      await useMessengerStore.getState().refreshDiscordGuilds();
-    };
-
-    void tick();
-    const id = setInterval(() => {
-      if (cancelled || attempts >= maxAttempts) {
-        clearInterval(id);
-        return;
-      }
-      void tick();
-    }, 5_000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [step, hasGuilds, conn.botToken]);
+  // while the wizard is exclusive). No give-up — the Discord authorize screen
+  // can take arbitrarily long.
+  useDiscordGuildMembershipPoll(step === 1 && !hasGuilds && Boolean(conn.botToken));
 
   const canAdvance = (() => {
     if (step === 0) return hasToken && isConnected;
@@ -379,7 +352,7 @@ export function DiscordOnboardingWizard({
               variant="outline"
               size="xs"
               className="!font-normal"
-              disabled={guildsRefreshing || !conn.botToken}
+              disabled={guildsRefreshing || (!conn.botToken && !conn.discordServerConfigured)}
               onClick={() => void refreshDiscordGuilds()}
             >
               {guildsRefreshing ? (

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import express, { Router } from 'express';
 import {
   createDiscordListenerRegistry,
@@ -76,6 +77,36 @@ function slugifyProjectLabel(label) {
       .replace(/^-+|-+$/g, '')
       .slice(0, 90) || 'project'
   );
+}
+
+/**
+ * Merge two project→channel binding lists, deduped by channelId. Incoming
+ * entries win on conflict; existing entries for other channels are preserved.
+ *
+ * Per-server project sync produces one binding per (server, project) — the same
+ * `projectPath` mapped from several different channelIds. A later single-server
+ * save (settings save-config / listener start, which only know the primary
+ * server's channels) must NOT drop the other servers' bindings, or inbound
+ * routing for those channels silently breaks. Removal is handled explicitly by
+ * `/bridge/project-removed`, so accumulate here and never shrink.
+ *
+ * Exported for testing.
+ */
+export function mergeProjectBindings(prev, incoming) {
+  const byChannel = new Map();
+  const add = (list) => {
+    for (const b of Array.isArray(list) ? list : []) {
+      if (!b || !b.channelId || !b.projectPath) continue;
+      byChannel.set(String(b.channelId), {
+        channelId: String(b.channelId),
+        projectPath: String(b.projectPath),
+        projectLabel: b.projectLabel ? String(b.projectLabel) : undefined,
+      });
+    }
+  };
+  add(prev);
+  add(incoming);
+  return Array.from(byChannel.values());
 }
 
 /** Inverse of `slugifyProjectLabel` — best-effort human label from a channel name. */
@@ -510,7 +541,15 @@ export function createMessengerSyncRouter({
 
   // Test connection endpoint
   router.post('/test', async (req, res) => {
-    const { type, token } = req.body ?? {};
+    let { type, token } = req.body ?? {};
+
+    // Fall back to the server-side settings.json token when the client
+    // doesn't have the token locally (e.g. localStorage was cleared but
+    // the server is still configured).  Follows the same pattern as
+    // /discord/runtime-status.
+    if (type === 'discord' && !token) {
+      token = await resolveDiscordBotToken(token);
+    }
 
     if (!type || !token) {
       return res.status(400).json({ error: 'type and token required' });
@@ -556,18 +595,36 @@ export function createMessengerSyncRouter({
 
   /**
    * Send a real message to a Discord channel.
-   * Body: { type: 'discord', token, target, text }
-   *   - target: channel_id
+   * Body: { type: 'discord', token?, target?, guildId?, text }
+   *   - target: channel_id (wins when present)
+   *   - guildId: when target is omitted, the server resolves the guild's first
+   *     text channel (per-server "Send test")
+   *   - token: optional; falls back to the saved settings.json token
    */
   router.post('/send', async (req, res) => {
-    const { type, token, target, text } = req.body ?? {};
+    const { type, target: explicitTarget, guildId, text } = req.body ?? {};
+    const token = await resolveDiscordBotToken(req.body?.token);
 
-    if (!type || !token || !target || !text) {
-      return res.status(400).json({ error: 'type, token, target and text are required' });
+    if (!type || !token || !text) {
+      return res.status(400).json({ error: 'type, token and text are required' });
     }
 
     try {
       if (type === 'discord') {
+        // An explicit channel id wins; otherwise resolve the first text channel
+        // of the requested server so a client without a saved channel can still
+        // target a specific server.
+        let target = explicitTarget;
+        if (!target && guildId) {
+          const resolved = await resolveGuildDefaultChannelId(token, guildId);
+          if (resolved.error) {
+            return res.json({ ok: false, error: resolved.error });
+          }
+          target = resolved.channelId;
+        }
+        if (!target) {
+          return res.status(400).json({ error: 'target or guildId is required' });
+        }
         const resp = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(target)}/messages`, {
           method: 'POST',
           headers: {
@@ -603,7 +660,8 @@ export function createMessengerSyncRouter({
    * 12=private_thread, 15=forum, 16=media, 2=voice — we just expose the raw int + a label.
    */
   router.post('/discord/resolve-channel', async (req, res) => {
-    const { token, channelId } = req.body ?? {};
+    const { channelId } = req.body ?? {};
+    const token = await resolveDiscordBotToken(req.body?.token);
     if (!token || !channelId) {
       return res.status(400).json({ error: 'token and channelId required' });
     }
@@ -680,7 +738,8 @@ export function createMessengerSyncRouter({
    *   - defaultChannelId: first text channel id (used for test messages when nothing is set)
    */
   router.post('/discord/resolve-guild', async (req, res) => {
-    const { token, guildId } = req.body ?? {};
+    const { guildId } = req.body ?? {};
+    const token = await resolveDiscordBotToken(req.body?.token);
     if (!token || !guildId) {
       return res.status(400).json({ error: 'token and guildId required' });
     }
@@ -795,8 +854,9 @@ export function createMessengerSyncRouter({
    * }
    */
   router.post('/discord/sync-projects', async (req, res) => {
-    const { token, guildId, parentCategoryId, summary, projects, mappings, createThreads } =
+    const { guildId, parentCategoryId, summary, projects, mappings, createThreads } =
       req.body ?? {};
+    const token = await resolveDiscordBotToken(req.body?.token);
     if (!token || !guildId) {
       return res.status(400).json({ error: 'token and guildId required' });
     }
@@ -1066,14 +1126,14 @@ export function createMessengerSyncRouter({
     }
 
     if (persistSettings) {
-      const projectBindings = channelResults
+      const newBindings = channelResults
         .filter((c) => c.channelId && c.projectPath && !c.error)
         .map((c) => ({
           channelId: String(c.channelId),
           projectPath: String(c.projectPath),
           projectLabel: c.projectLabel ? String(c.projectLabel) : undefined,
         }));
-      if (projectBindings.length > 0) {
+      if (newBindings.length > 0) {
         try {
           const current = readSettings ? await readSettings() : null;
           const prev = current?.discord ?? {};
@@ -1081,9 +1141,13 @@ export function createMessengerSyncRouter({
             discord: {
               ...prev,
               botToken: token || prev.botToken || undefined,
-              guildId: guildId || prev.guildId || undefined,
+              // Keep the first-configured server as the primary pointer so a
+              // per-server multi-sync doesn't churn settings.discord.guildId.
+              guildId: prev.guildId || guildId || undefined,
               defaultChannelId: prev.defaultChannelId || undefined,
-              projectBindings,
+              // Accumulate across servers — each server's channel is a distinct
+              // binding for the same project path.
+              projectBindings: mergeProjectBindings(prev.projectBindings, newBindings),
             },
           });
         } catch {
@@ -1321,6 +1385,48 @@ export function createMessengerSyncRouter({
     } catch {
       return { discord: {}, bindings: [] };
     }
+  }
+
+  /**
+   * Resolve the Discord bot token for a request. Prefer the token the client
+   * sent; otherwise fall back to the server-saved settings.json token. Settings
+   * strips the token on read, so a browser that never stored it locally (second
+   * device, cleared storage, PWA reinstall) sends no token even though the badge
+   * reads "connected" from the live gateway probe. Deferring to the saved token
+   * keeps send/sync/resolve working for those clients. Returns '' when neither
+   * source has a token, so callers still emit their existing 400.
+   */
+  async function resolveDiscordBotToken(bodyToken) {
+    if (typeof bodyToken === 'string' && bodyToken.trim().length > 0) return bodyToken.trim();
+    const { discord } = await loadDiscordSettings();
+    return typeof discord?.botToken === 'string' ? discord.botToken : '';
+  }
+
+  /**
+   * Best-effort "first text channel" of a guild — the default target for a
+   * server-scoped test message when the caller passes only a guildId (the
+   * per-server "Send test" button). Returns { channelId } or { error }.
+   */
+  async function resolveGuildDefaultChannelId(token, guildId) {
+    let resp;
+    try {
+      resp = await fetch(
+        `https://discord.com/api/v10/guilds/${encodeURIComponent(guildId)}/channels`,
+        { headers: { Authorization: `Bot ${token}` } },
+      );
+    } catch (err) {
+      return { error: err?.message ?? 'failed to list channels' };
+    }
+    if (!resp.ok) {
+      const text = await resp.text();
+      return { error: `Discord: ${resp.status} — ${friendlyDiscordError(resp.status, text)}` };
+    }
+    const channels = await resp.json();
+    const first = (Array.isArray(channels) ? channels : [])
+      .filter((c) => c.type === 0 || c.type === 5)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0];
+    if (!first) return { error: 'No text channel found in this server' };
+    return { channelId: first.id };
   }
 
   /**
@@ -1744,7 +1850,6 @@ export function createMessengerSyncRouter({
 
   router.post('/discord/listener/start', async (req, res) => {
     const {
-      token,
       guildId,
       autoReply,
       scopeToGuild,
@@ -1757,6 +1862,10 @@ export function createMessengerSyncRouter({
       defaultReplyMode,
       guildPolicies,
     } = req.body ?? {};
+    // Fall back to the settings.json token so tokenless clients (second
+    // device, cleared localStorage) can start the gateway too — same pattern
+    // as /listener/stop and /test.
+    const token = await resolveDiscordBotToken(req.body?.token);
     if (!token) return res.status(400).json({ error: 'token required' });
     const resolveProject = buildResolveProject(projectBindings);
     const result = discordListener.start(token, {
@@ -1829,7 +1938,7 @@ export function createMessengerSyncRouter({
               : Boolean(prev.registerDynamicSlashCommands),
             projectBindings:
               normalizedBindings && normalizedBindings.length > 0
-                ? normalizedBindings
+                ? mergeProjectBindings(prev.projectBindings, normalizedBindings)
                 : prev.projectBindings || undefined,
             defaultReplyMode:
               defaultReplyMode === 'always' || defaultReplyMode === 'mention'
@@ -1993,6 +2102,16 @@ export function createMessengerSyncRouter({
       defaultReplyMode,
       guildPolicies,
     } = req.body ?? {};
+    // TEMP DEBUG: capture what the browser actually posts when toggling reply modes
+    try {
+      fs.appendFileSync('/tmp/discord-save-config.log', JSON.stringify({
+        at: new Date().toISOString(),
+        hasToken: Boolean(botToken),
+        defaultReplyMode,
+        policyKeys: guildPolicies && typeof guildPolicies === 'object' ? Object.keys(guildPolicies) : null,
+        guildPolicies,
+      }) + '\n');
+    } catch {}
     try {
       // Merge with the previous discord block so this best-effort save (fired
       // by the frontend right after listener start) doesn't clobber the
@@ -2032,7 +2151,7 @@ export function createMessengerSyncRouter({
             : Boolean(prev.registerDynamicSlashCommands),
           projectBindings:
             normalizedBindings && normalizedBindings.length > 0
-              ? normalizedBindings
+              ? mergeProjectBindings(prev.projectBindings, normalizedBindings)
               : prev.projectBindings || undefined,
           defaultReplyMode:
             defaultReplyMode === 'always' || defaultReplyMode === 'mention'

@@ -12,6 +12,38 @@ export type MessengerVerbosity = 'quiet' | 'normal' | 'verbose';
 /** Tool permission mode for the OpenCode bridge (`/yolo` / `/permissions`). */
 export type MessengerPermissionMode = 'ask' | 'auto-edit' | 'yolo';
 
+export type DiscordReplyMode = 'always' | 'mention' | 'inherit';
+
+/**
+ * Per-server (guild) configuration. A single object holds both how the bot
+ * *responds* in a server and whether that server *mirrors projects*, so every
+ * server the bot is in is configured independently in one place.
+ */
+export interface DiscordGuildPolicy {
+  /**
+   * Respond in this server — the master per-server switch. When false the
+   * server is filtered out of the entire gateway pipeline (no listening, no
+   * OpenCode bridging, no replies). Absent/true = respond.
+   */
+  enabled?: boolean;
+  /** How the bot decides to reply in this server. `inherit` uses the default. */
+  replyMode?: DiscordReplyMode;
+  /** Mirror per-project channels into this server when syncing projects. */
+  syncProjects?: boolean;
+  /** Category to nest new project channels under, for this server. */
+  parentCategoryId?: string;
+  /** Start a thread from each project status message, in this server. */
+  createThreads?: boolean;
+}
+
+/** Cached channel/category topology for one guild, from `resolve-guild`. */
+export interface DiscordGuildResolved {
+  name?: string;
+  channels: { id: string; name: string; type: number; parentId: string | null }[];
+  categories: { id: string; name: string }[];
+  activeThreadCount: number;
+}
+
 export const MESSENGER_INTERRUPT_TIMEOUT_DEFAULT_MS = 8000;
 export const MESSENGER_INTERRUPT_TIMEOUT_MIN_MS = 1000;
 export const MESSENGER_INTERRUPT_TIMEOUT_MAX_MS = 60000;
@@ -25,6 +57,15 @@ export interface MessengerConnection {
 
   // Discord-specific
   botToken?: string;
+  /**
+   * True when the server-side settings.json has a Discord bot token
+   * configured, regardless of whether the local store has the token.
+   * Set by `refreshDiscordListenerStatus` after probing the runtime.
+   * Lets the settings view show "configured" (server settings) instead
+   * of the "Connect Discord" tile when the server already has a working
+   * bot but the local state was lost (e.g. localStorage cleared).
+   */
+  discordServerConfigured?: boolean;
   guildId?: string;
   guildName?: string;
   /** Default Discord channel id that summary / test messages are sent to. */
@@ -79,6 +120,9 @@ export interface MessengerConnection {
     projectId: string;
     projectPath?: string | null;
     projectLabel: string;
+    /** Which server this row was synced to (multi-server sync). */
+    guildId?: string;
+    guildName?: string | null;
     channelId: string | null;
     channelName: string | null;
     messageId: string | null;
@@ -118,10 +162,13 @@ export interface MessengerConnection {
   /** When true, scope the listener strictly to the saved Server (Guild) ID. */
   discordListenerScopeToGuild?: boolean;
   discordDefaultReplyMode?: 'always' | 'mention';
-  discordGuildPolicies?: Record<
-    string,
-    { enabled?: boolean; replyMode?: 'always' | 'mention' | 'inherit' }
-  >;
+  discordGuildPolicies?: Record<string, DiscordGuildPolicy>;
+  /**
+   * Per-guild resolved channel/category topology, cached from `resolve-guild`
+   * so each server's "sync projects here" options (category picker, thread
+   * toggle) render without re-fetching. Keyed by guild id.
+   */
+  discordGuildResolved?: Record<string, DiscordGuildResolved>;
   /**
    * Bridge inbound channel/chat messages to OpenCode (default true). When
    * off, the listener only does the legacy "OpenChamber agent received: ..." auto-reply.
@@ -226,6 +273,9 @@ interface MessengerState {
   projectMappings: ProjectMessengerMapping[];
   onboardingStep: number | null;
   onboardingType: MessengerType | null;
+  /** True after Zustand persist rehydration completes.  Used to prevent the
+   *  "Connect Discord" card from flashing before the persisted token loads. */
+  hasHydrated: boolean;
 
   /** Same shape for Discord — newest first, capped at 50. */
   discordInbound: MessengerInboundMessage[];
@@ -308,14 +358,14 @@ interface MessengerState {
    */
   refreshDiscordGuilds: () => Promise<boolean>;
   resolveDiscordChannel: () => Promise<boolean>;
-  resolveDiscordGuild: () => Promise<boolean>;
+  resolveDiscordGuild: (guildId?: string) => Promise<boolean>;
   fetchDiscordInviteUrl: () => Promise<string | null>;
   syncDiscordGuildProjects: (
     projects: { id: string; label: string; body: string }[],
     summary: string,
+    opts?: { guildIds?: string[] },
   ) => Promise<boolean>;
-  sendTestMessage: (type: MessengerType) => Promise<boolean>;
-  sendSyncSummary: (type: MessengerType, summary: string) => Promise<boolean>;
+  sendTestMessage: (type: MessengerType, opts?: { guildId?: string }) => Promise<boolean>;
   diagnoseDiscord: () => Promise<boolean>;
   refreshBridgeStatus: (type?: MessengerType) => Promise<void>;
   setBridgeVerbosity: (type: MessengerType, level: MessengerVerbosity) => Promise<boolean>;
@@ -337,7 +387,7 @@ interface MessengerState {
   refreshDiscordListenerStatus: () => Promise<void>;
   setDiscordGuildPolicy: (
     guildId: string,
-    patch: { enabled?: boolean; replyMode?: 'always' | 'mention' | 'inherit' },
+    patch: Partial<DiscordGuildPolicy>,
   ) => void;
   setDiscordDefaultReplyMode: (mode: 'always' | 'mention') => void;
   /**
@@ -471,7 +521,11 @@ async function verifyDiscordBotAndGuilds(
 ): Promise<boolean> {
   const quiet = Boolean(opts.quiet);
   const conn = get().connections.find((c) => c.type === 'discord');
-  if (!conn?.botToken) return false;
+  // Allow refresh when the server still has the token even if the local
+  // store lost it (localStorage cleared / rehydrate race). The /test
+  // endpoint falls back to settings.json when no token is sent.
+  if (!conn) return false;
+  if (!conn.botToken && !conn.discordServerConfigured) return false;
 
   const alreadyLive =
     conn.status === 'connected' ||
@@ -486,7 +540,7 @@ async function verifyDiscordBotAndGuilds(
   try {
     const data = await postJson<DiscordTestPayload>('/api/messenger/test', {
       type: 'discord',
-      token: conn.botToken,
+      ...(conn.botToken ? { token: conn.botToken } : {}),
     });
     if (!data.ok) throw new Error(data.error ?? 'Discord API failed');
 
@@ -494,6 +548,9 @@ async function verifyDiscordBotAndGuilds(
       discordBotId: data.id,
       discordBotUsername: data.username,
       discordBotDiscriminator: data.discriminator,
+      // Successful verify (local or server-token fallback) means the bot is
+      // configured — keep the configured view even if localStorage lost the token.
+      discordServerConfigured: true,
     };
 
     // Only replace guilds when the server included an authoritative list.
@@ -564,10 +621,7 @@ type DiscordListenerStatusPayload = {
   lastFilteredGuildId?: string | null;
   lastError?: string | null;
   defaultReplyMode?: 'always' | 'mention';
-  guildPolicies?: Record<
-    string,
-    { enabled?: boolean; replyMode?: 'always' | 'mention' | 'inherit' }
-  >;
+  guildPolicies?: Record<string, DiscordGuildPolicy>;
 };
 
 /**
@@ -579,7 +633,7 @@ type DiscordListenerStatusPayload = {
 export function deriveDiscordDisplayStatus(
   conn: Pick<
     MessengerConnection,
-    'status' | 'botToken' | 'discordListenerRunning' | 'discordListenerConnected'
+    'status' | 'botToken' | 'discordServerConfigured' | 'discordListenerRunning' | 'discordListenerConnected'
   >,
 ): MessengerConnection['status'] {
   if (conn.discordListenerConnected) return 'connected';
@@ -589,8 +643,84 @@ export function deriveDiscordDisplayStatus(
   if (conn.status === 'error') return 'error';
   // Token is configured but live state has not reconciled yet (reload /
   // rebuild). Never flash "disconnected" for a bot that is still working.
-  if (conn.botToken) return 'connecting';
+  if (conn.botToken || conn.discordServerConfigured) return 'connecting';
   return 'disconnected';
+}
+
+/**
+ * Which Discord surface the settings section shows. Keyed on *persistent*
+ * intent (a saved bot token) plus the explicit onboarding flag — never on the
+ * transient verify/listener status, so the view is stable across reloads:
+ *
+ * - `connect-card`: nothing connected → the square "Connect Discord" tile.
+ *   Also the correct state for a stale persisted connection that never got a
+ *   token (unfinished onboarding survives in localStorage; onboardingStep
+ *   does not).
+ * - `wizard`: explicit onboarding in progress. The wizard is the ONLY token
+ *   entry UI — there is no non-wizard token form.
+ * - `configured`: a token exists and onboarding is over. The configured view
+ *   renders the same regardless of whether the live status currently reads
+ *   connecting/connected/error — the badge carries the transient state.
+ */
+export type DiscordViewState = 'connect-card' | 'wizard' | 'configured';
+
+export function deriveDiscordViewState(input: {
+  hasToken: boolean;
+  /** True when the server-side runtime reports a configured bot even if the
+   *  local store doesn't have the token.  Prevents the connect-card from
+   *  appearing after a localStorage loss while the server is live. */
+  serverConfigured: boolean;
+  wizardActive: boolean;
+}): DiscordViewState {
+  if (input.wizardActive) return 'wizard';
+  if (!input.hasToken && !input.serverConfigured) return 'connect-card';
+  return 'configured';
+}
+
+/**
+ * Whether a given server mirrors projects. Once any server has an explicit
+ * `syncProjects` flag we honor those exactly; otherwise we fall back to the
+ * legacy single "primary sync server" (`discordGuildId`) so existing setups
+ * keep working before the user touches the new per-server toggles.
+ */
+export function isDiscordGuildSyncing(
+  conn: Pick<MessengerConnection, 'discordGuildPolicies' | 'discordGuildId'>,
+  guildId: string,
+): boolean {
+  const policies = conn.discordGuildPolicies ?? {};
+  const anyExplicit = Object.values(policies).some((p) => p?.syncProjects);
+  if (anyExplicit) return Boolean(policies[guildId]?.syncProjects);
+  return guildId === conn.discordGuildId;
+}
+
+/** The set of server ids that should receive per-project channel mirroring. */
+function getDiscordSyncGuildIds(
+  conn: Pick<MessengerConnection, 'discordGuildPolicies' | 'discordGuildId' | 'discordGuilds'>,
+): string[] {
+  const policies = conn.discordGuildPolicies ?? {};
+  const explicit = Object.entries(policies)
+    .filter(([, p]) => p?.syncProjects)
+    .map(([gid]) => gid);
+  if (explicit.length > 0) return explicit;
+  return conn.discordGuildId ? [conn.discordGuildId] : [];
+}
+
+/**
+ * Whether the bot should keep a live gateway connection: any joined server is
+ * set to respond (absent/true = respond). When membership is not loaded yet we
+ * fall back to "has a target" so the listener isn't stopped prematurely.
+ */
+function anyDiscordGuildResponds(
+  conn: Pick<
+    MessengerConnection,
+    'discordGuilds' | 'discordGuildPolicies' | 'discordGuildId' | 'defaultChannelId'
+  >,
+): boolean {
+  const guilds = conn.discordGuilds ?? [];
+  if (guilds.length === 0) {
+    return Boolean(conn.discordGuildId || conn.defaultChannelId);
+  }
+  return guilds.some((g) => conn.discordGuildPolicies?.[g.id]?.enabled !== false);
 }
 
 export const useMessengerStore = create<MessengerState>()(
@@ -600,6 +730,7 @@ export const useMessengerStore = create<MessengerState>()(
       projectMappings: [],
       onboardingStep: null,
       onboardingType: null,
+      hasHydrated: typeof window === 'undefined',
       discordInbound: [],
       discordHistory: [],
       discordDiagnosis: null,
@@ -619,13 +750,29 @@ export const useMessengerStore = create<MessengerState>()(
         set({ connections: [...get().connections, { ...DEFAULT_CONNECTION, type }] });
       },
 
-      updateConnection: (type, updates) => {
-        set({
-          connections: get().connections.map((c) =>
-            c.type === type ? { ...c, ...updates } : c,
-          ),
-        });
-      },
+  updateConnection: (type, updates) => {
+    const existing = get().connections.find((c) => c.type === type);
+    if (!existing) {
+      // Recover a connection from server-side config (e.g. after
+      // localStorage was cleared).  The caller may not know a
+      // connection exists yet, but the server is configured and
+      // returning live data — materialise the entry so the view
+      // can transition to "configured" instead of staying on the
+      // connect-card.
+      set({
+        connections: [
+          ...get().connections,
+          { ...DEFAULT_CONNECTION, type, ...updates },
+        ],
+      });
+      return;
+    }
+    set({
+      connections: get().connections.map((c) =>
+        c.type === type ? { ...c, ...updates } : c,
+      ),
+    });
+  },
 
       removeConnection: (type) => {
         set({
@@ -722,9 +869,12 @@ export const useMessengerStore = create<MessengerState>()(
         }
       },
 
-      resolveDiscordGuild: async () => {
+      resolveDiscordGuild: async (guildIdArg) => {
         const conn = get().connections.find((c) => c.type === 'discord');
-        if (!conn?.botToken || !conn.discordGuildId) return false;
+        const guildId = guildIdArg ?? conn?.discordGuildId;
+        // Server falls back to the saved token, so a tokenless-but-configured
+        // client can still resolve a server's channels/categories.
+        if (!conn || (!conn.botToken && !conn.discordServerConfigured) || !guildId) return false;
         try {
           const data = await postJson<{
             ok: boolean;
@@ -737,24 +887,40 @@ export const useMessengerStore = create<MessengerState>()(
             activeThreads?: { id: string; name: string; parentId: string | null }[];
             defaultChannelId?: string | null;
           }>('/api/messenger/discord/resolve-guild', {
-            token: conn.botToken,
-            guildId: conn.discordGuildId,
+            ...(conn.botToken ? { token: conn.botToken } : {}),
+            guildId,
           });
           if (!data.ok) {
             get().updateConnection('discord', { error: data.error ?? 'resolve-guild failed' });
             return false;
           }
-          get().updateConnection('discord', {
-            guildName: data.name ?? undefined,
-            discordGuildIconHash: data.iconHash ?? null,
-            discordGuildChannels: data.channels ?? [],
-            discordGuildCategories: data.categories ?? [],
-            discordGuildActiveThreadCount: data.activeThreads?.length ?? 0,
-            // If no default channel was set yet, auto-pick the first text channel
-            // of the server so Send-test-message just works.
-            defaultChannelId: conn.defaultChannelId ?? data.defaultChannelId ?? undefined,
+          const cur = get().connections.find((c) => c.type === 'discord');
+          const resolvedEntry: DiscordGuildResolved = {
+            name: data.name ?? undefined,
+            channels: data.channels ?? [],
+            categories: data.categories ?? [],
+            activeThreadCount: data.activeThreads?.length ?? 0,
+          };
+          const updates: Partial<MessengerConnection> = {
+            discordGuildResolved: {
+              ...(cur?.discordGuildResolved ?? {}),
+              [guildId]: resolvedEntry,
+            },
             error: null,
-          });
+          };
+          // Keep the legacy single-guild fields in sync when we resolved the
+          // primary server, so diagnose / the single Channel ID fallback stay
+          // populated for existing flows.
+          if (guildId === cur?.discordGuildId) {
+            updates.guildName = data.name ?? undefined;
+            updates.discordGuildIconHash = data.iconHash ?? null;
+            updates.discordGuildChannels = data.channels ?? [];
+            updates.discordGuildCategories = data.categories ?? [];
+            updates.discordGuildActiveThreadCount = data.activeThreads?.length ?? 0;
+            updates.defaultChannelId =
+              cur?.defaultChannelId ?? data.defaultChannelId ?? undefined;
+          }
+          get().updateConnection('discord', updates);
           return true;
         } catch (e) {
           get().updateConnection('discord', {
@@ -764,135 +930,158 @@ export const useMessengerStore = create<MessengerState>()(
         }
       },
 
-      syncDiscordGuildProjects: async (projects, summary) => {
+      syncDiscordGuildProjects: async (projects, summary, opts) => {
         const conn = get().connections.find((c) => c.type === 'discord');
-        if (!conn?.botToken || !conn.discordGuildId) {
+        // The badge reads "connected" from the live server gateway even when
+        // this browser never stored the token (second device / cleared
+        // storage). The server falls back to the saved settings.json token, so
+        // gate on "configured" (local token OR server-side config) rather than
+        // the local token alone — otherwise a connected bot can't sync.
+        if (!conn || (!conn.botToken && !conn.discordServerConfigured)) {
           get().updateConnection('discord', {
             lastSyncStatus: 'error',
-            lastSyncMessage: 'Add Discord bot token and Server ID first',
+            lastSyncMessage: 'Connect Discord before syncing projects',
+          });
+          return false;
+        }
+        // An explicit guild list (per-server "Sync now") wins; otherwise sync
+        // every server that has "Sync projects here" enabled.
+        const syncGuildIds =
+          opts?.guildIds && opts.guildIds.length > 0
+            ? opts.guildIds
+            : getDiscordSyncGuildIds(conn);
+        if (syncGuildIds.length === 0) {
+          get().updateConnection('discord', {
+            lastSyncStatus: 'error',
+            lastSyncMessage: 'Turn on "Sync projects here" for at least one server first',
           });
           return false;
         }
 
-        const applySyncResponse = (
-          data: {
+        const guildNameOf = (gid: string): string | null =>
+          conn.discordGuilds?.find((g) => g.id === gid)?.name ??
+          conn.discordGuildResolved?.[gid]?.name ??
+          (gid === conn.discordGuildId ? conn.guildName ?? null : null);
+
+        const runSyncForGuild = (gid: string) => {
+          const policy = conn.discordGuildPolicies?.[gid] ?? {};
+          // Legacy primary keeps using the old top-level category/threads until
+          // the user sets per-server values.
+          const isLegacyPrimary = gid === conn.discordGuildId;
+          return postJson<{
             ok: boolean;
             error?: string;
             channels?: NonNullable<MessengerConnection['lastSyncChannels']>;
-          },
-        ) => {
-          const results = data.channels ?? [];
-          for (const r of results) {
-            if (!r.channelId) continue;
-            get().setProjectMapping({
-              projectId: r.projectId,
-              projectLabel: r.projectLabel,
-              discord: {
-                channelId: r.channelId,
-                channelName: r.channelName ?? '',
-                ...(r.threadId
-                  ? { threadId: r.threadId, threadName: r.threadName ?? undefined }
-                  : {}),
-              },
-            });
-          }
-
-          const errored = results.filter((r) => r.error);
-          const threadFailed = results.filter((r) => r.threadError);
-          const threadRequested = results.filter((r) => r.threadRequested).length;
-          const createdCh = results.filter((r) => r.created).length;
-          const createdTh = results.filter((r) => r.threadCreated).length;
-          const postedMsgs = results.filter((r) => r.messageId).length;
-
-          const parts: string[] = [];
-          if (createdCh > 0) parts.push(`${createdCh} channel${createdCh === 1 ? '' : 's'} created`);
-          if (postedMsgs > 0)
-            parts.push(`${postedMsgs} message${postedMsgs === 1 ? '' : 's'} posted`);
-          if (createdTh > 0) parts.push(`${createdTh} thread${createdTh === 1 ? '' : 's'} opened`);
-          if (threadRequested > 0 && threadFailed.length > 0) {
-            parts.push(
-              `${threadFailed.length}/${threadRequested} thread${threadRequested === 1 ? '' : 's'} failed`,
-            );
-          }
-          if (errored.length > 0)
-            parts.push(`${errored.length} error${errored.length === 1 ? '' : 's'}`);
-          const summaryMsg = parts.length > 0 ? parts.join(', ') + ' ✓' : 'Sync sent ✓';
-
-          const hasAnyError = errored.length > 0 || threadFailed.length > 0;
-          const firstErrorMsg = errored[0]?.error ?? threadFailed[0]?.threadError;
-
-          get().updateConnection('discord', {
-            lastSyncAt: Date.now(),
-            lastSyncStatus: hasAnyError ? 'error' : 'ok',
-            lastSyncMessage: hasAnyError
-              ? `${summaryMsg} — first error: ${firstErrorMsg}`
-              : summaryMsg,
-            lastSyncChannels: results,
+          }>('/api/messenger/discord/sync-projects', {
+            ...(conn.botToken ? { token: conn.botToken } : {}),
+            guildId: gid,
+            parentCategoryId:
+              policy.parentCategoryId ?? (isLegacyPrimary ? conn.discordParentCategoryId : undefined),
+            createThreads:
+              policy.createThreads ??
+              (isLegacyPrimary ? conn.discordCreateThreads !== false : true),
+            summary,
+            projects,
+            mappings: get().projectMappings,
           });
-
-          return {
-            results,
-            hasAnyError,
-            rateLimited: [...errored, ...threadFailed].some((r) =>
-              String(r.error ?? r.threadError ?? '').includes('429'),
-            ),
-          };
         };
 
         get().updateConnection('discord', {
           lastSyncStatus: 'sending',
           lastSyncMessage:
             projects.length > 0
-              ? `Syncing ${projects.length} project${projects.length === 1 ? '' : 's'} to ${conn.guildName ?? 'server'}…`
+              ? `Syncing ${projects.length} project${projects.length === 1 ? '' : 's'} to ${syncGuildIds.length} server${syncGuildIds.length === 1 ? '' : 's'}…`
               : 'Sending sync summary…',
         });
 
-        const runSync = async () =>
-          postJson<{
-            ok: boolean;
-            error?: string;
-            channels?: NonNullable<MessengerConnection['lastSyncChannels']>;
-          }>('/api/messenger/discord/sync-projects', {
-            token: conn.botToken,
-            guildId: conn.discordGuildId,
-            parentCategoryId: conn.discordParentCategoryId,
-            createThreads: conn.discordCreateThreads !== false,
-            summary,
-            projects,
-            mappings: get().projectMappings,
-          });
+        const allRows: NonNullable<MessengerConnection['lastSyncChannels']> = [];
+        let hadError = false;
 
-        try {
-          let data = await runSync();
+        for (const gid of syncGuildIds) {
+          const guildName = guildNameOf(gid);
+          try {
+            const data = await runSyncForGuild(gid);
+            const rows = (data.channels ?? []).map((r) => ({ ...r, guildId: gid, guildName }));
+            allRows.push(...rows);
 
-          if (data.error && (!data.channels || data.channels.length === 0)) {
-            get().updateConnection('discord', {
-              lastSyncStatus: 'error',
-              lastSyncMessage: data.error,
+            // Store the primary (first) server's channels as the project mapping
+            // so the bridge keeps a stable per-project channel to route into.
+            if (gid === syncGuildIds[0]) {
+              for (const r of data.channels ?? []) {
+                if (!r.channelId) continue;
+                get().setProjectMapping({
+                  projectId: r.projectId,
+                  projectLabel: r.projectLabel,
+                  discord: {
+                    channelId: r.channelId,
+                    channelName: r.channelName ?? '',
+                    ...(r.threadId
+                      ? { threadId: r.threadId, threadName: r.threadName ?? undefined }
+                      : {}),
+                  },
+                });
+              }
+            }
+
+            if (data.error && (data.channels?.length ?? 0) === 0) {
+              hadError = true;
+              allRows.push({
+                projectId: `__guild_${gid}`,
+                projectLabel: guildName ?? gid,
+                guildId: gid,
+                guildName,
+                channelId: null,
+                channelName: null,
+                messageId: null,
+                threadId: null,
+                threadName: null,
+                created: false,
+                threadCreated: false,
+                error: data.error,
+              });
+            } else if ((data.channels ?? []).some((r) => r.error || r.threadError)) {
+              hadError = true;
+            }
+          } catch (e) {
+            hadError = true;
+            allRows.push({
+              projectId: `__guild_${gid}`,
+              projectLabel: guildName ?? gid,
+              guildId: gid,
+              guildName,
+              channelId: null,
+              channelName: null,
+              messageId: null,
+              threadId: null,
+              threadName: null,
+              created: false,
+              threadCreated: false,
+              error: e instanceof Error ? e.message : 'Sync failed',
             });
-            return false;
           }
-
-          let outcome = applySyncResponse(data);
-
-          if (outcome.rateLimited && outcome.hasAnyError) {
-            get().updateConnection('discord', {
-              lastSyncStatus: 'sending',
-              lastSyncMessage: 'Discord rate limit hit — retrying failed items in a few seconds…',
-            });
-            await new Promise((resolve) => setTimeout(resolve, 5_000));
-            data = await runSync();
-            outcome = applySyncResponse(data);
-          }
-
-          return !outcome.hasAnyError;
-        } catch (e) {
-          get().updateConnection('discord', {
-            lastSyncStatus: 'error',
-            lastSyncMessage: e instanceof Error ? e.message : 'Sync failed',
-          });
-          return false;
         }
+
+        const createdCh = allRows.filter((r) => r.created).length;
+        const postedMsgs = allRows.filter((r) => r.messageId).length;
+        const createdTh = allRows.filter((r) => r.threadCreated).length;
+        const errored = allRows.filter((r) => r.error);
+        const parts: string[] = [];
+        if (createdCh > 0) parts.push(`${createdCh} channel${createdCh === 1 ? '' : 's'} created`);
+        if (postedMsgs > 0) parts.push(`${postedMsgs} message${postedMsgs === 1 ? '' : 's'} posted`);
+        if (createdTh > 0) parts.push(`${createdTh} thread${createdTh === 1 ? '' : 's'} opened`);
+        if (errored.length > 0) parts.push(`${errored.length} error${errored.length === 1 ? '' : 's'}`);
+        const summaryMsg = parts.length > 0 ? `${parts.join(', ')} ✓` : 'Sync sent ✓';
+
+        get().updateConnection('discord', {
+          lastSyncAt: Date.now(),
+          lastSyncStatus: hadError ? 'error' : 'ok',
+          lastSyncMessage: hadError
+            ? `${summaryMsg} — first error: ${errored[0]?.error ?? 'sync failed'}`
+            : summaryMsg,
+          lastSyncChannels: allRows,
+        });
+
+        return !hadError;
       },
 
       fetchDiscordInviteUrl: async () => {
@@ -911,37 +1100,60 @@ export const useMessengerStore = create<MessengerState>()(
         }
       },
 
-      sendTestMessage: async (type) => {
+      sendTestMessage: async (type, opts) => {
         const conn = get().connections.find((c) => c.type === type);
         if (!conn) return false;
 
-        const token = conn.botToken;
-        // Fall back to the first text channel of the resolved server if no
-        // default channel is configured but a guild is set.
-        let target = conn.defaultChannelId;
-        if (!target && conn.discordGuildChannels && conn.discordGuildChannels.length > 0) {
-          target = conn.discordGuildChannels[0].id;
-        }
-        if (!token || !target) {
+        // "Connected" can be true purely from the live server gateway while
+        // this browser holds no token (second device / cleared storage). The
+        // server falls back to the saved token, so gate on configured state,
+        // not the local token — otherwise a connected bot can't send.
+        const configured = Boolean(conn.botToken || conn.discordServerConfigured);
+        if (!configured) {
           get().updateConnection(type, {
             lastSyncStatus: 'error',
-            lastSyncMessage: 'Add a Discord channel ID or Server ID before sending',
+            lastSyncMessage: 'Connect Discord before sending a test message',
           });
           return false;
         }
 
+        // Per-server "Send test" passes a guildId — the server resolves that
+        // server's first text channel. Otherwise target the configured default
+        // channel, falling back to the first channel of the resolved server.
+        const guildId = opts?.guildId;
+        let target = guildId ? undefined : conn.defaultChannelId;
+        if (!guildId && !target && conn.discordGuildChannels && conn.discordGuildChannels.length > 0) {
+          target = conn.discordGuildChannels[0].id;
+        }
+        if (!guildId && !target) {
+          get().updateConnection(type, {
+            lastSyncStatus: 'error',
+            lastSyncMessage: 'Pick a server or channel to send the test to',
+          });
+          return false;
+        }
+
+        const guildName = guildId
+          ? conn.discordGuilds?.find((g) => g.id === guildId)?.name ?? null
+          : null;
+
         get().updateConnection(type, {
           lastSyncStatus: 'sending',
-          lastSyncMessage: 'Sending test message…',
+          lastSyncMessage: guildName
+            ? `Sending test message to ${guildName}…`
+            : 'Sending test message…',
         });
 
         const text = `**OpenChamber agent connected ✓**\nThis is a test message from your OpenChamber agent.\nOpenChamber agent can now post project updates to this channel.`;
 
         try {
-          const data = await postJson<{ ok: boolean; error?: string }>(
-            '/api/messenger/send',
-            { type, token, target, text },
-          );
+          const data = await postJson<{ ok: boolean; error?: string }>('/api/messenger/send', {
+            type,
+            ...(conn.botToken ? { token: conn.botToken } : {}),
+            ...(target ? { target } : {}),
+            ...(guildId ? { guildId } : {}),
+            text,
+          });
           if (!data.ok) {
             get().updateConnection(type, {
               lastSyncStatus: 'error',
@@ -952,56 +1164,15 @@ export const useMessengerStore = create<MessengerState>()(
           get().updateConnection(type, {
             lastSyncAt: Date.now(),
             lastSyncStatus: 'ok',
-            lastSyncMessage: 'Test message delivered ✓',
+            lastSyncMessage: guildName
+              ? `Test message delivered to ${guildName} ✓`
+              : 'Test message delivered ✓',
           });
           return true;
         } catch (e) {
           get().updateConnection(type, {
             lastSyncStatus: 'error',
             lastSyncMessage: e instanceof Error ? e.message : 'Send failed',
-          });
-          return false;
-        }
-      },
-
-      sendSyncSummary: async (type, summary) => {
-        const conn = get().connections.find((c) => c.type === type);
-        if (!conn) return false;
-        const token = conn.botToken;
-        const target = conn.defaultChannelId;
-        if (!token || !target) {
-          get().updateConnection(type, {
-            lastSyncStatus: 'error',
-            lastSyncMessage: 'Add a Discord channel ID first',
-          });
-          return false;
-        }
-        get().updateConnection(type, {
-          lastSyncStatus: 'sending',
-          lastSyncMessage: 'Sending sync summary…',
-        });
-        try {
-          const data = await postJson<{ ok: boolean; error?: string }>(
-            '/api/messenger/send',
-            { type, token, target, text: summary },
-          );
-          if (!data.ok) {
-            get().updateConnection(type, {
-              lastSyncStatus: 'error',
-              lastSyncMessage: data.error ?? 'Sync failed',
-            });
-            return false;
-          }
-          get().updateConnection(type, {
-            lastSyncAt: Date.now(),
-            lastSyncStatus: 'ok',
-            lastSyncMessage: 'Sync summary sent ✓',
-          });
-          return true;
-        } catch (e) {
-          get().updateConnection(type, {
-            lastSyncStatus: 'error',
-            lastSyncMessage: e instanceof Error ? e.message : 'Sync failed',
           });
           return false;
         }
@@ -1159,7 +1330,12 @@ export const useMessengerStore = create<MessengerState>()(
 
       saveDiscordConfig: async () => {
         const conn = get().connections.find((c) => c.type === 'discord');
-        if (!conn?.botToken) return;
+        if (!conn) return;
+        // Tokenless clients (second device, cleared localStorage) must still
+        // save: the server falls back to the settings.json token when the body
+        // omits botToken. Without this, every reply-mode/policy toggle in that
+        // state silently never reached the server.
+        if (!conn.botToken && !conn.discordServerConfigured) return;
         const projects = useProjectsStore.getState().projects;
         const projectBindings = get()
           .projectMappings.flatMap((m) => {
@@ -1176,10 +1352,12 @@ export const useMessengerStore = create<MessengerState>()(
           });
         try {
           await postJson('/api/messenger/discord/save-config', {
-            botToken: conn.botToken,
+            ...(conn.botToken ? { botToken: conn.botToken } : {}),
             guildId: conn.discordGuildId,
             autoReply: conn.discordListenerAutoReply !== false,
-            scopeToGuild: Boolean(conn.discordListenerScopeToGuild),
+            // Listening is governed per-server via guildPolicies[*].enabled now,
+            // so the gateway always hears every server and never scopes to one.
+            scopeToGuild: false,
             bridgeEnabled: conn.bridgeEnabled !== false,
             defaultChannelId: conn.defaultChannelId,
             defaultUserId: conn.defaultUserId,
@@ -1196,7 +1374,9 @@ export const useMessengerStore = create<MessengerState>()(
 
       startDiscordListener: async () => {
         const conn = get().connections.find((c) => c.type === 'discord');
-        if (!conn?.botToken) return false;
+        // Tokenless start is allowed — the endpoint falls back to the token
+        // saved in settings.json (same pattern as /test and /listener/stop).
+        if (!conn?.botToken && !conn?.discordServerConfigured) return false;
         const projects = useProjectsStore.getState().projects;
         const projectBindings = get()
           .projectMappings.flatMap((m) => {
@@ -1226,16 +1406,16 @@ export const useMessengerStore = create<MessengerState>()(
             lastError?: string | null;
             botUsername?: string;
           }>('/api/messenger/discord/listener/start', {
-            token: conn.botToken,
+            ...(conn.botToken ? { token: conn.botToken } : {}),
             guildId: conn.discordGuildId,
             defaultChannelId: conn.defaultChannelId,
             defaultUserId: conn.defaultUserId,
             trustedBotIds: conn.trustedBotIds ?? [],
             registerDynamicSlashCommands: Boolean(conn.registerDynamicSlashCommands),
-            // Default OFF — we'd rather show every message the gateway
-            // delivers than silently drop messages from a different guild
-            // because the saved Server ID is wrong by one digit.
-            scopeToGuild: Boolean(conn.discordListenerScopeToGuild),
+            // Listening is governed per-server (guildPolicies[*].enabled), so
+            // the gateway always hears every server; disabled servers are
+            // filtered downstream instead of scoping the whole connection.
+            scopeToGuild: false,
             autoReply: conn.discordListenerAutoReply !== false,
             bridgeEnabled: conn.bridgeEnabled !== false,
             projectBindings,
@@ -1284,10 +1464,12 @@ export const useMessengerStore = create<MessengerState>()(
 
       stopDiscordListener: async () => {
         const conn = get().connections.find((c) => c.type === 'discord');
-        if (!conn?.botToken) return false;
+        // Tokenless stop is allowed — the endpoint falls back to the token
+        // saved in settings.json.
+        if (!conn?.botToken && !conn?.discordServerConfigured) return false;
         try {
           await postJson('/api/messenger/discord/listener/stop', {
-            token: conn.botToken,
+            ...(conn?.botToken ? { token: conn.botToken } : {}),
           });
           get().updateConnection('discord', {
             discordListenerEnabled: false,
@@ -1308,13 +1490,40 @@ export const useMessengerStore = create<MessengerState>()(
         if (!conn) return;
         const prev = conn.discordGuildPolicies ?? {};
         const existing = prev[guildId] ?? {};
-        get().updateConnection('discord', {
+        const nextPolicy = { ...existing, ...patch };
+        const updates: Partial<MessengerConnection> = {
           discordGuildPolicies: {
             ...prev,
-            [guildId]: { ...existing, ...patch },
+            [guildId]: nextPolicy,
           },
-        });
+        };
+        // Enabling project sync on a server designates it the primary sync
+        // target when none exists yet, so legacy single-server flows (auto
+        // channel create on project add, diagnose) keep a server to point at.
+        if (patch.syncProjects === true && !conn.discordGuildId) {
+          updates.discordGuildId = guildId;
+        }
+        get().updateConnection('discord', updates);
         setTimeout(() => get().saveDiscordConfig(), 0);
+
+        // Resolve the server's channels/categories so the category picker +
+        // thread toggle can render right after "Sync projects here" is enabled.
+        if (patch.syncProjects === true && !get().connections.find((c) => c.type === 'discord')?.discordGuildResolved?.[guildId]) {
+          setTimeout(() => void get().resolveDiscordGuild(guildId), 0);
+        }
+
+        // Auto-manage the single gateway connection: start it as soon as any
+        // server is set to respond, stop it when none are (there is no manual
+        // Start/Stop in the primary UI anymore). Tokenless clients use the
+        // server-saved token fallback on the start/stop endpoints.
+        const latest = get().connections.find((c) => c.type === 'discord');
+        if (!latest?.botToken && !latest?.discordServerConfigured) return;
+        const shouldListen = anyDiscordGuildResponds(latest);
+        if (shouldListen && !latest.discordListenerRunning) {
+          setTimeout(() => void get().startDiscordListener(), 0);
+        } else if (!shouldListen && latest.discordListenerRunning) {
+          setTimeout(() => void get().stopDiscordListener(), 0);
+        }
       },
 
       setDiscordDefaultReplyMode: (mode) => {
@@ -1342,6 +1551,7 @@ export const useMessengerStore = create<MessengerState>()(
           if (data?.ok && data.configured === false) {
             if (!conn) return;
             get().updateConnection('discord', {
+              discordServerConfigured: false,
               discordListenerEnabled: false,
               discordListenerRunning: false,
               discordListenerConnected: false,
@@ -1358,6 +1568,10 @@ export const useMessengerStore = create<MessengerState>()(
           if (!data?.ok) return;
 
           const updates: Partial<MessengerConnection> = {
+            // Reflect server-side config presence so the settings view can
+            // show the configured surface even when the local store lost the
+            // token (e.g. localStorage cleared).
+            discordServerConfigured: data.configured ?? false,
             discordListenerEnabled:
               typeof data.listenerEnabled === 'boolean'
                 ? data.listenerEnabled
@@ -1402,31 +1616,77 @@ export const useMessengerStore = create<MessengerState>()(
       resyncDiscordStatus: async () => {
         if (discordStatusResyncInFlight) return discordStatusResyncInFlight;
         discordStatusResyncInFlight = (async () => {
-          // Always probe server runtime status first (settings.json auto-start).
-          // Do not require a hydrated UI token — that raced rebuild/reload and
-          // left the badge stuck on disconnected while Discord kept working.
+          // Persist the UI token to server-side settings.json FIRST so the
+          // runtime-status probe below keys by the current token, not a stale
+          // one left over from a prior (now-revoked) bot token.
+          //
+          // Previously saveDiscordConfig ran *after* refreshDiscordListenerStatus,
+          // which caused a phantom "Gateway 4004: Invalid bot token" to surface
+          // in the onboarding wizard after the user entered a new token: the
+          // settings.json still held the old (revoked) token at probe time, and
+          // the old listener's corpse state in the in-memory registry returned
+          // its lastError — even though REST calls with the new token worked.
+          const conn = get().connections.find((c) => c.type === 'discord');
+          if (conn?.botToken) {
+            await get().saveDiscordConfig();
+          }
+
+          // Probe server runtime status (settings.json auto-start). Do this
+          // even without a UI token so the badge reflects a server-side
+          // auto-started listener.
           await get().refreshDiscordListenerStatus();
 
           const afterRefresh = get().connections.find((c) => c.type === 'discord');
-          if (!afterRefresh?.botToken) return;
+          // Load guilds when we hold a local token OR when the server reports a
+          // configured bot (tokenless second device / cleared storage).
+          // refreshDiscordGuilds() uses the /test server-token fallback, so the
+          // Servers list + per-server actions render either way. Bail only when
+          // neither source is available.
+          if (!afterRefresh?.botToken && !afterRefresh?.discordServerConfigured) return;
 
-          // Best-effort: keep server-side settings.json in sync so auto-start
-          // after the next rebuild still has the token/bindings.
-          void get().saveDiscordConfig();
-
-          // Always refresh guild membership + bot identity when a token exists.
+          // Always refresh guild membership + bot identity when configured.
           // Previously this was gated on !connected, so a live gateway after
           // reload skipped the fetch and left stale/empty discordGuilds.
           await get().refreshDiscordGuilds();
 
+          // One-time migration: fold the legacy single "primary sync server"
+          // (discordGuildId + top-level category/threads) into an explicit
+          // per-server policy, so the new Servers UI drives project sync
+          // uniformly. Idempotent — once any server has an explicit syncProjects
+          // flag we never re-seed.
+          const preMigrate = get().connections.find((c) => c.type === 'discord');
+          if (preMigrate?.discordGuildId) {
+            const policies = preMigrate.discordGuildPolicies ?? {};
+            const anyExplicit = Object.values(policies).some((p) => p?.syncProjects);
+            if (!anyExplicit) {
+              const gid = preMigrate.discordGuildId;
+              get().updateConnection('discord', {
+                discordGuildPolicies: {
+                  ...policies,
+                  [gid]: {
+                    ...(policies[gid] ?? {}),
+                    syncProjects: true,
+                    parentCategoryId:
+                      policies[gid]?.parentCategoryId ?? preMigrate.discordParentCategoryId,
+                    createThreads:
+                      policies[gid]?.createThreads ?? preMigrate.discordCreateThreads !== false,
+                  },
+                },
+              });
+              void get().saveDiscordConfig();
+            }
+          }
+
           const latest = get().connections.find((c) => c.type === 'discord');
           // Respect sticky stop — never auto-restart after the user stopped
-          // listening (listenerEnabled === false).
+          // listening (listenerEnabled === false). Otherwise keep the single
+          // gateway live whenever at least one joined server should respond.
+          // Tokenless clients rely on the server-saved token for the start.
           if (
-            latest?.botToken &&
+            (latest?.botToken || latest?.discordServerConfigured) &&
             latest.discordListenerEnabled !== false &&
             !latest.discordListenerRunning &&
-            (latest.discordGuildId || latest.defaultChannelId)
+            anyDiscordGuildResponds(latest)
           ) {
             await get().startDiscordListener();
           }
@@ -1635,9 +1895,14 @@ export const useMessengerStore = create<MessengerState>()(
 
       ensureProjectChannel: async (project) => {
         const conn = get().connections.find((c) => c.type === 'discord');
-        // Per-project channels require a server (guild). Without one we can only
-        // post to a single default channel, so leave the legacy behavior alone.
-        if (!conn?.botToken || !conn.discordGuildId || conn.syncProjects === false) return;
+        // Per-project channels require a sync-enabled server. Auto-create targets
+        // the primary sync server; "Sync now" propagates to the rest.
+        const syncGuildId = conn ? getDiscordSyncGuildIds(conn)[0] : undefined;
+        if (!conn?.botToken || !syncGuildId || conn.syncProjects === false) return;
+        const policy = conn.discordGuildPolicies?.[syncGuildId] ?? {};
+        const parentCategoryId =
+          policy.parentCategoryId ??
+          (syncGuildId === conn.discordGuildId ? conn.discordParentCategoryId : undefined);
         const projectLabel = project.label ?? project.path;
         try {
           const data = await postJson<{
@@ -1647,8 +1912,8 @@ export const useMessengerStore = create<MessengerState>()(
             project: { id: project.id, path: project.path, label: projectLabel },
             discord: {
               token: conn.botToken,
-              guildId: conn.discordGuildId,
-              parentCategoryId: conn.discordParentCategoryId,
+              guildId: syncGuildId,
+              parentCategoryId,
             },
           });
           const created = data.results?.find((r) => r.ok && r.channelId);
@@ -1667,7 +1932,12 @@ export const useMessengerStore = create<MessengerState>()(
 
       renameProjectChannel: async (project) => {
         const conn = get().connections.find((c) => c.type === 'discord');
-        if (!conn?.botToken || !conn.discordGuildId || conn.syncProjects === false) return;
+        const syncGuildId = conn ? getDiscordSyncGuildIds(conn)[0] : undefined;
+        if (!conn?.botToken || !syncGuildId || conn.syncProjects === false) return;
+        const policy = conn.discordGuildPolicies?.[syncGuildId] ?? {};
+        const parentCategoryId =
+          policy.parentCategoryId ??
+          (syncGuildId === conn.discordGuildId ? conn.discordParentCategoryId : undefined);
         const projectLabel = project.label ?? project.path;
         try {
           const data = await postJson<{
@@ -1678,8 +1948,8 @@ export const useMessengerStore = create<MessengerState>()(
             project: { id: project.id, path: project.path, label: projectLabel },
             discord: {
               token: conn.botToken,
-              guildId: conn.discordGuildId,
-              parentCategoryId: conn.discordParentCategoryId,
+              guildId: syncGuildId,
+              parentCategoryId,
             },
           });
           if (data.channelId) {
@@ -1766,6 +2036,9 @@ export const useMessengerStore = create<MessengerState>()(
           // the UI re-syncs after reload. Keep discordListenerEnabled: a sticky
           // local stop must not look like "unset → auto-start" before the
           // server probe returns.
+          // Also clear discordServerConfigured — it must be re-acquired from
+          // the live server probe on the next load.
+          discordServerConfigured: false,
           discordListenerRunning: false,
           discordListenerConnected: false,
           discordListenerStartedAt: null,
@@ -1774,10 +2047,21 @@ export const useMessengerStore = create<MessengerState>()(
         })),
         projectMappings: state.projectMappings,
       }),
-      onRehydrateStorage: () => (_state, error) => {
-        if (error) return;
-        // After localStorage rehydrate, pull live listener + token status from
-        // the server. Defer so the store API is fully wired before we call in.
+      merge: (persistedState: unknown, currentState: MessengerState): MessengerState => ({
+        ...currentState,
+        ...(persistedState as Partial<MessengerState>),
+        // Mark the store fully rehydrated so the settings UI won't flash
+        // the "Connect Discord" tile on every reload while waiting for
+        // localStorage.
+        hasHydrated: true,
+      }),
+      onRehydrateStorage: () => () => {
+        // Always unblock the Integrations UI — even when rehydrate fails.
+        useMessengerStore.setState({ hasHydrated: true });
+        // After localStorage rehydrate, pull live listener + token status
+        // from the server.  Defer so the store API is fully wired.
+        // Always probe — even a corrupt/empty localStorage still has a
+        // server-side settings.json that may hold a live bot token.
         queueMicrotask(() => {
           void useMessengerStore.getState().resyncDiscordStatus();
         });
@@ -1785,3 +2069,30 @@ export const useMessengerStore = create<MessengerState>()(
     },
   ),
 );
+
+// Safety net: ensure hasHydrated is set even when no persisted data exists
+// (the merge function is only called when storage returns data).  Mirrors
+// the pattern from useTerminalStore — including the final else so a missing
+// persist API can never leave Integrations blank forever.
+if (typeof window !== 'undefined') {
+  const persistApi = (
+    useMessengerStore as unknown as {
+      persist?: {
+        hasHydrated?: () => boolean;
+        onFinishHydration?: (cb: () => void) => (() => void) | void;
+      };
+    }
+  ).persist;
+  const markHydrated = () => {
+    if (!useMessengerStore.getState().hasHydrated) {
+      useMessengerStore.setState({ hasHydrated: true });
+    }
+  };
+  if (persistApi?.hasHydrated?.()) {
+    markHydrated();
+  } else if (persistApi?.onFinishHydration) {
+    persistApi.onFinishHydration(markHydrated);
+  } else {
+    markHydrated();
+  }
+}
