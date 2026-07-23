@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { createGlobalMessageStreamHub } from './global-hub.js';
 import { createGlobalUiEventBroadcaster, createMessageStreamWsRuntime } from './runtime.js';
 
 class FakeSocket extends EventEmitter {
@@ -506,6 +507,229 @@ describe('message stream websocket runtime', () => {
       directory: 'global',
     });
 
+    socket.close();
+    await runtime.close();
+  });
+
+  it('recovers upstream connection and resumes WS event delivery after buildUrl recovers (shared hub, production scenario)', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    let buildUrlCalls = 0;
+
+    // Phase 1: buildUrl succeeds, fetch returns a short SSE stream
+    // Phase 2: buildUrl fails repeatedly (OpenCode port gone)
+    // Phase 3: buildUrl recovers, fetch succeeds again
+    const buildOpenCodeUrl = vi.fn().mockImplementation(() => {
+      buildUrlCalls += 1;
+      if (buildUrlCalls === 1) {
+        return 'http://127.0.0.1:4096/global/event';
+      }
+      // Simulate OpenCode port being unavailable
+      if (buildUrlCalls <= 5) {
+        throw new Error('OpenCode service unavailable');
+      }
+      // Service recovers after 5 failed attempts
+      return 'http://127.0.0.1:4096/global/event';
+    });
+
+    let fetchCalls = 0;
+    const fetchImpl = vi.fn().mockImplementation(async (_url, options) => {
+      fetchCalls += 1;
+      // First response ends immediately so the reader loops back to buildUrl
+      if (fetchCalls === 1) {
+        return createSseResponse({
+          signal: options.signal,
+          holdOpen: false,
+          blocks: [
+            'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+          ],
+        });
+      }
+      // Subsequent responses hold open indefinitely
+      return createSseResponse({
+        signal: options.signal,
+        holdOpen: true,
+        blocks: [
+          `id: evt-${fetchCalls + 100}\ndata: {"type":"server.connected","properties":{}}\n\n`,
+        ],
+      });
+    });
+
+    // Shared hub — exactly how production index.js creates and passes it
+    const globalHub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl,
+      upstreamReconnectDelayMs: 0,
+    });
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      globalEventHub: globalHub,  // shared hub, ownsGlobalHub=false
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      heartbeatIntervalMs: 5000,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl,
+    });
+
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    // First SSE stream ended → reader reconnects → buildUrl fails
+    // Reader keeps retrying with buildUrl failures
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Verify buildUrl was called for initial success + retries during failure period
+    expect(buildUrlCalls).toBeGreaterThanOrEqual(6);
+
+    // Client stays connected — WS bridge does NOT close on 'error' status
+    // (only on 'initial-error', which only fires before everConnected)
+    expect(socket.readyState).toBe(1);
+
+    // buildUrl recovered on call 6 → reader reconnected
+    // Hub notified {type:'connect', wasReady:true}
+    // WS bridge should have sent a fresh ready frame
+    const readyFrames = socket.sent.filter((f) => f.type === 'ready');
+    expect(readyFrames.length).toBeGreaterThanOrEqual(2);
+
+    // Events flowed after reconnection
+    const eventFrames = socket.sent.filter((f) => f.type === 'event');
+    expect(eventFrames.length).toBeGreaterThanOrEqual(2);
+
+    socket.close();
+    await runtime.close();
+  });
+
+  // --- Reproduction of the exact scenario from issue #2380 ---
+  // The issue reports that after an event stream disconnection:
+  //   Message stream WS proxy error: terminated
+  //   [PushWatcher] disconnected terminated
+  //   Message stream WS proxy error: Error: OpenCode service unavailable
+  //   [PushWatcher] disconnected OpenCode service unavailable
+  // OpenCode recovers but the UI never gets streamed output.
+  //
+  // This test reproduces the event flow: connected → stream error →
+  // buildUrl failure → buildUrl recovery → verify events resume.
+  it('reproduces issue #2380 event flow: connected → terminated → service unavailable → recovery → events resume', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    const capturedWarns = [];
+
+    // The exact sequence from the bug:
+    // 1. Stream is working, events flow
+    // 2. Stream gets "terminated" error (fetch error)
+    // 3. On retry, buildUrl throws "OpenCode service unavailable" (port gone)
+    // 4. After several failures, buildUrl recovers and the stream reconnects
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...args) => {
+      capturedWarns.push(args.join(' '));
+    });
+
+    let attemptNum = 0;
+    const buildOpenCodeUrl = vi.fn().mockImplementation(() => {
+      attemptNum += 1;
+      // First call: service is up
+      if (attemptNum === 1) {
+        return 'http://127.0.0.1:4096/global/event';
+      }
+      // Calls 2-3: port is gone (simulating managed restart)
+      if (attemptNum <= 3) {
+        throw new Error('OpenCode service unavailable');
+      }
+      // Call 4+: service is back with a new port
+      return 'http://127.0.0.1:4097/global/event';
+    });
+
+    let fetchCount = 0;
+    const fetchImpl = vi.fn().mockImplementation(async (_url, options) => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        // First fetch: return a response that simulates a "terminated" error
+        // We abort the signal to simulate the stream being terminated
+        const controller = new AbortController();
+        const signal = controller.signal;
+        // Link to the reader's abort signal
+        options.signal.addEventListener('abort', () => controller.abort());
+        // Schedule an abort to simulate "terminated"
+        setTimeout(() => controller.abort(), 5);
+        return createSseResponse({
+          signal,
+          holdOpen: true,
+          blocks: [
+            'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+          ],
+        });
+      }
+      // Second+ fetch: normal response that holds open
+      return createSseResponse({
+        signal: options.signal,
+        holdOpen: true,
+        blocks: [
+          `id: evt-${fetchCount + 100}\ndata: {"type":"server.connected","properties":{}}\n\n`,
+        ],
+      });
+    });
+
+    // Shared hub (production scenario)
+    const globalHub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl,
+      upstreamReconnectDelayMs: 0,
+    });
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      globalEventHub: globalHub,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      heartbeatIntervalMs: 5000,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl,
+    });
+
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // First fetch was aborted (simulating "terminated").
+    // Reader reconnects → buildUrl throws → onError with "OpenCode service unavailable"
+    // Then on retry, buildUrl recovers → fetch succeeds → events flow
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    // Verify the WS proxy error was logged (matching user's log)
+    const terminatedErrors = capturedWarns.filter(
+      (w) => w.includes('Message stream WS proxy error:')
+    );
+    expect(terminatedErrors.length).toBeGreaterThanOrEqual(1);
+
+    // BuildUrl was called multiple times (initial + failures + recovery)
+    expect(attemptNum).toBeGreaterThanOrEqual(4);
+
+    // Events flowed after recovery
+    const eventFrames = socket.sent.filter((f) => f.type === 'event');
+    expect(eventFrames.length).toBeGreaterThanOrEqual(2);
+
+    // Ready frames: initial + recovery
+    const readyFrames = socket.sent.filter((f) => f.type === 'ready');
+    expect(readyFrames.length).toBeGreaterThanOrEqual(2);
+
+    warnSpy.mockRestore();
     socket.close();
     await runtime.close();
   });

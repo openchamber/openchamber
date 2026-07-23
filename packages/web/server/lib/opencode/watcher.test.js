@@ -236,4 +236,85 @@ describe('createOpenCodeWatcherRuntime', () => {
     expect(events.size).toBe(0);
     expect(statuses.size).toBe(0);
   });
+
+  // Reproduction test for issue #2380:
+  // The PushWatcher subscribes to a shared hub. When the upstream fails
+  // and then recovers, the hub should notify 'connect' and the watcher
+  // should see the reconnection (logging [PushWatcher] connected).
+  it('detects reconnect through shared hub after buildUrl fails then recovers', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const payloads = [];
+
+    let buildUrlCalls = 0;
+    const buildOpenCodeUrl = () => {
+      buildUrlCalls += 1;
+      if (buildUrlCalls === 1) return 'http://127.0.0.1:4096/global/event';
+      if (buildUrlCalls <= 3) throw new Error('OpenCode service unavailable');
+      return 'http://127.0.0.1:4097/global/event';
+    };
+
+    let fetchCount = 0;
+    const fetchImpl = (_url, options) => {
+      fetchCount += 1;
+      if (fetchCount === 1) {
+        // End the stream immediately so the reader reconnects
+        return createSseResponse({
+          signal: options.signal,
+          holdOpen: false,
+          blocks: [
+            'id: evt-1\ndata: {"payload":{"type":"session.updated","properties":{"sessionID":"ses_1"}}}\n\n',
+          ],
+        });
+      }
+      return createSseResponse({
+        signal: options.signal,
+        holdOpen: true,
+        blocks: [
+          `id: evt-${fetchCount + 10}\ndata: {"payload":{"type":"session.updated","properties":{"sessionID":"ses_${fetchCount}"}}}\n\n`,
+        ],
+      });
+    };
+
+    const globalEventHub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl,
+      upstreamReconnectDelayMs: 0,
+    });
+
+    const watcher = createOpenCodeWatcherRuntime({
+      waitForOpenCodePort: async () => {},
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders: () => ({}),
+      globalEventHub,
+      onPayload(payload) {
+        payloads.push(payload);
+      },
+      upstreamReconnectDelayMs: 0,
+    });
+
+    await watcher.start();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    // The first SSE stream ended → reader retried → buildUrl failed →
+    // buildUrl recovered → reader reconnected → events flowed
+    // After reconnection, the hub notifies 'connect' and PushWatcher
+    // logs '[PushWatcher] connected' (matching the user's expected recovery).
+    const connectedLogs = logSpy.mock.calls.filter(
+      (call) => call[0] === '[PushWatcher] connected'
+    );
+    // Should have at least 2 connected events: initial + recovery
+    expect(connectedLogs.length).toBeGreaterThanOrEqual(2);
+
+    // Payloads should include events from both before and after recovery
+    expect(payloads.length).toBeGreaterThanOrEqual(2);
+
+    // buildUrl was called for initial success + failures + recovery
+    expect(buildUrlCalls).toBeGreaterThanOrEqual(4);
+
+    warnSpy.mockRestore();
+    logSpy.mockRestore();
+    watcher.stop();
+  });
 });
