@@ -880,7 +880,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'ウィンドウを開かずにバックグラウンドでアプリを起動します。デスクトップのステータスアイコンから開けます。',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'OpenChamber をシステムトレイへ最小化または閉じる',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': 'システムトレイへ最小化または閉じる',
-  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'メインウィンドウを最小化または閉じたときも、OpenChamber を Windows のシステムトレイで実行し続けます。',
+  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'メインウィンドウを最小化または閉じたときも、OpenChamber をシステムトレイで実行し続けます。',
   'settings.openchamber.desktopNetwork.field.keepAwakeAria': 'OpenChamber の実行中はコンピューターのスリープを防止',
   'settings.openchamber.desktopNetwork.field.keepAwake': 'OpenChamber の実行中はコンピューターのスリープを防止',
   'settings.openchamber.desktopNetwork.field.keepAwakeDescription': 'スマートフォンがこのアプリを開き続けられるようにします。ディスプレイはオフにできます。',
