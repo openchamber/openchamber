@@ -103,7 +103,6 @@ export const useProjectSessionSelection = (args: Args): void => {
     if (!section) {
       return;
     }
-    previousActiveProjectRef.current = activeProjectId;
     const projectMap = projectSessionMeta.metaByProject.get(activeProjectId);
 
     if (currentSessionId && projectMap && projectMap.has(currentSessionId)) {
@@ -115,18 +114,11 @@ export const useProjectSessionSelection = (args: Args): void => {
         next.set(activeProjectId, currentSessionId);
         return next;
       });
+      previousActiveProjectRef.current = activeProjectId;
       return;
     }
 
-    // Path A' — currentSessionId is set but not in stale projectMap.
-    // Preserve user's explicit selection when the projectMap exists but
-    // is missing the session (worktree data not yet loaded). For
-    // empty projects (projectMap is undefined), fall through to Path B
-    // so a new session draft is opened.
-    if (currentSessionId && projectMap) {
-      return;
-    }
-
+    
     if (!projectMap || projectMap.size === 0) {
       setActiveMainTab('chat');
       if (mobileVariant) {
@@ -136,6 +128,7 @@ export const useProjectSessionSelection = (args: Args): void => {
         selectedProjectId: section.project.id,
         directoryOverride: section.project.normalizedPath,
       });
+      previousActiveProjectRef.current = activeProjectId;
       return;
     }
 
@@ -146,10 +139,12 @@ export const useProjectSessionSelection = (args: Args): void => {
     const fallback = projectSessionMeta.firstSessionByProject.get(activeProjectId)?.id ?? null;
     const targetSessionId = remembered ?? fallback;
     if (!targetSessionId || targetSessionId === currentSessionId) {
+      previousActiveProjectRef.current = activeProjectId;
       return;
     }
     const targetDirectory = projectMap.get(targetSessionId)?.directory ?? null;
     handleSessionSelect(targetSessionId, targetDirectory);
+    previousActiveProjectRef.current = activeProjectId;
   }, [
     activeProjectId,
     activeSessionByProject,
