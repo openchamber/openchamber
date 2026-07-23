@@ -1826,7 +1826,7 @@
   'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': '在背景啟動應用程式，不開啟視窗。可透過桌面狀態圖示開啟。',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': '將 OpenChamber 最小化和關閉到系統匣',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': '最小化和關閉到系統匣',
-  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '主視窗最小化或關閉時，讓 OpenChamber 繼續在 Windows 系統匣中執行。',
+  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '主視窗最小化或關閉時，讓 OpenChamber 繼續在系統匣中執行。',
   'settings.openchamber.desktopNetwork.field.keepAwakeAria': 'OpenChamber 執行時保持電腦喚醒',
   'settings.openchamber.desktopNetwork.field.keepAwake': 'OpenChamber 執行時保持電腦喚醒',
   'settings.openchamber.desktopNetwork.field.keepAwakeDescription': '讓手機可以持續開啟此應用程式。螢幕仍可關閉。',

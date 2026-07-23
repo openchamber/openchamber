@@ -847,7 +847,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': '在后台启动应用且不打开窗口。可通过桌面状态图标打开。',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': '将 OpenChamber 最小化和关闭到系统托盘',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': '最小化和关闭到系统托盘',
-  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '主窗口最小化或关闭时，让 OpenChamber 继续在 Windows 系统托盘中运行。',
+  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '主窗口最小化或关闭时，让 OpenChamber 继续在系统托盘中运行。',
   'settings.openchamber.desktopNetwork.field.keepAwakeAria': 'OpenChamber 运行时保持电脑唤醒',
   'settings.openchamber.desktopNetwork.field.keepAwake': 'OpenChamber 运行时保持电脑唤醒',
   'settings.openchamber.desktopNetwork.field.keepAwakeDescription': '让手机可以继续打开此应用。屏幕仍可关闭。',

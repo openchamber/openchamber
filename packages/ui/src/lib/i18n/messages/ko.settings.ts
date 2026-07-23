@@ -847,7 +847,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': '창을 열지 않고 백그라운드에서 앱을 시작합니다. 데스크톱 상태 아이콘으로 열 수 있습니다.',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'OpenChamber를 시스템 트레이로 최소화하거나 닫기',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': '시스템 트레이로 최소화하고 닫기',
-  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '메인 창을 최소화하거나 닫아도 OpenChamber가 Windows 시스템 트레이에서 계속 실행됩니다.',
+  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '메인 창을 최소화하거나 닫아도 OpenChamber가 시스템 트레이에서 계속 실행됩니다.',
   'settings.openchamber.desktopNetwork.field.keepAwakeAria': 'OpenChamber가 실행되는 동안 컴퓨터 절전 방지',
   'settings.openchamber.desktopNetwork.field.keepAwake': 'OpenChamber가 실행되는 동안 컴퓨터 절전 방지',
   'settings.openchamber.desktopNetwork.field.keepAwakeDescription': '휴대폰이 이 앱을 계속 열 수 있도록 합니다. 디스플레이는 꺼질 수 있습니다.',

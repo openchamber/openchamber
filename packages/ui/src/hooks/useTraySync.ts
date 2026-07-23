@@ -102,7 +102,7 @@ type DesktopBridgeGlobal = {
 const isTrayPlatform = (): boolean => {
   if (typeof window === 'undefined') return false;
   const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
-  return platform === 'darwin' || platform === 'win32';
+  return platform === 'darwin' || platform === 'win32' || platform === 'linux';
 };
 
 const permissionLabel = (request: PermissionRequest): string => {

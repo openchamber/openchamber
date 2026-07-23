@@ -847,7 +847,7 @@ export const settingsDict = {
   "settings.openchamber.desktopNetwork.field.launchAtLoginDescription": "Inicia o app em segundo plano sem abrir uma janela. Use o ícone de status da área de trabalho para abrir.",
   "settings.openchamber.desktopNetwork.field.minimizeToTrayAria": "Minimizar e fechar o OpenChamber na bandeja do sistema",
   "settings.openchamber.desktopNetwork.field.minimizeToTray": "Minimizar e fechar na bandeja do sistema",
-  "settings.openchamber.desktopNetwork.field.minimizeToTrayDescription": "Mantém o OpenChamber em execução na bandeja do sistema do Windows quando a janela principal é minimizada ou fechada.",
+  "settings.openchamber.desktopNetwork.field.minimizeToTrayDescription": "Mantém o OpenChamber em execução na bandeja do sistema quando a janela principal é minimizada ou fechada.",
   "settings.openchamber.desktopNetwork.field.keepAwakeAria": "Manter o computador ativo enquanto o OpenChamber estiver em execução",
   "settings.openchamber.desktopNetwork.field.keepAwake": "Manter o computador ativo enquanto o OpenChamber estiver em execução",
   "settings.openchamber.desktopNetwork.field.keepAwakeDescription": "Para que telefones continuem abrindo este app. A tela ainda pode desligar.",

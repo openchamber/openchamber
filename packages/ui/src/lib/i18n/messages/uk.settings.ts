@@ -847,7 +847,7 @@ export const settingsDict = {
   "settings.openchamber.desktopNetwork.field.launchAtLoginDescription": "Запускає застосунок у фоні без відкриття вікна. Відкрийте його через піктограму стану на робочому столі.",
   "settings.openchamber.desktopNetwork.field.minimizeToTrayAria": "Згортати й закривати OpenChamber у системний трей",
   "settings.openchamber.desktopNetwork.field.minimizeToTray": "Згортати й закривати в системний трей",
-  "settings.openchamber.desktopNetwork.field.minimizeToTrayDescription": "Залишає OpenChamber запущеним у системному треї Windows, коли головне вікно згорнуто або закрито.",
+  "settings.openchamber.desktopNetwork.field.minimizeToTrayDescription": "Залишає OpenChamber запущеним у системному треї, коли головне вікно згорнуто або закрито.",
   "settings.openchamber.desktopNetwork.field.keepAwakeAria": "Не давати комп’ютеру засинати, поки OpenChamber запущено",
   "settings.openchamber.desktopNetwork.field.keepAwake": "Не давати комп’ютеру засинати, поки OpenChamber запущено",
   "settings.openchamber.desktopNetwork.field.keepAwakeDescription": "Щоб телефон і далі міг відкривати застосунок. Екран усе одно може вимикатися.",

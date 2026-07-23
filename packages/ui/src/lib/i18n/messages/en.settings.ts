@@ -880,7 +880,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'Starts the app in the background without opening a window. Use the desktop status icon to open it.',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'Minimize and close OpenChamber to the system tray',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': 'Minimize and close to the system tray',
-  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'Keeps OpenChamber running in the Windows system tray when the main window is minimized or closed.',
+  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'Keeps OpenChamber running in the system tray when the main window is minimized or closed.',
   'settings.openchamber.desktopNetwork.field.keepAwakeAria': 'Keep computer awake while OpenChamber is running',
   'settings.openchamber.desktopNetwork.field.keepAwake': 'Keep computer awake while OpenChamber is running',
   'settings.openchamber.desktopNetwork.field.keepAwakeDescription': 'Prevents system sleep so phones can keep reaching this app. The screen can still turn off.',

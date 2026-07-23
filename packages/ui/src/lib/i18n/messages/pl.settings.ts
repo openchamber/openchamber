@@ -707,7 +707,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.field.launchAtLoginDescription': 'Uruchamia aplikację w tle bez otwierania okna. Otworzysz ją z ikony stanu na pulpicie.',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'Minimalizuj i zamykaj OpenChamber do zasobnika systemowego',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': 'Minimalizuj i zamykaj do zasobnika systemowego',
-  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'Utrzymuje OpenChamber w zasobniku systemowym Windows, gdy główne okno jest zminimalizowane lub zamknięte.',
+  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'Utrzymuje OpenChamber w zasobniku systemowym, gdy główne okno jest zminimalizowane lub zamknięte.',
   'settings.openchamber.desktopNetwork.field.keepAwakeAria': 'Utrzymuj komputer aktywny, gdy OpenChamber jest uruchomiony',
   'settings.openchamber.desktopNetwork.field.keepAwake': 'Utrzymuj komputer aktywny, gdy OpenChamber jest uruchomiony',
   'settings.openchamber.desktopNetwork.field.keepAwakeDescription': 'Aby telefony nadal mogły otwierać tę aplikację. Ekran nadal może się wyłączyć.',
