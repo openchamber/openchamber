@@ -26,6 +26,9 @@ local-dev*
 .tmp/
 # Editor directories and files
 .vscode/*
+.serena/*
+.opencode/*
+.omo/*
 !.vscode/extensions.json
 .idea
 .DS_Store

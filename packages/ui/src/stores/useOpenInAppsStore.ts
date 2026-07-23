@@ -8,6 +8,23 @@ export type OpenInAppOption = OpenInApp & {
   iconDataUrl?: string;
 };
 
+export const getOpenInAppDiscoveryNames = (): string[] => {
+  return OPEN_IN_APPS.map((app) => getPlatformOpenInApp(app).appName);
+};
+
+export const buildOpenInAppOptions = (installed: InstalledDesktopAppInfo[]): OpenInAppOption[] => {
+  const allowed = new Set(installed.map((app) => app.name));
+  const iconMap = new Map(installed.map((app) => [app.name, app.iconDataUrl ?? undefined]));
+  const platformApps = OPEN_IN_APPS.map((app) => getPlatformOpenInApp(app));
+
+  return platformApps
+    .filter((app) => allowed.has(app.appName) || OPEN_IN_ALWAYS_AVAILABLE_APP_IDS.has(app.id))
+    .map((app) => ({
+      ...app,
+      iconDataUrl: iconMap.get(app.appName),
+    }));
+};
+
 type OpenInAppsState = {
   selectedAppId: string;
   availableApps: OpenInAppOption[];
@@ -70,18 +87,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
         return;
       }
 
-      const allowed = new Set(installed.map((app) => app.name));
-      const iconMap = new Map(installed.map((app) => [app.name, app.iconDataUrl ?? undefined]));
-
-      const filtered = OPEN_IN_APPS.filter(
-        (app) => allowed.has(app.appName) || OPEN_IN_ALWAYS_AVAILABLE_APP_IDS.has(app.id)
-      );
-
-      const withIcons = filtered.map((app) => ({
-        ...getPlatformOpenInApp(app),
-        iconDataUrl: iconMap.get(app.appName),
-      }));
-
+      const withIcons = buildOpenInAppOptions(installed);
       set({ availableApps: withIcons, hasLoadedApps: true });
     };
 
@@ -99,7 +105,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
         return;
       }
 
-      const appNames = OPEN_IN_APPS.map((app) => app.appName);
+      const appNames = getOpenInAppDiscoveryNames();
       clearRetryTimeout();
 
       if (force) {
@@ -226,7 +232,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
       return;
     }
 
-    const appNames = OPEN_IN_APPS.map((app) => app.appName);
+    const appNames = getOpenInAppDiscoveryNames();
     clearRetryTimeout();
 
     if (force) {
@@ -244,15 +250,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
         isCacheStale,
       } = await fetchDesktopInstalledApps(appNames, force);
 
-      const allowed = new Set(installed.map((app) => app.name));
-      const iconMap = new Map(installed.map((app) => [app.name, app.iconDataUrl ?? undefined]));
-      const filtered = OPEN_IN_APPS.filter(
-        (app) => allowed.has(app.appName) || OPEN_IN_ALWAYS_AVAILABLE_APP_IDS.has(app.id)
-      );
-      const withIcons = filtered.map((app) => ({
-        ...app,
-        iconDataUrl: iconMap.get(app.appName),
-      }));
+      const withIcons = buildOpenInAppOptions(installed);
 
       set({
         availableApps: withIcons.length > 0 ? withIcons : getAlwaysAvailableApps(),

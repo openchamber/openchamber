@@ -40,6 +40,11 @@ export const getPlatformOpenInApp = (app: OpenInApp): OpenInApp => {
       return { ...app, label: 'Explorer', appName: 'File Explorer' };
     }
   }
+  if (typeof window !== 'undefined' && window.__OPENCHAMBER_PLATFORM__ === 'linux') {
+    if (app.id === 'finder') {
+      return { ...app, label: 'Files', appName: 'Files' };
+    }
+  }
   return app;
 };
 
