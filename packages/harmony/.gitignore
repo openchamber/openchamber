@@ -1,0 +1,10 @@
+/build/
+/.hvigor/
+/.appanalyzer/
+/.idea/
+/oh_modules/
+/local.properties
+/signature/
+/entry/build/
+/entry/.hvigor/
+/entry/oh_modules/

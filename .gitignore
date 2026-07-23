@@ -46,6 +46,7 @@ build/
 
 # Built webview assets (generated during build)
 src/main/resources/webview/
+packages/harmony/entry/src/main/resources/rawfile/mobile/
 
 # IDE
 *.iml

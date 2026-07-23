@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Unofficial OpenChamber HarmonyOS client"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "OpenChamber Harmony entry ability"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "OpenChamber Harmony"
+    }
+  ]
+}

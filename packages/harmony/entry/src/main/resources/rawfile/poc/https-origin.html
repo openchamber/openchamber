@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>OpenChamber Harmony HTTPS Origin PoC</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: sans-serif;
+      }
+
+      body {
+        box-sizing: border-box;
+        margin: 0;
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      main {
+        max-width: 42rem;
+        margin: 0 auto;
+      }
+
+      dl {
+        display: grid;
+        grid-template-columns: max-content minmax(0, 1fr);
+        gap: 0.75rem 1rem;
+      }
+
+      section {
+        margin-top: 2rem;
+      }
+
+      dt {
+        font-weight: 700;
+      }
+
+      dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+
+      input,
+      button {
+        font: inherit;
+      }
+
+      input {
+        box-sizing: border-box;
+        margin-top: 0.5rem;
+        width: 100%;
+      }
+
+      button {
+        margin-top: 0.75rem;
+      }
+
+      .status-ok {
+        color: #138a36;
+      }
+
+      .status-error {
+        color: #bf1d1d;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>OpenChamber Harmony ArkWeb PoC</h1>
+      <p>此页面从应用内打包资源读取，再以 https://localhost 的 loadData base URL 呈现；只验证受限 bridge 和浏览器传输候选，不会读取、写入或发送凭据。</p>
+      <dl>
+        <dt>候选类型</dt>
+        <dd>打包资源 + loadData 虚拟 Origin</dd>
+        <dt>页面 URL</dt>
+        <dd id="href">读取中…</dd>
+        <dt>页面 Origin</dt>
+        <dd id="origin">读取中…</dd>
+        <dt>原生平台</dt>
+        <dd id="platform">读取中…</dd>
+        <dt>Bridge 版本</dt>
+        <dd id="bridge-version">读取中…</dd>
+        <dt>能力声明</dt>
+        <dd id="capabilities">读取中…</dd>
+        <dt>ArkTS 回调</dt>
+        <dd id="host-callback">等待页面加载完成…</dd>
+      </dl>
+      <section aria-labelledby="transport-title">
+        <h2 id="transport-title">传输诊断</h2>
+        <p>仅连接你启动的无凭据诊断服务；不会发送 token、密码或任意请求头，也不会调用原生 HTTP 或安全存储。HTTPS 页面访问 HTTP 测试服务可能触发 mixed-content 拦截，这也是需要记录的结果。</p>
+        <label for="probe-url">测试服务器根地址</label>
+        <input id="probe-url" type="url" inputmode="url" autocomplete="off" placeholder="http://&lt;宿主机局域网 IP&gt;:8788">
+        <button id="run-probe" type="button">开始无凭据诊断</button>
+        <p id="transport-summary" aria-live="polite">尚未发起网络请求。</p>
+        <dl>
+          <dt>HTTP GET</dt>
+          <dd id="http-get">等待中…</dd>
+          <dt>HTTP preflight</dt>
+          <dd id="http-preflight">等待中…</dd>
+          <dt>SSE</dt>
+          <dd id="sse">等待中…</dd>
+          <dt>WebSocket</dt>
+          <dd id="websocket">等待中…</dd>
+          <dt>WebCrypto</dt>
+          <dd id="webcrypto">等待中…</dd>
+        </dl>
+      </section>
+    </main>
+    <!-- probe-script -->
+  </body>
+</html>
