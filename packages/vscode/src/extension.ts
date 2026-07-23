@@ -201,14 +201,6 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.internal.permissionAutoAcceptSynced', (snapshot: unknown) => {
-      chatViewProvider?.notifyPermissionAutoAcceptSynced(snapshot);
-      sessionEditorProvider?.notifyPermissionAutoAcceptSynced(snapshot);
-      agentManagerProvider?.notifyPermissionAutoAcceptSynced(snapshot);
-    })
-  );
-
-  context.subscriptions.push(
     vscode.window.onDidChangeWindowState((state) => {
       chatViewProvider?.notifyWindowFocusChanged(state.focused);
       sessionEditorProvider?.notifyWindowFocusChanged(state.focused);
@@ -305,14 +297,13 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       // Get file info for context
-      // false matches the relativePath broadcast for the active editor, so this attachment dedupes against the pin-selection suggestion.
-      const filePath = vscode.workspace.asRelativePath(editor.document.uri, false);
+      const filePath = vscode.workspace.asRelativePath(editor.document.uri);
       // Get line numbers (1-based for display)
       const startLine = selection.start.line + 1;
       const endLine = selection.end.line + 1;
       const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
 
-      const filename = `${filePath}:${lineRange}`;
+      const filename = `${editor.document.fileName.split(/[\\/]/).pop() || filePath}:${lineRange}`;
       const contextSelection = {
         filePath: editor.document.uri.fsPath,
         filename,

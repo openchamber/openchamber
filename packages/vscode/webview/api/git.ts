@@ -18,7 +18,6 @@ import type {
   GeneratedCommitMessage,
   GeneratedPullRequestDescription,
   GitWorktreeInfo,
-  GitWorktreeBootstrapStatus,
   CreateGitWorktreePayload,
   GitWorktreeValidationResult,
   GitWorktreeCreateResult,
@@ -41,10 +40,6 @@ import type {
   RevertCommitResponse,
   ResetToCommitResponse,
 } from '@openchamber/ui/lib/api/types';
-
-const requestWorktreeBootstrapStatus = (directory: string): Promise<GitWorktreeBootstrapStatus> => {
-  return sendBridgeMessage<GitWorktreeBootstrapStatus>('api:git/worktrees/bootstrap-status', { directory });
-};
 
 type GitIdentityStoreState = {
   profiles: GitIdentityProfile[];
@@ -198,8 +193,10 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     });
   },
 
-  getGitWorktreeBootstrapStatus: async (directory: string): Promise<GitWorktreeBootstrapStatus> => {
-    return requestWorktreeBootstrapStatus(directory);
+  getGitWorktreeBootstrapStatus: async (directory: string): Promise<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }> => {
+    return sendBridgeMessage<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }>('api:git/worktrees/bootstrap-status', {
+      directory,
+    });
   },
 
   previewGitWorktree: async (directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> => {
@@ -517,8 +514,10 @@ export const createVSCodeGitAPI = (): GitAPI => ({
         ...(payload || {}),
       });
     },
-    bootstrapStatus: async (directory: string): Promise<GitWorktreeBootstrapStatus> => {
-      return requestWorktreeBootstrapStatus(directory);
+    bootstrapStatus: async (directory: string): Promise<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }> => {
+      return sendBridgeMessage<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }>('api:git/worktrees/bootstrap-status', {
+        directory,
+      });
     },
     preview: async (directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> => {
       return sendBridgeMessage<GitWorktreeCreateResult>('api:git/worktrees/preview', {

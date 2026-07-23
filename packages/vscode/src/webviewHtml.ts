@@ -68,9 +68,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const connectSrc = uniqueTokens(['*', 'ws:', 'wss:', 'http:', 'https:', devServerOrigin]);
   const imgSrc = uniqueTokens([webview.cspSource, 'data:', 'https:', devServerOrigin]);
   const fontSrc = uniqueTokens([webview.cspSource, 'data:', devServerOrigin]);
-  // fflate's async browser inflater creates blob-backed workers. Keep blob:
-  // scoped to worker-src so document decompression works without allowing blob scripts.
-  const workerSrc = uniqueTokens([webview.cspSource, 'blob:', devServerOrigin]);
 
   const themeKind = getThemeKindName(vscode.window.activeColorTheme.kind);
 
@@ -87,7 +84,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleSrc}; script-src ${scriptSrc}; connect-src ${connectSrc}; img-src ${imgSrc}; font-src ${fontSrc}; worker-src ${workerSrc};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleSrc}; script-src ${scriptSrc}; connect-src ${connectSrc}; img-src ${imgSrc}; font-src ${fontSrc};">
   <style>
     html, body, #root { height: 100%; width: 100%; margin: 0; padding: 0; }
     body { 

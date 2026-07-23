@@ -318,14 +318,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public notifyPermissionAutoAcceptSynced(snapshot: unknown): void {
-    this._view?.webview.postMessage({
-      type: 'command',
-      command: 'permissionAutoAcceptSynced',
-      payload: snapshot,
-    });
-  }
-
   /**
    * Ask the webview to run the full OpenCode reload flow (overlay + managed
    * restart via the bridge + config/data refresh) — the same flow used after an

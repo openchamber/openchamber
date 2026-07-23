@@ -481,11 +481,7 @@ export async function handleFsBridgeMessage(
     }
 
     case 'api:files/pick': {
-      const options = payload as { allowMany?: boolean; extensions?: unknown };
-      const allowMany = options?.allowMany !== false;
-      const extensions = Array.isArray(options?.extensions)
-        ? options.extensions.filter((extension): extension is string => typeof extension === 'string' && extension.length > 0)
-        : [];
+      const allowMany = (payload as { allowMany?: boolean })?.allowMany !== false;
       const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
 
       const picks = await vscode.window.showOpenDialog({
@@ -494,7 +490,6 @@ export async function handleFsBridgeMessage(
         canSelectMany: allowMany,
         defaultUri,
         openLabel: 'Attach',
-        filters: extensions.length > 0 ? { Files: extensions } : undefined,
       });
 
       if (!picks || picks.length === 0) {

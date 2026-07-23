@@ -120,9 +120,9 @@ const DEFAULT_OUT_DIR = path.join(REPO_ROOT, 'packages', 'ui', 'src', 'lib', 'th
 
 const DEFAULT_CONFIG = {
   fonts: {
-    sans: '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
-    mono: 'ui-monospace, "SFMono-Regular", "Menlo", "Cascadia Mono", "Segoe UI Mono", monospace',
-    heading: '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
+    sans: '"IBM Plex Mono", monospace',
+    mono: '"IBM Plex Mono", monospace',
+    heading: '"IBM Plex Mono", monospace',
   },
   radius: {
     none: '0',

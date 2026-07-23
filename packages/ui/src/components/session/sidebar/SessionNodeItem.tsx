@@ -43,6 +43,7 @@ import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
 import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog';
 import { FusionIcon } from '@/components/icons/FusionIcon';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { getSessionShareUrl, isSessionShared } from '@/stores/useGlobalSessionsStore';
 import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -78,6 +79,7 @@ type Props = {
   handleShareSession: (session: Session) => void;
   copiedSessionId: string | null;
   handleCopyShareUrl: (url: string, sessionId: string) => void;
+  handleCopySessionReference: (session: Session) => void;
   handleUnshareSession: (sessionId: string) => void;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
@@ -264,6 +266,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     handleShareSession,
     copiedSessionId,
     handleCopyShareUrl,
+    handleCopySessionReference,
     handleUnshareSession,
     openSidebarMenuKey,
     setOpenSidebarMenuKey,
@@ -856,14 +859,19 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         {isPinnedSession ? <Icon name="unpin" className="mr-1 h-4 w-4" /> : <Icon name="pushpin" className="mr-1 h-4 w-4" />}
         {isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
       </Item>
-      {!resolvedSession.share ? (
+      <Item onClick={() => { void handleCopySessionReference(resolvedSession); }} className="[&>svg]:mr-1">
+        {copiedSessionId === session.id
+          ? <><Icon name="check" className="mr-1 h-4 w-4" style={{ color: 'var(--status-success)' }} />{t('sessions.sidebar.session.menu.copied')}</>
+          : <><Icon name="file-copy" className="mr-1 h-4 w-4" />{t('sessions.sidebar.session.menu.copyReference')}</>}
+      </Item>
+      {!isSessionShared(resolvedSession) ? (
         <Item onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
           <Icon name="share-2" className="mr-1 h-4 w-4" />
           {t('sessions.sidebar.session.menu.share')}
         </Item>
       ) : (
         <>
-          <Item onClick={() => { if (resolvedSession.share?.url) handleCopyShareUrl(resolvedSession.share.url, session.id); }} className="[&>svg]:mr-1">
+          <Item onClick={() => { const shareUrl = getSessionShareUrl(resolvedSession); if (shareUrl) handleCopyShareUrl(shareUrl, session.id); }} className="[&>svg]:mr-1">
             {copiedSessionId === session.id
               ? <><Icon name="check" className="mr-1 h-4 w-4"  style={{ color: 'var(--status-success)' }}/>{t('sessions.sidebar.session.menu.copied')}</>
               : <><Icon name="file-copy" className="mr-1 h-4 w-4" />{t('sessions.sidebar.session.menu.copyLink')}</>}
@@ -1508,6 +1516,7 @@ const areSessionNodeItemPropsEqual = (prev: Props, next: Props): boolean => {
     && prev.togglePinnedSession === next.togglePinnedSession
     && prev.handleShareSession === next.handleShareSession
     && prev.handleCopyShareUrl === next.handleCopyShareUrl
+    && prev.handleCopySessionReference === next.handleCopySessionReference
     && prev.handleUnshareSession === next.handleUnshareSession
     && prev.setOpenSidebarMenuKey === next.setOpenSidebarMenuKey
     && prev.getFoldersForScope === next.getFoldersForScope

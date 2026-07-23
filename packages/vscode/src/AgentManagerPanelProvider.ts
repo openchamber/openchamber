@@ -140,14 +140,6 @@ export class AgentManagerPanelProvider {
     });
   }
 
-  public notifyPermissionAutoAcceptSynced(snapshot: unknown): void {
-    this._panel?.webview.postMessage({
-      type: 'command',
-      command: 'permissionAutoAcceptSynced',
-      payload: snapshot,
-    });
-  }
-
   public notifyWindowFocusChanged(focused: boolean): void {
     if (!this._panel) {
       return;

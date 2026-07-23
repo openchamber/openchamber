@@ -125,6 +125,17 @@ export const mergeLiveSessionWithGlobalSession = (
   return merged;
 };
 
+export const getSessionShareUrl = (session: Session | null | undefined): string | null => {
+  const share = session?.share;
+  if (!share || share === null) return null;
+  const url = share.url;
+  return typeof url === 'string' && url.trim().length > 0 ? url.trim() : null;
+};
+
+export const isSessionShared = (session: Session | null | undefined): boolean => {
+  return getSessionShareUrl(session) !== null;
+};
+
 const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
   const next = new Map<string, Session[]>();
   for (const session of sessions) {

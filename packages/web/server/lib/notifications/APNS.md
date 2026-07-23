@@ -76,7 +76,7 @@ device token of a server sees the same badge.
 
 Server (`apns-runtime.js`):
 - `OPENCHAMBER_PUSH_RELAY_URL` (default the public relay), `OPENCHAMBER_APNS_ENVIRONMENT`
-  (`production` default / `sandbox` for development builds). The signing keypair is auto-generated — nothing to set.
+  (`sandbox` default / `production`). The signing keypair is auto-generated — nothing to set.
 - Direct fallback: `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8`
   (or `_P8_PATH`), `OPENCHAMBER_APNS_BUNDLE_ID`, `OPENCHAMBER_PUSH_RELAY_DISABLED=true`.
 

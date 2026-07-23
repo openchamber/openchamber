@@ -28,18 +28,15 @@ const readAuthFile = (): AuthFile => {
 const writeAuthFile = (auth: AuthFile): void => {
   try {
     if (!fs.existsSync(OPENCODE_DATA_DIR)) {
-      fs.mkdirSync(OPENCODE_DATA_DIR, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(OPENCODE_DATA_DIR, { recursive: true });
     }
-    if (process.platform !== 'win32') fs.chmodSync(OPENCODE_DATA_DIR, 0o700);
 
     if (fs.existsSync(AUTH_FILE)) {
       const backupFile = `${AUTH_FILE}.openchamber.backup`;
       fs.copyFileSync(AUTH_FILE, backupFile);
-      if (process.platform !== 'win32') fs.chmodSync(backupFile, 0o600);
     }
 
-    fs.writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2), { encoding: 'utf8', mode: 0o600 });
-    if (process.platform !== 'win32') fs.chmodSync(AUTH_FILE, 0o600);
+    fs.writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2), 'utf8');
   } catch (error) {
     console.error('Failed to write auth file:', error);
     throw new Error('Failed to write OpenCode auth configuration');

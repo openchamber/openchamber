@@ -3,6 +3,8 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { fetchSessionReference } from '@/lib/sessionReference';
+import { getSessionShareUrl, isSessionShared } from '@/stores/useGlobalSessionsStore';
 import type { MainTab } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -114,12 +116,16 @@ export const useSessionActions = (args: Args) => {
   }, [args]);
 
   const handleShareSession = React.useCallback(async (session: Session) => {
-    const result = await args.shareSession(session.id);
-    if (result && result.share?.url) {
-      toast.success(t('sessions.sidebar.session.share.successTitle'), {
-        description: t('sessions.sidebar.session.share.successDescription'),
-      });
-    } else {
+    try {
+      const result = await args.shareSession(session.id);
+      if (result && getSessionShareUrl(result)) {
+        toast.success(t('sessions.sidebar.session.share.successTitle'), {
+          description: t('sessions.sidebar.session.share.successDescription'),
+        });
+      } else {
+        toast.error(t('sessions.sidebar.session.share.error'));
+      }
+    } catch {
       toast.error(t('sessions.sidebar.session.share.error'));
     }
   }, [args, t]);
@@ -146,13 +152,40 @@ export const useSessionActions = (args: Args) => {
   }, [t]);
 
   const handleUnshareSession = React.useCallback(async (sessionId: string) => {
-    const result = await args.unshareSession(sessionId);
-    if (result) {
-      toast.success(t('sessions.sidebar.session.unshare.success'));
-    } else {
+    try {
+      const result = await args.unshareSession(sessionId);
+      if (result && !isSessionShared(result)) {
+        toast.success(t('sessions.sidebar.session.unshare.success'));
+      } else {
+        toast.error(t('sessions.sidebar.session.unshare.error'));
+      }
+    } catch {
       toast.error(t('sessions.sidebar.session.unshare.error'));
     }
   }, [args, t]);
+
+  const handleCopySessionReference = React.useCallback(async (session: Session) => {
+    try {
+      const payload = await fetchSessionReference(session.id);
+      const reference = payload?.reference ?? session.id;
+      const result = await copyTextToClipboard(reference);
+      if (!result.ok) {
+        toast.error(t('sessions.sidebar.session.reference.copyError'));
+        return;
+      }
+      setCopiedSessionId(session.id);
+      if (copyTimeout.current) {
+        clearTimeout(copyTimeout.current);
+      }
+      copyTimeout.current = window.setTimeout(() => {
+        setCopiedSessionId(null);
+        copyTimeout.current = null;
+      }, 2000);
+      toast.success(t('sessions.sidebar.session.reference.success'));
+    } catch {
+      toast.error(t('sessions.sidebar.session.reference.copyError'));
+    }
+  }, [t]);
 
   const collectDescendants = React.useCallback((sessionId: string): Session[] => {
     const collected: Session[] = [];
@@ -274,6 +307,7 @@ export const useSessionActions = (args: Args) => {
     handleCancelEdit,
     handleShareSession,
     handleCopyShareUrl,
+    handleCopySessionReference,
     handleUnshareSession,
     handleDeleteSession,
     confirmDeleteSession,

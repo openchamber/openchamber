@@ -13,6 +13,11 @@ import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
 import { useTraySync } from '@/hooks/useTraySync';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
+import { useOpenChamberAgentWebSocket } from '@/hooks/useOpenChamberAgentWebSocket';
+import { useMessengerBridgeToasts } from '@/hooks/useMessengerBridgeToasts';
+import { useMessengerProjectChannelSync } from '@/hooks/useMessengerProjectChannelSync';
+import { useDiscordStatusResync } from '@/hooks/useDiscordStatusResync';
+import { useDiscordSupersedeMessages } from '@/hooks/useDiscordSupersedeMessages';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
@@ -682,6 +687,17 @@ function App({ apis }: AppProps) {
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
   usePushVisibilityBeacon({ enabled: embeddedBackgroundWorkEnabled });
+  // Activate the OpenChamber agent realtime WS so messenger.bridge.* events, approval
+  // decisions and incoming Discord messages reach the UI.
+  useOpenChamberAgentWebSocket();
+  // Surface bridge events as user-visible toasts.
+  useMessengerBridgeToasts();
+  // Mirror UI project add/rename/remove to Discord channels (two-way sync).
+  useMessengerProjectChannelSync();
+  // After server rebuild/reconnect, refresh Discord badge + listener from live state.
+  useDiscordStatusResync();
+  // Show incoming Discord supersede messages immediately in the chat.
+  useDiscordSupersedeMessages();
   useWebNotificationStream({ enabled: embeddedBackgroundWorkEnabled });
   usePwaInstallPrompt();
 

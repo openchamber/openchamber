@@ -49,6 +49,7 @@ import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { usePendingDiscordStore } from '@/stores/usePendingDiscordStore';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
@@ -782,7 +783,62 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
         onActiveTurnChange: handleActiveTurnChange,
     });
 
-    const viewportMessages = sessionMessages;
+    // Pending Discord message — shown immediately when a Discord message
+    // supersedes the current turn, before the real message arrives via SSE.
+    const pendingDiscordMessage = usePendingDiscordStore(
+        React.useCallback(
+            (s) => (currentSessionId ? s.pending[currentSessionId] ?? null : null),
+            [currentSessionId],
+        ),
+    );
+    const clearPending = usePendingDiscordStore((s) => s.clearPending);
+
+    // Cleanup: when the real superseding user message lands via SSE, clear the
+    // pending placeholder. Only match messages created after the pending
+    // placeholder was shown — not earlier turns in the same session.
+    React.useEffect(() => {
+        if (!currentSessionId || !pendingDiscordMessage) return;
+        const pendingSince = pendingDiscordMessage.timestamp - 2_000;
+        const hasRealUserMessage = sessionMessages.some((m) => {
+            if (m.info.role !== 'user' || m.info.id === pendingDiscordMessage.messageId) {
+                return false;
+            }
+            const created = m.info.time?.created;
+            if (typeof created === 'number' && created >= pendingSince) {
+                return true;
+            }
+            const text = m.parts
+                .filter((part) => part.type === 'text')
+                .map((part) => (part as { text?: string }).text ?? '')
+                .join('');
+            return text === pendingDiscordMessage.text;
+        });
+        if (hasRealUserMessage) {
+            clearPending(currentSessionId);
+        }
+    }, [currentSessionId, pendingDiscordMessage, sessionMessages, clearPending]);
+
+    // Merge pending Discord message into viewport messages for rendering.
+    const viewportMessages = React.useMemo<SessionMessageRecord[]>(() => {
+        if (!currentSessionId || !pendingDiscordMessage) return sessionMessages;
+        const synthetic: SessionMessageRecord = {
+            info: {
+                id: pendingDiscordMessage.messageId,
+                role: 'user',
+                sessionID: currentSessionId,
+                time: { created: pendingDiscordMessage.timestamp, completed: pendingDiscordMessage.timestamp },
+                metadata: { discordPending: true },
+            } as unknown as Message,
+            parts: [
+                {
+                    id: `${pendingDiscordMessage.messageId}_text`,
+                    type: 'text',
+                    text: pendingDiscordMessage.text,
+                } as Part,
+            ],
+        };
+        return [...sessionMessages, synthetic];
+    }, [sessionMessages, pendingDiscordMessage, currentSessionId]);
 
     const timelineController = useChatTimelineController({
         sessionId: currentSessionId,

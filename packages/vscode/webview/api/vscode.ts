@@ -15,8 +15,8 @@ export const createVSCodeActionsAPI = (): VSCodeAPI => ({
     await openVSCodeExternalUrl(url);
   },
 
-  async pickFiles(options): Promise<unknown> {
-    return sendBridgeMessage('api:files/pick', options);
+  async pickFiles(): Promise<unknown> {
+    return sendBridgeMessage('api:files/pick');
   },
 
   async saveImage(payload: unknown): Promise<unknown> {

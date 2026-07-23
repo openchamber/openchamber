@@ -9,20 +9,13 @@ import { createVSCodeActionsAPI } from './vscode';
 import { createVSCodeGitHubAPI } from './github';
 import { createVSCodeNotificationsAPI } from './notifications';
 
-const terminalUnsupported = async (): Promise<never> => {
-  throw new Error('Terminal is not supported in the VS Code runtime');
-};
-
+// Stub APIs return sensible defaults instead of throwing
 const createStubTerminalAPI = (): TerminalAPI => ({
-  listShells: terminalUnsupported,
-  createSession: terminalUnsupported,
-  connect: (_sessionId, handlers) => {
-    handlers.onError?.(new Error('Terminal is not supported in the VS Code runtime'), true);
-    return { close: () => {} };
-  },
-  sendInput: terminalUnsupported,
-  resize: terminalUnsupported,
-  close: terminalUnsupported,
+  createSession: async () => ({ sessionId: '', cols: 80, rows: 24 }),
+  connect: () => ({ close: () => {} }),
+  sendInput: async () => {},
+  resize: async () => {},
+  close: async () => {},
 });
 
 export const createVSCodeAPIs = (): RuntimeAPIs => ({
