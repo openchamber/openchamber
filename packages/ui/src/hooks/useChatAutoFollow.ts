@@ -158,6 +158,10 @@ export const isMiddleButtonAutoScrollIntent = (root: HTMLElement, event: Pick<Mo
     return event.button === 1 && !nestedScrollableTarget(root, event.target);
 };
 
+export const shouldRepinReleasedAutoFollow = (scrollingDown: boolean, atTrueBottom: boolean): boolean => {
+    return scrollingDown || atTrueBottom;
+};
+
 const nestedScrollableCanConsumeUp = (root: HTMLElement, target: EventTarget | null): boolean => {
     const nested = nestedScrollableTarget(root, target);
     if (!nested) return false;
@@ -615,12 +619,16 @@ export const useChatAutoFollow = ({
         if (isNearBottom(el, isMobileRef.current)) {
             const atTrueBottom = distanceFromBottom(el) <= AUTO_MATCH_TOLERANCE_PX;
             if (stateRef.current === 'released') {
-                const elapsedSinceRelease = now() - lastUserReleaseAtRef.current;
-                if (elapsedSinceRelease < REPIN_GRACE_AFTER_RELEASE_MS) {
-                    scheduleRepinAfterGrace(REPIN_GRACE_AFTER_RELEASE_MS - elapsedSinceRelease);
-                } else {
+                if (!shouldRepinReleasedAutoFollow(scrollingDown, atTrueBottom)) {
                     clearDelayedRepin();
-                    setStateValue('following');
+                } else {
+                    const elapsedSinceRelease = now() - lastUserReleaseAtRef.current;
+                    if (elapsedSinceRelease < REPIN_GRACE_AFTER_RELEASE_MS) {
+                        scheduleRepinAfterGrace(REPIN_GRACE_AFTER_RELEASE_MS - elapsedSinceRelease);
+                    } else {
+                        clearDelayedRepin();
+                        setStateValue('following');
+                    }
                 }
             } else if (scrollingDown || stateRef.current === 'following' || atTrueBottom) {
                 clearDelayedRepin();

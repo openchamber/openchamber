@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isAutoFollowReleaseKey, isMiddleButtonAutoScrollIntent } from "./useChatAutoFollow"
+import { isAutoFollowReleaseKey, isMiddleButtonAutoScrollIntent, shouldRepinReleasedAutoFollow } from "./useChatAutoFollow"
 
 class MockElement {
   parent: MockElement | null = null
@@ -74,5 +74,11 @@ describe("useChatAutoFollow intent helpers", () => {
     root.appendChild(nested)
 
     expect(isMiddleButtonAutoScrollIntent(root as unknown as HTMLElement, { button: 1, target: child as unknown as EventTarget })).toBe(false)
+  })
+
+  test("re-pins a released follower only when moving down or at the true bottom", () => {
+    expect(shouldRepinReleasedAutoFollow(false, false)).toBe(false)
+    expect(shouldRepinReleasedAutoFollow(true, false)).toBe(true)
+    expect(shouldRepinReleasedAutoFollow(false, true)).toBe(true)
   })
 })
