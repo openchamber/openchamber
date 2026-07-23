@@ -68,6 +68,8 @@ data/
 workspaces/
 !packages/web/server/lib/workspaces/
 !packages/web/server/lib/workspaces/**
+!packages/ui/src/components/workspaces/
+!packages/ui/src/components/workspaces/**
 *.pid
 .worktrees/
 test-results/
