@@ -199,6 +199,72 @@ describe('openchamber session routes', () => {
     }
   });
 
+  it('creates goal metadata before dispatching the initial goal prompt', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).includes('/prompt_async')) return { ok: true, text: async () => '' };
+      return { ok: true, json: async () => ({ id: 'ses_123' }) };
+    });
+    const createSessionGoal = vi.fn(async () => undefined);
+    globalThis.fetch = fetchMock;
+    try {
+      const { app } = createApp({ createSessionGoal });
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({
+          directory: '/repo/app',
+          prompt: 'Finish and verify the migration',
+          model: 'openai/gpt-5.5',
+          goal: true,
+          goalTokenBudget: 200000,
+        })
+        .expect(200);
+
+      const promptCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/prompt_async'));
+      const promptPayload = JSON.parse(promptCall[1].body);
+      expect(createSessionGoal).toHaveBeenCalledWith(expect.objectContaining({
+        sessionID: 'ses_123',
+        directory: '/repo/app',
+        objective: 'Finish and verify the migration',
+        tokenBudget: 200000,
+        providerID: 'openai',
+        modelID: 'gpt-5.5',
+      }));
+      expect(createSessionGoal.mock.invocationCallOrder[0]).toBeLessThan(fetchMock.mock.invocationCallOrder.at(-1));
+      expect(promptPayload.parts).toEqual([
+        { type: 'text', text: 'Finish and verify the migration' },
+        expect.objectContaining({ type: 'text', synthetic: true }),
+      ]);
+      expect(response.body).toMatchObject({ goalEnabled: true, goalTokenBudget: 200000, promptDispatched: true });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects invalid goal requests before creating a session', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', goal: true })
+        .expect(400, { error: 'prompt is required when goal is enabled' });
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run', goalTokenBudget: 200000 })
+        .expect(400, { error: 'goalTokenBudget requires goal' });
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run', goal: true, goalTokenBudget: 999 })
+        .expect(400, { error: 'goalTokenBudget must be an integer from 1000 to 100000000' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('creates a worktree before creating a session', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (url) => {

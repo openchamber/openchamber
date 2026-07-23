@@ -66,8 +66,9 @@ before touching the filesystem). Rationale: metadata rides every
 - UI display fetches content via the GET route
   (`useGoalObjectiveContent`); in VS Code the route is unavailable, so the
   strip degrades to the audit note (display-only fallback by design).
-- Scheduled goal tasks write the file server-side directly via
-  `objectives.js`.
+- Server-created goals write the file through `create.js`, which also owns
+  objective fitting, inline fallback, metadata creation, and the synthetic
+  first-turn reminder shared by scheduled tasks and CLI-created sessions.
 
 ## Flow
 
@@ -173,6 +174,17 @@ Scheduled tasks can run as goals: `execution.goalEnabled` (+ optional
 stamp `metadata.openchamber.goal` onto the fresh session (objective = the
 expanded task prompt) and attach the goal-mode intro part to the prompt.
 The loop here picks it up from session events like any other goal.
+
+## CLI-created goals
+
+`openchamber session create --prompt <text> --goal` uses the explicit
+`POST /api/openchamber/sessions` orchestration route. The server creates the
+session, fits and stores the expanded prompt as its objective, patches active
+goal metadata, appends the synthetic goal reminder, and only then dispatches
+the prompt. `--goal-token-budget` applies the same optional budget contract as
+scheduled goals. Slash commands retain command dispatch semantics and cannot
+carry the synthetic prompt part; the goal metadata is still installed before
+the command runs.
 
 ## Limitations
 

@@ -3,6 +3,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { createWorktree } from '../git/index.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
+import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
@@ -23,6 +24,28 @@ const splitModel = (value) => {
 
 const FALLBACK_PROVIDER_ID = 'opencode';
 const FALLBACK_MODEL_ID = 'big-pickle';
+const MIN_GOAL_TOKEN_BUDGET = 1_000;
+const MAX_GOAL_TOKEN_BUDGET = 100_000_000;
+
+const resolveGoalInput = (payload, prompt) => {
+  const enabled = payload?.goal === true;
+  if (payload?.goalTokenBudget !== undefined && !enabled) {
+    return { ok: false, error: 'goalTokenBudget requires goal' };
+  }
+  if (enabled && !prompt) {
+    return { ok: false, error: 'prompt is required when goal is enabled' };
+  }
+  if (payload?.goalTokenBudget === undefined) {
+    return { ok: true, enabled, tokenBudget: null };
+  }
+  const tokenBudget = payload.goalTokenBudget;
+  if (!Number.isSafeInteger(tokenBudget)
+    || tokenBudget < MIN_GOAL_TOKEN_BUDGET
+    || tokenBudget > MAX_GOAL_TOKEN_BUDGET) {
+    return { ok: false, error: `goalTokenBudget must be an integer from ${MIN_GOAL_TOKEN_BUDGET} to ${MAX_GOAL_TOKEN_BUDGET}` };
+  }
+  return { ok: true, enabled, tokenBudget };
+};
 
 const isPrimaryAgentMode = (mode) => !mode || mode === 'primary' || mode === 'all';
 
@@ -231,12 +254,17 @@ export const registerOpenChamberSessionRoutes = (app, dependencies) => {
     getOpenCodeAuthHeaders,
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
+    createSessionGoal: createSessionGoalOverride,
   } = dependencies;
 
   app.post('/api/openchamber/sessions', express.json({ limit: '1mb' }), async (req, res) => {
     const payload = req.body && typeof req.body === 'object' ? req.body : {};
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
+    const goalInput = resolveGoalInput(payload, prompt);
+    if (!goalInput.ok) {
+      return res.status(400).json({ error: goalInput.error });
+    }
     let model = splitModel(payload.model)
       || (asNonEmptyString(payload.providerID) && asNonEmptyString(payload.modelID)
         ? { providerID: asNonEmptyString(payload.providerID), modelID: asNonEmptyString(payload.modelID) }
@@ -300,6 +328,21 @@ export const registerOpenChamberSessionRoutes = (app, dependencies) => {
           return res.status(400).json({ error: 'No model is configured or available for the requested directory' });
         }
 
+        const expandedPrompt = expandSnippets(prompt, sessionDirectory);
+        if (goalInput.enabled) {
+          await (createSessionGoalOverride || createSessionGoal)({
+            baseUrl,
+            authHeaders,
+            sessionID,
+            directory: sessionDirectory,
+            objective: expandedPrompt,
+            tokenBudget: goalInput.tokenBudget,
+            providerID: model.providerID,
+            modelID: model.modelID,
+            onWarning: (message, error) => console.warn(`[OpenChamberSessions] ${message}:`, error?.message || error),
+          });
+        }
+
         const parsedCommand = parseScheduledCommandPrompt(prompt);
         if (parsedCommand) {
           try {
@@ -332,7 +375,12 @@ export const registerOpenChamberSessionRoutes = (app, dependencies) => {
               model,
               ...(agent ? { agent } : {}),
               ...(variant ? { variant } : {}),
-              parts: [{ type: 'text', text: expandSnippets(prompt, sessionDirectory) }],
+              parts: [
+                { type: 'text', text: expandedPrompt },
+                ...(goalInput.enabled
+                  ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
+                  : []),
+              ],
             },
           });
           promptDispatched = true;
@@ -350,6 +398,8 @@ export const registerOpenChamberSessionRoutes = (app, dependencies) => {
         ...(prompt && variant ? { variant } : {}),
         promptDispatched,
         dispatchedAsCommand,
+        ...(goalInput.enabled ? { goalEnabled: true } : {}),
+        ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
       };
 
       try {
@@ -364,6 +414,8 @@ export const registerOpenChamberSessionRoutes = (app, dependencies) => {
           ...(prompt && variant ? { variant } : {}),
           promptDispatched,
           dispatchedAsCommand,
+          ...(goalInput.enabled ? { goalEnabled: true } : {}),
+          ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
           createdAt: Date.now(),
         });
       } catch {

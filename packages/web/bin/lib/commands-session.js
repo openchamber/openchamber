@@ -1,6 +1,7 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { requestJson } from './cli-http.js';
 import { resolveTargetPort } from './cli-api-target.js';
+import { parseGoalTokenBudget } from './cli-goal.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -86,6 +87,11 @@ const buildSessionCreatePayload = (options = {}) => {
 
   const prompt = asNonEmptyString(options.prompt);
   const model = validateModel(options.model);
+  const goalEnabled = options.goal === true;
+  const goalTokenBudget = parseGoalTokenBudget(options);
+  if (goalEnabled && !prompt) {
+    throw new TunnelCliError('--goal requires --prompt.', EXIT_CODE.USAGE_ERROR);
+  }
 
   const title = asNonEmptyString(options.title) || asNonEmptyString(options.name);
   const agent = asNonEmptyString(options.agent);
@@ -103,13 +109,15 @@ const buildSessionCreatePayload = (options = {}) => {
     ...(model ? { model } : {}),
     ...(agent ? { agent } : {}),
     ...(variant ? { variant } : {}),
+    ...(goalEnabled ? { goal: true } : {}),
+    ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
     ...(typeof options.setUpstream === 'boolean' ? { setUpstream: options.setUpstream } : {}),
   };
 };
 
 async function sessionCommand(options = {}, action = 'help') {
   if (action === 'help') {
-    process.stdout.write(`OpenChamber Session Commands\n\nUSAGE:\n  openchamber session list [--dir <path>] [--limit <count>] [OPTIONS]\n  openchamber session create --dir <path> [--title <title>] [OPTIONS]\n  openchamber session create --project <projectId> [--title <title>] [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --prompt <text>         Send an initial prompt after session creation\n  --model <provider/model>  Model for the initial prompt (defaults to configured selection)\n  --agent <id>            Agent for the initial prompt (defaults to configured selection)\n  --variant <id>          Model variant for the initial prompt\n  --name <title>          Alias for --title\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
+    process.stdout.write(`OpenChamber Session Commands\n\nUSAGE:\n  openchamber session list [--dir <path>] [--limit <count>] [OPTIONS]\n  openchamber session create --dir <path> [--title <title>] [OPTIONS]\n  openchamber session create --project <projectId> [--title <title>] [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --prompt <text>         Send an initial prompt after session creation\n  --model <provider/model>  Model for the initial prompt (defaults to configured selection)\n  --agent <id>            Agent for the initial prompt (defaults to configured selection)\n  --variant <id>          Model variant for the initial prompt\n  --goal                  Continue the session toward the initial prompt as a goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --name <title>          Alias for --title\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
     return;
   }
 
@@ -158,6 +166,9 @@ async function sessionCommand(options = {}, action = 'help') {
   }
   if (body?.promptDispatched) {
     logStatus('info', body.dispatchedAsCommand ? 'initial command dispatched' : 'initial prompt dispatched');
+  }
+  if (body?.goalEnabled) {
+    logStatus('info', 'goal mode active', body.goalTokenBudget ? `budget: ${body.goalTokenBudget}` : undefined);
   }
   clackOutro('created');
 }

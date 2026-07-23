@@ -27,7 +27,7 @@ Command modules implement user-facing commands and preserve output contracts acr
 
 - `commands-session.js`
   - Implements `openchamber session create` and `openchamber session list`.
-  - Uses OpenChamber session orchestration for create/worktree/prompt flows and compact OpenCode session output for agents.
+  - Uses OpenChamber session orchestration for create/worktree/prompt flows, including optional Goal Mode, and compact OpenCode session output for agents.
 
 - `commands-schedule.js`
   - Implements scheduled task status/list/create/run/delete/enable/disable.
@@ -91,6 +91,9 @@ These modules hold reusable, non-presentational logic for commands.
 
 - `cli-projects.js`
   - Loads configured projects through the settings API and resolves an exact directory to its project id.
+
+- `cli-goal.js`
+  - Owns shared Goal Mode token-budget validation for session and schedule commands.
 
 - `cli-network.js`
   - Host resolution, URL building, LAN detection, unsafe browser port validation, and UI password/network exposure checks.

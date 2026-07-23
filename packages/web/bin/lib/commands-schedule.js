@@ -1,6 +1,7 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { requestJson } from './cli-http.js';
 import { resolveTargetPort } from './cli-api-target.js';
+import { parseGoalTokenBudget } from './cli-goal.js';
 import { resolveProjectIdForDirectory } from './cli-projects.js';
 import {
   intro as clackIntro,
@@ -55,22 +56,6 @@ const parseModel = (value) => {
     providerID: model.slice(0, slashIndex),
     modelID: model.slice(slashIndex + 1),
   };
-};
-
-const parseGoalTokenBudget = (options) => {
-  if (options.goalTokenBudget === undefined) return undefined;
-  if (options.goal !== true) {
-    throw new TunnelCliError('--goal-token-budget requires --goal.', EXIT_CODE.USAGE_ERROR);
-  }
-  const raw = String(options.goalTokenBudget).trim();
-  if (!/^\d+$/.test(raw)) {
-    throw new TunnelCliError('--goal-token-budget must be an integer from 1000 to 100000000.', EXIT_CODE.USAGE_ERROR);
-  }
-  const budget = Number(raw);
-  if (!Number.isSafeInteger(budget) || budget < 1000 || budget > 100000000) {
-    throw new TunnelCliError('--goal-token-budget must be an integer from 1000 to 100000000.', EXIT_CODE.USAGE_ERROR);
-  }
-  return budget;
 };
 
 const parseWeekdays = (value) => {
@@ -329,4 +314,4 @@ async function scheduleCommand(options = {}, action = 'help') {
   throw new TunnelCliError(`Unknown schedule command '${action}'.`, EXIT_CODE.USAGE_ERROR);
 }
 
-export { scheduleCommand, buildTaskPayload, buildSchedule, resolveProjectID, parseGoalTokenBudget, formatGoal };
+export { scheduleCommand, buildTaskPayload, buildSchedule, resolveProjectID, formatGoal };

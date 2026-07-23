@@ -471,6 +471,44 @@ describe('cli args', () => {
     });
   });
 
+  it('builds goal-enabled session create payloads', () => {
+    const parsed = parseArgs([
+      'session',
+      'create',
+      '--dir',
+      '/repo',
+      '--prompt',
+      'Finish and verify the migration',
+      '--goal',
+      '--goal-token-budget',
+      '200000',
+    ]);
+
+    expect(buildSessionCreatePayload(parsed.options)).toEqual({
+      directory: '/repo',
+      prompt: 'Finish and verify the migration',
+      goal: true,
+      goalTokenBudget: 200000,
+    });
+  });
+
+  it('validates session goal options before HTTP', () => {
+    expect(() => buildSessionCreatePayload({ directory: '/repo', goal: true })).toThrow('--goal requires --prompt.');
+    expect(() => buildSessionCreatePayload({
+      directory: '/repo',
+      prompt: 'Run',
+      goalTokenBudget: '200000',
+    })).toThrow('--goal-token-budget requires --goal.');
+    for (const value of ['999', '1.5', '100000001', 'nope']) {
+      expect(() => buildSessionCreatePayload({
+        directory: '/repo',
+        prompt: 'Run',
+        goal: true,
+        goalTokenBudget: value,
+      })).toThrow('--goal-token-budget must be an integer from 1000 to 100000000.');
+    }
+  });
+
   it('parses session list filters', () => {
     const parsed = parseArgs(['session', 'list', '--dir', '/repo', '--limit', '5']);
 
