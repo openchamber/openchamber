@@ -26,8 +26,9 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Formats discovered instances and tunnel readiness/status for human, quiet, and JSON output.
 
 - `commands-session.js`
-  - Implements `openchamber session create` and `openchamber session list`.
-  - Uses OpenChamber session orchestration for create/worktree/prompt flows, including optional Goal Mode, and compact OpenCode session output for agents.
+  - Implements `openchamber session create`, `list`, `status`, and `messages`.
+  - Uses OpenChamber session orchestration for create/worktree/prompt flows, including optional Goal Mode, and official directory-scoped OpenCode APIs for authoritative status and text-only message reads.
+  - Message projection matches Export Markdown semantics: only ordered `text` parts are exposed; tool, reasoning, file, and other parts are omitted.
 
 - `commands-schedule.js`
   - Implements scheduled task status/list/create/run/delete/enable/disable.

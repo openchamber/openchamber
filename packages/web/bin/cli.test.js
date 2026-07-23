@@ -11,7 +11,17 @@ import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { requestJson } from './lib/cli-http.js';
 import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
 import { buildTaskPayload, formatGoal } from './lib/commands-schedule.js';
-import { buildSessionCreatePayload, buildSessionListEndpoint, filterVisibleSessions, formatSessionLine } from './lib/commands-session.js';
+import {
+  buildSessionCreatePayload,
+  buildSessionListEndpoint,
+  buildSessionMessagesEndpoint,
+  buildSessionStatusEndpoint,
+  extractTextMessages,
+  filterVisibleSessions,
+  formatSessionLine,
+  resolveSessionStatus,
+  sessionCommand,
+} from './lib/commands-session.js';
 import { formatModelsOutput } from './lib/commands-models.js';
 import { formatProjectLine } from './lib/commands-projects.js';
 import { normalizeProjects } from './lib/cli-projects.js';
@@ -519,6 +529,93 @@ describe('cli args', () => {
     expect(buildSessionListEndpoint(parsed.options)).toBe('/api/session?directory=%2Frepo');
   });
 
+  it('parses session status and message options', () => {
+    const status = parseArgs(['session', 'status', '--session', 'ses_123', '--dir', '/repo']);
+    expect(status.sessionAction).toBe('status');
+    expect(status.options.session).toBe('ses_123');
+    expect(status.options.directory).toBe('/repo');
+
+    const messages = parseArgs([
+      'session',
+      'messages',
+      '--session',
+      'ses_123',
+      '--dir',
+      '/repo',
+      '--last',
+      '--role',
+      'assistant',
+    ]);
+    expect(messages.sessionAction).toBe('messages');
+    expect(messages.options.last).toBe(true);
+    expect(messages.options.role).toBe('assistant');
+
+    const list = parseArgs(['session', 'list', '--dir', '/repo', '--with-status']);
+    expect(list.options.withStatus).toBe(true);
+  });
+
+  it('builds directory-scoped session read endpoints', () => {
+    expect(buildSessionStatusEndpoint('/repo worktree')).toBe('/api/session/status?directory=%2Frepo+worktree');
+    expect(buildSessionMessagesEndpoint('ses_123', '/repo worktree', 10)).toBe(
+      '/api/session/ses_123/message?directory=%2Frepo+worktree&limit=10',
+    );
+    expect(buildSessionMessagesEndpoint('ses_123', '/repo', undefined)).toBe(
+      '/api/session/ses_123/message?directory=%2Frepo',
+    );
+  });
+
+  it('resolves omitted successful statuses as idle', () => {
+    expect(resolveSessionStatus({}, 'ses_idle')).toEqual({ type: 'idle' });
+    expect(resolveSessionStatus({ ses_busy: { type: 'busy' } }, 'ses_busy')).toEqual({ type: 'busy' });
+    expect(resolveSessionStatus(null, 'ses_unknown')).toBeNull();
+  });
+
+  it('projects only ordered text parts from session messages', () => {
+    const messages = extractTextMessages([
+      {
+        info: { id: 'msg_assistant', role: 'assistant', providerID: 'openai', modelID: 'gpt-5.4-mini', time: { created: 20, completed: 30 } },
+        parts: [
+          { type: 'reasoning', text: 'hidden reasoning' },
+          { type: 'text', text: 'First ' },
+          { type: 'tool', state: {} },
+          { type: 'text', text: 'answer' },
+        ],
+      },
+      {
+        info: { id: 'msg_user', role: 'user', time: { created: 10 } },
+        parts: [{ type: 'text', text: 'Question' }],
+      },
+      {
+        info: { id: 'msg_tool_only', role: 'assistant', time: { created: 15 } },
+        parts: [{ type: 'tool', state: {} }],
+      },
+    ]);
+
+    expect(messages).toEqual([
+      { id: 'msg_user', role: 'user', createdAt: 10, completedAt: null, model: null, text: 'Question' },
+      {
+        id: 'msg_assistant',
+        role: 'assistant',
+        createdAt: 20,
+        completedAt: 30,
+        model: 'openai/gpt-5.4-mini',
+        text: 'First answer',
+      },
+    ]);
+    expect(extractTextMessages([
+      { info: { id: 'msg_user', role: 'user', time: { created: 10 } }, parts: [{ type: 'text', text: 'Question' }] },
+    ], 'assistant')).toEqual([]);
+  });
+
+  it('validates session message selectors before HTTP', async () => {
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', all: true, last: true }, 'messages'))
+      .rejects.toThrow('--all cannot be combined with --last or --limit.');
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', role: 'tool' }, 'messages'))
+      .rejects.toThrow('--role must be one of: all, user, assistant.');
+    await expect(sessionCommand({ session: 'ses_123' }, 'status'))
+      .rejects.toThrow('Missing required --dir.');
+  });
+
   it('parses models command', () => {
     const parsed = parseArgs(['models', '--json']);
 
@@ -569,6 +666,13 @@ describe('cli args', () => {
       directory: '/repo',
       model: { providerID: 'opencode-go', id: 'deepseek-v4-flash', variant: 'default' },
     })).toBe('- `CLI shim changed default smoke` — `opencode-go/deepseek-v4-flash`, `build` — `/repo`');
+    expect(formatSessionLine({
+      title: 'Working session',
+      agent: 'build',
+      directory: '/repo',
+      model: { providerID: 'openai', id: 'gpt-5.4-mini' },
+      status: { type: 'busy' },
+    })).toContain('status:busy');
   });
 
   it('excludes archived sessions by default', () => {

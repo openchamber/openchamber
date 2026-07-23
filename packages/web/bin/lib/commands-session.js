@@ -45,6 +45,94 @@ const normalizeLimit = (value, fallback = 10) => {
   return parsed;
 };
 
+const assertSessionTarget = (options = {}) => {
+  const sessionId = asNonEmptyString(options.session);
+  const directory = asNonEmptyString(options.directory);
+  if (!sessionId) {
+    throw new TunnelCliError('Missing required --session.', EXIT_CODE.USAGE_ERROR);
+  }
+  if (!directory) {
+    throw new TunnelCliError('Missing required --dir.', EXIT_CODE.USAGE_ERROR);
+  }
+  return { sessionId, directory };
+};
+
+const buildSessionStatusEndpoint = (directory) => {
+  const params = new URLSearchParams({ directory });
+  return `/api/session/status?${params.toString()}`;
+};
+
+const buildSessionMessagesEndpoint = (sessionId, directory, limit) => {
+  const params = new URLSearchParams({ directory });
+  if (limit !== undefined) params.set('limit', String(limit));
+  return `/api/session/${encodeURIComponent(sessionId)}/message?${params.toString()}`;
+};
+
+const resolveSessionStatus = (statuses, sessionId) => {
+  if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) return null;
+  const status = statuses[sessionId];
+  if (status && typeof status === 'object' && typeof status.type === 'string') return status;
+  return { type: 'idle' };
+};
+
+const normalizeMessageRole = (value) => {
+  const role = asNonEmptyString(value) || 'all';
+  if (!['all', 'user', 'assistant'].includes(role)) {
+    throw new TunnelCliError('--role must be one of: all, user, assistant.', EXIT_CODE.USAGE_ERROR);
+  }
+  return role;
+};
+
+const extractTextMessages = (messages, role = 'all') => {
+  const source = Array.isArray(messages) ? messages : [];
+  const textMessages = [];
+
+  for (const record of source) {
+    const info = record?.info;
+    const messageRole = info?.role;
+    if ((messageRole !== 'user' && messageRole !== 'assistant') || (role !== 'all' && role !== messageRole)) {
+      continue;
+    }
+
+    const text = Array.isArray(record?.parts)
+      ? record.parts
+        .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+        .map((part) => part.text)
+        .join('')
+        .trim()
+      : '';
+    if (!text) continue;
+
+    const providerID = asNonEmptyString(info.providerID);
+    const modelID = asNonEmptyString(info.modelID);
+    textMessages.push({
+      id: asNonEmptyString(info.id) || '',
+      role: messageRole,
+      createdAt: Number.isFinite(info?.time?.created) ? info.time.created : null,
+      completedAt: Number.isFinite(info?.time?.completed) ? info.time.completed : null,
+      model: providerID && modelID ? `${providerID}/${modelID}` : null,
+      text,
+    });
+  }
+
+  return textMessages.sort((left, right) => (left.createdAt || 0) - (right.createdAt || 0));
+};
+
+const formatTextMessage = (message) => {
+  const label = message.role === 'user' ? 'User' : 'Assistant';
+  const timestamp = message.createdAt ? new Date(message.createdAt).toISOString() : '';
+  const details = [timestamp, message.model].filter(Boolean).join(' ');
+  return `**${label}**${details ? `\n\n*${details}*` : ''}\n\n${message.text}`;
+};
+
+const fetchSessionStatus = async (port, sessionId, directory, options) => {
+  const { response, body } = await requestJson(port, buildSessionStatusEndpoint(directory), options);
+  assertOk(response, body, 'Failed to load session status');
+  const status = resolveSessionStatus(body, sessionId);
+  if (!status) throw new TunnelCliError('Invalid session status response.', EXIT_CODE.GENERAL_ERROR);
+  return status;
+};
+
 const formatSessionModel = (session) => {
   const model = session?.model;
   const providerID = asNonEmptyString(model?.providerID) || asNonEmptyString(model?.providerId);
@@ -60,7 +148,8 @@ const formatSessionLine = (session) => {
   const directory = asNonEmptyString(session?.directory) || 'unknown-directory';
   const selections = [`\`${model}\``, `\`${agent}\``];
   if (variant && variant !== 'default') selections.push(`\`${variant}\``);
-  return `- \`${title}\` — ${selections.join(', ')} — \`${directory}\``;
+  const status = asNonEmptyString(session?.status?.type);
+  return `- \`${title}\` — ${selections.join(', ')}${status ? ` — status:${status}` : ''} — \`${directory}\``;
 };
 
 const buildSessionListEndpoint = (options = {}) => {
@@ -117,7 +206,7 @@ const buildSessionCreatePayload = (options = {}) => {
 
 async function sessionCommand(options = {}, action = 'help') {
   if (action === 'help') {
-    process.stdout.write(`OpenChamber Session Commands\n\nUSAGE:\n  openchamber session list [--dir <path>] [--limit <count>] [OPTIONS]\n  openchamber session create --dir <path> [--title <title>] [OPTIONS]\n  openchamber session create --project <projectId> [--title <title>] [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --prompt <text>         Send an initial prompt after session creation\n  --model <provider/model>  Model for the initial prompt (defaults to configured selection)\n  --agent <id>            Agent for the initial prompt (defaults to configured selection)\n  --variant <id>          Model variant for the initial prompt\n  --goal                  Continue the session toward the initial prompt as a goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --name <title>          Alias for --title\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
+    process.stdout.write(`OpenChamber Session Commands\n\nUSAGE:\n  openchamber session list [--dir <path>] [--limit <count>] [--with-status] [OPTIONS]\n  openchamber session create --dir <path> [--title <title>] [OPTIONS]\n  openchamber session create --project <projectId> [--title <title>] [OPTIONS]\n  openchamber session status --session <id> --dir <path> [OPTIONS]\n  openchamber session messages --session <id> --dir <path> [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n  --with-status           Include authoritative idle/busy/retry status\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --prompt <text>         Send an initial prompt after session creation\n  --model <provider/model>  Model for the initial prompt (defaults to configured selection)\n  --agent <id>            Agent for the initial prompt (defaults to configured selection)\n  --variant <id>          Model variant for the initial prompt\n  --goal                  Continue the session toward the initial prompt as a goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --name <title>          Alias for --title\n\nSTATUS/MESSAGES OPTIONS:\n  --session <id>          Session id\n  --dir <path>            Session directory (required for authoritative scope)\n  --last                  Return only the latest text-bearing message\n  --limit <count>         Maximum text messages to return (default: 10)\n  --all                   Return all text-bearing messages\n  --role <role>           Filter messages: all, user, assistant\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
     return;
   }
 
@@ -126,7 +215,28 @@ async function sessionCommand(options = {}, action = 'help') {
     const port = await resolveTargetPort(options);
     const { response, body } = await requestJson(port, buildSessionListEndpoint(options), options);
     assertOk(response, body, 'Failed to load sessions');
-    const sessions = filterVisibleSessions(body, options).slice(0, limit);
+    let sessions = filterVisibleSessions(body, options).slice(0, limit);
+    if (options.withStatus) {
+      const statusMaps = new Map();
+      const directories = [...new Set(sessions.map((session) => asNonEmptyString(session?.directory)).filter(Boolean))];
+      await Promise.all(directories.map(async (directory) => {
+        try {
+          const { response: statusResponse, body: statusBody } = await requestJson(
+            port,
+            buildSessionStatusEndpoint(directory),
+            options,
+          );
+          statusMaps.set(directory, statusResponse?.ok ? statusBody : null);
+        } catch {
+          statusMaps.set(directory, null);
+        }
+      }));
+      sessions = sessions.map((session) => {
+        const directory = asNonEmptyString(session?.directory);
+        const status = directory ? resolveSessionStatus(statusMaps.get(directory), session.id) : null;
+        return { ...session, status: status || { type: 'unknown' } };
+      });
+    }
     if (isJsonMode(options)) {
       printJson({ sessions, limit, directory: asNonEmptyString(options.directory), archived: options.all ? 'included' : 'excluded' });
       return;
@@ -134,6 +244,67 @@ async function sessionCommand(options = {}, action = 'help') {
     process.stdout.write(sessions.length > 0
       ? `${sessions.map(formatSessionLine).join('\n')}\n`
       : 'No sessions found.\n');
+    return;
+  }
+
+  if (action === 'status') {
+    const { sessionId, directory } = assertSessionTarget(options);
+    const port = await resolveTargetPort(options);
+    const status = await fetchSessionStatus(port, sessionId, directory, options);
+    if (isJsonMode(options)) {
+      printJson({ status: 'ok', sessionId, directory, sessionStatus: status });
+      return;
+    }
+    if (isQuietMode(options)) {
+      process.stdout.write(`${status.type}\n`);
+      return;
+    }
+    process.stdout.write(`${sessionId} status:${status.type} directory:${directory}\n`);
+    return;
+  }
+
+  if (action === 'messages') {
+    const { sessionId, directory } = assertSessionTarget(options);
+    const role = normalizeMessageRole(options.role);
+    if (options.all && (options.last || options.limit !== undefined)) {
+      throw new TunnelCliError('--all cannot be combined with --last or --limit.', EXIT_CODE.USAGE_ERROR);
+    }
+    if (options.last && options.limit !== undefined) {
+      throw new TunnelCliError('--last cannot be combined with --limit.', EXIT_CODE.USAGE_ERROR);
+    }
+    const limit = options.all ? undefined : (options.last ? 1 : normalizeLimit(options.limit));
+    const fetchLimit = options.all ? undefined : Math.max(100, limit * 4);
+    const port = await resolveTargetPort(options);
+    const fetchMessages = async (upstreamLimit) => {
+      const { response, body } = await requestJson(
+        port,
+        buildSessionMessagesEndpoint(sessionId, directory, upstreamLimit),
+        { ...options, timeoutMs: 15_000 },
+      );
+      assertOk(response, body, 'Failed to load session messages');
+      if (!Array.isArray(body)) throw new TunnelCliError('Invalid session messages response.', EXIT_CODE.GENERAL_ERROR);
+      return body;
+    };
+    let rawMessages = await fetchMessages(fetchLimit);
+    let textMessages = extractTextMessages(rawMessages, role);
+    if (!options.all && textMessages.length < limit && rawMessages.length >= fetchLimit) {
+      rawMessages = await fetchMessages(undefined);
+      textMessages = extractTextMessages(rawMessages, role);
+    }
+    const messages = options.all ? textMessages : textMessages.slice(-limit);
+    if (isJsonMode(options)) {
+      printJson({ status: 'ok', sessionId, directory, role, messages });
+      return;
+    }
+    if (messages.length === 0) {
+      process.stdout.write('No text messages found.\n');
+      return;
+    }
+    if (isQuietMode(options)) {
+      process.stdout.write(`${messages.map((message) => message.text).join('\n\n')}\n`);
+      return;
+    }
+    process.stdout.write(`${messages.map(formatTextMessage).join('\n\n---\n\n')}\n`);
     return;
   }
 
@@ -173,4 +344,14 @@ async function sessionCommand(options = {}, action = 'help') {
   clackOutro('created');
 }
 
-export { sessionCommand, buildSessionCreatePayload, formatSessionLine, buildSessionListEndpoint, filterVisibleSessions };
+export {
+  sessionCommand,
+  buildSessionCreatePayload,
+  formatSessionLine,
+  buildSessionListEndpoint,
+  buildSessionStatusEndpoint,
+  buildSessionMessagesEndpoint,
+  filterVisibleSessions,
+  resolveSessionStatus,
+  extractTextMessages,
+};

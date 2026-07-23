@@ -92,6 +92,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     apiOnly: false,
     project: undefined,
     task: undefined,
+    session: undefined,
     prompt: undefined,
     model: undefined,
     daily: undefined,
@@ -106,6 +107,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     goal: false,
     goalTokenBudget: undefined,
     directory: undefined,
+    role: undefined,
+    last: false,
+    withStatus: false,
   };
 
   const removedFlagErrors = [];
@@ -262,6 +266,12 @@ function parseArgs(argv = process.argv.slice(2)) {
         options.task = typeof value === 'string' ? value : options.task;
         break;
       }
+      case 'session': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.session = typeof value === 'string' ? value : options.session;
+        break;
+      }
       case 'prompt': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
@@ -389,6 +399,18 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'all':
         options.all = true;
         break;
+      case 'last':
+        options.last = true;
+        break;
+      case 'with-status':
+        options.withStatus = true;
+        break;
+      case 'role': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.role = typeof value === 'string' ? value : options.role;
+        break;
+      }
       case 'no-follow':
         options.follow = false;
         break;
@@ -532,7 +554,7 @@ COMMANDS:
   restart        Stop and start the server
   status         Show server status
   schedule       Manage scheduled tasks
-  session        Create OpenChamber sessions
+  session        Create, inspect, and read OpenChamber sessions
   models         Show default and favorite models
   projects       Show configured projects and IDs
   control        Show OpenChamber control-plane commands
@@ -589,7 +611,7 @@ USAGE:
 
 COMMANDS:
   status                         Show running OpenChamber runtimes
-  session                        Create sessions and worktree-backed sessions
+  session                        Create, inspect, and read sessions
   models                         Show default and favorite models
   projects                       Show configured projects and IDs
   schedule                       Manage scheduled tasks
@@ -597,7 +619,7 @@ COMMANDS:
   logs                           Tail logs for CLI-managed runtimes
 
 DETAILED HELP:
-  openchamber session --help     Show session creation options and examples
+  openchamber session --help     Show session creation, status, and message options
   openchamber models --help      Show model defaults and favorites help
   openchamber projects --help    Show project list help
   openchamber schedule --help    Show scheduled task actions and schedule options
