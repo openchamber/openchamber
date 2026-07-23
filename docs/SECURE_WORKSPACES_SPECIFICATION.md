@@ -174,11 +174,11 @@ This section records the audited state of the current commits. It is status evid
 
 ### 5.1 Current Commits And Distribution
 
-- Plugin repository `main`: `988c11dfbb3376e5e224596a7a4e39ceaf29171c`.
-- OpenChamber branch `feature/secure-workspaces-plugin`: `ef891e1020fd1d80b22dced709dd8766c085e26e`.
+- Plugin repository `main` and release tag `v0.1.0`: `eedfd5b3a08e99285f3f167c7e7d83799844c03d`.
+- OpenChamber release-artifact pin commit: `aa0ed4bd37140d59c4fa5d08de791285414aa48b`.
 - OpenChamber currently pins the plugin by immutable Git commit in web and Electron package manifests.
 - The current plugin package payload is independently packable and Electron stages and verifies the exact payload.
-- The next plugin CI repair commit will replace the current plugin pin before image digests are added to OpenChamber.
+- OpenChamber server policy owns the exact signed runtime and gateway manifest defaults recorded in section 15; the UI does not duplicate them.
 - For the `v0.1.0` image/provider milestone, immutable Git SHA is the plugin distribution contract. npm trusted publishing is intentionally deferred to a later distribution milestone and no npm token is required now.
 
 ### 5.2 Implemented Security And Correctness Invariants
@@ -206,31 +206,29 @@ The current implementation includes:
 ### 5.3 Validation Evidence At Current Commits
 
 - Plugin unit/contract suite after the local certification fixes: 95 passed, 3 environment-gated skipped.
-- OpenChamber web suite: 835 passed, 1 platform-specific skipped.
+- OpenChamber web suite after release-artifact pinning: 836 passed, 1 platform-specific skipped.
 - Workspace-wide type-check and lint passed.
 - Production web build, documentation validation, server syntax checks, and Electron plugin staging/package tests passed.
 - Electron staged plugin payload contains 29 verified files; packaging verifier tests passed 4/4.
-- Live Docker, k3s port-forward, dedicated Colima HTTPS ingress (`existing-secret` and `cert-manager`), and Apple Container provider lifecycle/security certification passed locally.
+- Live Docker, k3s port-forward, dedicated Colima HTTPS ingress (`existing-secret` and `cert-manager`), and Apple Container provider lifecycle/security certification passed locally; Apple Container was rerun against the published public arm64 digest.
 - Live host-to-host immutable handoff passed against OpenCode `1.18.4`, including pagination, restart, stale review, exact hashes, and timeout recovery.
 - Electron HMR and bundled custom-scheme runtime smoke passed; hosted mobile and Capacitor asset/CORS/runtime tests passed.
 - Independent final code/security audit found no reachable code blocker at the current commits.
 
-These results do not make the release ready because the GHCR packages are private and no signed public release image digest exists.
+These results establish the release artifacts and public-digest provider lifecycle but do not complete the image/provider milestone until the remaining authenticated SSE/WebSocket, volume/port collision, credential rotation, and failure-injection matrix is complete.
 
 ### 5.4 Current Remote CI And Registry Status
 
 The original failures at run `29916187323` were repaired. GitHub Actions run `29925151247` passed the test, multi-architecture build/smoke/vulnerability, Docker live, and Kubernetes port-forward/HTTPS ingress jobs. Push run `29926186376` also passed. Current plugin commit `eedfd5b3a08e99285f3f167c7e7d83799844c03d` passed the same complete gate matrix in run `30017797840`.
 
-Registry preflight run `29927614258` then proved that the repository-scoped Actions token can create and push both run-scoped GHCR candidates and that both exact amd64/arm64 candidate digests pass vulnerability scans and runtime smokes. Both matrix jobs fail only when `GITHUB_TOKEN` attempts to change package visibility to public. The package pages still return `404` anonymously. This is the narrowly proven organization/package-administration blocker that requires an owner or package administrator; no personal registry credential is required or accepted.
+Historical registry preflight run `29927614258` proved candidate creation, exact amd64/arm64 scans and smokes, and the narrow package-visibility blocker. After an organization owner made both packages public, run `30021486938` passed the complete branch gate matrix and both registry-preflight jobs, including anonymous exact-digest pulls without a personal PAT.
 
-Plugin commit `eedfd5b3a08e99285f3f167c7e7d83799844c03d` contains the cert-manager cleanup, Apple Container compatibility fixes, repository guardrails, and registry-preflight handling for owner-managed public visibility described below. It is pushed and covered by remote CI run `30017797840`. Anonymous GHCR token requests still return `401` for both packages, so visibility remains the external blocker.
+Tag `v0.1.0` points to plugin commit `eedfd5b3a08e99285f3f167c7e7d83799844c03d`. Release run `30022813361` passed every branch gate and both publish jobs: exact candidates were scanned, promoted to semver tags, signed with keyless Cosign, signature-verified, and pulled anonymously. The workflow generated SBOM and provenance attestations for both multi-architecture images.
 
 ### 5.5 Remaining Immediate Gates
 
-- Have an organization owner or package administrator make both created GHCR packages public or grant the repository package-administration permission, then rerun registry preflight and verify anonymous exact-digest pulls.
-- Publish signed public `v0.1.0` images and verify unauthenticated exact-digest pulls.
-- Pin the final plugin commit and both published image digests in OpenChamber.
-- Rerun Apple Container certification against the published public arm64 digest and complete the remaining authenticated SSE/WebSocket and failure-injection matrix.
+- Complete the remaining authenticated SSE/WebSocket, volume/port collision, credential rotation, and failure-injection matrix.
+- Record the final public-digest provider evidence and declare only the image/provider milestone ready.
 
 Native iOS, Android, Windows, and Linux application certification is intentionally sequenced after these immediate gates. This deferral does not waive the final product-release matrix and no milestone may be called the complete cross-platform production release until those gates pass.
 
@@ -845,7 +843,7 @@ The absence of an exact Apple equivalent to Docker `no-new-privileges` is a docu
 
 The current `arm64` macOS `26.5.2` host has Apple Container `1.1.0` installed from Apple's signed and notarized `container-1.1.0-installer-signed.pkg`. Its SHA-256 matched `0ca1c42a2269c2557efb1d82b1b38ac553e6a3a3da1b1179c439bcee1e7d6714`, and installation used interactive local administrator approval without storing or automating a credential. `container system start`, native arm64 smoke, and system stop/start passed.
 
-Local provider certification against an immutable locally imported arm64 image passed create, loopback-only target, authenticated HTTP, unauthenticated `401`, source mutation/export, reconciliation, foreign-network collision refusal, system stop/start recovery with an ownership-verified runtime restart, and cleanup. Apple Container `1.1.0` exposed and verified fixes for directory-only bind mounts, explicit named-volume ownership, a minimal `CHOWN` capability on network-disabled ephemeral seed/secret helpers, writable `/tmp` on the read-only runtime, and restart reconciliation. Public-digest, SSE/WebSocket, volume/port collision, credential rotation, and broader failure-injection certification remain required after the GHCR packages are public.
+Local provider certification against an immutable locally imported arm64 image passed create, loopback-only target, authenticated HTTP, unauthenticated `401`, source mutation/export, reconciliation, foreign-network collision refusal, system stop/start recovery with an ownership-verified runtime restart, and cleanup. Apple Container `1.1.0` exposed and verified fixes for directory-only bind mounts, explicit named-volume ownership, a minimal `CHOWN` capability on network-disabled ephemeral seed/secret helpers, writable `/tmp` on the read-only runtime, and restart reconciliation. The same lifecycle passed against the published runtime digest, including system restart repair and cleanup. On the certification link, the initial uncached 569.5 MB manifest pull exceeded the provider's 300-second command timeout and failed explicitly before provider resource mutation; a standalone exact-digest pull completed in 7 minutes 29 seconds, and the cached lifecycle then passed in 21.14 seconds. SSE/WebSocket, volume/port collision, credential rotation, and broader failure injection remain required.
 
 ## 15. Runtime Images
 
@@ -860,7 +858,15 @@ Gateway package: ghcr.io/openchamber/workspace-egress-gateway:0.1.0
 Production references: the same package names pinned as @sha256:<digest>
 ```
 
-The packages do not currently exist as verified public artifacts. At the 2026-07-22 audit, unauthenticated manifest inspection returned `denied` for runtime tags `1.0.0` and `0.1.0` and gateway tag `0.1.0`. The first successful release push creates the real packages. OpenChamber MUST keep image defaults empty until public exact digests are available, then expose one authoritative server-owned default for each image; the UI MUST NOT duplicate image constants.
+Release run `30022813361` published and verified these public multi-architecture manifests:
+
+```text
+Runtime: ghcr.io/openchamber/opencode-workspace@sha256:8bf416c08e3e8ca3b540ee0b834a818770b701bc03be1fac74b919e0c992376c
+Gateway: ghcr.io/openchamber/workspace-egress-gateway@sha256:e12d6c43d598a994cd1825eb0b1f838df7a57c2186b9c4e013c61c30ef7e1b94
+Platforms: linux/amd64, linux/arm64
+```
+
+OpenChamber server policy uses these exact digests as its authoritative defaults. Explicit configured images remain digest-validated, and the UI does not duplicate the constants.
 
 The runtime image MUST:
 
@@ -1216,19 +1222,13 @@ These gates are deferred in execution order, not cancelled. Until they pass, sta
 
 ## 28. Implementation Dependency Order
 
-The core implementation items are complete at the commits recorded in section 5. The remaining execution order is:
+The core implementation, public image release, and OpenChamber artifact pins are complete at the commits recorded in section 5. The remaining execution order is:
 
 1. Keep this specification synchronized with current implementation, evidence, and release decisions.
-2. Push plugin commit `6cb95913f1abd5ea6ef7d92219658f1bee9db43e`, then require every plugin branch gate to pass.
-3. Request the already-proven narrow owner/package-admin GHCR visibility action and rerun registry preflight through anonymous exact-digest pulls.
-4. Tag the final green plugin commit as `v0.1.0`.
-5. Build, scan, smoke, publish, sign, attest, and unauthenticated-pull both exact GHCR image digests.
-6. Rerun Apple Container against the published arm64 digest and finish the remaining SSE/WebSocket, collision, rotation, and failure-injection cases.
-7. Update OpenChamber web/Electron plugin pins, lockfile, staged payload, and authoritative runtime/gateway digest defaults.
-8. Rerun OpenChamber tests, type-check, lint, docs, build, Electron staging/package verification, compatibility, and provider smoke.
-9. Record exact commits, image digests, signatures, attestations, workflow URLs, and remaining deferred platform gates.
-10. Declare only the image/provider milestone ready.
-11. Complete iOS, Android, Windows, Linux, physical-device, and platform-signing gates before the complete product release.
+2. Finish the remaining SSE/WebSocket, volume/port collision, credential rotation, and failure-injection cases.
+3. Record final provider evidence and remaining deferred platform gates.
+4. Declare only the image/provider milestone ready.
+5. Complete iOS, Android, Windows, Linux, physical-device, and platform-signing gates before the complete product release.
 
 ## 29. Validation Responsibilities
 
