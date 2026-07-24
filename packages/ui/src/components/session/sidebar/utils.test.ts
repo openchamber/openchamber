@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
-
-import { isPathWithinProject, isSessionRelatedToProject } from './utils';
+import {
+  isPathWithinProject,
+  selectExpandedParentKeysForContext,
+  toggleExpandedParentKey,
+} from './utils';
 
 describe('isPathWithinProject', () => {
   test('matches child directories for root projects', () => {
@@ -29,85 +31,47 @@ describe('isPathWithinProject', () => {
   });
 });
 
-describe('isSessionRelatedToProject', () => {
-  test('prefers the most specific project root for archived session directories', () => {
-    const session = {
-      id: 'ses_parent_child',
-      directory: '/home/user/proj/foo/src',
-    } as unknown as Session;
+describe('selectExpandedParentKeysForContext', () => {
+  test('keeps project and recent expansion state isolated', () => {
+    const expanded = new Set([
+      'project:active:parent-a',
+      'project:archived:parent-b',
+      'recent:active:parent-a',
+    ]);
 
-    const knownProjectDirectories = new Set(['/home/user', '/home/user/proj/foo']);
-
-    expect(
-      isSessionRelatedToProject(session, '/home/user', new Set(['/home/user']), knownProjectDirectories),
-    ).toBe(false);
-    expect(
-      isSessionRelatedToProject(
-        session,
-        '/home/user/proj/foo',
-        new Set(['/home/user/proj/foo']),
-        knownProjectDirectories,
-      ),
-    ).toBe(true);
+    expect(selectExpandedParentKeysForContext(new Set(), expanded, 'project')).toEqual(new Set([
+      'project:active:parent-a',
+      'project:archived:parent-b',
+    ]));
+    expect(selectExpandedParentKeysForContext(new Set(), expanded, 'recent')).toEqual(new Set([
+      'recent:active:parent-a',
+    ]));
   });
 
-  test('prefers the most specific project worktree when session directory is missing', () => {
-    const session = {
-      id: 'ses_project_worktree',
-      project: {
-        worktree: '/home/user/proj/foo',
-      },
-    } as unknown as Session;
+  test('preserves a context projection when only another context changes', () => {
+    const recent = new Set(['recent:active:parent-a']);
+    const expanded = new Set(['recent:active:parent-a', 'project:active:parent-a']);
 
-    const knownProjectDirectories = new Set(['/home/user', '/home/user/proj/foo']);
+    expect(selectExpandedParentKeysForContext(recent, expanded, 'recent')).toBe(recent);
+  });
+});
 
-    expect(
-      isSessionRelatedToProject(session, '/home/user', new Set(['/home/user']), knownProjectDirectories),
-    ).toBe(false);
-    expect(
-      isSessionRelatedToProject(
-        session,
-        '/home/user/proj/foo',
-        new Set(['/home/user/proj/foo']),
-        knownProjectDirectories,
-      ),
-    ).toBe(true);
+describe('parent expansion state', () => {
+  const recentKey = 'recent:active:parent-a';
+  const projectKey = 'project:active:parent-a';
+
+  test('manually expands and collapses a parent', () => {
+    const expanded = toggleExpandedParentKey(new Set(), recentKey);
+    expect(expanded).toEqual(new Set([recentKey]));
+    expect(toggleExpandedParentKey(expanded, recentKey)).toEqual(new Set());
   });
 
-  test('prefers explicit session directory over broader project worktree metadata', () => {
-    const session = {
-      id: 'ses_directory_beats_worktree',
-      directory: '/home/user/proj/foo/src',
-      project: {
-        worktree: '/home/user',
-      },
-    } as unknown as Session;
+  test('does not change the other render context', () => {
+    const recentExpanded = new Set([recentKey]);
+    const bothExpanded = toggleExpandedParentKey(recentExpanded, projectKey);
+    const projectCollapsed = toggleExpandedParentKey(bothExpanded, projectKey);
 
-    const knownProjectDirectories = new Set(['/home/user', '/home/user/proj/foo']);
-
-    expect(
-      isSessionRelatedToProject(session, '/home/user', new Set(['/home/user']), knownProjectDirectories),
-    ).toBe(false);
-    expect(
-      isSessionRelatedToProject(
-        session,
-        '/home/user/proj/foo',
-        new Set(['/home/user/proj/foo']),
-        knownProjectDirectories,
-      ),
-    ).toBe(true);
-  });
-
-  test('keeps descendant sessions on the broad project when no child project matches', () => {
-    const session = {
-      id: 'ses_home_misc',
-      directory: '/home/user/misc/sandbox',
-    } as unknown as Session;
-
-    const knownProjectDirectories = new Set(['/home/user', '/home/user/proj/foo']);
-
-    expect(
-      isSessionRelatedToProject(session, '/home/user', new Set(['/home/user']), knownProjectDirectories),
-    ).toBe(true);
+    expect(selectExpandedParentKeysForContext(new Set(), bothExpanded, 'recent')).toEqual(new Set([recentKey]));
+    expect(selectExpandedParentKeysForContext(new Set(), projectCollapsed, 'recent')).toEqual(new Set([recentKey]));
   });
 });

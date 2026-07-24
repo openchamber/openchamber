@@ -1,13 +1,15 @@
 import { create } from 'zustand';
-import type { Event } from '@opencode-ai/sdk/v2/client';
+import type { Event, SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { normalizeProjectPath } from '@/lib/projectResolution';
+import {
+  observeSessionActivityEvent,
+  reconcileSessionActivitySnapshot,
+  removeSessionOrdering,
+} from './session-ordering';
 
-// Live busy/retry status for sessions in directories WITHOUT a synced child
-// store. The global event stream (`/api/global/event/ws`) carries status
-// events for every directory, but the sync dispatcher can only apply them to
-// an existing child store — events for unopened directories used to be
-// dropped. They land here instead, so cross-project consumers (the macOS tray)
-// see live status for all sessions, not just the synced ones.
+// Shared live busy/retry index for every directory. Global events update it
+// incrementally and authoritative directory snapshots reconcile it, so each
+// sidebar row can subscribe to one leaf instead of every child store.
 //
 // Only non-idle entries are kept; absence means idle. Entries carry their
 // directory so a polled per-directory snapshot can authoritatively replace
@@ -15,7 +17,7 @@ import { normalizeProjectPath } from '@/lib/projectResolution';
 
 type ActiveStatusType = 'busy' | 'retry';
 
-type GlobalSessionStatusEntry = { status: ActiveStatusType; directory: string };
+type GlobalSessionStatusEntry = { status: SessionStatus; directory: string };
 
 type GlobalSessionStatusState = {
   statusById: Map<string, GlobalSessionStatusEntry>;
@@ -25,8 +27,15 @@ export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() =
   statusById: new Map(),
 }));
 
-const normalizeStatusType = (type: unknown): ActiveStatusType | 'idle' =>
-  type === 'busy' ? 'busy' : type === 'retry' ? 'retry' : 'idle';
+const normalizeStatusType = (type: unknown): ActiveStatusType | 'idle' => {
+  if (type === 'busy') return 'busy';
+  if (type === 'retry') return 'retry';
+  return 'idle';
+};
+
+const statusesEqual = (left: SessionStatus, right: SessionStatus): boolean => (
+  left.type === right.type && JSON.stringify(left) === JSON.stringify(right)
+);
 
 // Both write paths normalize the directory key, so a polled snapshot can
 // authoritatively replace entries written by events (and vice versa) even when
@@ -34,16 +43,16 @@ const normalizeStatusType = (type: unknown): ActiveStatusType | 'idle' =>
 const normalizeDirectory = (directory: string): string =>
   normalizeProjectPath(directory) ?? directory;
 
-const setStatus = (sessionId: string, directory: string, status: ActiveStatusType | 'idle'): void => {
+const setStatus = (sessionId: string, directory: string, status: SessionStatus | { type: 'idle' }): void => {
   useGlobalSessionStatusStore.setState((state) => {
     const current = state.statusById.get(sessionId);
-    if (status === 'idle') {
+    if (status.type === 'idle') {
       if (!current) return state;
       const next = new Map(state.statusById);
       next.delete(sessionId);
       return { statusById: next };
     }
-    if (current && current.status === status && current.directory === directory) return state;
+    if (current && current.directory === directory && statusesEqual(current.status, status)) return state;
     const next = new Map(state.statusById);
     next.set(sessionId, { status, directory });
     return { statusById: next };
@@ -58,15 +67,28 @@ export const applyGlobalSessionStatusEvent = (directory: string, payload: Event)
     case 'session.status': {
       const props = payload.properties as { sessionID?: string; status?: { type?: string } } | undefined;
       if (typeof props?.sessionID !== 'string' || !props.sessionID) return;
-      setStatus(props.sessionID, normalizeDirectory(directory), normalizeStatusType(props.status?.type));
+      const type = normalizeStatusType(props.status?.type);
+      setStatus(
+        props.sessionID,
+        normalizeDirectory(directory),
+        type === 'idle' ? { type: 'idle' } : { ...(props.status ?? {}), type } as SessionStatus,
+      );
+      observeSessionActivityEvent(props.sessionID, type === 'idle' ? 'settled' : 'active');
       return;
     }
     case 'session.idle':
     case 'session.error': {
       const props = payload.properties as { sessionID?: string } | undefined;
       if (typeof props?.sessionID === 'string' && props.sessionID) {
-        setStatus(props.sessionID, normalizeDirectory(directory), 'idle');
+        setStatus(props.sessionID, normalizeDirectory(directory), { type: 'idle' });
+        observeSessionActivityEvent(props.sessionID, 'settled');
       }
+      return;
+    }
+    case 'session.deleted': {
+      const props = payload.properties as { sessionID?: string; info?: { id?: string } } | undefined;
+      const sessionId = props?.sessionID ?? props?.info?.id;
+      if (sessionId) removeSessionOrdering(sessionId);
       return;
     }
     default:
@@ -86,6 +108,10 @@ export const applyGlobalSessionStatusSnapshot = (
 ): void => {
   const directory = normalizeDirectory(rawDirectory);
   const known = new Set(knownSessionIds ?? []);
+  const activeSessionIds = Object.entries(raw)
+    .filter(([, status]) => normalizeStatusType(status?.type) !== 'idle')
+    .map(([sessionId]) => sessionId);
+  reconcileSessionActivitySnapshot(activeSessionIds, known);
   useGlobalSessionStatusStore.setState((state) => {
     let changed = false;
     const next = new Map(state.statusById);
@@ -101,14 +127,15 @@ export const applyGlobalSessionStatusSnapshot = (
       const type = normalizeStatusType(status?.type);
       const current = next.get(sessionId);
       if (type === 'idle') {
-        if (current && current.directory === directory) {
+        if (current && (current.directory === directory || known.has(sessionId))) {
           next.delete(sessionId);
           changed = true;
         }
         continue;
       }
-      if (!current || current.status !== type || current.directory !== directory) {
-        next.set(sessionId, { status: type, directory });
+      const normalizedStatus = { ...status, type } as SessionStatus;
+      if (!current || current.directory !== directory || !statusesEqual(current.status, normalizedStatus)) {
+        next.set(sessionId, { status: normalizedStatus, directory });
         changed = true;
       }
     }

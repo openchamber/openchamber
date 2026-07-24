@@ -225,6 +225,7 @@ export const createScheduledTasksRuntime = (deps) => {
     getOpenCodeAuthHeaders,
     waitForOpenCodeReady,
     emitTaskRunEvent,
+    setSessionAutoAccept,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -609,6 +610,17 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID,
       });
     } catch {
+    }
+
+    if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
+      // Enroll before the prompt goes out so the very first permission request
+      // is already auto-approved. Enrollment failure must not kill the run —
+      // the task still executes, permissions just wait for the user.
+      try {
+        await setSessionAutoAccept(sessionID, true, projectPath);
+      } catch (error) {
+        logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
+      }
     }
 
     if (task.execution.goalEnabled) {

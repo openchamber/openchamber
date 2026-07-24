@@ -38,10 +38,19 @@ export const FadeInOnReveal: React.FC<FadeInOnRevealProps> = ({
         window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const shouldSkip = Boolean(skipAnimation) || (!ignoreContextDisabled && contextDisabled) || reducedMotion;
     const animationEnabled = FADE_ANIMATION_ENABLED || forceAnimation;
-    const [visible, setVisible] = React.useState(shouldSkip);
+    // Latch the animate/skip decision at mount. If skipAnimation flips to true
+    // mid-transition (e.g. the "animate on mount" flag is consumed on the next
+    // re-render), unwrapping the animated div would cut the translate short and
+    // visibly snap the content up by the remaining offset.
+    const animateRef = React.useRef<boolean | null>(null);
+    if (animateRef.current === null) {
+        animateRef.current = animationEnabled && !shouldSkip;
+    }
+    const animate = animateRef.current;
+    const [visible, setVisible] = React.useState(!animate);
 
     React.useEffect(() => {
-        if (!animationEnabled || shouldSkip) {
+        if (!animate) {
             return;
         }
 
@@ -64,9 +73,9 @@ export const FadeInOnReveal: React.FC<FadeInOnRevealProps> = ({
                 window.cancelAnimationFrame(frame);
             }
         };
-    }, [animationEnabled, shouldSkip]);
+    }, [animate]);
 
-    if (!animationEnabled || shouldSkip) {
+    if (!animate) {
         return <>{children}</>;
     }
 

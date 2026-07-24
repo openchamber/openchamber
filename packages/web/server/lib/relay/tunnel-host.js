@@ -141,7 +141,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
   // HTTP
   // -------------------------------------------------------------------------
 
-  const buildRequestHeaders = (rawHeaders) => {
+  const buildRequestHeaders = (rawHeaders, loopbackOrigin) => {
     const headers = {};
     for (const [name, value] of Object.entries(rawHeaders)) {
       if (typeof name !== 'string' || typeof value !== 'string') continue;
@@ -151,6 +151,9 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       headers[lower] = value;
     }
     headers['x-openchamber-relay-connection'] = connectionId;
+    // Browser-generated Origin is not visible to the tunnel client. Present the
+    // loopback origin being dialed and overwrite any client-supplied value.
+    headers.origin = loopbackOrigin;
     return headers;
   };
 
@@ -189,12 +192,13 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       stream.noBody = true;
     }
 
-    const url = `http://127.0.0.1:${getLocalPort()}${request.path}${request.query ? `?${request.query}` : ''}`;
+    const loopbackOrigin = `http://127.0.0.1:${getLocalPort()}`;
+    const url = `${loopbackOrigin}${request.path}${request.query ? `?${request.query}` : ''}`;
     let response;
     try {
       response = await fetch(url, {
         method,
-        headers: buildRequestHeaders(request.headers),
+        headers: buildRequestHeaders(request.headers, loopbackOrigin),
         body: requestBody,
         duplex: hasBody ? 'half' : undefined,
         signal: stream.abort.signal,

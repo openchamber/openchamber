@@ -564,6 +564,8 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --text-meta: ${typography.meta};`);
     vars.push('  /* Micro text - badges, shortcuts, indicators */');
     vars.push(`  --text-micro: ${typography.micro};`);
+    vars.push('  /* Settings page titles - larger than section headers */');
+    vars.push(`  --text-settings-page-title: ${typography.settingsPageTitle};`);
 
      vars.push('  /* Heading line height and letter spacing */');
      vars.push('  --h1-line-height: 1.25rem;');

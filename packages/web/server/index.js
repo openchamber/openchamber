@@ -74,6 +74,7 @@ import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
+import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -162,9 +163,6 @@ function shouldSkipCompression(req, res) {
     return true;
   }
 
-  if (pathname.startsWith('/api/terminal/') && pathname.endsWith('/stream')) {
-    return true;
-  }
   for (const prefix of SSE_PATH_PREFIXES) {
     if (pathname === prefix) {
       return true;
@@ -450,10 +448,7 @@ const sessionRuntime = createSessionRuntime({
   broadcastEvent: broadcastGlobalUiEvent,
 });
 
-const getActiveSessionCount = () => {
-  const snapshot = sessionRuntime.getSessionActivitySnapshot();
-  return Object.values(snapshot).filter((entry) => entry.type === 'busy').length;
-};
+const getActiveSessionCount = () => sessionRuntime.getActiveSessionCount();
 
 const getUpstreamStallTimeoutMs = () => (
   getActiveSessionCount() > 1
@@ -768,6 +763,10 @@ const sessionGoalRuntime = createSessionGoalRuntime({
     });
   },
 });
+const contextObligatoryRuntime = createContextObligatoryRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+});
 
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
@@ -813,6 +812,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     : '';
   sessionAssistRuntime.processPayload(payload, directory);
   sessionGoalRuntime.processPayload(payload, directory);
+  contextObligatoryRuntime.processPayload(payload, directory);
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
@@ -1065,6 +1065,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
+  setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
       try {
@@ -1130,6 +1131,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   openCodeWatcherRuntime,
   sessionAssistRuntime,
   sessionGoalRuntime,
+  contextObligatoryRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),
