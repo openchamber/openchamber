@@ -8,13 +8,13 @@ vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(),
 }));
 
-const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
-
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
+const originalStartTimeout = process.env.OPENCHAMBER_OPENCODE_START_TIMEOUT_MS;
 
 afterEach(() => {
   spawnMock.mockReset();
+  vi.useRealTimers();
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
   } else {
@@ -25,6 +25,12 @@ afterEach(() => {
     process.env.PATH = originalPath;
   } else {
     delete process.env.PATH;
+  }
+
+  if (typeof originalStartTimeout === 'string') {
+    process.env.OPENCHAMBER_OPENCODE_START_TIMEOUT_MS = originalStartTimeout;
+  } else {
+    delete process.env.OPENCHAMBER_OPENCODE_START_TIMEOUT_MS;
   }
 });
 
@@ -43,7 +49,8 @@ const createMockChild = () => {
   return child;
 };
 
-const createRuntime = (overrides = {}) => {
+const createRuntime = async (overrides = {}) => {
+  const { createOpenCodeLifecycleRuntime } = await import(`./lifecycle.js?test=${Date.now()}-${Math.random()}`);
   const state = {
     openCodeWorkingDirectory: '/tmp/project',
     openCodeProcess: null,
@@ -115,7 +122,7 @@ describe('OpenCode lifecycle', () => {
       return child;
     });
 
-    const runtime = createRuntime();
+    const runtime = await createRuntime();
     const server = await runtime.startOpenCode();
     const [binary, args, options] = spawnMock.mock.calls[0];
 
@@ -138,7 +145,7 @@ describe('OpenCode lifecycle', () => {
       return child;
     });
 
-    const runtime = createRuntime({
+    const runtime = await createRuntime({
       buildManagedOpenCodePath: undefined,
       buildAugmentedPath: vi.fn(() => '/home/user/.cargo/bin:/usr/local/bin'),
     });
@@ -161,7 +168,7 @@ describe('OpenCode lifecycle', () => {
       return child;
     });
 
-    const runtime = createRuntime({
+    const runtime = await createRuntime({
       buildManagedOpenCodePath: undefined,
       buildAugmentedPath: undefined,
     });
@@ -190,7 +197,7 @@ describe('OpenCode lifecycle', () => {
       return secondChild;
     });
 
-    const runtime = createRuntime();
+    const runtime = await createRuntime();
 
     await expect(runtime.startOpenCode()).rejects.toThrow('OpenCode process exited before serving with signal SIGTERM. Binary used: opencode. No stdout/stderr captured');
     expect(spawnMock).toHaveBeenCalledTimes(2);
@@ -204,7 +211,7 @@ describe('OpenCode lifecycle', () => {
       throw error;
     });
 
-    const runtime = createRuntime({ applyOpencodeBinaryFromSettings });
+    const runtime = await createRuntime({ applyOpencodeBinaryFromSettings });
 
     await expect(runtime.startOpenCode()).rejects.toThrow('Configured OpenCode binary not found: /missing/opencode');
     expect(applyOpencodeBinaryFromSettings).toHaveBeenCalledTimes(1);
@@ -229,10 +236,32 @@ describe('OpenCode lifecycle', () => {
       return secondChild;
     });
 
-    const runtime = createRuntime();
+    const runtime = await createRuntime();
     const server = await runtime.startOpenCode();
 
     expect(spawnMock).toHaveBeenCalledTimes(2);
+    await server.close();
+  });
+
+  it('cleans up a timed-out managed OpenCode attempt before retrying', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const firstChild = createMockChild();
+    const secondChild = createMockChild();
+    const waitForReady = vi.fn(async () => true);
+    spawnMock.mockImplementationOnce(() => firstChild);
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        secondChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return secondChild;
+    });
+
+    process.env.OPENCHAMBER_OPENCODE_START_TIMEOUT_MS = '10';
+    const runtime = await createRuntime({ waitForReady });
+    const server = await runtime.startOpenCode();
+
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(firstChild.kill).toHaveBeenCalledWith('SIGTERM');
     await server.close();
   });
 });
