@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { PatchDiff } from '@pierre/diffs/react';
@@ -39,6 +38,7 @@ import { JsonSummaryView } from './JsonSummaryView';
 import { Icon } from "@/components/icon/Icon";
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
+import { formatToolParamSummaryValue, shouldShowToolParamSummary } from './toolRenderUtils';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
@@ -1953,6 +1953,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
+    const shouldShowParamSummary = shouldShowToolParamSummary(part.tool);
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
@@ -2023,6 +2024,19 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
     const input = stateWithData.input;
     const time = stateWithData.time;
+
+    const mcpParamSummary = React.useMemo(() => {
+        if (!shouldShowParamSummary || !input || typeof input !== 'object') return '';
+        const keys = Object.keys(input);
+        if (keys.length === 0) return '';
+        const displayKeys = keys.slice(0, 2);
+        const parts = displayKeys.map(key => {
+            const value = (input as Record<string, unknown>)[key];
+            const displayValue = formatToolParamSummaryValue(value);
+            return `${key}: ${displayValue}`;
+        });
+        return parts.join(', ');
+    }, [shouldShowParamSummary, input]);
 
     const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>(() => ({
         start: typeof time?.start === 'number' ? time.start : undefined,
@@ -2301,7 +2315,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const shouldRenderTaskSummary = useDeferredExpandedContent(isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || !!taskSessionId));
     const shouldRenderExpandedContent = useDeferredExpandedContent(!isTaskTool && isExpanded);
 
-    if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
+    if (!shouldTreatAsFinalized && !isActive && !isTaskTool && !shouldShowParamSummary) {
         return null;
     }
 
@@ -2371,6 +2385,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 >
                                     {displayName}
                                 </MinDurationShineText>
+                                {mcpParamSummary && (
+                                    <span className="typography-meta text-muted-foreground/70 truncate" title={mcpParamSummary}>
+                                        ({mcpParamSummary})
+                                    </span>
+                                )}
                             </div>
                             {normalizedPartTool === 'bash' && typeof effectiveTimeStart === 'number' ? (
                                 <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>

@@ -219,9 +219,22 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
 function formatUnknownToolDisplayName(toolName: string): string {
   return toolName
     .trim()
-    .replace(/[_-]+/g, ' ')
+    .replace(/[_.-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^./, (char) => char.toUpperCase());
+}
+
+export function getCanonicalToolName(toolName: unknown): string {
+  if (typeof toolName !== 'string') return '';
+  const trimmed = toolName.trim().toLowerCase();
+  if (!trimmed) return '';
+  return trimmed.replace(/:\d+$/, '');
+}
+
+export function shouldShowToolParamSummary(toolName: unknown): boolean {
+  const canonicalName = getCanonicalToolName(toolName);
+  if (!canonicalName) return false;
+  return !(canonicalName in TOOL_METADATA);
 }
 
 export function getToolMetadata(toolName: string): ToolMetadata {
