@@ -159,6 +159,19 @@ function stripWrappingQuotes(value: string): string {
   return trimmed;
 }
 
+function killProcessTree(pid: number | undefined): void {
+  if (!Number.isInteger(pid)) return;
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        stdio: 'ignore', timeout: 5000, windowsHide: true,
+      });
+    } catch {
+      // ignore
+    }
+  }
+}
+
 function appendToPath(dir: string) {
   const trimmed = (dir || '').trim();
   if (!trimmed) return;
@@ -742,6 +755,7 @@ async function spawnManagedOpenCodeServer(
   return {
     url,
     close: () => {
+      killProcessTree(child.pid);
       try {
         child.kill('SIGTERM');
       } catch {
