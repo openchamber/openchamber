@@ -368,49 +368,117 @@ describe('compatibility exports', () => {
 });
 
 describe('CLI HTTP helpers', () => {
-  it('retries UI-authenticated API requests with the stored instance password', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const port = 45678;
-      fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'secret' }, null, 2));
-      const originalFetch = globalThis.fetch;
-      const calls = [];
-      globalThis.fetch = async (url, options = {}) => {
-        calls.push({ url: String(url), options });
-        if (String(url).endsWith('/auth/session')) {
-          expect(JSON.parse(options.body)).toEqual({ password: 'secret' });
-          return {
-            ok: true,
-            headers: { get: (name) => name.toLowerCase() === 'set-cookie' ? 'oc_ui_session=session-token; Path=/; HttpOnly' : null },
-            json: async () => ({ authenticated: true }),
-          };
-        }
-        if (options.headers?.Cookie === 'oc_ui_session=session-token') {
-          return createMockJsonResponse({ ok: true });
-        }
-        return {
-          ok: false,
-          status: 401,
-          json: async () => ({ error: 'UI authentication required', locked: true }),
-        };
-      };
+  const withUiSessionCookieName = async (cookieName, fn) => {
+    const originalCookieName = process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
+    if (cookieName === undefined) {
+      delete process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
+    } else {
+      process.env.OPENCHAMBER_SESSION_COOKIE_NAME = cookieName;
+    }
 
-      try {
-        const { response, body } = await requestJson(port, '/api/openchamber/tunnel/start', {
-          method: 'POST',
-          body: JSON.stringify({ provider: 'ngrok', mode: 'quick' }),
-        });
-
-        expect(response.ok).toBe(true);
-        expect(body).toEqual({ ok: true });
-        expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
-          '/api/openchamber/tunnel/start',
-          '/auth/session',
-          '/api/openchamber/tunnel/start',
-        ]);
-      } finally {
-        globalThis.fetch = originalFetch;
+    try {
+      return await fn();
+    } finally {
+      if (originalCookieName === undefined) {
+        delete process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
+      } else {
+        process.env.OPENCHAMBER_SESSION_COOKIE_NAME = originalCookieName;
       }
+    }
+  };
+
+  const runUiAuthenticatedRetry = async ({
+    port,
+    cookieName,
+    setCookieHeader,
+    expectedCookie,
+  }) => withUiSessionCookieName(cookieName, () => withTempOpenChamberDataDir(async () => {
+    fs.writeFileSync(
+      await getInstanceFilePath(port),
+      JSON.stringify({ port, uiPassword: 'secret' }, null, 2),
+    );
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      if (String(url).endsWith('/auth/session')) {
+        expect(JSON.parse(options.body)).toEqual({ password: 'secret' });
+        return {
+          ok: true,
+          headers: {
+            get: (name) => name.toLowerCase() === 'set-cookie' ? setCookieHeader : null,
+          },
+          json: async () => ({ authenticated: true }),
+        };
+      }
+      if (options.headers?.Cookie === expectedCookie) {
+        return createMockJsonResponse({ ok: true });
+      }
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: 'UI authentication required', locked: true }),
+      };
+    };
+
+    try {
+      const result = await requestJson(port, '/api/openchamber/tunnel/start', {
+        method: 'POST',
+        body: JSON.stringify({ provider: 'ngrok', mode: 'quick' }),
+      });
+      return { ...result, calls };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }));
+
+  it('retries UI-authenticated API requests with the stored instance password', async () => {
+    const { response, body, calls } = await runUiAuthenticatedRetry({
+      port: 45678,
+      cookieName: undefined,
+      setCookieHeader: 'oc_ui_session=session-token; Path=/; HttpOnly',
+      expectedCookie: 'oc_ui_session=session-token',
     });
+
+    expect(response.ok).toBe(true);
+    expect(body).toEqual({ ok: true });
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+      '/api/openchamber/tunnel/start',
+      '/auth/session',
+      '/api/openchamber/tunnel/start',
+    ]);
+  });
+
+  it('retries UI-authenticated API requests with the configured cookie name', async () => {
+    const { response, body, calls } = await runUiAuthenticatedRetry({
+      port: 45679,
+      cookieName: 'oc_ui_session_3000',
+      setCookieHeader: 'oc_ui_session_3000=session-token; Path=/; HttpOnly',
+      expectedCookie: 'oc_ui_session_3000=session-token',
+    });
+
+    expect(response.ok).toBe(true);
+    expect(body).toEqual({ ok: true });
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+      '/api/openchamber/tunnel/start',
+      '/auth/session',
+      '/api/openchamber/tunnel/start',
+    ]);
+    expect(calls[0].options.headers?.Cookie).toBeUndefined();
+    expect(calls[2].options.headers?.Cookie).toBe('oc_ui_session_3000=session-token');
+  });
+
+  it('matches configured cookie names containing regular-expression characters exactly', async () => {
+    const { response, body, calls } = await runUiAuthenticatedRetry({
+      port: 45680,
+      cookieName: 'oc.ui+session',
+      setCookieHeader: 'ocXuiiisession=wrong-token; Path=/, oc.ui+session=session-token; Path=/; HttpOnly',
+      expectedCookie: 'oc.ui+session=session-token',
+    });
+
+    expect(response.ok).toBe(true);
+    expect(body).toEqual({ ok: true });
+    expect(calls[2].options.headers?.Cookie).toBe('oc.ui+session=session-token');
   });
 });
 

@@ -1,5 +1,10 @@
+import { resolveUiSessionCookieName } from '../ui-auth/ui-session-cookie.js';
+
 export const createRequestSecurityRuntime = (deps) => {
-  const { readSettingsFromDiskMigrated } = deps;
+  const {
+    readSettingsFromDiskMigrated,
+    uiSessionCookieName = resolveUiSessionCookieName(),
+  } = deps;
   // Origins of packaged (non-browser) clients whose WebView origin never
   // matches the server host: the desktop shell, the iOS Capacitor WebView
   // (capacitor://localhost), and the Android Capacitor WebView, which uses
@@ -22,7 +27,7 @@ export const createRequestSecurityRuntime = (deps) => {
       const [rawName, ...rest] = segment.split('=');
       const name = rawName?.trim();
       if (!name) continue;
-      if (name !== 'oc_ui_session') continue;
+      if (name !== uiSessionCookieName) continue;
       const value = rest.join('=').trim();
       try {
         return decodeURIComponent(value || '');
