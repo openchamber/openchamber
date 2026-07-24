@@ -251,10 +251,10 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['collapse', 'expand', 'clamp', 'long messages', 'user messages'],
   },
   {
-    id: 'chat.wide-layout',
+    id: 'chat.message-width',
     page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.wideChatLayout',
-    keywords: ['layout', 'wide', 'messages'],
+    titleKey: 'settings.openchamber.visual.section.chatMessageWidth',
+    keywords: ['layout', 'wide', 'fluid', 'full width', 'messages'],
   },
   {
     id: 'chat.message-appearance',

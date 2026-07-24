@@ -4,6 +4,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import type { ChatMessageWidthMode } from '@/stores/useUIStore';
 
 type ManagedRemoteTunnelPreset = {
   id: string;
@@ -160,7 +161,7 @@ export type DesktopSettings = {
   stickyUserHeader?: boolean;
   promptNavigatorEnabled?: boolean;
   expandedEditorToolbar?: boolean;
-  wideChatLayoutEnabled?: boolean;
+  chatMessageWidthMode?: ChatMessageWidthMode;
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;

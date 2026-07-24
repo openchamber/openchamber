@@ -17,6 +17,7 @@ export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | '
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
+export type ChatMessageWidthMode = 'narrow' | 'wide' | 'fluid';
 export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
@@ -26,6 +27,11 @@ export type FileEditorKeymap = 'default' | 'vim';
 
 function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
   return value === 'vim' ? 'vim' : 'default';
+}
+
+export function normalizeChatMessageWidthMode(value: unknown): ChatMessageWidthMode {
+  if (value === 'wide' || value === 'fluid') return value;
+  return 'narrow';
 }
 
 type ContextPanelTab = {
@@ -646,7 +652,7 @@ interface UIStore {
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
   inputSpellcheckEnabled: boolean;
-  wideChatLayoutEnabled: boolean;
+  chatMessageWidthMode: ChatMessageWidthMode;
   codeBlockLineWrap: boolean;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
@@ -806,7 +812,7 @@ interface UIStore {
   setPersistChatDraft: (value: boolean) => void;
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
-  setWideChatLayoutEnabled: (value: boolean) => void;
+  setChatMessageWidthMode: (value: ChatMessageWidthMode) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
@@ -958,7 +964,7 @@ export const useUIStore = create<UIStore>()(
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: true,
         inputSpellcheckEnabled: false,
-        wideChatLayoutEnabled: false,
+        chatMessageWidthMode: 'narrow',
         codeBlockLineWrap: true,
         showToolFileIcons: true,
         showTurnChangedFiles: false,
@@ -2108,8 +2114,8 @@ export const useUIStore = create<UIStore>()(
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
-        setWideChatLayoutEnabled: (value) => {
-          set({ wideChatLayoutEnabled: value });
+        setChatMessageWidthMode: (value) => {
+          set({ chatMessageWidthMode: normalizeChatMessageWidthMode(value) });
         },
         setCodeBlockLineWrap: (value) => {
           set({ codeBlockLineWrap: value });
@@ -2221,7 +2227,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 11,
+        version: 12,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -2231,6 +2237,14 @@ export const useUIStore = create<UIStore>()(
           // v10 -> v11: move the previous terminal font default forward.
           if (version < 11 && state.terminalFontSize === 13) {
             state.terminalFontSize = 14;
+          }
+
+          // v11 -> v12: replace the old boolean wide layout toggle with a width mode.
+          if (version < 12) {
+            if (state.chatMessageWidthMode !== 'wide' && state.chatMessageWidthMode !== 'fluid') {
+              state.chatMessageWidthMode = state.wideChatLayoutEnabled === true ? 'wide' : 'narrow';
+            }
+            delete state.wideChatLayoutEnabled;
           }
 
           // v9 -> v10: remove obsolete single-file diff view mode setting
@@ -2320,6 +2334,7 @@ export const useUIStore = create<UIStore>()(
           }
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
+          state.chatMessageWidthMode = normalizeChatMessageWidthMode(state.chatMessageWidthMode);
 
           return state;
         },
@@ -2396,7 +2411,7 @@ export const useUIStore = create<UIStore>()(
           persistChatDraft: state.persistChatDraft,
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
-          wideChatLayoutEnabled: state.wideChatLayoutEnabled,
+          chatMessageWidthMode: state.chatMessageWidthMode,
           codeBlockLineWrap: state.codeBlockLineWrap,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,

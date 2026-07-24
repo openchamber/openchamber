@@ -184,6 +184,49 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: 'fixed-layout' })).toEqual({});
   });
 
+  it('accepts chatMessageWidthMode as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ chatMessageWidthMode: 'narrow' })).toEqual({
+      chatMessageWidthMode: 'narrow',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ chatMessageWidthMode: 'wide' })).toEqual({
+      chatMessageWidthMode: 'wide',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ chatMessageWidthMode: 'fluid' })).toEqual({
+      chatMessageWidthMode: 'fluid',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ chatMessageWidthMode: ' fluid ' })).toEqual({
+      chatMessageWidthMode: 'fluid',
+    });
+  });
+
+  it('migrates legacy wideChatLayoutEnabled but rejects unshipped readable mode', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: false })).toEqual({
+      chatMessageWidthMode: 'narrow',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: true })).toEqual({
+      chatMessageWidthMode: 'wide',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ chatMessageWidthMode: 'readable' })).toEqual({});
+  });
+
+  it('removes the legacy wide chat layout flag once a width mode is persisted', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.mergePersistedSettings(
+      { wideChatLayoutEnabled: true, themeId: 'default' },
+      { chatMessageWidthMode: 'fluid' },
+    )).toEqual({
+      themeId: 'default',
+      chatMessageWidthMode: 'fluid',
+      securityScopedBookmarks: [],
+      typographySizes: undefined,
+    });
+  });
+
   it('accepts collapsibleThinkingBlocks as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 

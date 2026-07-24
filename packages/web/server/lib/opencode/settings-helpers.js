@@ -537,6 +537,15 @@ export const createSettingsHelpers = (dependencies) => {
         result.userMessageRenderingMode = mode;
       }
     }
+    if (typeof candidate.chatMessageWidthMode === 'string') {
+      const mode = candidate.chatMessageWidthMode.trim();
+      if (mode === 'narrow' || mode === 'wide' || mode === 'fluid') {
+        result.chatMessageWidthMode = mode;
+      }
+    }
+    if (!result.chatMessageWidthMode && typeof candidate.wideChatLayoutEnabled === 'boolean') {
+      result.chatMessageWidthMode = candidate.wideChatLayoutEnabled ? 'wide' : 'narrow';
+    }
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }
@@ -851,6 +860,10 @@ export const createSettingsHelpers = (dependencies) => {
       ),
       typographySizes: nextTypographySizes
     };
+
+    if (typeof next.chatMessageWidthMode === 'string') {
+      delete next.wideChatLayoutEnabled;
+    }
 
     return next;
   };

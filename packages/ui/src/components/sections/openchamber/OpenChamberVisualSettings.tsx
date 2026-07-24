@@ -3,7 +3,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
-import { useUIStore } from '@/stores/useUIStore';
+import { useUIStore, type ChatMessageWidthMode } from '@/stores/useUIStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -178,6 +178,12 @@ const USER_MESSAGE_RENDERING_OPTIONS: Option<'markdown' | 'plain'>[] = [
     },
 ];
 
+const CHAT_MESSAGE_WIDTH_OPTIONS: Option<ChatMessageWidthMode>[] = [
+    { id: 'narrow', labelKey: 'settings.openchamber.visual.option.chatMessageWidth.narrow.label' },
+    { id: 'wide', labelKey: 'settings.openchamber.visual.option.chatMessageWidth.wide.label' },
+    { id: 'fluid', labelKey: 'settings.openchamber.visual.option.chatMessageWidth.fluid.label' },
+];
+
 const CHAT_RENDER_MODE_OPTIONS: Option<'sorted' | 'live'>[] = [
     {
         id: 'sorted',
@@ -271,7 +277,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'chatMessageWidth' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -312,8 +318,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const expandedEditorToolbar = useUIStore(state => state.expandedEditorToolbar);
     const setExpandedEditorToolbar = useUIStore(state => state.setExpandedEditorToolbar);
-    const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
-    const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
+    const chatMessageWidthMode = useUIStore(state => state.chatMessageWidthMode);
+    const setChatMessageWidthMode = useUIStore(state => state.setChatMessageWidthMode);
     const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
     const setCodeBlockLineWrap = useUIStore(state => state.setCodeBlockLineWrap);
     const chatRenderMode = useUIStore(state => state.chatRenderMode);
@@ -489,10 +495,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ collapsibleUserMessages: enabled });
     }, [setCollapsibleUserMessages]);
 
-    const handleWideChatLayoutChange = React.useCallback((enabled: boolean) => {
-        setWideChatLayoutEnabled(enabled);
-        void updateDesktopSettings({ wideChatLayoutEnabled: enabled });
-    }, [setWideChatLayoutEnabled]);
+    const handleChatMessageWidthChange = React.useCallback((mode: ChatMessageWidthMode) => {
+        setChatMessageWidthMode(mode);
+        void updateDesktopSettings({ chatMessageWidthMode: mode });
+    }, [setChatMessageWidthMode]);
 
     const handleShowSplitAssistantMessageActionsChange = React.useCallback((enabled: boolean) => {
         setShowSplitAssistantMessageActions(enabled);
@@ -612,7 +618,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
         || (shouldShow('promptNavigatorEnabled') && !isVSCode)
-        || shouldShow('wideChatLayout')
+        || shouldShow('chatMessageWidth')
         || shouldShow('codeBlockLineWrap')
         || shouldShow('splitAssistantMessageActions')
         || shouldShow('subagentReadOnlyBanner')
@@ -638,7 +644,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
         || (shouldShow('promptNavigatorEnabled') && !isVSCode)
-        || shouldShow('wideChatLayout')
+        || shouldShow('chatMessageWidth')
         || shouldShow('codeBlockLineWrap')
         || shouldShow('splitAssistantMessageActions')
         || shouldShow('dotfiles')
@@ -1823,7 +1829,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </SettingsSection>
                                 )}
 
-                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
+                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('chatMessageWidth') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
                                 <SettingsSection
                                     title={t('settings.openchamber.visual.section.messageAppearance')}
                                     settingsItem="chat.message-appearance"
@@ -1859,14 +1865,20 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     />
                                 )}
 
-                                {shouldShow('wideChatLayout') && (
-                                    <SettingsCheckboxRow
-                                        checked={wideChatLayoutEnabled}
-                                        onChange={handleWideChatLayoutChange}
-                                        label={t('settings.openchamber.visual.field.wideChatLayout')}
-                                        ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
-                                        settingsItem="chat.wide-layout"
-                                    />
+                                {shouldShow('chatMessageWidth') && (
+                                    <SettingsControlGroup title={t('settings.openchamber.visual.section.chatMessageWidth')} settingsItem="chat.message-width">
+                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.chatMessageWidthAria')}>
+                                            {CHAT_MESSAGE_WIDTH_OPTIONS.map((option) => (
+                                                <SettingsRadioOption
+                                                    key={option.id}
+                                                    selected={chatMessageWidthMode === option.id}
+                                                    onSelect={() => handleChatMessageWidthChange(option.id)}
+                                                    label={tUnsafe(option.labelKey)}
+                                                    ariaLabel={t('settings.openchamber.visual.field.chatMessageWidthAria', { option: tUnsafe(option.labelKey) })}
+                                                />
+                                            ))}
+                                        </SettingsRadioGroup>
+                                    </SettingsControlGroup>
                                 )}
 
                                 {shouldShow('splitAssistantMessageActions') && (
