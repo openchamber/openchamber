@@ -130,8 +130,9 @@ export const BehaviorPage: React.FC = () => {
         ]);
 
         let nextSettings: BehaviorSettingsState = DEFAULT_BEHAVIOR_SETTINGS;
+        let settingsGlobalBehaviorPrompt: string | undefined;
         if (settingsRes.ok) {
-          const data = await settingsRes.json();
+          const data = (await settingsRes.json()) as Record<string, unknown>;
           nextSettings = {
             ...nextSettings,
             responseStyleEnabled: data.responseStyleEnabled === true,
@@ -141,15 +142,22 @@ export const BehaviorPage: React.FC = () => {
               : '',
           };
           if (typeof data.globalBehaviorPrompt === 'string') {
-            nextSettings = { ...nextSettings, prompt: data.globalBehaviorPrompt };
+            settingsGlobalBehaviorPrompt = data.globalBehaviorPrompt;
           }
         }
 
-        if (!nextSettings.prompt.trim() && agentsMdRes.ok) {
+        // AGENTS.md is the source of truth for the system prompt — read it
+        // first so that external edits are always reflected. Only fall back to
+        // the persisted copy (globalBehaviorPrompt) when the file is missing
+        // or empty.
+        if (agentsMdRes.ok) {
           const agentsData = await agentsMdRes.json();
-          if (typeof agentsData.content === 'string') {
+          if (typeof agentsData.content === 'string' && agentsData.content.trim()) {
             nextSettings = { ...nextSettings, prompt: agentsData.content };
           }
+        }
+        if (!nextSettings.prompt.trim() && typeof settingsGlobalBehaviorPrompt === 'string') {
+          nextSettings = { ...nextSettings, prompt: settingsGlobalBehaviorPrompt };
         }
 
         setPrompt(nextSettings.prompt);
