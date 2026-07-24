@@ -4,8 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- **Desktop/Linux:** official AppImage releases for x64 and arm64, with in-app updates from the GitHub release feed. Missing update manifests are treated as “no update” instead of a hard failure, and updater errors surface in About/sidebar.
-- Desktop/Linux: frameless window controls, system tray minimize, launch at login via XDG autostart, multi-window support, and “Open in” for discovered installed apps.
+- **Desktop/Linux:** official AppImage releases for x64 and arm64, with in-app updates from the GitHub release feed. Missing update manifests are treated as “no update” instead of a hard failure, and updater errors surface in About/sidebar (thanks to @jibanez-staticduo).
+- Desktop/Linux: frameless window controls, system tray minimize, launch at login via XDG autostart, multi-window support, and “Open in” for discovered installed apps (thanks to @jibanez-staticduo, @makeittech).
 
 ## [1.16.3] - 2026-07-22
 
