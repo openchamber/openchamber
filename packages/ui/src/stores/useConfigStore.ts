@@ -2548,9 +2548,12 @@ export const useConfigStore = create<ConfigStore>()(
                 // Re-applies the same priority cascade used at app startup (see loadAgents):
                 //   agent: settings.defaultAgent → build → first primary → first agent
                 //   model: project.defaultModel → settings.defaultModel → agent's preferred model → opencode/big-pickle → first
-                // Used when entering a fresh draft session so model/agent reset to defaults
-                // instead of sticking to the previously open session's selection.
+                // Used when entering a fresh draft session. The manual guard preserves a
+                // persisted or previously selected manual model so the user's choice is not
+                // lost on restart or across drafts. Without a manual selection (selectionSource
+                // is "auto"), the guard falls through to the cascade defaults.
                 applyDefaultModelAgentSelection: (options) => {
+                    const state = get();
                     const {
                         agents,
                         providers,
@@ -2559,18 +2562,13 @@ export const useConfigStore = create<ConfigStore>()(
                         settingsDefaultAgent,
                         opencodeDefaultAgent,
                         opencodeDefaultModel,
-                    } = get();
+                    } = state;
 
                     if (agents.length === 0 || providers.length === 0) {
                         return;
                     }
 
-                    const {
-                        agentName: resolvedAgentName,
-                        providerId: resolvedProviderId,
-                        modelId: resolvedModelId,
-                        variant: resolvedVariant,
-                    } = resolveDefaultAgentModelSelection({
+                    const resolvedDefault = resolveDefaultAgentModelSelection({
                         agents,
                         providers,
                         projectDefaultModel: options?.projectDefaultModel,
@@ -2581,9 +2579,26 @@ export const useConfigStore = create<ConfigStore>()(
                         opencodeDefaultModel,
                     });
 
-                    if (!resolvedAgentName) {
+                    if (!resolvedDefault.agentName) {
                         return;
                     }
+
+                    // Use the manual guard so any manual selection (persisted across restart
+                    // or set earlier in the session) is preserved. Without a manual selection
+                    // (selectionSource is "auto"), the guard falls through to the cascade.
+                    const nextSelection = resolveSelectionWithManualGuard({
+                        agents,
+                        providers,
+                        currentAgentName: state.currentAgentName,
+                        currentProviderId: state.currentProviderId,
+                        currentModelId: state.currentModelId,
+                        currentVariant: state.currentVariant,
+                        selectionSource: state.selectionSource,
+                        resolvedAgentName: resolvedDefault.agentName,
+                        resolvedProviderId: resolvedDefault.providerId,
+                        resolvedModelId: resolvedDefault.modelId,
+                        resolvedVariant: resolvedDefault.variant,
+                    });
 
                     set((state) => {
                         const directoryKey = state.activeDirectoryKey;
@@ -2601,32 +2616,32 @@ export const useConfigStore = create<ConfigStore>()(
 
                         const nextSnapshot: DirectoryScopedConfig = {
                             ...baseSnapshot,
-                            currentAgentName: resolvedAgentName,
-                            ...(resolvedProviderId && resolvedModelId
+                            currentAgentName: nextSelection.agentName,
+                            ...(nextSelection.providerId && nextSelection.modelId
                                 ? {
-                                    currentProviderId: resolvedProviderId,
-                                    currentModelId: resolvedModelId,
-                                    currentVariant: resolvedVariant,
-                                    selectedProviderId: preserveAddProviderSelection(state.selectedProviderId, resolvedProviderId),
+                                    currentProviderId: nextSelection.providerId,
+                                    currentModelId: nextSelection.modelId,
+                                    currentVariant: nextSelection.variant,
+                                    selectedProviderId: preserveAddProviderSelection(state.selectedProviderId, nextSelection.providerId),
                                 }
                                 : {}),
-                            selectionSource: "auto",
+                            selectionSource: nextSelection.selectionSource,
                         };
 
                         const nextState: Partial<ConfigStore> = {
-                            currentAgentName: resolvedAgentName,
-                            selectionSource: "auto",
+                            currentAgentName: nextSelection.agentName,
+                            selectionSource: nextSelection.selectionSource,
                             directoryScoped: {
                                 ...state.directoryScoped,
                                 [directoryKey]: nextSnapshot,
                             },
                         };
 
-                        if (resolvedProviderId && resolvedModelId) {
-                            nextState.currentProviderId = resolvedProviderId;
-                            nextState.currentModelId = resolvedModelId;
-                            nextState.currentVariant = resolvedVariant;
-                            nextState.selectedProviderId = preserveAddProviderSelection(state.selectedProviderId, resolvedProviderId);
+                        if (nextSelection.providerId && nextSelection.modelId) {
+                            nextState.currentProviderId = nextSelection.providerId;
+                            nextState.currentModelId = nextSelection.modelId;
+                            nextState.currentVariant = nextSelection.variant;
+                            nextState.selectedProviderId = preserveAddProviderSelection(state.selectedProviderId, nextSelection.providerId);
                         }
 
                         return nextState;
@@ -3319,6 +3334,7 @@ export const useConfigStore = create<ConfigStore>()(
                     currentVariant: state.currentVariant,
                     currentAgentName: state.currentAgentName,
                     selectedProviderId: sanitizePersistedSelectedProviderId(state.selectedProviderId),
+                    selectionSource: state.selectionSource,
                     agentModelSelections: state.agentModelSelections,
                     defaultProviders: state.defaultProviders,
                     settingsDefaultModel: state.settingsDefaultModel,
