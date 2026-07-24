@@ -427,6 +427,38 @@ export function applyDirectoryEvent(
           ? next.findIndex((p) => p.type === part.type && !(p as { sessionID?: string }).sessionID)
           : -1
         if (optimisticIdx >= 0) {
+          // For text parts: if the server echo is a non-empty strict prefix of
+          // the optimistic text (shorter and starts with it), keep the optimistic
+          // part as-is. OpenCode echo for slash commands / skills / agent-only
+          // prompts can strip trailing user input; the optimistic insert already
+          // carries the full text typed by the user, so do not regress it.
+          if (part.type === "text") {
+            const optimisticText = (next[optimisticIdx] as { text?: string }).text
+            const serverText = (part as { text?: string }).text
+            if (typeof optimisticText === "string" && typeof serverText === "string"
+              && serverText.length > 0
+              && optimisticText.length > serverText.length
+              && optimisticText.startsWith(serverText)) {
+              // Keep the optimistic text (it carries the full user input that
+              // the server echo dropped), but adopt the server part's id so any
+              // follow-up `message.part.updated` for the same part will find
+              // and update this entry instead of being treated as a new part.
+              const adoptedPart = {
+                ...(next[optimisticIdx] as Record<string, unknown>),
+                id: part.id,
+                sessionID: (part as { sessionID?: string }).sessionID,
+              } as Part
+              const adopted = [...next]
+              adopted[optimisticIdx] = adoptedPart
+              draft.part[messageID] = adopted
+              return missingOwningMessage
+                ? {
+                  changed: true,
+                  materialization: { type: "incomplete-session-snapshot", sessionID, messageID, partID: part.id },
+                }
+                : true
+            }
+          }
           next.splice(optimisticIdx, 1)
         }
         const insertResult = Binary.search(next, part.id, (p) => p.id)
