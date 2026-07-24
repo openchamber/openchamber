@@ -1078,3 +1078,210 @@ describe("dismissOpenQuestionsForSession", () => {
     expect(store.getState().question["session-a"]).toBe(undefined)
   })
 })
+
+describe("optimisticSend resolved payload (#1944)", () => {
+  const wireOptimisticAdd = (store: ReturnType<typeof createStore>) =>
+    (input: OptimisticAddCall) => {
+      const current = store.getState()
+      const messages = current.message[input.sessionID]
+        ? [...current.message[input.sessionID]!]
+        : []
+      const existingIndex = messages.findIndex((m) => m.id === input.message.id)
+      if (existingIndex < 0) messages.push(input.message)
+      const nextMessage = { ...current.message, [input.sessionID]: messages }
+      const nextPart = { ...current.part, [input.message.id]: input.parts }
+      store.setState({ message: nextMessage, part: nextPart })
+    }
+
+  test("applies server-resolved message fields and parts to the existing optimistic placeholder", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const optimisticAdds: OptimisticAddCall[] = []
+    let sentMessageID = ""
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        optimisticAdds.push(input)
+        wireOptimisticAdd(targetStore)(input)
+      },
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-cmd",
+      directory: "/target/project",
+      content: "/push-merge target-branch",
+      providerID: "openai",
+      modelID: "gpt-4o",
+      send: async (messageID) => {
+        sentMessageID = messageID
+        // Simulate the OpenCode server returning the resolved user message
+        // (with !`shell` substitutions applied) for session.command.
+        return {
+          info: {
+            id: messageID,
+            sessionID: "session-cmd",
+            role: "user",
+            time: { created: 1700000000000 },
+            agent: "build",
+            model: { providerID: "openai", modelID: "gpt-4o" },
+            system: "resolved-system-prompt",
+          } as Message,
+          parts: [
+            { id: "prt_resolved", type: "text", text: "push-merge main" } as Part,
+          ],
+        }
+      },
+    })
+
+    // First _optimisticAdd: the optimistic placeholder with the user-typed content.
+    expect(optimisticAdds).toHaveLength(2)
+    const firstAdd = optimisticAdds[0]
+    expect(firstAdd.message.id).toBe(sentMessageID)
+    expect(firstAdd.parts[0]?.type).toBe("text")
+
+    // Second _optimisticAdd: the server-resolved payload.
+    const secondAdd = optimisticAdds[1]
+    expect(secondAdd.message.id).toBe(sentMessageID)
+    expect(secondAdd.parts[0]?.type).toBe("text")
+    expect((secondAdd.parts[0] as { text?: string }).text).toBe("push-merge main")
+
+    // Message-level fields from the resolved info are patched onto the
+    // existing message in the store (#1949 review).
+    const storedMessages = targetStore.getState().message["session-cmd"]
+    expect(Array.isArray(storedMessages)).toBe(true)
+    const stored = (storedMessages as Message[]).find((m) => m.id === sentMessageID)
+    expect(stored).not.toBe(undefined)
+    expect(stored?.agent).toBe("build")
+    expect((stored as { system?: string } | undefined)?.system).toBe("resolved-system-prompt")
+
+    // Parts in the store reflect the resolved value, not the placeholder text.
+    const storedParts = targetStore.getState().part[sentMessageID]
+    expect(storedParts).not.toBe(undefined)
+    const textPart = (storedParts as Part[]).find((p) => p.type === "text")
+    expect((textPart as { text?: string } | undefined)?.text).toBe("push-merge main")
+  })
+
+  test("does not call _optimisticAdd twice when the send returns no resolved payload", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const optimisticAdds: OptimisticAddCall[] = []
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        optimisticAdds.push(input)
+      },
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-cmd",
+      directory: "/target/project",
+      content: "/push-merge target-branch",
+      providerID: "openai",
+      modelID: "gpt-4o",
+      send: async () => {
+        // Server returned no payload — falls back to SSE-only path.
+      },
+    })
+
+    expect(optimisticAdds).toHaveLength(1)
+  })
+
+  test("patches the message even when resolved.parts is empty (OCR finding)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let sentMessageID = ""
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        wireOptimisticAdd(targetStore)(input)
+      },
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-cmd",
+      directory: "/target/project",
+      content: "/push-merge target-branch",
+      providerID: "openai",
+      modelID: "gpt-4o",
+      send: async (messageID) => {
+        sentMessageID = messageID
+        // Server returns info but no parts (e.g. malformed response).
+        return {
+          info: {
+            id: messageID,
+            sessionID: "session-cmd",
+            role: "user",
+            time: { created: 1700000000000 },
+            agent: "build",
+            model: { providerID: "openai", modelID: "gpt-4o" },
+            system: "resolved-system-prompt",
+          } as Message,
+          parts: [],
+        }
+      },
+    })
+
+    // Message-level fields must still be patched even when parts is empty.
+    const storedMessages = targetStore.getState().message["session-cmd"] as Message[]
+    const stored = storedMessages.find((m) => m.id === sentMessageID)
+    expect(stored).not.toBe(undefined)
+    expect(stored?.agent).toBe("build")
+  })
+
+  test("does not clobber placeholder fields that the server did not return (OCR finding)", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let sentMessageID = ""
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        wireOptimisticAdd(targetStore)(input)
+      },
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-cmd",
+      directory: "/target/project",
+      content: "/push-merge target-branch",
+      providerID: "openai",
+      modelID: "gpt-4o",
+      send: async (messageID) => {
+        sentMessageID = messageID
+        // Server returns ONLY `agent` and `time`. The placeholder had its
+        // own `system` and `model`; the patch must preserve them rather
+        // than overwriting with undefined.
+        return {
+          info: {
+            id: messageID,
+            sessionID: "session-cmd",
+            role: "user",
+            time: { created: 1700000000000 },
+            agent: "build",
+          } as Message,
+          parts: [{ id: "prt_resolved", type: "text", text: "push-merge main" } as Part],
+        }
+      },
+    })
+
+    const storedMessages = targetStore.getState().message["session-cmd"] as Message[]
+    const stored = storedMessages.find((m) => m.id === sentMessageID) as Record<string, unknown> | undefined
+    expect(stored).not.toBe(undefined)
+    expect(stored?.agent).toBe("build")
+    // The server payload did not include `system` or `model`; the
+    // placeholder's values must survive the patch.
+    expect(stored?.system).toBe("")
+    expect(stored?.model).toBe("openai/gpt-4o")
+  })
+})

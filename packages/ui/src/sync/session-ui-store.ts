@@ -140,7 +140,7 @@ export function routeMessage(params: {
           files: params.files,
           messageId: messageID,
           directory: requestDirectory,
-        }).then(() => {}),
+        }).then(({ resolved }) => resolved ?? undefined),
       })
     }
   }
