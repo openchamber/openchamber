@@ -389,10 +389,8 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
           await git.gitPull(currentDirectory, { remote: remote.name, branch: trackedBranch, rebase: true });
         }
 
-        const afterPull = await git.getGitStatus(currentDirectory);
-        if ((afterPull.ahead ?? 0) > 0) {
-          await git.gitPush(currentDirectory);
-        }
+        // Always push the new commit; gating on ahead skips branches with no upstream.
+        await git.gitPush(currentDirectory);
 
         await refreshStatusAndBranches(false);
         await refreshRemotes();
