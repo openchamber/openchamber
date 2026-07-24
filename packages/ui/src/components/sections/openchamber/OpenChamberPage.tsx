@@ -14,7 +14,7 @@ import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { useDeviceInfo } from '@/lib/device';
-import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime, usesFramelessElectronChrome } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { isCapacitorApp } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -42,7 +42,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
     const showAbout = isMobile && isWebRuntime();
     const isVSCode = isVSCodeRuntime();
     void runtimeEndpointEpoch;
-    const showDesktopNetworkSettings = isDesktopShell() && (isDesktopLocalOriginActive() || usesFramelessElectronChrome());
+    const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
 
     // If no section specified, show all (mobile/legacy behavior)
     if (!section) {
@@ -135,7 +135,7 @@ const GeneralSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
     void runtimeEndpointEpoch;
-    const showDesktopNetworkSettings = isDesktopShell() && (isDesktopLocalOriginActive() || usesFramelessElectronChrome());
+    const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
     // Passkeys only work against the browser's WebAuthn UI on the web surface —
     // desktop shell, VS Code, and the Capacitor app never show the login screen.
     const showPasskeySettings = isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp();
@@ -162,6 +162,7 @@ const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     return <OpenChamberVisualSettings visibleSettings={[
         'theme',
+        'windowControlsPosition',
         'pwaInstallName',
         'pwaOrientation',
         'mobileKeyboardMode',

@@ -392,7 +392,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'sessions.desktop-window-controls-position',
-    page: 'general',
+    page: 'appearance',
     titleKey: 'settings.openchamber.desktopNetwork.field.windowControlsPosition',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.windowControlsPositionDescription',
     keywords: ['desktop', 'window', 'controls', 'minimize', 'maximize', 'close', 'titlebar', 'linux', 'windows'],
