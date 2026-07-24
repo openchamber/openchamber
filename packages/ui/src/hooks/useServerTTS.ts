@@ -286,6 +286,12 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       abortControllerRef.current = null;
     }
     
+    // Resume context if it was suspended to avoid blocking other audio
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+
     setIsPlaying(false);
     setIsPaused(false);
   }, []);
@@ -464,7 +470,15 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       // Flush accumulated PCM into an AudioBuffer and schedule it for playback
       const flushPcmBuffer = () => {
         if (pcmAccumulator.length === 0 || !wavInfo) return;
-        const audioBuffer = pcm16ToAudioBuffer(ctx, pcmAccumulator, wavInfo);
+        
+        const bytesPerSample = wavInfo.bitsPerSample / 8;
+        const blockAlign = wavInfo.numChannels * bytesPerSample;
+        const processableLength = pcmAccumulator.length - (pcmAccumulator.length % blockAlign);
+        
+        if (processableLength === 0) return;
+        
+        const chunkToProcess = pcmAccumulator.slice(0, processableLength);
+        const audioBuffer = pcm16ToAudioBuffer(ctx, chunkToProcess, wavInfo);
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
 
@@ -481,7 +495,9 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
         const startTime = Math.max(nextStartTimeRef.current, ctx.currentTime);
         source.start(startTime);
         nextStartTimeRef.current = startTime + audioBuffer.duration;
-        pcmAccumulator = new Uint8Array(0);
+        
+        // Keep remainder bytes for the next chunk
+        pcmAccumulator = pcmAccumulator.slice(processableLength);
       };
 
       try {

@@ -150,6 +150,7 @@ class TTSService {
       instructions,
       apiKey,
       baseURL,
+      signal,
     } = options;
 
     const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
@@ -189,7 +190,8 @@ class TTSService {
         };
 
     console.log('[TTSService] Streaming speech — model:', model, 'voice:', voice, 'baseURL:', normalizedBaseURL ?? '(openai)');
-    const response = await client.audio.speech.create(speechParams);
+    const requestOptions = signal ? { signal } : {};
+    const response = await client.audio.speech.create(speechParams, requestOptions);
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');

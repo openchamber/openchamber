@@ -92,7 +92,9 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
           instructions,
           apiKey: hasClientKey ? apiKey.trim() : undefined,
           baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
+          signal: req.signal,
         })) {
+          if (req.destroyed) break;
           res.write(chunk);
         }
         res.end();
