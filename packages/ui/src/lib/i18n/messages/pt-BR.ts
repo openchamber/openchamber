@@ -1654,8 +1654,6 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.noMatchingBranches": "Não há branches coincidentes",
   "session.newWorktree.localBranches": "Branches locais",
   "session.newWorktree.remoteBranches": "Branches remotas",
-  "session.newWorktree.otherLocalBranches": "Outras branches locais",
-  "session.newWorktree.otherRemoteBranches": "Outras branches remotas",
   "session.newWorktree.branchName": "Nome da branch",
   "session.newWorktree.branchNamePlaceholder": "feature/my-awesome-feature",
   "session.newWorktree.actions.change": "Alterar",

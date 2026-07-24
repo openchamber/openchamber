@@ -1654,8 +1654,6 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.noMatchingBranches": "No hay ramas coincidentes",
   "session.newWorktree.localBranches": "Ramas locales",
   "session.newWorktree.remoteBranches": "Ramas remotas",
-  "session.newWorktree.otherLocalBranches": "Otras ramas locales",
-  "session.newWorktree.otherRemoteBranches": "Otras ramas remotas",
   "session.newWorktree.branchName": "Nombre de la rama",
   "session.newWorktree.branchNamePlaceholder": "feature/my-awesome-feature",
   "session.newWorktree.actions.change": "Cambiar",
