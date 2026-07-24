@@ -201,6 +201,29 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
   return null;
 };
 
+/**
+ * Whether a one-time task's scheduled instant has already passed. Such a task
+ * can never be scheduled again (computeNextRunAt returns null), so leaving it
+ * enabled is misleading; callers disable it on sync.
+ */
+export const isOneTimeTaskExpired = (task, nowMs = Date.now()) => {
+  if (task?.schedule?.kind !== 'once') {
+    return false;
+  }
+  const { date, time, timezone } = task.schedule;
+  if (typeof date !== 'string' || typeof time !== 'string') {
+    return false;
+  }
+  const zone = typeof timezone === 'string' && timezone.trim().length > 0
+    ? timezone.trim()
+    : DateTime.local().zoneName;
+  const parsed = DateTime.fromFormat(`${date} ${time}`, 'yyyy-LL-dd HH:mm', { zone });
+  if (!parsed.isValid) {
+    return false;
+  }
+  return parsed.toMillis() <= nowMs;
+};
+
 export const formatScheduledSessionTitle = (task, nowMs = Date.now()) => {
   const timezone = typeof task?.schedule?.timezone === 'string' && task.schedule.timezone.trim().length > 0
     ? task.schedule.timezone.trim()
@@ -321,10 +344,38 @@ export const createScheduledTasksRuntime = (deps) => {
     if (!task) {
       return;
     }
-    const nextRunAt = computeNextRunAt(task, Date.now());
+    const nowMs = Date.now();
+
+    // Auto-expire one-time tasks whose scheduled instant has already passed
+    // (e.g. the server was offline when it was due). They can never run again,
+    // so disable them instead of leaving a dead "enabled" task in the UI/CLI.
+    if (task.enabled && isOneTimeTaskExpired(task, nowMs)) {
+      try {
+        const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, {
+          ...task,
+          enabled: false,
+        });
+        if (consumed.task) {
+          updateInMemoryTask(projectID, consumed.task);
+        }
+        logger.info?.('[ScheduledTasks] disabled expired one-time task', {
+          projectID,
+          taskID: task.id,
+        });
+      } catch (error) {
+        logger.warn?.('[ScheduledTasks] failed to expire one-time task', {
+          projectID,
+          taskID: task.id,
+          error: safeErrorMessage(error),
+        });
+      }
+      return;
+    }
+
+    const nextRunAt = computeNextRunAt(task, nowMs);
     const statePatch = {
       nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
-      updatedAt: Date.now(),
+      updatedAt: nowMs,
     };
     const result = await projectConfigRuntime.updateScheduledTaskState(projectID, task.id, statePatch);
     if (result.task) {

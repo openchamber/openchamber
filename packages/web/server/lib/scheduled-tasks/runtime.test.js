@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeNextRunAt, formatScheduledSessionTitle, parseScheduledCommandPrompt } from './runtime.js';
+import { computeNextRunAt, formatScheduledSessionTitle, parseScheduledCommandPrompt, isOneTimeTaskExpired } from './runtime.js';
 
 describe('scheduled-tasks runtime helpers', () => {
   it('computes next daily run in timezone', () => {
@@ -96,5 +96,26 @@ describe('scheduled-tasks runtime helpers', () => {
   it('returns null when prompt is not a slash command', () => {
     expect(parseScheduledCommandPrompt('Summarize open issues')).toBeNull();
     expect(parseScheduledCommandPrompt('/')).toBeNull();
+  });
+
+  describe('isOneTimeTaskExpired', () => {
+    const baseOnce = {
+      schedule: { kind: 'once', date: '2026-04-16', time: '13:30', timezone: 'UTC' },
+    };
+
+    it('is true when the one-time instant has passed', () => {
+      expect(isOneTimeTaskExpired(baseOnce, Date.UTC(2026, 3, 16, 14, 0, 0))).toBe(true);
+      expect(isOneTimeTaskExpired(baseOnce, Date.UTC(2026, 3, 16, 13, 30, 0))).toBe(true);
+    });
+
+    it('is false when the one-time instant is in the future', () => {
+      expect(isOneTimeTaskExpired(baseOnce, Date.UTC(2026, 3, 16, 13, 0, 0))).toBe(false);
+    });
+
+    it('is false for recurring or malformed schedules', () => {
+      expect(isOneTimeTaskExpired({ schedule: { kind: 'daily', times: ['09:00'] } }, Date.now())).toBe(false);
+      expect(isOneTimeTaskExpired({ schedule: { kind: 'once', date: 'bad', time: '13:30' } }, Date.now())).toBe(false);
+      expect(isOneTimeTaskExpired(null, Date.now())).toBe(false);
+    });
   });
 });
