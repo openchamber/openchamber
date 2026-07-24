@@ -901,7 +901,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [searching, setSearching] = React.useState(false);
 
   const [fileContent, setFileContent] = React.useState<string>('');
-  const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
+  const { isPlaying: isTTSPlaying, isPaused, canPause, play: playTTS, stop: stopTTS, pause: pauseTTS, resume: resumeTTS } = useMessageTTS();
+  const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
   const [fileLoading, setFileLoading] = React.useState(false);
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
@@ -3342,32 +3343,65 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         )}
 
         {isMarkdown && getMdViewMode() === 'preview' && showMessageTTSButtons && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
-                aria-label={isTTSPlaying ? t('filesView.tts.stopSpeaking') : t('filesView.tts.readAloud')}
-                onClick={() => {
-                  if (isTTSPlaying) {
-                    stopTTS();
-                  } else if (fileContent.trim()) {
-                    void playTTS(fileContent);
-                  }
-                }}
-              >
-                {isTTSPlaying ? (
-                  <Icon name="stop" className="size-4 text-[color:var(--status-success)]" />
-                ) : (
-                  <Icon name="volume-up" className="size-4" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8}>
-              {isTTSPlaying ? t('filesView.tts.stopSpeaking') : t('filesView.tts.readAloud')}
-            </TooltipContent>
-          </Tooltip>
+          <>
+            {canPause && isTTSPlaying && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
+                    aria-label={isPaused ? t('chat.goal.action.resume') : t('chat.goal.action.pause')}
+                    onClick={() => {
+                      if (isPaused) {
+                        resumeTTS();
+                      } else {
+                        pauseTTS();
+                      }
+                    }}
+                  >
+                    {isPaused ? (
+                      <Icon name="play" className="size-4" />
+                    ) : (
+                      <Icon name="pause" className="size-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8}>
+                  {isPaused ? t('chat.goal.action.resume') : t('chat.goal.action.pause')}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "size-6 p-0 opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent",
+                    isTTSPlaying && !isPaused ? "text-green-500" : isPaused ? "text-yellow-500" : "text-muted-foreground"
+                  )}
+                  aria-label={isTTSPlaying ? t('filesView.tts.stopSpeaking') : t('filesView.tts.readAloud')}
+                  onClick={() => {
+                    if (isTTSPlaying) {
+                      stopTTS();
+                    } else if (fileContent.trim()) {
+                      void playTTS(fileContent);
+                    }
+                  }}
+                >
+                  {isTTSPlaying ? (
+                    <Icon name="stop" className="size-4 text-[color:var(--status-success)]" />
+                  ) : (
+                    <Icon name="volume-up" className="size-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={8}>
+                {isTTSPlaying ? t('filesView.tts.stopSpeaking') : t('filesView.tts.readAloud')}
+              </TooltipContent>
+            </Tooltip>
+          </>
         )}
 
         {isDrawio && (

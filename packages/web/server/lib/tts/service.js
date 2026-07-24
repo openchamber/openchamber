@@ -199,10 +199,14 @@ class TTSService {
     }
 
     const reader = response.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      yield Buffer.from(value);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        yield Buffer.from(value);
+      }
+    } finally {
+      reader.releaseLock();
     }
   }
 

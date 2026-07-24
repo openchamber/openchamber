@@ -111,10 +111,14 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 - The sanitization removes markdown, code blocks, URLs, file paths, shell commands, and special characters.
 - This prevents the TTS from reading out technical formatting that sounds unnatural.
 
-### Error handling
-- `generateSpeechStream` and `generateSpeechBuffer` throw descriptive errors for missing API keys or empty text.
+### Error handling and cancellation
+- Client disconnects emit `close` events which trigger an `AbortController`. The `signal` is passed down to `generateSpeechStreamRaw` to cancel the upstream OpenAI request, preventing resource leaks.
+- `generateSpeechStreamRaw` and `generateSpeechBuffer` throw descriptive errors for missing API keys or empty text.
 - `summarizeText` does not call Zen and returns mode-specific fallback text with `summarized: false`.
 - All errors are logged to console with `[TTSService]` or `[Summarize]` prefix.
+
+### WAV Format Handling
+- When streaming custom `audio/wav` endpoints, the streaming client (`useServerTTS`) must wait for the full 44-byte WAV header before playback can begin. The chunks are accumulated in a buffer until the format is verified.
 
 ### API key management
 - TTSService caches OpenAI client instance and recreates when API key changes.

@@ -517,8 +517,8 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
               if (riff === 'RIFF') {
                 // WAV format detected — wait for full header
                 isWav = true;
-                formatDetected = true;
                 if (headerBuffer.length >= WAV_HEADER_SIZE) {
+                  formatDetected = true;
                   wavInfo = parseWavHeader(headerBuffer);
                   const pcm = headerBuffer.slice(WAV_HEADER_SIZE);
                   headerBuffer = new Uint8Array(0);

@@ -792,7 +792,7 @@ const AssistantMessageActionButtons = React.memo(({
 }: AssistantMessageActionButtonsProps) => {
     const { t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
-    const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
+    const { isPlaying: isTTSPlaying, isPaused, canPause, play: playTTS, stop: stopTTS, pause: pauseTTS, resume: resumeTTS } = useMessageTTS();
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const voiceProvider = useConfigStore((state) => state.voiceProvider);
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
@@ -1039,29 +1039,65 @@ const AssistantMessageActionButtons = React.memo(({
                 <TooltipContent sideOffset={6}>{isSharing ? t('chat.messageBody.actions.savingImage') : t('chat.messageBody.actions.saveAsImage')}</TooltipContent>
             </Tooltip> : null}
             {chatSurfaceMode !== 'mini-chat' && showMessageTTSButtons && hasCopyableText && (
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className={cn(
-                                'h-8 w-8 bg-transparent hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
-                                isTTSPlaying ? 'text-green-500' : 'text-muted-foreground hover:text-foreground'
-                            )}
-                            aria-label={isTTSPlaying ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud')}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={handleTTSClick}
-                        >
-                            {isTTSPlaying ? (
-                                <Icon name="stop" className="h-3.5 w-3.5" />
-                            ) : (
-                                <Icon name="volume-up" className="h-3.5 w-3.5" />
-                            )}
-                        </Button>
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={6}>{readAloudTooltip}</TooltipContent>
-                </Tooltip>
+                <>
+                    {canPause && isTTSPlaying && (
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className={cn(
+                                        'h-8 w-8 bg-transparent hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50 text-muted-foreground hover:text-foreground'
+                                    )}
+                                    aria-label={isPaused ? t('chat.goal.action.resume') : t('chat.goal.action.pause')}
+                                    onPointerDown={(event) => event.stopPropagation()}
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        event.preventDefault();
+                                        if (isPaused) {
+                                            resumeTTS();
+                                        } else {
+                                            pauseTTS();
+                                        }
+                                    }}
+                                >
+                                    {isPaused ? (
+                                        <Icon name="play" className="h-3.5 w-3.5" />
+                                    ) : (
+                                        <Icon name="pause" className="h-3.5 w-3.5" />
+                                    )}
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>
+                                {isPaused ? t('chat.goal.action.resume') : t('chat.goal.action.pause')}
+                            </TooltipContent>
+                        </Tooltip>
+                    )}
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className={cn(
+                                    'h-8 w-8 bg-transparent hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                                    isTTSPlaying && !isPaused ? 'text-green-500' : isPaused ? 'text-yellow-500' : 'text-muted-foreground hover:text-foreground'
+                                )}
+                                aria-label={isTTSPlaying ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud')}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={handleTTSClick}
+                            >
+                                {isTTSPlaying ? (
+                                    <Icon name="stop" className="h-3.5 w-3.5" />
+                                ) : (
+                                    <Icon name="volume-up" className="h-3.5 w-3.5" />
+                                )}
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>{readAloudTooltip}</TooltipContent>
+                    </Tooltip>
+                </>
             )}
         </>
     );

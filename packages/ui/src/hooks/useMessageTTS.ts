@@ -56,6 +56,8 @@ export interface UseMessageTTSReturn {
     pause: () => void;
     /** Resume playback */
     resume: () => void;
+    /** Whether the current provider supports pause/resume */
+    canPause: boolean;
 }
 
 export function useMessageTTS(): UseMessageTTSReturn {
@@ -219,5 +221,6 @@ export function useMessageTTS(): UseMessageTTSReturn {
         stop,
         pause,
         resume,
+        canPause: isServerProvider,
     };
 }

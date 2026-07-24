@@ -81,7 +81,19 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       const contentType = ttsService.getContentType(hasCustomBaseURL ? normalizedBaseURL : undefined);
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Transfer-Encoding', 'chunked');
+
+      const controller = new AbortController();
+      let closed = false;
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        console.log('[TTS] Client disconnected, aborting upstream request.');
+        controller.abort();
+      };
+
+      req.on('close', cleanup);
+      res.on('close', cleanup);
+      res.on('error', cleanup);
 
       try {
         for await (const chunk of ttsService.generateSpeechStreamRaw({
@@ -92,14 +104,16 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
           instructions,
           apiKey: hasClientKey ? apiKey.trim() : undefined,
           baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
-          signal: req.signal,
+          signal: controller.signal,
         })) {
-          if (req.destroyed) break;
+          if (req.destroyed || res.writableEnded) break;
           res.write(chunk);
         }
         res.end();
       } catch (streamError) {
-        console.error('[TTS] Stream error:', streamError);
+        if (streamError.name !== 'AbortError') {
+          console.error('[TTS] Stream error:', streamError);
+        }
         if (!res.headersSent) {
           res.status(500).json({ error: streamError.message || 'TTS streaming failed' });
         } else {
