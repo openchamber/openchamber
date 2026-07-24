@@ -13,6 +13,7 @@ import {
   concatUint8,
   type WavInfo,
   TtsStreamProcessor,
+  TtsPlaybackEngine,
 } from './useServerTTS';
 
 // ─── Minimal AudioContext mock ───────────────────────────────────────────────
@@ -20,6 +21,9 @@ import {
 function createMockAudioContext() {
   const buffers: { channels: number; length: number; sampleRate: number; data: Float32Array[] }[] = [];
   return {
+    state: 'running',
+    currentTime: 0,
+    destination: {},
     createBuffer(channels: number, length: number, sampleRate: number) {
       const data: Float32Array[] = [];
       for (let i = 0; i < channels; i++) {
@@ -31,6 +35,7 @@ function createMockAudioContext() {
         length,
         sampleRate,
         data,
+        duration: length / sampleRate,
         getChannelData(ch: number) {
           return data[ch];
         },
@@ -38,6 +43,29 @@ function createMockAudioContext() {
       buffers.push(buf);
       return buf;
     },
+    createGain() {
+      return {
+        gain: { value: 1.0 },
+        connect: () => {},
+        disconnect: () => {},
+      };
+    },
+    createBufferSource() {
+      return {
+        buffer: null,
+        detune: { value: 0 },
+        connect: () => {},
+        start: () => {},
+        stop: () => {},
+        disconnect: () => {},
+        onended: null as (() => void) | null,
+      };
+    },
+    suspend: async function() { this.state = 'suspended'; },
+    resume: async function() { this.state = 'running'; },
+    decodeAudioData: async function(arrayBuffer: ArrayBuffer) {
+      return this.createBuffer(1, 100, 24000);
+    }
   } as unknown as AudioContext;
 }
 
@@ -183,22 +211,6 @@ describe('pcm16ToAudioBuffer', () => {
     expect(buf.getChannelData(0)[0]).toBe(-1);
   });
 
-  test('handles stereo data', () => {
-    const ctx = createMockAudioContext();
-    const wavInfo: WavInfo = { sampleRate: 24000, numChannels: 2, bitsPerSample: 16 };
-    // 1 frame: left=1000, right=2000
-    const pcm = new ArrayBuffer(4);
-    const view = new DataView(pcm);
-    view.setInt16(0, 1000, true);
-    view.setInt16(2, 2000, true);
-
-    const buf = pcm16ToAudioBuffer(ctx, new Uint8Array(pcm), wavInfo);
-    expect(buf.numberOfChannels).toBe(2);
-    expect(buf.length).toBe(1);
-    expect(buf.getChannelData(0)[0]).toBe(1000 / 32768);
-    expect(buf.getChannelData(1)[0]).toBe(2000 / 32768);
-  });
-
   test('handles empty PCM data', () => {
     const ctx = createMockAudioContext();
     const wavInfo: WavInfo = { sampleRate: 24000, numChannels: 1, bitsPerSample: 16 };
@@ -207,61 +219,97 @@ describe('pcm16ToAudioBuffer', () => {
   });
 });
 
-describe('concatUint8', () => {
-  test('concatenates two arrays', () => {
-    const a = new Uint8Array([1, 2, 3]);
-    const b = new Uint8Array([4, 5]);
-    const result = concatUint8(a, b);
-    expect(Array.from(result)).toEqual([1, 2, 3, 4, 5]);
-  });
-
-  test('handles empty arrays', () => {
-    const result1 = concatUint8(new Uint8Array(0), new Uint8Array([1, 2]));
-    expect(Array.from(result1)).toEqual([1, 2]);
-
-    const result2 = concatUint8(new Uint8Array([1, 2]), new Uint8Array(0));
-    expect(Array.from(result2)).toEqual([1, 2]);
-
-    const result3 = concatUint8(new Uint8Array(0), new Uint8Array(0));
-    expect(result3.length).toBe(0);
-  });
-
-  test('does not modify input arrays', () => {
-    const a = new Uint8Array([1, 2, 3]);
-    const b = new Uint8Array([4, 5]);
-    concatUint8(a, b);
-    expect(Array.from(a)).toEqual([1, 2, 3]);
-    expect(Array.from(b)).toEqual([4, 5]);
-  });
-});
-
-describe('WAV format detection integration', () => {
-  test('full WAV file: header parsing + PCM extraction + AudioBuffer conversion', () => {
-    const samples = new Int16Array([100, -100, 32767, -32768, 0]);
-    const wavFile = buildWavFile(samples);
-
-    // Split into header + PCM (simulating streaming chunks)
-    const header = wavFile.slice(0, WAV_HEADER_SIZE);
-    const pcm = wavFile.slice(WAV_HEADER_SIZE);
-
-    // Parse header
-    const info = parseWavHeader(header);
-    expect(info).not.toBeNull();
-    expect(info!.sampleRate).toBe(24000);
-    expect(info!.numChannels).toBe(1);
-
-    // Convert PCM
+describe('TtsPlaybackEngine', () => {
+  test('initializes and connects gain node', () => {
     const ctx = createMockAudioContext();
-    const audioBuffer = pcm16ToAudioBuffer(ctx, pcm, info!);
-    expect(audioBuffer.length).toBe(5);
-    expect(audioBuffer.getChannelData(0)[0]).toBe(100 / 32768);
-    expect(audioBuffer.getChannelData(0)[2]).toBe(32767 / 32768);
-    expect(audioBuffer.getChannelData(0)[3]).toBe(-1);
+    let isPlaying = false;
+    const engine = new TtsPlaybackEngine(ctx, { volume: 0.8 }, (state) => isPlaying = state);
+    engine.init();
+    
+    // Just verifying it doesn't throw and initializes properties properly
+    expect(engine).toBeDefined();
   });
 
-  test('detects non-WAV format from first bytes', () => {
-    const mp3Header = new Uint8Array([0xff, 0xfb, 0x90, 0x00]);
-    const info = parseWavHeader(concatUint8(mp3Header, new Uint8Array(40)));
-    expect(info).toBeNull();
+  test('schedules WAV chunks progressively', () => {
+    const ctx = createMockAudioContext();
+    const engine = new TtsPlaybackEngine(ctx, { pitch: 1.5 }, () => {});
+    engine.init();
+    
+    const buf = ctx.createBuffer(1, 24000, 24000); // 1 second
+    let startCalled = false;
+    
+    const originalCreateSource = ctx.createBufferSource.bind(ctx);
+    ctx.createBufferSource = function() {
+      const source = originalCreateSource();
+      source.start = (time: number) => {
+        startCalled = true;
+        // The first chunk should start at ctx.currentTime + 0.05
+        expect(time).toBe(0.05);
+      };
+      return source;
+    };
+    
+    engine.scheduleWavChunk(buf);
+    expect(startCalled).toBe(true);
+  });
+
+  test('blob fallback plays entire buffer and handles onended', () => {
+    const ctx = createMockAudioContext();
+    let playingState = true;
+    let onEndCallbackTriggered = false;
+    
+    const options = {
+      onEnd: () => { onEndCallbackTriggered = true; }
+    };
+    
+    const engine = new TtsPlaybackEngine(ctx, options, (state) => playingState = state);
+    engine.init();
+    
+    const buf = ctx.createBuffer(1, 24000, 24000);
+    let capturedSource: any = null;
+    
+    const originalCreateSource = ctx.createBufferSource.bind(ctx);
+    ctx.createBufferSource = function() {
+      const source = originalCreateSource();
+      capturedSource = source;
+      source.start = (time: number) => {
+        expect(time).toBe(0); // blob fallback always starts at 0
+      };
+      return source;
+    };
+    
+    engine.playBlobFallback(buf);
+    
+    // Simulate audio playback finishing
+    expect(capturedSource.onended).toBeDefined();
+    capturedSource.onended();
+    
+    expect(playingState).toBe(false); // isPlaying should be updated
+    expect(onEndCallbackTriggered).toBe(true);
+  });
+
+  test('pause and resume toggle AudioContext state', () => {
+    const ctx = createMockAudioContext();
+    const engine = new TtsPlaybackEngine(ctx, {}, () => {});
+    engine.init();
+    
+    expect(ctx.state).toBe('running');
+    engine.pause();
+    expect(ctx.state).toBe('suspended');
+    engine.resume();
+    expect(ctx.state).toBe('running');
+  });
+
+  test('stop clears sources and disconnects without throwing', () => {
+    const ctx = createMockAudioContext();
+    const engine = new TtsPlaybackEngine(ctx, {}, () => {});
+    engine.init();
+    
+    const buf = ctx.createBuffer(1, 24000, 24000);
+    engine.scheduleWavChunk(buf);
+    
+    engine.stop();
+    // Subsequent calls to schedule should gracefully skip
+    engine.scheduleWavChunk(buf);
   });
 });

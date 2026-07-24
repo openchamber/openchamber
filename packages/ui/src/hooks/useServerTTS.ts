@@ -211,6 +211,133 @@ export class TtsStreamProcessor {
   }
 }
 
+// ─── Playback Engine ─────────────────────────────────────────────────────────
+
+export interface SpeakOptions {
+  voice?: string;
+  model?: string;
+  speed?: number;
+  pitch?: number;
+  volume?: number;
+  instructions?: string;
+  summarize?: boolean;
+  providerId?: string;
+  modelId?: string;
+  threshold?: number;
+  baseURL?: string;
+  onStart?: () => void;
+  onEnd?: () => void;
+  onError?: (error: string) => void;
+}
+
+/**
+ * Pure class for managing Web Audio API scheduling, pause, resume, and stop.
+ * Decoupled from React to enable pure-function unit testing.
+ */
+export class TtsPlaybackEngine {
+  private activeSources: AudioBufferSourceNode[] = [];
+  private gainNode: GainNode | null = null;
+  private nextStartTime = 0;
+  private playbackEnded = false;
+
+  constructor(
+    public ctx: AudioContext,
+    private options: SpeakOptions,
+    private onPlayStateChange: (isPlaying: boolean) => void
+  ) {}
+
+  init() {
+    this.gainNode = this.ctx.createGain();
+    this.gainNode.gain.value = this.options.volume ?? 1.0;
+    this.gainNode.connect(this.ctx.destination);
+    this.nextStartTime = this.ctx.currentTime + 0.05;
+  }
+
+  scheduleWavChunk(audioBuffer: AudioBuffer) {
+    if (!this.gainNode) return;
+    const source = this.ctx.createBufferSource();
+    source.buffer = audioBuffer;
+
+    const pitch = this.options.pitch ?? 1.0;
+    if (pitch !== 1.0) {
+      source.detune.value = (pitch - 1.0) * 1200;
+    }
+
+    source.connect(this.gainNode);
+    this.activeSources.push(source);
+
+    const startTime = Math.max(this.nextStartTime, this.ctx.currentTime);
+    source.start(startTime);
+    this.nextStartTime = startTime + audioBuffer.duration;
+  }
+
+  playBlobFallback(audioBuffer: AudioBuffer) {
+    if (!this.gainNode) return;
+    const source = this.ctx.createBufferSource();
+    source.buffer = audioBuffer;
+
+    const pitch = this.options.pitch ?? 1.0;
+    if (pitch !== 1.0) {
+      source.detune.value = (pitch - 1.0) * 1200;
+    }
+
+    source.connect(this.gainNode);
+    this.activeSources.push(source);
+    
+    source.onended = () => {
+      if (!this.playbackEnded) {
+        this.playbackEnded = true;
+        this.onPlayStateChange(false);
+        this.options.onEnd?.();
+      }
+    };
+    source.start(0);
+  }
+
+  onWavStreamEnded() {
+    const lastSource = this.activeSources[this.activeSources.length - 1];
+    if (lastSource) {
+      lastSource.onended = () => {
+        if (!this.playbackEnded) {
+          this.playbackEnded = true;
+          this.onPlayStateChange(false);
+          this.options.onEnd?.();
+        }
+      };
+    } else {
+      this.onPlayStateChange(false);
+      this.options.onEnd?.();
+    }
+  }
+
+  pause() {
+    if (this.ctx.state === 'running') {
+      this.ctx.suspend();
+    }
+  }
+
+  resume() {
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  }
+
+  stop() {
+    for (const src of this.activeSources) {
+      try { src.stop(); } catch {}
+      try { src.disconnect(); } catch {}
+    }
+    this.activeSources = [];
+    if (this.gainNode) {
+      try { this.gainNode.disconnect(); } catch {}
+      this.gainNode = null;
+    }
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+}
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export interface UseServerTTSReturn {
@@ -236,36 +363,7 @@ export interface UseServerTTSReturn {
   unlockAudio: () => Promise<void>;
 }
 
-interface SpeakOptions {
-  /** Voice to use (defaults to coral) */
-  voice?: string;
-  /** Model to use (defaults to gpt-4o-mini-tts) */
-  model?: string;
-  /** Speech speed (0.25 to 4.0, defaults to 1.0) */
-  speed?: number;
-  /** Speech pitch shift (0.5 to 2.0, mapped to cents; 1.0 = no shift) */
-  pitch?: number;
-  /** Playback volume (0 to 1, defaults to 1.0) */
-  volume?: number;
-  /** Optional instructions for the voice */
-  instructions?: string;
-  /** Summarize long text before speaking (defaults to true) */
-  summarize?: boolean;
-  /** Provider ID for summarization model */
-  providerId?: string;
-  /** Model ID for summarization */
-  modelId?: string;
-  /** Character threshold for summarization (defaults to 200) */
-  threshold?: number;
-  /** Custom base URL for OpenAI-compatible server */
-  baseURL?: string;
-  /** Callback when playback starts */
-  onStart?: () => void;
-  /** Callback when playback ends */
-  onEnd?: () => void;
-  /** Callback on error */
-  onError?: (error: string) => void;
-}
+
 
 // Shared AudioContext for Web Audio API playback (better iOS support)
 let sharedAudioContext: AudioContext | null = null;
@@ -285,12 +383,8 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
   const [isAvailable, setIsAvailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
-  const gainNodeRef = useRef<GainNode | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
-  const nextStartTimeRef = useRef(0);
-  const playbackEndedRef = useRef(false);
   
   // Get current model and API settings from config store.
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
@@ -338,27 +432,13 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
     void checkAvailability();
   }, [checkAvailability]);
 
+  const engineRef = useRef<TtsPlaybackEngine | null>(null);
+
   // Stop current playback
   const stop = useCallback(() => {
-    // Stop all active Web Audio API source nodes
-    for (const src of activeSourcesRef.current) {
-      try {
-        src.stop();
-      } catch {
-        // Already stopped
-      }
-      try {
-        src.disconnect();
-      } catch {
-        // Already disconnected
-      }
-    }
-    activeSourcesRef.current = [];
-
-    // Disconnect gain node from destination to prevent audio graph leaks
-    if (gainNodeRef.current) {
-      try { gainNodeRef.current.disconnect(); } catch { /* */ }
-      gainNodeRef.current = null;
+    if (engineRef.current) {
+      engineRef.current.stop();
+      engineRef.current = null;
     }
 
     // Cancel reader (closes the HTTP connection)
@@ -372,30 +452,22 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       abortControllerRef.current = null;
     }
     
-    // Resume context if it was suspended to avoid blocking other audio
-    const ctx = getAudioContext();
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
-    }
-
     setIsPlaying(false);
     setIsPaused(false);
   }, []);
 
   // Pause playback — suspends AudioContext, keeps HTTP connection alive
   const pause = useCallback(() => {
-    const ctx = getAudioContext();
-    if (ctx.state === 'running') {
-      ctx.suspend();
+    if (engineRef.current) {
+      engineRef.current.pause();
       setIsPaused(true);
     }
   }, []);
 
   // Resume playback — resumes AudioContext after pause
   const resume = useCallback(() => {
-    const ctx = getAudioContext();
-    if (ctx.state === 'suspended') {
-      ctx.resume();
+    if (engineRef.current) {
+      engineRef.current.resume();
       setIsPaused(false);
     }
   }, []);
@@ -459,12 +531,10 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       // Create abort controller for this request
       abortControllerRef.current = new AbortController();
 
-      // Apply volume via GainNode
-      const volume = options?.volume ?? 1.0;
-      const gainNode = ctx.createGain();
-      gainNode.gain.value = volume;
-      gainNode.connect(ctx.destination);
-      gainNodeRef.current = gainNode;
+      // Initialize playback engine
+      const engine = new TtsPlaybackEngine(ctx, options || {}, setIsPlaying);
+      engine.init();
+      engineRef.current = engine;
 
       const voice = options?.voice || 'nova';
       console.log('[useServerTTS] Speaking with voice:', voice, 'options:', options);
@@ -482,12 +552,9 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
           speed: options?.speed || 0.9,
           instructions: options?.instructions,
           summarize: false,
-          // Use provided provider/model, or fall back to current chat model
           providerId: options?.providerId || currentProviderId || undefined,
           modelId: options?.modelId || currentModelId || undefined,
-          // Send API key from settings if available
           apiKey: options?.baseURL ? (openaiCompatibleApiKey || undefined) : (openaiApiKey || undefined),
-          // Send custom base URL for OpenAI-compatible servers
           baseURL: options?.baseURL || undefined,
         }),
         signal: abortControllerRef.current.signal,
@@ -510,58 +577,20 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
         const audioBlob = await response.blob();
         const arrayBuffer = await audioBlob.arrayBuffer();
         
-        // Decode audio data using the same context we unlocked earlier
         console.log('[useServerTTS] Decoding audio data...');
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
         
-        // Create source node
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-
-        // Apply pitch shift via detune (cents): 1200 cents = 1 octave
-        const pitch = options?.pitch ?? 1.0;
-        if (pitch !== 1.0) {
-          source.detune.value = (pitch - 1.0) * 1200;
-        }
-
-        source.connect(gainNode);
-        activeSourcesRef.current.push(source);
-        
-        // Set up event handlers
-        source.onended = () => {
-          console.log('[useServerTTS] Audio playback ended');
-          setIsPlaying(false);
-          options?.onEnd?.();
-        };
-        
-        source.start(0);
+        engine.playBlobFallback(audioBuffer);
         return;
       }
 
       // ── Streaming playback via ReadableStream ─────────────────────────────
-      // For WAV format: parse header, then feed PCM chunks to AudioBufferSourceNodes.
-      // For non-WAV (e.g. MP3): accumulate all chunks, then decode as blob fallback.
       const reader = response.body.getReader();
       readerRef.current = reader;
 
-      nextStartTimeRef.current = ctx.currentTime + 0.05;
-
       const processor = new TtsStreamProcessor((chunkToProcess, info) => {
-        const audioBuffer = pcm16ToAudioBuffer(ctx, chunkToProcess, info);
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-
-        const pitch = options?.pitch ?? 1.0;
-        if (pitch !== 1.0) {
-          source.detune.value = (pitch - 1.0) * 1200;
-        }
-
-        source.connect(gainNode);
-        activeSourcesRef.current.push(source);
-
-        const startTime = Math.max(nextStartTimeRef.current, ctx.currentTime);
-        source.start(startTime);
-        nextStartTimeRef.current = startTime + audioBuffer.duration;
+        const audioBuffer = pcm16ToAudioBuffer(engine.ctx, chunkToProcess, info);
+        engine.scheduleWavChunk(audioBuffer);
       }, () => {
         console.log('[useServerTTS] Non-WAV format, accumulating for blob fallback');
       });
@@ -576,47 +605,12 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
         // Flush any remaining PCM data
         if (processor.isWav && processor.wavInfo) {
           processor.flushPcm(true);
-          // Set up event handler on the last source to detect playback end
-          const lastSource = activeSourcesRef.current[activeSourcesRef.current.length - 1];
-          if (lastSource) {
-            lastSource.onended = () => {
-              if (!playbackEndedRef.current) {
-                console.log('[useServerTTS] Audio playback ended');
-                playbackEndedRef.current = true;
-                setIsPlaying(false);
-                options?.onEnd?.();
-              }
-            };
-          } else {
-            setIsPlaying(false);
-            options?.onEnd?.();
-          }
+          engine.onWavStreamEnded();
         } else if (processor.nonWavBuffer.length > 0) {
           // Non-WAV fallback: decode complete blob
           console.log('[useServerTTS] Decoding non-WAV blob:', processor.nonWavBuffer.length, 'bytes');
-          const audioBuffer = await ctx.decodeAudioData(processor.nonWavBuffer.buffer.slice(0) as ArrayBuffer);
-          const source = ctx.createBufferSource();
-          source.buffer = audioBuffer;
-
-          // Apply pitch shift via detune (cents): 1200 cents = 1 octave
-          const pitch = options?.pitch ?? 1.0;
-          if (pitch !== 1.0) {
-            source.detune.value = (pitch - 1.0) * 1200;
-          }
-
-          source.connect(gainNode);
-          activeSourcesRef.current.push(source);
-
-          // Set up event handlers
-          source.onended = () => {
-            if (!playbackEndedRef.current) {
-              console.log('[useServerTTS] Audio playback ended');
-              playbackEndedRef.current = true;
-              setIsPlaying(false);
-              options?.onEnd?.();
-            }
-          };
-          source.start(0);
+          const audioBuffer = await engine.ctx.decodeAudioData(processor.nonWavBuffer.buffer.slice(0) as ArrayBuffer);
+          engine.playBlobFallback(audioBuffer);
         }
       } finally {
         readerRef.current = null;
