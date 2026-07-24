@@ -20,6 +20,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Pin node-gyp
+        run: npm install -g node-gyp@12
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
