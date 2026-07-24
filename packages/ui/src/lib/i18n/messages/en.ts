@@ -1556,6 +1556,7 @@ export const dict = {
   'aboutDialog.toast.copyFailed': 'Copy failed',
   'aboutDialog.toast.diagnosticsNotReady': 'Diagnostics not ready yet. Wait a second and retry.',
   'aboutDialog.toast.diagnosticsCopied': 'Diagnostics copied',
+  'aboutDialog.manualCopyFallback': 'Automatic copy failed — select the text below and copy it manually.',
   'helpDialog.title': 'Keyboard Shortcuts',
   'helpDialog.description': 'Use these keyboard shortcuts to navigate OpenChamber efficiently',
   'helpDialog.section.navigationCommands': 'Navigation & Commands',

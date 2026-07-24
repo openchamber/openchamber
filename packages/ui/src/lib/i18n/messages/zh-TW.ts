@@ -1526,6 +1526,7 @@ export const dict: Record<I18nKey, string> = {
   'aboutDialog.toast.copyFailed': '複製失敗',
   'aboutDialog.toast.diagnosticsNotReady': '診斷資訊尚未就緒。請稍後重試。',
   'aboutDialog.toast.diagnosticsCopied': '診斷資訊已複製',
+  'aboutDialog.manualCopyFallback': '自動複製失敗 — 請選取下方文字並手動複製。',
   'helpDialog.title': '鍵盤快速鍵',
   'helpDialog.description': '使用這些快速鍵可更有效率地導覽 OpenChamber',
   'helpDialog.section.navigationCommands': '導覽與命令',

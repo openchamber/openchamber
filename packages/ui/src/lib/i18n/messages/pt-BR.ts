@@ -1534,6 +1534,7 @@ export const dict: Record<I18nKey, string> = {
   "aboutDialog.toast.copyFailed": "Não foi possível copiar",
   "aboutDialog.toast.diagnosticsNotReady": "Os diagnósticos ainda não estão prontos. Aguarde um segundo e tente novamente.",
   "aboutDialog.toast.diagnosticsCopied": "Diagnósticos copiados",
+  "aboutDialog.manualCopyFallback": "Falha na cópia automática — selecione o texto abaixo e copie-o manualmente.",
   "helpDialog.title": "Atalhos de teclado",
   "helpDialog.description": "Use estes atalhos de teclado para navegar pelo OpenChamber com eficiência",
   "helpDialog.section.navigationCommands": "Navegação e comandos",

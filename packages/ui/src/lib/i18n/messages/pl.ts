@@ -983,6 +983,7 @@ export const dict: Record<I18nKey, string> = {
   'aboutDialog.footerNote': 'Stworzone z sercem dla społeczności',
   'aboutDialog.toast.copyFailed': 'Nie udało się skopiować',
   'aboutDialog.toast.diagnosticsCopied': 'Diagnostyka skopiowana',
+  'aboutDialog.manualCopyFallback': 'Automatyczne kopiowanie nie powiodło się — zaznacz poniższy tekst i skopiuj go ręcznie.',
   'aboutDialog.toast.diagnosticsNotReady': 'Diagnostyka nie jest jeszcze gotowa. Poczekaj chwilę i spróbuj ponownie.',
   'aboutDialog.versionLabel': 'Wersja {version}',
   'aboutDialog.openChamberVersionLabel': 'Wersja OpenChamber {version}',

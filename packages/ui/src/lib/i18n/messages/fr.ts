@@ -1375,6 +1375,7 @@ export const dict = {
   'aboutDialog.toast.copyFailed': 'Échec de la copie',
   'aboutDialog.toast.diagnosticsNotReady': 'Les diagnostics ne sont pas encore prêts. Attendez une seconde et réessayez.',
   'aboutDialog.toast.diagnosticsCopied': 'Diagnostic copié',
+  'aboutDialog.manualCopyFallback': 'Échec de la copie automatique — sélectionnez le texte ci-dessous et copiez-le manuellement.',
   'helpDialog.title': 'Raccourcis clavier',
   'helpDialog.description': 'Utilisez ces raccourcis clavier pour naviguer efficacement dans OpenChamber',
   'helpDialog.section.navigationCommands': 'Navigation et commandes',
