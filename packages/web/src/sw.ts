@@ -67,5 +67,30 @@ self.addEventListener('notificationclick', (event) => {
   const data = (event.notification.data ?? null) as { url?: string } | null;
   const url = data?.url ?? '/';
 
-  event.waitUntil(self.clients.openWindow(url));
+  event.waitUntil((async () => {
+    // Prefer focusing an already-open window (e.g. the installed PWA) and
+    // navigating it to the target, instead of always spawning a new window.
+    const target = new URL(url, self.location.origin).href;
+    const windowClients = await self.clients.matchAll({
+      type: 'window',
+      includeUncontrolled: true,
+    });
+
+    for (const client of windowClients) {
+      try {
+        if ('navigate' in client) {
+          await client.navigate(target);
+        }
+      } catch {
+        // navigate() can reject for uncontrolled clients; fall back to focus.
+      }
+      if ('focus' in client) {
+        return client.focus();
+      }
+    }
+
+    if (self.clients.openWindow) {
+      return self.clients.openWindow(target);
+    }
+  })());
 });
