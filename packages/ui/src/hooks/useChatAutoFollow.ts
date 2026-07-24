@@ -90,6 +90,7 @@ const ANIMATION_GUARD_MS = 350;
 // After streaming stops, keep following the bottom for a short window so the
 // final content can settle into place.
 const SETTLE_MS = 300;
+const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
 // Entry-stick window. On the FIRST open of a session, late async data (most
 // visibly a task/subagent tool whose nested rows are fetched from the child
 // session after entry — see useEnsureSessionMessages in ToolPart.tsx) grows the
@@ -127,14 +128,19 @@ const isNearBottom = (el: HTMLElement, isMobile: boolean): boolean => {
     return distanceFromBottom(el) <= computeBottomZoneThreshold(isMobile, el);
 };
 
-const isReleaseKey = (event: KeyboardEvent): boolean => {
+export const isAutoFollowReleaseKey = (event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>): boolean => {
     if (event.altKey || event.ctrlKey || event.metaKey) {
         return false;
+    }
+    if (event.key === ' ' && event.shiftKey) {
+        return true;
     }
     switch (event.key) {
         case 'ArrowUp':
         case 'PageUp':
         case 'Home':
+        case 'Pause':
+        case 'Break':
             return true;
         default:
             return false;
@@ -146,6 +152,32 @@ const nestedScrollableTarget = (root: HTMLElement, target: EventTarget | null): 
     const nested = target.closest('[data-scrollable]');
     if (!nested || nested === root || !(nested instanceof HTMLElement)) return null;
     return nested;
+};
+
+export const isMiddleButtonAutoScrollIntent = (root: HTMLElement, event: Pick<MouseEvent, 'button' | 'target'>): boolean => {
+    return event.button === 1 && !nestedScrollableTarget(root, event.target);
+};
+
+export const shouldRepinReleasedAutoFollow = (scrollingDown: boolean, atTrueBottom: boolean): boolean => {
+    return scrollingDown || atTrueBottom;
+};
+
+interface DelayedRepinOptions {
+    delayMs: number;
+    getContainer: () => HTMLElement | null;
+    shouldRepin: (container: HTMLElement) => boolean;
+    onElapsed: () => void;
+    repin: () => void;
+    scheduleTimer?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
+}
+
+export const scheduleAutoFollowRepin = ({ delayMs, getContainer, shouldRepin, onElapsed, repin, scheduleTimer = setTimeout }: DelayedRepinOptions): ReturnType<typeof setTimeout> => {
+    return scheduleTimer(() => {
+        onElapsed();
+        const container = getContainer();
+        if (!container || !shouldRepin(container)) return;
+        repin();
+    }, Math.max(0, delayMs));
 };
 
 const nestedScrollableCanConsumeUp = (root: HTMLElement, target: EventTarget | null): boolean => {
@@ -218,6 +250,8 @@ export const useChatAutoFollow = ({
 
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
+    const delayedRepinTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastUserReleaseAtRef = React.useRef(0);
     // When restoreSnapshot is invoked while ChatViewport is still hydrating
     // (skeleton rendered, no scroll container yet), we record the session here
     // so a follow-up effect can replay the restore once the container mounts.
@@ -341,6 +375,13 @@ export const useChatAutoFollow = ({
         setShowScrollButton(showButton);
     }, []);
 
+    const clearDelayedRepin = React.useCallback(() => {
+        if (delayedRepinTimerRef.current !== null) {
+            clearTimeout(delayedRepinTimerRef.current);
+            delayedRepinTimerRef.current = null;
+        }
+    }, []);
+
     // ── core scroll primitives ───────────────────────────────────────────────
     const scrollToBottomNow = React.useCallback((behavior: ScrollBehavior) => {
         const el = scrollRef.current;
@@ -387,6 +428,7 @@ export const useChatAutoFollow = ({
 
     // User left the bottom — release auto-follow.
     const stop = React.useCallback(() => {
+        clearDelayedRepin();
         const el = scrollRef.current;
         if (!el) return;
         if (!canScroll(el)) {
@@ -394,33 +436,57 @@ export const useChatAutoFollow = ({
             return;
         }
         if (stateRef.current === 'released') return;
+        lastUserReleaseAtRef.current = now();
         setStateValue('released');
         updateOverflowAndButton();
-    }, [setStateValue, updateOverflowAndButton]);
+    }, [clearDelayedRepin, setStateValue, updateOverflowAndButton]);
 
     // ── public scroll API (mapped onto the primitives) ───────────────────────
     const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
+        clearDelayedRepin();
+        lastUserReleaseAtRef.current = 0;
         scrollToBottom(true, mode === 'smooth' ? 'smooth' : 'auto');
-    }, [scrollToBottom]);
+    }, [clearDelayedRepin, scrollToBottom]);
 
     const scrollToBottomOnSend = React.useCallback(() => {
         // Single movement to the just-sent message. Force re-pins to the bottom
         // whether we were following or scrolled up; the content ResizeObserver
         // keeps us pinned as the optimistic message and its reply stream in.
+        clearDelayedRepin();
+        lastUserReleaseAtRef.current = 0;
         scrollToBottom(true);
-    }, [scrollToBottom]);
+    }, [clearDelayedRepin, scrollToBottom]);
 
     const releaseAutoFollow = React.useCallback(() => {
+        clearDelayedRepin();
+        lastUserReleaseAtRef.current = now();
         setStateValue('released');
         updateOverflowAndButton();
-    }, [setStateValue, updateOverflowAndButton]);
+    }, [clearDelayedRepin, setStateValue, updateOverflowAndButton]);
 
     const releaseFromUserIntent = React.useCallback(() => {
         // A genuine user gesture (wheel/touch/key/scrollbar) cancels the entry
         // window immediately so we never fight the user's read position.
         endEntryStick();
+        lastUserReleaseAtRef.current = now();
         stop();
     }, [endEntryStick, stop]);
+
+    const scheduleRepinAfterGrace = React.useCallback((delayMs: number) => {
+        if (delayedRepinTimerRef.current !== null) return;
+        delayedRepinTimerRef.current = scheduleAutoFollowRepin({
+            delayMs,
+            getContainer: () => scrollRef.current,
+            shouldRepin: (container) => stateRef.current === 'released' && isNearBottom(container, isMobileRef.current),
+            onElapsed: () => {
+                delayedRepinTimerRef.current = null;
+            },
+            repin: () => {
+                setStateValue('following');
+                scrollToBottom(true);
+            },
+        });
+    }, [scrollToBottom, setStateValue]);
 
     // ── per-session snapshot persistence (kept; restore still goes to bottom) ─
     const flushSave = React.useCallback(() => {
@@ -501,13 +567,14 @@ export const useChatAutoFollow = ({
         }
         lastSessionIdRef.current = currentSessionId;
         MessageFreshnessDetector.getInstance().recordSessionStart(currentSessionId);
+        clearDelayedRepin();
         flushSave();
         autoRef.current = null;
         // Drop any pending restore request inherited from a different session.
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current !== currentSessionId) {
             pendingInitialRestoreRef.current = null;
         }
-    }, [currentSessionId, flushSave]);
+    }, [clearDelayedRepin, currentSessionId, flushSave]);
 
     // When work begins and we are still
     // following, pin to the bottom. When work stops, keep following alive for a
@@ -577,12 +644,26 @@ export const useChatAutoFollow = ({
         // content streams.
         if (isNearBottom(el, isMobileRef.current)) {
             const atTrueBottom = distanceFromBottom(el) <= AUTO_MATCH_TOLERANCE_PX;
-            if (scrollingDown || stateRef.current === 'following' || atTrueBottom) {
+            if (stateRef.current === 'released') {
+                if (!shouldRepinReleasedAutoFollow(scrollingDown, atTrueBottom)) {
+                    clearDelayedRepin();
+                } else {
+                    const elapsedSinceRelease = now() - lastUserReleaseAtRef.current;
+                    if (elapsedSinceRelease < REPIN_GRACE_AFTER_RELEASE_MS) {
+                        scheduleRepinAfterGrace(REPIN_GRACE_AFTER_RELEASE_MS - elapsedSinceRelease);
+                    } else {
+                        clearDelayedRepin();
+                        setStateValue('following');
+                    }
+                }
+            } else if (scrollingDown || stateRef.current === 'following' || atTrueBottom) {
+                clearDelayedRepin();
                 setStateValue('following');
             }
             queueSave();
             return;
         }
+        clearDelayedRepin();
 
         // Our own geometry change (a programmatic write that landed at the bottom
         // but where content grew between the write and this event, OR a tracked
@@ -596,7 +677,7 @@ export const useChatAutoFollow = ({
         // Genuine user scroll away from the bottom.
         stop();
         queueSave();
-    }, [isAnimationGuardActive, isAuto, queueSave, scrollToBottom, setStateValue, stop, updateOverflowAndButton]);
+    }, [clearDelayedRepin, isAnimationGuardActive, isAuto, queueSave, scheduleRepinAfterGrace, scrollToBottom, setStateValue, stop, updateOverflowAndButton]);
 
     React.useEffect(() => {
         const container = containerEl;
@@ -634,7 +715,17 @@ export const useChatAutoFollow = ({
         };
 
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (!isReleaseKey(event)) return;
+            if (!isAutoFollowReleaseKey(event)) return;
+            releaseFromUserIntent();
+        };
+
+        const handlePointerDown = (event: PointerEvent) => {
+            if (!isMiddleButtonAutoScrollIntent(container, event)) return;
+            releaseFromUserIntent();
+        };
+
+        const handleMouseDown = (event: MouseEvent) => {
+            if (!isMiddleButtonAutoScrollIntent(container, event)) return;
             releaseFromUserIntent();
         };
 
@@ -652,6 +743,8 @@ export const useChatAutoFollow = ({
         container.addEventListener('touchend', handleTouchEnd, { passive: true });
         container.addEventListener('touchcancel', handleTouchEnd, { passive: true });
         container.addEventListener('keydown', handleKeyDown);
+        container.addEventListener('pointerdown', handlePointerDown, { passive: true });
+        container.addEventListener('mousedown', handleMouseDown, { passive: true });
         if (typeof window !== 'undefined') {
             window.addEventListener('pointerdown', handlePointerDownIntent, true);
         }
@@ -664,6 +757,8 @@ export const useChatAutoFollow = ({
             container.removeEventListener('touchend', handleTouchEnd);
             container.removeEventListener('touchcancel', handleTouchEnd);
             container.removeEventListener('keydown', handleKeyDown);
+            container.removeEventListener('pointerdown', handlePointerDown);
+            container.removeEventListener('mousedown', handleMouseDown);
             if (typeof window !== 'undefined') {
                 window.removeEventListener('pointerdown', handlePointerDownIntent, true);
             }
@@ -829,6 +924,7 @@ export const useChatAutoFollow = ({
 
     React.useEffect(() => {
         return () => {
+            clearDelayedRepin();
             if (autoTimerRef.current) {
                 clearTimeout(autoTimerRef.current);
                 autoTimerRef.current = null;
@@ -844,7 +940,7 @@ export const useChatAutoFollow = ({
                 saveTimerRef.current = null;
             }
         };
-    }, [endEntryStick, flushSave]);
+    }, [clearDelayedRepin, endEntryStick, flushSave]);
 
     React.useEffect(() => {
         if (!onActiveTurnChange) return;
