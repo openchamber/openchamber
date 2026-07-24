@@ -1338,6 +1338,26 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     }
   };
 
+  const handleDeleteBranch = async (branch: string) => {
+    if (!currentDirectory) return;
+
+    const blockingReasons = getMutationBlockingReasons(worktreeAttachment);
+    if (blockingReasons.length > 0) {
+      toast.error(t('gitView.toast.cannotDeleteBranch', { reason: formatBlockingReason(blockingReasons[0]) }));
+      return;
+    }
+
+    try {
+      await git.deleteGitBranch(currentDirectory, { branch });
+      toast.success(t('gitView.toast.deletedBranch', { branch }));
+      await refreshStatusAndBranches();
+      await refreshLog();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('gitView.toast.deleteBranchFailed', { branch });
+      toast.error(message);
+    }
+  };
+
   const handleCheckoutBranch = async (branch: string) => {
     if (!currentDirectory) return;
 
@@ -2398,6 +2418,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         onCheckoutBranch={handleCheckoutBranch}
         onCreateBranch={handleCreateBranch}
         onRenameBranch={handleRenameBranch}
+        onDeleteBranch={handleDeleteBranch}
         activeIdentityProfile={activeIdentityProfile}
         availableIdentities={availableIdentities}
         onSelectIdentity={handleApplyIdentity}

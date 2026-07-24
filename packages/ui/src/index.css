@@ -1616,6 +1616,20 @@ input[aria-label="Terminal input"] {
   padding-right: 2rem;
 }
 
+.git-branch-name-marquee-track {
+  display: inline-flex;
+  min-width: max-content;
+  white-space: nowrap;
+  animation: open-file-name-marquee-scroll var(--open-file-name-marquee-duration, 14s) linear infinite;
+  will-change: transform;
+}
+
+.git-branch-name-marquee-item {
+  flex-shrink: 0;
+  padding-right: 2rem;
+  white-space: nowrap;
+}
+
 .marquee-text {
   display: inline-block;
   white-space: nowrap;
