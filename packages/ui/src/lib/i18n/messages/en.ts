@@ -1240,6 +1240,8 @@ export const dict = {
   'contextSidebar.stats.user': 'User',
   'contextSidebar.stats.assistant': 'Assistant',
   'contextSidebar.stats.cost': 'Cost',
+  'contextSidebar.stats.tokensPerSecond': 'Tokens/s',
+  'contextSidebar.stats.lastTokensPerSecond': 'Last tok/s',
   'contextSidebar.tokens.input': 'Input',
   'contextSidebar.tokens.output': 'Output',
   'contextSidebar.tokens.reasoning': 'Reasoning',

@@ -7,7 +7,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { computeCacheHitRate } from '@/stores/utils/tokenUtils';
+import { computeCacheHitRate, computeSessionTokenRate } from '@/stores/utils/tokenUtils';
 import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -346,6 +346,15 @@ export const ContextPanelContent: React.FC = () => {
       return sum + cost;
     }, 0);
 
+    const partsByMessageId = new Map<string, typeof assistantMessages[number]['parts']>();
+    for (const msg of assistantMessages) {
+      partsByMessageId.set(msg.info.id, msg.parts);
+    }
+    const { avgTokensPerSecond, lastTokensPerSecond } = computeSessionTokenRate(
+      assistantMessages.map((m) => m.info),
+      (id) => partsByMessageId.get(id),
+    );
+
     const latestAssistantInfo = (contextMessage?.info ?? null) as (Message & { providerID?: string; modelID?: string }) | null;
     const providerModel = resolveProviderAndModel(
       providers as ProviderLike[],
@@ -387,6 +396,8 @@ export const ContextPanelContent: React.FC = () => {
       usagePercent,
       cacheHitRate,
       totalAssistantCost,
+      tokensPerSecond: avgTokensPerSecond > 0 ? avgTokensPerSecond : undefined,
+      lastTokensPerSecond: lastTokensPerSecond > 0 ? lastTokensPerSecond : undefined,
       contextLimit,
       breakdown: {
         user: userTokens,
@@ -463,6 +474,7 @@ export const ContextPanelContent: React.FC = () => {
             { label: t('contextSidebar.stats.user'), value: formatNumber(viewModel.userMessagesCount) },
             { label: t('contextSidebar.stats.assistant'), value: formatNumber(viewModel.assistantMessagesCount) },
             { label: t('contextSidebar.stats.cost'), value: formatMoney(viewModel.totalAssistantCost) },
+            { label: t('contextSidebar.stats.tokensPerSecond'), value: viewModel.tokensPerSecond != null ? `${viewModel.tokensPerSecond.toFixed(1)} tok/s` : '—' },
           ] as const).map((item) => (
             <div key={item.label} className="rounded-lg bg-[var(--surface-elevated)]/70 px-3 py-2.5">
               <div className="typography-micro text-muted-foreground/70">{item.label}</div>
@@ -486,6 +498,11 @@ export const ContextPanelContent: React.FC = () => {
                 value: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
                 format: 'percent',
               },
+              {
+                label: t('contextSidebar.stats.lastTokensPerSecond'),
+                value: viewModel.lastTokensPerSecond != null ? viewModel.lastTokensPerSecond : null,
+                format: 'rate',
+              },
             ] as const).map((item) => (
               <div key={item.label}>
                 <div className="typography-micro text-muted-foreground/70">{item.label}</div>
@@ -493,7 +510,9 @@ export const ContextPanelContent: React.FC = () => {
                   {item.value !== null && item.value !== undefined
                     ? item.format === 'percent'
                       ? `${item.value.toFixed(1)}%`
-                      : formatNumber(item.value)
+                      : item.format === 'rate'
+                        ? `${item.value.toFixed(1)} tok/s`
+                        : formatNumber(item.value)
                     : '—'}
                 </div>
               </div>

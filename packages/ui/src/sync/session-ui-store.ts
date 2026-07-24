@@ -26,6 +26,7 @@ import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
 import { useSkillsStore } from "@/stores/useSkillsStore"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
+import { computeSessionCostAndCounts, computeSessionTokenRate } from "@/stores/utils/tokenUtils"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { normalizePath } from "@/lib/pathNormalization"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
@@ -893,16 +894,20 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const msg = messages[i]
       if (msg.role !== "assistant") continue
       const tokens = (msg as { tokens?: AssistantTokens }).tokens
-      if (!tokens) continue
-      const total = tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0)
-      if (total > 0) {
-        lastTokens = tokens
-        lastMessageId = msg.id
-        break
+      if (tokens) {
+        const total = tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0)
+        if (total > 0) {
+          lastTokens = tokens
+          lastMessageId = msg.id
+          break
+        }
       }
     }
 
     if (!lastTokens) return null
+
+    const { totalCost, userCount, assistantCount } = computeSessionCostAndCounts(messages)
+    const { avgTokensPerSecond, lastTokensPerSecond } = computeSessionTokenRate(messages, getSyncParts)
 
     const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0)
     const thresholdLimit = contextLimit > 0 ? contextLimit : 200000
@@ -917,6 +922,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       normalizedOutput,
       thresholdLimit,
       lastMessageId,
+      cost: totalCost > 0 ? totalCost : undefined,
+      totalMessages: messages.length,
+      userMessages: userCount,
+      assistantMessages: assistantCount,
+      tokensPerSecond: avgTokensPerSecond > 0 ? avgTokensPerSecond : undefined,
+      lastTokensPerSecond: lastTokensPerSecond > 0 ? lastTokensPerSecond : undefined,
     }
   },
 
