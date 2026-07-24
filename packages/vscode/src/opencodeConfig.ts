@@ -1061,10 +1061,24 @@ type NpmLookupResult =
 const npmInfoCache = new Map<string, { fetchedAt: number; payload: NpmLookupResult }>();
 const npmInfoInFlight = new Map<string, Promise<NpmLookupResult>>();
 const NPM_CACHE_TTL_MS = 3_600_000;
+const DEFAULT_NPM_REGISTRY_BASE = 'https://registry.npmjs.org';
+
+/**
+ * Resolve the npm registry base URL for direct package-metadata lookups,
+ * honoring `npm_config_registry` / `NPM_CONFIG_REGISTRY` and defaulting to the
+ * public npm registry. Resolved at call time and trailing-slash trimmed.
+ */
+const resolveNpmRegistryBase = (): string => {
+  const configured = (process.env.npm_config_registry || process.env.NPM_CONFIG_REGISTRY || '').trim();
+  if (!configured) {
+    return DEFAULT_NPM_REGISTRY_BASE;
+  }
+  return configured.replace(/\/+$/, '') || DEFAULT_NPM_REGISTRY_BASE;
+};
 
 const lookupNpmPackage = async (name: string): Promise<NpmLookupResult> => {
   try {
-    const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name).replace(/^%40/, '@')}`, {
+    const response = await fetch(`${resolveNpmRegistryBase()}/${encodeURIComponent(name).replace(/^%40/, '@')}`, {
       headers: { Accept: 'application/json', 'User-Agent': 'openchamber-vscode/dev' },
       signal: AbortSignal.timeout(5000),
     });
