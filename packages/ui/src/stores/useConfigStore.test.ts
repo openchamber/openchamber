@@ -18,6 +18,10 @@ let listAgentsImpl: ((directory?: string | null) => Promise<TestAgent[]>) | null
 let withDirectoryCalls: Array<string | null> = [];
 let currentFetchDirectory: string | null = DIRECTORY;
 let configListener: ((event: { scopes: string[]; source?: string; timestamp: number }) => void | Promise<void>) | null = null;
+// Test-controlled health check result. Default healthy; individual tests can
+// flip it to `false` to simulate a transient HTTP health probe failure (used
+// to validate the issue #1769 guard in `probeConnection`).
+let healthCheckResult: boolean = true;
 
 const makeStorage = (): Storage => ({
   getItem: (key: string) => storage.get(key) ?? null,
@@ -164,7 +168,7 @@ mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
     setDirectory: mock(() => undefined),
     getDirectory: mock(() => DIRECTORY),
-    checkHealth: mock(async () => true),
+    checkHealth: mock(async () => healthCheckResult),
     withDirectory: mock(async (directory: string | null, callback: () => Promise<unknown>) => {
       withDirectoryCalls.push(directory);
       const previous = currentFetchDirectory;
@@ -252,6 +256,7 @@ describe('useConfigStore provider persistence', () => {
     listAgentsImpl = null;
     withDirectoryCalls = [];
     currentFetchDirectory = DIRECTORY;
+    healthCheckResult = true;
     setSyncRefs({} as never, { children: new Map(), getState: () => undefined } as never, DIRECTORY);
     useSelectionStore.setState({
       sessionModelSelections: new Map(),
@@ -945,5 +950,347 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentAgentName).toBe('manual-agent');
     expect(state.currentProviderId).toBe('manual');
     expect(state.selectionSource).toBe('manual');
+  });
+});
+
+describe('useConfigStore probeConnection — issue #1769', () => {
+  beforeEach(() => {
+    storage = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: makeStorage(),
+    });
+    liveProviderId = 'live';
+    liveProviderIdsByDirectory = new Map();
+    liveProviderVariants = undefined;
+    getProvidersCalls = 0;
+    getConfigCalls = 0;
+    listAgentsCalls = 0;
+    liveAgents = [];
+    listAgentsImpl = null;
+    withDirectoryCalls = [];
+    currentFetchDirectory = DIRECTORY;
+    healthCheckResult = true;
+    setSyncRefs({} as never, { children: new Map(), getState: () => undefined } as never, DIRECTORY);
+    useSelectionStore.setState({
+      sessionModelSelections: new Map(),
+      sessionAgentSelections: new Map(),
+      sessionAgentModelSelections: new Map(),
+      lastUsedProvider: null,
+    });
+    useSessionUIStore.setState({ currentSessionId: null });
+  });
+
+  test('probe failure during warmup does not flip connectionPhase to reconnecting', async () => {
+    // Reload after a previous session: hasEverConnected is true (carried
+    // over by store hydration), but the SSE/WS pipeline has not yet
+    // reported its first onReconnect in this lifecycle, so
+    // transportConnectedAt is null. A transient HTTP probe failure here
+    // must not surface as a spurious "reconnecting" indicator flicker.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: true,
+      connectionPhase: 'connecting',
+      transportConnectedAt: null,
+    });
+    healthCheckResult = false;
+
+    const ok = await useConfigStore.getState().probeConnection();
+    const state = useConfigStore.getState();
+
+    expect(ok).toBe(false);
+    expect(state.connectionPhase).toBe('connecting');
+    // warmup-guarded path also stamps lastDisconnectReason so the
+    // user-facing connectionLostError in session-actions.ts has accurate
+    // context (matches the non-guarded branch behaviour).
+    expect(state.lastDisconnectReason).toBe('health_check_unhealthy');
+  });
+
+  test('probe failure after a real transport connect still reports reconnecting', async () => {
+    // Once the pipeline has reported at least one onReconnect in this
+    // lifecycle (transportConnectedAt set) and the stream is currently
+    // down (isConnected false), a probe failure must still surface
+    // reconnecting — the pipeline itself can additionally override this
+    // via onDisconnect, but the probe must not pretend everything is fine.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: true,
+      connectionPhase: 'reconnecting',
+      transportConnectedAt: Date.now() - 5_000,
+      lastDisconnectReason: 'ws_heartbeat_timeout',
+    });
+    healthCheckResult = false;
+
+    const ok = await useConfigStore.getState().probeConnection();
+    const state = useConfigStore.getState();
+
+    expect(ok).toBe(false);
+    expect(state.connectionPhase).toBe('reconnecting');
+  });
+
+  test('probe success sets connected and transportConnectedAt is left to pipeline', async () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: false,
+      connectionPhase: 'connecting',
+      transportConnectedAt: null,
+    });
+    healthCheckResult = true;
+
+    const ok = await useConfigStore.getState().probeConnection();
+    const state = useConfigStore.getState();
+
+    expect(ok).toBe(true);
+    expect(state.isConnected).toBe(true);
+    expect(state.hasEverConnected).toBe(true);
+    expect(state.connectionPhase).toBe('connected');
+    // probeConnection does not stamp transportConnectedAt — that is the
+    // pipeline's job via setTransportConnectedAt on onReconnect.
+    expect(state.transportConnectedAt).toBe(null);
+    // probeConnection now calls setConnected(), which stamps
+    // hasEverConnectedSince for the warmup-guard timeout anchor.
+    expect(state.hasEverConnectedSince).not.toBeNull();
+  });
+
+  test('probe does not downgrade an already-connected stream', async () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: true,
+      hasEverConnected: true,
+      connectionPhase: 'connected',
+      transportConnectedAt: Date.now() - 1_000,
+    });
+    healthCheckResult = false;
+
+    const ok = await useConfigStore.getState().probeConnection();
+    const state = useConfigStore.getState();
+
+    expect(ok).toBe(true);
+    expect(state.isConnected).toBe(true);
+    expect(state.connectionPhase).toBe('connected');
+  });
+
+  test('first-start probe failure keeps connecting (no reconnecting flash)', async () => {
+    // First-ever launch: hasEverConnected false, transportConnectedAt null.
+    // The original code path already handled this correctly; guard against
+    // regressions when the warmup guard lands.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: false,
+      connectionPhase: 'connecting',
+      transportConnectedAt: null,
+    });
+    healthCheckResult = false;
+
+    const ok = await useConfigStore.getState().probeConnection();
+    const state = useConfigStore.getState();
+
+    expect(ok).toBe(false);
+    expect(state.connectionPhase).toBe('connecting');
+  });
+
+  test('setTransportConnectedAt is idempotent for the same timestamp', () => {
+    useConfigStore.setState({ transportConnectedAt: null });
+    const ts = Date.now();
+    useConfigStore.getState().setTransportConnectedAt(ts);
+    useConfigStore.getState().setTransportConnectedAt(ts);
+    expect(useConfigStore.getState().transportConnectedAt).toBe(ts);
+  });
+
+  test('setTransportConnectedAt(null) clears the marker after a teardown', () => {
+    useConfigStore.getState().setTransportConnectedAt(Date.now());
+    useConfigStore.getState().setTransportConnectedAt(null);
+    expect(useConfigStore.getState().transportConnectedAt).toBe(null);
+  });
+
+  test('warmup guard releases after WARMUP_GUARD_MAX_MS without a pipeline connect', async () => {
+    // Regression guard for the issue #1769 fix: a pipeline that never
+    // reports `onReconnect` (e.g. the server is genuinely down and the
+    // SSE/WS transport cannot establish) must not keep the warmup guard
+    // active forever. After the warmup window elapses, the guard
+    // releases so a subsequent HTTP probe failure surfaces
+    // `reconnecting` (the correct end-user state) rather than staying
+    // stuck on `connecting`.
+    const now = Date.now();
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: true,
+      connectionPhase: 'connecting',
+      transportConnectedAt: null,
+      transportMountedAt: now - (31_000), // past the 30s warmup window
+    });
+    healthCheckResult = false;
+
+    expect(useConfigStore.getState().isWarmupGuarded()).toBe(false);
+    const ok = await useConfigStore.getState().probeConnection();
+
+    // Now that the guard is released, the probe failure must surface
+    // reconnecting (hasEverConnected is true).
+    expect(ok).toBe(false);
+    expect(useConfigStore.getState().connectionPhase).toBe('reconnecting');
+  });
+
+  test('warmup guard is still active within the window', () => {
+    const now = Date.now();
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: true,
+      connectionPhase: 'connecting',
+      transportConnectedAt: null,
+      transportMountedAt: now - 5_000, // well within the 30s window
+    });
+
+    expect(useConfigStore.getState().isWarmupGuarded()).toBe(true);
+  });
+
+  test('warmup guard falls back to hasEverConnectedSince when transportMountedAt is null', () => {
+    // First mount case: the pipeline effect cleanup that would set
+    // transportMountedAt has not yet run. If hasEverConnected was
+    // hydrated as true (rehydrated store), the guard must still release
+    // after WARMUP_GUARD_MAX_MS so a broken transport is not masked
+    // forever. See issue #1769.
+    const now = Date.now();
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: true,
+      connectionPhase: 'connecting',
+      transportConnectedAt: null,
+      transportMountedAt: null,
+      hasEverConnectedSince: now - 31_000, // past the 30s window
+    });
+
+    expect(useConfigStore.getState().isWarmupGuarded()).toBe(false);
+  });
+
+  test('setConnected stamps hasEverConnectedSince for the warmup-guard timeout', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: false,
+      connectionPhase: 'connecting',
+      hasEverConnectedSince: null,
+    });
+
+    const before = Date.now();
+    useConfigStore.getState().setConnected();
+    const after = Date.now();
+
+    const state = useConfigStore.getState();
+    expect(state.isConnected).toBe(true);
+    expect(state.hasEverConnected).toBe(true);
+    expect(state.connectionPhase).toBe('connected');
+    expect(state.hasEverConnectedSince).not.toBeNull();
+    expect(state.hasEverConnectedSince!).toBeGreaterThan(before - 1);
+    expect(state.hasEverConnectedSince!).toBeLessThan(after + 1);
+  });
+
+  test('setWarmupGuardedDisconnect without a reason preserves the existing one', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: true,
+      connectionPhase: 'connecting',
+      transportConnectedAt: null,
+      lastDisconnectReason: 'health_check_failed',
+    });
+
+    useConfigStore.getState().setWarmupGuardedDisconnect();
+
+    const state = useConfigStore.getState();
+    expect(state.isConnected).toBe(false);
+    expect(state.connectionPhase).toBe('connecting');
+    // The existing reason is preserved instead of being silently cleared.
+    expect(state.lastDisconnectReason).toBe('health_check_failed');
+  });
+
+  test('after pipeline teardown, a probe failure is warmup-guarded again', async () => {
+    // Reproduces the SyncProvider useEffect cleanup path: when the
+    // pipeline re-mounts (deps change, hot reload, worktree switch, ...),
+    // `setTransportConnectedAt(null)` is invoked in cleanup. The store
+    // must then go back to the warmup-guarded state so a transient HTTP
+    // failure during the new pipeline's bootstrap does not flash
+    // "reconnecting" again. Regression guard for the issue #1769 fix.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: true,
+      hasEverConnected: true,
+      connectionPhase: 'connected',
+      transportConnectedAt: Date.now() - 5_000,
+    });
+
+    // Simulate cleanup of the previous lifecycle.
+    useConfigStore.getState().setTransportConnectedAt(null);
+    expect(useConfigStore.getState().transportConnectedAt).toBe(null);
+
+    // The store now mirrors a fresh lifecycle: isConnected reset to
+    // false because the previous pipeline is gone. hasEverConnected
+    // stays true (carried over from the prior lifecycle, as the store
+    // would hydrate it). This is exactly the post-reload scenario the
+    // issue #1769 fix targets.
+    useConfigStore.setState({
+      isConnected: false,
+      connectionPhase: 'connecting',
+    });
+    healthCheckResult = false;
+
+    const ok = await useConfigStore.getState().probeConnection();
+
+    // The probe must NOT flip to reconnecting while the new pipeline
+    // has not yet reported its first onReconnect.
+    expect(ok).toBe(false);
+    expect(useConfigStore.getState().connectionPhase).toBe('connecting');
+    expect(useConfigStore.getState().lastDisconnectReason).toBe('health_check_unhealthy');
+  });
+
+  test('checkConnection during warmup does not flip to reconnecting on HTTP failure', async () => {
+    // Same root cause as the probeConnection test above, but exercising
+    // the initializeApp health-check loop. After a reload, the first
+    // `checkConnection` call can transiently fail while the pipeline is
+    // still bootstrapping; without the warmup guard it would surface
+    // `reconnecting` for the duration of the 5-attempt retry loop.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: true,
+      connectionPhase: 'connecting',
+      transportConnectedAt: null,
+    });
+    healthCheckResult = false;
+
+    const ok = await useConfigStore.getState().checkConnection();
+
+    // 5 attempts × up-to-400-1600ms backoff ≈ 4s; that's acceptable
+    // for a single regression guard against a real user-visible flicker.
+    expect(ok).toBe(false);
+    expect(useConfigStore.getState().connectionPhase).toBe('connecting');
+    expect(useConfigStore.getState().isConnected).toBe(false);
+  });
+
+  test('checkConnection after pipeline connect still reports reconnecting on HTTP failure', async () => {
+    // Once the pipeline has reported at least one onReconnect in this
+    // lifecycle (transportConnectedAt set), `checkConnection` must
+    // behave as it did before the fix — a probe failure while the
+    // stream is currently down should surface reconnecting.
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      isConnected: false,
+      hasEverConnected: true,
+      connectionPhase: 'reconnecting',
+      transportConnectedAt: Date.now() - 5_000,
+      lastDisconnectReason: 'ws_heartbeat_timeout',
+    });
+    healthCheckResult = false;
+
+    const ok = await useConfigStore.getState().checkConnection();
+
+    expect(ok).toBe(false);
+    expect(useConfigStore.getState().connectionPhase).toBe('reconnecting');
   });
 });

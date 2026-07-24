@@ -1994,6 +1994,7 @@ export function SyncProvider(props: {
   // Event pipeline — created once per mount. No class, no start/stop.
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
+    useConfigStore.getState().setTransportMountedAt(Date.now())
     const pipeline = createEventPipeline({
       sdk: props.sdk,
       transport: messageStreamTransport,
@@ -2031,6 +2032,8 @@ export function SyncProvider(props: {
           isConnected: true,
           hasEverConnected: true,
           connectionPhase: "connected",
+          hasEverConnectedSince: Date.now(),
+          transportConnectedAt: Date.now(),
         })
         const isFirstConnect = !pipelineHasConnectedRef.current
         pipelineHasConnectedRef.current = true
@@ -2062,6 +2065,8 @@ export function SyncProvider(props: {
           isConnected: true,
           hasEverConnected: true,
           connectionPhase: "connected",
+          hasEverConnectedSince: Date.now(),
+          transportConnectedAt: Date.now(),
         })
         for (const dir of childStores.children.keys()) {
           triggerDirectoryResync(dir, "transport-switch")
@@ -2074,6 +2079,9 @@ export function SyncProvider(props: {
         pipelineReconnectRef.current = null
       }
       pipeline.cleanup()
+      const configStore = useConfigStore.getState()
+      configStore.setTransportConnectedAt(null)
+      configStore.setTransportMountedAt(Date.now())
     }
   }, [props.sdk, childStores, routingIndex, messageStreamTransport, runtimeKey, triggerDirectoryResync])
 
