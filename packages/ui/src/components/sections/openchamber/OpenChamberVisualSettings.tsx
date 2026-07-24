@@ -1005,24 +1005,19 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                         {showWindowControlsPositionSetting && (
                             <SettingsSection
                                 title={t('settings.openchamber.desktopNetwork.field.windowControlsPosition')}
+                                description={t('settings.openchamber.desktopNetwork.field.windowControlsPositionDescription')}
                                 divider={hasThemeSettings}
+                                settingsItem="sessions.desktop-window-controls-position"
                             >
-                                <SettingsFieldRow
-                                    settingsItem="sessions.desktop-window-controls-position"
-                                    label={t('settings.openchamber.desktopNetwork.field.windowControlsPositionDescription')}
-                                    alignEnd={false}
-                                    controlClassName="flex-col items-stretch"
-                                >
-                                    <SettingsChipGroup
-                                        value={desktopWindowControlsPosition}
-                                        options={WINDOW_CONTROLS_POSITION_OPTIONS.map((option) => ({
-                                            value: option.id,
-                                            label: tUnsafe(option.labelKey),
-                                        }))}
-                                        onChange={handleWindowControlsPositionChange}
-                                        aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsPositionAria')}
-                                    />
-                                </SettingsFieldRow>
+                                <SettingsChipGroup
+                                    value={desktopWindowControlsPosition}
+                                    options={WINDOW_CONTROLS_POSITION_OPTIONS.map((option) => ({
+                                        value: option.id,
+                                        label: tUnsafe(option.labelKey),
+                                    }))}
+                                    onChange={handleWindowControlsPositionChange}
+                                    aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsPositionAria')}
+                                />
                             </SettingsSection>
                         )}
 
