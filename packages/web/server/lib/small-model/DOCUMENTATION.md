@@ -66,9 +66,17 @@ other runtime API.
 - `catalog.js` — models.dev catalog via the shared in-process cache
   (`../opencode/models-metadata.js`, also serving
   `/api/openchamber/models-metadata`).
-- `routes.js` — `GET /api/small-model` (resolution preview) and
-  `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
+- `routes.js` — `GET /api/small-model` (resolution preview, returns
+  `{ available, model, authenticatedProviders, noAuthProviders, availableProviders }`)
+  and `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
   model?, directory? }` → `{ text, providerID, modelID, source }`).
+  `availableProviders` is the deduplicated union of `authenticatedProviders`
+  plus the no-auth providers — what the settings override picker uses as
+  `allowedProviderIds`. `noAuthProviders` lists providers that ship without
+  requiring an auth entry (currently just `opencode` — see "Known
+  limitations" below); callers can use it to render a distinction in the
+  picker (e.g. an "OpenCode zen" badge). `authenticatedProviders` is the
+  strict "callable directly" set, kept for callers that want it.
 
 ## Registration
 
@@ -77,12 +85,20 @@ module is imported on first request, not at server startup.
 
 ## Known limitations
 
-- OpenCode's free models (`opencode/big-pickle`, `*-free`) work without a
-  token only through OpenCode's own server — direct calls are rejected, and
-  piggybacking on their subsidized infra is out of bounds by design. Every
-  resolution step therefore requires a usable auth entry for the provider:
-  a session on an unauthenticated `opencode` provider falls through to the
-  global scan (or a clean 404 on a vanilla setup with no logins).
+- OpenCode's free / zen models (`opencode/big-pickle`, `*-free`) work without
+  a token only through OpenCode's own server — direct calls from this module
+  are rejected, and piggybacking on their subsidized infra is out of bounds
+  by design. The settings override picker, however, is allowed to surface
+  them: `listNoAuthProviders()` exposes the `opencode` provider id on its
+  own, and `listSelectableProviders()` unions it with the authenticated
+  providers — `GET /api/small-model` surfaces those as `noAuthProviders`
+  and `availableProviders` respectively (see `NO_AUTH_PROVIDER_IDS` in
+  `index.js`). A user-selected `opencode/<model>` is honored at the
+  `source: 'settings'` step in `resolveSmallModel()` (which never checks
+  auth). The family-priority scan and the direct `POST /api/small-model/generate`
+  path still require a usable auth entry — picking a zen override is a
+  per-session preference, not a fallback the resolver can use on a vanilla
+  setup with no logins (it returns `null` there, same as before).
 
 - Anthropic OAuth (Claude Pro/Max) entries are not supported — OpenCode itself
   keeps those outside `auth.json` in this generation; only `type: api` keys
