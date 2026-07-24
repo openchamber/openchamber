@@ -973,12 +973,24 @@ export const registerFsRoutes = (app, dependencies) => {
   });
 
   app.post('/api/fs/write', async (req, res) => {
-    const { path: filePath, content } = req.body || {};
+    const { path: filePath, content, encoding } = req.body || {};
     if (!filePath || typeof filePath !== 'string') {
       return res.status(400).json({ error: 'Path is required' });
     }
     if (typeof content !== 'string') {
       return res.status(400).json({ error: 'Content is required' });
+    }
+    if (encoding !== undefined && encoding !== 'utf8' && encoding !== 'base64') {
+      return res.status(400).json({ error: 'Unsupported encoding' });
+    }
+    const isBase64 = encoding === 'base64';
+    let payload = content;
+    if (isBase64) {
+      try {
+        payload = Buffer.from(content, 'base64');
+      } catch {
+        return res.status(400).json({ error: 'Invalid base64 content' });
+      }
     }
 
     try {
@@ -1006,9 +1018,16 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
-      if (existing === content) {
-        return res.json({ success: true, path: resolved.resolved });
+      if (isBase64) {
+        const existing = await fsPromises.readFile(writePath).catch(() => null);
+        if (existing && existing.equals(payload)) {
+          return res.json({ success: true, path: resolved.resolved });
+        }
+      } else {
+        const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
+        if (existing === payload) {
+          return res.json({ success: true, path: resolved.resolved });
+        }
       }
 
       await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
@@ -1017,7 +1036,11 @@ export const registerFsRoutes = (app, dependencies) => {
       // seeing an empty file during the O_TRUNC window of direct writeFile.
       const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       try {
-        await fsPromises.writeFile(tmp, content, 'utf8');
+        if (isBase64) {
+          await fsPromises.writeFile(tmp, payload);
+        } else {
+          await fsPromises.writeFile(tmp, payload, 'utf8');
+        }
         await fsPromises.rename(tmp, writePath);
       } catch (error) {
         await fsPromises.unlink(tmp).catch(() => {});

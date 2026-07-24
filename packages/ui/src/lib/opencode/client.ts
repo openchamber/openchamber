@@ -30,6 +30,7 @@ import { runtimeFetch } from "@/lib/runtime-fetch";
 import { getRuntimeKey } from "@/lib/runtime-switch";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
+import { groundAttachmentsForModel } from "@/lib/attachments/attachmentGrounding";
 import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
@@ -792,12 +793,30 @@ class OpencodeService {
       parts.push(textPart);
     }
 
+    const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
+
+    // Attachments the selected model cannot ingest are grounded to the
+    // workspace (uploads/) and replaced with synthetic text hints so the
+    // agent reads them with its own tools instead of the provider rejecting
+    // the whole message. See lib/attachments/attachmentGrounding.ts.
+    const appendFiles = async (files: Array<FileInputLite>) => {
+      const grounded = await groundAttachmentsForModel({
+        files,
+        providerID: params.providerID,
+        modelID: params.modelID,
+        directory: requestDirectory,
+      });
+      for (const file of grounded.direct) {
+        parts.push(await this.toNormalizedFilePartInput(file));
+      }
+      for (const hint of grounded.hints) {
+        parts.push({ type: 'text', text: hint, synthetic: true });
+      }
+    };
+
     // Add file parts if provided (normalizing MIME types for compatibility)
     if (params.files && params.files.length > 0) {
-      for (const file of params.files) {
-        const filePart = await this.toNormalizedFilePartInput(file);
-        parts.push(filePart);
-      }
+      await appendFiles(params.files);
     }
 
     // Add additional parts (for batch/queued messages)
@@ -811,10 +830,7 @@ class OpencodeService {
           });
         }
         if (additional.files && additional.files.length > 0) {
-          for (const file of additional.files) {
-            const filePart = await this.toNormalizedFilePartInput(file);
-            parts.push(filePart);
-          }
+          await appendFiles(additional.files);
         }
       }
     }
@@ -834,8 +850,6 @@ class OpencodeService {
     if (parts.length === 0) {
       throw new Error('Message must have at least one part (text or file)');
     }
-
-    const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
 
     if (params.format) {
       console.info('[git-generation][browser] send structured message', {
@@ -924,20 +938,32 @@ class OpencodeService {
   }): Promise<string> {
     const tempMessageId = params.messageId ?? ascendingId("msg");
 
+    const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
+
+    // Command parts only accept file parts, so grounded-attachment hints are
+    // appended to the command arguments instead (same grounding as sendMessage).
     const parts: FilePartInput[] = [];
+    let commandArguments = params.arguments ?? '';
     if (params.files && params.files.length > 0) {
-      for (const file of params.files) {
+      const grounded = await groundAttachmentsForModel({
+        files: params.files,
+        providerID: params.providerID,
+        modelID: params.modelID,
+        directory: requestDirectory,
+      });
+      for (const file of grounded.direct) {
         parts.push(await this.toNormalizedFilePartInput(file));
       }
+      if (grounded.hints.length > 0) {
+        commandArguments = [commandArguments, ...grounded.hints].filter(Boolean).join('\n');
+      }
     }
-
-    const requestDirectory = this.normalizeCandidatePath(params.directory ?? null) ?? this.currentDirectory;
 
     const response = await this.client.session.command({
       sessionID: params.id,
       ...(requestDirectory ? { directory: requestDirectory } : {}),
       command: params.command,
-      arguments: params.arguments ?? '',
+      arguments: commandArguments,
       model: `${params.providerID}/${params.modelID}`,
       agent: params.agent,
       variant: params.variant,
