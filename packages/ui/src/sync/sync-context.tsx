@@ -664,7 +664,7 @@ const dispatchVSCodeRuntimeNotificationEvent = (directory: string, payload: Even
   }))
 }
 
-const createEventRoutingIndex = (): EventRoutingIndex => ({
+export const createEventRoutingIndex = (): EventRoutingIndex => ({
   sessionDirectoryById: new Map(),
   messageSessionById: new Map(),
   sessionMessageIdsById: new Map(),
@@ -964,8 +964,12 @@ const childStoreHasMessagePartState = (
   return Object.prototype.hasOwnProperty.call(getDirectoryEventState(store, batch).part, messageID)
 }
 
-const getActiveDirectoryFallback = (childStores: ChildStoreManager): string | null => {
+const getActiveDirectoryFallback = (
+  childStores: ChildStoreManager,
+  sessionID?: string | null,
+): string | null => {
   if (!_activeDirectory || !_activeSession) return null
+  if (sessionID && sessionID !== _activeSession) return null
   return childStores.getChild(_activeDirectory) ? _activeDirectory : null
 }
 
@@ -995,6 +999,14 @@ const resolveDirectoryFromRoutingIndex = (
     const found = findSessionInChildStores(sessionID, childStores, routingIndex, batch)
     if (found) {
       return found
+    }
+
+    // The global stream does not always include a directory. During a session
+    // transition, its routing index can lag the active session briefly; route
+    // a session-addressed event only when that session is the one being viewed.
+    const activeDirectory = getActiveDirectoryFallback(childStores, sessionID)
+    if (activeDirectory) {
+      return activeDirectory
     }
   }
 
@@ -1351,7 +1363,7 @@ async function resyncDirectoryAfterReconnect(
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
 
-function handleEvent(
+export function handleEvent(
   rawDirectory: string,
   payload: Event,
   childStores: ChildStoreManager,

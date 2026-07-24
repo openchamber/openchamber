@@ -258,6 +258,10 @@ Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 | `question.asked/replied/rejected` | `question` |
 | `lsp.updated` | `lsp` |
 
+### Directory-less session events
+
+The global stream can omit a directory for a session-addressed event. Resolve it through the session routing index first. If the index is briefly stale during a session transition, route only when the event session matches the active session and that directory store exists; otherwise leave it un-routed rather than updating another directory.
+
 ## Adding a new event type
 
 1. Add the case to the event reducer (`event-reducer.ts`)

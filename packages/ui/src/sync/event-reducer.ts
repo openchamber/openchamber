@@ -308,6 +308,9 @@ export function applyDirectoryEvent(
 
     case "todo.updated": {
       const props = event.properties as { sessionID: string; todos: Todo[] }
+      if (areJsonEquivalent(draft.todo[props.sessionID], props.todos)) {
+        return false
+      }
       draft.todo[props.sessionID] = props.todos
       callbacks?.onSetSessionTodo?.(props.sessionID, props.todos)
       return true
