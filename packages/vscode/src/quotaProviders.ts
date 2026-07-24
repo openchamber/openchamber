@@ -184,7 +184,7 @@ const resolveGoogleWindow = (sourceId: GoogleAuthSource['sourceId'], resetAt: nu
   return { label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS } as const;
 };
 
-const ZAI_TOKEN_WINDOW_SECONDS: Record<number, number> = { 3: 3600 };
+const ZAI_TOKEN_WINDOW_SECONDS: Record<number, number> = { 3: 3600, 6: 604800 };
 
 const readAuthFile = (): AuthFile => {
   if (!fs.existsSync(AUTH_FILE)) {
@@ -1530,14 +1530,14 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
 
     const payload = await response.json() as ZaiPayload;
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
-    const tokensLimit = limits.find((limit: Record<string, unknown>) => limit?.type === 'TOKENS_LIMIT');
-    const windowSeconds = resolveWindowSeconds(tokensLimit as Record<string, unknown> | undefined);
-    const windowLabel = resolveWindowLabel(windowSeconds);
-    const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-    const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
+    const tokensLimits = limits.filter((limit: Record<string, unknown>) => limit?.type === 'TOKENS_LIMIT');
 
     const windows: Record<string, UsageWindow> = {};
-    if (tokensLimit) {
+    for (const tokensLimit of tokensLimits) {
+      const windowSeconds = resolveWindowSeconds(tokensLimit as Record<string, unknown> | undefined);
+      const windowLabel = resolveWindowLabel(windowSeconds);
+      const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
+      const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
       windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,
@@ -1600,18 +1600,17 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
     const payload = await response.json() as ZhipuaiPayload;
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
 
-    const tokensLimit = limits.find((limit): limit is ZhipuaiTokensLimit => limit?.type === 'TOKENS_LIMIT');
+    const tokensLimits = limits.filter((limit): limit is ZhipuaiTokensLimit => limit?.type === 'TOKENS_LIMIT');
     const mcpToolsTimeLimit = limits.find((limit): limit is ZhipuaiMcpTimeLimit => limit?.type === 'TIME_LIMIT');
 
     const windows: Record<string, UsageWindow> = {};
 
-    // Handle TOKENS_LIMIT (5-hour window for token usage)
-    if (tokensLimit) {
+    for (const tokensLimit of tokensLimits) {
       const windowSeconds = resolveWindowSeconds(tokensLimit);
+      const windowLabel = resolveWindowLabel(windowSeconds);
       const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
       const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
-
-      windows['Tokens'] = toUsageWindow({
+      windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,
         resetAt,

@@ -35,7 +35,8 @@ export const normalizeTimestamp = (value) => {
 };
 
 export const resolveWindowSeconds = (limit) => {
-  const ZAI_TOKEN_WINDOW_SECONDS = { 3: 3600 };
+  // unit 3 = hour (3600s), unit 6 = week (604800s)
+  const ZAI_TOKEN_WINDOW_SECONDS = { 3: 3600, 6: 604800 };
   if (!limit || !limit.number) return null;
   const unitSeconds = ZAI_TOKEN_WINDOW_SECONDS[limit.unit];
   if (!unitSeconds) return null;

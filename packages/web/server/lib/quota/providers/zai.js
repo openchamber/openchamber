@@ -57,14 +57,15 @@ export const fetchQuota = async () => {
 
     const payload = await response.json();
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
-    const tokensLimit = limits.find((limit) => limit?.type === 'TOKENS_LIMIT');
-    const windowSeconds = resolveWindowSeconds(tokensLimit);
-    const windowLabel = resolveWindowLabel(windowSeconds);
-    const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-    const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
+
+    const tokensLimits = limits.filter((limit) => limit?.type === 'TOKENS_LIMIT');
 
     const windows = {};
-    if (tokensLimit) {
+    for (const tokensLimit of tokensLimits) {
+      const windowSeconds = resolveWindowSeconds(tokensLimit);
+      const windowLabel = resolveWindowLabel(windowSeconds);
+      const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
+      const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
       windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,

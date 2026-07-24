@@ -33,6 +33,7 @@ import {
   buildResult,
   toUsageWindow,
   resolveWindowSeconds,
+  resolveWindowLabel,
   normalizeTimestamp
 } from '../utils/index.js';
 
@@ -104,18 +105,18 @@ export const fetchQuota = async () => {
     const payload = await response.json();
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
 
-    const tokensLimit = limits.find((limit) => limit?.type === 'TOKENS_LIMIT');
+    const tokensLimits = limits.filter((limit) => limit?.type === 'TOKENS_LIMIT');
     const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
 
     const windows = {};
 
-    // Handle TOKENS_LIMIT (5-hour window for token usage)
-    if (tokensLimit) {
+    for (const tokensLimit of tokensLimits) {
       const windowSeconds = resolveWindowSeconds(tokensLimit);
+      const windowLabel = resolveWindowLabel(windowSeconds);
       const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
       const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
 
-      windows['Tokens'] = toUsageWindow({
+      windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,
         resetAt
