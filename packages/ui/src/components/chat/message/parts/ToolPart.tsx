@@ -53,6 +53,7 @@ import {
 } from './taskToolModel';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
+import { getEffectiveToolOutput } from './toolOutputHelpers';
 import { getDiffPatchEntries, getPatchText, type DiffPatchEntry } from './toolDiffUtils';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
@@ -798,6 +799,8 @@ interface ToolScrollableSectionProps {
     className?: string;
     outerClassName?: string;
     disableHorizontal?: boolean;
+    pinToBottom?: boolean;
+    pinKey?: string;
 }
 
 const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
@@ -806,22 +809,40 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
     className,
     outerClassName,
     disableHorizontal = false,
-}) => (
-    <div className={cn('w-full min-w-0 flex-none overflow-hidden', outerClassName)}>
-        <ScrollShadow
-            className={cn(
-                'tool-output-surface p-2 rounded-xl w-full min-w-0',
-                maxHeightClass,
-                disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
-                className,
-            )}
-        >
-            <div className="w-full min-w-0">
-                {children}
-            </div>
-        </ScrollShadow>
-    </div>
-);
+    pinToBottom = false,
+    pinKey,
+}) => {
+    const scrollRef = React.useRef<HTMLElement>(null);
+
+    React.useLayoutEffect(() => {
+        if (!pinToBottom) {
+            return;
+        }
+        const el = scrollRef.current;
+        if (!el) {
+            return;
+        }
+        el.scrollTop = el.scrollHeight;
+    }, [pinToBottom, pinKey]);
+
+    return (
+        <div className={cn('w-full min-w-0 flex-none overflow-hidden', outerClassName)}>
+            <ScrollShadow
+                ref={scrollRef}
+                className={cn(
+                    'tool-output-surface p-2 rounded-xl w-full min-w-0',
+                    maxHeightClass,
+                    disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
+                    className,
+                )}
+            >
+                <div className="w-full min-w-0">
+                    {children}
+                </div>
+            </ScrollShadow>
+        </div>
+    );
+};
 
 const getToolOutputLanguage = (
     output: string,
@@ -1510,7 +1531,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
-    const rawOutput = stateWithData.output;
+    const rawOutput = getEffectiveToolOutput(part.tool, stateWithData.output, metadata?.output);
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
     const attachments = stateWithData.attachments;
@@ -1578,13 +1599,15 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
     const renderScrollableBlock = (
         content: React.ReactNode,
-        options?: { maxHeightClass?: string; className?: string; disableHorizontal?: boolean; outerClassName?: string }
+        options?: { maxHeightClass?: string; className?: string; disableHorizontal?: boolean; outerClassName?: string; pinToBottom?: boolean; pinKey?: string }
     ) => (
         <ToolScrollableSection
             maxHeightClass={options?.maxHeightClass}
             className={options?.className}
             disableHorizontal={options?.disableHorizontal}
             outerClassName={options?.outerClassName}
+            pinToBottom={options?.pinToBottom}
+            pinKey={options?.pinKey}
         >
             {content}
         </ToolScrollableSection>
@@ -1801,6 +1824,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         if (hasStringOutput && outputString.trim()) {
+            const isRunningBash = part.tool === 'bash' && state.status === 'running';
             return renderScrollableBlock(
                 <ToolScrollableTextOutput
                     output={coerceToText(outputString)}
@@ -1811,6 +1835,8 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 {
                     className: part.tool === 'bash' ? 'p-1 rounded-none' : 'p-1',
                     maxHeightClass: part.tool === 'bash' ? 'max-h-[46vh]' : undefined,
+                    pinToBottom: isRunningBash,
+                    pinKey: isRunningBash ? outputString : undefined,
                 }
             );
         }
@@ -1820,6 +1846,9 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             { maxHeightClass: 'max-h-60' }
         );
     };
+
+    const shouldRenderResult = (state.status === 'completed' && 'output' in state)
+        || (part.tool === 'bash' && hasStringOutput);
 
     if (isTodoTool) {
         if (state.status === 'error' && 'error' in state) {
@@ -1899,7 +1928,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     ) : null}
 
-                    {state.status === 'completed' && 'output' in state && (
+                    {shouldRenderResult && (
                         <div>
                             {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && hasVisualDiffEntry ? (
                                 <div className="mb-1 flex items-center justify-end gap-2">
