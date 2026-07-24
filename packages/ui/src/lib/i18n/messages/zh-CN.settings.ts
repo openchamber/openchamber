@@ -471,6 +471,8 @@ export const settingsDict = {
   'settings.agents.page.toast.updateFailed': '更新智能体失败',
   'settings.agents.page.toast.saveUnexpectedError': '保存时发生错误',
   'settings.agents.page.toast.savedManualRestart': '已保存到磁盘。请重启已连接的 OpenCode 服务器以应用更改。',
+  'settings.agents.page.toast.savedDeferredSingle': '已保存。活动任务完成后 OpenCode 将重新加载。',
+  'settings.agents.page.toast.savedDeferredPlural': '已保存。{count} 个活动任务完成后 OpenCode 将重新加载。',
   'settings.agents.page.empty.title': '从侧边栏选择一个智能体',
   'settings.agents.page.empty.description': '或新建一个智能体',
   'settings.agents.page.title.new': '新建智能体',

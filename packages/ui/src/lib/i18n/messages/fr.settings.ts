@@ -392,6 +392,8 @@ export const settingsDict = {
   'settings.agents.page.toast.updateFailed': 'Échec de la mise à jour de l\'agent',
   'settings.agents.page.toast.saveUnexpectedError': 'Une erreur s\'est produite lors de l\'enregistrement',
   'settings.agents.page.toast.savedManualRestart': 'Enregistré sur le disque. Redémarrez votre serveur OpenCode connecté pour appliquer les modifications.',
+  'settings.agents.page.toast.savedDeferredSingle': 'Enregistré. OpenCode rechargera lorsque la tâche active sera terminée.',
+  'settings.agents.page.toast.savedDeferredPlural': 'Enregistré. OpenCode rechargera lorsque {count} tâches actives seront terminées.',
   'settings.agents.page.empty.title': 'Sélectionnez un agent dans la barre latérale',
   'settings.agents.page.empty.description': 'ou créez-en un nouveau',
   'settings.agents.page.title.new': 'Nouvel agent',

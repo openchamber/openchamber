@@ -471,6 +471,8 @@ export const settingsDict = {
   "settings.agents.page.toast.updateFailed": "No se pudo actualizar el agente",
   "settings.agents.page.toast.saveUnexpectedError": "Ocurrió un error al guardar",
   "settings.agents.page.toast.savedManualRestart": "Guardado en disco. Reinicia tu servidor OpenCode conectado para aplicar los cambios.",
+  "settings.agents.page.toast.savedDeferredSingle": "Guardado. OpenCode se recargará cuando termine la tarea activa.",
+  "settings.agents.page.toast.savedDeferredPlural": "Guardado. OpenCode se recargará cuando terminen {count} tareas activas.",
   "settings.agents.page.empty.title": "Selecciona un agente desde la barra lateral",
   "settings.agents.page.empty.description": "o crea uno nuevo",
   "settings.agents.page.title.new": "Nuevo agente",

@@ -504,6 +504,8 @@ export const settingsDict = {
   'settings.agents.page.toast.updateFailed': 'Agent の更新に失敗しました',
   'settings.agents.page.toast.saveUnexpectedError': '保存中にエラーが発生しました',
   'settings.agents.page.toast.savedManualRestart': 'ディスクに保存しました。変更を適用するには接続中の OpenCode サーバーを再起動してください。',
+  'settings.agents.page.toast.savedDeferredSingle': '保存しました。アクティブなタスクが完了すると OpenCode が再読み込みされます。',
+  'settings.agents.page.toast.savedDeferredPlural': '保存しました。{count} 件のアクティブなタスクが完了すると OpenCode が再読み込みされます。',
   'settings.agents.page.empty.title': 'サイドバーから Agent を選択してください',
   'settings.agents.page.empty.description': 'または新しいものを作成',
   'settings.agents.page.title.new': '新しい Agent',

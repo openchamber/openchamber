@@ -108,6 +108,8 @@ export const settingsDict = {
   'settings.agents.page.toast.permissionNameRequired': 'Nazwa uprawnienia jest wymagana',
   'settings.agents.page.toast.saveUnexpectedError': 'Wystąpił błąd podczas zapisywania',
   'settings.agents.page.toast.savedManualRestart': 'Zapisano na dysku. Uruchom ponownie połączony serwer OpenCode, aby zastosować zmiany.',
+  'settings.agents.page.toast.savedDeferredSingle': 'Zapisano. OpenCode przeładuje się po zakończeniu aktywnego zadania.',
+  'settings.agents.page.toast.savedDeferredPlural': 'Zapisano. OpenCode przeładuje się po zakończeniu {count} aktywnych zadań.',
   'settings.agents.page.toast.updateFailed': 'Nie udało się zaktualizować agenta',
   'settings.agents.page.toast.updated': 'Agent został zaktualizowany pomyślnie',
   'settings.agents.sidebar.badge.system': 'system',

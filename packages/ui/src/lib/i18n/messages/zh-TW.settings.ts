@@ -468,6 +468,8 @@
   'settings.agents.page.toast.updateFailed': '更新 agent 失敗',
   'settings.agents.page.toast.saveUnexpectedError': '儲存時發生錯誤',
   'settings.agents.page.toast.savedManualRestart': '已儲存到磁碟。請重新啟動已連線的 OpenCode 伺服器以套用變更。',
+  'settings.agents.page.toast.savedDeferredSingle': '已儲存。活動任務完成後 OpenCode 將重新載入。',
+  'settings.agents.page.toast.savedDeferredPlural': '已儲存。{count} 個活動任務完成後 OpenCode 將重新載入。',
   'settings.agents.page.empty.title': '從側邊欄選擇一個 agent',
   'settings.agents.page.empty.description': '或建立一個 agent',
   'settings.agents.page.title.new': '新增 Agent',
