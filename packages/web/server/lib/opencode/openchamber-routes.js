@@ -1,3 +1,82 @@
+import { resolveUpdateRestartOwnerForInstance } from '../systemd-user-service.js';
+
+const UPDATE_STATUS_FILE_NAME = 'update-install-status';
+
+function getUpdateStatusFilePath(pathImpl, openchamberDataDir) {
+  return pathImpl.join(openchamberDataDir, UPDATE_STATUS_FILE_NAME);
+}
+
+function serializeUpdateStatusFile(payload) {
+  return Object.entries(payload)
+    .filter(([, value]) => typeof value === 'string' && value.length > 0)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n');
+}
+
+function parseUpdateStatusFile(content) {
+  if (typeof content !== 'string' || content.trim().length === 0) {
+    return null;
+  }
+
+  const payload = {};
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const separator = line.indexOf('=');
+    if (separator <= 0) continue;
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (!key || !value) continue;
+    payload[key] = value;
+  }
+
+  return Object.keys(payload).length > 0 ? payload : null;
+}
+
+function readUpdateStatus(pathImpl, fsImpl, openchamberDataDir) {
+  try {
+    const content = fsImpl.readFileSync(getUpdateStatusFilePath(pathImpl, openchamberDataDir), 'utf8');
+    return parseUpdateStatusFile(content);
+  } catch {
+    return null;
+  }
+}
+
+function writeUpdateStatus(pathImpl, fsImpl, openchamberDataDir, payload) {
+  const filePath = getUpdateStatusFilePath(pathImpl, openchamberDataDir);
+  fsImpl.mkdirSync(pathImpl.dirname(filePath), { recursive: true });
+  fsImpl.writeFileSync(filePath, `${serializeUpdateStatusFile(payload)}\n`, 'utf8');
+}
+
+function quoteStatusValue(value) {
+  return String(value || '').replace(/[\r\n]/g, ' ').trim();
+}
+
+function buildUpdateStatusPayload(base, overrides = {}) {
+  const next = {
+    ...base,
+    ...overrides,
+  };
+
+  return Object.fromEntries(
+    Object.entries(next)
+      .filter(([, value]) => value !== null && value !== undefined && String(value).trim().length > 0)
+      .map(([key, value]) => [key, quoteStatusValue(value)]),
+  );
+}
+
+function buildPosixUpdateStatusCommand(statusFilePath, quotePosix, payload) {
+  const lines = Object.entries(payload).map(([key, value]) => `${key}=${value}`);
+  const quotedLines = lines.map((line) => quotePosix(line)).join(' ');
+  return `printf '%s\\n' ${quotedLines} > ${quotePosix(statusFilePath)}`;
+}
+
+function buildWindowsUpdateStatusCommand(statusFilePath, quoteCmd, payload) {
+  const lines = Object.entries(payload).map(([key, value]) => `${key}=${value}`);
+  const body = lines.map((line) => `echo ${line}`).join('\r\n');
+  return `(${body}) > ${quoteCmd(statusFilePath)}`;
+}
+
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
@@ -109,7 +188,11 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       } catch {
       }
       const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
-      const isForegroundService = launchMode === 'foreground';
+      const restartOwner = resolveUpdateRestartOwnerForInstance({
+        launchMode,
+        port: storedOptions.port,
+      });
+      const managedForegroundController = restartOwner.controller;
 
       const isWindows = process.platform === 'win32';
       const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
@@ -154,7 +237,25 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         restartCmdPrimary += ' --api-only';
         restartCmdFallback += ' --api-only';
       }
-      const restartCmd = isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
+      const restartCmd = managedForegroundController
+        ? managedForegroundController.start.shellCommand
+        : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
+      const stopCmd = managedForegroundController?.stop.shellCommand || '';
+      const useSystemdRunDetachedUpdate = Boolean(managedForegroundController);
+      const updateStatusFilePath = getUpdateStatusFilePath(path, openchamberDataDir);
+      const statusBase = buildUpdateStatusPayload({
+        currentVersion: updateInfo.currentVersion || 'unknown',
+        targetVersion: updateInfo.version || 'unknown',
+        launchMode,
+        restartManager: restartOwner.kind,
+      });
+      writeUpdateStatus(path, fs, openchamberDataDir, buildUpdateStatusPayload(statusBase, { state: 'queued' }));
+      const statusCmd = (state) => {
+        const payload = buildUpdateStatusPayload(statusBase, { state });
+        return isWindows
+          ? buildWindowsUpdateStatusCommand(updateStatusFilePath, quoteCmd, payload)
+          : buildPosixUpdateStatusCommand(updateStatusFilePath, quotePosix, payload);
+      };
       const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
       const logPreamble = [
         '',
@@ -168,8 +269,12 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         `globalNodeModulesRoot=${pmDetails.globalNodeModulesRoot || 'unknown'}`,
         `mode=${isContainer ? 'container' : 'restart'}`,
         `launchMode=${launchMode}`,
+        `serviceManager=${managedForegroundController?.label || 'none'}`,
+        `launcher=${useSystemdRunDetachedUpdate ? 'systemd-run --user' : 'direct-detached-shell'}`,
         `updateCommand=${updateCmd}`,
+        `stopCommand=${stopCmd || 'pid/process-exit'}`,
         `restartCommand=${restartCmd || 'service-manager'}`,
+        `statusFile=${updateStatusFilePath}`,
         `logPath=${updateLogPath}`,
       ].join('\n');
 
@@ -179,7 +284,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         version: updateInfo.version,
         packageManager: pm,
         autoRestart: true,
-        restartManager: isForegroundService ? 'service' : 'cli',
+        restartManager: restartOwner.kind,
       });
 
         setTimeout(() => {
@@ -193,11 +298,27 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
             ? `
             echo ${quoteCmd(logPreamble)}
             timeout /t 2 /nobreak >nul
+            ${statusCmd('stopping_service')}
+            ${stopCmd || 'rem no service stop required'}
+            if %ERRORLEVEL% NEQ 0 (
+              ${statusCmd('failed_stop')}
+              echo Failed to stop OpenChamber before update
+              exit /b 1
+            )
+            ${statusCmd('installing_update')}
             ${updateCmd}
             if %ERRORLEVEL% EQU 0 (
+              ${statusCmd('restarting_service')}
               echo Update successful, restarting OpenChamber...
               ${restartCmd || 'echo Service manager will restart OpenChamber.'}
+              if %ERRORLEVEL% NEQ 0 (
+                ${statusCmd('failed_restart')}
+                echo Update succeeded but restart failed
+                exit /b 1
+              )
+              ${statusCmd('completed')}
             ) else (
+              ${statusCmd('failed_install')}
               echo Update failed
               exit /b 1
             )
@@ -205,12 +326,33 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           : `
             printf '%s\n' ${quotePosix(logPreamble)}
             sleep 2
+            ${statusCmd('stopping_service')}
+            ${stopCmd || ':'}
+            if [ $? -ne 0 ]; then
+              ${statusCmd('failed_stop')}
+              echo "Failed to stop OpenChamber before update"
+              exit 1
+            fi
+            ${statusCmd('installing_update')}
             ${updateCmd}
             if [ $? -eq 0 ]; then
+              ${statusCmd('restarting_service')}
               echo "Update successful, restarting OpenChamber..."
               ${restartCmd || 'echo "Service manager will restart OpenChamber."'}
+              if [ $? -ne 0 ]; then
+                ${statusCmd('failed_restart')}
+                echo "Update succeeded but service restart failed"
+                exit 1
+              fi
+              ${statusCmd('completed')}
             else
+              ${statusCmd('failed_install')}
               echo "Update failed"
+              ${managedForegroundController ? `${restartCmd}
+              if [ $? -ne 0 ]; then
+                ${statusCmd('failed_restart')}
+                echo "Update failed and service restart also failed"
+              fi` : ':'}
               exit 1
             fi
           `;
@@ -223,10 +365,34 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           console.warn('Failed to open update log file, continuing without log capture:', logError);
         }
 
-        const child = spawnChild(shell, [shellFlag, script], {
-          detached: true,
-          stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
-          env: process.env,
+        const systemdRunArgs = [
+          '--user',
+          ...(typeof process.env.PATH === 'string' && process.env.PATH.length > 0 ? ['-E', 'PATH'] : []),
+          '--unit', `openchamber-update-${Date.now()}`,
+          '--collect',
+          '--quiet',
+          'sh',
+          '-lc',
+          script,
+        ];
+
+        const child = useSystemdRunDetachedUpdate
+          ? spawnChild('systemd-run', systemdRunArgs, {
+            detached: true,
+            stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
+            env: process.env,
+          })
+          : spawnChild(shell, [shellFlag, script], {
+            detached: true,
+            stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
+            env: process.env,
+          });
+        child.on('error', (error) => {
+          try {
+            writeUpdateStatus(path, fs, openchamberDataDir, buildUpdateStatusPayload(statusBase, { state: 'failed_launch' }));
+          } catch {
+          }
+          console.error('Failed to launch detached update process:', error);
         });
         child.unref();
 
@@ -248,6 +414,16 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to install update',
       });
+    }
+  });
+
+  app.get('/api/openchamber/update-status', async (_req, res) => {
+    try {
+      const status = readUpdateStatus(path, fs, openchamberDataDir);
+      res.json(status || { state: 'idle' });
+    } catch (error) {
+      console.error('Failed to read update status:', error);
+      res.status(500).json({ state: 'unknown', error: error instanceof Error ? error.message : 'Failed to read update status' });
     }
   });
 

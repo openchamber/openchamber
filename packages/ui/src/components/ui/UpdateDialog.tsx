@@ -117,6 +117,19 @@ type InstallWebUpdateResult = {
   autoRestart?: boolean;
 };
 
+type WebServerUpdateStatus = {
+  state: string;
+  currentVersion?: string;
+  targetVersion?: string;
+  launchMode?: string;
+  restartManager?: string;
+};
+
+type WaitForWebUpdateResult =
+  | { outcome: 'applied' }
+  | { outcome: 'failed'; status: WebServerUpdateStatus | null }
+  | { outcome: 'timeout'; status: WebServerUpdateStatus | null };
+
 const WEB_UPDATE_POLL_INTERVAL_MS = 2000;
 const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
 
@@ -154,12 +167,64 @@ async function isServerReachable(): Promise<boolean> {
   }
 }
 
+async function getWebUpdateStatus(): Promise<WebServerUpdateStatus | null> {
+  try {
+    const response = await runtimeFetch('/api/openchamber/update-status', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json().catch(() => null);
+    return data && typeof data.state === 'string' ? data as WebServerUpdateStatus : null;
+  } catch {
+    return null;
+  }
+}
+
+function isFailedWebUpdateStatus(state?: string): boolean {
+  return state === 'failed_launch'
+    || state === 'failed_stop'
+    || state === 'failed_install'
+    || state === 'failed_restart';
+}
+
+function mapWebUpdateStatusToDialogState(state?: string): WebUpdateState | null {
+  switch (state) {
+    case 'queued':
+    case 'installing_update':
+      return 'updating';
+    case 'stopping_service':
+    case 'restarting_service':
+      return 'restarting';
+    case 'completed':
+      return 'reconnecting';
+    default:
+      return null;
+  }
+}
+
 async function waitForUpdateApplied(
   previousVersion?: string,
+  onStateChange?: (state: WebUpdateState) => void,
   maxAttempts = Math.ceil(WEB_UPDATE_MAX_WAIT_MS / WEB_UPDATE_POLL_INTERVAL_MS),
   intervalMs = WEB_UPDATE_POLL_INTERVAL_MS,
-): Promise<boolean> {
+): Promise<WaitForWebUpdateResult> {
+  let lastStatus: WebServerUpdateStatus | null = null;
   for (let i = 0; i < maxAttempts; i++) {
+    const status = await getWebUpdateStatus();
+    if (status) {
+      lastStatus = status;
+      if (isFailedWebUpdateStatus(status.state)) {
+        return { outcome: 'failed', status };
+      }
+      const nextState = mapWebUpdateStatusToDialogState(status.state);
+      if (nextState) {
+        onStateChange?.(nextState);
+      }
+    }
+
     try {
       const response = await runtimeFetch('/api/openchamber/update-check', {
         method: 'GET',
@@ -168,7 +233,7 @@ async function waitForUpdateApplied(
       if (response.ok) {
         const data = await response.json().catch(() => null);
         if (data && data.available === false) {
-          return true;
+          return { outcome: 'applied' };
         }
         if (
           data &&
@@ -176,17 +241,18 @@ async function waitForUpdateApplied(
           typeof previousVersion === 'string' &&
           data.currentVersion !== previousVersion
         ) {
-          return true;
+          return { outcome: 'applied' };
         }
       } else if ((response.status === 401 || response.status === 403) && await isServerReachable()) {
-        return true;
+        return { outcome: 'applied' };
       }
     } catch {
       // Server may be restarting
+      onStateChange?.('reconnecting');
     }
     await new Promise(resolve => setTimeout(resolve, intervalMs));
   }
-  return false;
+  return { outcome: 'timeout', status: lastStatus };
 }
 
 export const UpdateDialog: React.FC<UpdateDialogProps> = ({
@@ -257,10 +323,13 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
     setWebUpdateState('reconnecting');
 
-    const applied = await waitForUpdateApplied(info?.currentVersion);
+    const outcome = await waitForUpdateApplied(info?.currentVersion, setWebUpdateState);
 
-    if (applied) {
+    if (outcome.outcome === 'applied') {
       window.location.reload();
+    } else if (outcome.outcome === 'failed') {
+      setWebUpdateState('error');
+      setWebError(t('updateDialog.error.updateFailed'));
     } else {
       setWebUpdateState('error');
       setWebError(t('updateDialog.error.takingLonger'));
