@@ -16,10 +16,39 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { ReasoningMode } from '@/lib/api/types';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
+
+const REASONING_MODE_VALUES = new Set<ReasoningMode>(['off', 'collapsible-hidden', 'collapsible-dynamic', 'full']);
+
+/**
+ * Resolve a `reasoningMode` value from incoming settings, accepting either the
+ * new enum or the legacy boolean pair `showReasoningTraces` /
+ * `collapsibleThinkingBlocks`. Returns `undefined` when no usable signal is
+ * present (caller should leave the existing store value untouched).
+ */
+const resolveReasoningModeFromSettings = (settings: Partial<DesktopSettings>): ReasoningMode | undefined => {
+  if (typeof settings.reasoningMode === 'string' && REASONING_MODE_VALUES.has(settings.reasoningMode as ReasoningMode)) {
+    return settings.reasoningMode as ReasoningMode;
+  }
+
+  const hasTraces = typeof settings.showReasoningTraces === 'boolean';
+  const hasCollapsible = typeof settings.collapsibleThinkingBlocks === 'boolean';
+  if (!hasTraces && !hasCollapsible) {
+    return undefined;
+  }
+
+  // Legacy migration: derive the enum from the previous booleans.
+  const traces = hasTraces ? (settings.showReasoningTraces as boolean) : true;
+  if (!traces) {
+    return 'off';
+  }
+  const collapsible = hasCollapsible ? (settings.collapsibleThinkingBlocks as boolean) : true;
+  return collapsible ? 'collapsible-dynamic' : 'full';
+};
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -610,8 +639,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     : null;
   const queueStore = useMessageQueueStore.getState();
 
-  if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
-    store.setShowReasoningTraces(settings.showReasoningTraces);
+  const resolvedReasoningMode = resolveReasoningModeFromSettings(settings);
+  if (resolvedReasoningMode && resolvedReasoningMode !== store.reasoningMode) {
+    store.setReasoningMode(resolvedReasoningMode);
   }
   if (typeof settings.sessionRecapEnabled === 'boolean' && settings.sessionRecapEnabled !== store.sessionRecapEnabled) {
     store.setSessionRecapEnabled(settings.sessionRecapEnabled);
@@ -627,9 +657,6 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.sessionGoalDefaultBudget === 'number' && Number.isFinite(settings.sessionGoalDefaultBudget) && settings.sessionGoalDefaultBudget !== store.sessionGoalDefaultBudget) {
     store.setSessionGoalDefaultBudget(settings.sessionGoalDefaultBudget);
-  }
-  if (typeof settings.collapsibleThinkingBlocks === 'boolean' && settings.collapsibleThinkingBlocks !== store.collapsibleThinkingBlocks) {
-    store.setCollapsibleThinkingBlocks(settings.collapsibleThinkingBlocks);
   }
   if (typeof settings.autoDeleteEnabled === 'boolean' && settings.autoDeleteEnabled !== store.autoDeleteEnabled) {
     store.setAutoDeleteEnabled(settings.autoDeleteEnabled);
@@ -1023,8 +1050,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.draftStartersCraftGoalAdded === 'boolean') {
     result.draftStartersCraftGoalAdded = candidate.draftStartersCraftGoalAdded;
   }
-  if (typeof candidate.showReasoningTraces === 'boolean') {
-    result.showReasoningTraces = candidate.showReasoningTraces;
+  const resolvedReasoning = resolveReasoningModeFromSettings(candidate as Partial<DesktopSettings>);
+  if (resolvedReasoning) {
+    result.reasoningMode = resolvedReasoning;
   }
   if (typeof candidate.sessionRecapEnabled === 'boolean') {
     result.sessionRecapEnabled = candidate.sessionRecapEnabled;
@@ -1040,9 +1068,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget) && candidate.sessionGoalDefaultBudget > 0) {
     result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
-  }
-  if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
-    result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
   }
   if (typeof candidate.autoDeleteEnabled === 'boolean') {
     result.autoDeleteEnabled = candidate.autoDeleteEnabled;

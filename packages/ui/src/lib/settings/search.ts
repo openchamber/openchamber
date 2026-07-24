@@ -222,7 +222,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'chat.reasoning-traces',
     page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.showReasoningTraces',
+    titleKey: 'settings.openchamber.visual.section.reasoningTraces',
     keywords: ['thinking', 'reasoning'],
   },
   {

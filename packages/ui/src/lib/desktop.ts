@@ -1,4 +1,4 @@
-import type { ProjectEntry, TerminalShell } from '@/lib/api/types';
+import type { ProjectEntry, ReasoningMode, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -64,7 +64,10 @@ export type DesktopSettings = {
   activeProjectId?: string;
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
+  reasoningMode?: ReasoningMode;
+  /** @deprecated Use `reasoningMode`. Accepted for backward-compat migration. */
   showReasoningTraces?: boolean;
+  /** @deprecated Use `reasoningMode`. Accepted for backward-compat migration. */
   collapsibleThinkingBlocks?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;

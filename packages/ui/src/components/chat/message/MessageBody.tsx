@@ -4,7 +4,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
-import ReasoningPart from './parts/ReasoningPart';
+import { MergedReasoningPart } from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
@@ -426,7 +426,6 @@ interface MessageBodyProps {
     onCopyMessage?: () => void | boolean | Promise<void | boolean>;
     copiedMessage?: boolean;
     onAuxiliaryContentComplete?: () => void;
-    showReasoningTraces?: boolean;
     agentMention?: AgentMentionInfo;
     turnGroupingContext?: TurnGroupingContext;
     onRevert?: () => void;
@@ -1088,7 +1087,6 @@ const AssistantMessageBody = React.memo(({
     hasTextContent = false,
     onCopyMessage,
     onAuxiliaryContentComplete,
-    showReasoningTraces = false,
     turnGroupingContext,
     errorMessage,
     errorVariant = 'error',
@@ -1294,7 +1292,7 @@ const AssistantMessageBody = React.memo(({
     const [isForkDialogOpen, setIsForkDialogOpen] = React.useState(false);
     const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
-    const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
+    const reasoningMode = useUIStore((state) => state.reasoningMode);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const vscodeApi = useRuntimeAPIs().vscode;
@@ -1764,7 +1762,7 @@ const AssistantMessageBody = React.memo(({
             if (!shouldRenderActivityGroup || !toggleActivityGroup) {
                 return null;
             }
-            const visibleSegmentParts = showReasoningTraces
+            const visibleSegmentParts = reasoningMode !== 'off'
                 ? segment.parts
                 : segment.parts.filter((activity) => activity.kind !== 'reasoning');
             if (visibleSegmentParts.length === 0) {
@@ -1836,6 +1834,15 @@ const AssistantMessageBody = React.memo(({
         // Group consecutive static tools (read, grep, glob, etc.) into compact rows.
         // Expandable tools (bash, edit, task) get individual rows.
         // Text renders inline at its natural position.
+        // Reasoning: all reasoning parts for this message are merged into ONE block
+        // at the position of the first reasoning part (VSCode Copilot pattern).
+        const flatReasoningParts = visibleParts.filter((p) => {
+            if (p.type !== 'reasoning') return false;
+            const a = activityByPart.get(p);
+            return a?.kind !== 'reasoning';
+        });
+        let reasoningMergeRendered = false;
+
         let i = 0;
         while (i < visibleParts.length) {
             const part = visibleParts[i];
@@ -1882,8 +1889,8 @@ const AssistantMessageBody = React.memo(({
                     i += 1;
                     continue;
                 }
-                if (showReasoningTraces) {
-                    if (!collapsibleThinkingBlocks) {
+                if (reasoningMode !== 'off') {
+                    if (reasoningMode === 'full') {
                         // Non-collapsible mode: render thinking blocks as plain text inline.
                         rendered.push(
                             <AssistantTextPart
@@ -1898,16 +1905,21 @@ const AssistantMessageBody = React.memo(({
                             />
                         );
                     } else {
-                        // Per-part mode: each reasoning block at its natural position.
-                        rendered.push(
-                            <ReasoningPart
-                                key={`reasoning-${messageId}-${i}`}
-                                part={part}
-                                messageId={messageId}
-                                streamPhase={effectiveStreamPhase}
-                                onContentChange={onContentChange}
-                            />
-                        );
+                        // Collapsible modes: one merged block for all reasoning parts.
+                        if (!reasoningMergeRendered) {
+                            reasoningMergeRendered = true;
+                            rendered.push(
+                                <MergedReasoningPart
+                                    key={`reasoning-merged-${messageId}`}
+                                    parts={flatReasoningParts}
+                                    messageId={messageId}
+                                    streamPhase={effectiveStreamPhase}
+                                    onContentChange={onContentChange}
+                                    defaultExpanded={false}
+                                    autoExpand={reasoningMode === 'collapsible-dynamic'}
+                                />
+                            );
+                        }
                     }
                 }
                 i++;
@@ -2010,7 +2022,7 @@ const AssistantMessageBody = React.memo(({
         animatedToolIdsLookup,
         animateActivityRows,
         chatRenderMode,
-        collapsibleThinkingBlocks,
+        reasoningMode,
         collapsedPreviewCount,
         expandedTools,
         isMobile,
@@ -2028,7 +2040,6 @@ const AssistantMessageBody = React.memo(({
         shouldShowStandaloneMessageActions,
         shouldShowTool,
         effectiveStreamPhase,
-        showReasoningTraces,
         shouldDeferSortedInlineText,
         toggleActivityGroup,
         turnGroupingContext,

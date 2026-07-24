@@ -618,6 +618,8 @@ export interface ProjectEntry {
   sidebarCollapsed?: boolean;
 }
 
+export type ReasoningMode = 'off' | 'collapsible-hidden' | 'collapsible-dynamic' | 'full';
+
 export interface SettingsPayload {
   themeId?: string;
   useSystemTheme?: boolean;
@@ -631,7 +633,10 @@ export interface SettingsPayload {
   activeProjectId?: string;
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
+  reasoningMode?: ReasoningMode;
+  /** @deprecated Use `reasoningMode`. Accepted for backward-compat migration. */
   showReasoningTraces?: boolean;
+  /** @deprecated Use `reasoningMode`. Accepted for backward-compat migration. */
   collapsibleThinkingBlocks?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;

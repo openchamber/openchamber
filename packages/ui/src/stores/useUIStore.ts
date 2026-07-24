@@ -8,7 +8,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import type { TerminalShell } from '@/lib/api/types';
+import type { ReasoningMode, TerminalShell } from '@/lib/api/types';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
@@ -573,13 +573,12 @@ interface UIStore {
   settingsRemoteInstancesSelectedId: string | null;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
-  showReasoningTraces: boolean;
+  reasoningMode: ReasoningMode;
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
   sessionGoalEnabled: boolean;
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
-  collapsibleThinkingBlocks: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
@@ -733,13 +732,12 @@ interface UIStore {
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
-  setShowReasoningTraces: (value: boolean) => void;
+  setReasoningMode: (value: ReasoningMode) => void;
   setSessionRecapEnabled: (value: boolean) => void;
   setSessionSuggestionEnabled: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
   setSessionGoalDefaultBudgetEnabled: (value: boolean) => void;
   setSessionGoalDefaultBudget: (value: number) => void;
-  setCollapsibleThinkingBlocks: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
@@ -891,13 +889,12 @@ export const useUIStore = create<UIStore>()(
         settingsRemoteInstancesSelectedId: null,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
-        showReasoningTraces: true,
+        reasoningMode: 'collapsible-dynamic',
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
         sessionGoalEnabled: true,
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
-        collapsibleThinkingBlocks: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
         showDeletionDialog: true,
@@ -1599,10 +1596,6 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setShowReasoningTraces: (value) => {
-          set({ showReasoningTraces: value });
-        },
-
         setSessionRecapEnabled: (value) => {
           set({ sessionRecapEnabled: value });
         },
@@ -1622,13 +1615,11 @@ export const useUIStore = create<UIStore>()(
         setSessionGoalDefaultBudget: (value) => {
           set({ sessionGoalDefaultBudget: value });
         },
-
-        setCollapsibleThinkingBlocks: (value) => {
-          set({ collapsibleThinkingBlocks: value });
-        },
-
         setChatRenderMode: (value) => {
           set({ chatRenderMode: value });
+        },
+        setReasoningMode: (value: ReasoningMode) => {
+          set({ reasoningMode: value });
         },
 
         setActivityRenderMode: (value) => {
@@ -2345,13 +2336,12 @@ export const useUIStore = create<UIStore>()(
           settingsRemoteInstancesSelectedId: state.settingsRemoteInstancesSelectedId,
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
-          showReasoningTraces: state.showReasoningTraces,
+          reasoningMode: state.reasoningMode,
           sessionRecapEnabled: state.sessionRecapEnabled,
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
-          collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,

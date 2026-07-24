@@ -22,6 +22,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
+import type { ReasoningMode } from '@/lib/api/types';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -109,6 +110,29 @@ const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
         id: 'ascii',
         labelKey: 'settings.openchamber.visual.option.mermaidRendering.ascii.label',
         descriptionKey: 'settings.openchamber.visual.option.mermaidRendering.ascii.description',
+    },
+];
+
+const REASONING_MODE_OPTIONS: Option<ReasoningMode>[] = [
+    {
+        id: 'off',
+        labelKey: 'settings.openchamber.visual.option.reasoningMode.off.label',
+        descriptionKey: 'settings.openchamber.visual.option.reasoningMode.off.description',
+    },
+    {
+        id: 'collapsible-hidden',
+        labelKey: 'settings.openchamber.visual.option.reasoningMode.collapsibleHidden.label',
+        descriptionKey: 'settings.openchamber.visual.option.reasoningMode.collapsibleHidden.description',
+    },
+    {
+        id: 'collapsible-dynamic',
+        labelKey: 'settings.openchamber.visual.option.reasoningMode.collapsibleDynamic.label',
+        descriptionKey: 'settings.openchamber.visual.option.reasoningMode.collapsibleDynamic.description',
+    },
+    {
+        id: 'full',
+        labelKey: 'settings.openchamber.visual.option.reasoningMode.full.label',
+        descriptionKey: 'settings.openchamber.visual.option.reasoningMode.full.description',
     },
 ];
 
@@ -285,7 +309,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const { terminal } = useRuntimeAPIs();
     const { browserTab } = usePwaDetection();
     const directoryShowHidden = useDirectoryShowHidden();
-    const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
+    const reasoningMode = useUIStore(state => state.reasoningMode);
+    const setReasoningMode = useUIStore(state => state.setReasoningMode);
     const sessionRecapEnabled = useUIStore(state => state.sessionRecapEnabled);
     const sessionSuggestionEnabled = useUIStore(state => state.sessionSuggestionEnabled);
     const setSessionRecapEnabled = useUIStore(state => state.setSessionRecapEnabled);
@@ -296,9 +321,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setSessionGoalDefaultBudgetEnabled = useUIStore(state => state.setSessionGoalDefaultBudgetEnabled);
     const sessionGoalDefaultBudget = useUIStore(state => state.sessionGoalDefaultBudget);
     const setSessionGoalDefaultBudget = useUIStore(state => state.setSessionGoalDefaultBudget);
-    const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
-    const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
-    const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
 
     const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
     const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
@@ -523,6 +545,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setMermaidRenderingMode(mode);
         void updateDesktopSettings({ mermaidRenderingMode: mode });
     }, [setMermaidRenderingMode]);
+
+    const handleReasoningModeChange = React.useCallback((mode: ReasoningMode) => {
+        setReasoningMode(mode);
+        void updateDesktopSettings({ reasoningMode: mode });
+    }, [setReasoningMode]);
 
     const handleShowToolFileIconsChange = React.useCallback((enabled: boolean) => {
         setShowToolFileIcons(enabled);
@@ -1801,25 +1828,27 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                                 {shouldShow('reasoning') && (
                                     <SettingsSection
-                                        title={t('settings.openchamber.visual.section.reasoning')}
-                                        settingsItem="chat.reasoning"
+                                        title={tUnsafe('settings.openchamber.visual.section.reasoningTraces')}
+                                        settingsItem="chat.reasoning-traces"
                                         contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                     >
-                                        <SettingsCheckboxRow
-                                            checked={showReasoningTraces}
-                                            onChange={setShowReasoningTraces}
-                                            label={t('settings.openchamber.visual.field.showReasoningTraces')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showReasoningTracesAria')}
-                                            settingsItem="chat.reasoning-traces"
-                                        />
-                                        {showReasoningTraces && (
-                                            <SettingsCheckboxRow
-                                                checked={collapsibleThinkingBlocks}
-                                                onChange={setCollapsibleThinkingBlocks}
-                                                label={t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}
-                                                ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
+                                        <div className="flex max-w-[24rem] flex-col gap-2">
+                                            <SettingsChipGroup<ReasoningMode>
+                                                value={reasoningMode}
+                                                onChange={handleReasoningModeChange}
+                                                aria-label={tUnsafe('settings.openchamber.visual.section.reasoningTracesAria')}
+                                                options={REASONING_MODE_OPTIONS.map((option) => ({
+                                                    value: option.id,
+                                                    label: tUnsafe(option.labelKey),
+                                                }))}
                                             />
-                                        )}
+                                            <span className="typography-meta text-muted-foreground">
+                                                {(() => {
+                                                    const option = REASONING_MODE_OPTIONS.find((item) => item.id === reasoningMode);
+                                                    return option?.descriptionKey ? tUnsafe(option.descriptionKey) : '';
+                                                })()}
+                                            </span>
+                                        </div>
                                     </SettingsSection>
                                 )}
 
