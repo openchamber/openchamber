@@ -13,7 +13,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import {
   Collapsible,
   CollapsibleContent,
@@ -228,6 +227,8 @@ const rankRemotesForAutoSelect = (
 
 type TimelineCommentItem = {
   id: string;
+  rawId: number;
+  kind: 'issue' | 'review';
   body: string;
   authorName: string;
   authorLogin: string | null;
@@ -236,7 +237,25 @@ type TimelineCommentItem = {
   context: string;
   path: string | null;
   line: number | null;
+  inReplyToId: number | null;
 };
+
+type TimelineCommentThread = {
+  comment: TimelineCommentItem;
+  replies: TimelineCommentItem[];
+};
+
+type TimelineCommitItem = {
+  sha: string;
+  url: string;
+  message: string;
+  authorName: string;
+  authoredAt?: string;
+};
+
+type TimelineEntry =
+  | { kind: 'commit'; key: string; createdAt?: string; commit: TimelineCommitItem }
+  | { kind: 'comment'; key: string; createdAt?: string; thread: TimelineCommentThread };
 
 type ChatDispatchTarget = {
   sessionId: string;
@@ -470,15 +489,23 @@ export const PullRequestSection: React.FC<{
   const [checkDetails, setCheckDetails] = React.useState<GitHubPullRequestContextResult | null>(null);
   const [isLoadingCheckDetails, setIsLoadingCheckDetails] = React.useState(false);
   const [expandedCheckStepKeys, setExpandedCheckStepKeys] = React.useState<Set<string>>(new Set());
-  const [commentsDialogOpen, setCommentsDialogOpen] = React.useState(false);
   const [commentsDetails, setCommentsDetails] = React.useState<GitHubPullRequestContextResult | null>(null);
   const [isLoadingCommentsDetails, setIsLoadingCommentsDetails] = React.useState(false);
+  const [newCommentBody, setNewCommentBody] = React.useState('');
+  const [pendingReplyCommentId, setPendingReplyCommentId] = React.useState<number | null>(null);
+  const [replyBody, setReplyBody] = React.useState('');
+  const [isSubmittingComment, setIsSubmittingComment] = React.useState(false);
+  const [isSubmittingReply, setIsSubmittingReply] = React.useState(false);
 
   const attemptedBodyHydrationRef = React.useRef<Set<string>>(new Set());
   const lastSyncedPrNumberRef = React.useRef<number | null>(null);
   const didUserOverrideRemoteRef = React.useRef(false);
   const autoRemoteProbeDoneRef = React.useRef<Set<string>>(new Set());
   const pendingActionRefreshTimersRef = React.useRef<number[]>([]);
+  const loadedCommentsKeyRef = React.useRef<string | null>(null);
+  const commentsSectionRef = React.useRef<HTMLDivElement | null>(null);
+  const newCommentInputRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const replyInputRef = React.useRef<HTMLTextAreaElement | null>(null);
 
   // Auto-enable detected upstream when there's no explicit upstream remote
   React.useEffect(() => {
@@ -499,6 +526,18 @@ export const PullRequestSection: React.FC<{
   const isHydratingCurrentPrBody = Boolean(
     currentPrBodyHydrationKey && hydratingPrBodyKey === currentPrBodyHydrationKey,
   );
+
+  React.useEffect(() => {
+    if (pendingReplyCommentId === null) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      replyInputRef.current?.focus();
+      const length = replyInputRef.current?.value.length ?? 0;
+      replyInputRef.current?.setSelectionRange(length, length);
+    }, 0);
+  }, [pendingReplyCommentId]);
 
   React.useEffect(() => {
     if (!github?.prContext || !pr) {
@@ -601,14 +640,20 @@ export const PullRequestSection: React.FC<{
     }
   }, [directory, github, pr, status?.repo, t]);
 
-  const openCommentsDialog = React.useCallback(async () => {
+  const loadComments = React.useCallback(async (options?: { force?: boolean; silent?: boolean }) => {
     if (!github?.prContext) {
-      toast.error(t('gitView.pr.toast.githubApiUnavailable'));
+      if (!options?.silent) {
+        toast.error(t('gitView.pr.toast.githubApiUnavailable'));
+      }
       return;
     }
     if (!pr) return;
 
-    setCommentsDialogOpen(true);
+    const commentsKey = `${directory}#${pr.number}::${status?.repo?.owner ?? ''}/${status?.repo?.repo ?? ''}`;
+    if (!options?.force && loadedCommentsKeyRef.current === commentsKey) {
+      return;
+    }
+
     setIsLoadingCommentsDetails(true);
     try {
       const ctx = await github.prContext(directory, pr.number, {
@@ -617,9 +662,12 @@ export const PullRequestSection: React.FC<{
         sourceRepo: status?.repo ?? null,
       });
       setCommentsDetails(ctx);
+      loadedCommentsKeyRef.current = commentsKey;
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      toast.error(t('gitView.pr.toast.loadCommentsFailed'), { description: message });
+      if (!options?.silent) {
+        const message = e instanceof Error ? e.message : String(e);
+        toast.error(t('gitView.pr.toast.loadCommentsFailed'), { description: message });
+      }
     } finally {
       setIsLoadingCommentsDetails(false);
     }
@@ -663,6 +711,8 @@ export const PullRequestSection: React.FC<{
   const timelineComments = React.useMemo<TimelineCommentItem[]>(() => {
     const issue = (commentsDetails?.issueComments ?? []).map((comment) => ({
       id: `issue-${comment.id}`,
+      rawId: comment.id,
+      kind: 'issue' as const,
       body: comment.body || '',
       authorName: comment.author?.name || comment.author?.login || t('gitView.pr.comments.unknownAuthor'),
       authorLogin: comment.author?.login || null,
@@ -671,10 +721,13 @@ export const PullRequestSection: React.FC<{
       context: t('gitView.pr.comments.generalContext'),
       path: null as string | null,
       line: null as number | null,
+      inReplyToId: null,
     }));
 
     const review = (commentsDetails?.reviewComments ?? []).map((comment) => ({
       id: `review-${comment.id}`,
+      rawId: comment.id,
+      kind: 'review' as const,
       body: comment.body || '',
       authorName: comment.author?.name || comment.author?.login || t('gitView.pr.comments.unknownAuthor'),
       authorLogin: comment.author?.login || null,
@@ -683,6 +736,7 @@ export const PullRequestSection: React.FC<{
       context: t('gitView.pr.comments.reviewContext'),
       path: comment.path || null,
       line: comment.line ?? null,
+      inReplyToId: comment.inReplyToId ?? null,
     }));
 
     const all = [...issue, ...review];
@@ -695,6 +749,71 @@ export const PullRequestSection: React.FC<{
     });
     return all;
   }, [commentsDetails, t]);
+
+  const commentThreads = React.useMemo<TimelineCommentThread[]>(() => {
+    const topLevel: TimelineCommentThread[] = [];
+    const reviewThreadMap = new Map<number, TimelineCommentThread>();
+
+    for (const comment of timelineComments) {
+      if (comment.kind === 'review' && comment.inReplyToId) {
+        continue;
+      }
+      const thread = { comment, replies: [] };
+      topLevel.push(thread);
+      if (comment.kind === 'review') {
+        reviewThreadMap.set(comment.rawId, thread);
+      }
+    }
+
+    for (const comment of timelineComments) {
+      if (comment.kind !== 'review' || !comment.inReplyToId) {
+        continue;
+      }
+      const thread = reviewThreadMap.get(comment.inReplyToId);
+      if (thread) {
+        thread.replies.push(comment);
+      } else {
+        topLevel.push({ comment, replies: [] });
+      }
+    }
+
+    return topLevel;
+  }, [timelineComments]);
+
+  const timelineEntries = React.useMemo<TimelineEntry[]>(() => {
+    const commitEntries = (commentsDetails?.commits ?? []).map((commit) => ({
+      kind: 'commit' as const,
+      key: `commit-${commit.sha}`,
+      createdAt: commit.authoredAt,
+      commit: {
+        sha: commit.sha,
+        url: commit.url,
+        message: commit.message,
+        authorName: commit.author?.login || t('gitView.pr.comments.unknownAuthor'),
+        authoredAt: commit.authoredAt,
+      },
+    }));
+
+    const commentEntries = commentThreads.map((thread) => ({
+      kind: 'comment' as const,
+      key: thread.comment.id,
+      createdAt: thread.comment.createdAt,
+      thread,
+    }));
+
+    const entries = [...commitEntries, ...commentEntries];
+    entries.sort((a, b) => {
+      const aTs = a.createdAt ? Date.parse(a.createdAt) : 0;
+      const bTs = b.createdAt ? Date.parse(b.createdAt) : 0;
+      const aVal = Number.isFinite(aTs) ? aTs : 0;
+      const bVal = Number.isFinite(bTs) ? bTs : 0;
+      if (aVal !== bVal) {
+        return aVal - bVal;
+      }
+      return a.key.localeCompare(b.key);
+    });
+    return entries;
+  }, [commentThreads, commentsDetails?.commits, t]);
 
   const resolveChatDispatchTarget = React.useCallback((): ChatDispatchTarget | null => {
     if (!currentSessionId) {
@@ -970,7 +1089,6 @@ export const PullRequestSection: React.FC<{
   }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, status?.repo, t]);
 
   const sendSingleCommentToChat = React.useCallback(async (comment: TimelineCommentItem) => {
-    setCommentsDialogOpen(false);
     setActiveMainTab('chat');
 
     const target = resolveChatDispatchTarget();
@@ -988,6 +1106,91 @@ export const PullRequestSection: React.FC<{
 
     dispatchSyntheticPrompt(target, visibleText, instructionsText, payloadText);
   }, [commentsDetails, dispatchSyntheticPrompt, pr, resolveChatDispatchTarget, setActiveMainTab]);
+
+  const focusNewCommentComposer = React.useCallback(() => {
+    window.setTimeout(() => {
+      newCommentInputRef.current?.focus();
+      const length = newCommentInputRef.current?.value.length ?? 0;
+      newCommentInputRef.current?.setSelectionRange(length, length);
+    }, 0);
+  }, []);
+
+  const startReply = React.useCallback((comment: TimelineCommentItem) => {
+    if (comment.kind === 'review') {
+      setPendingReplyCommentId(comment.rawId);
+      setReplyBody('');
+      return;
+    }
+
+    setPendingReplyCommentId(null);
+    setReplyBody('');
+    const mention = comment.authorLogin ? `@${comment.authorLogin} ` : '';
+    setNewCommentBody((prev) => (prev.trim() ? prev : mention));
+    commentsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    focusNewCommentComposer();
+  }, [focusNewCommentComposer]);
+
+  const createPrComment = React.useCallback(async () => {
+    if (!github?.prCommentCreate) {
+      toast.error(t('gitView.pr.toast.githubApiUnavailable'));
+      return;
+    }
+
+    const trimmedBody = newCommentBody.trim();
+    if (!trimmedBody || !pr) {
+      return;
+    }
+
+    setIsSubmittingComment(true);
+    try {
+      await github.prCommentCreate({
+        directory,
+        number: pr.number,
+        body: trimmedBody,
+        sourceRepo: status?.repo ?? null,
+      });
+      setNewCommentBody('');
+      toast.success(t('gitView.pr.toast.commentAdded'));
+      await loadComments({ force: true, silent: true });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error(t('gitView.pr.toast.addCommentFailed'), { description: message });
+    } finally {
+      setIsSubmittingComment(false);
+    }
+  }, [newCommentBody, pr, github, directory, status?.repo, t, loadComments]);
+
+  const createReviewReply = React.useCallback(async () => {
+    if (!github?.prReviewReplyCreate) {
+      toast.error(t('gitView.pr.toast.githubApiUnavailable'));
+      return;
+    }
+
+    const trimmedBody = replyBody.trim();
+    if (!trimmedBody || !pr || !pendingReplyCommentId) {
+      return;
+    }
+
+    setIsSubmittingReply(true);
+    try {
+      await github.prReviewReplyCreate({
+        directory,
+        number: pr.number,
+        commentId: pendingReplyCommentId,
+        body: trimmedBody,
+        sourceRepo: status?.repo ?? null,
+      });
+      setReplyBody('');
+      setPendingReplyCommentId(null);
+      toast.success(t('gitView.pr.toast.replyAdded'));
+      await loadComments({ force: true, silent: true });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error(t('gitView.pr.toast.replyFailed'), { description: message });
+    } finally {
+      setIsSubmittingReply(false);
+    }
+  }, [replyBody, pr, pendingReplyCommentId, github, directory, status?.repo, t, loadComments]);
 
   const refresh = React.useCallback(async (options?: { force?: boolean; onlyExistingPr?: boolean; silent?: boolean; markInitialResolved?: boolean }) => {
     await refreshPrStatus(prStatusKey, options);
@@ -1052,6 +1255,19 @@ export const PullRequestSection: React.FC<{
       cancelled = true;
     };
   }, [branch, canShow, directory, github, remotes, selectedRemote?.name, snapshotKey, status?.pr, trackingBranch]);
+
+  React.useEffect(() => {
+    if (!pr) {
+      loadedCommentsKeyRef.current = null;
+      setCommentsDetails(null);
+      setNewCommentBody('');
+      setPendingReplyCommentId(null);
+      setReplyBody('');
+      return;
+    }
+
+    void loadComments({ silent: true });
+  }, [loadComments, pr]);
 
   React.useEffect(() => {
     ensurePrStatusEntry(prStatusKey);
@@ -1437,7 +1653,10 @@ export const PullRequestSection: React.FC<{
                   type="button"
                   className="inline-flex size-5 items-center justify-center rounded hover:bg-interactive-hover/60 disabled:opacity-40"
                   disabled={isLoading}
-                  onClick={() => void refresh({ force: true })}
+                  onClick={() => {
+                    void refresh({ force: true });
+                    void loadComments({ force: true, silent: true });
+                  }}
                   aria-label={t('gitView.pr.actions.refreshAria')}
                 >
                   <Icon name="refresh" className="size-3.5 text-muted-foreground" />
@@ -1546,6 +1765,267 @@ export const PullRequestSection: React.FC<{
                     {!canMerge ? (
                       <div className="typography-micro text-muted-foreground">{t('gitView.pr.noMergePermission')}</div>
                     ) : null}
+
+                    <div ref={commentsSectionRef} className="mt-5 space-y-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="typography-ui-label text-foreground">{t('gitView.pr.comments.title')}</div>
+                          <div className="typography-micro text-muted-foreground">{t('gitView.pr.numberLabel', { number: pr.number })}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isLoadingCommentsDetails ? <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" /> : null}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 px-0"
+                                onClick={() => {
+                                  void loadComments({ force: true });
+                                }}
+                                disabled={isLoadingCommentsDetails}
+                                aria-label={t('gitView.pr.actions.refreshAria')}
+                              >
+                                <Icon name="refresh" className="size-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>{t('gitView.pr.actions.refresh')}</p></TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </div>
+
+                      {isLoadingCommentsDetails ? (
+                        <div className="flex items-center justify-center gap-2 py-8 text-center text-muted-foreground">
+                          <Icon name="loader-4" className="h-4 w-4 animate-spin" />
+                          {t('gitView.loading.loading')}
+                        </div>
+                      ) : (
+                        <div className="space-y-5">
+                            {timelineEntries.length > 0 ? (
+                              <div className="relative pl-3">
+                                <div>
+                                  {timelineEntries.map((entry, idx) => {
+                                    const isLast = idx === timelineEntries.length - 1;
+                                    if (entry.kind === 'commit') {
+                                      const commit = entry.commit;
+                                      const subject = commit.message.split('\n', 1)[0] || commit.sha.slice(0, 7);
+                                      return (
+                                        <div key={entry.key} className="relative min-h-8 pl-10 pb-4 last:pb-0">
+                                          {!isLast ? <div className="absolute left-4 top-8 bottom-0 w-px bg-border/60" /> : null}
+                                          <button
+                                            type="button"
+                                            className="absolute left-0 top-0 z-10 flex size-8 items-center justify-center rounded-full border border-border/60 bg-[var(--surface-elevated)] text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground"
+                                            onClick={() => void openExternal(commit.url)}
+                                            aria-label={t('gitView.pr.actions.openOnGitHubAria')}
+                                          >
+                                            <Icon name="git-commit" className="size-4" />
+                                          </button>
+                                          <div className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-0.5 py-1 typography-micro">
+                                            <button
+                                              type="button"
+                                              className="min-w-0 truncate text-left text-foreground hover:text-[var(--primary-base)]"
+                                              onClick={() => void openExternal(commit.url)}
+                                            >
+                                              {subject}
+                                            </button>
+                                            <span className="font-mono text-muted-foreground">{commit.sha.slice(0, 7)}</span>
+                                            <span className="text-muted-foreground">{commit.authorName}</span>
+                                            {commit.authoredAt ? <span className="text-muted-foreground">{formatTimestamp(commit.authoredAt)}</span> : null}
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+
+                                    const thread = entry.thread;
+                                    const comment = thread.comment;
+                                    const initial = (comment.authorName || '?').charAt(0).toUpperCase();
+                                    const replyOpen = pendingReplyCommentId === comment.rawId;
+                                    return (
+                                      <div key={entry.key} className="relative pl-10 pb-5 last:pb-0">
+                                        {!isLast ? <div className="absolute left-4 top-[2.375rem] bottom-[0.375rem] w-px bg-border/60" /> : null}
+                                        <div className="absolute left-0 top-0 z-10 flex size-8 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-[var(--surface-elevated)] text-xs text-muted-foreground">
+                                          {comment.avatarUrl ? (
+                                            <img src={comment.avatarUrl} alt={comment.authorName} className="h-full w-full object-cover" />
+                                          ) : (
+                                            <span>{initial}</span>
+                                          )}
+                                        </div>
+                                        <div className="space-y-3 rounded-lg bg-[var(--surface-elevated)] px-3 pt-0 pb-3">
+                                          <div className="flex flex-col items-start gap-1 typography-micro text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-1 sm:gap-y-1">
+                                            <span className="whitespace-nowrap text-foreground">
+                                              {comment.authorName}
+                                              {comment.authorLogin && comment.authorLogin !== comment.authorName ? ` · @${comment.authorLogin}` : ''}
+                                            </span>
+                                            {comment.createdAt ? <span className="whitespace-nowrap">{formatTimestamp(comment.createdAt)}</span> : null}
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-6 justify-start px-0 text-muted-foreground hover:text-foreground has-[>svg]:px-0 sm:px-2 sm:has-[>svg]:px-2.5"
+                                                  onClick={() => startReply(comment)}
+                                                  aria-label={t('gitView.pr.actions.replyAria')}
+                                                >
+                                                  <Icon name="chat-4" className="size-3.5" />
+                                                  {t('gitView.pr.actions.reply')}
+                                                </Button>
+                                              </TooltipTrigger>
+                                              <TooltipContent><p>{t('gitView.pr.actions.reply')}</p></TooltipContent>
+                                            </Tooltip>
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  className="h-6 justify-start px-0 text-[var(--status-success)] hover:bg-[var(--status-success-background)] hover:text-[var(--status-success)] has-[>svg]:px-0 sm:px-2 sm:has-[>svg]:px-2.5"
+                                                  onClick={() => {
+                                                    void sendSingleCommentToChat(comment);
+                                                  }}
+                                                  aria-label={t('gitView.pr.actions.sendCommentToAgentAria')}
+                                                >
+                                                  <Icon name="ai-generate-2" className="size-3.5" />
+                                                  {t('gitView.pr.actions.sendToAgent')}
+                                                </Button>
+                                              </TooltipTrigger>
+                                              <TooltipContent><p>{t('gitView.pr.actions.sendCommentToAgent')}</p></TooltipContent>
+                                            </Tooltip>
+                                          </div>
+                                          <div className="typography-micro text-muted-foreground">
+                                            {comment.context}
+                                            {comment.path ? ` · ${comment.path}` : ''}
+                                            {comment.line ? `:${comment.line}` : ''}
+                                          </div>
+                                          <SimpleMarkdownRenderer
+                                            content={linkifyMentionsMarkdown(comment.body)}
+                                            className={[
+                                              'typography-markdown-body text-foreground break-words [&_a]:no-underline [&_a:hover]:no-underline',
+                                              selfMentionHighlightClass,
+                                            ].filter(Boolean).join(' ')}
+                                            enableFileReferences={false}
+                                          />
+
+                                          {thread.replies.length > 0 ? (
+                                            <div className="space-y-3 border-l border-border/40 pl-4">
+                                              {thread.replies.map((reply) => (
+                                                <div key={reply.id} className="space-y-2 rounded-lg border border-border/30 bg-[var(--surface-elevated)]/70 px-3 py-3">
+                                                  <div className="flex flex-col items-start gap-1 typography-micro text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-1 sm:gap-y-1">
+                                                    <span className="whitespace-nowrap text-foreground">
+                                                      {reply.authorName}
+                                                      {reply.authorLogin && reply.authorLogin !== reply.authorName ? ` · @${reply.authorLogin}` : ''}
+                                                    </span>
+                                                    {reply.createdAt ? <span className="whitespace-nowrap">{formatTimestamp(reply.createdAt)}</span> : null}
+                                                    <Tooltip>
+                                                      <TooltipTrigger asChild>
+                                                        <Button
+                                                          variant="ghost"
+                                                          size="sm"
+                                                          className="h-6 justify-start px-0 text-muted-foreground hover:text-foreground has-[>svg]:px-0 sm:px-2 sm:has-[>svg]:px-2.5"
+                                                          onClick={() => startReply(reply)}
+                                                          aria-label={t('gitView.pr.actions.replyAria')}
+                                                        >
+                                                          <Icon name="chat-4" className="size-3.5" />
+                                                          {t('gitView.pr.actions.reply')}
+                                                        </Button>
+                                                      </TooltipTrigger>
+                                                      <TooltipContent><p>{t('gitView.pr.actions.reply')}</p></TooltipContent>
+                                                    </Tooltip>
+                                                  </div>
+                                                  <SimpleMarkdownRenderer
+                                                    content={linkifyMentionsMarkdown(reply.body)}
+                                                    className={[
+                                                      'typography-markdown-body text-foreground break-words [&_a]:no-underline [&_a:hover]:no-underline',
+                                                      selfMentionHighlightClass,
+                                                    ].filter(Boolean).join(' ')}
+                                                    enableFileReferences={false}
+                                                  />
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : null}
+
+                                          {replyOpen ? (
+                                            <div className="space-y-2 rounded-lg border border-border/40 bg-[var(--surface-elevated)]/70 p-3">
+                                              <Textarea
+                                                ref={replyInputRef}
+                                                value={replyBody}
+                                                onChange={(e) => setReplyBody(e.target.value)}
+                                                className="min-h-[88px] bg-transparent"
+                                                placeholder={t('gitView.pr.placeholder.reply')}
+                                                autoCorrect={hasTouchInput ? 'on' : 'off'}
+                                                autoCapitalize={hasTouchInput ? 'sentences' : 'off'}
+                                                spellCheck={hasTouchInput}
+                                              />
+                                              <div className="flex items-center justify-end gap-2">
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  onClick={() => {
+                                                    setPendingReplyCommentId(null);
+                                                    setReplyBody('');
+                                                  }}
+                                                  disabled={isSubmittingReply}
+                                                >
+                                                  {t('gitView.common.cancel')}
+                                                </Button>
+                                                <Button
+                                                  size="sm"
+                                                  onClick={() => {
+                                                    void createReviewReply();
+                                                  }}
+                                                  disabled={isSubmittingReply || !replyBody.trim()}
+                                                >
+                                                  {isSubmittingReply ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="chat-4" className="size-4" />}
+                                                  {t('gitView.pr.actions.reply')}
+                                                </Button>
+                                              </div>
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="py-4 text-center text-muted-foreground">{t('gitView.pr.comments.empty')}</div>
+                            )}
+
+                            <div className="space-y-2 border-t border-border/40 pt-4">
+                              <div className="typography-ui-label text-foreground">{t('gitView.pr.actions.addComment')}</div>
+                              <Textarea
+                                ref={newCommentInputRef}
+                                value={newCommentBody}
+                                onChange={(e) => setNewCommentBody(e.target.value)}
+                                className="min-h-[100px] bg-transparent"
+                                placeholder={t('gitView.pr.placeholder.comment')}
+                                autoCorrect={hasTouchInput ? 'on' : 'off'}
+                                autoCapitalize={hasTouchInput ? 'sentences' : 'off'}
+                                spellCheck={hasTouchInput}
+                              />
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setNewCommentBody('')}
+                                  disabled={isSubmittingComment || !newCommentBody}
+                                >
+                                  {t('gitView.common.cancel')}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    void createPrComment();
+                                  }}
+                                  disabled={isSubmittingComment || !newCommentBody.trim()}
+                                >
+                                  {isSubmittingComment ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="chat-4" className="size-4" />}
+                                  {t('gitView.pr.actions.addComment')}
+                                </Button>
+                              </div>
+                            </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="order-first w-full flex flex-wrap items-center gap-2">
@@ -1639,21 +2119,6 @@ export const PullRequestSection: React.FC<{
                           <TooltipContent><p>{t('gitView.pr.actions.resolveFailedChecks')}</p></TooltipContent>
                         </Tooltip>
                       ) : null}
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-7 px-0"
-                            onClick={openCommentsDialog}
-                            aria-label={t('gitView.pr.actions.openCommentsAria')}
-                          >
-                            <Icon name="chat-4" className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent><p>{t('gitView.pr.actions.openComments')}</p></TooltipContent>
-                      </Tooltip>
 
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -1960,97 +2425,6 @@ export const PullRequestSection: React.FC<{
         </DialogContent>
       </Dialog>
 
-      <Dialog open={commentsDialogOpen} onOpenChange={setCommentsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[82vh] min-h-[38rem] flex flex-col gap-2">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Icon name="git-pull-request" className="h-5 w-5" />
-              {t('gitView.pr.comments.title')}
-              {pr ? (
-                <span className="typography-meta text-muted-foreground">{t('gitView.pr.numberLabel', { number: pr.number })}</span>
-              ) : null}
-            </DialogTitle>
-          </DialogHeader>
-
-          <ScrollShadow className="mt-2 max-h-[66vh] overflow-y-auto overlay-scrollbar-target overlay-scrollbar-container">
-            {isLoadingCommentsDetails ? (
-              <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
-                <Icon name="loader-4" className="h-4 w-4 animate-spin" />
-                {t('gitView.loading.loading')}
-              </div>
-            ) : null}
-
-            {!isLoadingCommentsDetails ? (
-              <div className="space-y-4">
-                {timelineComments.length > 0 ? (
-                  <div className="relative pl-3">
-                    <div>
-                      {timelineComments.map((comment, idx) => {
-                        const initial = (comment.authorName || '?').charAt(0).toUpperCase();
-                        const isLast = idx === timelineComments.length - 1;
-                        return (
-                          <div key={comment.id} className="relative pl-10 pb-5 last:pb-0">
-                            {!isLast ? <div className="absolute left-4 top-[2.375rem] bottom-[0.375rem] w-px bg-border/60" /> : null}
-                            <div className="absolute left-0 top-0 z-10 flex size-8 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-surface-elevated text-xs text-muted-foreground">
-                              {comment.avatarUrl ? (
-                                <img src={comment.avatarUrl} alt={comment.authorName} className="h-full w-full object-cover" />
-                              ) : (
-                                <span>{initial}</span>
-                              )}
-                            </div>
-                            <div className="rounded-lg bg-surface-elevated px-3 pt-0 pb-3 space-y-2">
-                              <div className="flex flex-col items-start gap-1 typography-micro text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-1 sm:gap-y-1">
-                                <span className="text-foreground whitespace-nowrap">
-                                  {comment.authorName}
-                                  {comment.authorLogin && comment.authorLogin !== comment.authorName ? ` · @${comment.authorLogin}` : ''}
-                                </span>
-                                {comment.createdAt ? <span className="whitespace-nowrap">{formatTimestamp(comment.createdAt)}</span> : null}
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 px-0 has-[>svg]:px-0 sm:px-2 sm:has-[>svg]:px-2.5 text-[var(--status-success)] hover:bg-[var(--status-success-background)] hover:text-[var(--status-success)] justify-start"
-                                      onClick={() => {
-                                        void sendSingleCommentToChat(comment);
-                                      }}
-                                      aria-label={t('gitView.pr.actions.sendCommentToAgentAria')}
-                                    >
-                                      <Icon name="ai-generate-2" className="size-3.5" />
-                                      {t('gitView.pr.actions.sendToAgent')}
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent><p>{t('gitView.pr.actions.sendCommentToAgent')}</p></TooltipContent>
-                                </Tooltip>
-                              </div>
-                              <div className="typography-micro text-muted-foreground">
-                                {comment.context}
-                                {comment.path ? ` · ${comment.path}` : ''}
-                                {comment.line ? `:${comment.line}` : ''}
-                              </div>
-                              <SimpleMarkdownRenderer
-                                content={linkifyMentionsMarkdown(comment.body)}
-                                className={[
-                                  'typography-markdown-body text-foreground break-words [&_a]:no-underline [&_a:hover]:no-underline',
-                                  selfMentionHighlightClass,
-                                ].filter(Boolean).join(' ')}
-                                enableFileReferences={false}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center text-muted-foreground py-8">{t('gitView.pr.comments.empty')}</div>
-                )}
-              </div>
-            ) : null}
-          </ScrollShadow>
-
-        </DialogContent>
-      </Dialog>
     </section>
   );
 };

@@ -2,9 +2,11 @@ import type {
   GitHubAPI,
   GitHubAuthStatus,
   GitHubIssueCommentsResult,
+  GitHubIssueComment,
   GitHubIssueGetResult,
   GitHubIssuesListResult,
   GitHubPullRequestContextResult,
+  GitHubPullRequestReviewComment,
   GitHubPullRequestsListResult,
   GitHubPullRequest,
   GitHubPullRequestCreateInput,
@@ -12,6 +14,8 @@ import type {
   GitHubPullRequestMergeResult,
   GitHubPullRequestReadyInput,
   GitHubPullRequestReadyResult,
+  GitHubPullRequestCommentCreateInput,
+  GitHubPullRequestReviewReplyCreateInput,
   GitHubPullRequestUpdateInput,
   GitHubPullRequestStatus,
   GitHubRepoUpstreamResult,
@@ -178,6 +182,32 @@ export const createWebGitHubAPI = ({ urls }: WebGitHubAPIOptions): GitHubAPI => 
       throw new Error((body as { error?: string } | null)?.error || response.statusText || 'Failed to mark PR ready');
     }
     return body;
+  },
+
+  async prCommentCreate(payload: GitHubPullRequestCommentCreateInput): Promise<GitHubIssueComment> {
+    const response = await runtimeFetch('/api/github/pr/comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await jsonOrNull<{ comment?: GitHubIssueComment; error?: string }>(response);
+    if (!response.ok || !body?.comment) {
+      throw new Error(body?.error || response.statusText || 'Failed to add pull request comment');
+    }
+    return body.comment;
+  },
+
+  async prReviewReplyCreate(payload: GitHubPullRequestReviewReplyCreateInput): Promise<GitHubPullRequestReviewComment> {
+    const response = await runtimeFetch('/api/github/pr/review-comment/reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await jsonOrNull<{ comment?: GitHubPullRequestReviewComment; error?: string }>(response);
+    if (!response.ok || !body?.comment) {
+      throw new Error(body?.error || response.statusText || 'Failed to reply to review comment');
+    }
+    return body.comment;
   },
 
   async repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult> {

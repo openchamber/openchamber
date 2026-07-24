@@ -76,6 +76,12 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
   optimizeDeps: {
+    entries: [
+      path.resolve(__dirname, 'index.html'),
+      path.resolve(__dirname, 'mobile.html'),
+      path.resolve(__dirname, 'mini-chat.html'),
+      path.resolve(__dirname, '../ui/src/components/chat/markdown/markdown-shiki.worker.ts'),
+    ],
     include: ['@opencode-ai/sdk/v2'],
   },
   server: {
