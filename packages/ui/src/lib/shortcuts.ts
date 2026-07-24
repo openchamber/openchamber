@@ -308,7 +308,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   },
   {
     id: 'cycle_agent',
-    defaultCombo: 'tab',
+    defaultCombo: 'ctrl+tab',
     label: 'Cycle agent',
     description: 'Cycle agent while the model selector is open',
     customizable: true,
