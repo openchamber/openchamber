@@ -286,6 +286,38 @@ describe('ChildStoreManager directory bootstrap scheduler', () => {
     manager.disposeAll();
   });
 
+  test('keeps deferred work authoritative until a newer bootstrap replaces it', async () => {
+    const manager = new ChildStoreManager();
+    const latestChecks: Array<() => boolean> = [];
+    const currentChecks: Array<() => boolean> = [];
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 1,
+      onBootstrap: ({ isCurrent, isLatest }) => {
+        currentChecks.push(isCurrent);
+        latestChecks.push(isLatest);
+      },
+    });
+
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
+    await settle();
+    expect(currentChecks[0]?.()).toBe(false);
+    expect(latestChecks[0]?.()).toBe(true);
+
+    manager.requestBootstrap({
+      directory: '/workspace',
+      priority: 'selected',
+      reason: 'server-connected',
+      force: true,
+    });
+    await settle();
+    expect(latestChecks[0]?.()).toBe(false);
+    expect(latestChecks[1]?.()).toBe(true);
+
+    cleanup();
+    expect(latestChecks[1]?.()).toBe(false);
+    manager.disposeAll();
+  });
+
   test('continues after a synchronous bootstrap failure', async () => {
     const manager = new ChildStoreManager();
     const started: string[] = [];

@@ -3,7 +3,10 @@ import type { OpencodeClient, Project } from "@opencode-ai/sdk/v2/client"
 import { bootstrapDirectory } from "./bootstrap"
 import { INITIAL_STATE, type State } from "./types"
 
-const createSdk = (options?: { commandList?: () => Promise<{ data: unknown[] }> }) => ({
+const createSdk = (options?: {
+  commandList?: () => Promise<{ data: unknown[] }>
+  vcsGet?: (input?: unknown) => Promise<{ data: { branch: string; default_branch?: string } }>
+}) => ({
   project: { current: async () => ({ data: { id: "project-a" } }) },
   config: { get: async () => ({ data: {} }) },
   path: { get: async () => ({ data: { state: "", config: "", worktree: "/repo", directory: "/repo", home: "/home" } }) },
@@ -11,7 +14,7 @@ const createSdk = (options?: { commandList?: () => Promise<{ data: unknown[] }> 
   command: { list: options?.commandList ?? (async () => ({ data: [] })) },
   mcp: { status: async () => ({ data: {} }) },
   lsp: { status: async () => ({ data: [] }) },
-  vcs: { get: async () => ({ data: { branch: "main" } }) },
+  vcs: { get: options?.vcsGet ?? (async () => ({ data: { branch: "main" } })) },
   question: { list: async () => ({ data: [] }) },
   permission: { list: async () => ({ data: [] }) },
 }) as unknown as OpencodeClient
@@ -25,6 +28,60 @@ const createState = (): State => ({
 const project = { id: "project-a", worktree: "/repo" } as Project
 
 describe("bootstrapDirectory", () => {
+  test("scopes VCS metadata to the bootstrapped directory", async () => {
+    let state = createState()
+    const requests: unknown[] = []
+    await bootstrapDirectory({
+      directory: "/repo",
+      sdk: createSdk({
+        vcsGet: async (input) => {
+          requests.push(input)
+          return { data: { branch: "feature", default_branch: "main" } }
+        },
+      }),
+      getState: () => state,
+      set: (patch) => {
+        state = { ...state, ...patch }
+      },
+      global: { config: {}, projects: [project] },
+      loadSessions: async () => undefined,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(requests).toEqual([{ directory: "/repo" }])
+    expect(state.vcs).toEqual({ branch: "feature", default_branch: "main" })
+    expect(state.vcs_status).toBe("complete")
+  })
+
+  test("preserves authoritative VCS metadata while rebootstrap refreshes it", async () => {
+    let state: State = {
+      ...createState(),
+      status: "complete",
+      vcs: { branch: "feature", default_branch: "main" },
+      vcs_status: "complete",
+    }
+    let resolveSessions!: () => void
+    const sessions = new Promise<void>((resolve) => {
+      resolveSessions = resolve
+    })
+    const bootstrapping = bootstrapDirectory({
+      directory: "/repo",
+      sdk: createSdk(),
+      getState: () => state,
+      set: (patch) => {
+        state = { ...state, ...patch }
+      },
+      global: { config: {}, projects: [project] },
+      loadSessions: () => sessions,
+    })
+
+    expect(state.vcs_status).toBe("complete")
+    expect(state.vcs).toEqual({ branch: "feature", default_branch: "main" })
+
+    resolveSessions()
+    expect(await bootstrapping).toBe("complete")
+  })
+
   test("prioritizes session loading without waiting for deferred fields", async () => {
     let state = createState()
     let deferredStarted = false

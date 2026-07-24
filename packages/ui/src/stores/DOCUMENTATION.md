@@ -229,6 +229,7 @@ Expected model:
 - `GitView` / `DiffView` ensure current-directory Git state when visible
 - explicit Git actions refresh status/branches/log as needed
 - successful file-mutating tools can issue a one-shot Git refresh hint
+- non-`.git` file-watcher events issue a coalesced VCS diff refresh hint for visible diff consumers
 - no root-level background Git polling
 
 ### PR

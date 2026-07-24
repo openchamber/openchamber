@@ -70,7 +70,7 @@ The composer compares normalized attachment MIME types with the selected model's
 - Selected session/current directory demand outranks active-project, expanded, visible, and background demand.
 - Demand is deduplicated by normalized directory and can be promoted while queued.
 - The complete known project/worktree set is always published. Collapsed and off-screen directories remain background demand, so they refresh eventually rather than waiting for expansion.
-- A bootstrap holds its scheduler slot through critical state and the authoritative directory session-list fetch. Deferrable command/MCP/LSP/VCS/question/permission enrichment starts afterward without extending slot ownership or competing with the initial session-list request.
+- A bootstrap holds its scheduler slot through critical state and the authoritative directory session-list fetch. Deferrable command/MCP/LSP/VCS/question/permission enrichment starts afterward without extending slot ownership or competing with the initial session-list request. Its commits remain authoritative only until a newer bootstrap, runtime generation, or directory disposal replaces that work.
 - A mounted directory-store consumer pins that store for its lifetime. Eviction may dispose only unmounted directories, so optimistic actions and realtime events cannot move to a replacement store while visible React consumers remain subscribed to an older identity.
 - Reconfiguration and runtime switching invalidate stale generations. A stale completion must not publish state into the new runtime.
 - Failure is recorded as `failed`; it is not converted into a successful empty snapshot. Forced demand can retry failed or completed work.
@@ -257,6 +257,8 @@ Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 | `permission.asked/replied` | `permission` |
 | `question.asked/replied/rejected` | `question` |
 | `lsp.updated` | `lsp` |
+
+`vcs_status` tracks whether the deferred authoritative `vcs.get()` call is loading, complete, or failed. Consumers must not treat cached or not-yet-loaded VCS metadata as authoritative absence.
 
 ## Adding a new event type
 

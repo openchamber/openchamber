@@ -19,11 +19,14 @@ type CreateListener = (request: SessionCreateRequest) => void;
 type DirectoryListener = () => void;
 type GitRefreshHint = { directory: string };
 type GitRefreshListener = (hint: GitRefreshHint) => void;
+type VcsDiffRefreshListener = (hint: GitRefreshHint) => void;
 
 const deleteListeners = new Set<DeleteListener>();
 const createListeners = new Set<CreateListener>();
 const directoryListeners = new Set<DirectoryListener>();
 const gitRefreshListeners = new Set<GitRefreshListener>();
+const vcsDiffRefreshListeners = new Set<VcsDiffRefreshListener>();
+const vcsDiffRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export const sessionEvents = {
   onDeleteRequest(listener: DeleteListener) {
@@ -68,5 +71,22 @@ export const sessionEvents = {
       return;
     }
     gitRefreshListeners.forEach((listener) => listener(hint));
+  },
+  onVcsDiffRefreshHint(listener: VcsDiffRefreshListener) {
+    vcsDiffRefreshListeners.add(listener);
+    return () => {
+      vcsDiffRefreshListeners.delete(listener);
+    };
+  },
+  requestVcsDiffRefresh(hint: GitRefreshHint) {
+    const directory = hint.directory.trim();
+    if (!directory) return;
+
+    const existing = vcsDiffRefreshTimers.get(directory);
+    if (existing) clearTimeout(existing);
+    vcsDiffRefreshTimers.set(directory, setTimeout(() => {
+      vcsDiffRefreshTimers.delete(directory);
+      vcsDiffRefreshListeners.forEach((listener) => listener({ directory }));
+    }, 100));
   },
 };

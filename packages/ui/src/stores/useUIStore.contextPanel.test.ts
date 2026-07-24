@@ -27,4 +27,19 @@ describe('useUIStore context panel tabs', () => {
     expect(tabs).toHaveLength(1);
     expect(tabs[0]?.readOnly).toBe(false);
   });
+
+  test('persists branch as the selected diff scope', () => {
+    const directory = '/repo';
+
+    useUIStore.getState().openContextDiff(directory, 'src/file.ts', false, 'branch');
+    useUIStore.getState().openContextPanelTab(directory, {
+      mode: 'file',
+      targetPath: 'src/other.ts',
+    });
+
+    const diffTab = useUIStore.getState().contextPanelByDirectory[directory]?.tabs
+      .find((tab) => tab.mode === 'diff');
+    expect(diffTab?.diffScope).toBe('branch');
+    expect(diffTab?.stagedDiff).toBe(false);
+  });
 });

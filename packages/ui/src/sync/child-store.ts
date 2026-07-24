@@ -184,6 +184,7 @@ export type DirectoryBootstrapState = "queued" | "running" | "complete" | "faile
 export type DirectoryBootstrapContext = DirectoryBootstrapDemand & {
   generation: number
   isCurrent: () => boolean
+  isLatest: () => boolean
 }
 
 const BOOTSTRAP_PRIORITY: Record<DirectoryBootstrapPriority, number> = {
@@ -258,6 +259,7 @@ export class ChildStoreManager {
   private readonly bootstrapQueue = new Map<string, QueuedBootstrap>()
   private readonly runningBootstraps = new Map<string, RunningBootstrap>()
   private readonly bootstrapStates = new Map<string, DirectoryBootstrapState>()
+  private readonly latestBootstrapTokens = new Map<string, object>()
 
   private onBootstrap?: (context: DirectoryBootstrapContext) => Promise<void> | void
   private onDispose?: (directory: string) => void
@@ -287,6 +289,7 @@ export class ChildStoreManager {
     bootstrapConcurrency?: number
   }): () => void {
     const generation = ++this.bootstrapGeneration
+    this.latestBootstrapTokens.clear()
     this.disposed = false
     this.onBootstrap = callbacks.onBootstrap
     this.onDispose = callbacks.onDispose
@@ -298,6 +301,7 @@ export class ChildStoreManager {
     return () => {
       if (this.bootstrapGeneration !== generation) return
       this.bootstrapGeneration += 1
+      this.latestBootstrapTokens.clear()
       this.onBootstrap = undefined
       this.onDispose = undefined
       this.isBooting = undefined
@@ -521,6 +525,7 @@ export class ChildStoreManager {
         manualDemandRevision: this.manualBootstrapDemands.get(next.directory)?.revision,
       }
       this.runningBootstraps.set(next.directory, running)
+      this.latestBootstrapTokens.set(next.directory, token)
       this.bootstrapStates.set(next.directory, "running")
       this.notifyBootstrapSubscribers()
       const finishPerformanceEvent = startSessionLoadPerformanceEvent({
@@ -536,9 +541,15 @@ export class ChildStoreManager {
         && this.runningBootstraps.get(next.directory)?.token === token
         && this.children.has(next.directory)
       )
+      const isLatest = () => (
+        !this.disposed
+        && this.bootstrapGeneration === running.generation
+        && this.latestBootstrapTokens.get(next.directory) === token
+        && this.children.has(next.directory)
+      )
       let bootstrapPromise: Promise<void>
       try {
-        bootstrapPromise = Promise.resolve(this.onBootstrap({ ...next, generation: running.generation, isCurrent }))
+        bootstrapPromise = Promise.resolve(this.onBootstrap({ ...next, generation: running.generation, isCurrent, isLatest }))
       } catch (error) {
         bootstrapPromise = Promise.reject(error)
       }
@@ -601,6 +612,7 @@ export class ChildStoreManager {
     this.bootstrapQueue.delete(directory)
     this.manualBootstrapDemands.delete(directory)
     this.bootstrapStates.delete(directory)
+    this.latestBootstrapTokens.delete(directory)
     for (const demands of this.bootstrapDemandsByOwner.values()) demands.delete(directory)
     this.children.delete(directory)
     this.notifyRegistrySubscribers()
@@ -661,6 +673,7 @@ export class ChildStoreManager {
     this.bootstrapQueue.clear()
     this.runningBootstraps.clear()
     this.bootstrapStates.clear()
+    this.latestBootstrapTokens.clear()
     this.bootstrapDemandsByOwner.clear()
     this.manualBootstrapDemands.clear()
     this.notifyBootstrapSubscribers()

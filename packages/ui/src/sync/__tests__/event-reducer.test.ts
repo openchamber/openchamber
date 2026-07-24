@@ -224,6 +224,31 @@ describe("applyDirectoryEvent", () => {
     expect((draft.session_status.ses_1 as Extract<SessionStatus, { type: "retry" }>).attempt).toBe(2)
   })
 
+  test("preserves the default branch when the current branch changes", () => {
+    const draft = state({ vcs: { branch: "feature/old", default_branch: "trunk" } })
+
+    expect(applyDirectoryEvent(draft, {
+      type: "vcs.branch.updated",
+      properties: { branch: "feature/new" },
+    } as Event)).toBe(true)
+    expect(draft.vcs).toEqual({ branch: "feature/new", default_branch: "trunk" })
+
+    expect(applyDirectoryEvent(draft, {
+      type: "vcs.branch.updated",
+      properties: { branch: "feature/new" },
+    } as Event)).toBe(false)
+  })
+
+  test("ignores malformed branch updates", () => {
+    const draft = state({ vcs: { branch: "feature/current", default_branch: "trunk" } })
+
+    expect(applyDirectoryEvent(draft, {
+      type: "vcs.branch.updated",
+      properties: {},
+    } as Event)).toBe(false)
+    expect(draft.vcs).toEqual({ branch: "feature/current", default_branch: "trunk" })
+  })
+
   test("updates permission request arrays immutably", () => {
     const initialPermissions = [
       { id: "perm_1", sessionID: "ses_1" } as PermissionRequest,

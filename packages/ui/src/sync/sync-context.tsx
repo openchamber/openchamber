@@ -65,6 +65,7 @@ import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
 import { runtimeFetch } from "@/lib/runtime-fetch"
+import { sessionEvents } from "@/lib/sessionEvents"
 import {
   EMPTY_SESSION_MESSAGE_LOAD_STATE,
   SessionMessageLoader,
@@ -1541,6 +1542,14 @@ function handleEvent(
     }
   }
 
+  if (payload.type === "file.watcher.updated" && resolvedDirectory !== "global") {
+    const props = payload.properties as { file?: string }
+    const file = props.file?.replace(/\\/g, "/")
+    if (file && !file.includes("/.git/") && !file.startsWith(".git/")) {
+      sessionEvents.requestVcsDiffRefresh({ directory: resolvedDirectory })
+    }
+  }
+
   // Notification dispatch for session turn-complete and error events.
   // These are NOT handled by the event reducer — only the notification store.
   if (payload.type === "session.idle" || payload.type === "session.error") {
@@ -1864,7 +1873,7 @@ export function SyncProvider(props: {
             sdk: props.sdk,
             getState: () => store.getState(),
             set: (patch) => {
-              if (!context.isCurrent()) return
+              if (!context.isLatest()) return
               store.setState(patch)
               if (patch.session_status) {
                 applyGlobalSessionStatusSnapshot(directory, patch.session_status, store.getState().session.map((session) => session.id))
@@ -1873,7 +1882,7 @@ export function SyncProvider(props: {
                 ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
               }
             },
-            isStale: () => !context.isCurrent(),
+            isStale: () => !context.isLatest(),
             global: {
               config: globalState.config,
               projects: globalState.projects,
