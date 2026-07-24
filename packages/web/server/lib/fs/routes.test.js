@@ -180,6 +180,26 @@ const registerRaw = (fsPromises) => {
   return getRoute('GET', '/api/fs/raw');
 };
 
+const registerOfficePreview = (fsPromises, spawn) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user', tmpdir: () => '/tmp' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      ...fsPromises,
+    },
+    spawn,
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('GET', '/api/fs/office-preview');
+};
+
 const registerMkdir = (fsPromises) => {
   const { app, getRoute } = createRouteRegistry();
   registerFsRoutes(app, {
@@ -219,6 +239,12 @@ const callRead = async (handler, query) => {
 };
 
 const callRaw = async (handler, query) => {
+  const res = createMockResponse();
+  await handler({ query }, res);
+  return res;
+};
+
+const callOfficePreview = async (handler, query) => {
   const res = createMockResponse();
   await handler({ query }, res);
   return res;
@@ -633,5 +659,98 @@ describe('fs raw download Content-Disposition', () => {
     const cd = res.getHeader('content-disposition');
     expect(cd).toContain('filename="readme.txt"');
     expect(cd).toContain("filename*=UTF-8''readme.txt");
+  });
+});
+
+describe('fs Office preview', () => {
+  it('converts an isolated snapshot and returns a PDF without modifying the source', async () => {
+    const sourceStats = { isFile: () => true, size: 12, mtimeMs: 123 };
+    const pdf = Buffer.from('%PDF-1.4');
+    const fsPromises = {
+      mkdtemp: vi.fn(async () => '/tmp/preview-job'),
+      mkdir: vi.fn(async () => undefined),
+      copyFile: vi.fn(async () => undefined),
+      readdir: vi.fn(async () => ['slides.pdf']),
+      stat: vi.fn(async (targetPath) => targetPath.endsWith('.pdf')
+        ? { isFile: () => true, size: pdf.length }
+        : sourceStats),
+      readFile: vi.fn(async () => pdf),
+      rm: vi.fn(async () => undefined),
+      writeFile: vi.fn(),
+      rename: vi.fn(),
+    };
+    const { spawn } = createSpawn();
+    const handler = registerOfficePreview(fsPromises, spawn);
+
+    process.env.OPENCHAMBER_OFFICE_PREVIEW_TEST_SECRET = 'not-forwarded';
+    let res;
+    try {
+      res = await callOfficePreview(handler, { path: '/repo/slides.pptx' });
+    } finally {
+      delete process.env.OPENCHAMBER_OFFICE_PREVIEW_TEST_SECRET;
+    }
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual(pdf);
+    expect(fsPromises.copyFile).toHaveBeenCalledWith(
+      '/repo/slides.pptx',
+      '/tmp/preview-job/input/slides.pptx',
+    );
+    expect(fsPromises.writeFile).not.toHaveBeenCalled();
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+    expect(fsPromises.rm).toHaveBeenCalledWith('/tmp/preview-job', { recursive: true, force: true });
+
+    const [binary, args, options] = spawn.mock.calls[0];
+    expect(binary).toBe('libreoffice');
+    expect(args).toContain('--headless');
+    expect(args).toContain('-env:UserInstallation=file:///tmp/preview-job/profile');
+    expect(args).toContain('/tmp/preview-job/input/slides.pptx');
+    expect(options.shell).toBe(false);
+    expect(options.cwd).toBe('/tmp/preview-job');
+    expect(options.env.HOME).toBe('/tmp/preview-job/profile');
+    expect(options.env.TMPDIR).toBe('/tmp/preview-job');
+    expect(options.env.OPENCHAMBER_OFFICE_PREVIEW_TEST_SECRET).toBeUndefined();
+  });
+
+  it('returns retry guidance while the converter is busy', async () => {
+    const sourceStats = { isFile: () => true, size: 12, mtimeMs: 123 };
+    const pdf = Buffer.from('%PDF-1.4');
+    const fsPromises = {
+      mkdtemp: vi.fn(async () => '/tmp/preview-job'),
+      mkdir: vi.fn(async () => undefined),
+      copyFile: vi.fn(async () => undefined),
+      readdir: vi.fn(async () => ['slides.pdf']),
+      stat: vi.fn(async (targetPath) => targetPath.endsWith('.pdf')
+        ? { isFile: () => true, size: pdf.length }
+        : sourceStats),
+      readFile: vi.fn(async () => pdf),
+      rm: vi.fn(async () => undefined),
+    };
+    const { spawn, closeNext } = createDeferredSpawn();
+    const handler = registerOfficePreview(fsPromises, spawn);
+
+    const firstResponse = callOfficePreview(handler, { path: '/repo/slides.pptx' });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+    const busyResponse = await callOfficePreview(handler, { path: '/repo/report.xlsx' });
+
+    expect(busyResponse.statusCode).toBe(429);
+    expect(busyResponse.getHeader('retry-after')).toBe('1');
+    closeNext();
+    expect((await firstResponse).statusCode).toBe(200);
+  });
+
+  it('rejects unsupported extensions before starting a conversion', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 10, mtimeMs: 123 })),
+      mkdtemp: vi.fn(),
+    };
+    const spawn = vi.fn();
+    const handler = registerOfficePreview(fsPromises, spawn);
+
+    const res = await callOfficePreview(handler, { path: '/repo/readme.txt' });
+
+    expect(res.statusCode).toBe(415);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(fsPromises.mkdtemp).not.toHaveBeenCalled();
   });
 });

@@ -1178,6 +1178,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.error.switchToTextMode": "Alterne para o modo de texto para ver o conteúdo bruto.",
   "filesView.warning.largeFilePreviewLimited": "Este arquivo é grande ({sizeKb}KB). A prévia pode estar limitada.",
   "filesView.error.previewUnavailable": "Pré-visualização indisponível",
+  "filesView.documentPreview.unavailable": "Este documento não pode ser visualizado como texto.",
+  "filesView.editor.saveOriginal": "Salvar original",
   "filesView.error.switchToEditMode": "Alterne para o modo de edição para resolver o problema.",
   "filesView.error.readFileFailed": "Não foi possível ler o arquivo",
   "filesView.editor.htmlPreviewTitle": "Pré-visualização HTML",

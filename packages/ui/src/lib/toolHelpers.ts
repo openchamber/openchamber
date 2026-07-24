@@ -688,6 +688,8 @@ export function isDrawioFile(filePath: string): boolean {
 
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp', 'avif'];
 
+const OFFICE_DOCUMENT_EXTENSIONS = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp'];
+
 export function isImageFile(filePath: string): boolean {
   const ext = filePath.split('.').pop()?.toLowerCase();
   return IMAGE_EXTENSIONS.includes(ext || '');
@@ -696,6 +698,11 @@ export function isImageFile(filePath: string): boolean {
 export function isPdfFile(filePath: string): boolean {
   const ext = filePath.split('.').pop()?.toLowerCase();
   return ext === 'pdf';
+}
+
+export function isOfficeDocumentFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  return OFFICE_DOCUMENT_EXTENSIONS.includes(ext || '');
 }
 
 export function getImageMimeType(filePath: string): string {

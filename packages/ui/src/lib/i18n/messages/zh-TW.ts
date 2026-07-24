@@ -1188,6 +1188,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.error.switchToTextMode': '請切換到文字模式查看原始內容。',
   'filesView.warning.largeFilePreviewLimited': '該檔案較大（{sizeKb}KB），預覽可能受限。',
   'filesView.error.previewUnavailable': '預覽無法使用',
+  'filesView.documentPreview.unavailable': '無法以文字形式預覽此文件。',
+  'filesView.editor.saveOriginal': '下載原件',
   'filesView.error.switchToEditMode': '請切換到編輯模式修復問題。',
   'filesView.error.readFileFailed': '讀取檔案失敗',
   'filesView.editor.htmlPreviewTitle': 'HTML 預覽',

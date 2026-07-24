@@ -1215,6 +1215,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.error.switchToTextMode': '원본 내용을 보려면 텍스트 모드로 전환하세요.',
   'filesView.warning.largeFilePreviewLimited': '이 파일은 큽니다({sizeKb}KB). 미리보기가 제한될 수 있습니다.',
   'filesView.error.previewUnavailable': '미리보기를 사용할 수 없음',
+  'filesView.documentPreview.unavailable': '이 문서는 텍스트로 미리 볼 수 없습니다.',
+  'filesView.editor.saveOriginal': '원본 저장',
   'filesView.error.switchToEditMode': '문제를 수정하려면 편집 모드로 전환하세요.',
   'filesView.error.readFileFailed': '파일 읽기 실패',
   'filesView.editor.htmlPreviewTitle': 'HTML 미리보기',

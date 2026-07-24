@@ -1178,6 +1178,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.error.switchToTextMode": "Перейдіть у текстовий режим, щоб переглянути необроблений вміст.",
   "filesView.warning.largeFilePreviewLimited": "Цей файл великий ({sizeKb} КБ). Попередній перегляд може бути обмежений.",
   "filesView.error.previewUnavailable": "Попередній перегляд недоступний",
+  "filesView.documentPreview.unavailable": "Цей документ не можна переглянути як текст.",
+  "filesView.editor.saveOriginal": "Зберегти оригінал",
   "filesView.error.switchToEditMode": "Перейдіть у режим редагування, щоб усунути проблему.",
   "filesView.error.readFileFailed": "Не вдалося прочитати файл",
   "filesView.editor.htmlPreviewTitle": "Попередній перегляд HTML",
