@@ -56,7 +56,9 @@ export const TitlebarLeftControls: React.FC = () => {
     }
 
     const publishWidth = () => {
-      const width = node.getBoundingClientRect().width;
+      // Prefer scrollWidth so negative child margins / overflow cannot under-report
+      // the space the overlay actually occupies over the header.
+      const width = Math.max(node.getBoundingClientRect().width, node.scrollWidth);
       document.documentElement.style.setProperty('--oc-titlebar-controls-width', `${Math.round(width)}px`);
     };
 

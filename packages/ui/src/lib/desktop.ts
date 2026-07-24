@@ -246,8 +246,8 @@ export const getElectronPlatform = (): string | null => {
   return typeof platform === 'string' ? platform : null;
 };
 
-/** Width of the three in-app window control buttons (3 × w-11). */
-export const DESKTOP_WINDOW_CONTROLS_WIDTH_PX = 132;
+/** Width of the three in-app window control buttons when placed on the left (3 × w-8). */
+export const DESKTOP_WINDOW_CONTROLS_WIDTH_PX = 96;
 
 /** Windows and Linux use frameless windows with in-app minimize/maximize/close controls. */
 export const usesFramelessElectronChrome = (): boolean => {
