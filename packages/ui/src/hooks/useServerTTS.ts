@@ -197,7 +197,7 @@ export class TtsStreamProcessor {
     
     const bytesPerSample = this.wavInfo.bitsPerSample / 8;
     const blockAlign = this.wavInfo.numChannels * bytesPerSample;
-    let processableLength = this.pcmAccumulator.length - (this.pcmAccumulator.length % blockAlign);
+    const processableLength = this.pcmAccumulator.length - (this.pcmAccumulator.length % blockAlign);
     
     if (!force && processableLength < MIN_PCM_CHUNK_BYTES) {
       return; // Not enough data yet

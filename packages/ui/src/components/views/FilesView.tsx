@@ -3379,7 +3379,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   size="sm"
                   className={cn(
                     "size-6 p-0 opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent",
-                    isTTSPlaying && !isPaused ? "text-green-500" : isPaused ? "text-yellow-500" : "text-muted-foreground"
+                    isTTSPlaying && !isPaused ? "text-[color:var(--status-success)]" : isPaused ? "text-[color:var(--status-warning)]" : "text-muted-foreground"
                   )}
                   aria-label={isTTSPlaying ? t('filesView.tts.stopSpeaking') : t('filesView.tts.readAloud')}
                   onClick={() => {

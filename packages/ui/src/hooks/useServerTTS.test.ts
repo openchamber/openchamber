@@ -105,7 +105,7 @@ describe('parseWavHeader', () => {
 describe('TtsStreamProcessor', () => {
   test('buffers WAV chunks correctly until WAV_HEADER_SIZE is reached and yields valid PCM frames', () => {
     let pcmReadyCount = 0;
-    const processor = new TtsStreamProcessor((pcmData, info) => {
+    const processor = new TtsStreamProcessor((pcmData) => {
       pcmReadyCount++;
       // Since bitsPerSample is 16 and channels is 1, block align is 2.
       // So length should be divisible by 2.

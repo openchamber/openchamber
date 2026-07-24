@@ -1082,7 +1082,7 @@ const AssistantMessageActionButtons = React.memo(({
                                 size="icon"
                                 className={cn(
                                     'h-8 w-8 bg-transparent hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
-                                    isTTSPlaying && !isPaused ? 'text-green-500' : isPaused ? 'text-yellow-500' : 'text-muted-foreground hover:text-foreground'
+                                    isTTSPlaying && !isPaused ? 'text-[color:var(--status-success)]' : isPaused ? 'text-[color:var(--status-warning)]' : 'text-muted-foreground hover:text-foreground'
                                 )}
                                 aria-label={isTTSPlaying ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud')}
                                 onPointerDown={(event) => event.stopPropagation()}

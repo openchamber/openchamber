@@ -769,7 +769,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                       size="sm"
                       className={cn(
                         'h-5 w-5 p-0',
-                        isTTSPlaying && !isPaused ? 'text-green-500' : isPaused ? 'text-yellow-500' : '',
+                        isTTSPlaying && !isPaused ? 'text-[color:var(--status-success)]' : isPaused ? 'text-[color:var(--status-warning)]' : '',
                       )}
                       aria-label={isTTSPlaying ? t('planView.tts.stopSpeaking') : t('planView.tts.readAloud')}
                       onClick={() => {
