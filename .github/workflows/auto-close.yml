@@ -1,0 +1,60 @@
+name: auto-close
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  close:
+    if: github.event.pull_request.merged == true && github.repository == 'openchamber/openchamber'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const closingPattern = /(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)/gi;
+            const urlPattern = /(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+https:\/\/github\.com\/openchamber\/openchamber\/issues\/(\d+)/gi;
+
+            const refs = new Set();
+
+            const body = context.payload.pull_request.body || '';
+            const title = context.payload.pull_request.title || '';
+            let match;
+
+            while ((match = closingPattern.exec(body)) !== null) refs.add(match[1]);
+            while ((match = urlPattern.exec(body)) !== null) refs.add(match[1]);
+            while ((match = closingPattern.exec(title)) !== null) refs.add(match[1]);
+
+            const { data: commits } = await github.rest.pulls.listCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            });
+
+            for (const commit of commits) {
+              const msg = commit.commit.message;
+              while ((match = closingPattern.exec(msg)) !== null) refs.add(match[1]);
+              while ((match = urlPattern.exec(msg)) !== null) refs.add(match[1]);
+            }
+
+            const prNumber = context.payload.pull_request.number;
+            const prTitle = context.payload.pull_request.title;
+
+            for (const issueNum of refs) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: parseInt(issueNum),
+                state: 'closed',
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: parseInt(issueNum),
+                body: `Closed by #${prNumber} (${prTitle})`,
+              });
+            }
