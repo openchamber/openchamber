@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Desktop/Linux:** official AppImage releases for x64 and arm64, with in-app updates from the GitHub release feed. Missing update manifests are treated as “no update” instead of a hard failure, and updater errors surface in About/sidebar (thanks to @jibanez-staticduo).
+- Desktop/Linux: frameless window controls, system tray minimize, launch at login via XDG autostart, multi-window support, and “Open in” for discovered installed apps (thanks to @jibanez-staticduo, @makeittech).
+
 ## [1.16.3] - 2026-07-22
 
 - **Chat attachments:** added Office and OpenDocument files (`.docx`, `.pptx`, `.xlsx`, `.odt`, `.odp`, and `.ods`), with readable text and supported embedded images extracted before sending. Attachments also support more source-code formats, notebooks, HAR files with credentials and cookies removed, SVG and Draw.io files, and HEIC/HEIF images; the composer warns when the selected model may ignore an attachment type.

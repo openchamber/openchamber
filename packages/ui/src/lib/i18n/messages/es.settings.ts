@@ -921,7 +921,7 @@ export const settingsDict = {
   "settings.openchamber.desktopNetwork.field.macMenuBarDescription": "Requiere reiniciar la aplicación. Al desactivarlo, OpenChamber no crea el elemento de la barra de menús ni ejecuta sus actualizaciones de sesiones, aprobaciones y uso.",
   "settings.openchamber.desktopNetwork.field.minimizeToTrayAria": "Minimizar y cerrar OpenChamber a la bandeja del sistema",
   "settings.openchamber.desktopNetwork.field.minimizeToTray": "Minimizar y cerrar a la bandeja del sistema",
-  "settings.openchamber.desktopNetwork.field.minimizeToTrayDescription": "Mantiene OpenChamber en ejecución en la bandeja del sistema de Windows cuando la ventana principal se minimiza o se cierra.",
+  "settings.openchamber.desktopNetwork.field.minimizeToTrayDescription": "Mantiene OpenChamber en ejecución en la bandeja del sistema cuando la ventana principal se minimiza o se cierra.",
   "settings.openchamber.desktopNetwork.field.keepAwakeAria": "Mantener el ordenador activo mientras OpenChamber está en ejecución",
   "settings.openchamber.desktopNetwork.field.keepAwake": "Mantener el ordenador activo mientras OpenChamber está en ejecución",
   "settings.openchamber.desktopNetwork.field.keepAwakeDescription": "Para que los teléfonos puedan seguir abriendo esta app. La pantalla aún puede apagarse.",

@@ -11,6 +11,7 @@ import { getAuthEntryForProvider } from './resolve.js';
 // opencode repo). auth.json credentials never leave this process.
 
 const REQUEST_TIMEOUT_MS = 60_000;
+const COPILOT_MODELS_TIMEOUT_MS = 5_000;
 // Generous default: thinking models that can't be switched off (DeepSeek,
 // Qwen, …) spend part of this budget on reasoning before the actual answer.
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_000;
@@ -183,14 +184,53 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
   return text;
 };
 
-const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) => {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel }) => {
+  const trimmedBase = baseURL.replace(/\/+$/, '');
+  const response = await fetch(`${trimmedBase}/responses`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      ...headers,
+    },
+    body: JSON.stringify({
+      model: modelID,
+      ...(system ? { instructions: system } : {}),
+      input: [{
+        role: 'user',
+        content: [{ type: 'input_text', text: prompt }],
+      }],
+      max_output_tokens: maxOutputTokens,
+      stream: false,
+      store: false,
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw await httpError(response, providerLabel);
+  }
+  const payload = await response.json();
+  const text = typeof payload?.output_text === 'string'
+    ? payload.output_text
+    : Array.isArray(payload?.output)
+      ? payload.output
+        .flatMap((item) => (Array.isArray(item?.content) ? item.content : []))
+        .map((part) => (part?.type === 'output_text' && typeof part.text === 'string' ? part.text : ''))
+        .join('')
+      : '';
+  if (!text.trim()) {
+    throw new Error(`${providerLabel} returned no text output`);
+  }
+  return text;
+};
+
+const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTokens, providerLabel }) => {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...headers,
     },
     body: JSON.stringify({
       model: modelID,
@@ -201,7 +241,7 @@ const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens 
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw await httpError(response, 'Anthropic');
+    throw await httpError(response, providerLabel);
   }
   const payload = await response.json();
   const text = (payload?.content || [])
@@ -209,9 +249,67 @@ const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens 
     .map((part) => part.text)
     .join('');
   if (!text) {
-    throw new Error('Anthropic returned no text content');
+    throw new Error(`${providerLabel} returned no text content`);
   }
   return text;
+};
+
+const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) => callMessages({
+  url: 'https://api.anthropic.com/v1/messages',
+  headers: {
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+  },
+  modelID,
+  prompt,
+  system,
+  maxOutputTokens,
+  providerLabel: 'Anthropic',
+});
+
+const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
+  const trimmedBase = baseURL.replace(/\/+$/, '');
+  const response = await fetch(`${trimmedBase}/models`, {
+    headers: {
+      Accept: 'application/json',
+      ...headers,
+    },
+    signal: AbortSignal.timeout(COPILOT_MODELS_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw await httpError(response, 'GitHub Copilot models');
+  }
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error('GitHub Copilot models returned invalid JSON');
+  }
+  if (!Array.isArray(payload?.data)) {
+    throw new Error('GitHub Copilot models returned an invalid model list');
+  }
+
+  const model = payload.data.find((item) => item && typeof item === 'object' && item.id === modelID);
+  if (!model) {
+    throw new Error(`GitHub Copilot model "${modelID}" was not returned by /models`);
+  }
+  if (model.supported_endpoints === undefined) {
+    return 'chat';
+  }
+  if (!Array.isArray(model.supported_endpoints)) {
+    throw new Error(`GitHub Copilot model "${modelID}" returned invalid endpoint metadata`);
+  }
+  if (model.supported_endpoints.includes('/v1/messages')) {
+    return 'messages';
+  }
+  if (model.supported_endpoints.includes('/responses')) {
+    return 'responses';
+  }
+  if (model.supported_endpoints.includes('/chat/completions')) {
+    return 'chat';
+  }
+  throw new Error(`GitHub Copilot model "${modelID}" has no supported text endpoint`);
 };
 
 const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) => {
@@ -395,21 +493,44 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     const baseURL = entry.enterpriseUrl
       ? `https://copilot-api.${String(entry.enterpriseUrl).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
       : 'https://api.githubcopilot.com';
-    return callOpenaiCompatible({
+    const authHeaders = {
+      Authorization: `Bearer ${token}`,
+      'User-Agent': USER_AGENT,
+      'X-GitHub-Api-Version': '2026-06-01',
+    };
+    const headers = {
+      ...authHeaders,
+      'Openai-Intent': 'conversation-edits',
+      'x-initiator': 'agent',
+    };
+    const endpoint = await getCopilotEndpoint({
       baseURL,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'User-Agent': USER_AGENT,
-        'Openai-Intent': 'conversation-edits',
-        'x-initiator': 'agent',
-        'X-GitHub-Api-Version': '2026-06-01',
-      },
+      headers: authHeaders,
+      modelID,
+    });
+    const request = {
+      baseURL,
+      headers,
       modelID,
       prompt,
       system,
       maxOutputTokens: tokens,
       providerLabel: 'GitHub Copilot',
-    });
+    };
+    if (endpoint === 'messages') {
+      return callMessages({
+        ...request,
+        url: `${baseURL.replace(/\/+$/, '')}/v1/messages`,
+        headers: {
+          ...headers,
+          'anthropic-version': '2023-06-01',
+        },
+      });
+    }
+    if (endpoint === 'responses') {
+      return callOpenaiResponses(request);
+    }
+    return callOpenaiCompatible(request);
   }
 
   if (providerID === 'openai' && entry.type === 'oauth') {

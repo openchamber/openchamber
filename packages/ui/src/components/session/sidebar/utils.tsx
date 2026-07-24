@@ -1,7 +1,5 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
-import { isSessionPinned } from '@/stores/useSessionPinnedStore';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 
@@ -129,45 +127,6 @@ export const normalizeForBranchComparison = (value: string): string => {
 export const isBranchDifferentFromLabel = (branch: string | null, label: string): boolean => {
   if (!branch) return false;
   return normalizeForBranchComparison(branch) !== normalizeForBranchComparison(label);
-};
-
-const toFiniteNumber = (value: unknown): number | undefined => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
-};
-
-const getSessionCreatedAt = (session: Session): number => {
-  return toFiniteNumber(session.time?.created) ?? 0;
-};
-
-const getSessionUpdatedAt = (session: Session): number => {
-  return toFiniteNumber(session.time?.updated) ?? toFiniteNumber(session.time?.created) ?? 0;
-};
-
-export const compareSessionsByPinnedAndTime = (
-  a: Session,
-  b: Session,
-  pinnedSessionIds: Set<string>,
-): number => {
-  const aPinned = isSessionPinned(pinnedSessionIds, resolveGlobalSessionDirectory(a), a.id);
-  const bPinned = isSessionPinned(pinnedSessionIds, resolveGlobalSessionDirectory(b), b.id);
-  if (aPinned !== bPinned) {
-    return aPinned ? -1 : 1;
-  }
-
-  if (aPinned && bPinned) {
-    return getSessionCreatedAt(b) - getSessionCreatedAt(a);
-  }
-
-  return getSessionUpdatedAt(b) - getSessionUpdatedAt(a);
 };
 
 export const dedupeSessionsById = (sessions: Session[]): Session[] => {
