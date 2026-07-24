@@ -70,6 +70,7 @@ import { setSessionOpener } from "./session-navigation"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
+import { sessionMRU } from "./session-mru"
 
 export type { AttachedFile }
 
@@ -1628,5 +1629,11 @@ useSessionUIStore.subscribe((state, prev) => {
       lastPersistedWorktreeSerializedByRuntime.set(runtimeKey, serialized)
       persistWorktreeTopology(runtimeKey, state.availableWorktreesByProject)
     }
+  }
+})
+
+useSessionUIStore.subscribe((state, prev) => {
+  if (state.currentSessionId !== prev.currentSessionId) {
+    sessionMRU.recordActiveSession(state.currentSessionId)
   }
 })
