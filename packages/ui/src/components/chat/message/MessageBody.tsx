@@ -47,6 +47,7 @@ import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import { extractLoopbackUrls } from '@/lib/url';
+import { stripAnsi } from '@/lib/text/stripAnsi';
 import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import {
@@ -1243,8 +1244,7 @@ const AssistantMessageBody = React.memo(({
             if (!output) {
                 continue;
             }
-            // eslint-disable-next-line no-control-regex
-            const url = extractLoopbackUrls(output.replace(/\x1b\[[0-9;]*m/g, ''))[0];
+            const url = extractLoopbackUrls(stripAnsi(output))[0];
             if (!url) {
                 continue;
             }

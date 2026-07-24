@@ -53,6 +53,7 @@ import {
 } from './taskToolModel';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
+import { stripAnsi } from '@/lib/text/stripAnsi';
 import { getDiffPatchEntries, getPatchText, type DiffPatchEntry } from './toolDiffUtils';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
@@ -823,19 +824,6 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
     </div>
 );
 
-const getToolOutputLanguage = (
-    output: string,
-    part: ToolPartType,
-    metadata: Record<string, unknown> | undefined,
-    input: Record<string, unknown> | undefined,
-): string => {
-    if (part.tool === 'bash') {
-        return 'bash';
-    }
-
-    return detectLanguageFromOutput(formatEditOutput(output, part.tool, metadata), part.tool, input);
-};
-
 const getToolOutputText = (
     output: string,
     part: ToolPartType,
@@ -855,8 +843,22 @@ const ToolScrollableTextOutput: React.FC<{
     input: Record<string, unknown> | undefined;
 }> = ({ output, part, metadata, input }) => {
     const { t } = useI18n();
-    const renderedOutput = getToolOutputText(output, part, metadata);
-    const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
+    // Shell tools (bash, grep with --color, ocr, etc.) emit ANSI SGR/OSC codes
+    // that the chat renderer does not interpret. Strip them once at the
+    // boundary so the highlighted code block, JSON-tree fallback, and
+    // copy-to-clipboard all receive HTML-safe text.
+    const renderedOutput = React.useMemo(
+        () => stripAnsi(getToolOutputText(output, part, metadata)),
+        [output, part, metadata]
+    );
+    // Use the same ANSI-cleaned string the highlighter/JSON/copy paths see.
+    // Pass renderedOutput (already formatEditOutput + stripAnsi) directly to
+    // detectLanguageFromOutput instead of re-applying formatEditOutput, which
+    // could re-run cleanOutput's 5-digit-`|` prefix strip or the LSP diagnostic
+    // envelope strip on already-cleaned text.
+    const outputLanguage = part.tool === 'bash'
+        ? 'bash'
+        : detectLanguageFromOutput(renderedOutput, part.tool, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
     const [jsonViewMode, setJsonViewMode] = React.useState<'summary' | 'formatted' | 'raw'>('summary');
     const [copiedJson, setCopiedJson] = React.useState(false);
