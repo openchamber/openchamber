@@ -1467,8 +1467,9 @@ export function createMessengerOpencodeBridge({
 
   // --- Project memory (MEMORY.md) -------------------------------------------
   // When a brand-new session starts, the project's MEMORY.md (if present) is
-  // injected into the first prompt as a <project-memory> block so persistent
-  // context survives across sessions.
+  // injected into the first prompt as a synthetic <project-memory> part so
+  // persistent context survives across sessions without polluting the visible
+  // user message in the web UI.
   const MEMORY_FILE_NAME = 'MEMORY.md';
   const MEMORY_MAX_CHARS = 12_000;
   async function readProjectMemory(projectPath) {
@@ -2492,6 +2493,9 @@ export function createMessengerOpencodeBridge({
 
   async function emitWebUserPart(sessionId, part, { projectPath = null } = {}) {
     const text = typeof part?.text === 'string' ? part.text.trim() : '';
+    // Hidden agent-context parts (project memory, scheduling/discord
+    // instructions, etc.) must never surface as a **Web** prompt block.
+    if (part?.synthetic === true) return;
     // Never mirror the synthetic shell marker as a **Web** prompt block — it is
     // internal noise ("The following tool was executed by the user"). The
     // command + output are mirrored separately as a shell block (emitPart).
@@ -3317,6 +3321,14 @@ export function createMessengerOpencodeBridge({
 
   function firstTextOfMessage(message) {
     const parts = Array.isArray(message?.parts) ? message.parts : [];
+    // Prefer the user's visible text over synthetic agent-context parts
+    // (memory / scheduling / discord instructions injected on session start).
+    for (const part of parts) {
+      if (part?.synthetic === true) continue;
+      if (part?.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
+        return part.text.trim();
+      }
+    }
     for (const part of parts) {
       if (part?.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
         return part.text.trim();
@@ -3895,11 +3907,15 @@ export function createMessengerOpencodeBridge({
         if (!stored?.sessionId) return { ok: false, error: 'no session bound to this conversation.' };
         const messages = await opencodeAdapter.listMessages(stored.sessionId, stored?.projectPath ?? undefined);
         // Branch from the most recent genuine user message — synthetic
-        // injections (memory + scheduling blocks) are skipped.
+        // injections (memory / scheduling / discord blocks) are skipped.
+        // Legacy sessions may still have those blocks prepended into the
+        // visible user text; newer sessions keep them on synthetic parts.
         const lastUserMessage = [...(messages ?? [])].reverse().find((m) => {
           if ((m?.info?.role ?? m?.role) !== 'user') return false;
           const preview = firstTextOfMessage(m);
-          return !preview.startsWith('<project-memory>') && !preview.startsWith('<scheduling>');
+          return !preview.startsWith('<project-memory>')
+            && !preview.startsWith('<scheduling>')
+            && !preview.startsWith('<discord>');
         });
         const messageId = lastUserMessage?.info?.id ?? lastUserMessage?.id ?? null;
         if (!messageId) return { ok: false, error: 'no user message found in this session to fork from.' };
@@ -4583,30 +4599,38 @@ export function createMessengerOpencodeBridge({
       return { ok: false, error: err?.message ?? 'session resolve failed' };
     }
 
-    // Project memory: a brand-new session's first prompt
-    // carries the project's MEMORY.md as persistent context. The scheduling
-    // instructions ride along so the agent can self-serve reminders /
-    // recurring tasks via the local API when the user asks.
-    // Remember the user's raw prompt (before any project-memory / scheduling
-    // context is prepended) so the `/model` wizard's "Send last message" button
-    // can replay it under a freshly-chosen model.
+    // Project memory + scheduling/discord instructions ride along on a
+    // brand-new session's first prompt as *synthetic* text parts so the agent
+    // still sees them, but the web UI (and Discord web-mirrors) keep showing
+    // only the user's real message. Never concatenate into `text` — that made
+    // the instruction blocks appear as the user's own chat bubble.
+    // Remember the user's raw prompt so the `/model` wizard's "Send last
+    // message" button can replay it under a freshly-chosen model.
     rememberLastPrompt(
       { type, token, channelId, threadId: effectiveThreadId },
       text,
     );
 
+    /** @type {Array<{ type: 'text', text: string, synthetic: true }>} */
+    const contextSyntheticParts = [];
     if (sessionCreated) {
-      const contextBlocks = [];
       const memory = await readProjectMemory(effectiveProjectPath);
-      if (memory) contextBlocks.push(`<project-memory>\n${memory}\n</project-memory>`);
+      if (memory) {
+        contextSyntheticParts.push({
+          type: 'text',
+          text: `<project-memory>\n${memory}\n</project-memory>`,
+          synthetic: true,
+        });
+      }
       const scheduling = await buildSchedulingInstructions({
         projectPath: effectiveProjectPath,
       }).catch(() => null);
-      if (scheduling) contextBlocks.push(scheduling);
+      if (scheduling) {
+        contextSyntheticParts.push({ type: 'text', text: scheduling, synthetic: true });
+      }
       const discordInstructions = await buildDiscordInstructions().catch(() => null);
-      if (discordInstructions) contextBlocks.push(discordInstructions);
-      if (contextBlocks.length > 0) {
-        text = `${contextBlocks.join('\n\n')}\n\n${text}`;
+      if (discordInstructions) {
+        contextSyntheticParts.push({ type: 'text', text: discordInstructions, synthetic: true });
       }
     }
 
@@ -4757,7 +4781,7 @@ export function createMessengerOpencodeBridge({
           modelOverride,
           agentOverride,
           variantOverride,
-          extraParts: extraFileParts,
+          extraParts: [...contextSyntheticParts, ...extraFileParts],
         });
       } catch (err) {
         const errMsg = err?.message ?? 'prompt failed';

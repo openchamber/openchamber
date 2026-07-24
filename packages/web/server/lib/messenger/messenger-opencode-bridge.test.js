@@ -705,6 +705,76 @@ describe('discord inbound mirroring', () => {
     expect(threadMessages).toEqual(['assistant reply']);
   });
 
+
+  it('keeps new-session memory/scheduling/discord context on synthetic parts', async () => {
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-discord-ctx-'));
+    await fs.writeFile(path.join(tmpDir, 'MEMORY.md'), 'remember this', 'utf8');
+
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      calls.push([String(url), init]);
+      const u = String(url);
+      if (u.includes('/messages/source-msg/threads')) {
+        return { ok: true, status: 200, json: async () => ({ id: 'thread-ctx', name: 'sdsfs' }), text: async () => '' };
+      }
+      if (u.includes('/thread-members/user-1')) {
+        return { ok: true, status: 204, json: async () => null, text: async () => '' };
+      }
+      if (u.startsWith('http://opencode/session?directory=')) {
+        return { ok: true, status: 200, json: async () => ({ id: 'discord-ses-ctx' }), text: async () => '' };
+      }
+      if (u.includes('/session/discord-ses-ctx/prompt_async')) {
+        return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+      }
+      return { ok: true, status: 200, json: async () => ({ id: 'm' }), text: async () => '' };
+    });
+
+    const bridge = makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: () => null,
+        bind: () => {},
+      },
+      getLocalApiBaseUrl: () => 'http://127.0.0.1:3902',
+      readSettings: async () => ({ discord: { botToken: 'bot-token' } }),
+      projectConfigRuntime: {},
+      listProjects: async () => [{ id: 'proj-1', path: tmpDir, name: 'Project' }],
+    });
+
+    const routed = await bridge.routeInbound({
+      type: 'discord',
+      token: 'bot-token',
+      channelId: 'channel-1',
+      threadId: null,
+      sourceMessageId: 'source-msg',
+      text: 'sdsfs',
+      projectPath: tmpDir,
+      projectLabel: 'Project',
+      from: { id: 'user-1', username: 'alice' },
+    });
+    expect(routed.ok).toBe(true);
+
+    const promptCall = calls.find(([url]) => url.includes('/session/discord-ses-ctx/prompt_async'));
+    expect(promptCall).toBeTruthy();
+    const body = JSON.parse(promptCall[1].body);
+    expect(body.parts[0]).toEqual({ type: 'text', text: 'sdsfs' });
+    const synthetic = body.parts.slice(1);
+    expect(synthetic.length).toBe(3);
+    expect(synthetic.every((part) => part.type === 'text' && part.synthetic === true)).toBe(true);
+    expect(synthetic[0].text).toContain('<project-memory>');
+    expect(synthetic[0].text).toContain('remember this');
+    expect(synthetic[1].text).toContain('<scheduling>');
+    expect(synthetic[2].text).toContain('<discord>');
+    expect(JSON.stringify(body.parts[0])).not.toContain('<scheduling>');
+    expect(JSON.stringify(body.parts[0])).not.toContain('<discord>');
+    expect(JSON.stringify(body.parts[0])).not.toContain('<project-memory>');
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
   it('runs a `!status` console command on Discord without sending it as a prompt', async () => {
     const calls = [];
     globalThis.fetch = vi.fn(async (url, init = {}) => {
