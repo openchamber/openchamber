@@ -1,5 +1,6 @@
 import React from 'react';
-import { cn, fuzzyMatch } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { rankAutocompleteItems } from '@/lib/search/autocompleteRanking';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessages } from '@/sync/sync-context';
 import { useCommandsStore } from '@/stores/useCommandsStore';
@@ -190,20 +191,23 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         const allCommands = [...builtInCommands, ...customCommands, ...skillCommands];
 
         const allowInitCommand = !hasMessagesInCurrentSession;
-        const filtered = (searchQuery
-          ? allCommands.filter(cmd =>
-              fuzzyMatch(cmd.name, searchQuery) ||
-              (cmd.description && fuzzyMatch(cmd.description, searchQuery))
-            )
-          : allCommands).filter(cmd => allowInitCommand || cmd.name !== 'init');
-
-        filtered.sort((a, b) => {
-          const aStartsWith = a.name.toLowerCase().startsWith(searchQuery.toLowerCase());
-          const bStartsWith = b.name.toLowerCase().startsWith(searchQuery.toLowerCase());
-          if (aStartsWith && !bStartsWith) return -1;
-          if (!aStartsWith && bStartsWith) return 1;
-          return a.name.localeCompare(b.name);
-        });
+        const query = searchQuery.trim().toLowerCase();
+        const filtered = rankAutocompleteItems(
+          allCommands.filter((cmd) => allowInitCommand || cmd.name !== 'init'),
+          searchQuery,
+          (cmd) => `${cmd.name} ${cmd.description ?? ''}`,
+          {
+            compare: (a, b) => {
+              const aName = a.name.toLowerCase();
+              const bName = b.name.toLowerCase();
+              const aStartsWith = aName.startsWith(query);
+              const bStartsWith = bName.startsWith(query);
+              if (aStartsWith && !bStartsWith) return -1;
+              if (!aStartsWith && bStartsWith) return 1;
+              return aName.localeCompare(bName);
+            },
+          },
+        );
 
         setCommands(filtered);
       } catch {
@@ -261,12 +265,23 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           ),
         ];
 
-        const filtered = (searchQuery
-          ? builtInCommands.filter(cmd =>
-              fuzzyMatch(cmd.name, searchQuery) ||
-              (cmd.description && fuzzyMatch(cmd.description, searchQuery))
-            )
-          : builtInCommands).filter(cmd => allowInitCommand || cmd.name !== 'init');
+        const query = searchQuery.trim().toLowerCase();
+        const filtered = rankAutocompleteItems(
+          builtInCommands.filter((cmd) => allowInitCommand || cmd.name !== 'init'),
+          searchQuery,
+          (cmd) => `${cmd.name} ${cmd.description ?? ''}`,
+          {
+            compare: (a, b) => {
+              const aName = a.name.toLowerCase();
+              const bName = b.name.toLowerCase();
+              const aStartsWith = aName.startsWith(query);
+              const bStartsWith = bName.startsWith(query);
+              if (aStartsWith && !bStartsWith) return -1;
+              if (!aStartsWith && bStartsWith) return 1;
+              return aName.localeCompare(bName);
+            },
+          },
+        );
 
         setCommands(filtered);
       } finally {
