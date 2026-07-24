@@ -921,7 +921,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.field.macMenuBarDescription': '需要重启应用。关闭后，OpenChamber 不会创建菜单栏项目，也不会运行相关的会话、审批和用量更新。',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': '将 OpenChamber 最小化和关闭到系统托盘',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': '最小化和关闭到系统托盘',
-  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '主窗口最小化或关闭时，让 OpenChamber 继续在 Windows 系统托盘中运行。',
+  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '主窗口最小化或关闭时，让 OpenChamber 继续在系统托盘中运行。',
   'settings.openchamber.desktopNetwork.field.keepAwakeAria': 'OpenChamber 运行时保持电脑唤醒',
   'settings.openchamber.desktopNetwork.field.keepAwake': 'OpenChamber 运行时保持电脑唤醒',
   'settings.openchamber.desktopNetwork.field.keepAwakeDescription': '让手机可以继续打开此应用。屏幕仍可关闭。',

@@ -921,7 +921,7 @@ export const settingsDict = {
   "settings.openchamber.desktopNetwork.field.macMenuBarDescription": "Потребує перезапуску застосунку. Якщо вимкнено, OpenChamber не створює елемент смуги меню та не запускає пов’язані оновлення сесій, запитів на підтвердження й використання.",
   "settings.openchamber.desktopNetwork.field.minimizeToTrayAria": "Згортати й закривати OpenChamber у системний трей",
   "settings.openchamber.desktopNetwork.field.minimizeToTray": "Згортати й закривати в системний трей",
-  "settings.openchamber.desktopNetwork.field.minimizeToTrayDescription": "Залишає OpenChamber запущеним у системному треї Windows, коли головне вікно згорнуто або закрито.",
+  "settings.openchamber.desktopNetwork.field.minimizeToTrayDescription": "Залишає OpenChamber запущеним у системному треї, коли головне вікно згорнуто або закрито.",
   "settings.openchamber.desktopNetwork.field.keepAwakeAria": "Не давати комп’ютеру засинати, поки OpenChamber запущено",
   "settings.openchamber.desktopNetwork.field.keepAwake": "Не давати комп’ютеру засинати, поки OpenChamber запущено",
   "settings.openchamber.desktopNetwork.field.keepAwakeDescription": "Щоб телефон і далі міг відкривати застосунок. Екран усе одно може вимикатися.",

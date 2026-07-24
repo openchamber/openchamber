@@ -5,9 +5,11 @@ import {
   applyGlobalSessionStatusSnapshot,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
+import { resetSessionOrdering, useSessionOrderingStore } from "./session-ordering"
 
 beforeEach(() => {
   useGlobalSessionStatusStore.setState({ statusById: new Map() })
+  resetSessionOrdering()
 })
 
 describe("global session status index", () => {
@@ -25,6 +27,33 @@ describe("global session status index", () => {
       attempt: 2,
       message: "waiting",
     })
+  })
+
+  test("promotes on active and settled lifecycle edges only", () => {
+    applyGlobalSessionStatusEvent("/repo", {
+      type: "session.status",
+      properties: { sessionID: "session-a", status: { type: "busy" } },
+    } as Event)
+    const busyRank = useSessionOrderingStore.getState().rankById.get("session-a")
+
+    applyGlobalSessionStatusEvent("/repo", {
+      type: "session.status",
+      properties: { sessionID: "session-a", status: { type: "retry", attempt: 1, message: "wait", next: 1 } },
+    } as Event)
+    expect(useSessionOrderingStore.getState().rankById.get("session-a")).toBe(busyRank)
+
+    applyGlobalSessionStatusEvent("/repo", {
+      type: "session.idle",
+      properties: { sessionID: "session-a" },
+    } as Event)
+    const idleRank = useSessionOrderingStore.getState().rankById.get("session-a")
+    expect(idleRank).toBeGreaterThan(busyRank ?? 0)
+
+    applyGlobalSessionStatusEvent("/repo", {
+      type: "session.error",
+      properties: { sessionID: "session-a" },
+    } as Event)
+    expect(useSessionOrderingStore.getState().rankById.get("session-a")).toBe(idleRank)
   })
 
   test("authoritative snapshots clear absent active entries for their directory", () => {

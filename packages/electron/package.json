@@ -40,6 +40,7 @@
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "test:architecture": "node --test ./scripts/target-architecture.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
     "test:updater": "node --test ./updater-capability.test.mjs ./updater-check.test.mjs ./updater-feed.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
+    "test:linux-desktop": "node --test ./linux-autostart.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
     "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",

@@ -954,7 +954,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.field.macMenuBarDescription': 'アプリの再起動が必要です。オフにすると、OpenChamber はメニューバー項目を作成せず、セッション、承認、使用量の更新も実行しません。',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'OpenChamber をシステムトレイへ最小化または閉じる',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': 'システムトレイへ最小化または閉じる',
-  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'メインウィンドウを最小化または閉じたときも、OpenChamber を Windows のシステムトレイで実行し続けます。',
+  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'メインウィンドウを最小化または閉じたときも、OpenChamber をシステムトレイで実行し続けます。',
   'settings.openchamber.desktopNetwork.field.keepAwakeAria': 'OpenChamber の実行中はコンピューターのスリープを防止',
   'settings.openchamber.desktopNetwork.field.keepAwake': 'OpenChamber の実行中はコンピューターのスリープを防止',
   'settings.openchamber.desktopNetwork.field.keepAwakeDescription': 'スマートフォンがこのアプリを開き続けられるようにします。ディスプレイはオフにできます。',

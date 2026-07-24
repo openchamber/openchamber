@@ -4,7 +4,9 @@ import type { ProjectEntry } from '@/lib/api/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useNotificationStore } from '@/sync/notification-store';
+import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 /**
@@ -31,7 +33,7 @@ export interface MobileWidgetSnapshot {
   runtimeKey: string;
   /** Count of sessions needing attention — same signal that drives the app-icon badge. */
   attentionCount: number;
-  /** Most-recently-updated top-level sessions, newest first (capped for the medium widget). */
+  /** Top-level sessions in the app's shared lifecycle order (capped for the medium widget). */
   recentSessions: MobileWidgetSession[];
 }
 
@@ -73,9 +75,11 @@ export const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
   const unseenBySession = useNotificationStore.getState().index.session.unseenCount;
   const notifyOnSubtasks = useUIStore.getState().notifyOnSubtasks;
   const projects = useProjectsStore.getState().projects;
+  const pinnedSessionIds = useSessionPinnedStore.getState().ids;
+  const sessionOrderRanks = useSessionOrderingStore.getState().rankById;
 
   let attentionCount = 0;
-  const topLevel: Array<{ id: string; title: string; updated: number; unread: boolean; project: string }> = [];
+  const topLevel: Array<{ session: Session; unread: boolean; project: string }> = [];
 
   for (const session of sessions) {
     const isSubtask = parentIdOf(session) !== null;
@@ -86,19 +90,17 @@ export const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
     }
     if (!isSubtask) {
       topLevel.push({
-        id: session.id,
-        title: session.title ?? '',
-        updated: session.time?.updated ?? session.time?.created ?? 0,
+        session,
         unread: needsAttention,
         project: projectLabelForDirectory(resolveGlobalSessionDirectory(session), projects),
       });
     }
   }
 
-  topLevel.sort((a, b) => b.updated - a.updated);
+  topLevel.sort((a, b) => compareSessionsByLifecycleOrder(a.session, b.session, pinnedSessionIds, sessionOrderRanks));
   const recentSessions = topLevel
     .slice(0, RECENT_LIMIT)
-    .map(({ id, title, unread, project }) => ({ id, title, unread, project }));
+    .map(({ session, unread, project }) => ({ id: session.id, title: session.title ?? '', unread, project }));
 
   return { runtimeKey: getRuntimeKey(), attentionCount, recentSessions };
 };

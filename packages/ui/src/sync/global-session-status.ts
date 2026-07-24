@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import type { Event, SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { normalizeProjectPath } from '@/lib/projectResolution';
+import {
+  observeSessionActivityEvent,
+  reconcileSessionActivitySnapshot,
+  removeSessionOrdering,
+} from './session-ordering';
 
 // Shared live busy/retry index for every directory. Global events update it
 // incrementally and authoritative directory snapshots reconcile it, so each
@@ -22,8 +27,15 @@ export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() =
   statusById: new Map(),
 }));
 
-const normalizeStatusType = (type: unknown): ActiveStatusType | 'idle' =>
-  type === 'busy' ? 'busy' : type === 'retry' ? 'retry' : 'idle';
+const normalizeStatusType = (type: unknown): ActiveStatusType | 'idle' => {
+  if (type === 'busy') return 'busy';
+  if (type === 'retry') return 'retry';
+  return 'idle';
+};
+
+const statusesEqual = (left: SessionStatus, right: SessionStatus): boolean => (
+  left.type === right.type && JSON.stringify(left) === JSON.stringify(right)
+);
 
 // Both write paths normalize the directory key, so a polled snapshot can
 // authoritatively replace entries written by events (and vice versa) even when
@@ -40,8 +52,7 @@ const setStatus = (sessionId: string, directory: string, status: SessionStatus |
       next.delete(sessionId);
       return { statusById: next };
     }
-    if (current && current.status.type === status.type && current.directory === directory
-      && JSON.stringify(current.status) === JSON.stringify(status)) return state;
+    if (current && current.directory === directory && statusesEqual(current.status, status)) return state;
     const next = new Map(state.statusById);
     next.set(sessionId, { status, directory });
     return { statusById: next };
@@ -62,6 +73,7 @@ export const applyGlobalSessionStatusEvent = (directory: string, payload: Event)
         normalizeDirectory(directory),
         type === 'idle' ? { type: 'idle' } : { ...(props.status ?? {}), type } as SessionStatus,
       );
+      observeSessionActivityEvent(props.sessionID, type === 'idle' ? 'settled' : 'active');
       return;
     }
     case 'session.idle':
@@ -69,7 +81,14 @@ export const applyGlobalSessionStatusEvent = (directory: string, payload: Event)
       const props = payload.properties as { sessionID?: string } | undefined;
       if (typeof props?.sessionID === 'string' && props.sessionID) {
         setStatus(props.sessionID, normalizeDirectory(directory), { type: 'idle' });
+        observeSessionActivityEvent(props.sessionID, 'settled');
       }
+      return;
+    }
+    case 'session.deleted': {
+      const props = payload.properties as { sessionID?: string; info?: { id?: string } } | undefined;
+      const sessionId = props?.sessionID ?? props?.info?.id;
+      if (sessionId) removeSessionOrdering(sessionId);
       return;
     }
     default:
@@ -89,6 +108,10 @@ export const applyGlobalSessionStatusSnapshot = (
 ): void => {
   const directory = normalizeDirectory(rawDirectory);
   const known = new Set(knownSessionIds ?? []);
+  const activeSessionIds = Object.entries(raw)
+    .filter(([, status]) => normalizeStatusType(status?.type) !== 'idle')
+    .map(([sessionId]) => sessionId);
+  reconcileSessionActivitySnapshot(activeSessionIds, known);
   useGlobalSessionStatusStore.setState((state) => {
     let changed = false;
     const next = new Map(state.statusById);
@@ -111,8 +134,7 @@ export const applyGlobalSessionStatusSnapshot = (
         continue;
       }
       const normalizedStatus = { ...status, type } as SessionStatus;
-      if (!current || current.status.type !== type || current.directory !== directory
-        || JSON.stringify(current.status) !== JSON.stringify(normalizedStatus)) {
+      if (!current || current.directory !== directory || !statusesEqual(current.status, normalizedStatus)) {
         next.set(sessionId, { status: normalizedStatus, directory });
         changed = true;
       }

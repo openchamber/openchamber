@@ -17,7 +17,8 @@ import { SessionFolderItem } from '../SessionFolderItem';
 import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDnd';
 import type { SortableDragHandleProps } from './sortableItems';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
-import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePath, renderHighlightedText } from './utils';
+import { isBranchDifferentFromLabel, normalizePath, renderHighlightedText } from './utils';
+import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
 import {
   collectSubtreeContainingId,
   computeNodeStructureKey,
@@ -342,7 +343,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
       if (bIndex === undefined) return -1;
       if (aIndex !== bIndex) return aIndex - bIndex;
     }
-    return compareSessionsByPinnedAndTime(a.session, b.session, pinnedSessionIds);
+    return compareSessionsByLifecycleOrder(a.session, b.session, pinnedSessionIds, EMPTY_SESSION_ORDER_RANKS);
   }, [pinnedSessionIds, sessionOrderIndex]);
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;

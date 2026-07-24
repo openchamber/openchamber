@@ -12,6 +12,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { Icon } from "@/components/icon/Icon";
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useNotificationStore } from '@/sync/notification-store';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useI18n } from '@/lib/i18n';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 
@@ -77,6 +79,8 @@ function useSessionGrouping(
   sessionStatus: Record<string, { type: string }> | undefined
 ) {
   const unseenCounts = useNotificationStore((s) => s.index.session.unseenCount);
+  const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
+  const sessionOrderRanks = useSessionOrderingStore((state) => state.rankById);
 
   const parentChildMap = React.useMemo(() => {
     const map = new Map<string, Session[]>();
@@ -106,40 +110,23 @@ function useSessionGrouping(
       return !parentID || !sessionIds.has(parentID);
     });
 
-    const running: SessionWithStatus[] = [];
-    const viewed: SessionWithStatus[] = [];
-
-    topLevel.forEach((session) => {
+    const ordered = topLevel.map((session): SessionWithStatus => {
       const statusType = getStatusType(session.id);
       const runningChildrenCount = (parentChildMap.get(session.id) ?? [])
         .filter((child) => getStatusType(child.id) !== 'idle')
         .length;
-      const attention = (unseenCounts[session.id] ?? 0) > 0;
-
-      const enriched: SessionWithStatus = {
+      return {
         ...session,
         _statusType: statusType,
         _runningChildrenCount: runningChildrenCount,
       };
-
-      if (statusType !== 'idle' || runningChildrenCount > 0 || attention) {
-        running.push(enriched);
-      } else {
-        viewed.push(enriched);
-      }
     });
 
-    const sortByUpdated = (a: Session, b: Session) => {
-      const aTime = (a as unknown as { time?: { updated?: number } }).time?.updated ?? 0;
-      const bTime = (b as unknown as { time?: { updated?: number } }).time?.updated ?? 0;
-      return bTime - aTime;
-    };
-
-    running.sort(sortByUpdated);
-    viewed.sort(sortByUpdated);
-
-    return [...running, ...viewed];
-  }, [sessions, getStatusType, parentChildMap, unseenCounts]);
+    const compare = (a: Session, b: Session) => (
+      compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks)
+    );
+    return ordered.sort(compare);
+  }, [sessions, getStatusType, parentChildMap, pinnedSessionIds, sessionOrderRanks]);
 
   const totalRunning = processedSessions.reduce((sum, s) => {
     const selfRunning = s._statusType !== 'idle' ? 1 : 0;
@@ -509,11 +496,12 @@ const MobileSessionStatusOpenPanel: React.FC<MobileSessionStatusBarProps> = ({
         return;
       }
     }
-    const mostRecent = [...sessions].sort((a, b) => {
-      const aTime = (a as { time?: { updated?: number } }).time?.updated ?? 0;
-      const bTime = (b as { time?: { updated?: number } }).time?.updated ?? 0;
-      return bTime - aTime;
-    })[0];
+    const mostRecent = [...sessions].sort((a, b) => compareSessionsByLifecycleOrder(
+      a,
+      b,
+      useSessionPinnedStore.getState().ids,
+      useSessionOrderingStore.getState().rankById,
+    ))[0];
     const directory = mostRecent ? sessionDirectory(mostRecent) : '';
     openNewSessionDraft(directory ? { directoryOverride: directory } : undefined);
   }, [filterProjectId, projects, sessions, openNewSessionDraft, setOpen]);

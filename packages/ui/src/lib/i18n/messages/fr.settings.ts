@@ -842,7 +842,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.field.macMenuBarDescription': 'Nécessite un redémarrage de l\'application. Lorsque cette option est désactivée, OpenChamber ne crée pas l\'élément de barre des menus et n\'exécute pas ses mises à jour de sessions, d\'approbations et d\'utilisation.',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': 'Réduire et fermer OpenChamber dans la zone de notification',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': 'Réduire et fermer dans la zone de notification',
-  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'Garde OpenChamber actif dans la zone de notification Windows lorsque la fenêtre principale est réduite ou fermée.',
+  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': 'Garde OpenChamber actif dans la zone de notification lorsque la fenêtre principale est réduite ou fermée.',
   'settings.openchamber.desktopNetwork.field.keepAwakeAria': 'Garder l\'ordinateur éveillé pendant qu\'OpenChamber fonctionne',
   'settings.openchamber.desktopNetwork.field.keepAwake': 'Garder l\'ordinateur éveillé pendant qu\'OpenChamber fonctionne',
   'settings.openchamber.desktopNetwork.field.keepAwakeDescription': 'Pour que les téléphones puissent continuer à ouvrir cette application. L\'écran peut toujours s\'éteindre.',

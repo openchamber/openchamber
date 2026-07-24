@@ -661,6 +661,9 @@ export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
     return null;
   }
 
+  // Propagate updater capability / feed errors so the UI can show actionable
+  // messages (missing AppImage, read-only path, network failure). Missing
+  // latest-linux*.yml is already normalized to available:false in main.
   const info = await invokeDesktop<UpdateInfo>('desktop_check_for_updates');
   return info as UpdateInfo;
 };

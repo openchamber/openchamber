@@ -1933,7 +1933,7 @@
   'settings.openchamber.desktopNetwork.field.macMenuBarDescription': '需要重新啟動應用程式。關閉後，OpenChamber 不會建立選單列項目，也不會執行相關的工作階段、核准與用量更新。',
   'settings.openchamber.desktopNetwork.field.minimizeToTrayAria': '將 OpenChamber 最小化和關閉到系統匣',
   'settings.openchamber.desktopNetwork.field.minimizeToTray': '最小化和關閉到系統匣',
-  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '主視窗最小化或關閉時，讓 OpenChamber 繼續在 Windows 系統匣中執行。',
+  'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription': '主視窗最小化或關閉時，讓 OpenChamber 繼續在系統匣中執行。',
   'settings.openchamber.desktopNetwork.field.keepAwakeAria': 'OpenChamber 執行時保持電腦喚醒',
   'settings.openchamber.desktopNetwork.field.keepAwake': 'OpenChamber 執行時保持電腦喚醒',
   'settings.openchamber.desktopNetwork.field.keepAwakeDescription': '讓手機可以持續開啟此應用程式。螢幕仍可關閉。',
