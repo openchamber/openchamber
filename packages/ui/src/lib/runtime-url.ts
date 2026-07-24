@@ -90,7 +90,11 @@ const buildHttpUrl = (baseUrl: string, path: string, query?: RuntimeUrlQuery): s
     return appendRelativeQuery(normalizedPath, query);
   }
 
-  const url = new URL(normalizedPath, `${baseUrl}/`);
+  // Concatenate instead of new URL(absolutePath, base): resolving an absolute
+  // path against a base keeps only the base's origin and silently drops any
+  // path prefix (e.g. https://host/openchamber -> https://host). Concatenation
+  // is correct for both origin-only bases and bases served under a sub-path.
+  const url = new URL(`${baseUrl.replace(/\/+$/, '')}${normalizedPath}`);
   appendQuery(url, query);
   return url.toString();
 };
