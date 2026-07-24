@@ -1027,7 +1027,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
   const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
-  const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
   const settingsExpandedEditorToolbar = useUIStore((state) => state.expandedEditorToolbar);
 
   // Global mouseup to end drag selection
