@@ -15,6 +15,17 @@ const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' ||
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
   plugins: [
+    {
+      name: 'suppress-katex-warnings',
+      enforce: 'post',
+      configResolved(config) {
+        const origWarn = config.logger.warn;
+        config.logger.warn = (msg, options) => {
+          if (typeof msg === 'string' && msg.includes('fonts/KaTeX_')) return;
+          origWarn(msg, options);
+        };
+      },
+    },
     react({
       babel: {
         plugins: ['babel-plugin-react-compiler'],
