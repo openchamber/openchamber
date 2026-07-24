@@ -37,17 +37,32 @@ other runtime API.
   reported as `inputTruncated: true` in the response.
 - `call.js` — wire formats and per-provider auth, replicating OpenCode's
   plugin auth loaders:
-  - **GitHub Copilot**: OpenAI-compatible `/chat/completions` on
-    `https://api.githubcopilot.com` (or `copilot-api.<enterprise>`) with the
-    stored device-OAuth token as the bearer — no token exchange, no expiry.
+  - **GitHub Copilot**: fetches the requested model's authenticated `/models`
+    metadata from `https://api.githubcopilot.com` (or
+    `copilot-api.<enterprise>`) and honors its advertised endpoint, preferring
+    Anthropic-compatible `/v1/messages`, then OpenAI `/responses`, then
+    `/chat/completions`. Models without `supported_endpoints` retain the legacy
+    Chat Completions default; metadata, missing-model, and unsupported-endpoint
+    failures are surfaced instead of guessing. The stored device-OAuth token is
+    used as the bearer with no token exchange or expiry.
   - **OpenAI OAuth (ChatGPT plan)**: streaming Responses API on
     `https://chatgpt.com/backend-api/codex/responses` with
     `ChatGPT-Account-Id`; expired tokens are refreshed against
     `auth.openai.com` (single-flight) and written back to `auth.json`.
   - **Anthropic** (`type: api`): `/v1/messages` with `x-api-key`.
-  - **Google** (`type: api`): `generateContent` with `x-goog-api-key`.
+  - **Google** (`type: api`): `generateContent` with `x-goog-api-key`; Gemini 3
+    uses `thinkingLevel` while older Flash models use `thinkingBudget: 0`.
   - Everything else: OpenAI-compatible `/chat/completions` against the
-    provider's models.dev base URL with `Authorization: Bearer <key>`.
+    provider's base URL, resolved from (1) `provider.<id>.options.baseURL`
+    in the OpenCode config, (2) the hardcoded `https://api.openai.com/v1`
+     endpoint, or (3) the provider's `api` field from the models.dev catalog.
+    Configured API keys honor OpenCode's `{env:NAME}` and `{file:path}`
+    substitutions; file contents and resolved credentials remain server-side.
+  - `[small-model:diagnostic]` logs record provider/model, input character
+    counts, output budget, thinking toggle, HTTP/finish status, and
+    content/reasoning lengths without logging prompts, response text, or
+    credentials. Goal audit parsing similarly emits
+    `[session-goal:diagnostic]` structural verdict metadata.
 - `catalog.js` — models.dev catalog via the shared in-process cache
   (`../opencode/models-metadata.js`, also serving
   `/api/openchamber/models-metadata`).

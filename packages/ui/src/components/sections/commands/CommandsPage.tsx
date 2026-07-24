@@ -7,7 +7,6 @@ import { useCommandsStore, type CommandConfig, type CommandScope } from '@/store
 import { useShallow } from 'zustand/react/shallow';
 import { ModelSelector } from '../agents/ModelSelector';
 import { AgentSelector } from './AgentSelector';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Select,
   SelectContent,
@@ -18,6 +17,13 @@ import {
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SETTINGS_SELECT_SIZE,
+  SETTINGS_CUSTOM_TRIGGER_CLASS,
+} from '@/components/sections/shared/SettingsSection';
 
 export const CommandsPage: React.FC = () => {
   const { t } = useI18n();
@@ -189,158 +195,117 @@ export const CommandsPage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-
-        {/* Header */}
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <h2 className="typography-ui-header font-semibold text-foreground truncate">
-              {isNewCommand ? t('settings.commands.page.title.new') : `/${selectedCommandName}`}
-            </h2>
-            <p className="typography-meta text-muted-foreground truncate">
-              {isNewCommand ? t('settings.commands.page.subtitle.new') : t('settings.commands.page.subtitle.edit')}
-            </p>
-          </div>
-        </div>
-
-        {/* Identity */}
-        <div className="mb-8">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.commands.page.section.identity')}
-            </h3>
-          </div>
-
-          <section className="px-2 pb-2 pt-0 space-y-0">
-
-            {isNewCommand && (
-              <div data-settings-item="commands.name" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-                <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                  <span className="typography-ui-label text-foreground">{t('settings.commands.page.field.commandName')}</span>
-                </div>
-                <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
-                  <div className="flex items-center">
-                    <span className="typography-ui-label text-muted-foreground mr-1">/</span>
-                    <Input
-                      value={draftName}
-                      onChange={(e) => setDraftName(e.target.value)}
-                      placeholder={t('settings.commands.page.field.commandNamePlaceholder')}
-                      className="h-7 w-40 px-2"
-                    />
+    <SettingsPageLayout
+      title={isNewCommand ? t('settings.commands.page.title.new') : `/${selectedCommandName}`}
+      description={isNewCommand ? t('settings.commands.page.subtitle.new') : t('settings.commands.page.subtitle.edit')}
+      showSaveStatus={false}
+    >
+      <SettingsSection
+        title={t('settings.commands.page.section.identity')}
+        divider={false}
+        contentClassName="space-y-0"
+      >
+        {isNewCommand && (
+          <SettingsFieldRow
+            settingsItem="commands.name"
+            label={t('settings.commands.page.field.commandName')}
+          >
+            <div className="flex items-center">
+              <span className="typography-ui-label text-muted-foreground mr-1">/</span>
+              <Input
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                placeholder={t('settings.commands.page.field.commandNamePlaceholder')}
+                className="h-7 w-40 px-2"
+              />
+            </div>
+            <Select value={draftScope} onValueChange={(v) => setDraftScope(v as CommandScope)}>
+              <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit min-w-[100px]">
+                <SelectValue placeholder={t('settings.agents.page.field.scopePlaceholder')} />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="user">
+                  <div className="flex items-center gap-2">
+                    <Icon name="user-3" className="h-3.5 w-3.5" />
+                    <span>{t('settings.common.scope.global')}</span>
                   </div>
-                  <Select value={draftScope} onValueChange={(v) => setDraftScope(v as CommandScope)}>
-                    <SelectTrigger className="w-fit min-w-[100px]">
-                      <SelectValue placeholder={t('settings.agents.page.field.scopePlaceholder')} />
-                    </SelectTrigger>
-                    <SelectContent align="end">
-                      <SelectItem value="user">
-                        <div className="flex items-center gap-2">
-                          <Icon name="user-3" className="h-3.5 w-3.5" />
-                          <span>{t('settings.common.scope.global')}</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="project">
-                        <div className="flex items-center gap-2">
-                          <Icon name="folder" className="h-3.5 w-3.5" />
-                          <span>{t('settings.common.scope.project')}</span>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
+                </SelectItem>
+                <SelectItem value="project">
+                  <div className="flex items-center gap-2">
+                    <Icon name="folder" className="h-3.5 w-3.5" />
+                    <span>{t('settings.common.scope.project')}</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
+        )}
 
-            <div className="py-1.5">
-              <span className="typography-ui-label text-foreground">{t('settings.common.field.description')}</span>
-              <div className="mt-1.5">
-                <Textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder={t('settings.commands.page.field.descriptionPlaceholder')}
-                  rows={2}
-                  className="w-full resize-none min-h-[60px] bg-transparent"
-                />
-              </div>
-            </div>
-
-          </section>
-        </div>
-
-        {/* Execution Context */}
-        <div className="mb-8">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.commands.page.section.executionContext')}
-            </h3>
-          </div>
-
-          <section className="px-2 pb-2 pt-0 space-y-0">
-
-            <div data-settings-item="commands.agent" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                <span className="typography-ui-label text-foreground">{t('settings.commands.page.field.overrideAgent')}</span>
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
-                <AgentSelector
-                  agentName={agent}
-                  onChange={(agentName: string) => setAgent(agentName)}
-                />
-              </div>
-            </div>
-
-            <div data-settings-item="commands.model" className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
-              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                <span className="typography-ui-label text-foreground">{t('settings.agents.page.field.overrideModel')}</span>
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
-                <ModelSelector
-                  providerId={parseModelIdentifier(model)?.providerId ?? ''}
-                  modelId={parseModelIdentifier(model)?.modelId ?? ''}
-                  onChange={(providerId: string, modelId: string) => {
-                    if (providerId && modelId) {
-                      setModel(`${providerId}/${modelId}`);
-                    } else {
-                      setModel('');
-                    }
-                  }}
-                />
-              </div>
-            </div>
-
-          </section>
-        </div>
-
-        {/* Command Template */}
-        <div data-settings-item="commands.template" className="mb-2">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.commands.page.section.template')}
-            </h3>
-          </div>
-
-          <section className="px-2 pb-2 pt-0">
+        <div className="py-1.5">
+          <span className="typography-ui-label text-foreground">{t('settings.common.field.description')}</span>
+          <div className="mt-1.5">
             <Textarea
-              value={template}
-              onChange={(e) => setTemplate(e.target.value)}
-              placeholder={t('settings.commands.page.field.templatePlaceholder')}
-              rows={12}
-              className="w-full font-mono typography-meta min-h-[160px] max-h-[60vh] bg-transparent resize-y"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={t('settings.commands.page.field.descriptionPlaceholder')}
+              rows={2}
+              className="w-full resize-none min-h-[60px] bg-transparent"
             />
-          </section>
-
-          <div className="mt-2 px-2">
-            <p className="typography-meta text-muted-foreground">
-              <code className="text-foreground">$ARGUMENTS</code> {t('settings.commands.page.templateHint.userInput')} &middot;{' '}
-              <code className="text-foreground">!`cmd`</code> {t('settings.commands.page.templateHint.shellOutput')} &middot;{' '}
-              <code className="text-foreground">@file</code> {t('settings.commands.page.templateHint.fileContents')}
-            </p>
           </div>
         </div>
+      </SettingsSection>
 
-        {/* Save action */}
-        <div className="px-2 py-1">
+      <SettingsSection
+        title={t('settings.commands.page.section.executionContext')}
+        contentClassName="space-y-0"
+      >
+        <SettingsFieldRow
+          settingsItem="commands.agent"
+          label={t('settings.commands.page.field.overrideAgent')}
+        >
+          <AgentSelector
+            agentName={agent}
+            onChange={(agentName: string) => setAgent(agentName)}
+            className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+          />
+        </SettingsFieldRow>
+
+        <SettingsFieldRow
+          settingsItem="commands.model"
+          label={t('settings.agents.page.field.overrideModel')}
+        >
+          <ModelSelector
+            providerId={parseModelIdentifier(model)?.providerId ?? ''}
+            modelId={parseModelIdentifier(model)?.modelId ?? ''}
+            onChange={(providerId: string, modelId: string) => {
+              if (providerId && modelId) {
+                setModel(`${providerId}/${modelId}`);
+              } else {
+                setModel('');
+              }
+            }}
+            className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+          />
+        </SettingsFieldRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('settings.commands.page.section.template')}
+        settingsItem="commands.template"
+      >
+        <Textarea
+          value={template}
+          onChange={(e) => setTemplate(e.target.value)}
+          placeholder={t('settings.commands.page.field.templatePlaceholder')}
+          rows={12}
+          className="w-full font-mono typography-meta min-h-[160px] max-h-[60vh] bg-transparent resize-y"
+        />
+        <p className="mt-2 typography-meta text-muted-foreground">
+          <code className="text-foreground">$ARGUMENTS</code> {t('settings.commands.page.templateHint.userInput')} &middot;{' '}
+          <code className="text-foreground">!`cmd`</code> {t('settings.commands.page.templateHint.shellOutput')} &middot;{' '}
+          <code className="text-foreground">@file</code> {t('settings.commands.page.templateHint.fileContents')}
+        </p>
+        <div className="pt-3">
           <Button
             onClick={handleSave}
             disabled={isSaving || !isDirty}
@@ -350,8 +315,7 @@ export const CommandsPage: React.FC = () => {
             {isSaving ? t('settings.common.actions.saving') : t('settings.common.actions.saveChanges')}
           </Button>
         </div>
-
-      </div>
-    </ScrollableOverlay>
+      </SettingsSection>
+    </SettingsPageLayout>
   );
 };

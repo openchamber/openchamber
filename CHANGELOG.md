@@ -4,6 +4,71 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Desktop/Linux:** official AppImage releases for x64 and arm64, with in-app updates from the GitHub release feed. Missing update manifests are treated as “no update” instead of a hard failure, and updater errors surface in About/sidebar.
+- Desktop/Linux: frameless window controls, system tray minimize, launch at login via XDG autostart, multi-window support, and “Open in” for discovered installed apps.
+
+## [1.16.3] - 2026-07-22
+
+- **Chat attachments:** added Office and OpenDocument files (`.docx`, `.pptx`, `.xlsx`, `.odt`, `.odp`, and `.ods`), with readable text and supported embedded images extracted before sending. Attachments also support more source-code formats, notebooks, HAR files with credentials and cookies removed, SVG and Draw.io files, and HEIC/HEIF images; the composer warns when the selected model may ignore an attachment type.
+- **Performance:** opening and switching sessions now prioritizes the selected and visible chats in large workspaces. Failed refreshes keep the existing session list, parent sessions no longer disappear when their sub-sessions load first, and session data no longer crosses between instances, projects, or worktrees.
+- **Sessions/Worktrees**: idle root sessions can now be moved with their sub-sessions and uncommitted changes into a new worktree. Worktree creation also recovers when an earlier Git operation left the repository locked.
+- Desktop: the app can now start directly with a saved remote instance, URL, or pairing link without requiring a local OpenCode installation or local server.
+- Scheduled Tasks: tasks can now start with permission auto-accept enabled, and the permission and Run as goal controls use the same compact toggles as the chat composer.
+- Chat: assistant turns now show model, agent, thinking level, duration, and time together in the footer, and replies separated by hidden system or subagent prompts display as one continuous turn. The working indicator shows the model actually producing the active response, streaming at the bottom no longer jitters, and new user messages finish their entry animation instead of snapping into place.
+- Chat/Tools: attachments returned by plugin and custom tools remain visible after streaming and refreshes, with the same image previews and file chips as chat attachments (thanks to @FrostiDrinks).
+- Sidebar: projects now default to manual ordering instead of recent-activity order; explicit sorting choices remain unchanged.
+- Desktop/macOS: added a setting to hide the menu bar item.
+- Desktop/Windows: SSH remote instances now connect through native Windows OpenSSH without relying on unsupported connection sharing. Password authentication and port forwarding work through hidden background processes, and connection failures now show the underlying SSH error instead of a generic message.
+- VSCode/Cursor: opening a chat no longer crashes when the editor webview does not expose its usual messaging APIs, and disposed editor tabs no longer receive late streaming messages (thanks to @makeittech).
+- VSCode: the active workspace is now detected before startup state is restored, preventing projects outside the editor workspace from replacing it.
+- Mobile/Terminal: opening the terminal in a mobile browser or PWA now focuses its input and opens the keyboard without an extra tap (thanks to @bashrusakh).
+- Context Panel: delayed file-open requests no longer switch the panel back to a file after you select another tab.
+
+## [1.16.2] - 2026-07-18
+
+- **Terminal:** rebuilt terminal sessions across the Web, Desktop, and Mobile apps with faster rendering, retained scrollback after reconnecting, shell and login-shell selection, restart and selected-output attachment actions, live theme changes, and more accurate Unicode and full-screen app rendering. Mobile now includes a full-screen terminal workspace with touch scrolling and selection, quick keys, and Ctrl/Alt input.
+- **Pinned messages:** pin important user or assistant messages to restore their text to the agent after conversation compaction.
+- **Settings:** pages now use a consistent responsive layout, navigation is grouped into OpenChamber, Workspace, OpenCode, and Library sections, and save failures are shown in the page header. Agent tool permissions now distinguish inherited and explicit rules and show session-granted rules separately (thanks to @makeittech).
+- Session goals: audits now wait while direct subagents are still active, and goal details show the model used for the latest successful evaluation.
+- Chat: if creating a session fails, the new-session draft stays open and restores the submitted prompt instead of discarding it.
+- Sessions: new drafts and sessions now stay with the project selected in the sidebar, including workspaces with nested or sibling projects (thanks to @bashrusakh).
+- Small Model: provider API keys referenced through environment variables or files now work for summaries, goal audits, and other Small Model features; Gemini 3 Flash models now use their supported thinking setting.
+- VSCode: per-session permission auto-accept works again, persists across extension restarts, and applies to subagent sessions while an OpenChamber view is open.
+- Mobile/Android: update downloads now select an APK when a release also includes an Android App Bundle.
+
+## [1.16.1] - 2026-07-14
+
+- **Performance:** large session sidebars stay responsive while chats stream, including setups with many projects, worktrees, and sessions. Opening a long chat after an empty or aborted agent turn also no longer repeatedly loads larger portions of its history.
+- Chat: an optional Prompt Navigator adds a marker rail beside desktop chats; hover to preview prompts, click to jump between them, or assign a shortcut in Keyboard Shortcuts settings (thanks to @makeittech).
+- Chat: shell-mode command cards now update their status and output while the command runs, with syntax highlighting for the command and output.
+- Chat/Subagents: task cards now track the correct subagent when several run at once, preventing one subagent's activity or "Open subtask" action from pointing to another session.
+- Chat/Subagents: "Open subtask" now works for nested subagents inside the side-panel chat, with a Parent action to return to the previous subagent (thanks to @ameshkov).
+- Sessions: temporary project lookup failures no longer remove worktree groups from the sidebar.
+- Small Model: custom OpenAI-compatible providers now use the base URL and API key from OpenCode configuration (thanks to @ameshkov).
+
+## [1.16.0] - 2026-07-13
+
+- **Session goals:** arm the new target button in the composer and your next prompt becomes a [goal](https://docs.openchamber.dev/session-goals/) — the session keeps working toward it on its own, with an independent small-model audit checking each finished turn, until the objective is verifiably complete, blocked, or over its optional token budget. The loop runs on the server, so it continues with the app closed and survives restarts. A goal strip above the composer shows progress with pause/resume; goals can also start from the plan-implement dialog, from scheduled tasks ("Run as goal"), or with the new "Craft a Goal" starter and `/craft-goal` command. While a goal runs, per-turn "ready" notifications are replaced by a single notification when it settles.
+- **Usage:** OpenCode Go usage tracking is here, and Codex quota windows now show the correct reset times.
+- **Remote access:** connecting over the relay got much faster — the app no longer waits for a stale local address to time out before trying the relay (previously up to ~20 seconds on a phone away from home). When your computer gets a new local IP, paired devices now learn the new address over the relay and quietly move back to the local network on their own — no re-pairing. The phone's launch screen shows which device it is connecting to.
+- Remote access: running several OpenChamber instances on the same machine no longer makes paired devices land on a random one of them — only one process per machine serves the relay now. This was behind intermittent "Unable to reach server" errors on paired phones.
+- Permissions: per-session auto-accept now lives on the server — sessions keep auto-accepting tool calls while the app is closed and after a server restart, subagent sessions inherit the setting, and it can be enabled on a draft before the first message (thanks to @bashrusakh for the draft fix).
+- Chat: subagent sessions can now be prompted directly — open a subagent from the context panel and send it follow-up messages (off by default, available in settings).
+- Chat: queued messages now send when the session is already idle instead of waiting forever in some cases, pending agent questions stay answerable after a server restart, and session renames no longer flicker back to the old title (thanks to @bashrusakh).
+- Files: the file viewer has a markdown preview toggle (thanks to @greghaynes).
+- Sidebar: projects can be sorted by different modes with a direction toggle, pinned sessions survive refreshes, and the file tree stays expanded while it refreshes (thanks to @bashrusakh).
+- Command palette: projects are included in the fuzzy search alongside sessions and files (thanks to @bashrusakh).
+- Settings: chat visual settings are grouped into labeled sections, and a new editor font size setting for the code editor (thanks to @bashrusakh).
+- GitHub: PR and issue context now resolves against the source repository in fork workflows (thanks to @bashrusakh).
+- Agents: saving agent settings from the UI no longer drops custom YAML frontmatter fields (thanks to @bashrusakh).
+- Notifications: session errors and subagent completions now notify reliably across desktop, web, and mobile.
+- Editor: "Open in" now recognizes VS Code Insiders.
+- Windows: paths no longer mismatch on drive letter casing, which could split one project into duplicates (thanks to @bashrusakh).
+- Mobile: the sessions sidebar opens instantly instead of taking many seconds on some devices (thanks to @tomzx).
+- Mobile: renaming a saved instance no longer breaks its connection — the stored access token was getting lost on edit.
+- Mobile: on Android 15 the app no longer draws under the status bar.
+- Security: requests that spoof local host headers to look like same-machine traffic are rejected.
+
 ## [1.15.0] - 2026-07-10
 
 - **Remote access:** a new [private relay](https://docs.openchamber.dev/private-relay/) lets you reach your instance from anywhere — no open ports and no third-party tunnel, over an end-to-end-encrypted tunnel. It turns on by itself when you pair a device over it and turns off once no paired device uses it (thanks to @yulia-ivashko).

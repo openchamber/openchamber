@@ -64,7 +64,7 @@ Options:
   --deployment-mode <global|testing>
   --remote-id <id>                 Remote deployment id from ${configPath}
   --target <test-api|test-ui>      Compatibility alias for remote deployment selection
-  --web-mode <hmr|hmr-lan|full>
+  --web-mode <hmr|hmr-react-scan|hmr-lan|full>
   --mobile-mode <ios-sim-local|ios-sim-lan|android-local|android-lan>
   --mobile-task <task>
   --adb-address <host:port>        Wireless ADB address for android-connect
@@ -409,11 +409,14 @@ async function deployRemoteWeb(options, config) {
 async function startWebDev(options) {
   const mode = await chooseValue(options.webMode, [
     { value: 'hmr', label: 'Web HMR' },
+    { value: 'hmr-react-scan', label: 'Web HMR + React Scan' },
     { value: 'hmr-lan', label: 'Web HMR LAN/mobile' },
     { value: 'full', label: 'Web prod-like' },
   ], 'Select web dev mode');
 
-  if (mode === 'hmr-lan') {
+  if (mode === 'hmr-react-scan') {
+    run('bun', ['run', 'dev:web:hmr'], { env: { VITE_ENABLE_REACT_SCAN: '1' } });
+  } else if (mode === 'hmr-lan') {
     log.info('Starting web HMR LAN/mobile loop. Open the LAN URL printed after startup.');
     run('bun', ['run', 'dev:web:hmr'], { env: { OPENCHAMBER_HMR_HOST: '0.0.0.0' } });
   } else if (mode === 'full') {

@@ -5,6 +5,8 @@ import {
   clearRuntimeUrlAuthToken,
   getRuntimeBearerTokenSync,
   refreshRuntimeUrlAuthToken,
+  refreshLocalRuntimeUrlAuthToken,
+  getLocalRuntimeUrlAuthTokenSync,
   setRuntimeAuthCredentialProvider,
   setRuntimeBearerToken,
   setRuntimeExtraHeaders,
@@ -143,6 +145,55 @@ describe('runtime auth headers', () => {
       clearRuntimeUrlAuthToken();
       setRuntimeExtraHeaders(null);
       clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('never reuses a local URL token for another origin', async () => {
+    const previousFetch = globalThis.fetch;
+    let fetchCount = 0;
+    try {
+      clearRuntimeUrlAuthToken();
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        fetchCount += 1;
+        const origin = new URL(String(input)).origin;
+        return Response.json({ token: `${origin}-token`, expiresAt: Date.now() + 60_000 });
+      }) as typeof fetch;
+
+      const a = await refreshLocalRuntimeUrlAuthToken('http://127.0.0.1:3001');
+      const b = await refreshLocalRuntimeUrlAuthToken('http://127.0.0.1:3002');
+
+      expect(a).toBe('http://127.0.0.1:3001-token');
+      expect(b).toBe('http://127.0.0.1:3002-token');
+      expect(getLocalRuntimeUrlAuthTokenSync('http://127.0.0.1:3001')).toBe('');
+      expect(getLocalRuntimeUrlAuthTokenSync('http://127.0.0.1:3002')).toBe(b);
+      expect(fetchCount).toBe(2);
+    } finally {
+      globalThis.fetch = previousFetch;
+      clearRuntimeUrlAuthToken();
+    }
+  });
+
+  test('rejects a local mint that completes after switching origins', async () => {
+    const previousFetch = globalThis.fetch;
+    let resolveA!: (response: Response) => void;
+    try {
+      clearRuntimeUrlAuthToken();
+      globalThis.fetch = ((input: RequestInfo | URL) => {
+        const origin = new URL(String(input)).origin;
+        if (origin.endsWith(':3001')) return new Promise<Response>((resolve) => { resolveA = resolve; });
+        return Promise.resolve(Response.json({ token: 'token-b', expiresAt: Date.now() + 60_000 }));
+      }) as typeof fetch;
+
+      const requestA = refreshLocalRuntimeUrlAuthToken('http://127.0.0.1:3001');
+      const tokenB = await refreshLocalRuntimeUrlAuthToken('http://127.0.0.1:3002');
+      resolveA(Response.json({ token: 'token-a', expiresAt: Date.now() + 60_000 }));
+
+      expect(tokenB).toBe('token-b');
+      await expect(requestA).rejects.toThrow('stale');
+      expect(getLocalRuntimeUrlAuthTokenSync('http://127.0.0.1:3002')).toBe('token-b');
+    } finally {
+      globalThis.fetch = previousFetch;
+      clearRuntimeUrlAuthToken();
     }
   });
 });

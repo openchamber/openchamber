@@ -1,4 +1,4 @@
-import type { ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry, TerminalShell } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -38,6 +38,9 @@ export type SkillCatalogConfig = {
   gitIdentityId?: string;
 };
 
+export type DesktopWindowControlsPosition = 'auto' | 'left' | 'right';
+export type DesktopWindowControlsSide = 'left' | 'right';
+
 export type DesktopSettings = {
   themeId?: string;
   useSystemTheme?: boolean;
@@ -55,6 +58,7 @@ export type DesktopSettings = {
   desktopLanAccessEnabled?: boolean;
   desktopKeepAwakeEnabled?: boolean;
   desktopMinimizeToTrayEnabled?: boolean;
+  desktopMacMenuBarEnabled?: boolean;
   desktopUiPassword?: string;
   projects?: ProjectEntry[];
   activeProjectId?: string;
@@ -119,6 +123,9 @@ export type DesktopSettings = {
   smallModelUseDefault?: boolean;
   sessionRecapEnabled?: boolean;
   sessionSuggestionEnabled?: boolean;
+  sessionGoalEnabled?: boolean;
+  sessionGoalDefaultBudgetEnabled?: boolean;
+  sessionGoalDefaultBudget?: number;
   smallModelOverride?: string; // format: "provider/model"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
@@ -133,6 +140,7 @@ export type DesktopSettings = {
   pwaAppName?: string;
   pwaOrientation?: 'system' | 'portrait' | 'landscape';
   mobileKeyboardMode?: MobileKeyboardMode;
+  desktopWindowControlsPosition?: DesktopWindowControlsPosition;
   inputSpellcheckEnabled?: boolean;
   showOpenCodeUpdateNotifications?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
@@ -150,11 +158,15 @@ export type DesktopSettings = {
   userMessageRenderingMode?: 'markdown' | 'plain';
   collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;
+  promptNavigatorEnabled?: boolean;
   expandedEditorToolbar?: boolean;
   wideChatLayoutEnabled?: boolean;
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  terminalShell?: TerminalShell;
+  terminalLoginShells?: TerminalShell[];
+  editorFontSize?: number;
   uiFont?: string;
   monoFont?: string;
   padding?: number;
@@ -194,6 +206,8 @@ export type DesktopSettings = {
   sttLanguage?: string;
   // Global draft welcome starters (pinned commands/skills), persisted to settings.json
   draftStarters?: DraftStarterRef[];
+  // One-time migration marker: Craft a Goal was offered in the starter row.
+  draftStartersCraftGoalAdded?: boolean;
 };
 
 type DesktopBridgeGlobal = {
@@ -211,6 +225,7 @@ type ElectronRuntimeGlobal = {
   runtime?: string;
   macVibrancy?: boolean;
   macVibrancySupported?: boolean;
+  trayEnabled?: boolean;
 };
 
 const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
@@ -231,11 +246,31 @@ export const getElectronPlatform = (): string | null => {
   return typeof platform === 'string' ? platform : null;
 };
 
+/** Width of the three in-app window control buttons (3 × w-11). */
+export const DESKTOP_WINDOW_CONTROLS_WIDTH_PX = 132;
+
 /** Windows and Linux use frameless windows with in-app minimize/maximize/close controls. */
 export const usesFramelessElectronChrome = (): boolean => {
   if (!isElectronShell()) return false;
   const platform = getElectronPlatform();
   return platform === 'win32' || platform === 'linux';
+};
+
+export const getDefaultDesktopWindowControlsSide = (platform: string | null = getElectronPlatform()): DesktopWindowControlsSide => {
+  if (platform === 'linux') {
+    return 'left';
+  }
+  return 'right';
+};
+
+export const resolveDesktopWindowControlsSide = (
+  preference: DesktopWindowControlsPosition | undefined,
+  platform: string | null = getElectronPlatform(),
+): DesktopWindowControlsSide => {
+  if (preference === 'left' || preference === 'right') {
+    return preference;
+  }
+  return getDefaultDesktopWindowControlsSide(platform);
 };
 
 export const hasDesktopInvoke = (): boolean => {
@@ -878,6 +913,11 @@ export const fetchDesktopInstalledApps = async (
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 
+  // Linux desktop does not resolve installed GUI apps; skip the IPC round-trip.
+  if (getElectronPlatform() === 'linux') {
+    return { apps: [], success: true, hasCache: false, isCacheStale: false };
+  }
+
   const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
   if (candidate.length === 0) {
     return { apps: [], success: true, hasCache: false, isCacheStale: false };
@@ -891,7 +931,10 @@ export const fetchDesktopInstalledApps = async (
     if (!result || typeof result !== 'object') {
       return { apps: [], success: false, hasCache: false, isCacheStale: false };
     }
-    const payload = result as { apps?: unknown; hasCache?: unknown; isCacheStale?: unknown };
+    const payload = result as { apps?: unknown; hasCache?: unknown; isCacheStale?: unknown; supported?: unknown };
+    if (payload.supported === false) {
+      return { apps: [], success: true, hasCache: false, isCacheStale: false };
+    }
     if (!Array.isArray(payload.apps)) {
       return { apps: [], success: false, hasCache: false, isCacheStale: false };
     }

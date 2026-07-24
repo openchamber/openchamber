@@ -99,6 +99,14 @@ On Linux, choose the AppImage for your system:
 
 Make the AppImage executable before launching it, for example with `chmod +x <downloaded-appimage>`. Keep the AppImage in a location your user can write to so OpenChamber can download and apply in-app updates.
 
+Linux AppImages need FUSE (`libfuse.so.2`). On Ubuntu/Debian install `libfuse2` (or `fuse` / `libfuse2t64` on newer releases). If FUSE is unavailable, run with extraction instead:
+
+```bash
+APPIMAGE_EXTRACT_AND_RUN=1 ./OpenChamber-*-linux-*.AppImage
+```
+
+Linux Desktop ships as AppImage with in-app window controls and auto-update when running from a writable AppImage.
+
 ### **VS Code**
 Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.
 

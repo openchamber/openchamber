@@ -3,6 +3,7 @@ import React from 'react';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { StatusRow } from './StatusRow';
 
 /**
@@ -20,8 +21,19 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             return state.sessionAbortFlags?.get(currentSessionId) ?? null;
         }, [currentSessionId]),
     );
-    const { working } = useAssistantStatus();
+    const { activeModel, working } = useAssistantStatus();
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
+    const providers = useConfigStore((state) => state.providers);
+
+    const modelDisplayName = React.useMemo(() => {
+        if (!activeModel) {
+            return null;
+        }
+        const provider = providers.length > 0
+            ? providers.find((candidate) => candidate.id === activeModel.providerId)
+            : undefined;
+        return getProviderModelDisplayName(provider, activeModel.modelId) || null;
+    }, [activeModel, providers]);
 
     const wasAborted = Boolean(abortRecord && !abortRecord.acknowledged);
 
@@ -37,6 +49,8 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             showAssistantStatus
             showTodos={false}
             agentName={currentAgentName}
+            modelName={modelDisplayName}
+            providerId={activeModel?.providerId ?? null}
         />
     );
 });

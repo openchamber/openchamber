@@ -3,6 +3,32 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 
+import { normalizePath } from '@/lib/pathNormalization';
+export { normalizePath };
+
+export const selectExpandedParentKeysForContext = (
+  previous: Set<string>,
+  expanded: ReadonlySet<string>,
+  context: 'project' | 'recent',
+): Set<string> => {
+  const prefix = `${context}:`;
+  const next = new Set([...expanded].filter((key) => key.startsWith(prefix)));
+  if (previous.size === next.size && [...next].every((key) => previous.has(key))) {
+    return previous;
+  }
+  return next;
+};
+
+export const toggleExpandedParentKey = (
+  expanded: Set<string>,
+  key: string,
+): Set<string> => {
+  const next = new Set(expanded);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+};
+
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
 
@@ -77,17 +103,13 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
   return t('common.relative.yearsAgoCompact', { count: Math.floor(diff / year) });
 };
 
-export const normalizePath = (value?: string | null) => {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
-  return normalized.length === 0 ? '/' : normalized;
-};
-
 export const isPathWithinProject = (directory?: string | null, projectPath?: string | null): boolean => {
   const normalizedDirectory = normalizePath(directory);
   const normalizedProjectPath = normalizePath(projectPath);
+  return isNormalizedPathWithinProject(normalizedDirectory, normalizedProjectPath);
+};
+
+const isNormalizedPathWithinProject = (normalizedDirectory: string | null, normalizedProjectPath: string | null): boolean => {
   if (!normalizedDirectory || !normalizedProjectPath) return false;
   if (normalizedDirectory === normalizedProjectPath) return true;
   if (normalizedProjectPath === '/') return normalizedDirectory.startsWith('/');
@@ -105,45 +127,6 @@ export const normalizeForBranchComparison = (value: string): string => {
 export const isBranchDifferentFromLabel = (branch: string | null, label: string): boolean => {
   if (!branch) return false;
   return normalizeForBranchComparison(branch) !== normalizeForBranchComparison(label);
-};
-
-const toFiniteNumber = (value: unknown): number | undefined => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
-};
-
-const getSessionCreatedAt = (session: Session): number => {
-  return toFiniteNumber(session.time?.created) ?? 0;
-};
-
-const getSessionUpdatedAt = (session: Session): number => {
-  return toFiniteNumber(session.time?.updated) ?? toFiniteNumber(session.time?.created) ?? 0;
-};
-
-export const compareSessionsByPinnedAndTime = (
-  a: Session,
-  b: Session,
-  pinnedSessionIds: Set<string>,
-): number => {
-  const aPinned = pinnedSessionIds.has(a.id);
-  const bPinned = pinnedSessionIds.has(b.id);
-  if (aPinned !== bPinned) {
-    return aPinned ? -1 : 1;
-  }
-
-  if (aPinned && bPinned) {
-    return getSessionCreatedAt(b) - getSessionCreatedAt(a);
-  }
-
-  return getSessionUpdatedAt(b) - getSessionUpdatedAt(a);
 };
 
 export const dedupeSessionsById = (sessions: Session[]): Session[] => {
@@ -172,28 +155,6 @@ export const resolveArchivedFolderName = (session: Session, projectRoot: string 
   const segments = source.split('/').filter(Boolean);
   return segments[segments.length - 1] ?? 'unassigned';
 };
-
-export const isSessionRelatedToProject = (
-  session: Session,
-  projectRoot: string,
-  validDirectories?: Set<string>,
-): boolean => {
-  const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-  const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
-
-  if (projectWorktree && (projectWorktree === projectRoot || projectWorktree.startsWith(`${projectRoot}/`))) {
-    return true;
-  }
-
-  if (!sessionDirectory) {
-    return false;
-  }
-  if (validDirectories && validDirectories.has(sessionDirectory)) {
-    return true;
-  }
-  return sessionDirectory === projectRoot || sessionDirectory.startsWith(`${projectRoot}/`);
-};
-
 
 export const formatProjectLabel = (label: string): string => {
   return label

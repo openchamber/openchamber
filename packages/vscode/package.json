@@ -2,12 +2,12 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "%extension.description%",
-  "version": "1.15.0",
+  "version": "1.16.3",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/btriapitsyn/openchamber.git"
+    "url": "https://github.com/openchamber/openchamber.git"
   },
   "qna": "https://discord.gg/ZYRSdnwwKA",
   "license": "MIT",
@@ -244,7 +244,7 @@
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode-ai/sdk": "1.17.18",
+    "@opencode-ai/sdk": "1.18.4",
     "adm-zip": "^0.5.16",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

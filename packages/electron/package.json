@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.15.0",
+  "version": "1.16.3",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -17,11 +17,15 @@
     "electron": "^41.2.1",
     "electron-builder": "^26.0.0"
   },
+  "trustedDependencies": [
+    "electron"
+  ],
   "desktopPrerequisites": [
     "Electron runtime dependencies installed via bun install",
     "Bun available for sidecar compilation",
     "macOS: Xcode + build tools for notarized packaging",
-    "Windows: NSIS installed for installer creation"
+    "Windows: NSIS installed for installer creation",
+    "Linux: native x64 or arm64 host (no cross-arch packaging); FUSE/libfuse2 to run AppImages, or APPIMAGE_EXTRACT_AND_RUN=1"
   ],
   "scripts": {
     "dev": "node ./scripts/electron-dev.mjs",

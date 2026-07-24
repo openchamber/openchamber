@@ -11,7 +11,7 @@ export function createFlexokiCodeMirrorTheme(
   // When syntax colors are provided elsewhere (e.g. the Shiki decoration
   // extension), pass `{ syntaxColors: false }` to keep only the editor UI theme
   // (gutters, selection, cursor) and avoid a competing token color source.
-  options?: { syntaxColors?: boolean },
+  options?: { syntaxColors?: boolean; fontSize?: number },
 ): Extension {
   const isDark = theme.metadata.variant === 'dark';
 
@@ -19,12 +19,14 @@ export function createFlexokiCodeMirrorTheme(
   const highlights = theme.colors.syntax.highlights || {};
   const tokens = theme.colors.syntax.tokens || {};
 
+  const contentFontSize = options?.fontSize ? `${options.fontSize}px` : 'var(--text-code)';
+
   const ui = EditorView.theme({
     '&': {
       backgroundColor: 'var(--background)',
       color: theme.colors.syntax.base.foreground,
-      fontSize: 'var(--text-code)',
-      lineHeight: '1.5rem',
+      fontSize: contentFontSize,
+      lineHeight: '1.5',
       position: 'relative' as const,
     },
     '.cm-scroller': {

@@ -1,6 +1,6 @@
 ---
 name: relay-transport
-description: Use when adding or changing any WebSocket, SSE, or streaming endpoint (terminal, dictation/voice, event stream, notifications), opening a WebSocket in shared UI, refactoring the runtime transport (runtime-fetch/runtime-url/runtime-switch/runtime-auth), touching anything under packages/ui/src/lib/relay or packages/web/server/lib/relay, or porting a realtime feature. These changes silently break OpenChamber's private relay (mobile→desktop over an E2EE tunnel) in ways that pass local/desktop testing and only fail over the relay on a real device. Load this before such work to know the invariants and the traps already hit.
+description: Use when adding or changing OpenChamber WebSocket, SSE, streaming, realtime endpoints, shared UI sockets, runtime transport internals, private relay behavior, or files under the UI/server relay modules.
 license: MIT
 compatibility: opencode
 ---
@@ -43,6 +43,18 @@ Adding a new WS endpoint (or porting one, e.g. the planned terminal port) requir
 
 - Relay mode routes through `runtime-switch` (activates the tunnel singleton), `runtime-fetch` (routes runtime requests through it), `runtime-url`/`runtime-socket` (tunnel-backed URLs/sockets), and `runtime-auth` (mints the URL token through the tunnel). When refactoring any of these, preserve the relay branch and the direct-URL/Electron-realtime-proxy branches — they must remain byte-identical in behavior for non-relay runtimes.
 - **The host dispatcher never injects credentials.** Tunneled requests carry the client's own token; the server authenticates them. Do not add host-side auth shortcuts, and do not trust loopback source address as authentication (relay traffic arrives at loopback but represents remote clients).
+
+## Reconnect pacing
+
+For indefinite SSE/WebSocket reconnect loops:
+
+- Use exponential backoff based on consecutive failures, not a constant short delay.
+- Use the long backoff cap while `navigator.onLine` is false or `document.visibilityState` is hidden.
+- Treat permanent 4xx responses as long-backoff failures; keep 408 and 429 retryable.
+- Make waits interruptible by `online`, visibility becoming visible, and the pipeline abort signal.
+- Reset failure state only after a genuinely healthy connection.
+
+Blind short retries on hidden, offline, unauthorized, or stale-path clients waste battery and flood server logs.
 
 ## Testing guidance (a stub that skips auth/origin hides the exact bugs)
 

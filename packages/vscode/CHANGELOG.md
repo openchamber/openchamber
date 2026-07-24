@@ -1,3 +1,41 @@
+## [1.16.3] - 2026-07-22
+
+- **Chat attachments:** added Office and OpenDocument files (`.docx`, `.pptx`, `.xlsx`, `.odt`, `.odp`, and `.ods`), with readable text and supported embedded images extracted before sending. Attachments also support more source-code formats, notebooks, HAR files with credentials and cookies removed, SVG and Draw.io files, and HEIC/HEIF images; the composer warns when the selected model may ignore an attachment type.
+- **Performance:** opening and switching sessions now prioritizes the selected and visible chats in large workspaces. Failed refreshes keep the existing session list, parent sessions no longer disappear when their sub-sessions load first, and session data no longer crosses between workspaces or extension views.
+- Chat: assistant turns now show model, agent, thinking level, duration, and time together in the footer, and replies separated by hidden system or subagent prompts display as one continuous turn. The working indicator shows the model actually producing the active response, streaming at the bottom no longer jitters, and new user messages finish their entry animation instead of snapping into place.
+- Chat/Tools: attachments returned by plugin and custom tools remain visible after streaming and refreshes, with the same image previews and file chips as chat attachments (thanks to @FrostiDrinks).
+- Cursor: opening a chat no longer crashes when the editor webview does not expose its usual messaging APIs, and disposed editor tabs no longer receive late streaming messages (thanks to @makeittech).
+- Startup: the active workspace is now detected before startup state is restored, preventing projects outside the editor workspace from replacing it.
+- Agent Manager: worktree creation now recovers when an earlier Git operation left the repository locked, and removing a worktree while setup is still running no longer brings it back.
+- Sessions: workspace groups now default to manual ordering instead of recent-activity order; explicit sorting choices remain unchanged.
+
+## [1.16.2] - 2026-07-18
+
+- **Settings:** pages now use a consistent responsive layout, navigation is grouped by area, and save failures are shown in the page header. Agent tool permissions now distinguish inherited and explicit rules and show session-granted rules separately (thanks to @makeittech).
+- Permissions: per-session auto-accept works again, persists across extension restarts, and applies to subagent sessions while an OpenChamber view is open.
+- Sessions: new drafts and sessions now stay with the workspace selected in the sidebar, including multi-root and nested workspace setups (thanks to @bashrusakh).
+- Chat: if creating a session fails, the new-session draft stays open and restores the submitted prompt instead of discarding it.
+
+## [1.16.1] - 2026-07-14
+
+- **Performance:** large workspace session lists no longer regroup every session while chats stream. Opening a long chat after an empty or aborted agent turn also no longer repeatedly loads larger portions of its history.
+- Chat: shell-mode command cards now update their status and output while the command runs, with syntax highlighting for the command and output.
+- Chat: task (subagents) now track the correct subagent when several run at once, preventing one subagent's activity or "Open subtask" action from pointing to another session.
+
+## [1.16.0] - 2026-07-13
+
+- Chat: sessions with an active [goal](https://docs.openchamber.dev/session-goals/) (started from the web or desktop app) show the goal strip with its live status above the composer.
+- Chat: code blocks highlight correctly again — the webview's security policy was blocking the syntax highlighter (thanks to @bashrusakh).
+- Chat: queued messages now send when the session is already idle instead of waiting forever (thanks to @bashrusakh).
+- Chat: pending agent questions stay answerable after a restart, and session renames no longer flicker back to the old title (thanks to @bashrusakh).
+- Chat: tool output rendering no longer breaks on tools that return non-text results (thanks to @bashrusakh).
+- Settings: a new editor font size setting for the code editor (thanks to @bashrusakh).
+- Sessions: pinned sessions survive refreshes (thanks to @bashrusakh).
+- Agents: saving agent settings from the UI no longer drops custom YAML frontmatter fields (thanks to @bashrusakh).
+- Notifications: subagent completion notifications now follow the same settings as the main app.
+- Usage: OpenCode Go usage tracking was added.
+- Windows: paths no longer mismatch on drive letter casing, which could split one project into duplicates (thanks to @bashrusakh).
+
 ## [1.15.0] - 2026-07-10
 
 - Chat/Tools: every tool call now expands to show its input, result, and errors, including MCP, plugin, and custom tools; Read and Skill stay compact links to their files. JSON results now offer navigable summary, tree, and raw views.

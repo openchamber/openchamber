@@ -19,7 +19,9 @@ import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
+import { normalizePath } from "@/lib/pathNormalization";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
+import { getRuntimeKey } from "@/lib/runtime-switch";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -716,18 +718,57 @@ const resolveInitialDirectoryKey = (): string => {
 // We cache resolved mappings to localStorage so subsequent launches resolve the
 // project synchronously at init time. worktree→project is effectively immutable,
 // so a cached entry is safe to trust.
-const WORKTREE_PROJECT_MAP_KEY = 'oc.worktreeProjectMap';
-let _worktreeProjectMap: Record<string, string> | null = null;
+const WORKTREE_PROJECT_MAP_KEY = 'oc.worktreeProjectMap.v2';
+const LEGACY_WORKTREE_PROJECT_MAP_KEY = 'oc.worktreeProjectMap';
+const MAX_WORKTREE_PROJECT_RUNTIME_MAPS = 8;
+type WorktreeProjectMapEnvelope = {
+    version: 2;
+    legacyClaimed: boolean;
+    runtimes: Record<string, { updatedAt: number; entries: Record<string, string> }>;
+};
+const _worktreeProjectMaps = new Map<string, Record<string, string>>();
+const readWorktreeProjectEnvelope = (): WorktreeProjectMapEnvelope => {
+    try {
+        const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(WORKTREE_PROJECT_MAP_KEY) : null;
+        if (!raw) return { version: 2, legacyClaimed: false, runtimes: {} };
+        const parsed = JSON.parse(raw) as Partial<WorktreeProjectMapEnvelope>;
+        if (parsed.version !== 2 || !parsed.runtimes || typeof parsed.runtimes !== 'object') {
+            return { version: 2, legacyClaimed: false, runtimes: {} };
+        }
+        return { version: 2, legacyClaimed: parsed.legacyClaimed === true, runtimes: parsed.runtimes };
+    } catch {
+        return { version: 2, legacyClaimed: false, runtimes: {} };
+    }
+};
+const writeWorktreeProjectEnvelope = (envelope: WorktreeProjectMapEnvelope): void => {
+    const runtimes = Object.fromEntries(
+        Object.entries(envelope.runtimes)
+            .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
+            .slice(0, MAX_WORKTREE_PROJECT_RUNTIME_MAPS),
+    );
+    localStorage.setItem(WORKTREE_PROJECT_MAP_KEY, JSON.stringify({ ...envelope, runtimes }));
+};
 const getWorktreeProjectMap = (): Record<string, string> => {
-    if (_worktreeProjectMap === null) {
+    const runtimeKey = getRuntimeKey() || 'default';
+    const existing = _worktreeProjectMaps.get(runtimeKey);
+    if (existing) return existing;
+    const envelope = readWorktreeProjectEnvelope();
+    let map = envelope.runtimes[runtimeKey]?.entries ?? null;
+    if (!map && !envelope.legacyClaimed) {
         try {
-            const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(WORKTREE_PROJECT_MAP_KEY) : null;
-            _worktreeProjectMap = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+            const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(LEGACY_WORKTREE_PROJECT_MAP_KEY) : null;
+            map = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+            envelope.legacyClaimed = true;
+            envelope.runtimes[runtimeKey] = { updatedAt: Date.now(), entries: map };
+            writeWorktreeProjectEnvelope(envelope);
+            localStorage.removeItem(LEGACY_WORKTREE_PROJECT_MAP_KEY);
         } catch {
-            _worktreeProjectMap = {};
+            map = {};
         }
     }
-    return _worktreeProjectMap;
+    const result = map ?? {};
+    _worktreeProjectMaps.set(runtimeKey, result);
+    return result;
 };
 const rememberWorktreeProject = (worktree: string, project: string): void => {
     if (!worktree || !project || worktree === project) return;
@@ -735,16 +776,21 @@ const rememberWorktreeProject = (worktree: string, project: string): void => {
     if (map[worktree] === project) return;
     map[worktree] = project;
     try {
-        localStorage.setItem(WORKTREE_PROJECT_MAP_KEY, JSON.stringify(map));
+        const runtimeKey = getRuntimeKey() || 'default';
+        const envelope = readWorktreeProjectEnvelope();
+        envelope.legacyClaimed = true;
+        envelope.runtimes[runtimeKey] = { updatedAt: Date.now(), entries: map };
+        writeWorktreeProjectEnvelope(envelope);
+        localStorage.removeItem(LEGACY_WORKTREE_PROJECT_MAP_KEY);
     } catch {
         // localStorage quota exceeded — ignore; live resolution still works.
     }
 };
 
 const normalizeConfigPath = (value: string | null | undefined): string | null => {
-    const trimmed = typeof value === 'string' ? value.trim() : '';
-    if (!trimmed) return null;
-    return trimmed.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+    const result = normalizePath(value);
+    if (result === null) return null;
+    return result || '/';
 };
 
 const getKnownProjectDirectories = (): string[] => {

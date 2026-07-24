@@ -15,6 +15,11 @@ const ELF_MACHINE = { x64: 62, arm64: 183 };
 // than Electron-rebuilding it with the source-built modules.
 const REQUIRED_NATIVE_MODULES = ['better_sqlite3.node', 'pty.node', 'sherpa-onnx.node'];
 
+/** electron-builder AppImage arch token: x64 → x86_64, arm64 → arm64 */
+export const linuxAppImageArchSuffix = (architecture) => (
+  architecture === 'x64' ? 'x86_64' : 'arm64'
+);
+
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
 export const readElfArchitecture = (filePath) => {
@@ -109,7 +114,7 @@ export const verifyExtractedPayload = ({
 };
 
 const findAppImage = (version, architecture) => {
-  const suffix = architecture === 'x64' ? 'x86_64' : 'arm64';
+  const suffix = linuxAppImageArchSuffix(architecture);
   const expected = path.join(electronRoot, 'dist', `OpenChamber-${version}-linux-${suffix}.AppImage`);
   if (!fs.existsSync(expected)) throw new Error(`Linux AppImage not found: ${expected}`);
   return expected;

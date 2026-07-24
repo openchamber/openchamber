@@ -54,6 +54,7 @@ import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { SyncAppEffects } from '@/apps/AppEffects';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
@@ -117,15 +118,11 @@ const normalizeEmbeddedDirectory = (value: string | null | undefined): string =>
 };
 
 const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || !isEmbeddedSessionChat()) {
     return null;
   }
 
   const params = new URLSearchParams(window.location.search);
-  if (params.get('ocPanel') !== 'session-chat') {
-    return null;
-  }
-
   const sessionIdRaw = params.get('sessionId');
   const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
   if (!sessionId) {
@@ -171,7 +168,12 @@ const EmbeddedSessionChatContent: React.FC<{
     if (expectedDirectory && activeDirectory !== expectedDirectory) return;
 
     const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.sessionId}`;
-    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId === embeddedSessionChat.sessionId) {
+    // Skip if this session was already bootstrapped and a session is still
+    // active — allows in-place navigation (e.g. "Open subtask") to change
+    // currentSessionId without this effect forcing it back. Only re-bootstrap
+    // when currentSessionId was cleared (store init, draft, delete/archive,
+    // runtime-switch remount).
+    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId) {
       return;
     }
 
@@ -668,26 +670,6 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ projectPath?: string }>).detail;
-      const projectPath = typeof detail?.projectPath === 'string' ? detail.projectPath.trim() : '';
-      if (!projectPath) return;
-      const projectsStore = useProjectsStore.getState();
-      const existing = projectsStore.projects.find((project) => project.path === projectPath);
-      if (existing) {
-        projectsStore.setActiveProject(existing.id);
-      } else {
-        projectsStore.addProject(projectPath);
-      }
-    };
-
-    window.addEventListener('openchamber:open-project', handler as EventListener);
-    return () => window.removeEventListener('openchamber:open-project', handler as EventListener);
-  }, []);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
     if (!isInitialized || isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
@@ -851,10 +833,11 @@ function App({ apis }: AppProps) {
     if (bootView.screen === 'chooser') {
       return (
         <ErrorBoundary>
-          <div className="h-full text-foreground bg-transparent">
+          <div className="h-full text-foreground bg-background">
             <React.Suspense fallback={<div className="h-full" />}>
               <OnboardingScreen
                 mode="first-launch"
+                localAvailable={bootView.localAvailable !== false}
                 onCliAvailable={handleDesktopBootDismiss}
                 onChooseRemote={() => {
                   // Switch to remote tab - handled internally by OnboardingScreen
@@ -872,13 +855,14 @@ function App({ apis }: AppProps) {
 
     return (
       <ErrorBoundary>
-        <div className="h-full text-foreground bg-transparent">
+        <div className="h-full text-foreground bg-background">
           <React.Suspense fallback={<div className="h-full" />}>
             <OnboardingScreen
               mode="recovery"
               recoveryVariant={recoveryVariant}
               recoveryHostUrl={hostUrl}
               recoveryHostLabel={undefined}
+              localAvailable={bootView.localAvailable !== false}
               onCliAvailable={handleDesktopBootDismiss}
             />
           </React.Suspense>
