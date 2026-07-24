@@ -2687,6 +2687,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.actions.openMobileUpdate': '更新を開く',
   'updateDialog.status.updating': '更新中...',
   'updateDialog.error.updateFailed': '更新に失敗しました',
+  'updateDialog.error.recoveredOldVersion': '更新に失敗し、以前のバージョンが復元されました。',
   'updateDialog.error.takingLonger': '更新に予想以上に時間がかかっています。しばらく待ってから更新するか、次を実行: openchamber update',
   'mobileUpdate.toast.available.title': 'OpenChamberの更新があります',
   'mobileUpdate.toast.available.description': 'バージョン{version}をAndroidで利用できます。',

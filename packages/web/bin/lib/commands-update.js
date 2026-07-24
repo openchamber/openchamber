@@ -1,5 +1,10 @@
 import { requestServerShutdown } from './cli-http.js';
 import { discoverRunningInstances } from './cli-lifecycle.js';
+import { getDataDir } from './cli-paths.js';
+import {
+  clearUpdateMaintenance,
+  readActiveUpdateMaintenance,
+} from '../../server/lib/openchamber-update/maintenance.js';
 import {
   readInstanceOptions,
   removePidFile,
@@ -28,6 +33,18 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
       getCurrentVersion,
     } = await importFromFilePath(packageManagerPath);
 
+    const activeUpdate = readActiveUpdateMaintenance({ openchamberDataDir: getDataDir() });
+    if (activeUpdate && activeUpdate.requiresRecovery !== true) {
+      throw new Error(`OpenChamber update ${activeUpdate.id} is already in progress`);
+    }
+    const recoveryTargetVersion = activeUpdate?.requiresRecovery === true
+      && typeof activeUpdate.recoveryTargetVersion === 'string'
+      ? activeUpdate.recoveryTargetVersion
+      : null;
+    if (activeUpdate?.requiresRecovery === true && !recoveryTargetVersion) {
+      throw new Error('The interrupted OpenChamber update requires manual recovery because its target version is unavailable');
+    }
+
     const runningInstances = await discoverRunningInstances();
     const currentVersion = getCurrentVersion();
 
@@ -41,7 +58,9 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
 
     updateSpin?.start('Checking for updates...');
 
-    const updateInfo = await checkForUpdates();
+    const updateInfo = recoveryTargetVersion
+      ? { available: true, currentVersion, version: recoveryTargetVersion }
+      : await checkForUpdates();
     if (updateInfo.error) {
       updateSpin?.error('Update check failed');
       if (showOutput) {
@@ -92,13 +111,27 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
     }
 
     const pm = detectPackageManager();
-    const result = executeUpdate(pm, { silent: isJsonMode(options) || isQuietMode(options) });
+    const result = executeUpdate(pm, {
+      silent: isJsonMode(options) || isQuietMode(options),
+      targetVersion: updateInfo.version,
+    });
     if (!result.success) {
       updateSpin?.error('Update failed');
       if (showOutput) {
         clackOutro('update failed');
       }
       throw new Error(`Update failed with exit code ${result.exitCode}`);
+    }
+
+    if (activeUpdate?.requiresRecovery === true) {
+      const repairedVersion = getCurrentVersion();
+      if (repairedVersion !== recoveryTargetVersion) {
+        throw new Error(`Update repair installed ${repairedVersion}, expected ${recoveryTargetVersion}`);
+      }
+      clearUpdateMaintenance({
+        openchamberDataDir: getDataDir(),
+        transactionId: activeUpdate.id,
+      });
     }
 
     if (runningInstances.length > 0) {

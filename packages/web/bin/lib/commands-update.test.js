@@ -41,10 +41,105 @@ describe('update command', () => {
       try {
         await updateCommand({ json: true });
 
-        expect(executeUpdate).toHaveBeenCalledWith('npm', { silent: true });
+        expect(executeUpdate).toHaveBeenCalledWith('npm', { silent: true, targetVersion: '9.9.9' });
       } finally {
         process.stdout.write = originalWrite;
       }
+    });
+  });
+
+  it('repairs an interrupted update and clears its maintenance gate only after success', async () => {
+    await withTempOpenChamberDataDir(async (directory) => {
+      const originalWrite = process.stdout.write;
+      process.stdout.write = vi.fn(() => true);
+      const markerPath = path.join(directory, 'run', 'openchamber-update.lock', 'marker.json');
+      fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+      fs.writeFileSync(markerPath, JSON.stringify({
+        id: 'interrupted-update',
+        requiresRecovery: true,
+        recoveryTargetVersion: '9.9.9',
+        createdAt: new Date().toISOString(),
+      }));
+      const executeUpdate = vi.fn(() => ({ success: true, exitCode: 0 }));
+      const checkForUpdates = vi.fn();
+      const getCurrentVersion = vi.fn()
+        .mockReturnValueOnce('unknown')
+        .mockReturnValueOnce('9.9.9');
+      const updateCommand = createUpdateCommand({
+        packageManagerPath: '/fake/package-manager.js',
+        serveCommand: vi.fn(),
+        importFromFilePath: vi.fn(async () => ({
+          checkForUpdates,
+          detectPackageManager: vi.fn(() => 'npm'),
+          executeUpdate,
+          getCurrentVersion,
+        })),
+      });
+
+      try {
+        await updateCommand({ json: true });
+
+        expect(checkForUpdates).not.toHaveBeenCalled();
+        expect(executeUpdate).toHaveBeenCalledWith('npm', { silent: true, targetVersion: '9.9.9' });
+        expect(fs.existsSync(markerPath)).toBe(false);
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+    });
+  });
+
+  it('keeps the maintenance gate when interrupted-update repair fails', async () => {
+    await withTempOpenChamberDataDir(async (directory) => {
+      const markerPath = path.join(directory, 'run', 'openchamber-update.lock', 'marker.json');
+      fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+      fs.writeFileSync(markerPath, JSON.stringify({
+        id: 'interrupted-update',
+        requiresRecovery: true,
+        recoveryTargetVersion: '9.9.9',
+        createdAt: new Date().toISOString(),
+      }));
+      const updateCommand = createUpdateCommand({
+        packageManagerPath: '/fake/package-manager.js',
+        serveCommand: vi.fn(),
+        importFromFilePath: vi.fn(async () => ({
+          checkForUpdates: vi.fn(),
+          detectPackageManager: vi.fn(() => 'npm'),
+          executeUpdate: vi.fn(() => ({ success: false, exitCode: 1 })),
+          getCurrentVersion: vi.fn(() => 'unknown'),
+        })),
+      });
+
+      await expect(updateCommand({ quiet: true })).rejects.toThrow('Update failed with exit code 1');
+      expect(fs.existsSync(markerPath)).toBe(true);
+    });
+  });
+
+  it('keeps the maintenance gate when repair does not install the pinned version', async () => {
+    await withTempOpenChamberDataDir(async (directory) => {
+      const markerPath = path.join(directory, 'run', 'openchamber-update.lock', 'marker.json');
+      fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+      fs.writeFileSync(markerPath, JSON.stringify({
+        id: 'interrupted-update',
+        requiresRecovery: true,
+        recoveryTargetVersion: '9.9.9',
+        createdAt: new Date().toISOString(),
+      }));
+      const getCurrentVersion = vi.fn()
+        .mockReturnValueOnce('unknown')
+        .mockReturnValueOnce('9.9.8');
+      const updateCommand = createUpdateCommand({
+        packageManagerPath: '/fake/package-manager.js',
+        serveCommand: vi.fn(),
+        importFromFilePath: vi.fn(async () => ({
+          checkForUpdates: vi.fn(),
+          detectPackageManager: vi.fn(() => 'npm'),
+          executeUpdate: vi.fn(() => ({ success: true, exitCode: 0 })),
+          getCurrentVersion,
+        })),
+      });
+
+      await expect(updateCommand({ quiet: true })).rejects.toThrow('installed 9.9.8, expected 9.9.9');
+      expect(fs.existsSync(markerPath)).toBe(true);
     });
   });
 });

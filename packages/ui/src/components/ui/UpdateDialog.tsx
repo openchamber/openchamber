@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,7 @@ import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { startWebUpdate, waitForWebUpdate, type WebUpdateTransactionStatus } from '@/lib/webUpdate';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -111,84 +111,6 @@ function parseChangelogSections(body: string): ChangelogSection[] {
   });
 }
 
-type InstallWebUpdateResult = {
-  success: boolean;
-  error?: string;
-  autoRestart?: boolean;
-};
-
-const WEB_UPDATE_POLL_INTERVAL_MS = 2000;
-const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
-
-async function installWebUpdate(): Promise<InstallWebUpdateResult> {
-  try {
-    const response = await runtimeFetch('/api/openchamber/update-install', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      return { success: false, error: data.error || `Server error: ${response.status}` };
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return {
-      success: true,
-      autoRestart: data.autoRestart !== false,
-    };
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : undefined };
-  }
-}
-
-async function isServerReachable(): Promise<boolean> {
-  try {
-    const response = await runtimeFetch('/health', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForUpdateApplied(
-  previousVersion?: string,
-  maxAttempts = Math.ceil(WEB_UPDATE_MAX_WAIT_MS / WEB_UPDATE_POLL_INTERVAL_MS),
-  intervalMs = WEB_UPDATE_POLL_INTERVAL_MS,
-): Promise<boolean> {
-  for (let i = 0; i < maxAttempts; i++) {
-    try {
-      const response = await runtimeFetch('/api/openchamber/update-check', {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      if (response.ok) {
-        const data = await response.json().catch(() => null);
-        if (data && data.available === false) {
-          return true;
-        }
-        if (
-          data &&
-          typeof data.currentVersion === 'string' &&
-          typeof previousVersion === 'string' &&
-          data.currentVersion !== previousVersion
-        ) {
-          return true;
-        }
-      } else if ((response.status === 401 || response.status === 403) && await isServerReachable()) {
-        return true;
-      }
-    } catch {
-      // Server may be restarting
-    }
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
-  }
-  return false;
-}
-
 export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   open,
   onOpenChange,
@@ -205,6 +127,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const [copied, setCopied] = useState(false);
   const [webUpdateState, setWebUpdateState] = useState<WebUpdateState>('idle');
   const [webError, setWebError] = useState<string | null>(null);
+  const webUpdateAbortRef = useRef<AbortController | null>(null);
 
   const releaseUrl = info?.version
     ? (info.releaseUrl || `${GITHUB_RELEASES_URL}/tag/v${info.version}`)
@@ -222,10 +145,21 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   // Reset state when dialog closes
   useEffect(() => {
     if (!open) {
+      webUpdateAbortRef.current?.abort();
+      webUpdateAbortRef.current = null;
       setWebUpdateState('idle');
       setWebError(null);
     }
   }, [open]);
+
+  useEffect(() => {
+    const cancelWebUpdate = () => webUpdateAbortRef.current?.abort();
+    window.addEventListener('openchamber:runtime-endpoint-changed', cancelWebUpdate);
+    return () => {
+      window.removeEventListener('openchamber:runtime-endpoint-changed', cancelWebUpdate);
+      cancelWebUpdate();
+    };
+  }, []);
 
   const handleCopyCommand = async () => {
     const result = await copyTextToClipboard(updateCommand);
@@ -239,33 +173,63 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     await openExternalUrl(url);
   }, []);
   const handleWebUpdate = useCallback(async () => {
+    webUpdateAbortRef.current?.abort();
+    const abortController = new AbortController();
+    webUpdateAbortRef.current = abortController;
     setWebUpdateState('updating');
     setWebError(null);
 
-    const result = await installWebUpdate();
+    const result = await startWebUpdate(undefined, abortController.signal);
 
-    if (!result.success) {
+    if (abortController.signal.aborted) return;
+
+    if (!result.accepted) {
       setWebUpdateState('error');
       setWebError(result.error || t('updateDialog.error.updateFailed'));
       return;
     }
 
-    if (result.autoRestart) {
+    if (result.restartManager === 'cli') {
       setWebUpdateState('restarting');
       await new Promise(resolve => setTimeout(resolve, 2000));
+      if (abortController.signal.aborted) return;
     }
 
     setWebUpdateState('reconnecting');
+    const onStatus = (status: WebUpdateTransactionStatus) => {
+      if (status.state === 'installing' || status.state === 'verifying' || status.state === 'rolling-back') {
+        setWebUpdateState('updating');
+      } else if (status.state === 'restarting' || status.state === 'awaiting-service-restart') {
+        setWebUpdateState('restarting');
+      } else if (status.state === 'checking-health') {
+        setWebUpdateState('reconnecting');
+      }
+    };
+    const outcome = await waitForWebUpdate({
+      transactionId: result.transactionId,
+      targetVersion: result.targetVersion,
+      signal: abortController.signal,
+      onStatus,
+    });
 
-    const applied = await waitForUpdateApplied(info?.currentVersion);
+    if (webUpdateAbortRef.current === abortController) {
+      webUpdateAbortRef.current = null;
+    }
+    if (outcome.outcome === 'cancelled') return;
 
-    if (applied) {
+    if (outcome.outcome === 'healthy') {
       window.location.reload();
+    } else if (outcome.outcome === 'recovered-old-version') {
+      setWebUpdateState('error');
+      setWebError(t('updateDialog.error.recoveredOldVersion'));
+    } else if (outcome.outcome === 'failed') {
+      setWebUpdateState('error');
+      setWebError(t('updateDialog.error.updateFailed'));
     } else {
       setWebUpdateState('error');
       setWebError(t('updateDialog.error.takingLonger'));
     }
-  }, [info?.currentVersion, t]);
+  }, [t]);
 
   const handleMobileUpdate = useCallback(() => {
     void handleOpenExternal(mobileUpdateUrl);
