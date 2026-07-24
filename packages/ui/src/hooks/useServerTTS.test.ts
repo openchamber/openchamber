@@ -12,6 +12,7 @@ import {
   pcm16ToAudioBuffer,
   concatUint8,
   type WavInfo,
+  TtsStreamProcessor,
 } from './useServerTTS';
 
 // ─── Minimal AudioContext mock ───────────────────────────────────────────────
@@ -98,6 +99,58 @@ describe('parseWavHeader', () => {
   test('returns null for data shorter than 44 bytes', () => {
     const short = new Uint8Array(20);
     expect(parseWavHeader(short)).toBeNull();
+  });
+});
+
+describe('TtsStreamProcessor', () => {
+  test('buffers WAV chunks correctly until WAV_HEADER_SIZE is reached and yields valid PCM frames', () => {
+    let pcmReadyCount = 0;
+    const processor = new TtsStreamProcessor((pcmData, info) => {
+      pcmReadyCount++;
+      // Since bitsPerSample is 16 and channels is 1, block align is 2.
+      // So length should be divisible by 2.
+      expect(pcmData.length % 2).toBe(0);
+    }, () => {});
+
+    // Create a 44-byte WAV header
+    const wavHeader = buildWavHeader(24000, 1, 16);
+    
+    // Feed the first 20 bytes (simulating a split chunk during streaming)
+    processor.processChunk(wavHeader.slice(0, 20));
+    expect(processor.formatDetected).toBe(false);
+    
+    // Feed the remaining 24 bytes
+    processor.processChunk(wavHeader.slice(20, 44));
+    expect(processor.formatDetected).toBe(true);
+    expect(processor.isWav).toBe(true);
+
+    // Feed a PCM chunk that exceeds MIN_PCM_CHUNK_BYTES (8192)
+    const largeChunk = new Uint8Array(9000);
+    processor.processChunk(largeChunk);
+    
+    // Should trigger exactly one flush
+    expect(pcmReadyCount).toBe(1);
+    
+    // Feed a small chunk that doesn't reach the threshold
+    processor.processChunk(new Uint8Array(2000));
+    expect(pcmReadyCount).toBe(1); // Still 1
+
+    // Test the remainder logic by forcing flush at stream end
+    processor.flushPcm(true);
+    expect(pcmReadyCount).toBe(2);
+  });
+  
+  test('invokes fallback for non-WAV data', () => {
+    let fallbackCalled = false;
+    const processor = new TtsStreamProcessor(() => {}, () => {
+      fallbackCalled = true;
+    });
+
+    const mp3Header = new Uint8Array([0xff, 0xfb, 0x90, 0x00]);
+    processor.processChunk(mp3Header);
+    expect(processor.formatDetected).toBe(true);
+    expect(processor.isWav).toBe(false);
+    expect(fallbackCalled).toBe(true);
   });
 });
 

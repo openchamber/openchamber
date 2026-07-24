@@ -121,11 +121,97 @@ export function pcm16ToAudioBuffer(
 }
 
 export function concatUint8(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const result = new Uint8Array(a.length + b.length);
-  result.set(a);
-  result.set(b, a.length);
-  return result;
+  const c = new Uint8Array(a.length + b.length);
+  c.set(a, 0);
+  c.set(b, a.length);
+  return c;
 }
+
+// ─── Stream Processor ────────────────────────────────────────────────────────
+
+/**
+ * Pure class for processing streaming TTS chunks.
+ * Decoupled from React and Web Audio API for pure testing.
+ */
+export class TtsStreamProcessor {
+  headerBuffer: Uint8Array = new Uint8Array(0);
+  wavInfo: WavInfo | null = null;
+  pcmAccumulator: Uint8Array = new Uint8Array(0);
+  isWav = false;
+  formatDetected = false;
+  nonWavBuffer: Uint8Array = new Uint8Array(0);
+
+  constructor(
+    private onPcmDataReady: (pcmData: Uint8Array, wavInfo: WavInfo) => void,
+    private onNonWavFallback: () => void // Optional, not heavily used but keeps logging clean
+  ) {}
+
+  processChunk(value: Uint8Array) {
+    if (!value || value.length === 0) return;
+
+    if (!this.formatDetected) {
+      // First chunk(s): detect audio format
+      this.headerBuffer = concatUint8(this.headerBuffer, value);
+
+      if (this.headerBuffer.length >= 4) {
+        const riff = String.fromCharCode(
+          this.headerBuffer[0], this.headerBuffer[1], this.headerBuffer[2], this.headerBuffer[3],
+        );
+        if (riff === 'RIFF') {
+          // WAV format detected — wait for full header
+          this.isWav = true;
+          if (this.headerBuffer.length >= WAV_HEADER_SIZE) {
+            this.formatDetected = true;
+            this.wavInfo = parseWavHeader(this.headerBuffer);
+            const pcm = this.headerBuffer.slice(WAV_HEADER_SIZE);
+            this.headerBuffer = new Uint8Array(0);
+            if (pcm.length > 0) {
+              this.pcmAccumulator = concatUint8(this.pcmAccumulator, pcm);
+            }
+          }
+        } else {
+          // Not WAV — accumulate for blob fallback
+          this.formatDetected = true;
+          this.nonWavBuffer = this.headerBuffer;
+          this.headerBuffer = new Uint8Array(0);
+          this.onNonWavFallback();
+        }
+      }
+      return;
+    }
+
+    if (this.isWav && this.wavInfo) {
+      // Progressive WAV playback: accumulate PCM, flush when enough data
+      this.pcmAccumulator = concatUint8(this.pcmAccumulator, value);
+      if (this.pcmAccumulator.length >= MIN_PCM_CHUNK_BYTES) {
+        this.flushPcm(false);
+      }
+    } else {
+      // Non-WAV: accumulate for blob fallback
+      this.nonWavBuffer = concatUint8(this.nonWavBuffer, value);
+    }
+  }
+
+  flushPcm(force: boolean = true) {
+    if (this.pcmAccumulator.length === 0 || !this.wavInfo) return;
+    
+    const bytesPerSample = this.wavInfo.bitsPerSample / 8;
+    const blockAlign = this.wavInfo.numChannels * bytesPerSample;
+    let processableLength = this.pcmAccumulator.length - (this.pcmAccumulator.length % blockAlign);
+    
+    if (!force && processableLength < MIN_PCM_CHUNK_BYTES) {
+      return; // Not enough data yet
+    }
+    
+    if (processableLength === 0) return;
+    
+    const chunkToProcess = this.pcmAccumulator.slice(0, processableLength);
+    this.pcmAccumulator = this.pcmAccumulator.slice(processableLength);
+    this.onPcmDataReady(chunkToProcess, this.wavInfo);
+  }
+}
+
+// ─── Hook ────────────────────────────────────────────────────────────────────
 
 export interface UseServerTTSReturn {
   /** Whether TTS is currently playing */
@@ -458,31 +544,13 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       const reader = response.body.getReader();
       readerRef.current = reader;
 
-      let headerBuffer: Uint8Array = new Uint8Array(0);
-      let wavInfo: WavInfo | null = null;
-      let pcmAccumulator: Uint8Array = new Uint8Array(0);
-      let isWav = false;
-      let formatDetected = false;
-      let nonWavBuffer: Uint8Array = new Uint8Array(0);
-
       nextStartTimeRef.current = ctx.currentTime + 0.05;
 
-      // Flush accumulated PCM into an AudioBuffer and schedule it for playback
-      const flushPcmBuffer = () => {
-        if (pcmAccumulator.length === 0 || !wavInfo) return;
-        
-        const bytesPerSample = wavInfo.bitsPerSample / 8;
-        const blockAlign = wavInfo.numChannels * bytesPerSample;
-        const processableLength = pcmAccumulator.length - (pcmAccumulator.length % blockAlign);
-        
-        if (processableLength === 0) return;
-        
-        const chunkToProcess = pcmAccumulator.slice(0, processableLength);
-        const audioBuffer = pcm16ToAudioBuffer(ctx, chunkToProcess, wavInfo);
+      const processor = new TtsStreamProcessor((chunkToProcess, info) => {
+        const audioBuffer = pcm16ToAudioBuffer(ctx, chunkToProcess, info);
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
 
-        // Apply pitch shift via detune (cents): 1200 cents = 1 octave
         const pitch = options?.pitch ?? 1.0;
         if (pitch !== 1.0) {
           source.detune.value = (pitch - 1.0) * 1200;
@@ -491,67 +559,23 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
         source.connect(gainNode);
         activeSourcesRef.current.push(source);
 
-        // Schedule back-to-back with previous chunk
         const startTime = Math.max(nextStartTimeRef.current, ctx.currentTime);
         source.start(startTime);
         nextStartTimeRef.current = startTime + audioBuffer.duration;
-        
-        // Keep remainder bytes for the next chunk
-        pcmAccumulator = pcmAccumulator.slice(processableLength);
-      };
+      }, () => {
+        console.log('[useServerTTS] Non-WAV format, accumulating for blob fallback');
+      });
 
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (!value || value.length === 0) continue;
-
-          if (!formatDetected) {
-            // First chunk(s): detect audio format
-            headerBuffer = concatUint8(headerBuffer, value);
-
-            if (headerBuffer.length >= 4) {
-              const riff = String.fromCharCode(
-                headerBuffer[0], headerBuffer[1], headerBuffer[2], headerBuffer[3],
-              );
-              if (riff === 'RIFF') {
-                // WAV format detected — wait for full header
-                isWav = true;
-                if (headerBuffer.length >= WAV_HEADER_SIZE) {
-                  formatDetected = true;
-                  wavInfo = parseWavHeader(headerBuffer);
-                  const pcm = headerBuffer.slice(WAV_HEADER_SIZE);
-                  headerBuffer = new Uint8Array(0);
-                  if (pcm.length > 0) {
-                    pcmAccumulator = concatUint8(pcmAccumulator, pcm);
-                  }
-                }
-              } else {
-                // Not WAV — accumulate for blob fallback
-                console.log('[useServerTTS] Non-WAV format, accumulating for blob fallback');
-                formatDetected = true;
-                nonWavBuffer = headerBuffer;
-                headerBuffer = new Uint8Array(0);
-              }
-            }
-            continue;
-          }
-
-          if (isWav && wavInfo) {
-            // Progressive WAV playback: accumulate PCM, flush when enough data
-            pcmAccumulator = concatUint8(pcmAccumulator, value);
-            if (pcmAccumulator.length >= MIN_PCM_CHUNK_BYTES) {
-              flushPcmBuffer();
-            }
-          } else {
-            // Non-WAV: accumulate for blob fallback
-            nonWavBuffer = concatUint8(nonWavBuffer, value);
-          }
+          processor.processChunk(value);
         }
 
         // Flush any remaining PCM data
-        if (isWav && wavInfo) {
-          flushPcmBuffer();
+        if (processor.isWav && processor.wavInfo) {
+          processor.flushPcm(true);
           // Set up event handler on the last source to detect playback end
           const lastSource = activeSourcesRef.current[activeSourcesRef.current.length - 1];
           if (lastSource) {
@@ -567,10 +591,10 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
             setIsPlaying(false);
             options?.onEnd?.();
           }
-        } else if (nonWavBuffer.length > 0) {
+        } else if (processor.nonWavBuffer.length > 0) {
           // Non-WAV fallback: decode complete blob
-          console.log('[useServerTTS] Decoding non-WAV blob:', nonWavBuffer.length, 'bytes');
-          const audioBuffer = await ctx.decodeAudioData(nonWavBuffer.buffer.slice(0) as ArrayBuffer);
+          console.log('[useServerTTS] Decoding non-WAV blob:', processor.nonWavBuffer.length, 'bytes');
+          const audioBuffer = await ctx.decodeAudioData(processor.nonWavBuffer.buffer.slice(0) as ArrayBuffer);
           const source = ctx.createBufferSource();
           source.buffer = audioBuffer;
 
