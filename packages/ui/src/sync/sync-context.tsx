@@ -35,6 +35,7 @@ import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { applySessionEventToGlobalSessions } from "./session-event-router"
+import { sessionEvents } from "@/lib/sessionEvents"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
@@ -1361,6 +1362,16 @@ function handleEvent(
   streamingDirectory?: string,
   batch?: DirectoryEventBatch,
 ) {
+  if (payload.type === "workspace.status") {
+    sessionEvents.publishWorkspaceEvent({
+      type: "status",
+      workspaceID: payload.properties.workspaceID,
+      status: payload.properties.status,
+    })
+  } else if (payload.type === "workspace.ready" || payload.type === "workspace.failed") {
+    sessionEvents.publishWorkspaceEvent({ type: "refresh" })
+  }
+
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
     if (properties && typeof properties === "object") {

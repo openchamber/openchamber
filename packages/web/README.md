@@ -112,6 +112,8 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
 
 </details>
 
+When `OPENCODE_SKIP_START=true`, `OPENCODE_HOST` or `OPENCODE_PORT` must identify the external OpenCode server. Without either target, OpenChamber still starts but reports OpenCode as unavailable; it does not launch or reuse a managed OpenCode process.
+
 <details>
 <summary>Bind managed OpenCode to LAN / Tailscale</summary>
 

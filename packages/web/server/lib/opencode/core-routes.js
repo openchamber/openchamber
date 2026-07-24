@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 const parseLoopbackUrl = (rawUrl) => {
   if (typeof rawUrl !== 'string') {
     return null;
@@ -407,6 +409,8 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   const PAIRING_REDEEM_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
   const PAIRING_REDEEM_RATE_LIMIT_MAX_ATTEMPTS = 10;
   const pairingRedeemAttempts = new Map();
+  const isNativeDesktopLocalClient = (client) =>
+    remoteClientAuthRuntime?.isNativeDesktopLocalClient?.(client) === true;
 
   const runWithUiAuth = async (req, res, next, handler, options = {}) => {
     try {
@@ -455,7 +459,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         }
         if (context?.type === 'client') {
           const client = await clientRecordFromAuthContext(context);
-          if (client?.clientKind === 'desktop-local') {
+          if (isNativeDesktopLocalClient(client)) {
             await handler({ ...context, client });
             return;
           }
@@ -634,6 +638,38 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     return uiAuthController.handleSessionCreate(req, res);
   });
 
+  app.post('/auth/reauth', express.json({ limit: '16kb' }), async (req, res, next) => {
+    try {
+      await uiAuthController.handleReauthProof(req, res);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/auth/reauth/passkey/options', express.json({ limit: '16kb' }), async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey reauthentication is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.handlePasskeyReauthOptions(req, res);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/auth/reauth/passkey/verify', express.json({ limit: '64kb' }), async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey reauthentication is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.handlePasskeyReauthVerify(req, res);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post('/auth/url-token', async (req, res, next) => {
     try {
       await uiAuthController.handleUrlAuthToken(req, res);
@@ -743,7 +779,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         // The desktop shell's local client is the trusted operator of this
         // server; it manages devices just like a browser UI session. Every
         // other client token is scoped to its own record.
-        if (client?.clientKind !== 'desktop-local') {
+        if (!isNativeDesktopLocalClient(client)) {
           return res.json({ clients: client ? [client] : [] });
         }
       }
@@ -756,12 +792,43 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     await runWithClientCreateAuth(req, res, next, async () => {
       const result = await remoteClientAuthRuntime.createClient({
         label: req.body?.label,
-        clientKind: req.body?.clientKind,
+        clientKind: req.body?.clientKind === 'mobile' || req.body?.clientKind === 'desktop' ? req.body.clientKind : null,
         dedupeKey: req.body?.dedupeKey,
       });
       res.setHeader('Cache-Control', 'no-store');
       res.status(201).json(result);
     });
+  });
+
+  app.patch('/api/host-admin/clients/:id/capabilities', express.json({ limit: '16kb' }), async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ updated: false, error: 'Host administration is unavailable for tunnel sessions' });
+    }
+    await runWithUiAuth(req, res, next, async () => {
+      try {
+        const grant = Array.isArray(req.body?.grant) ? req.body.grant : [];
+        const revoke = Array.isArray(req.body?.revoke) ? req.body.revoke : [];
+        const binding = { grant, id: req.params?.id, revoke };
+        const validProof = await uiAuthController.consumeReauthProof?.(req, {
+          operation: 'host.capabilities',
+          project: 'host',
+          bodyHash: crypto.createHash('sha256').update(JSON.stringify(binding)).digest('hex'),
+        });
+        if (!validProof) {
+          return res.status(428).json({ updated: false, error: 'Reauthentication required', reauthRequired: true });
+        }
+        const result = await remoteClientAuthRuntime.updateClientCapabilities(req.params?.id, { grant, revoke });
+        if (!result.updated) return res.status(404).json({ updated: false, error: 'Client not found' });
+        return res.json(result);
+      } catch (error) {
+        return res.status(error?.statusCode || 400).json({ updated: false, error: error?.message || 'Invalid capabilities' });
+      }
+    }, { sessionOnly: true });
+  });
+
+  app.get('/api/host-admin/status', async (req, res, next) => {
+    await runWithUiAuth(req, res, next, async () => res.json({ hostSessionAuthorized: true }), { sessionOnly: true });
   });
 
   app.delete('/api/client-auth/clients/:id', async (req, res, next) => {
@@ -770,7 +837,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         const actingClient = await clientRecordFromAuthContext(authContext);
         // The desktop shell's local client manages every device; other client
         // tokens may only revoke themselves.
-        if (actingClient?.clientKind !== 'desktop-local') {
+        if (!isNativeDesktopLocalClient(actingClient)) {
           const clientId = clientIdFromAuthContext(authContext);
           if (!clientId || clientId !== req.params?.id) {
             return res.status(403).json({ revoked: false, error: 'Client tokens can only revoke themselves' });
@@ -792,7 +859,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         const actingClient = await clientRecordFromAuthContext(authContext);
         // Purging revoked devices is a whole-server management action; only the
         // trusted desktop shell client (or a UI session) may do it.
-        if (actingClient?.clientKind !== 'desktop-local') {
+        if (!isNativeDesktopLocalClient(actingClient)) {
           return res.status(403).json({ purged: 0, error: 'Client tokens cannot purge revoked devices' });
         }
       }
@@ -926,6 +993,103 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
         ok: true,
         server: {
           label: getServerLabel(),
+          url: requestOrigin(req),
+          fingerprint: result.pairing?.fingerprint || null,
+        },
+        client: result.client,
+        clientToken: result.token,
+      });
+    } catch (error) {
+      if (error?.message === 'Invalid or expired pairing session') {
+        sendPairingRedeemError(res, error);
+        return;
+      }
+      next(error);
+    }
+  });
+
+  app.post('/api/client-auth/pairing/sessions', express.json({ limit: '64kb' }), async (req, res, next) => {
+    await runWithClientCreateAuth(req, res, next, async (authContext) => {
+      const candidates = await pairingServerCandidates(req, {
+        preferredServerUrl: req.body?.serverUrl,
+        includeRelay: typeof req.body?.includeRelay === 'boolean' ? req.body.includeRelay : undefined,
+        includeDirect: req.body?.includeDirect !== false,
+      });
+      const usesRelay = candidates.some((candidate) => candidate.type === 'relay');
+      const result = await clientPairingRuntime.createPairingSession({
+        label: req.body?.label,
+        allowedClientKinds: req.body?.allowedClientKinds,
+        createdByClientId: clientIdFromAuthContext(authContext),
+        usesRelay,
+      });
+      void reconcileRelay();
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(201).json({
+        ...result,
+        server: { label: 'OpenChamber', candidates },
+      });
+    });
+  });
+
+  // Direct transports the server can be reached on (for the create-device dialog).
+  app.get('/api/client-auth/pairing/transports', async (req, res, next) => {
+    await runWithClientCreateAuth(req, res, next, async () => {
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(getPairingTransports());
+    });
+  });
+
+  // Pending pairing sessions (link created, device not yet connected) for the
+  // "pending devices" list. Secrets are never included.
+  app.get('/api/client-auth/pairing/sessions', async (req, res, next) => {
+    await runWithClientCreateAuth(req, res, next, async () => {
+      const pending = await clientPairingRuntime.listPendingSessions();
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ pending });
+    });
+  });
+
+  app.delete('/api/client-auth/pairing/sessions/:id', async (req, res, next) => {
+    await runWithClientCreateAuth(req, res, next, async () => {
+      const result = await clientPairingRuntime.cancelPairingSession(req.params?.id);
+      if (!result.cancelled) {
+        return res.status(404).json({ cancelled: false, error: 'Pairing session not found' });
+      }
+      void reconcileRelay();
+      res.json(result);
+    });
+  });
+
+  app.post('/api/client-auth/pairing/redeem', express.json({ limit: '64kb' }), async (req, res, next) => {
+    try {
+      const rateLimit = checkPairingRedeemRateLimit(req);
+      res.setHeader('X-RateLimit-Limit', PAIRING_REDEEM_RATE_LIMIT_MAX_ATTEMPTS);
+      res.setHeader('X-RateLimit-Remaining', rateLimit.remaining);
+      res.setHeader('X-RateLimit-Reset', rateLimit.reset);
+      if (!rateLimit.allowed) {
+        res.setHeader('Retry-After', rateLimit.retryAfter);
+        return res.status(429).json({ error: 'Invalid or expired pairing session' });
+      }
+      const result = await clientPairingRuntime.redeemPairingSession({
+        pairingId: req.body?.pairingId,
+        secret: req.body?.secret,
+        clientLabel: req.body?.clientLabel,
+        clientKind: req.body?.clientKind,
+        deviceName: req.body?.deviceName,
+        devicePlatform: req.body?.devicePlatform,
+        deviceModel: req.body?.deviceModel,
+        appVersion: req.body?.appVersion,
+        dedupeKey: req.body?.dedupeKey,
+      });
+      clearPairingRedeemRateLimit(req);
+      // The session became a device: relay demand may have moved from the pending
+      // session to the paired device (or a non-relay redeem may drop it).
+      void reconcileRelay();
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({
+        ok: true,
+        server: {
+          label: 'OpenChamber',
           url: requestOrigin(req),
           fingerprint: result.pairing?.fingerprint || null,
         },
@@ -1076,6 +1240,7 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/text') ||
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||
+      req.path.startsWith('/api/workspaces') ||
       req.path.startsWith('/api/openchamber/tunnel')
     ) {
       express.json({ limit: '50mb' })(req, res, next);

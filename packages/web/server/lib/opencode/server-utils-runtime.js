@@ -21,6 +21,8 @@ export const createServerUtilsRuntime = (dependencies) => {
     setOpenCodeNotReadySince,
     clearLastOpenCodeError,
     getLoginShellPath,
+    getUiAuthController,
+    getTunnelAuthController,
   } = dependencies;
 
   const setOpenCodePort = (port) => {
@@ -212,6 +214,8 @@ export const createServerUtilsRuntime = (dependencies) => {
       getOpenCodeAuthHeaders,
       buildOpenCodeUrl,
       ensureOpenCodeApiPrefix,
+      uiAuthController: getUiAuthController?.(),
+      tunnelAuthController: getTunnelAuthController?.(),
       getUiNotificationClients,
     });
   };

@@ -1,11 +1,18 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
+import { verifyPackagedWorkspacePlugins, verifyStagedWorkspacePlugin } from './verify-workspace-plugin.mjs';
+
+const electronRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const env = { ...process.env };
 const builderArgs = process.argv.slice(2);
 const targetArchitecture = resolveTargetArchitecture({ environment: env, builderArgs });
+
+const stagedPlugin = verifyStagedWorkspacePlugin({ electronRoot });
+console.log(`[electron] verified staged workspace plugin (${stagedPlugin.fileCount} files).`);
 
 if (process.platform === 'win32' && !env.CSC_LINK && !env.WINDOWS_CSC_LINK) {
   env.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
@@ -41,7 +48,17 @@ child.on('exit', (code, signal) => {
     process.kill(process.pid, signal);
     return;
   }
-  process.exit(code ?? 1);
+  if (code !== 0) {
+    process.exit(code ?? 1);
+    return;
+  }
+  try {
+    const packagedPlugin = verifyPackagedWorkspacePlugins({ electronRoot });
+    console.log(`[electron] verified workspace plugin in ${packagedPlugin.payloadCount} packaged app(s).`);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
 });
 
 child.on('error', (error) => {

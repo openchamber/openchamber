@@ -14,6 +14,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.0",
+    "@openchamber/opencode-container-workspace": "github:openchamber/opencode-container-workspace#d9567f00fa5d1c2115fed613d8fe5b9aafe69cbb",
     "electron": "^41.2.1",
     "electron-builder": "^26.0.0"
   },
@@ -39,14 +40,16 @@
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "test:architecture": "node --test ./scripts/target-architecture.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
+    "test:packaging": "node --test ./scripts/verify-workspace-plugin.test.mjs",
     "test:updater": "node --test ./updater-capability.test.mjs ./updater-check.test.mjs ./updater-feed.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
     "test:linux-desktop": "node --test ./linux-autostart.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
-    "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
+    "package": "bun run stage:workspace-plugin && bun run build:web-assets && bun run prepare:opencode-cli && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
-    "lint": "node -e \"process.exit(0)\""
+    "lint": "node -e \"process.exit(0)\"",
+    "stage:workspace-plugin": "node ./scripts/stage-workspace-plugin.mjs"
   },
   "build": {
     "appId": "dev.openchamber.desktop",
@@ -75,6 +78,19 @@
       {
         "from": "resources/opencode-cli",
         "to": "opencode-cli"
+      },
+      {
+        "from": "resources/opencode-container-workspace",
+        "to": "opencode-container-workspace",
+        "filter": [
+          "src/**",
+          "!src/**/*.test.js",
+          "runtime-image/**",
+          "egress-image/**",
+          "package.json",
+          "README.md",
+          "LICENSE"
+        ]
       }
     ],
     "afterPack": "scripts/after-pack.cjs",

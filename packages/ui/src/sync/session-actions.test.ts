@@ -12,6 +12,8 @@ let questionRejectError: unknown | null = null
 let sessionShareResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionUpdateResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
 let sessionMessagesResult: { data?: unknown; error?: unknown; response?: { status?: number } } = { data: [] }
+let workspaceCreatedResult: Session | null = null
+let workspaceSessionResult: Session | null = null
 let sessionDeleteError: unknown | null = null
 const globalUpsertedSessions: unknown[] = []
 const globalRemovedSessionIds: string[] = []
@@ -115,6 +117,14 @@ mock.module("@/lib/opencode/client", () => ({
     },
     getDirectory: () => "/test/project",
     getSdkClient: () => mockSdk,
+    createSession: mock((params: Record<string, unknown>, directory?: string | null) => {
+      replyCalls.push({ method: "session.create", params: { ...params, directory } })
+      return Promise.resolve(workspaceCreatedResult)
+    }),
+    getSession: mock((sessionId: string, directory?: string | null, workspace?: string | null) => {
+      replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory, workspace } })
+      return Promise.resolve(workspaceSessionResult)
+    }),
     replyToPermission: mock((requestId: string, reply: string, options?: { directory?: string | null }) => {
       replyCalls.push({ method: "permission.reply", params: { requestID: requestId, reply, directory: options?.directory } })
       return Promise.resolve(true)
@@ -166,11 +176,12 @@ mock.module("./session-ui-store", () => ({
         return null
       },
       currentSessionId: null,
-      setCurrentSession: () => {},
       setWorktreeMetadata: () => {},
       setSessionDirectory: (sessionID: string, directory: string) => {
         movedSessionDirectories.push({ sessionID, directory })
       },
+      setCurrentSession: () => {},
+      markSessionAsOpenChamberCreated: () => {},
     }),
   },
 }))
@@ -348,6 +359,42 @@ describe("moveSessionToDirectory", () => {
     expect(destination.getState().session).toHaveLength(0)
     expect(destination.getState().message["session-a"]).toBe(undefined)
     expect(destination.getState().part["message-a"]).toBe(undefined)
+  })
+})
+
+describe("secure workspace session routing", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    registeredSessionDirectories.length = 0
+    workspaceCreatedResult = null
+    workspaceSessionResult = null
+  })
+
+  test("creates through the workspace query and confirms authoritative ownership", async () => {
+    workspaceCreatedResult = {
+      id: "session-workspace",
+      directory: "/test/project",
+      time: { created: 1 },
+    } as Session
+    workspaceSessionResult = {
+      id: "session-workspace",
+      workspaceID: "workspace-a",
+      directory: "/test/project",
+      time: { created: 1 },
+    } as Session
+    const { createSessionInWorkspace } = await import("./session-actions")
+
+    const result = await createSessionInWorkspace("workspace-a", undefined, "/test/project")
+
+    expect(result.workspaceID).toBe("workspace-a")
+    expect(replyCalls.find((call) => call.method === "session.create")?.params).toEqual({
+      workspace: "workspace-a",
+      directory: "/test/project",
+      title: undefined,
+    })
+    expect(replyCalls.find((call) => call.method === "session.get")?.params.workspace).toBe("workspace-a")
+    expect(globalUpsertedSessions).toEqual([workspaceSessionResult])
   })
 })
 

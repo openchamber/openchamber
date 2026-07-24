@@ -19,11 +19,16 @@ type CreateListener = (request: SessionCreateRequest) => void;
 type DirectoryListener = () => void;
 type GitRefreshHint = { directory: string };
 type GitRefreshListener = (hint: GitRefreshHint) => void;
+type WorkspaceLiveEvent =
+  | { type: 'status'; workspaceID: string; status: 'connected' | 'connecting' | 'disconnected' | 'error' }
+  | { type: 'refresh' };
+type WorkspaceListener = (event: WorkspaceLiveEvent) => void;
 
 const deleteListeners = new Set<DeleteListener>();
 const createListeners = new Set<CreateListener>();
 const directoryListeners = new Set<DirectoryListener>();
 const gitRefreshListeners = new Set<GitRefreshListener>();
+const workspaceListeners = new Set<WorkspaceListener>();
 
 export const sessionEvents = {
   onDeleteRequest(listener: DeleteListener) {
@@ -68,5 +73,14 @@ export const sessionEvents = {
       return;
     }
     gitRefreshListeners.forEach((listener) => listener(hint));
+  },
+  onWorkspaceEvent(listener: WorkspaceListener) {
+    workspaceListeners.add(listener);
+    return () => {
+      workspaceListeners.delete(listener);
+    };
+  },
+  publishWorkspaceEvent(event: WorkspaceLiveEvent) {
+    workspaceListeners.forEach((listener) => listener(event));
   },
 };

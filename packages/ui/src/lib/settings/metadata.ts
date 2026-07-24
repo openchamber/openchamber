@@ -5,6 +5,7 @@ export type SettingsPageSlug =
   | 'general'
   | 'projects'
   | 'remote-instances'
+  | 'workspaces'
   | 'providers'
   | 'usage'
   | 'agents'
@@ -78,6 +79,14 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'projects',
     kind: 'single',
     keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    slug: 'workspaces',
+    title: 'Workspaces',
+    group: 'projects',
+    kind: 'single',
+    keywords: ['workspace', 'workspaces', 'docker', 'kubernetes', 'sandbox', 'isolation', 'container', 'security'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

@@ -1,6 +1,8 @@
 import fs from 'fs';
 import os from 'os';
+import path from 'node:path';
 
+import { isWorkspacePluginEntry, isWorkspacePluginSpec } from '../workspaces/plugin-identity.js';
 import { getNpmInfo as defaultGetNpmInfo } from './npm-registry.js';
 import { isExactSemver as defaultIsExactSemver, isPathSpec as defaultIsPathSpec, parseNpmSpec as defaultParseNpmSpec, parsePathSpec as defaultParsePathSpec } from './plugin-spec.js';
 
@@ -30,6 +32,7 @@ export const registerPluginRoutes = (app, dependencies) => {
     parsePathSpec = defaultParsePathSpec,
     isExactSemver = defaultIsExactSemver,
     isPathSpec = defaultIsPathSpec,
+    getWorkspacePluginSpec = () => null,
   } = dependencies;
 
   const parsedKindForSpec = (spec) => (isPathSpec(spec) ? 'path' : 'npm');
@@ -89,6 +92,29 @@ export const registerPluginRoutes = (app, dependencies) => {
       error.code = 'NOT_FOUND';
       throw error;
     }
+  };
+
+  const rejectReservedWorkspacePlugin = (res, entry, nextSpec, directory) => {
+    const resolvedSpec = getWorkspacePluginSpec();
+    const canonicalSpec = (spec) => {
+      if (typeof spec !== 'string' || !isPathSpec(spec)) return spec;
+      const absolutePath = parsePathSpec(spec, { homedir: os.homedir(), cwd: directory || os.homedir() }).absolutePath;
+      const normalizedPath = path.win32.isAbsolute(absolutePath) && !absolutePath.startsWith('/')
+        ? path.win32.normalize(absolutePath)
+        : path.resolve(absolutePath);
+      try {
+        return fs.realpathSync.native(normalizedPath);
+      } catch {
+        return normalizedPath;
+      }
+    };
+    const canonicalResolvedSpec = canonicalSpec(resolvedSpec);
+    if (!isWorkspacePluginEntry(entry, resolvedSpec)
+      && !isWorkspacePluginSpec(nextSpec, resolvedSpec)
+      && canonicalSpec(entry?.spec) !== canonicalResolvedSpec
+      && canonicalSpec(nextSpec) !== canonicalResolvedSpec) return false;
+    res.status(409).json({ error: 'Secure Workspace plugin configuration must use the workspace settings endpoint' });
+    return true;
   };
 
   const handlePluginError = (res, error, fallbackMessage, context, existsKind = null) => {
@@ -255,6 +281,7 @@ export const registerPluginRoutes = (app, dependencies) => {
     try {
       const directory = await resolveDirectory(req, res);
       if (directory === null && res.headersSent) return;
+      if (rejectReservedWorkspacePlugin(res, null, req.body?.spec, directory)) return;
 
       await completePluginMutation(res, 'entry creation', 'entry', () => {
         createPluginEntry({
@@ -273,6 +300,9 @@ export const registerPluginRoutes = (app, dependencies) => {
       const directory = await resolveDirectory(req, res);
       if (directory === null && res.headersSent) return;
       validateEntryId(req.params.id);
+      const entry = getPluginEntry(req.params.id, directory);
+      if (!entry) return res.status(404).json({ error: 'Plugin entry not found' });
+      if (rejectReservedWorkspacePlugin(res, entry, req.body?.spec, directory)) return;
 
       await completePluginMutation(res, 'entry update', 'entry', () => {
         updatePluginEntry(req.params.id, {
@@ -290,6 +320,9 @@ export const registerPluginRoutes = (app, dependencies) => {
       const directory = await resolveDirectory(req, res);
       if (directory === null && res.headersSent) return;
       validateEntryId(req.params.id);
+      const entry = getPluginEntry(req.params.id, directory);
+      if (!entry) return res.status(404).json({ error: 'Plugin entry not found' });
+      if (rejectReservedWorkspacePlugin(res, entry, undefined, directory)) return;
 
       await completePluginMutation(res, 'entry deletion', 'entry', () => {
         deletePluginEntry(req.params.id, directory);

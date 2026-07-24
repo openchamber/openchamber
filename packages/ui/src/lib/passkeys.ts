@@ -146,6 +146,27 @@ export const authenticateWithPasskey = async (trustDevice: boolean, options: Pas
   return verifyResponse.json().catch(() => null);
 };
 
+export const reauthenticateWithPasskey = async (binding: {
+  operation: string;
+  project: string;
+  bodyHash: string;
+  nonce: string;
+}) => {
+  const support = getPasskeySupportState();
+  if (!support.supported) throw new Error(support.reason);
+  const optionsResponse = await postJson('/auth/reauth/passkey/options', binding);
+  if (!optionsResponse.ok) {
+    throw new Error(await getPasskeyErrorMessage(optionsResponse, 'Passkey reauthentication is not available.'));
+  }
+  const { requestId, optionsJSON } = await optionsResponse.json();
+  const response = await startAuthentication({ optionsJSON });
+  const verifyResponse = await postJson('/auth/reauth/passkey/verify', { requestId, response });
+  if (!verifyResponse.ok) {
+    throw new Error(await getPasskeyErrorMessage(verifyResponse, 'Passkey reauthentication failed.'));
+  }
+  return verifyResponse.json();
+};
+
 export const fetchPasskeyStatus = async (): Promise<PasskeyStatus> => {
   const response = await runtimeFetch(PASSKEY_STATUS_ENDPOINT, {
     method: 'GET',

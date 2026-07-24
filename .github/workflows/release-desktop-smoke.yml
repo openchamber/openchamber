@@ -114,6 +114,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
         run: |
+          bun run stage:workspace-plugin
           bun run build:web-assets
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
@@ -122,7 +123,7 @@ jobs:
           # recompile native deps on its own. Rebuild against the target
           # Electron ABI before packaging, matching the release workflow.
           bun run rebuild:native
-          bunx electron-builder --mac --${{ matrix.arch }} --publish=never
+          node ./scripts/package.mjs --mac --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
 
       - name: Verify signature + entitlements + notarization
@@ -225,6 +226,10 @@ jobs:
           key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
           restore-keys: |
             opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: Stage workspace plugin
+        working-directory: packages/electron
+        run: bun run stage:workspace-plugin
 
       - name: Build web assets
         working-directory: packages/electron

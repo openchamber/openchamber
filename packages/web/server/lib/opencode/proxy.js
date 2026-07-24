@@ -186,6 +186,8 @@ export const registerOpenCodeProxy = (app, deps) => {
     getOpenCodeAuthHeaders,
     buildOpenCodeUrl,
     ensureOpenCodeApiPrefix,
+    uiAuthController,
+    tunnelAuthController,
   } = deps;
 
   if (app.get('opencodeProxyConfigured')) {
@@ -509,6 +511,75 @@ export const registerOpenCodeProxy = (app, deps) => {
     return canonicalizeDirectoryQuery(upstreamPathRaw);
   };
 
+  const requestUrl = (req) => new URL(req.originalUrl || req.url || '/', 'http://localhost');
+
+  const explicitWorkspaceId = (req) => {
+    const url = requestUrl(req);
+    const values = [
+      url.searchParams.get('workspace'),
+      url.searchParams.get('workspaceID'),
+      url.searchParams.get('location[workspace]'),
+      req.headers?.['x-opencode-workspace'],
+      req.body?.workspace,
+      req.body?.workspaceID,
+    ];
+    return values.find((value) => typeof value === 'string' && value.trim())?.trim() || null;
+  };
+
+  const sessionIdForRequest = (req) => {
+    const pathname = requestUrl(req).pathname.replace(/^\/api/, '');
+    const pathMatch = pathname.match(/^\/(?:experimental\/)?session\/([^/]+)/);
+    if (pathMatch) return decodeURIComponent(pathMatch[1]);
+    const url = requestUrl(req);
+    const values = [url.searchParams.get('sessionID'), url.searchParams.get('sessionId'), req.body?.sessionID, req.body?.sessionId];
+    return values.find((value) => typeof value === 'string' && value.trim())?.trim() || null;
+  };
+
+  const loadSessionWorkspaceId = async (sessionId, req) => {
+    const directory = requestUrl(req).searchParams.get('directory');
+    const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+    const upstream = await fetch(buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}${query}`, ''), {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+    });
+    const payload = await upstream.json().catch(() => null);
+    if (!upstream.ok) {
+      const error = new Error(payload?.error || upstream.statusText || 'Failed to resolve session workspace');
+      error.statusCode = upstream.status;
+      throw error;
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw Object.assign(new Error('OpenCode returned an invalid session'), { statusCode: 502 });
+    }
+    return typeof payload.workspaceID === 'string' && payload.workspaceID.trim() ? payload.workspaceID.trim() : null;
+  };
+
+  const authorizeWorkspaceUse = async (req, res, next) => {
+    const pathname = requestUrl(req).pathname.replace(/^\/api/, '');
+    if ((req.method === 'POST' && pathname === '/experimental/workspace')
+      || (req.method === 'DELETE' && /^\/experimental\/workspace\/[^/]+$/.test(pathname))) {
+      return res.status(403).json({ error: 'Workspace lifecycle must use OpenChamber orchestration' });
+    }
+    if (!uiAuthController?.resolveAuthContext) return next();
+    try {
+      const context = await uiAuthController.resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: false });
+      if (!context) return res.status(401).json({ error: 'Authentication required' });
+      if (context.type === 'session') {
+        const scope = tunnelAuthController?.classifyRequestScope?.(req);
+        if (scope !== 'tunnel' && scope !== 'unknown-public') return next();
+      }
+      const workspaceId = explicitWorkspaceId(req) || (sessionIdForRequest(req) ? await loadSessionWorkspaceId(sessionIdForRequest(req), req) : null);
+      if (!workspaceId) return next();
+      const capabilities = Array.isArray(context.client?.capabilities) ? context.client.capabilities : [];
+      if (context.type !== 'client' || !capabilities.includes('workspace.use')) {
+        return res.status(403).json({ error: 'Client capability required: workspace.use', requiredCapability: 'workspace.use' });
+      }
+      return next();
+    } catch (error) {
+      return res.status(error?.statusCode || 502).json({ error: error?.message || 'Failed to authorize workspace access' });
+    }
+  };
+
   const forwardSanitizedSessionListRequest = async (req, res, next, logLabel) => {
     try {
       const upstreamPath = await getRequestUpstreamPath(req);
@@ -604,6 +675,8 @@ export const registerOpenCodeProxy = (app, deps) => {
       });
     }
   });
+
+  app.use('/api', authorizeWorkspaceUse);
 
   // Windows: session merge for cross-directory session listing
   if (process.platform === 'win32') {

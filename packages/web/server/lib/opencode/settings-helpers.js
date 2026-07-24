@@ -1,3 +1,5 @@
+import { sanitizeWorkspaceSettingsUpdate } from '../workspaces/policy.js';
+
 export const createSettingsHelpers = (dependencies) => {
   const {
     normalizePathForPersistence,
@@ -222,6 +224,7 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
       result.activeProjectId = candidate.activeProjectId;
     }
+    Object.assign(result, sanitizeWorkspaceSettingsUpdate(candidate));
 
     if (Array.isArray(candidate.securityScopedBookmarks)) {
       result.securityScopedBookmarks = normalizeStringArray(candidate.securityScopedBookmarks);
@@ -856,7 +859,8 @@ export const createSettingsHelpers = (dependencies) => {
   };
 
   const formatSettingsResponse = (settings) => {
-    const sanitized = sanitizeSettingsUpdate(settings);
+    const sanitized = sanitizeSettingsUpdate({ ...settings, secureWorkspacesRequirePinnedImage: true });
+    sanitized.secureWorkspacesRequirePinnedImage = true;
     delete sanitized.managedRemoteTunnelToken;
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;

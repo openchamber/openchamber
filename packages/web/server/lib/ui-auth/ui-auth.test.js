@@ -45,6 +45,67 @@ const createResponse = () => {
 };
 
 describe('ui auth client credential seam', () => {
+  it('binds one-time reauthentication proofs to the session, operation, project, and body hash', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    const loginRes = createResponse();
+    await auth.handleSessionCreate({ method: 'POST', headers: {}, body: { password: 'secret' } }, loginRes);
+    const cookie = String(loginRes.getHeader('set-cookie')).split(';', 1)[0];
+    const bodyHash = 'a'.repeat(64);
+    const proofRes = createResponse();
+    await auth.handleReauthProof({
+      method: 'POST',
+      headers: { cookie },
+      body: { password: 'secret', operation: 'workspace.export', project: '/repo', bodyHash, nonce: 'nonce-1234567890abcdef' },
+    }, proofRes);
+
+    const proofReq = { headers: { cookie, 'x-openchamber-reauth-proof': proofRes.body.proof, 'x-openchamber-reauth-nonce': proofRes.body.nonce } };
+    expect(await auth.consumeReauthProof(proofReq, { operation: 'workspace.export', project: '/other', bodyHash })).toBe(false);
+    expect(await auth.consumeReauthProof(proofReq, { operation: 'workspace.validate', project: '/repo', bodyHash })).toBe(false);
+    expect(await auth.consumeReauthProof(proofReq, { operation: 'workspace.export', project: '/repo', bodyHash: 'c'.repeat(64) })).toBe(false);
+    const originalNonce = proofReq.headers['x-openchamber-reauth-nonce'];
+    proofReq.headers['x-openchamber-reauth-nonce'] = 'different-1234567890abcdef';
+    expect(await auth.consumeReauthProof(proofReq, { operation: 'workspace.export', project: '/repo', bodyHash })).toBe(false);
+    proofReq.headers['x-openchamber-reauth-nonce'] = originalNonce;
+    expect(await auth.consumeReauthProof(proofReq, { operation: 'workspace.export', project: '/repo', bodyHash })).toBe(true);
+    expect(await auth.consumeReauthProof(proofReq, { operation: 'workspace.export', project: '/repo', bodyHash })).toBe(false);
+    auth.dispose();
+  });
+
+  it('rejects expired reauthentication proofs', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret', reauthProofTtlMs: 1 });
+    const loginRes = createResponse();
+    await auth.handleSessionCreate({ method: 'POST', headers: {}, body: { password: 'secret' } }, loginRes);
+    const cookie = String(loginRes.getHeader('set-cookie')).split(';', 1)[0];
+    const binding = { operation: 'host.apply', project: '/repo', bodyHash: 'b'.repeat(64), nonce: 'nonce-1234567890abcdef' };
+    const proofRes = createResponse();
+    await auth.handleReauthProof({ headers: { cookie }, body: { ...binding, password: 'secret' } }, proofRes);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(await auth.consumeReauthProof({ headers: { cookie, 'x-openchamber-reauth-proof': proofRes.body.proof, 'x-openchamber-reauth-nonce': proofRes.body.nonce } }, binding)).toBe(false);
+    auth.dispose();
+  });
+
+  it('fails closed for passwordless privileged reauthentication', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({
+      password: '',
+      requireClientAuth: true,
+      reauthProofTtlMs: 1,
+      clientAuthController: {
+        authenticateBearerToken: async (token) => token === 'client-a'
+          ? { ok: true, clientId: 'a' }
+          : token === 'client-b' ? { ok: true, clientId: 'b' } : null,
+      },
+    });
+    const binding = { operation: 'host.apply', project: '/repo', bodyHash: 'b'.repeat(64), nonce: 'nonce-1234567890abcdef' };
+    const proofRes = createResponse();
+    await auth.handleReauthProof({ headers: { authorization: 'Bearer client-a' }, body: binding }, proofRes);
+    expect(proofRes.statusCode).toBe(428);
+    expect(proofRes.body).toMatchObject({ setupRequired: true });
+    auth.dispose();
+  });
+
   it('accepts bearer client credentials when UI password auth is enabled', async () => {
     const createUiAuth = await loadCreateUiAuth();
     const auth = createUiAuth({
@@ -299,5 +360,28 @@ describe('ui auth client credential seam', () => {
     const expiresAt = Date.parse(createClientInput.expiresAt);
     expect(expiresAt).toBeGreaterThanOrEqual(before + 122_000);
     expect(expiresAt).toBeLessThanOrEqual(Date.now() + 124_000);
+  });
+
+  it('never accepts desktop-local authority from password login payloads', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    let createClientInput = null;
+    const auth = createUiAuth({
+      password: 'secret',
+      clientAuthController: {
+        createClient: async (input) => {
+          createClientInput = input;
+          return { token: 'client-token', client: { id: 'device-1' } };
+        },
+      },
+    });
+    const res = createResponse();
+    await auth.handleSessionCreate({
+      method: 'POST',
+      headers: {},
+      body: { password: 'secret', issueClientToken: true, clientKind: 'desktop-local' },
+    }, res);
+    expect(res.statusCode).toBe(200);
+    expect(createClientInput.clientKind).toBe(null);
+    auth.dispose();
   });
 });

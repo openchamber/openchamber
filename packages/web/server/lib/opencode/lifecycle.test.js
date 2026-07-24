@@ -2,19 +2,23 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
+const spawnSyncMock = vi.fn();
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
-  spawnSync: vi.fn(),
+  spawnSync: spawnSyncMock,
 }));
 
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
+const originalManagedProcessRegistry = process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
 
 afterEach(() => {
   spawnMock.mockReset();
+  spawnSyncMock.mockReset();
+  vi.unstubAllGlobals();
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
   } else {
@@ -25,6 +29,12 @@ afterEach(() => {
     process.env.PATH = originalPath;
   } else {
     delete process.env.PATH;
+  }
+
+  if (typeof originalManagedProcessRegistry === 'string') {
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = originalManagedProcessRegistry;
+  } else {
+    delete process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
   }
 });
 
@@ -43,29 +53,32 @@ const createMockChild = () => {
   return child;
 };
 
+const createLifecycleState = () => ({
+  openCodeWorkingDirectory: '/tmp/project',
+  openCodeProcess: null,
+  openCodePort: null,
+  openCodeBaseUrl: null,
+  currentRestartPromise: null,
+  isRestartingOpenCode: false,
+  openCodeApiPrefix: '',
+  openCodeApiPrefixDetected: false,
+  openCodeApiDetectionTimer: null,
+  lastOpenCodeError: null,
+  lastOpenCodeLaunchDiagnostics: null,
+  isOpenCodeReady: false,
+  openCodeNotReadySince: 0,
+  isExternalOpenCode: false,
+  isShuttingDown: false,
+  healthCheckInterval: null,
+  expressApp: null,
+  useWslForOpencode: false,
+  resolvedWslBinary: null,
+  resolvedWslOpencodePath: null,
+  resolvedWslDistro: null,
+});
+
 const createRuntime = (overrides = {}) => {
-  const state = {
-    openCodeWorkingDirectory: '/tmp/project',
-    openCodeProcess: null,
-    openCodePort: null,
-    openCodeBaseUrl: null,
-    currentRestartPromise: null,
-    isRestartingOpenCode: false,
-    openCodeApiPrefix: '',
-    openCodeApiPrefixDetected: false,
-    openCodeApiDetectionTimer: null,
-    lastOpenCodeError: null,
-    isOpenCodeReady: false,
-    openCodeNotReadySince: 0,
-    isExternalOpenCode: false,
-    isShuttingDown: false,
-    healthCheckInterval: null,
-    expressApp: null,
-    useWslForOpencode: false,
-    resolvedWslBinary: null,
-    resolvedWslOpencodePath: null,
-    resolvedWslDistro: null,
-  };
+  const state = overrides.state ?? createLifecycleState();
 
   return createOpenCodeLifecycleRuntime({
     state,
@@ -105,6 +118,87 @@ const createRuntime = (overrides = {}) => {
 };
 
 describe('OpenCode lifecycle', () => {
+  it('uses only the configured external target in skip-start mode, ahead of HMR reuse', async () => {
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = `/tmp/openchamber-lifecycle-test-${process.pid}-configured`;
+    const managedProcess = { close: vi.fn(async () => {}) };
+    const state = createLifecycleState();
+    state.openCodeProcess = managedProcess;
+    state.openCodePort = 4096;
+    state.isOpenCodeReady = true;
+    state.lastOpenCodeLaunchDiagnostics = { binary: 'opencode' };
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ healthy: true }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const runtime = createRuntime({
+      state,
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 4999,
+        ENV_CONFIGURED_OPENCODE_HOST: { origin: 'https://external.example:7443', port: 7443 },
+        ENV_EFFECTIVE_PORT: 7443,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      buildOpenCodeUrl: (route) => `${state.openCodeBaseUrl}${route}`,
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(managedProcess.close).toHaveBeenCalledOnce();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe('https://external.example:7443/global/health');
+    expect(state.openCodeProcess).toBeNull();
+    expect(state.openCodePort).toBe(7443);
+    expect(state.openCodeBaseUrl).toBe('https://external.example:7443');
+    expect(state.isExternalOpenCode).toBe(true);
+    expect(state.isOpenCodeReady).toBe(true);
+    expect(state.openCodeNotReadySince).toBe(0);
+    expect(state.lastOpenCodeError).toBeNull();
+    expect(state.lastOpenCodeLaunchDiagnostics).toBeNull();
+  });
+
+  it('keeps OpenCode unavailable without waiting or spawning when skip-start has no target', async () => {
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = `/tmp/openchamber-lifecycle-test-${process.pid}-unconfigured`;
+    const managedProcess = { close: vi.fn(async () => {}) };
+    const state = createLifecycleState();
+    state.openCodeProcess = managedProcess;
+    state.openCodePort = 4096;
+    state.isOpenCodeReady = true;
+    state.lastOpenCodeLaunchDiagnostics = { binary: 'opencode' };
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const runtime = createRuntime({
+      state,
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(managedProcess.close).toHaveBeenCalledOnce();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(state.openCodeProcess).toBeNull();
+    expect(state.openCodePort).toBeNull();
+    expect(state.openCodeBaseUrl).toBeNull();
+    expect(state.isExternalOpenCode).toBe(false);
+    expect(state.isOpenCodeReady).toBe(false);
+    expect(state.openCodeNotReadySince).toBeGreaterThan(0);
+    expect(state.lastOpenCodeError).toBe('OpenCode is unavailable: skip-start mode requires OPENCODE_HOST or OPENCODE_PORT');
+    expect(state.lastOpenCodeLaunchDiagnostics).toBeNull();
+  });
+
   it('launches managed OpenCode with the managed PATH', async () => {
     delete process.env.OPENCODE_BINARY;
     const child = createMockChild();

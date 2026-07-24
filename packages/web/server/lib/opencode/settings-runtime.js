@@ -488,19 +488,12 @@ export const createSettingsRuntime = (deps) => {
       }
     }
 
-    if (!isTransientWindowsReplaceError(lastError)) {
-      throw lastError;
-    }
-
-    // Windows can transiently reject atomic replacement when another process
-    // briefly opens the target file. Preserve atomic rename everywhere it works,
-    // but fall back to a direct replacement so settings persistence does not
-    // get permanently wedged on Windows desktop installs.
-    await fsPromises.copyFile(tmp, target);
-    await fsPromises.rm(tmp, { force: true });
+    throw lastError;
   };
 
   const writeSettingsToDisk = async (settings) => {
+    const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let handle;
     try {
       const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
       await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
@@ -509,12 +502,22 @@ export const createSettingsRuntime = (deps) => {
       // readFile + JSON.parse and silently coerce parse errors to {}. A
       // partial read during a non-atomic writeFile would make their next
       // read-modify-write wipe the settings file.
-      const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
-      if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
+      handle = await fsPromises.open(tmp, 'wx', 0o600);
+      await handle.writeFile(JSON.stringify(settings, null, 2), 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = null;
       await replaceFile(tmp, SETTINGS_FILE_PATH);
       if (process.platform !== 'win32') await fsPromises.chmod(SETTINGS_FILE_PATH, 0o600);
+      try {
+        const directoryHandle = await fsPromises.open(path.dirname(SETTINGS_FILE_PATH), 'r');
+        try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+      } catch {
+        // Directory fsync is not supported by every platform/filesystem.
+      }
     } catch (error) {
+      if (handle) await handle.close().catch(() => {});
+      await fsPromises.rm(tmp, { force: true }).catch(() => {});
       console.warn('Failed to write settings file:', error);
       throw error;
     }
@@ -896,11 +899,28 @@ export const createSettingsRuntime = (deps) => {
     return persistSettingsLock;
   };
 
+  const restoreSettingsFields = async (settings, keyPrefix) => {
+    persistSettingsLock = persistSettingsLock.then(async () => {
+      const current = await readSettingsFromDiskStrict();
+      const restored = { ...current };
+      for (const key of Object.keys(restored)) {
+        if (key.startsWith(keyPrefix)) delete restored[key];
+      }
+      for (const [key, value] of Object.entries(settings)) {
+        if (key.startsWith(keyPrefix)) restored[key] = value;
+      }
+      await writeSettingsToDisk(restored);
+      return formatSettingsResponse(restored);
+    });
+    return persistSettingsLock;
+  };
+
   return {
     readSettingsFromDisk,
     readSettingsFromDiskStrict,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,
+    restoreSettingsFields,
   };
 };
