@@ -1,6 +1,7 @@
 import { createConfiguredWebAPIs } from './runtimeConfig';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import '@openchamber/ui/index.css';
+import '@openchamber/ui/styles/katex-css';
 import '@openchamber/ui/styles/fonts';
 
 declare global {
