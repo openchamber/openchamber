@@ -269,6 +269,16 @@ export const useDirectoryStore = create<DirectoryStore>()(
           console.log('[DirectoryStore] setDirectory called with path:', resolvedPath);
         }
 
+        // Perf guard (#2096): skip when re-entering the already-active
+        // directory after initial persistence. HAR analysis showed 53
+        // redundant /api/config/settings PUT for the same lastDirectory
+        // in a single 18-min session. Keep first-init behavior intact by
+        // gating on hasPersistedDirectory.
+        const currentState = get();
+        if (currentState.currentDirectory === resolvedPath && currentState.hasPersistedDirectory) {
+          return;
+        }
+
         opencodeClient.setDirectory(resolvedPath);
         invalidateFileSearchCache();
 
