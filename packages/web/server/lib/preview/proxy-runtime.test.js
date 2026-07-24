@@ -384,12 +384,59 @@ describe('preview redirect URL rewriting', () => {
     })).toBe('/api/preview/proxy/abc123/login?next=%2F#top');
   });
 
-  it('leaves external redirects unchanged', () => {
+  it('rewrites same-origin absolute redirects for external targets', () => {
+    expect(rewritePreviewRedirectLocation({
+      location: 'https://google.com/search?q=1',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'https://google.com',
+      previewToken: 'preview-secret',
+      allowExternal: true,
+    })).toBe('/api/preview/proxy/abc123/search?q=1&oc_preview_token=preview-secret');
+  });
+
+  it('rewrites relative redirects for external targets onto the proxy path', () => {
+    expect(rewritePreviewRedirectLocation({
+      location: '/maps',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'https://www.google.com',
+      previewToken: 'preview-secret',
+      allowExternal: true,
+    })).toBe('/api/preview/proxy/abc123/maps?oc_preview_token=preview-secret');
+  });
+
+  it('retargets cross-origin redirects for allowExternal targets', () => {
+    const retargeted = [];
+    expect(rewritePreviewRedirectLocation({
+      location: 'https://www.google.com/',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'https://google.com',
+      previewToken: 'old-token',
+      urlAuthToken: 'url-secret',
+      allowExternal: true,
+      retarget: (origin) => {
+        retargeted.push(origin);
+        return { id: 'deadbeefdeadbeef', token: 'new-token' };
+      },
+    })).toBe('/api/preview/proxy/deadbeefdeadbeef/?oc_preview_token=new-token&oc_url_token=url-secret&oc_preview_target_origin=https%3A%2F%2Fwww.google.com');
+    expect(retargeted).toEqual(['https://www.google.com']);
+  });
+
+  it('leaves cross-origin redirects unchanged for loopback-only targets', () => {
     expect(rewritePreviewRedirectLocation({
       location: 'https://example.com/login',
       proxyBasePath: '/api/preview/proxy/abc123',
       targetOrigin: 'http://127.0.0.1:3000',
     })).toBe('https://example.com/login');
+  });
+
+  it('leaves blocked private cross-origin redirects unchanged even with allowExternal', () => {
+    expect(rewritePreviewRedirectLocation({
+      location: 'http://127.0.0.1:9999/admin',
+      proxyBasePath: '/api/preview/proxy/abc123',
+      targetOrigin: 'https://example.com',
+      allowExternal: true,
+      retarget: () => ({ id: 'should-not-run', token: 'x' }),
+    })).toBe('http://127.0.0.1:9999/admin');
   });
 
   it('adds proxy auth tokens to loopback redirects when provided', () => {

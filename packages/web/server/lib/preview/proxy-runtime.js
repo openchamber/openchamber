@@ -3,6 +3,9 @@ const TOKEN_COOKIE_NAME = 'oc_preview_token';
 const TOKEN_QUERY_PARAM = 'oc_preview_token';
 const CLIENT_TOKEN_QUERY_PARAM = 'oc_client_token';
 const URL_AUTH_TOKEN_QUERY_PARAM = 'oc_url_token';
+// Carried on cross-origin redirect Locations so the browser pane can rebuild the
+// upstream URL after the iframe follows a retargeted proxy path.
+const TARGET_ORIGIN_QUERY_PARAM = 'oc_preview_target_origin';
 const PREVIEW_PASSTHROUGH_REQUEST_HEADERS = ['x-inertia', 'x-inertia-version'];
 const PREVIEW_PASSTHROUGH_RESPONSE_HEADERS = ['x-inertia', 'x-inertia-location'];
 export const PREVIEW_TARGET_ERROR_HEADER = 'x-openchamber-preview-target-error';
@@ -14,6 +17,12 @@ const LOOPBACK_HOSTS = new Set([
   '[::1]',
   '0.0.0.0',
 ]);
+
+const isLoopbackHostname = (hostname) => {
+  if (!hostname) return false;
+  const host = hostname.toLowerCase();
+  return LOOPBACK_HOSTS.has(host) || host === 'localhost' || host.endsWith('.localhost');
+};
 
 const PREVIEW_BRIDGE_SCRIPT_ID = 'openchamber-preview-bridge';
 
@@ -199,6 +208,20 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   if (window.__openchamberPreviewBridgeInstalled) return;
   window.__openchamberPreviewBridgeInstalled = true;
 
+  // Keep a real parent handle for postMessage, then mask top/parent/frameElement
+  // so same-origin proxied pages cannot escape the iframe sandbox or navigate
+  // the OpenChamber shell via classic frame-bust checks.
+  const realParent = window.parent;
+  try {
+    Object.defineProperty(window, 'frameElement', { configurable: false, get() { return null; } });
+  } catch {}
+  try {
+    if (realParent && realParent !== window) {
+      Object.defineProperty(window, 'parent', { configurable: false, get() { return window; } });
+      Object.defineProperty(window, 'top', { configurable: false, get() { return window; } });
+    }
+  } catch {}
+
   const SOURCE = 'openchamber-preview-bridge';
   const VERSION = 1;
   const MAX_TEXT = 500;
@@ -225,9 +248,9 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
 
   const post = (payload) => {
     try {
-      if (parentOrigin && window.parent && typeof window.parent.postMessage === 'function') {
+      if (parentOrigin && realParent && typeof realParent.postMessage === 'function') {
         const message = Object.assign({ source: SOURCE, version: VERSION }, payload || {});
-        window.parent.postMessage(message, parentOrigin);
+        realParent.postMessage(message, parentOrigin);
       }
     } catch {}
   };
@@ -859,7 +882,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   });
 
   window.addEventListener('message', (event) => {
-    if (event.source !== window.parent) return;
+    if (event.source !== realParent) return;
     const data = event.data;
     if (!data || data.source !== 'openchamber-preview-parent' || data.version !== VERSION) return;
     if (data.type === 'set-inspect-mode') {
@@ -942,6 +965,32 @@ const buildCookie = ({
   chunks.push('SameSite=Lax');
   if (secure) chunks.push('Secure');
   return chunks.join('; ');
+};
+
+const appendResponseSetCookie = (res, cookie) => {
+  if (!res || typeof cookie !== 'string' || !cookie) return;
+  if (typeof res.appendHeader === 'function') {
+    res.appendHeader('Set-Cookie', cookie);
+    return;
+  }
+  if (typeof res.setHeader !== 'function') return;
+  const existing = typeof res.getHeader === 'function' ? res.getHeader('Set-Cookie') : undefined;
+  if (!existing) {
+    res.setHeader('Set-Cookie', cookie);
+    return;
+  }
+  res.setHeader('Set-Cookie', Array.isArray(existing) ? [...existing, cookie] : [String(existing), cookie]);
+};
+
+// responseInterceptor copies upstream headers onto `res` before our callback, so
+// header mutations must update both proxyRes.headers and the Express response.
+const setProxyResponseHeader = (proxyRes, res, name, value) => {
+  if (proxyRes?.headers && typeof name === 'string') {
+    proxyRes.headers[name] = value;
+  }
+  if (typeof res?.setHeader === 'function') {
+    res.setHeader(name, value);
+  }
 };
 
 // SSRF guard for the `allowExternal` path: refuse to proxy private, loopback and
@@ -1167,18 +1216,95 @@ export const rewritePreviewCspHeader = (cspValue, nonce) => {
   return rebuilt.length > 0 ? rebuilt.join('; ') : null;
 };
 
-export const rewritePreviewRedirectLocation = ({ location, proxyBasePath, targetOrigin, previewToken = '', urlAuthToken = '' }) => {
-  if (typeof location !== 'string' || !location) return location;
+const buildProxiedRedirectLocation = ({
+  proxyBasePath,
+  pathname,
+  search,
+  hash,
+  previewToken = '',
+  urlAuthToken = '',
+  targetOrigin = '',
+}) => {
   const prefix = proxyBasePath.endsWith('/') ? proxyBasePath.slice(0, -1) : proxyBasePath;
+  const withAuth = appendProxyAuthToProxyUrl(`${prefix}${pathname || '/'}${search || ''}${hash || ''}`, {
+    previewToken,
+    urlAuthToken,
+  });
+  if (!targetOrigin) return withAuth;
+  try {
+    const parsed = new URL(withAuth, 'http://openchamber-preview.local');
+    parsed.searchParams.set(TARGET_ORIGIN_QUERY_PARAM, targetOrigin);
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return withAuth;
+  }
+};
+
+// Keep HTTP redirects inside the same-origin preview proxy whenever possible.
+// Same-origin (incl. relative) redirects are rewritten onto the current proxy
+// path. Cross-origin redirects on allowExternal targets create/reuse a proxy
+// target for the new origin so the iframe never navigates to the bare upstream
+// URL (which would hit X-Frame-Options / CSP frame-ancestors).
+export const rewritePreviewRedirectLocation = ({
+  location,
+  proxyBasePath,
+  targetOrigin,
+  previewToken = '',
+  urlAuthToken = '',
+  allowExternal = false,
+  retarget = null,
+}) => {
+  if (typeof location !== 'string' || !location) return location;
   const target = targetOrigin ? new URL(targetOrigin) : null;
   if (!target) return location;
   try {
     const parsed = new URL(location, target);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return location;
-    const host = parsed.hostname;
-    const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1' || host === '[::1]';
-    if (!isLoopback || parsed.port !== target.port) return location;
-    return appendProxyAuthToProxyUrl(`${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`, { previewToken, urlAuthToken });
+
+    const redirectIsLoopback = isLoopbackHostname(parsed.hostname);
+    const targetIsLoopback = isLoopbackHostname(target.hostname);
+    const sameOrigin = parsed.origin === target.origin;
+    const sameLoopbackPort = redirectIsLoopback && targetIsLoopback && parsed.port === target.port;
+
+    if (sameOrigin || sameLoopbackPort) {
+      return buildProxiedRedirectLocation({
+        proxyBasePath,
+        pathname: parsed.pathname,
+        search: parsed.search,
+        hash: parsed.hash,
+        previewToken,
+        urlAuthToken,
+      });
+    }
+
+    if (!allowExternal) {
+      // Loopback-only preview targets must not be widened to arbitrary hosts.
+      return location;
+    }
+
+    const normalized = normalizeProxyTargetUrl(parsed.toString(), { allowExternal: true });
+    if (!normalized.ok) {
+      return location;
+    }
+
+    if (typeof retarget !== 'function') {
+      return location;
+    }
+
+    const nextTarget = retarget(normalized.origin);
+    if (!nextTarget || typeof nextTarget.id !== 'string' || typeof nextTarget.token !== 'string') {
+      return location;
+    }
+
+    return buildProxiedRedirectLocation({
+      proxyBasePath: `/api/preview/proxy/${nextTarget.id}`,
+      pathname: parsed.pathname,
+      search: parsed.search,
+      hash: parsed.hash,
+      previewToken: nextTarget.token,
+      urlAuthToken,
+      targetOrigin: normalized.origin,
+    });
   } catch {
     return location;
   }
@@ -1213,7 +1339,7 @@ export const createPreviewProxyRuntime = ({
     sweepTimer.unref?.();
   };
 
-  const createTarget = (origin, ttlMs) => {
+  const createTarget = (origin, ttlMs, { allowExternal = false } = {}) => {
     const id = crypto.randomBytes(16).toString('hex');
     const token = crypto.randomBytes(16).toString('hex');
     const createdAt = now();
@@ -1222,10 +1348,30 @@ export const createPreviewProxyRuntime = ({
       id,
       origin,
       token,
+      allowExternal: allowExternal === true,
       createdAt,
       expiresAt,
     });
-    return { id, token, expiresAt };
+    return { id, token, expiresAt, allowExternal: allowExternal === true };
+  };
+
+  const findTargetByOrigin = (origin, { allowExternal = false } = {}) => {
+    const t = now();
+    for (const entry of targets.values()) {
+      if (entry.expiresAt <= t) continue;
+      if (entry.origin !== origin) continue;
+      if (Boolean(entry.allowExternal) !== Boolean(allowExternal)) continue;
+      return entry;
+    }
+    return null;
+  };
+
+  const retargetExternalOrigin = (origin, ttlMs) => {
+    const existing = findTargetByOrigin(origin, { allowExternal: true });
+    if (existing) {
+      return { id: existing.id, token: existing.token, expiresAt: existing.expiresAt };
+    }
+    return createTarget(origin, ttlMs, { allowExternal: true });
   };
 
   const resolveTargetFromRequest = (req) => {
@@ -1276,7 +1422,6 @@ export const createPreviewProxyRuntime = ({
   };
 
   // Drop only CSP directives that prevent framing or the injected preview bridge.
-  // Preview targets are restricted to loopback dev servers.
   const stripFrameBustingHeaders = (headers, bridgeNonce) => {
     if (!headers || typeof headers !== 'object') {
       return;
@@ -1302,6 +1447,58 @@ export const createPreviewProxyRuntime = ({
         }
       }
     }
+  };
+
+  // Mirror stripped frame-busting headers onto the Express response. The
+  // responseInterceptor copies upstream headers onto `res` before our callback.
+  const applyFrameBustingHeadersToResponse = (res, proxyHeaders) => {
+    if (!res || typeof res.removeHeader !== 'function' || typeof res.setHeader !== 'function') {
+      return;
+    }
+
+    res.removeHeader('x-frame-options');
+    for (const name of ['content-security-policy', 'content-security-policy-report-only']) {
+      const value = readHeader(proxyHeaders, name);
+      if (value === undefined) {
+        res.removeHeader(name);
+        continue;
+      }
+      res.setHeader(name, value);
+    }
+  };
+
+  const issueRetargetCookie = (req, res, target) => {
+    appendResponseSetCookie(res, buildCookie({
+      name: TOKEN_COOKIE_NAME,
+      value: target.token,
+      path: `/api/preview/proxy/${target.id}`,
+      maxAgeSeconds: Math.round((target.expiresAt - now()) / 1000),
+      secure: Boolean(req.secure),
+    }));
+  };
+
+  const rewriteOutgoingRedirect = ({ req, res, proxyRes, resolved, proxyBasePath, urlAuthToken }) => {
+    const location = proxyRes.headers?.location;
+    if (typeof location !== 'string' || !location) return;
+
+    const allowExternal = resolved.entry.allowExternal === true;
+    const remainingTtlMs = Math.max(15_000, resolved.entry.expiresAt - now());
+    const rewrittenLocation = rewritePreviewRedirectLocation({
+      location,
+      proxyBasePath,
+      targetOrigin: resolved.entry.origin,
+      previewToken: resolved.entry.token,
+      urlAuthToken,
+      allowExternal,
+      retarget: allowExternal
+        ? (origin) => {
+            const next = retargetExternalOrigin(origin, remainingTtlMs);
+            issueRetargetCookie(req, res, next);
+            return next;
+          }
+        : null,
+    });
+    setProxyResponseHeader(proxyRes, res, 'location', rewrittenLocation);
   };
 
   const attach = (app, {
@@ -1377,7 +1574,7 @@ export const createPreviewProxyRuntime = ({
           return res.status(400).json({ error: normalized.error });
         }
 
-        const target = createTarget(normalized.origin, ttlMs);
+        const target = createTarget(normalized.origin, ttlMs, { allowExternal });
         const cookiePath = `/api/preview/proxy/${target.id}`;
         const secure = Boolean(req.secure);
         res.setHeader('Set-Cookie', buildCookie({
@@ -1440,7 +1637,8 @@ export const createPreviewProxyRuntime = ({
         const withoutPreviewToken = removeRawQueryParam(withoutReloadParam, TOKEN_QUERY_PARAM);
         const withoutClientToken = removeRawQueryParam(withoutPreviewToken, CLIENT_TOKEN_QUERY_PARAM);
         const withoutUrlAuthToken = removeRawQueryParam(withoutClientToken, URL_AUTH_TOKEN_QUERY_PARAM);
-        return `${strippedPath}${withoutUrlAuthToken}`;
+        const withoutTargetOrigin = removeRawQueryParam(withoutUrlAuthToken, TARGET_ORIGIN_QUERY_PARAM);
+        return `${strippedPath}${withoutTargetOrigin}`;
       },
       on: {
         proxyReq: (proxyReq, req) => {
@@ -1459,10 +1657,11 @@ export const createPreviewProxyRuntime = ({
           // Per-response nonce lets the injected bridge run under the dev
           // server's CSP without dropping its script restrictions wholesale.
           const bridgeNonce = crypto.randomBytes(16).toString('base64');
-          // Allow the dev server response to be framed inside OpenChamber even
+          // Allow the upstream response to be framed inside OpenChamber even
           // if it normally sets X-Frame-Options or a CSP frame-ancestors rule.
           // The proxy is same-origin so embedding is otherwise safe.
           stripFrameBustingHeaders(proxyRes.headers, bridgeNonce);
+          applyFrameBustingHeadersToResponse(res, proxyRes.headers);
 
           const resolved = resolveTargetFromRequest(req);
           if (!resolved.ok) {
@@ -1471,15 +1670,7 @@ export const createPreviewProxyRuntime = ({
 
           const proxyBasePath = `/api/preview/proxy/${resolved.id}`;
           const urlAuthToken = resolved.parsed.searchParams.get(URL_AUTH_TOKEN_QUERY_PARAM) || '';
-          if (typeof proxyRes.headers?.location === 'string') {
-            proxyRes.headers.location = rewritePreviewRedirectLocation({
-              location: proxyRes.headers.location,
-              proxyBasePath,
-              targetOrigin: resolved.entry.origin,
-              previewToken: resolved.entry.token,
-              urlAuthToken,
-            });
-          }
+          rewriteOutgoingRedirect({ req, res, proxyRes, resolved, proxyBasePath, urlAuthToken });
 
           const contentType = String(proxyRes.headers?.['content-type'] || '').toLowerCase();
           const isHtml = contentType.includes('text/html');
@@ -1586,6 +1777,7 @@ export const createPreviewProxyRuntime = ({
           parsed.searchParams.delete(TOKEN_QUERY_PARAM);
           parsed.searchParams.delete(CLIENT_TOKEN_QUERY_PARAM);
           parsed.searchParams.delete(URL_AUTH_TOKEN_QUERY_PARAM);
+          parsed.searchParams.delete(TARGET_ORIGIN_QUERY_PARAM);
           const search = parsed.searchParams.toString();
           req.url = `${nextPath}${search ? `?${search}` : ''}`;
           proxy.upgrade(req, socket, head);
