@@ -270,7 +270,7 @@ export function applyDirectoryEvent(
 
       if (info.time.archived) {
         if (result.found) sessions.splice(result.index, 1)
-        cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
+        cleanupArchivedSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
         if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
         markSessionEvent(info.id, true)
         return true
@@ -600,4 +600,18 @@ function cleanupSessionCaches(
   if (!sessionID) return
   setSessionTodo?.(sessionID, undefined)
   dropSessionCaches(draft, [sessionID])
+}
+
+function cleanupArchivedSessionCaches(
+  draft: State,
+  sessionID: string,
+  setSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void,
+) {
+  if (!sessionID) return
+  setSessionTodo?.(sessionID, undefined)
+  delete draft.todo[sessionID]
+  delete draft.session_diff[sessionID]
+  delete draft.session_status[sessionID]
+  delete draft.permission[sessionID]
+  delete draft.question[sessionID]
 }
