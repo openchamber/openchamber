@@ -221,7 +221,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       // Drop it from the registry only once it has actually exited, so a child
       // that survived teardown stays eligible for the next run's reaper.
       if (Number.isInteger(pid) && hasChildProcessExited(child)) {
-        unregisterManagedProcess(pid);
+        await unregisterManagedProcess(pid);
       }
     }
   };
@@ -343,7 +343,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // actual host (Electron sets OPENCHAMBER_RUNTIME='desktop'; the standalone
     // web CLI leaves it unset → 'web'; SSH remote → 'ssh-remote') rather than a
     // hardcoded label, matching the server's existing runtimeName convention.
-    registerManagedProcess({
+    await registerManagedProcess({
       pid: child.pid,
       ownerPid: process.pid,
       port,
