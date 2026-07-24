@@ -192,7 +192,7 @@ export class MessengerBridgeStore {
   }
 
   /**
-   * Per-messenger default permission mode (`ask` | `auto-edit` | `yolo`) used
+   * Per-messenger default permission mode (`ask` | `yolo` | `agent`) used
    * when a surface/project has no explicit override. Returns `null` when never
    * configured so the caller can fall back to its own default.
    */

@@ -224,12 +224,19 @@ describe('P1 messenger commands', () => {
 describe('/yolo (permission mode) command', () => {
   it('lists the modes and marks the effective one with no args', async () => {
     const { result, surfaceMutators } = await run('/yolo', {
-      binding: { permissionModeDefault: 'auto-edit' },
+      binding: { permissionModeDefault: 'agent' },
     });
     expect(result.reply).toContain('Tool permission mode');
     expect(result.reply).toContain('yolo');
-    expect(result.reply).toContain('➤ `auto-edit`');
+    expect(result.reply).toContain('➤ `agent`');
     expect(surfaceMutators.setOverrides).not.toHaveBeenCalled();
+  });
+
+  it('marks agent as effective when no permission defaults are set', async () => {
+    const { result } = await run('/yolo');
+    expect(result.reply).toContain('➤ `agent`');
+    expect(result.reply).toContain('`ask`');
+    expect(result.reply).toContain('`yolo`');
   });
 
   it('sets a conversation override', async () => {
@@ -239,7 +246,7 @@ describe('/yolo (permission mode) command', () => {
 
   it('accepts aliases', async () => {
     const a = await run('/yolo safe');
-    expect(a.surfaceMutators.setOverrides).toHaveBeenCalledWith({ permissionModeOverride: 'auto-edit' });
+    expect(a.surfaceMutators.setOverrides).toHaveBeenCalledWith({ permissionModeOverride: 'agent' });
     const b = await run('/yolo on');
     expect(b.surfaceMutators.setOverrides).toHaveBeenCalledWith({ permissionModeOverride: 'yolo' });
   });
@@ -279,9 +286,9 @@ describe('/permissions synonym for /yolo', () => {
   });
 
   it('sets a conversation override', async () => {
-    const { surfaceMutators } = await run('/permissions auto-edit');
+    const { surfaceMutators } = await run('/permissions agent');
     expect(surfaceMutators.setOverrides).toHaveBeenCalledWith({
-      permissionModeOverride: 'auto-edit',
+      permissionModeOverride: 'agent',
     });
   });
 

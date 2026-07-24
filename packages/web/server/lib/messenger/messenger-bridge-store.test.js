@@ -46,11 +46,11 @@ describe('MessengerBridgeStore — permission mode persistence', () => {
 
   it('does not clobber other overrides when only setting the permission mode', () => {
     store.setOverrides({ ...surface, modelOverride: 'anthropic/sonnet', verbosityOverride: 'verbose' });
-    store.setOverrides({ ...surface, permissionModeOverride: 'auto-edit' });
+    store.setOverrides({ ...surface, permissionModeOverride: 'agent' });
     const row = store.lookup(surface);
     expect(row.modelOverride).toBe('anthropic/sonnet');
     expect(row.verbosityOverride).toBe('verbose');
-    expect(row.permissionModeOverride).toBe('auto-edit');
+    expect(row.permissionModeOverride).toBe('agent');
   });
 
   it('round-trips the project-default permission mode', () => {
@@ -76,8 +76,8 @@ describe('MessengerBridgeStore — permission mode persistence', () => {
 
   it('round-trips the messenger-wide permission mode default', () => {
     expect(store.getPermissionModeDefault('discord')).toBeNull();
-    store.setPermissionModeDefault('discord', 'auto-edit');
-    expect(store.getPermissionModeDefault('discord')).toBe('auto-edit');
+    store.setPermissionModeDefault('discord', 'agent');
+    expect(store.getPermissionModeDefault('discord')).toBe('agent');
     store.setPermissionModeDefault('discord', null);
     expect(store.getPermissionModeDefault('discord')).toBeNull();
   });

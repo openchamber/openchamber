@@ -239,9 +239,13 @@ export function renderPermissionContext(permission) {
 /**
  * Render one question of a question request ("ask" tool) into a Discord
  * message body. The interactive option components (buttons / select menu)
- * are attached by the bridge; this renders the text part: header, question,
- * numbered options. Questions are interactive session state, so — like
- * permission prompts — they are rendered at every verbosity level.
+ * are attached by the bridge; this renders only the text part: header and
+ * question. Options are NOT repeated in the text — the components already
+ * show them, so listing them again read as a duplicated wall of text.
+ * The single exception: select menus cap at 25 options, so any overflow
+ * options are listed in the text to keep them visible and answerable.
+ * Questions are interactive session state, so — like permission prompts —
+ * they are rendered at every verbosity level.
  */
 export function renderQuestionForMessenger(question, { index = 0, total = 1 } = {}) {
   if (!question || typeof question !== 'object') return null;
@@ -252,14 +256,16 @@ export function renderQuestionForMessenger(question, { index = 0, total = 1 } = 
   const lines = [`❓ **${escapeMd(header || 'Question')}**${counter}`];
   if (text) lines.push(clipBlock(text, 900));
   const options = Array.isArray(question.options) ? question.options : [];
-  options.slice(0, 25).forEach((opt, i) => {
-    const label = typeof opt?.label === 'string' && opt.label.trim() ? opt.label.trim() : `Option ${i + 1}`;
-    const description = typeof opt?.description === 'string' ? opt.description.trim() : '';
-    lines.push(
-      `\`${i + 1}.\` ${escapeMd(clipBlock(label, 120))}${description ? ` — ${escapeMd(clipBlock(description, 150))}` : ''}`,
-    );
-  });
-  if (options.length > 25) lines.push(`… ${options.length - 25} more`);
+  if (options.length > 25) {
+    lines.push('', '_Options beyond the first 25 (not in the menu above):_');
+    options.slice(25).forEach((opt, i) => {
+      const label = typeof opt?.label === 'string' && opt.label.trim() ? opt.label.trim() : `Option ${i + 26}`;
+      const description = typeof opt?.description === 'string' ? opt.description.trim() : '';
+      lines.push(
+        `\`${i + 26}.\` ${escapeMd(clipBlock(label, 120))}${description ? ` — ${escapeMd(clipBlock(description, 150))}` : ''}`,
+      );
+    });
+  }
   lines.push('', '_Pick an option below or reply with your own answer._');
   return clipBlock(lines.join('\n'), 1900);
 }

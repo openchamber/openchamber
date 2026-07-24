@@ -198,24 +198,74 @@ describe('permission mode (/yolo) auto-approve', () => {
     });
   });
 
-  it('auto-edit mode auto-approves edits but still prompts for shell', async () => {
-    const respond1 = vi.fn(async () => {});
-    const editBridge = makeBridgeWithMode('auto-edit');
-    editBridge.initApprovalListener(respond1);
-    await askPermission(editBridge, 'edit');
-    expect(respond1).toHaveBeenCalledWith(expect.objectContaining({ reply: 'once' }));
-    expect([...editBridge.approvalContexts.keys()]).toHaveLength(0);
+  it('agent mode auto-approves tools the agent allows', async () => {
+    globalThis.fetch = vi.fn(async (url, init) => {
+      const href = String(url);
+      if (href.includes('/agent')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              name: 'build',
+              permission: [
+                { permission: 'edit', pattern: '*', action: 'allow' },
+                { permission: 'bash', pattern: '*', action: 'ask' },
+              ],
+            },
+          ],
+          text: async () => '',
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 'discord-msg-1' }),
+        text: async () => '',
+      };
+    });
 
-    const respond2 = vi.fn(async () => {});
-    const shellBridge = makeBridgeWithMode('auto-edit');
-    shellBridge.initApprovalListener(respond2);
-    await askPermission(shellBridge, 'bash');
-    // Shell still requires an explicit decision → an approval message is posted.
-    expect(respond2).not.toHaveBeenCalled();
-    expect([...shellBridge.approvalContexts.keys()]).toHaveLength(1);
+    const respondAllow = vi.fn(async () => {});
+    const allowBridge = makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: () => ({ permissionModeOverride: 'agent', agentOverride: 'build' }),
+        getPermissionModeDefault: () => null,
+        getProjectDefaults: () => null,
+      },
+      getGlobalDefaults: async () => ({ model: null, agent: 'build', variant: null }),
+    });
+    allowBridge.initApprovalListener(respondAllow);
+    await askPermission(allowBridge, 'edit');
+    expect(respondAllow).toHaveBeenCalledWith(expect.objectContaining({ reply: 'once' }));
+    expect([...allowBridge.approvalContexts.keys()]).toHaveLength(0);
+
+    const respondAsk = vi.fn(async () => {});
+    const askBridge = makeBridge({
+      store: {
+        ...makeFakeStore(),
+        lookup: () => ({ permissionModeOverride: 'agent', agentOverride: 'build' }),
+        getPermissionModeDefault: () => null,
+        getProjectDefaults: () => null,
+      },
+      getGlobalDefaults: async () => ({ model: null, agent: 'build', variant: null }),
+    });
+    askBridge.initApprovalListener(respondAsk);
+    await askPermission(askBridge, 'bash');
+    expect(respondAsk).not.toHaveBeenCalled();
+    expect([...askBridge.approvalContexts.keys()]).toHaveLength(1);
   });
 
-  it('ask mode (default) always posts buttons', async () => {
+  it('ask mode always posts buttons', async () => {
+    const bridge = makeBridgeWithMode('ask');
+    const respond = vi.fn(async () => {});
+    bridge.initApprovalListener(respond);
+    await askPermission(bridge, 'edit');
+    expect(respond).not.toHaveBeenCalled();
+    expect([...bridge.approvalContexts.keys()]).toHaveLength(1);
+  });
+
+  it('default (null) follows agent settings and asks when agent is unknown', async () => {
     const bridge = makeBridgeWithMode(null);
     const respond = vi.fn(async () => {});
     bridge.initApprovalListener(respond);
@@ -438,6 +488,88 @@ describe('web session mirroring', () => {
     expect(JSON.parse(threadMessageCalls[0][1].body).content).toContain('hello from web');
     expect(JSON.parse(threadMessageCalls[0][1].body).content).toContain('Web');
     expect(JSON.parse(threadMessageCalls[1][1].body).content).toContain('hello from assistant');
+  });
+
+  it('posts the web user echo before the assistant reply when events race', async () => {
+    // Reproduce the real hub behavior: subscribers are not awaited, so the
+    // finished assistant part can start posting while the **Web** echo is still
+    // creating a thread / waiting on Discord. The bridge must keep user text
+    // first in the Discord thread.
+    const postOrder = [];
+    let threadSeq = 0;
+    let msgSeq = 0;
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      const u = String(url);
+      if (u.endsWith('/threads')) {
+        // Slow thread create — the classic race window for first web messages.
+        await new Promise((r) => setTimeout(r, 40));
+        threadSeq += 1;
+        return { ok: true, status: 200, json: async () => ({ id: `thread-${threadSeq}`, name: 'web' }), text: async () => '' };
+      }
+      if (u.includes('/messages') && (init.method ?? 'POST') === 'POST') {
+        const content = JSON.parse(init.body).content;
+        // Make the user echo slightly slower than a naive assistant post so a
+        // missing barrier would let the assistant win the race.
+        if (String(content).includes('**Web**')) {
+          await new Promise((r) => setTimeout(r, 30));
+        }
+        postOrder.push(content);
+        msgSeq += 1;
+        return { ok: true, status: 200, json: async () => ({ id: `msg-${msgSeq}` }), text: async () => '' };
+      }
+      return { ok: true, status: 200, json: async () => ({ id: `other-${++msgSeq}` }), text: async () => '' };
+    });
+
+    const bridge = makeWebBridge();
+    const sessionId = 'web-ses-race';
+
+    // Fire-and-forget like globalEventHub.notifySubscriber — do not await.
+    void bridge._handleGlobalEvent({
+      directory: '/web/project',
+      payload: { type: 'message.updated', properties: { info: { id: 'm-user-race', role: 'user', sessionID: sessionId } } },
+    });
+    void bridge._handleGlobalEvent({
+      directory: '/web/project',
+      payload: {
+        type: 'message.part.updated',
+        properties: {
+          part: { id: 'usr-race', type: 'text', messageID: 'm-user-race', sessionID: sessionId, text: 'from ui first' },
+        },
+      },
+    });
+    void bridge._handleGlobalEvent({
+      directory: '/web/project',
+      payload: {
+        type: 'message.updated',
+        properties: {
+          info: { id: 'm-ast-race', role: 'assistant', parentID: 'm-user-race', sessionID: sessionId },
+        },
+      },
+    });
+    void bridge._handleGlobalEvent({
+      directory: '/web/project',
+      payload: {
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'ast-race',
+            type: 'text',
+            messageID: 'm-ast-race',
+            sessionID: sessionId,
+            text: 'assistant second',
+            time: { end: Date.now() },
+          },
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(postOrder.length).toBeGreaterThanOrEqual(2);
+    });
+
+    expect(postOrder[0]).toContain('from ui first');
+    expect(postOrder[0]).toContain('Web');
+    expect(postOrder[1]).toContain('assistant second');
   });
 
   it('renders a user-run shell command as a clean command + output block (no marker noise)', async () => {
@@ -1297,10 +1429,7 @@ describe('question flow — interactive questions in Discord', () => {
       {
         question: 'Which approach should I take?',
         header: 'Approach',
-        options: [
-          { label: 'Option A', description: 'fast' },
-          { label: 'Option B', description: 'thorough' },
-        ],
+        options: [{ label: 'Option A' }, { label: 'Option B' }],
       },
     ]);
 
@@ -1309,11 +1438,37 @@ describe('question flow — interactive questions in Discord', () => {
     const body = JSON.parse(post.body);
     expect(body.content).toContain('Approach');
     expect(body.content).toContain('Which approach should I take?');
-    expect(body.content).toContain('Option A');
+    // Options render as components only — not duplicated in the text body.
+    expect(body.content).not.toContain('Option A');
     const buttons = body.components[0].components;
     expect(buttons).toHaveLength(2);
     expect(buttons[0].custom_id).toMatch(/^openchamber-agent-question:[0-9a-f]+:0:0$/);
     expect(buttons[1].custom_id).toMatch(/^openchamber-agent-question:[0-9a-f]+:0:1$/);
+  });
+
+  it('uses a select menu instead of buttons when options carry descriptions', async () => {
+    const bridge = makeBridge();
+    await askQuestion(bridge, [
+      {
+        question: 'Which approach?',
+        header: 'Approach',
+        options: [
+          { label: 'Option A', description: 'fast' },
+          { label: 'Option B', description: 'thorough' },
+        ],
+      },
+    ]);
+
+    const post = calls.find((c) => c.url.includes('/channels/chan-123/messages') && c.method === 'POST');
+    const body = JSON.parse(post.body);
+    const select = body.components[0].components[0];
+    expect(select.type).toBe(3);
+    expect(select.custom_id).toMatch(/^openchamber-agent-question-select:[0-9a-f]+:0$/);
+    expect(select.options).toEqual([
+      { label: 'Option A', value: '0', description: 'fast' },
+      { label: 'Option B', value: '1', description: 'thorough' },
+    ]);
+    expect(select.max_values).toBe(1);
   });
 
   it('uses a select menu for multi-select questions', async () => {
@@ -3294,5 +3449,143 @@ describe('session deletion → Discord thread cleanup', () => {
       'messenger.bridge.thread_deleted_from_session',
       expect.anything(),
     );
+  });
+});
+
+describe('bootstrap dialogue — channel auto-binding', () => {
+  let originalFetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  function makeMemoryStore() {
+    const rows = new Map();
+    return {
+      lookup: ({ botTokenHash, targetKey }) => rows.get(`${botTokenHash}:${targetKey}`) ?? null,
+      bind: vi.fn(({ botTokenHash, targetKey, sessionId, projectPath, projectLabel }) => {
+        rows.set(`${botTokenHash}:${targetKey}`, { botTokenHash, targetKey, sessionId, projectPath, projectLabel });
+      }),
+      touch: () => {},
+      unbind: ({ botTokenHash, targetKey }) => rows.delete(`${botTokenHash}:${targetKey}`),
+      setOverrides: () => {},
+      getVerbosityDefault: () => null,
+      getProjectDefaults: () => null,
+      lookupBySessionId: () => [],
+      rows,
+    };
+  }
+
+  function mockDiscordAndOpenCode(calls) {
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      const u = String(url);
+      calls.push([u, init]);
+      if (u.includes('/messages/msg-first/threads')) {
+        return { ok: true, status: 200, json: async () => ({ id: 'thread-1', name: 'hello bootstrap' }), text: async () => '' };
+      }
+      if (u.startsWith('http://opencode/session?')) {
+        return { ok: true, status: 200, json: async () => ({ id: 'ses-new' }), text: async () => '' };
+      }
+      return { ok: true, status: 200, json: async () => ({ id: 'msg-1' }), text: async () => '' };
+    });
+  }
+
+  const firstMessage = {
+    type: 'discord',
+    token: 'bot-token',
+    channelId: 'chan-1',
+    threadId: null,
+    sourceMessageId: 'msg-first',
+    text: 'hello bootstrap',
+    from: { id: 'user-1', username: 'alice' },
+  };
+
+  it('binds the channel to the project after a successful `new` bootstrap', async () => {
+    const calls = [];
+    mockDiscordAndOpenCode(calls);
+    const store = makeMemoryStore();
+    const persistSettings = vi.fn(async () => {});
+    const bootstrapProject = vi.fn(async () => ({
+      ok: true,
+      project: { id: 'p1', path: '/p/my-proj', label: 'My Proj' },
+    }));
+    const bridge = makeBridge({
+      store,
+      bootstrapProject,
+      readSettings: async () => ({ discord: { botToken: 'bot-token' } }),
+      persistSettings,
+    });
+
+    const first = await bridge.routeInbound({ ...firstMessage });
+    expect(first).toMatchObject({ ok: true, awaitingBootstrap: true });
+
+    const second = await bridge.routeInbound({
+      ...firstMessage,
+      sourceMessageId: 'msg-reply',
+      text: 'new my-proj',
+    });
+    expect(second.ok).toBe(true);
+    expect(bootstrapProject).toHaveBeenCalledWith({ action: 'new', label: 'my-proj' });
+
+    // 1. Persisted binding — the authoritative channel→project map the
+    //    listener and web→Discord mirroring read.
+    expect(persistSettings).toHaveBeenCalledWith({
+      discord: expect.objectContaining({
+        projectBindings: [{ channelId: 'chan-1', projectPath: '/p/my-proj', projectLabel: 'My Proj' }],
+      }),
+    });
+
+    // 2. Channel-level pre-bind in the bridge store (session lazily created).
+    expect(store.bind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'discord',
+        targetKey: 'chan-1',
+        sessionId: '',
+        projectPath: '/p/my-proj',
+      }),
+    );
+
+    // 3. The stashed message still spins up its session in the new project.
+    expect(calls.some(([u]) => u === 'http://opencode/session?directory=%2Fp%2Fmy-proj')).toBe(true);
+  });
+
+  it('routes a later channel message to the bound project without re-opening the dialogue', async () => {
+    const calls = [];
+    mockDiscordAndOpenCode(calls);
+    const store = makeMemoryStore();
+    const bootstrapProject = vi.fn(async () => ({
+      ok: true,
+      project: { id: 'p1', path: '/p/my-proj', label: 'My Proj' },
+    }));
+    const bridge = makeBridge({
+      store,
+      bootstrapProject,
+      readSettings: async () => ({ discord: { botToken: 'bot-token' } }),
+      persistSettings: vi.fn(async () => {}),
+    });
+
+    // Drive the full bootstrap once so the channel becomes bound.
+    await bridge.routeInbound({ ...firstMessage });
+    await bridge.routeInbound({ ...firstMessage, sourceMessageId: 'msg-reply', text: 'new my-proj' });
+
+    // A fresh channel-level message — as the RUNNING listener would deliver
+    // it, since its resolveProject map was built before the binding existed.
+    const third = await bridge.routeInbound({
+      ...firstMessage,
+      sourceMessageId: 'msg-third',
+      text: 'second conversation',
+    });
+
+    expect(third.ok).toBe(true);
+    expect(third.awaitingBootstrap).not.toBe(true);
+    // Every session created along the way targeted the bound project.
+    const sessionCreates = calls.filter(([u]) => u.startsWith('http://opencode/session?'));
+    expect(sessionCreates.length).toBeGreaterThan(0);
+    expect(sessionCreates.every(([u]) => u === 'http://opencode/session?directory=%2Fp%2Fmy-proj')).toBe(true);
   });
 });

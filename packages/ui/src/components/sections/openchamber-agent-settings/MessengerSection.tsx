@@ -71,17 +71,25 @@ const MESSENGER_META: Record<MessengerType, MessengerMeta> = {
   },
 };
 
-const VERBOSITY_OPTIONS: { id: MessengerVerbosity; label: string; desc: string }[] = [
-  { id: 'quiet', label: 'Quiet', desc: 'Final answer only — hides reasoning and tool activity' },
+const VERBOSITY_OPTIONS: {
+  id: MessengerVerbosity;
+  labelKey: I18nKey;
+  descKey: I18nKey;
+}[] = [
+  {
+    id: 'quiet',
+    labelKey: 'settings.integrations.discord.bridge.verbosity.quiet.label',
+    descKey: 'settings.integrations.discord.bridge.verbosity.quiet.desc',
+  },
   {
     id: 'normal',
-    label: 'Normal',
-    desc: 'Compact activity feed — tool names with short summaries and a thinking marker, no payloads',
+    labelKey: 'settings.integrations.discord.bridge.verbosity.normal.label',
+    descKey: 'settings.integrations.discord.bridge.verbosity.normal.desc',
   },
   {
     id: 'verbose',
-    label: 'Verbose',
-    desc: 'Full detail — commands, diffs, outputs and reasoning, formatted for reading',
+    labelKey: 'settings.integrations.discord.bridge.verbosity.verbose.label',
+    descKey: 'settings.integrations.discord.bridge.verbosity.verbose.desc',
   },
 ];
 
@@ -96,14 +104,14 @@ const PERMISSION_MODE_OPTIONS: {
     descKey: 'settings.integrations.discord.bridge.permissionMode.ask.desc',
   },
   {
-    id: 'auto-edit',
-    labelKey: 'settings.integrations.discord.bridge.permissionMode.autoEdit.label',
-    descKey: 'settings.integrations.discord.bridge.permissionMode.autoEdit.desc',
-  },
-  {
     id: 'yolo',
     labelKey: 'settings.integrations.discord.bridge.permissionMode.yolo.label',
     descKey: 'settings.integrations.discord.bridge.permissionMode.yolo.desc',
+  },
+  {
+    id: 'agent',
+    labelKey: 'settings.integrations.discord.bridge.permissionMode.agent.label',
+    descKey: 'settings.integrations.discord.bridge.permissionMode.agent.desc',
   },
 ];
 
@@ -505,7 +513,9 @@ function BridgePanel({
   const bindings = bridgeStatus.bindings.filter((b) => b.type === type);
   const active = bridgeStatus.active.filter((a) => a.type === type);
   const currentVerbosity: MessengerVerbosity = bridgeVerbosity[type] ?? 'normal';
-  const currentPermissionMode: MessengerPermissionMode = bridgePermissionMode[type] ?? 'ask';
+  const currentVerbosityOption =
+    VERBOSITY_OPTIONS.find((o) => o.id === currentVerbosity) ?? VERBOSITY_OPTIONS[0];
+  const currentPermissionMode: MessengerPermissionMode = bridgePermissionMode[type] ?? 'agent';
   const currentPermissionOption =
     PERMISSION_MODE_OPTIONS.find((o) => o.id === currentPermissionMode) ??
     PERMISSION_MODE_OPTIONS[0];
@@ -559,7 +569,9 @@ function BridgePanel({
 
       {/* Output verbosity — how much of each OpenCode turn is mirrored back. */}
       <div className="space-y-1.5 border-t border-border/60 pt-2">
-        <div className="text-[11px] font-medium text-foreground">Output verbosity</div>
+        <div className="text-[11px] font-medium text-foreground">
+          {t('settings.integrations.discord.bridge.verbosity.title')}
+        </div>
         <div className="flex gap-1">
           {VERBOSITY_OPTIONS.map((opt) => (
             <button
@@ -573,14 +585,14 @@ function BridgePanel({
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted text-muted-foreground hover:text-foreground',
               )}
-              title={opt.desc}
+              title={t(opt.descKey)}
             >
-              {opt.label}
+              {t(opt.labelKey)}
             </button>
           ))}
         </div>
         <div className="text-[10px] text-muted-foreground leading-snug">
-          {VERBOSITY_OPTIONS.find((o) => o.id === currentVerbosity)?.desc}.
+          {t(currentVerbosityOption.descKey)}
         </div>
       </div>
 

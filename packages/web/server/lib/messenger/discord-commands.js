@@ -60,7 +60,7 @@ export function buildSlashCommandDefinitions() {
     { name: 'model', description: 'Pick the model + thinking effort (this chat, project, or everywhere)' },
     { name: 'agent', description: 'Pick the agent for this conversation (or set a project default)' },
     { name: 'verbosity', description: 'Choose how much OpenChamber agent streams back' },
-    { name: 'yolo', description: 'Set tool permission mode: always ask / non-destructive / allow all' },
+    { name: 'yolo', description: 'Set tool permission mode (ask all / allow all / follow agent settings)' },
     { name: 'permissions', description: 'Synonym for /yolo — set tool permission mode' },
     { name: 'skill', description: 'Pick an available skill and hand it to the agent' },
     { name: 'login', description: 'Start OpenCode provider auth (OAuth link or API-key guidance)' },

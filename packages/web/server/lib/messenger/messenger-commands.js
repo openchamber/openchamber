@@ -33,6 +33,7 @@ import crypto from 'node:crypto';
 import { buildSlashCommandDefinitions } from './discord-commands.js';
 import { parseVerbosityLevel, VERBOSITY_LEVELS } from './messenger-verbosity.js';
 import {
+  DEFAULT_PERMISSION_MODE,
   parsePermissionMode,
   PERMISSION_MODES,
   PERMISSION_MODE_DESCRIPTIONS,
@@ -140,9 +141,9 @@ const COMMAND_HELP = [
   },
   {
     name: 'yolo',
-    usage: '/yolo|/permissions [ask | auto-edit | yolo | project <mode> | default <mode> | reset]',
+    usage: '/yolo|/permissions [ask | yolo | agent | project <mode> | default <mode> | reset]',
     summary:
-      'How OpenChamber agent handles tool permissions: `ask` = always ask, `auto-edit` = allow non-destructive tools (still ask for shell), `yolo` = allow all. `/permissions` is a synonym. On Discord, run `/yolo` or `/permissions` for a dropdown. Stop any run with `/abort`.',
+      'How OpenChamber agent handles tool permissions: `ask` = ask all, `yolo` = allow all, `agent` = follow agent settings. `/permissions` is a synonym. On Discord, run `/yolo` or `/permissions` for a dropdown. Stop any run with `/abort`.',
   },
   {
     name: 'sessions',
@@ -857,7 +858,7 @@ export async function executeMessengerCommand({
         binding?.permissionModeOverride ??
         binding?.projectDefaults?.permissionModeDefault ??
         binding?.permissionModeDefault ??
-        'ask';
+        DEFAULT_PERMISSION_MODE;
       if (!command.args) {
         const lines = [
           '**Tool permission mode** — how OpenChamber agent handles approval requests (shell, edits, …)',
@@ -889,7 +890,7 @@ export async function executeMessengerCommand({
         const value = defaultMatch[1].trim();
         if (value === 'reset' || value === 'clear') {
           await surfaceMutators.setPermissionModeDefault(null);
-          return { reply: '✓ Messenger default permission mode cleared — falling back to `ask`.' };
+          return { reply: '✓ Messenger default permission mode cleared — falling back to `agent` (follow agent settings).' };
         }
         const mode = parsePermissionMode(value);
         if (!mode) {

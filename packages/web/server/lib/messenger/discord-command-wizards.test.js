@@ -61,6 +61,9 @@ function customIdOf(call) {
 function optionValues(call) {
   return call.body?.data?.components?.[0]?.components?.[0]?.options?.map((o) => o.value) ?? [];
 }
+function optionLabels(call) {
+  return call.body?.data?.components?.[0]?.components?.[0]?.options?.map((o) => o.label) ?? [];
+}
 
 const state = { token: 'bot-token' };
 const interaction = { id: 'i1', token: 't1', channel_id: 'chan-1', guild_id: 'g1', application_id: 'app' };
@@ -73,6 +76,7 @@ describe('verbosity wizard', () => {
     const levelCustomId = customIdOf(calls.at(-1));
     expect(wizards.ownsComponent(levelCustomId)).toBe(true);
     expect(optionValues(calls.at(-1))).toEqual(['quiet', 'normal', 'verbose']);
+    expect(optionLabels(calls.at(-1))).toEqual(['quiet', 'default', 'verbose']);
 
     await wizards.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['verbose'] } }, levelCustomId);
     const scopeCustomId = customIdOf(calls.at(-1));
@@ -120,7 +124,7 @@ describe('permissions (/yolo) wizard', () => {
     await wizards.startPermissions(state, interaction);
     const modeCustomId = customIdOf(calls.at(-1));
     expect(wizards.ownsComponent(modeCustomId)).toBe(true);
-    expect(optionValues(calls.at(-1))).toEqual(['ask', 'auto-edit', 'yolo']);
+    expect(optionValues(calls.at(-1))).toEqual(['ask', 'yolo', 'agent']);
 
     await wizards.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['yolo'] } }, modeCustomId);
     const scopeCustomId = customIdOf(calls.at(-1));
@@ -138,10 +142,10 @@ describe('permissions (/yolo) wizard', () => {
     const { wizards, calls, overrides, permissionModeDefaults } = makeHarness();
     await wizards.startPermissions(state, interaction);
     const modeCustomId = customIdOf(calls.at(-1));
-    await wizards.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['auto-edit'] } }, modeCustomId);
+    await wizards.handleComponent(state, { id: 'i2', token: 't2', data: { values: ['agent'] } }, modeCustomId);
     const scopeCustomId = customIdOf(calls.at(-1));
     await wizards.handleComponent(state, { id: 'i3', token: 't3', data: { values: ['global'] } }, scopeCustomId);
-    expect(permissionModeDefaults).toEqual([{ type: 'discord', mode: 'auto-edit' }]);
+    expect(permissionModeDefaults).toEqual([{ type: 'discord', mode: 'agent' }]);
     expect(overrides).toHaveLength(0);
   });
 

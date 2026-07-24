@@ -1264,7 +1264,7 @@ export function createMessengerSyncRouter({
   });
 
   /**
-   * Per-messenger default tool permission mode (`ask` | `auto-edit` | `yolo`).
+   * Per-messenger default tool permission mode (`ask` | `yolo` | `agent`).
    * Same value as `/yolo default <mode>` / `/permissions default <mode>`, so
    * the OpenChamber UI and Discord stay in sync. A per-conversation
    * `/permissions <mode>` override always wins over this default.

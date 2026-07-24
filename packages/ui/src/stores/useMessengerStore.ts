@@ -10,7 +10,7 @@ export type SyncMode = 'full' | 'notifications' | 'off';
 export type MessengerVerbosity = 'quiet' | 'normal' | 'verbose';
 
 /** Tool permission mode for the OpenCode bridge (`/yolo` / `/permissions`). */
-export type MessengerPermissionMode = 'ask' | 'auto-edit' | 'yolo';
+export type MessengerPermissionMode = 'ask' | 'yolo' | 'agent';
 
 export type DiscordReplyMode = 'always' | 'mention' | 'inherit';
 
@@ -336,9 +336,10 @@ interface MessengerState {
 
   /**
    * Per-messenger default tool permission mode for the OpenCode bridge
-   * (`ask` | `auto-edit` | `yolo`). `null` means "never configured — the
-   * bridge uses its built-in `ask` default". Mirrors `/yolo default <mode>`
-   * / `/permissions default <mode>`; refreshed from /bridge/status.
+   * (`ask` | `yolo` | `agent`). `null` means "never configured — the
+   * bridge uses its built-in `agent` (follow agent settings) default".
+   * Mirrors `/yolo default <mode>` / `/permissions default <mode>`;
+   * refreshed from /bridge/status.
    */
   bridgePermissionMode: Partial<Record<MessengerType, MessengerPermissionMode | null>>;
 

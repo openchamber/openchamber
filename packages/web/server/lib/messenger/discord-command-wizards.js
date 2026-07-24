@@ -39,6 +39,12 @@ const PERM_SCOPE_PREFIX = 'openchamber-agent-perm-scope:';
 const LOGIN_PROVIDER_PREFIX = 'openchamber-agent-login-provider:';
 const LOGIN_METHOD_PREFIX = 'openchamber-agent-login-method:';
 
+const VERBOSITY_LABELS = {
+  quiet: 'quiet',
+  normal: 'default',
+  verbose: 'verbose',
+};
+
 const VERBOSITY_DESCRIPTIONS = {
   quiet: 'Final answer only — hides reasoning + tool activity',
   normal: 'Compact feed: tool names + thinking marker (default)',
@@ -121,7 +127,7 @@ export function createDiscordCommandWizards({ restCall, bridge }) {
   // ── /verbosity ─────────────────────────────────────────────────────────────
   function verbosityLevelSelect(hash) {
     const options = VERBOSITY_LEVELS.map((level) => ({
-      label: level,
+      label: VERBOSITY_LABELS[level] ?? level,
       value: level,
       description: VERBOSITY_DESCRIPTIONS[level],
     }));
@@ -163,7 +169,7 @@ export function createDiscordCommandWizards({ restCall, bridge }) {
     await respond(wizard.token, interaction, {
       type: 7,
       data: {
-        content: `**Set output verbosity**\nLevel: **${value}** — ${VERBOSITY_DESCRIPTIONS[value] ?? ''}\nApply to:`,
+        content: `**Set output verbosity**\nLevel: **${VERBOSITY_LABELS[value] ?? value}** — ${VERBOSITY_DESCRIPTIONS[value] ?? ''}\nApply to:`,
         flags: 64,
         components: [stringSelect(`${VERB_SCOPE_PREFIX}${hash}`, scopeOptions, 'Apply to…')],
       },
@@ -229,7 +235,7 @@ export function createDiscordCommandWizards({ restCall, bridge }) {
     await respond(wizard.token, interaction, {
       type: 7,
       data: {
-        content: `✓ Verbosity set to **${level}** for ${scopeLabel}.\n_${VERBOSITY_DESCRIPTIONS[level] ?? ''}_`,
+        content: `✓ Verbosity set to **${VERBOSITY_LABELS[level] ?? level}** for ${scopeLabel}.\n_${VERBOSITY_DESCRIPTIONS[level] ?? ''}_`,
         flags: 64,
         components: [],
       },

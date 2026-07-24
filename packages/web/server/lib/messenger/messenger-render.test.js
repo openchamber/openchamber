@@ -333,7 +333,7 @@ describe('extractLastAssistantTokens', () => {
 });
 
 describe('renderQuestionForMessenger', () => {
-  it('renders header, question text and numbered options', () => {
+  it('renders header and question text without duplicating the options shown as components', () => {
     const out = renderQuestionForMessenger(
       {
         question: 'Which database should the service use?',
@@ -347,9 +347,21 @@ describe('renderQuestionForMessenger', () => {
     );
     expect(out).toContain('❓ **Database**');
     expect(out).toContain('Which database should the service use?');
-    expect(out).toContain('`1.` Postgres — relational, battle-tested');
-    expect(out).toContain('`2.` SQLite');
+    expect(out).not.toContain('Postgres');
+    expect(out).not.toContain('SQLite');
     expect(out).toContain('reply with your own answer');
+  });
+
+  it('lists options beyond the select-menu cap of 25 so they stay answerable', () => {
+    const options = Array.from({ length: 27 }, (_, i) => ({ label: `Choice ${i + 1}` }));
+    const out = renderQuestionForMessenger(
+      { question: 'Pick one?', header: 'Pick', options },
+      { index: 0, total: 1 },
+    );
+    expect(out).not.toContain('Choice 25`');
+    expect(out).not.toContain('`25.`');
+    expect(out).toContain('`26.` Choice 26');
+    expect(out).toContain('`27.` Choice 27');
   });
 
   it('adds a counter for multi-question requests and survives missing fields', () => {

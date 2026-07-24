@@ -42,6 +42,14 @@ describe('buildSlashCommandDefinitions', () => {
     expect(help?.description).toMatch(/help all/i);
   });
 
+  it('describes /yolo with the ask / allow-all / follow-agent modes', () => {
+    const yolo = defs.find((d) => d.name === 'yolo');
+    expect(yolo?.description).toMatch(/ask all/i);
+    expect(yolo?.description).toMatch(/allow all/i);
+    expect(yolo?.description).toMatch(/follow agent settings/i);
+    expect(yolo?.description).not.toMatch(/non-destructive/i);
+  });
+
   it('does not register stub or low-frequency parity commands as native slash', () => {
     const names = new Set(defs.map((d) => d.name));
     for (const name of [

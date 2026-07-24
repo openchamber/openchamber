@@ -17,7 +17,9 @@ import {
   DEFAULT_PERMISSION_MODE,
   PERMISSION_MODE_LABELS,
   normalizePermissionMode,
+  resolveAgentToolAction,
   shouldAutoApprove,
+  shouldAutoDeny,
 } from './messenger-permissions.js';
 import {
   renderPartForMessenger,
@@ -352,9 +354,14 @@ function buildQuestionComponents({ questionId, questionIndex, question }) {
   if (options.length === 0) return [];
   const multiple = Boolean(question?.multiple);
 
-  // Up to 5 single-select options fit as one row of buttons; anything
-  // bigger (or multi-select) becomes a select menu (max 25 options).
-  if (!multiple && options.length <= 5) {
+  // Up to 5 single-select options fit as one row of buttons. Anything
+  // bigger, multi-select, or carrying option descriptions becomes a select
+  // menu (max 25 options): Discord buttons can only show a label, so when
+  // descriptions exist the menu is the only way to keep them visible.
+  const hasDescriptions = options.some(
+    (opt) => typeof opt?.description === 'string' && opt.description.trim(),
+  );
+  if (!multiple && options.length <= 5 && !hasDescriptions) {
     return [
       {
         type: 1,
@@ -931,6 +938,77 @@ export function createMessengerOpencodeBridge({
     pendingPartsByMessageId.set(messageId, { part, projectPath });
   }
 
+  // Web→Discord prompt barrier. The global event hub fires `handleGlobalEvent`
+  // without awaiting, so a finished assistant part can race the slower
+  // `**Web**` echo (thread create + Discord POST) and land first in the
+  // channel. Arm a per-user-message gate when we learn about a user prompt and
+  // hold web-mirror assistant output until that gate is released (after the
+  // echo posts, is skipped, or times out).
+  const WEB_USER_PROMPT_WAIT_MS = 8_000;
+  const WEB_USER_PROMPT_STATE_MAX = 2000;
+  /** @type {Map<string, { handled: boolean, resolvers: Array<() => void> }>} */
+  const webUserPromptState = new Map();
+  function beginWebUserPrompt(messageId) {
+    if (!messageId) return null;
+    let state = webUserPromptState.get(messageId);
+    if (state) return state;
+    if (webUserPromptState.size >= WEB_USER_PROMPT_STATE_MAX) {
+      const oldest = webUserPromptState.keys().next().value;
+      if (oldest !== undefined) webUserPromptState.delete(oldest);
+    }
+    state = { handled: false, resolvers: [] };
+    webUserPromptState.set(messageId, state);
+    return state;
+  }
+  function markWebUserPromptHandled(messageId) {
+    if (!messageId) return;
+    const state = beginWebUserPrompt(messageId);
+    if (!state || state.handled) return;
+    state.handled = true;
+    for (const resolve of state.resolvers) resolve();
+    state.resolvers = [];
+  }
+  function waitForWebUserPromptHandled(messageId, timeoutMs = WEB_USER_PROMPT_WAIT_MS) {
+    if (!messageId) return Promise.resolve();
+    const state = beginWebUserPrompt(messageId);
+    if (!state || state.handled) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        markWebUserPromptHandled(messageId);
+        resolve();
+      }, timeoutMs);
+      state.resolvers.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  // Serialize outbound messenger posts per session. Even when JS starts the
+  // user echo before the assistant reply, concurrent Discord HTTP requests can
+  // still land out of order without a per-session chain.
+  /** @type {Map<string, Promise<unknown>>} */
+  const sessionOutboundChains = new Map();
+  const SESSION_OUTBOUND_CHAIN_MAX = 500;
+  function enqueueSessionOutbound(sessionId, task) {
+    if (!sessionId) return task();
+    const prev = sessionOutboundChains.get(sessionId) ?? Promise.resolve();
+    const next = prev.then(task, task);
+    if (!sessionOutboundChains.has(sessionId) && sessionOutboundChains.size >= SESSION_OUTBOUND_CHAIN_MAX) {
+      const oldest = sessionOutboundChains.keys().next().value;
+      if (oldest !== undefined) sessionOutboundChains.delete(oldest);
+    }
+    // Keep the chain settled so one failure doesn't permanently stall the session.
+    sessionOutboundChains.set(
+      sessionId,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return next;
+  }
+
   // Guards against creating two threads / contexts for the same session when
   // the user and assistant parts arrive nearly simultaneously.
   /** @type {Map<string, Promise<object|null>>} */
@@ -1006,6 +1084,50 @@ export function createMessengerOpencodeBridge({
     if (action === 'path') return { action: 'path', path: rest };
     if (action === 'new') return { action: 'new', label: rest };
     return null;
+  }
+
+  /**
+   * Durably bind the Discord channel that hosted a successful bootstrap
+   * dialogue (`clone` | `path` | `new`) to the project it produced. Two layers:
+   *
+   *  1. settings.discord.projectBindings — the authoritative channel→project
+   *     map the listener (buildResolveProject) and web→Discord mirroring
+   *     (resolveProjectChannel) read. Survives restarts.
+   *  2. bridge-store channel pre-bind (sessionId: '') — a RUNNING listener's
+   *     resolveProject map was built at start and never re-read; the pre-bind
+   *     lets routeInbound honor the binding immediately instead of re-opening
+   *     the bootstrap dialogue on the next channel-level message.
+   *
+   * Without this the project existed but the channel stayed unbound: the next
+   * channel message re-triggered the "clone | path | new" dialogue, and the
+   * web UI's project-channel sync created a SECOND, empty channel for the
+   * project while the real conversation stayed orphaned here.
+   */
+  async function bindChannelToBootstrappedProject({ type, token, channelId, project }) {
+    if (type !== 'discord' || !channelId || !project?.path) return;
+    const projectLabel =
+      project.label ?? project.path.split('/').pop() ?? project.path;
+    try {
+      bridgeStore.bind({
+        type,
+        botTokenHash: tokenHash(token),
+        targetKey: String(channelId),
+        sessionId: '', // session is lazily created on the next message
+        projectPath: project.path,
+        projectLabel,
+      });
+    } catch {
+      // best-effort — the persisted settings binding below is authoritative
+    }
+    const current = await readDiscordBindings();
+    if (!current) return;
+    const { discord, bindings } = current;
+    // Same upsert semantics as the auto-create flow: one channel ↔ one project.
+    const next = bindings.filter(
+      (b) => b && b.projectPath !== project.path && String(b.channelId) !== String(channelId),
+    );
+    next.push({ channelId: String(channelId), projectPath: project.path, projectLabel });
+    await persistDiscordBindings(next, discord);
   }
 
   // Cache: target name lookups (for slug-matching projects).
@@ -1172,8 +1294,9 @@ export function createMessengerOpencodeBridge({
         return { ok: false, error: e?.message ?? 'OAuth start failed' };
       }
     },
-    async listAgents() {
-      const r = await opencodeFetch('/agent');
+    async listAgents(directory) {
+      const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+      const r = await opencodeFetch(`/agent${params}`);
       if (!r.ok) return [];
       const d = await r.json().catch(() => null);
       const raw = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : Array.isArray(d?.agents) ? d.agents : [];
@@ -1183,6 +1306,7 @@ export function createMessengerOpencodeBridge({
         model: a.model,
         hidden: Boolean(a.hidden),
         mode: a.mode,
+        permission: a.permission ?? null,
       }));
     },
     async listSessions(directory) {
@@ -2258,11 +2382,11 @@ export function createMessengerOpencodeBridge({
   }
 
   /**
-   * Resolve the effective permission mode for a surface (`ask` | `auto-edit` |
-   * `yolo`). Mirrors {@link resolveVerbosity}'s resolution order: surface
+   * Resolve the effective permission mode for a surface (`ask` | `yolo` |
+   * `agent`). Mirrors {@link resolveVerbosity}'s resolution order: surface
    * override (`/yolo`) → parent-channel override → per-project default →
-   * per-messenger default → `ask`. Read fresh at each `permission.asked` event
-   * so a `/yolo` change applies without a restart.
+   * per-messenger default → `agent`. Read fresh at each `permission.asked`
+   * event so a `/yolo` change applies without a restart.
    */
   function resolvePermissionMode({ type, token, channelId, threadId }) {
     const hash = tokenHash(token);
@@ -2286,14 +2410,76 @@ export function createMessengerOpencodeBridge({
       }
       if (!mode) mode = bridgeStore.getPermissionModeDefault?.(type) ?? null;
     } catch {
-      // ignore — best-effort, fall back to the safe default (ask)
+      // ignore — best-effort, fall back to follow-agent default
     }
     return normalizePermissionMode(mode ?? DEFAULT_PERMISSION_MODE);
   }
 
+  /**
+   * Resolve the agent name bound to a messenger surface (same priority as
+   * prompt routing): surface override → parent channel → project default →
+   * OpenChamber global default.
+   */
+  async function resolveSurfaceAgentName({ type, token, channelId, threadId }) {
+    const hash = tokenHash(token);
+    const stableKey = targetKey({ type, channelId, threadId });
+    let agentName = null;
+    let projectPath = null;
+    try {
+      const row = bridgeStore.lookup({ type, botTokenHash: hash, targetKey: stableKey });
+      projectPath = row?.projectPath ?? null;
+      agentName = row?.agentOverride ?? null;
+      if (!agentName && stableKey !== String(channelId)) {
+        const parent = bridgeStore.lookup({
+          type,
+          botTokenHash: hash,
+          targetKey: String(channelId),
+        });
+        agentName = parent?.agentOverride ?? null;
+        if (!projectPath) projectPath = parent?.projectPath ?? null;
+      }
+      if (!agentName && projectPath) {
+        agentName = bridgeStore.getProjectDefaults?.(projectPath)?.agentDefault ?? null;
+      }
+      if (!agentName) {
+        const globals = await resolveGlobalDefaults();
+        agentName = globals.agent ?? null;
+      }
+    } catch {
+      // best-effort
+    }
+    return { agentName, projectPath };
+  }
+
+  /**
+   * Look up the active agent's permission action for a tool. Returns `null`
+   * when the agent or its permission map cannot be loaded so callers fall
+   * back to asking.
+   */
+  async function resolveAgentActionForTool({ type, token, channelId, threadId, toolName, directory }) {
+    try {
+      const { agentName, projectPath } = await resolveSurfaceAgentName({
+        type,
+        token,
+        channelId,
+        threadId,
+      });
+      if (!agentName) return null;
+      const agents = await opencodeAdapter.listAgents(directory || projectPath || undefined);
+      const agent = (Array.isArray(agents) ? agents : []).find(
+        (entry) => entry && entry.name === agentName,
+      );
+      if (!agent) return null;
+      return resolveAgentToolAction(agent.permission, toolName);
+    } catch {
+      return null;
+    }
+  }
+
   // --- Outbound: post one message per renderable part --------------------
   async function postToSurface(ctx, content) {
-    return postMessengerSurface(ctx, content);
+    const sessionId = ctx?.sessionId ?? null;
+    return enqueueSessionOutbound(sessionId, () => postMessengerSurface(ctx, content));
   }
 
   /** Like postToSurface but takes a raw surface descriptor — used by the
@@ -2492,34 +2678,44 @@ export function createMessengerOpencodeBridge({
   }
 
   async function emitWebUserPart(sessionId, part, { projectPath = null } = {}) {
-    const text = typeof part?.text === 'string' ? part.text.trim() : '';
-    // Hidden agent-context parts (project memory, scheduling/discord
-    // instructions, etc.) must never surface as a **Web** prompt block.
-    if (part?.synthetic === true) return;
-    // Never mirror the synthetic shell marker as a **Web** prompt block — it is
-    // internal noise ("The following tool was executed by the user"). The
-    // command + output are mirrored separately as a shell block (emitPart).
-    if (isUserShellMarkerText(text)) return;
-    // Never mirror a prompt that originated from a messenger surface back to the
-    // same surface. This stops the "I reply from Discord and my own message
-    // bounces straight back to me" duplication on web-created threads that are
-    // later continued from Discord.
-    if (consumeMessengerInbound(sessionId, text)) return;
-    // Name the thread (when one is created) after the user's first line so the
-    // Discord thread list is meaningful instead of a wall of "OpenChamber agent · web".
-    const threadName = text ? clipBlock(text.split('\n')[0], 80) : null;
-    const ctx = await ensureDefaultSessionContext(sessionId, { projectPath, threadName });
-    if (!ctx?.webMirror) return;
-    if (!text) return;
-    const dedupKey = part?.id ? `${part.id}:user` : null;
-    if (dedupKey && ctx.sentPartIds.has(dedupKey)) return;
-    const safe = clipBlock(text.replace(/```/g, "'''"), 1500);
-    const sent = await postToSurface(ctx, `**Web**\n\`\`\`\n${safe}\n\`\`\``);
-    if (!sent.ok) {
-      ctx.lastError = sent.error;
-      return;
+    const messageId = getPartMessageId(part);
+    // Arm before any await so a racing assistant part that already knows this
+    // message as its parentID cannot post ahead of the **Web** echo.
+    beginWebUserPrompt(messageId);
+    try {
+      const text = typeof part?.text === 'string' ? part.text.trim() : '';
+      // Hidden agent-context parts (project memory, scheduling/discord
+      // instructions, etc.) must never surface as a **Web** prompt block.
+      if (part?.synthetic === true) return;
+      // Never mirror the synthetic shell marker as a **Web** prompt block — it is
+      // internal noise ("The following tool was executed by the user"). The
+      // command + output are mirrored separately as a shell block (emitPart).
+      if (isUserShellMarkerText(text)) return;
+      // Never mirror a prompt that originated from a messenger surface back to the
+      // same surface. This stops the "I reply from Discord and my own message
+      // bounces straight back to me" duplication on web-created threads that are
+      // later continued from Discord.
+      if (consumeMessengerInbound(sessionId, text)) return;
+      // Name the thread (when one is created) after the user's first line so the
+      // Discord thread list is meaningful instead of a wall of "OpenChamber agent · web".
+      const threadName = text ? clipBlock(text.split('\n')[0], 80) : null;
+      const ctx = await ensureDefaultSessionContext(sessionId, { projectPath, threadName });
+      if (!ctx?.webMirror) return;
+      if (!text) return;
+      const dedupKey = part?.id ? `${part.id}:user` : null;
+      if (dedupKey && ctx.sentPartIds.has(dedupKey)) return;
+      const safe = clipBlock(text.replace(/```/g, "'''"), 1500);
+      const sent = await postToSurface(ctx, `**Web**\n\`\`\`\n${safe}\n\`\`\``);
+      if (!sent.ok) {
+        ctx.lastError = sent.error;
+        return;
+      }
+      if (dedupKey) ctx.sentPartIds.add(dedupKey);
+    } finally {
+      // Release waiters whether we posted, skipped, or failed — assistant output
+      // must not stall forever if the echo is intentionally omitted.
+      markWebUserPromptHandled(messageId);
     }
-    if (dedupKey) ctx.sentPartIds.add(dedupKey);
   }
 
   async function emitPart(sessionId, part) {
@@ -2596,6 +2792,15 @@ export function createMessengerOpencodeBridge({
       ctx.lastPostedMarker = null;
     }
 
+    // Web-mirrored sessions must post the user's **Web** echo before any
+    // assistant output for that turn. The hub does not serialize handlers, so
+    // without this gate a completed assistant part can overtake the echo.
+    if (ctx.webMirror) {
+      const assistantMessageId = getPartMessageId(part);
+      const parentId = assistantMessageId ? messageParents.get(assistantMessageId) : null;
+      if (parentId) await waitForWebUserPromptHandled(parentId);
+    }
+
     const sent = await postToSurface(ctx, rendered);
     if (!sent.ok) {
       ctx.lastError = sent.error;
@@ -2654,9 +2859,14 @@ export function createMessengerOpencodeBridge({
             .filter((b) => b.type === 'discord');
           if (messengerBindings.length === 0) {
             await emitWebUserPart(sessionId, part, { projectPath: envelopeDirectory });
+          } else {
+            // Not mirrored as **Web** — release any waiters armed by message.updated.
+            markWebUserPromptHandled(partMessageId);
           }
         } else if (ctx.source === 'web' || ctx.webMirror) {
           await emitWebUserPart(sessionId, part, { projectPath: envelopeDirectory });
+        } else {
+          markWebUserPromptHandled(partMessageId);
         }
         return;
       }
@@ -2679,6 +2889,11 @@ export function createMessengerOpencodeBridge({
       // linked back to its synthetic shell-marker parent (see getUserShellEcho).
       const parentId = info?.parentID ?? info?.message?.parentID ?? null;
       if (messageId && parentId) rememberMessageParent(messageId, parentId);
+      if (messageId && role === 'user') {
+        // Arm early so assistant output that arrives before the user part is
+        // replayed still waits for the **Web** echo on web-mirrored sessions.
+        beginWebUserPrompt(messageId);
+      }
       if (messageId && role) {
         rememberMessageRole(messageId, role);
         const pending = pendingPartsByMessageId.get(messageId);
@@ -2992,7 +3207,36 @@ export function createMessengerOpencodeBridge({
         channelId: ctx.channelId,
         threadId: ctx.threadId,
       });
-      if (permissionMode !== 'ask' && shouldAutoApprove(permissionMode, permission.permission)) {
+      let agentAction = null;
+      if (permissionMode === 'agent') {
+        agentAction = await resolveAgentActionForTool({
+          type: ctx.type,
+          token: ctx.token,
+          channelId: ctx.channelId,
+          threadId: ctx.threadId,
+          toolName: permission.permission,
+          directory: replyDirectory,
+        });
+      }
+      if (shouldAutoDeny(permissionMode, agentAction)) {
+        if (typeof _respondToOpenCode === 'function' && permission.id) {
+          _respondToOpenCode({
+            sessionID: sessionId,
+            requestID: permission.id,
+            reply: 'reject',
+            directory: replyDirectory,
+          }).catch((err) =>
+            console.error('[PERMISSION] auto-deny reply failed:', err?.message ?? err),
+          );
+        }
+        const label = PERMISSION_MODE_LABELS[permissionMode] ?? permissionMode;
+        void postToSurface(
+          ctx,
+          `⛔ _Auto-denied (${escapeMd(label)}): \`${escapeMd(String(permission.permission))}\`_`,
+        );
+        return;
+      }
+      if (shouldAutoApprove(permissionMode, permission.permission, agentAction)) {
         if (typeof _respondToOpenCode === 'function' && permission.id) {
           _respondToOpenCode({
             sessionID: sessionId,
@@ -4474,6 +4718,15 @@ export function createMessengerOpencodeBridge({
             return { ok: false, error: result.error ?? 'bootstrap failed' };
           }
           bootstrapPending.delete(surfaceKey);
+          // The user just told us which project this channel belongs to —
+          // make it durable so the dialogue never re-opens here and web
+          // conversations mirror into this channel.
+          await bindChannelToBootstrappedProject({
+            type,
+            token,
+            channelId,
+            project: result.project,
+          });
           await postMessengerSurface(
             { type, token, channelId, threadId: threadId ?? null },
             `✓ Project ready: *${escapeMd(result.project.label ?? result.project.path)}* → ${escapeMd(result.project.path)}\nOpenChamber agent will use this directory from now on. Re-sending your earlier message…`,
@@ -4507,7 +4760,16 @@ export function createMessengerOpencodeBridge({
         const hash = tokenHash(token);
         const keyForStore = targetKey({ type, channelId, threadId: threadId ?? null });
         const stored = bridgeStore.lookup({ type, botTokenHash: hash, targetKey: keyForStore });
-        if (!stored?.sessionId) {
+        // A channel-level pre-bind (bootstrap dialogue or auto-created project
+        // channel) is authoritative even before any session exists — honor it
+        // instead of re-opening the dialogue. The running listener's static
+        // resolveProject map predates bindings made after its start, so this
+        // store lookup is the only way those bindings take effect live.
+        if (!stored?.sessionId && stored?.projectPath) {
+          projectPath = stored.projectPath;
+          projectLabel = projectLabel ?? stored.projectLabel ?? null;
+        }
+        if (!projectPath && !stored?.sessionId) {
           const auto = await autoResolveProject({
             type,
             token,
