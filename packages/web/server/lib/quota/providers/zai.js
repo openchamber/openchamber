@@ -4,8 +4,6 @@ import {
   normalizeAuthEntry,
   buildResult,
   toUsageWindow,
-  toNumber,
-  toTimestamp,
   resolveWindowSeconds,
   resolveWindowLabel,
   normalizeTimestamp
@@ -19,6 +17,22 @@ export const isConfigured = () => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.key || entry?.token);
+};
+
+export const buildZaiWindows = (limits) => {
+  const windows = {};
+  for (const limit of Array.isArray(limits) ? limits : []) {
+    if (limit?.type !== 'TOKENS_LIMIT') continue;
+    const windowSeconds = resolveWindowSeconds(limit);
+    if (windowSeconds === null) continue;
+    const label = resolveWindowLabel(windowSeconds);
+    windows[label] = toUsageWindow({
+      usedPercent: typeof limit.percentage === 'number' ? limit.percentage : null,
+      windowSeconds,
+      resetAt: limit.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null
+    });
+  }
+  return windows;
 };
 
 export const fetchQuota = async () => {
@@ -56,21 +70,7 @@ export const fetchQuota = async () => {
     }
 
     const payload = await response.json();
-    const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
-    const tokensLimit = limits.find((limit) => limit?.type === 'TOKENS_LIMIT');
-    const windowSeconds = resolveWindowSeconds(tokensLimit);
-    const windowLabel = resolveWindowLabel(windowSeconds);
-    const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-    const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
-
-    const windows = {};
-    if (tokensLimit) {
-      windows[windowLabel] = toUsageWindow({
-        usedPercent,
-        windowSeconds,
-        resetAt
-      });
-    }
+    const windows = buildZaiWindows(payload?.data?.limits);
 
     return buildResult({
       providerId,

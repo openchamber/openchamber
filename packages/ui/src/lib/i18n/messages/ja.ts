@@ -2793,6 +2793,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.daily': '日次',
   'quota.window.monthly': '月間制限',
   'quota.window.credits': 'クレジット',
+  'quota.note.runwayLeft': '残り約{duration}',
   'quota.window.creditsBalance': 'クレジット残高',
   'quota.window.billingCycle': '請求サイクル',
   'quota.window.auto': '自動',

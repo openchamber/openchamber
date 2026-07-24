@@ -34,10 +34,12 @@ export const normalizeTimestamp = (value) => {
   return value < 1_000_000_000_000 ? value * 1000 : value;
 };
 
+// z.ai `unit` enum (undocumented): 3=hour, 4=day, 6=week, 5=month. Unknown -> null.
+const ZAI_UNIT_SECONDS = { 3: 3600, 4: 86400, 6: 604800, 5: 2592000 };
+
 export const resolveWindowSeconds = (limit) => {
-  const ZAI_TOKEN_WINDOW_SECONDS = { 3: 3600 };
   if (!limit || !limit.number) return null;
-  const unitSeconds = ZAI_TOKEN_WINDOW_SECONDS[limit.unit];
+  const unitSeconds = ZAI_UNIT_SECONDS[limit.unit];
   if (!unitSeconds) return null;
   return unitSeconds * limit.number;
 };

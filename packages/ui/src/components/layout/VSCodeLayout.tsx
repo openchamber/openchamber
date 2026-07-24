@@ -32,7 +32,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { Icon } from "@/components/icon/Icon";
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, formatCreditsNote, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { formatTimeForPreference } from '@/lib/timeFormat';
@@ -982,6 +982,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                           : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                       : null;
                     const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
+                    const creditsNote = formatCreditsNote(window.credits);
                     return (
                     <DropdownMenuItem
                       key={`${group.providerId}-${label}`}
@@ -1001,6 +1002,9 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                                 className="h-1"
                                 expectedMarkerPercent={expectedMarker}
                               />
+                              {creditsNote ? (
+                                <span className="truncate typography-micro text-muted-foreground">{creditsNote}</span>
+                              ) : null}
                               {paceInfo && showPredValues && (
                                 <div className="mt-0.5">
                                   <PaceIndicator paceInfo={paceInfo} compact />

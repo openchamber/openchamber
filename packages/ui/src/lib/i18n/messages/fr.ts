@@ -2554,6 +2554,7 @@ export const dict = {
   'quota.window.daily': 'Quotidien',
   'quota.window.monthly': 'Limite mensuelle',
   'quota.window.credits': 'Crédits',
+  'quota.note.runwayLeft': '~{duration} restant',
   'quota.window.creditsBalance': 'Solde de crédits',
   'quota.window.billingCycle': 'Cycle de facturation',
   'quota.window.auto': 'Auto',

@@ -1,6 +1,7 @@
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { formatDateTimeForPreference, formatTimeForPreference } from '@/lib/timeFormat';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
+import type { CreditsBurn } from '../../types/quota';
 
 const t = (key: Parameters<typeof formatMessage>[1]) => formatMessage(useI18nStore.getState().dictionary, key);
 
@@ -281,6 +282,20 @@ export const formatRemainingTime = (seconds: number): string => {
     return '<1m';
   }
   return `${minutes}m`;
+};
+
+/**
+ * Format a burn-rate + runway note for credit-based quotas (e.g. DeepSeek).
+ * Returns null when no credits data is present.
+ */
+export const formatCreditsNote = (credits: CreditsBurn | null | undefined): string | null => {
+  if (!credits) {
+    return null;
+  }
+  const runwayLeft = formatMessage(useI18nStore.getState().dictionary, 'quota.note.runwayLeft', {
+    duration: formatRemainingTime(credits.runwaySeconds),
+  });
+  return `~${credits.symbol}${credits.burnPerHour.toFixed(2)}/h \u00b7 ${runwayLeft}`;
 };
 
 /**

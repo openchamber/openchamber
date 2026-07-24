@@ -15,7 +15,14 @@ export type QuotaProviderId =
   | 'minimax-cn-coding-plan'
   | 'ollama-cloud'
   | 'wafer'
-  | 'opencode-go';
+  | 'opencode-go'
+  | 'deepseek';
+
+export interface CreditsBurn {
+  burnPerHour: number;
+  runwaySeconds: number;
+  symbol: string;
+}
 
 export interface UsageWindow {
   usedPercent: number | null;
@@ -26,6 +33,7 @@ export interface UsageWindow {
   resetAtFormatted: string | null;
   resetAfterFormatted: string | null;
   valueLabel?: string | null;
+  credits?: CreditsBurn | null;
 }
 
 export interface UsageWindows {

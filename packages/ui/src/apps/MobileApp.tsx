@@ -32,7 +32,7 @@ import { useOrientation } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isIPadApp } from '@/lib/platform';
 import { resolveProjectForDirectory, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
-import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
+import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, formatCreditsNote, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
@@ -1591,19 +1591,25 @@ const MobileUsageLimits: React.FC<{
                     row.window.resetAfterFormatted ?? row.window.resetAtFormatted,
                     timeFormatPreference,
                   );
+                  const creditsNote = formatCreditsNote(row.window.credits);
                   return (
-                    <div key={row.key} className="flex min-w-0 items-baseline justify-between gap-3">
-                      <span className="inline-flex min-w-0 flex-1 items-baseline gap-1.5">
-                        <span className="truncate typography-ui-label text-muted-foreground">
-                          {row.subtitle ? `${row.subtitle} · ${row.label}` : row.label}
+                    <div key={row.key} className="flex min-w-0 flex-col">
+                      <div className="flex min-w-0 items-baseline justify-between gap-3">
+                        <span className="inline-flex min-w-0 flex-1 items-baseline gap-1.5">
+                          <span className="truncate typography-ui-label text-muted-foreground">
+                            {row.subtitle ? `${row.subtitle} · ${row.label}` : row.label}
+                          </span>
+                          {resetLabel ? (
+                            <span className="shrink-0 truncate typography-micro text-muted-foreground/70">{resetLabel}</span>
+                          ) : null}
                         </span>
-                        {resetLabel ? (
-                          <span className="shrink-0 truncate typography-micro text-muted-foreground/70">{resetLabel}</span>
-                        ) : null}
-                      </span>
-                      <span className={cn('shrink-0 typography-ui-label font-semibold tabular-nums', getWindowValueClass(row.window))}>
-                        {metricLabel === '-' ? '' : metricLabel}
-                      </span>
+                        <span className={cn('shrink-0 typography-ui-label font-semibold tabular-nums', getWindowValueClass(row.window))}>
+                          {metricLabel === '-' ? '' : metricLabel}
+                        </span>
+                      </div>
+                      {creditsNote ? (
+                        <span className="truncate typography-micro text-muted-foreground">{creditsNote}</span>
+                      ) : null}
                     </div>
                   );
                 })}

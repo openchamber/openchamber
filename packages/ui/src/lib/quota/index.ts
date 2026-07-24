@@ -5,6 +5,7 @@ export {
   formatQuotaResetLabel,
   resolveUsageTone,
   formatWindowLabel,
+  formatCreditsNote,
   calculatePace,
   getPaceStatusColor,
   formatRemainingTime,

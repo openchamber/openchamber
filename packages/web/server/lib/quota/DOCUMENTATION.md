@@ -32,6 +32,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `ollama-cloud` | Ollama Cloud | `providers/ollama-cloud.js` | Manual cookie stored under `~/.config/openchamber/quota/` |
 | `wafer` | Wafer.ai | `providers/wafer.js` | `wafer`, `wafer-ai`, `wafer_ai`, `wafer.ai` |
 | `opencode-go` | OpenCode Go | `providers/opencode-go.js` | Manual workspace ID and auth cookie stored under `~/.config/openchamber/quota/` |
+| `deepseek` | DeepSeek | `providers/deepseek.js` (+ `providers/deepseek-burn.js`) | `deepseek` |
 
 ## Internal-only provider module
 - `providers/openai.js` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
@@ -67,6 +68,14 @@ In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 mo
 - **Percentage-based plans**: Legacy Coding Plan accounts return `current_interval_total_count: 0` but include `current_interval_remaining_percent`. The provider prefers this field when count fields are absent.
 - **model_remains array**: Now contains entries for multiple model categories (chat, speech, video, image). The provider selects the chat-model entry by matching `MiniMax-M*`, then `general`/`chat`/`text` by name, then any entry with a remaining percent.
 - **Window status**: The `current_interval_status` and `current_weekly_status` fields indicate whether a window is active. Status `3` means the window is not applicable for the current plan tier (e.g. legacy plans without weekly limits). The provider omits inactive windows.
+
+## z.ai / Zhipu token windows
+
+The GLM Coding Plan surfaces **two** token windows from `/monitor/usage/quota/limit` as separate `TOKENS_LIMIT` entries, distinguished by the (undocumented) `unit` field: `unit 3` = hour (5h window, `number 5`) and `unit 6` = week (weekly window). `resolveWindowSeconds` maps `unit` to seconds (`3`=hour, `4`=day, `6`=week, `5`=month) and returns null for unknown units so `buildZaiWindows` skips them instead of emitting a bogus window. `percentage` is consumed percent; `nextResetTime` is epoch ms and may be absent for an idle window. The `TIME_LIMIT` entry (monthly MCP/tools count) is intentionally not surfaced by this provider.
+
+## DeepSeek balance + burn tracking
+
+DeepSeek Platform (`api.deepseek.com`) exposes only `GET /user/balance` (prepaid credit balance) and no usage/spend-over-time API. To show a burn rate we sample the balance ourselves: each `fetchQuota` appends `{ balance, currency, at }` to `deepseek-balance-history.json` under `OPENCODE_DATA_DIR`, pruned to the last 24h and 200 samples, best-effort (a write failure never breaks the fetch). Sampling is **on-fetch only** — it piggybacks the existing quota refresh rather than a scheduled job, so no background timer spends credits while idle. `computeBurn` (in `deepseek-burn.js`) derives `$/hour` from the most recent monotonically-decreasing segment (a balance rise is treated as a top-up boundary, never negative burn) and a runway estimate. The result rides the `credits_balance` window as a structured `credits: { burnPerHour, runwaySeconds, symbol }` field; the UI formats and localizes the note.
 
 ## Notes for contributors
 - Keep provider IDs stable; clients use them directly.

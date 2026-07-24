@@ -2797,6 +2797,7 @@ export const dict = {
   'quota.window.daily': 'Daily',
   'quota.window.monthly': 'Monthly Limit',
   'quota.window.credits': 'Credits',
+  'quota.note.runwayLeft': '~{duration} left',
   'quota.window.creditsBalance': 'Credits Balance',
   'quota.window.billingCycle': 'Billing Cycle',
   'quota.window.auto': 'Auto',
