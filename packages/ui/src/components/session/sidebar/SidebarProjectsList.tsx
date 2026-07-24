@@ -17,6 +17,7 @@ import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
 import type { MainTab } from '@/stores/useUIStore';
+import { getSessionNodesActivityState } from './collapsedActivityState';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 
@@ -77,6 +78,9 @@ type Props = {
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
   isInlineEditing: boolean;
+  activeActivitySessionIds: Set<string>;
+  unreadActivitySessionIds: Set<string>;
+  notifyOnSubtasks: boolean;
 };
 
 function SidebarProjectsListComponent(props: Props): React.ReactNode {
@@ -220,6 +224,14 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
                 const nestedGroups = rootGroup
                   ? orderedGroups.filter((group) => group.id !== rootGroup.id)
                   : orderedGroups;
+                const collapsedActivityState = isCollapsed
+                  ? getSessionNodesActivityState(
+                    orderedGroups.flatMap((group) => group.sessions),
+                    props.activeActivitySessionIds,
+                    props.unreadActivitySessionIds,
+                    props.notifyOnSubtasks,
+                  )
+                  : null;
 
                 return (
                   <SortableProjectItem
@@ -237,6 +249,7 @@ function SidebarProjectsListComponent(props: Props): React.ReactNode {
                     isRepo={Boolean(isRepo)}
                     isDesktopShell={props.isDesktopShellRuntime}
                     isStuck={props.stuckProjectHeaders.has(projectKey)}
+                    collapsedActivityState={collapsedActivityState}
                     hideDirectoryControls={props.hideDirectoryControls}
                     mobileVariant={props.mobileVariant}
                     alwaysShowActions={props.alwaysShowActions}

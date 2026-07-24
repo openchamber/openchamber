@@ -7,7 +7,7 @@ import { isDesktopShell } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useChildStoreManager } from '@/sync/sync-context';
+import { useAllSessionStatuses, useChildStoreManager } from '@/sync/sync-context';
 import { getAllSyncSessionMap } from '@/sync/sync-refs';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
@@ -61,6 +61,8 @@ import {
 import { BulkActionBar } from './sidebar/BulkActionBar';
 import { useSidebarBulkActions } from './sidebar/hooks/useSidebarBulkActions';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useNotificationStore } from '@/sync/notification-store';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
   deriveRecentSessions,
@@ -389,6 +391,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const gitBranches = useGitAllBranches(isVisible);
 
   const sync = useSync();
+  const liveSessionStatuses = useAllSessionStatuses();
+  const globalSessionStatusById = useGlobalSessionStatusStore((state) => state.statusById);
+  const unseenCountBySessionId = useNotificationStore((state) => state.index.session.unseenCount);
   const childStores = useChildStoreManager();
   const bootstrapDemandOwner = `session-sidebar:${React.useId()}`;
   const liveSessionIndex = getAllSyncSessionMap();
@@ -483,6 +488,31 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   React.useEffect(() => {
     syncSessionsSnapshotRef.current = liveSessions;
   }, [liveSessions]);
+
+  const activeActivitySessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    Object.entries(liveSessionStatuses).forEach(([sessionId, status]) => {
+      if (status?.type === 'busy' || status?.type === 'retry') {
+        ids.add(sessionId);
+      }
+    });
+    globalSessionStatusById.forEach((entry, sessionId) => {
+      if (entry.status.type === 'busy' || entry.status.type === 'retry') {
+        ids.add(sessionId);
+      }
+    });
+    return ids;
+  }, [globalSessionStatusById, liveSessionStatuses]);
+
+  const unreadActivitySessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    Object.entries(unseenCountBySessionId).forEach(([sessionId, count]) => {
+      if (count > 0) {
+        ids.add(sessionId);
+      }
+    });
+    return ids;
+  }, [unseenCountBySessionId]);
 
   const runtimeKey = getRuntimeKey();
   const projectWorktreeDiscoveryKey = React.useMemo(
@@ -1600,6 +1630,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         editTitle={editTitle}
         openSidebarMenuKey={openSidebarMenuKey}
         prVisualStateByDirectoryBranch={prVisualStateByDirectoryBranch}
+        activeActivitySessionIds={activeActivitySessionIds}
+        unreadActivitySessionIds={unreadActivitySessionIds}
+        notifyOnSubtasks={notifyOnSubtasks}
         onToggleCollapsedGroup={toggleCollapsedGroup}
         dragHandleProps={dragHandleProps}
         scrollContainerRef={scrollContainerRef}
@@ -1639,6 +1672,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       editTitle,
       openSidebarMenuKey,
       prVisualStateByDirectoryBranch,
+      activeActivitySessionIds,
+      unreadActivitySessionIds,
+      notifyOnSubtasks,
       toggleCollapsedGroup,
     ],
   );
@@ -1792,6 +1828,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         openSidebarMenuKey={openSidebarMenuKey}
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
         isInlineEditing={isInlineEditing}
+        activeActivitySessionIds={activeActivitySessionIds}
+        unreadActivitySessionIds={unreadActivitySessionIds}
+        notifyOnSubtasks={notifyOnSubtasks}
       /> : null}
 
       {selectionModeEnabled && hasSelection ? (
