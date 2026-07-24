@@ -6,6 +6,7 @@ import { getStoredMobileLayoutPreference } from '@openchamber/ui/lib/mobileLayou
 import type { HostedSurface } from '@openchamber/ui/lib/runtimeSurface';
 import '@openchamber/ui/index.css';
 import '@openchamber/ui/styles/fonts';
+import '@openchamber/ui/styles/katex-css';
 
 declare global {
   interface Window {
