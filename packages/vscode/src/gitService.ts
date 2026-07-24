@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
+import type { ProjectCommandRuntime } from './project-commands-runtime';
 
 let gitApi: GitAPI | null = null;
 let gitExtensionEnabled = false;
@@ -1385,6 +1386,22 @@ const loadProjectStartCommand = async (projectID: string): Promise<string> => {
   }
 };
 
+export const resolveWorktreeProjectStartCommand = async (
+  projectID: string,
+  primaryWorktree: string,
+  runtime?: ProjectCommandRuntime,
+  legacyLoader: (projectID: string) => Promise<string> = loadProjectStartCommand,
+): Promise<string> => {
+  if (typeof runtime?.loadStartCommand === 'function') {
+    const result = await runtime.loadStartCommand(projectID, primaryWorktree);
+    if (result.available) {
+      return result.command.trim();
+    }
+  }
+
+  return legacyLoader(projectID);
+};
+
 const getProjectStoragePath = (projectID: string) => {
   return path.join(getOpenCodeDataPath(), 'storage', 'project', `${projectID}.json`);
 };
@@ -1502,8 +1519,14 @@ const cleanupFailedFastWorktreeCreate = async (
   }
 };
 
-const runWorktreeStartScripts = async (directory: string, projectID: string, startCommand: string | undefined) => {
-  const projectStart = await loadProjectStartCommand(projectID);
+const runWorktreeStartScripts = async (
+  directory: string,
+  projectID: string,
+  primaryWorktree: string,
+  startCommand: string | undefined,
+  projectCommandRuntime?: ProjectCommandRuntime,
+) => {
+  const projectStart = await resolveWorktreeProjectStartCommand(projectID, primaryWorktree, projectCommandRuntime);
   if (projectStart) {
     const projectResult = await runWorktreeStartCommand(directory, projectStart);
     if (!projectResult.success) {
@@ -1533,6 +1556,7 @@ const queueWorktreeBootstrap = (args: {
   ensureRemoteName: string;
   ensureRemoteUrl: string;
   startCommand: string | undefined;
+  projectCommandRuntime?: ProjectCommandRuntime;
 }) => {
   const {
     directory,
@@ -1545,6 +1569,7 @@ const queueWorktreeBootstrap = (args: {
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand,
+    projectCommandRuntime,
   } = args;
   const task = new Promise<void>((resolve) => setTimeout(resolve, 0))
     .then(async () => {
@@ -1564,7 +1589,7 @@ const queueWorktreeBootstrap = (args: {
         });
       }
       setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_PENDING, WORKTREE_PHASE_GIT_READY);
-      await runWorktreeStartScripts(directory, projectID, startCommand).catch((error) => {
+      await runWorktreeStartScripts(directory, projectID, primaryWorktree, startCommand, projectCommandRuntime).catch((error) => {
         console.warn('[GitService] Worktree start script task failed:', error instanceof Error ? error.message : String(error));
       });
       setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_READY, WORKTREE_PHASE_SETUP_READY);
@@ -1882,6 +1907,7 @@ async function attachGitWorktreeToCandidate(
   context: Awaited<ReturnType<typeof resolveWorktreeProjectContext>>,
   candidate: { name: string; directory: string; branch: string },
   input: CreateGitWorktreePayload = {},
+  runtime: { projectCommandRuntime?: ProjectCommandRuntime } = {},
 ): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -1995,6 +2021,7 @@ async function attachGitWorktreeToCandidate(
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand: input?.startCommand,
+    projectCommandRuntime: runtime.projectCommandRuntime,
   });
 
   const headResult = await runGitCommand(candidate.directory, ['rev-parse', 'HEAD']);
@@ -2010,7 +2037,11 @@ async function attachGitWorktreeToCandidate(
   };
 }
 
-export async function createWorktree(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
+export async function createWorktree(
+  directory: string,
+  input: CreateGitWorktreePayload = {},
+  runtime: { projectCommandRuntime?: ProjectCommandRuntime } = {},
+): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
 
@@ -2053,7 +2084,7 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
       ? cleanBranchName(String(input?.branchName || input?.existingBranch || candidate.branch || '').trim())
       : candidate.branch;
 
-    const task = attachGitWorktreeToCandidate(context, candidate, input).catch(async (error) => {
+    const task = attachGitWorktreeToCandidate(context, candidate, input, runtime).catch(async (error) => {
       setWorktreeBootstrapFailure(candidate.directory, error);
       await cleanupFailedFastWorktreeCreate(context, candidate);
       console.warn('[GitService] Background worktree creation failed:', error instanceof Error ? error.message : String(error));
@@ -2070,7 +2101,7 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
     };
   }
 
-  return attachGitWorktreeToCandidate(context, candidate, input);
+  return attachGitWorktreeToCandidate(context, candidate, input, runtime);
 }
 
 export async function getWorktreeBootstrapStatus(directory: string): Promise<WorktreeBootstrapStatus> {

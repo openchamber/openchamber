@@ -14,6 +14,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-git-runtime.ts`
   - Standard Git message handlers.
+  - Injects the VS Code OpenCode project-command runtime into worktree creation so bootstrap setup mirrors the web server runtime.
 
 - `bridge-git-special-runtime.ts`
   - Specialized Git flows (`pr-description`, `conflict-details`) and generation helpers.
@@ -23,8 +24,14 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
+  - `createWorktree(directory, input, runtime?)` accepts an injected project-command loader. The service executes an authoritative OpenCode `commands.start` value before any extra `startCommand`, treats authoritative empty commands as “do not run project start”, and falls back to legacy project JSON only when the runtime is absent, unavailable, or unmatched.
   - Fast worktree creation reports bootstrap phases explicitly: `directory-created`, then `git-ready` after Git population/upstream work, and `setup-ready` after setup commands. Existing worktrees without tracked bootstrap state fall back to `ready`/`setup-ready`; shared webview consumers also accept legacy responses without `phase`.
   - Worktree removal waits for an active create/bootstrap task for the same directory so background Git and setup work cannot race deletion or restore stale bootstrap state.
+
+- `project-commands-runtime.ts`
+  - SDK-backed OpenCode project command lookup for VS Code worktree bootstrap.
+  - Creates a fresh `@opencode-ai/sdk/v2` client per lookup from `OpenCodeManager.getApiUrl()` and `getOpenCodeAuthHeaders()`.
+  - Matches projects by exact OpenCode project ID first, then normalized explicit worktree path; unmatched or failed API lookups are reported as unavailable for legacy fallback.
 
 - `bridge-fs-runtime.ts`
   - Bridge handlers for filesystem-related message routes.

@@ -46,7 +46,7 @@ The following functions are exported and used by the web server:
 ### Worktree Operations
 - `getWorktrees(directory)`: List all git worktrees for a repository.
 - `validateWorktreeCreate(directory, input)`: Validate worktree creation parameters (mode, branchName, startRef, upstream config).
-- `createWorktree(directory, input)`: Create a new worktree (supports 'new' and 'existing' modes, upstream setup).
+- `createWorktree(directory, input, runtime?)`: Create a new worktree (supports 'new' and 'existing' modes, upstream setup). `runtime.projectCommandRuntime` may provide an authoritative OpenCode project `commands.start` loader for bootstrap setup.
 - `removeWorktree(directory, input)`: Remove a worktree (optionally delete local branch).
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
 
@@ -124,6 +124,7 @@ The following functions are internal helpers used by exported functions:
 - Fast-create background failures remove OpenCode sandbox metadata for directories that never became Git worktrees, and remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
 - Worktree removal waits for any active create/bootstrap task for that directory before deleting it, preventing a background Git or setup task from restoring removed state or racing filesystem cleanup.
 - Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains byte-for-byte and metadata-identical across the retry window, it is treated as stale, removed, and population continues automatically; changing locks are left untouched and reported as failures.
+- Worktree bootstrap runs the authoritative OpenCode project `commands.start` before any request `startCommand` when the injected runtime matches the project by exact ID or normalized worktree. An authoritative empty command suppresses legacy fallback. If the API is unavailable, errors, or does not match the project, bootstrap falls back to the legacy project JSON command for compatibility.
 
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.

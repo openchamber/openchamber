@@ -1,5 +1,6 @@
 import * as gitService from './gitService';
-import type { BridgeResponse } from './bridge';
+import type { BridgeContext, BridgeResponse } from './bridge';
+import { createOpenCodeProjectCommandRuntime } from './project-commands-runtime';
 
 type BridgeMessageInput = {
   id: string;
@@ -18,7 +19,7 @@ const isValidCommitHash = (hash: string | undefined): hash is string => (
   typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
 );
 
-export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
+export async function handleStandardGitBridgeMessage(message: BridgeMessageInput, ctx?: BridgeContext): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
   switch (type) {
@@ -124,7 +125,15 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       }
 
       if (normalizedMethod === 'POST') {
-        const created = await gitService.createWorktree(directory!, (payload || {}) as gitService.CreateGitWorktreePayload);
+        const projectCommandRuntime = createOpenCodeProjectCommandRuntime({
+          getApiUrl: () => ctx?.manager?.getApiUrl() || null,
+          getOpenCodeAuthHeaders: () => ctx?.manager?.getOpenCodeAuthHeaders() || {},
+        });
+        const created = await gitService.createWorktree(
+          directory!,
+          (payload || {}) as gitService.CreateGitWorktreePayload,
+          { projectCommandRuntime },
+        );
         return { id, type, success: true, data: created };
       }
 

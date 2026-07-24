@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const gitLibraries = {
   stageFiles: vi.fn(),
   unstageFiles: vi.fn(),
+  createWorktree: vi.fn(),
 };
 
 vi.mock('./index.js', () => ({
   stageFiles: gitLibraries.stageFiles,
   unstageFiles: gitLibraries.unstageFiles,
+  createWorktree: gitLibraries.createWorktree,
 }));
 
 const { registerGitRoutes } = await import('./routes.js');
@@ -62,6 +64,7 @@ describe('git routes index mutations', () => {
   beforeEach(() => {
     gitLibraries.stageFiles.mockReset();
     gitLibraries.unstageFiles.mockReset();
+    gitLibraries.createWorktree.mockReset();
   });
 
   it('accepts legacy stage path payloads', async () => {
@@ -133,5 +136,23 @@ describe('git routes index mutations', () => {
     expect(response.statusCode).toBe(400);
     expect(response.body).toEqual({ error: 'path parameter is required' });
     expect(gitLibraries.stageFiles).not.toHaveBeenCalled();
+  });
+
+  it('forwards the injected OpenCode project command runtime to worktree creation', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const projectCommandRuntime = { loadStartCommand: vi.fn() };
+    gitLibraries.createWorktree.mockResolvedValue({ path: '/repo/worktree' });
+
+    registerGitRoutes(app, { projectCommandRuntime });
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/worktrees')(
+      { query: { directory: '/repo' }, body: { mode: 'new' } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ path: '/repo/worktree' });
+    expect(gitLibraries.createWorktree).toHaveBeenCalledWith('/repo', { mode: 'new' }, { projectCommandRuntime });
   });
 });

@@ -1,4 +1,5 @@
-export function registerGitRoutes(app) {
+export function registerGitRoutes(app, dependencies = {}) {
+  const { projectCommandRuntime } = dependencies;
   let gitLibraries = null;
   const getGitLibraries = async () => {
     if (!gitLibraries) {
@@ -1011,7 +1012,7 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const created = await createWorktree(directory, req.body || {});
+      const created = await createWorktree(directory, req.body || {}, { projectCommandRuntime });
       res.json(created);
     } catch (error) {
       console.error('Failed to create worktree:', error);
