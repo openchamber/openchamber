@@ -1587,7 +1587,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return container.querySelector(`[data-message-id="${messageId}"]`);
     }, [resolveScrollContainer]);
 
-    const scrollHistoryIndexIntoView = React.useCallback((index: number, behavior: ScrollBehavior = 'auto') => {
+    const scrollHistoryIndexIntoView = React.useCallback((index: number) => {
         if (index < 0 || index >= historyEntries.length) {
             return false;
         }
@@ -1601,7 +1601,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             return false;
         }
 
-        virtualizer.scrollToIndex(index, { align: 'start', behavior: behavior === 'smooth' ? 'smooth' : 'auto' });
+        // Smooth scrolling can stop at a stale offset while unmounted,
+        // variable-height rows replace estimates with real measurements. Use
+        // exact auto-reconciliation; mounted targets still take the smooth DOM
+        // path below.
+        virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' });
         return true;
     }, [historyEntries.length, shouldVirtualizeHistory]);
 
@@ -1651,7 +1655,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
-                return scrollHistoryIndexIntoView(index, behavior);
+                return scrollHistoryIndexIntoView(index);
             },
 
             scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => {
@@ -1665,7 +1669,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     || (
                         trailingStreamingEntry !== undefined && index >= historyEntries.length
                             ? false
-                            : scrollHistoryIndexIntoView(index, behavior)
+                            : scrollHistoryIndexIntoView(index)
                     );
             },
 
@@ -1774,7 +1778,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 if (!applyAnchor()) {
                     const index = messageIndexMap.get(anchor.messageId);
                     if (typeof index === 'number' && index < historyEntries.length) {
-                        return scrollHistoryIndexIntoView(index, 'auto');
+                        return scrollHistoryIndexIntoView(index);
                     }
                 }
 

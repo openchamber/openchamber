@@ -1288,7 +1288,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const availableSkills = useSkillsStore((s) => s.skills);
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
-            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'catch-up', 'debug', 'weigh', 'explore',
+            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
         ]);
         if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
@@ -2254,6 +2254,32 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     scrollToBottom?.();
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.craftGoalFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'schedule-task' && (currentSessionId || newSessionDraftOpen)) {
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const idea = normalizedCommand.replace(/^\/schedule-task\b/i, '').trim();
+                    const visibleText = await renderMagicPrompt('session.scheduleTask.visible', {
+                        idea_block: idea ? `\n\nHere is my initial idea:\n${idea}` : '',
+                    });
+                    const instructionsText = await renderMagicPrompt('session.scheduleTask.instructions');
+                    await sendMessage(
+                        visibleText,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        variantToSend,
+                        inputMode,
+                        sendMessageOptions,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.scheduleTaskFailed'));
                 }
                 return;
             }

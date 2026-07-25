@@ -24,6 +24,8 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMac: boolean;
   // Windows desktop shell — for controls that only render on win32.
   isWindows: boolean;
+  // Linux desktop shell — for controls that only render on linux.
+  isLinux: boolean;
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -274,6 +276,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['copy', 'save image', 'read aloud'],
   },
   {
+    id: 'chat.draft-starters-visible',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.draftStartersVisible',
+    keywords: ['starter', 'starters', 'new session', 'welcome', 'suggestions'],
+  },
+  {
     id: 'chat.subagent-read-only-banner',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.allowPromptingSubagentSessions',
@@ -385,12 +393,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.openchamber.desktopNetwork.field.launchAtLogin',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
-    keywords: ['desktop', 'startup', 'login'],
+    keywords: ['desktop', 'startup', 'login', 'launch', 'background', 'autostart'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
     id: 'sessions.desktop-window-controls-position',
-    page: 'general',
+    page: 'appearance',
     titleKey: 'settings.openchamber.desktopNetwork.field.windowControlsPosition',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.windowControlsPositionDescription',
     keywords: ['desktop', 'window', 'controls', 'minimize', 'maximize', 'close', 'titlebar', 'linux', 'windows'],
@@ -409,8 +417,8 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.openchamber.desktopNetwork.field.minimizeToTray',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription',
-    keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows'],
-    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && ctx.isWindows,
+    keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows', 'linux'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && (ctx.isWindows || ctx.isLinux),
   },
   {
     id: 'sessions.desktop-keep-awake',
@@ -448,6 +456,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.openchamber.opencodeCli.field.showUpdateNotifications',
     keywords: ['opencode', 'cli', 'updates'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-control-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.opencodeCli.field.agentControlTool',
+    descriptionKey: 'settings.openchamber.opencodeCli.field.agentControlToolInfo',
+    keywords: ['agent', 'tool', 'orchestration', 'openchamber', 'sessions', 'schedule', 'control'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

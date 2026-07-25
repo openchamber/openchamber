@@ -866,6 +866,29 @@ export async function optimisticSend(input: {
 
   const targetDirectory = input.directory ?? dir()
   const store = targetDirectory ? dirStoreForDirectory(targetDirectory) : dirStore()
+  const stateBeforeSend = store.getState()
+  const sessionBeforeSend = stateBeforeSend.session.find((session) => session.id === input.sessionId)
+  const revertMessageID = sessionBeforeSend?.revert?.messageID
+  const revertedMessages = revertMessageID
+    ? (stateBeforeSend.message[input.sessionId] ?? []).filter((message) => message.id >= revertMessageID)
+    : []
+  const revertedParts = new Map(
+    revertedMessages.map((message) => [message.id, stateBeforeSend.part[message.id] ?? []] as const),
+  )
+
+  if (revertMessageID) {
+    const session = stateBeforeSend.session.map((candidate) => (
+      candidate.id === input.sessionId ? { ...candidate, revert: undefined } as Session : candidate
+    ))
+    const message = {
+      ...stateBeforeSend.message,
+      [input.sessionId]: (stateBeforeSend.message[input.sessionId] ?? []).filter((candidate) => candidate.id < revertMessageID),
+    }
+    const part = { ...stateBeforeSend.part }
+    for (const revertedMessage of revertedMessages) delete part[revertedMessage.id]
+    store.setState({ session, message, part })
+  }
+
   const messageID = ascendingId("msg")
   input.onMessageID?.(messageID)
   const textPartId = ascendingId("prt")
@@ -934,10 +957,32 @@ export async function optimisticSend(input: {
       directory: targetDirectory,
       messageID,
     })
-    const s = store.getState()
+    const rollbackState = store.getState()
+    let session = rollbackState.session
+    let message = rollbackState.message
+    let part = rollbackState.part
+
+    if (revertMessageID) {
+      session = rollbackState.session.map((candidate) => (
+        candidate.id === input.sessionId ? { ...candidate, revert: sessionBeforeSend?.revert } as Session : candidate
+      ))
+      message = {
+        ...rollbackState.message,
+        [input.sessionId]: [...(rollbackState.message[input.sessionId] ?? []), ...revertedMessages]
+          .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+      }
+      part = { ...rollbackState.part }
+      for (const [revertedMessageID, parts] of revertedParts) {
+        part[revertedMessageID] = parts
+      }
+    }
+
     store.setState({
+      session,
+      message,
+      part,
       session_status: {
-        ...s.session_status,
+        ...rollbackState.session_status,
         [input.sessionId]: { type: "idle" as const },
       },
     })

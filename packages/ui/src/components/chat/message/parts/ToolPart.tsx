@@ -971,7 +971,6 @@ const ToolScrollableTextOutput: React.FC<{
 
 ToolScrollableTextOutput.displayName = 'ToolScrollableTextOutput';
 
-
 const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
     const title = entry.state?.title;
     if (typeof title === 'string' && title.trim().length > 0) {
@@ -1514,7 +1513,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
     const attachments = stateWithData.attachments;
-
     const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
     const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
         ?? getPatchText(metadata?.diff)
@@ -1526,7 +1524,8 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         [currentDirectory, diffContent, metadata]
     );
     const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
-    const hideToolInputPreview = part.tool === 'apply_patch'
+    const hideToolInputPreview = part.tool === 'openchamber'
+        || part.tool === 'apply_patch'
         || part.tool === 'edit'
         || part.tool === 'multiedit';
     const diagnosticSection = React.useMemo(

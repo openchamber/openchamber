@@ -143,6 +143,7 @@ export type DesktopSettings = {
   desktopWindowControlsPosition?: DesktopWindowControlsPosition;
   inputSpellcheckEnabled?: boolean;
   showOpenCodeUpdateNotifications?: boolean;
+  agentControlToolEnabled?: boolean;
   openCodeUpdateToastDismissedVersion?: string;
   showToolFileIcons?: boolean;
   codeBlockLineWrap?: boolean;
@@ -206,8 +207,10 @@ export type DesktopSettings = {
   sttLanguage?: string;
   // Global draft welcome starters (pinned commands/skills), persisted to settings.json
   draftStarters?: DraftStarterRef[];
+  draftStartersVisible?: boolean;
   // One-time migration marker: Craft a Goal was offered in the starter row.
   draftStartersCraftGoalAdded?: boolean;
+  draftStartersScheduleTaskAdded?: boolean;
 };
 
 type DesktopBridgeGlobal = {
@@ -246,8 +249,8 @@ export const getElectronPlatform = (): string | null => {
   return typeof platform === 'string' ? platform : null;
 };
 
-/** Width of the three in-app window control buttons (3 × w-11). */
-export const DESKTOP_WINDOW_CONTROLS_WIDTH_PX = 132;
+/** Width of the three in-app window control buttons when placed on the left (3 × w-8). */
+export const DESKTOP_WINDOW_CONTROLS_WIDTH_PX = 96;
 
 /** Windows and Linux use frameless windows with in-app minimize/maximize/close controls. */
 export const usesFramelessElectronChrome = (): boolean => {
@@ -661,6 +664,9 @@ export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
     return null;
   }
 
+  // Propagate updater capability / feed errors so the UI can show actionable
+  // messages (missing AppImage, read-only path, network failure). Missing
+  // latest-linux*.yml is already normalized to available:false in main.
   const info = await invokeDesktop<UpdateInfo>('desktop_check_for_updates');
   return info as UpdateInfo;
 };

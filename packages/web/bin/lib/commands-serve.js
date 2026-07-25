@@ -10,6 +10,7 @@ import { rotateLogFile } from './cli-log-files.js';
 import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
+import { resolveUiSessionCookieName } from '../../server/lib/ui-auth/ui-session-cookie.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -111,6 +112,10 @@ async function serveCommand(options) {
     const logFd = fs.openSync(initialLogPath, 'a');
 
     const effectiveUiPassword = hasUiPasswordConfigured(options.uiPassword) ? options.uiPassword : undefined;
+    const effectiveUiSessionCookieName = typeof options.uiSessionCookieName === 'string'
+      && options.uiSessionCookieName.length > 0
+      ? options.uiSessionCookieName
+      : resolveUiSessionCookieName();
     assertAuthenticatedNetworkExposure({
       host: effectiveHost,
       uiPassword: effectiveUiPassword,
@@ -155,6 +160,7 @@ async function serveCommand(options) {
       if (effectiveUiPassword) {
         process.env.OPENCHAMBER_UI_PASSWORD = effectiveUiPassword;
       }
+      process.env.OPENCHAMBER_SESSION_COOKIE_NAME = effectiveUiSessionCookieName;
       process.env.OPENCHAMBER_HOST = effectiveHost;
       process.env.OPENCHAMBER_RUNTIME = 'web';
 
@@ -209,6 +215,7 @@ async function serveCommand(options) {
         host: effectiveHost,
         launchMode: 'foreground',
         uiPassword: effectiveUiPassword,
+        uiSessionCookieName: effectiveUiSessionCookieName,
         apiOnly: options.apiOnly === true,
       }, emitNotice);
 
@@ -273,6 +280,7 @@ async function serveCommand(options) {
         OPENCHAMBER_RUNTIME: 'web',
         OPENCODE_BINARY: opencodeBinary,
         OPENCHAMBER_HOST: effectiveHost,
+        OPENCHAMBER_SESSION_COOKIE_NAME: effectiveUiSessionCookieName,
         ...(effectiveUiPassword ? { OPENCHAMBER_UI_PASSWORD: effectiveUiPassword } : {}),
         ...(options.apiOnly === true ? { OPENCHAMBER_API_ONLY: 'true' } : {}),
         ...(process.env.OPENCODE_SKIP_START ? { OPENCHAMBER_SKIP_OPENCODE_START: process.env.OPENCODE_SKIP_START } : {}),
@@ -353,6 +361,7 @@ async function serveCommand(options) {
       host: effectiveHost,
       launchMode: 'daemon',
       uiPassword: effectiveUiPassword,
+      uiSessionCookieName: effectiveUiSessionCookieName,
       apiOnly: options.apiOnly === true,
     }, emitNotice);
 

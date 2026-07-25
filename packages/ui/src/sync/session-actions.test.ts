@@ -617,6 +617,85 @@ describe("optimisticSend target directory", () => {
     expect(currentStore.getState().session_status["session-new"]).toBe(undefined)
   })
 
+  test("commits the new branch locally when sending after a revert", async () => {
+    const retainedMessage = { id: "msg_1", role: "user", sessionID: "session-reverted" } as Message
+    const revertedMessage = { id: "msg_2", role: "user", sessionID: "session-reverted" } as Message
+    const targetStore = createStore({}, {
+      session: [{ id: "session-reverted", revert: { messageID: "msg_2" } } as Session],
+      message: { "session-reverted": [retainedMessage, revertedMessage] },
+      part: { msg_2: [{ id: "part_2", type: "text", text: "old branch" } as Part] },
+    })
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let optimisticMessage: Message | null = null
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        optimisticMessage = input.message
+        targetStore.setState((state) => ({
+          message: { ...state.message, [input.sessionID]: [...(state.message[input.sessionID] ?? []), input.message] },
+          part: { ...state.part, [input.message.id]: input.parts },
+        }))
+      },
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-reverted",
+      directory: "/target/project",
+      content: "new branch",
+      providerID: "provider",
+      modelID: "model",
+      send: async () => {},
+    })
+
+    expect(targetStore.getState().session[0].revert).toBe(undefined)
+    expect(targetStore.getState().message["session-reverted"].map((message) => message.id)).toEqual([
+      "msg_1",
+      (optimisticMessage as unknown as Message).id,
+    ])
+    expect(targetStore.getState().part.msg_2).toBe(undefined)
+  })
+
+  test("restores the reverted branch when sending fails", async () => {
+    const retainedMessage = { id: "msg_1", role: "user", sessionID: "session-reverted" } as Message
+    const revertedMessage = { id: "msg_2", role: "user", sessionID: "session-reverted" } as Message
+    const revertedPart = { id: "part_2", type: "text", text: "old branch" } as Part
+    const targetStore = createStore({}, {
+      session: [{ id: "session-reverted", revert: { messageID: "msg_2" } } as Session],
+      message: { "session-reverted": [retainedMessage, revertedMessage] },
+      part: { msg_2: [revertedPart] },
+    })
+    const childStores = createChildStores([["/target/project", targetStore]])
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => targetStore.setState((state) => ({
+        message: { ...state.message, [input.sessionID]: [...(state.message[input.sessionID] ?? []), input.message] },
+        part: { ...state.part, [input.message.id]: input.parts },
+      })),
+      (input) => targetStore.setState((state) => ({
+        message: { ...state.message, [input.sessionID]: (state.message[input.sessionID] ?? []).filter((message) => message.id !== input.messageID) },
+        part: Object.fromEntries(Object.entries(state.part).filter(([messageID]) => messageID !== input.messageID)),
+      })),
+    )
+
+    await expect(optimisticSend({
+      sessionId: "session-reverted",
+      directory: "/target/project",
+      content: "new branch",
+      providerID: "provider",
+      modelID: "model",
+      send: async () => { throw new Error("rejected") },
+    })).rejects.toThrow("rejected")
+
+    expect(targetStore.getState().session[0].revert?.messageID).toBe("msg_2")
+    expect(targetStore.getState().message["session-reverted"]).toEqual([retainedMessage, revertedMessage])
+    expect(targetStore.getState().part.msg_2).toEqual([revertedPart])
+  })
+
   test("allows callers to block final send when runtime changes after optimistic insert", async () => {
     const targetStore = createStore({})
     const childStores = createChildStores([["/target/project", targetStore]])

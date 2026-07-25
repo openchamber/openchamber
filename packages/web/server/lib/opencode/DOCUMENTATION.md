@@ -28,6 +28,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/opencode-resolution-runtime.js`: OpenCode binary resolution snapshot runtime for settings routes and diagnostics.
 - `packages/web/server/lib/opencode/tunnel-wiring-runtime.js`: tunnel service/routes composition runtime and active-port wiring for main server startup.
 - `packages/web/server/lib/opencode/startup-pipeline-runtime.js`: server startup tail orchestration runtime for terminal/proxy/static/start-listen flow.
+- `packages/web/server/lib/agent-tool/runtime.js`: managed OpenCode custom-tool materialization, environment injection, loopback authentication, and fixed CLI action dispatch.
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/opencode/openchamber-routes.js`: OpenChamber update and models metadata route registration.
 - `packages/web/server/lib/opencode/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
@@ -112,6 +113,11 @@ The runtime maintains active-session count incrementally from idempotent activit
   - `startHealthMonitoring(healthCheckIntervalMs)`
   - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
+
+Managed OpenCode launch also merges the environment returned by the agent-tool
+runtime. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
+be replaced by injected values. External OpenCode processes receive no
+OpenChamber tool injection.
 
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
@@ -310,6 +316,10 @@ The runtime maintains active-session count incrementally from idempotent activit
 - `createStartupPipelineRuntime(dependencies)`: creates runtime for terminal wiring, proxy/bootstrap scheduling, static route registration, and server startup/listen flow.
 - Returned API:
   - `run(options)`
+
+The pipeline binds the OpenChamber listener and publishes its active port
+before starting managed OpenCode. The managed custom tool therefore receives
+an authoritative loopback callback URL even when OpenChamber binds port `0`.
 
 ## Public exports (openchamber-routes.js)
 - `registerOpenChamberRoutes(app, dependencies)`: registers OpenChamber endpoints:

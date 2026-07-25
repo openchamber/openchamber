@@ -1,32 +1,65 @@
 import { buildLocalUrl } from './cli-network.js';
+import { readDesktopLocalClientTokenFromSettings, readDesktopLocalPortFromSettings } from './cli-paths.js';
 import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
-import { resolveUiSessionCookieName } from '../../server/lib/ui-auth/ui-session-cookie.js';
+import { DEFAULT_UI_SESSION_COOKIE_NAME } from '../../server/lib/ui-auth/ui-session-cookie.js';
 
-function extractUiSessionCookie(response, cookieName = resolveUiSessionCookieName()) {
-  const setCookie = response?.headers?.get?.('set-cookie');
-  if (typeof setCookie !== 'string' || setCookie.length === 0) {
-    return null;
+function extractUiSessionCookie(response, cookieName = DEFAULT_UI_SESSION_COOKIE_NAME) {
+  const values = [];
+  const direct = response?.headers?.get?.('set-cookie');
+  if (typeof direct === 'string' && direct.length > 0) {
+    values.push(direct);
   }
+  const getSetCookie = response?.headers?.getSetCookie;
+  if (typeof getSetCookie === 'function') {
+    const setCookies = getSetCookie.call(response.headers);
+    if (Array.isArray(setCookies)) {
+      values.push(...setCookies.filter((value) => typeof value === 'string' && value.length > 0));
+    }
+  }
+  const raw = response?.headers?.raw?.();
+  if (Array.isArray(raw?.['set-cookie'])) {
+    values.push(...raw['set-cookie'].filter((value) => typeof value === 'string' && value.length > 0));
+  }
+
   const escapedCookieName = cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = setCookie.match(new RegExp(`(?:^|,\\s*)(${escapedCookieName}=[^;]+)`));
-  return match?.[1] || null;
+  for (const setCookie of values) {
+    const match = setCookie.match(new RegExp(`(?:^|,\\s*)(${escapedCookieName}=[^;]+)`));
+    if (match?.[1]) return match[1];
+  }
+  return null;
 }
 
-async function resolveUiPasswordForPort(port, options = {}) {
-  if (typeof options.uiPassword === 'string' && options.uiPassword.trim().length > 0) {
-    return options.uiPassword;
-  }
+async function resolveUiAuthForPort(port, options = {}) {
   const instanceOptions = readInstanceOptions(await getInstanceFilePath(port));
-  return typeof instanceOptions?.uiPassword === 'string' && instanceOptions.uiPassword.trim().length > 0
+  const explicitUiPassword = options.explicitUiPassword
+    && typeof options.uiPassword === 'string'
+    && options.uiPassword.trim().length > 0
+    ? options.uiPassword
+    : null;
+  const storedUiPassword = typeof instanceOptions?.uiPassword === 'string'
+    && instanceOptions.uiPassword.trim().length > 0
     ? instanceOptions.uiPassword
     : null;
+  const fallbackUiPassword = typeof options.uiPassword === 'string'
+    && options.uiPassword.trim().length > 0
+    ? options.uiPassword
+    : null;
+  const uiSessionCookieName = typeof instanceOptions?.uiSessionCookieName === 'string'
+    && instanceOptions.uiSessionCookieName.length > 0
+    ? instanceOptions.uiSessionCookieName
+    : DEFAULT_UI_SESSION_COOKIE_NAME;
+
+  return {
+    uiPassword: explicitUiPassword || storedUiPassword || fallbackUiPassword,
+    uiSessionCookieName,
+  };
 }
 
 async function createUiSessionCookie(
   port,
   password,
   timeoutMs,
-  cookieName = resolveUiSessionCookieName(),
+  cookieName = DEFAULT_UI_SESSION_COOKIE_NAME,
 ) {
   if (typeof password !== 'string' || password.length === 0) {
     return null;
@@ -52,6 +85,18 @@ async function createUiSessionCookie(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function getDesktopLocalAuthHeader(port, requestHeaders) {
+  if (requestHeaders.Authorization || requestHeaders.authorization) {
+    return null;
+  }
+  const desktopPort = readDesktopLocalPortFromSettings();
+  if (desktopPort !== port) {
+    return null;
+  }
+  const token = readDesktopLocalClientTokenFromSettings();
+  return token ? `Bearer ${token}` : null;
 }
 
 async function requestServerShutdown(port, hostOverride) {
@@ -88,6 +133,10 @@ async function requestJson(port, endpoint, options = {}) {
       ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
       ...(fetchOptions.headers || {}),
     };
+    const desktopAuth = getDesktopLocalAuthHeader(port, requestHeaders);
+    if (desktopAuth) {
+      requestHeaders.Authorization = desktopAuth;
+    }
     const response = await fetch(requestUrl, {
       ...fetchOptions,
       headers: requestHeaders,
@@ -95,8 +144,13 @@ async function requestJson(port, endpoint, options = {}) {
     });
     const body = await response.json().catch(() => null);
     if (response.status === 401 && body?.error === 'UI authentication required') {
-      const uiPassword = await resolveUiPasswordForPort(port, options);
-      const cookie = await createUiSessionCookie(port, uiPassword, timeoutMs);
+      const { uiPassword, uiSessionCookieName } = await resolveUiAuthForPort(port, options);
+      const cookie = await createUiSessionCookie(
+        port,
+        uiPassword,
+        timeoutMs,
+        uiSessionCookieName,
+      );
       if (cookie) {
         const retryResponse = await fetch(requestUrl, {
           ...fetchOptions,

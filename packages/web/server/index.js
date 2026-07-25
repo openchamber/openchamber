@@ -95,6 +95,10 @@ import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
+import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
+import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
+import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
+import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -264,6 +268,7 @@ const themeRuntime = createThemeRuntime({
 const readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromDisk(...args);
 
 let notificationTemplateRuntime = null;
+let agentToolRuntime = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -952,6 +957,7 @@ const bootstrapRuntime = createBootstrapRuntime({
   registerTtsRoutes,
   registerNotificationRoutes,
   registerOpenChamberRoutes,
+  registerAgentToolRoutes: (app, options) => options.agentToolRuntime.registerRoutes(app, options.express),
   express,
 });
 const tunnelWiringRuntime = createTunnelWiringRuntime({
@@ -1048,6 +1054,11 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  getManagedOpenCodeEnv: async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    if (settings?.agentControlToolEnabled === false) return {};
+    return agentToolRuntime?.prepareManagedOpenCodeEnv() || {};
+  },
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
@@ -1085,6 +1096,50 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
     }
   },
   logger: console,
+});
+const emitSessionCreatedEvent = (event) => {
+  for (const client of uiOpenChamberEventClients) {
+    try {
+      writeSseEvent(client, {
+        type: 'openchamber:session-created',
+        properties: {
+          sessionId: event.sessionID,
+          directory: event.directory,
+          createdAt: event.createdAt,
+          promptDispatched: event.promptDispatched === true,
+          dispatchedAsCommand: event.dispatchedAsCommand === true,
+          ...(event.projectID ? { projectId: event.projectID } : {}),
+          ...(event.title ? { title: event.title } : {}),
+        },
+      });
+    } catch {
+      uiOpenChamberEventClients.delete(client);
+    }
+  }
+};
+const scheduledTaskService = createScheduledTaskService({
+  readSettingsFromDiskMigrated,
+  sanitizeProjects,
+  projectConfigRuntime,
+  scheduledTasksRuntime,
+});
+const openChamberSessionService = createOpenChamberSessionService({
+  readSettingsFromDiskMigrated,
+  sanitizeProjects,
+  validateDirectoryPath,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  waitForOpenCodeReady,
+  emitSessionCreatedEvent,
+});
+const openChamberControlService = createOpenChamberControlService({
+  readSettingsFromDiskMigrated,
+  sanitizeProjects,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  waitForOpenCodeReady,
+  sessionService: openChamberSessionService,
+  scheduledTaskService,
 });
 
 const ensureGlobalWatcherStarted = async () => {
@@ -1173,6 +1228,18 @@ async function main(options = {}) {
     || (typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
       ? process.env.OPENCHAMBER_HOST.trim()
       : '127.0.0.1');
+  agentToolRuntime = createAgentToolRuntime({
+    crypto,
+    fsPromises,
+    path,
+    dataDir: OPENCHAMBER_DATA_DIR,
+    env: process.env,
+    executeAction: (...args) => openChamberControlService.execute(...args),
+    getActivePort: () => {
+      const address = server?.address?.();
+      return typeof address === 'object' && address ? address.port : null;
+    },
+  });
 
   // Pairing transports advertised to the create-device dialog. LAN reachability is
   // derived from the SERVER's actual bind (a wildcard bind → the machine's LAN IP;
@@ -1455,6 +1522,7 @@ async function main(options = {}) {
     fetchFreeZenModels,
     getCachedZenModels,
     setAutoAcceptSession,
+    agentToolRuntime,
   });
   uiAuthController = bootstrapResult.uiAuthController;
   realtimeProxyRuntime = attachRealtimeProxy({
@@ -1531,6 +1599,11 @@ async function main(options = {}) {
     buildAugmentedPath,
     projectConfigRuntime,
     scheduledTasksRuntime,
+    scheduledTaskService,
+    openChamberSessionService,
+    openChamberControlService,
+    waitForOpenCodeReady,
+    emitSessionCreatedEvent,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
     permissionAutoAcceptRuntime,

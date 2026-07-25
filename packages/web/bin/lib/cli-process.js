@@ -59,6 +59,9 @@ function writeInstanceOptions(instanceFilePath, options, onNotice) {
       launchMode: options.launchMode === 'foreground' ? 'foreground' : 'daemon',
       uiPassword: typeof options.uiPassword === 'string' ? options.uiPassword : undefined,
       hasUiPassword: typeof options.uiPassword === 'string',
+      uiSessionCookieName: typeof options.uiSessionCookieName === 'string' && options.uiSessionCookieName.length > 0
+        ? options.uiSessionCookieName
+        : undefined,
       apiOnly: options.apiOnly === true,
       startedAt: Number.isFinite(options.startedAt) ? options.startedAt : Date.now(),
     };

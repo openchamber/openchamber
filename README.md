@@ -105,7 +105,7 @@ Linux AppImages need FUSE (`libfuse.so.2`). On Ubuntu/Debian install `libfuse2` 
 APPIMAGE_EXTRACT_AND_RUN=1 ./OpenChamber-*-linux-*.AppImage
 ```
 
-Linux Desktop ships as AppImage with in-app window controls and auto-update when running from a writable AppImage. System tray and launch-at-login are not available on Linux yet (macOS/Windows only).
+Linux Desktop ships as AppImage with in-app window controls and auto-update when running from a writable AppImage.
 
 ### **VS Code**
 Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.

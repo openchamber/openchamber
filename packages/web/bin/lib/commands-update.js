@@ -110,6 +110,7 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
           host: storedOptions.host,
           explicitPort: true,
           uiPassword: storedOptions.uiPassword,
+          uiSessionCookieName: storedOptions.uiSessionCookieName,
           suppressStartupSummary: true,
           suppressUiPasswordWarning: true,
           quiet: true,

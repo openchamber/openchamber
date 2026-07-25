@@ -32,7 +32,8 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
   - `dispose()`
 
 ## Public exports (ui-session-cookie.js)
-- `resolveUiSessionCookieName(env)`: resolves `OPENCHAMBER_SESSION_COOKIE_NAME` at call time and falls back to the internal compatibility default, `oc_ui_session`.
+- `DEFAULT_UI_SESSION_COOKIE_NAME`: compatibility fallback (`oc_ui_session`) used for legacy instance records that predate configurable cookie names.
+- `resolveUiSessionCookieName(env)`: resolves `OPENCHAMBER_SESSION_COOKIE_NAME` at call time and falls back to `DEFAULT_UI_SESSION_COOKIE_NAME`.
 
 ## Public exports (ui-passkeys.js)
 - `createUiPasskeys({ passwordBinding, readSettingsFromDiskMigrated, storeFile, rpName, challengeTtlMs })`: creates passkey runtime with methods:

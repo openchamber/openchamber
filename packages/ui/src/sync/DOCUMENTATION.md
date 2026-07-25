@@ -200,6 +200,7 @@ Rules:
 1. If an action mutates session list membership or visible session metadata, update `useGlobalSessionsStore` there.
 2. If an action targets a session by ID, resolve the **session's own directory**. Do not assume the current directory is correct.
 3. `session-ui-store.ts` should delegate to `session-actions.ts` for these mutations instead of duplicating SDK calls.
+4. Sending after a revert commits the new branch optimistically: remove the reverted tail and marker before inserting the new message, and restore both if the send is rejected.
 
 Examples of global-store updates performed in `session-actions.ts`:
 

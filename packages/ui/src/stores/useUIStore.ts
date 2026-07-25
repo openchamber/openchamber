@@ -591,6 +591,7 @@ interface UIStore {
   fontSize: number;
   // Global draft welcome starters; null = unset (use the default built-in set).
   globalDraftStarters: DraftStarterRef[] | null;
+  draftStartersVisible: boolean;
   terminalFontSize: number;
   terminalShell: TerminalShell;
   terminalLoginShells: TerminalShell[];
@@ -645,6 +646,7 @@ interface UIStore {
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
+  agentControlToolEnabled: boolean;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
@@ -750,6 +752,7 @@ interface UIStore {
   setMessageLimit: (value: number) => void;
   setFontSize: (size: number) => void;
   setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
+  setDraftStartersVisible: (value: boolean) => void;
   setTerminalFontSize: (size: number) => void;
   setTerminalShell: (shell: TerminalShell) => void;
   setTerminalLoginShells: (shells: TerminalShell[]) => void;
@@ -805,6 +808,7 @@ interface UIStore {
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
+  setAgentControlToolEnabled: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
@@ -957,6 +961,7 @@ export const useUIStore = create<UIStore>()(
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: true,
+        agentControlToolEnabled: true,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
@@ -975,6 +980,7 @@ export const useUIStore = create<UIStore>()(
         expandedEditorToolbar: false,
         showSplitAssistantMessageActions: false,
         allowPromptingSubagentSessions: false,
+        draftStartersVisible: true,
         isMobileSessionStatusBarCollapsed: false,
         mobileSessionPanelOpen: false,
         mobileSessionFilterProjectId: null,
@@ -1672,6 +1678,10 @@ export const useUIStore = create<UIStore>()(
           set({ globalDraftStarters: refs });
         },
 
+        setDraftStartersVisible: (value) => {
+          set({ draftStartersVisible: value });
+        },
+
         setTerminalFontSize: (size) => {
           const rounded = Math.round(size);
           const clamped = Math.max(9, Math.min(52, rounded));
@@ -2105,6 +2115,9 @@ export const useUIStore = create<UIStore>()(
         setShowOpenCodeUpdateNotifications: (value) => {
           set({ showOpenCodeUpdateNotifications: value });
         },
+        setAgentControlToolEnabled: (value) => {
+          set({ agentControlToolEnabled: value });
+        },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
@@ -2395,6 +2408,7 @@ export const useUIStore = create<UIStore>()(
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
+          agentControlToolEnabled: state.agentControlToolEnabled,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
@@ -2413,6 +2427,7 @@ export const useUIStore = create<UIStore>()(
           expandedEditorToolbar: state.expandedEditorToolbar,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
+          draftStartersVisible: state.draftStartersVisible,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,

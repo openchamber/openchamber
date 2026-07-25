@@ -25,6 +25,22 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Implements `openchamber status`.
   - Formats discovered instances and tunnel readiness/status for human, quiet, and JSON output.
 
+- `commands-session.js`
+  - Implements `openchamber session create`, `send`, `fork`, `list`, `status`, and `messages`.
+  - Maps CLI options to shared control-service inputs and owns only human, quiet, and JSON presentation.
+  - Message projection matches Export Markdown semantics: only ordered `text` parts are exposed; tool, reasoning, file, and other parts are omitted.
+  - The server control service owns create/worktree/prompt orchestration, official OpenCode reads, Goal Mode, wait semantics, and partial failures.
+
+- `commands-schedule.js`
+  - Implements scheduled task status/list/create/run/delete/enable/disable.
+  - Maps options to control-service inputs and renders results; project resolution, validation, persistence, and execution remain server-owned.
+
+- `commands-models.js`
+  - Prints OpenChamber default, favorite, and recent model settings.
+
+- `commands-projects.js`
+  - Prints configured project labels, ids, and directories for later control-plane calls.
+
 - `commands-logs.js`
   - Implements `openchamber logs`.
   - Resolves log files, tails recent lines, and follows log output.
@@ -64,12 +80,25 @@ These modules hold reusable, non-presentational logic for commands.
 
 - `cli-process.js`
   - PID files, instance registry files, process identity checks, runtime metadata checks, and process termination helpers.
+  - Instance records persist the resolved per-port UI session cookie name alongside launch/auth metadata so later CLI processes and lifecycle restarts do not depend on their current environment.
 
 - `cli-lifecycle.js`
   - Instance discovery, live health probing, attachability checks, provider discovery, and status aggregation used by lifecycle/status/tunnel commands.
 
 - `cli-http.js`
   - HTTP helpers for health checks, shutdown requests, JSON API calls, tunnel provider fetches, and system info fetches.
+  - Owns local desktop bearer auth and managed CLI-instance UI password retry for control-plane requests.
+  - Password-auth retries read both the password and cookie name from the target port's instance record. Legacy records without `uiSessionCookieName` fall back to `oc_ui_session`.
+
+- `cli-control.js`
+  - Sends one typed action request to the authenticated OpenChamber control endpoint and maps HTTP failures to CLI exit behavior.
+  - Must not reproduce session, scheduled-task, project-resolution, or wait orchestration.
+
+- `cli-api-target.js`
+  - Resolves the target OpenChamber runtime for control-plane commands, preferring desktop unless a port is explicit.
+
+- `cli-goal.js`
+  - Owns shared Goal Mode token-budget validation for session and schedule commands.
 
 - `cli-network.js`
   - Host resolution, URL building, LAN detection, unsafe browser port validation, and UI password/network exposure checks.

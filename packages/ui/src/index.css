@@ -933,6 +933,49 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+/*
+ * Active pill indicator motion. Transitions are opt-in via the --is-animated
+ * modifier so first measurement and container resizes reposition instantly
+ * instead of sliding in from the track origin.
+ */
+.pill-tabs__indicator--is-animated {
+  /* Decelerating ease with no overshoot: the indicator settles rather than
+     bouncing back at the end of its travel. */
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Underline indicator shares the pill's travel curve so both tab styles feel
+   like the same control. */
+.underline-tabs__indicator--is-animated {
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pill-tabs__button {
+  transition-property: color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pill-tabs__button:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill-tabs__indicator--is-animated,
+  .underline-tabs__indicator--is-animated {
+    transition: none;
+  }
+
+  .pill-tabs__button:active {
+    transform: none;
+  }
+}
+
 /* Text font */
 .markdown-content {
   font-family: var(--font-sans);

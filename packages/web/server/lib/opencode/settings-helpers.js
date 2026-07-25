@@ -248,6 +248,15 @@ export const createSettingsHelpers = (dependencies) => {
       }
       result.draftStarters = starters;
     }
+    if (typeof candidate.draftStartersVisible === 'boolean') {
+      result.draftStartersVisible = candidate.draftStartersVisible;
+    }
+    if (typeof candidate.draftStartersCraftGoalAdded === 'boolean') {
+      result.draftStartersCraftGoalAdded = candidate.draftStartersCraftGoalAdded;
+    }
+    if (typeof candidate.draftStartersScheduleTaskAdded === 'boolean') {
+      result.draftStartersScheduleTaskAdded = candidate.draftStartersScheduleTaskAdded;
+    }
 
 
     if (typeof candidate.uiFont === 'string' && candidate.uiFont.length > 0) {
@@ -479,6 +488,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
       result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
     }
+    if (typeof candidate.agentControlToolEnabled === 'boolean') {
+      result.agentControlToolEnabled = candidate.agentControlToolEnabled;
+    }
     if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
       const version = candidate.openCodeUpdateToastDismissedVersion.trim();
       result.openCodeUpdateToastDismissedVersion = version.slice(0, VERSION_STRING_MAX_LENGTH);
@@ -545,6 +557,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.expandedEditorToolbar === 'boolean') {
       result.expandedEditorToolbar = candidate.expandedEditorToolbar;
+    }
+    if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
+      result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
     }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;

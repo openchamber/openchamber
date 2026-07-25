@@ -1,3 +1,10 @@
+## [Unreleased]
+
+- Sessions: fixed missing activity-based sorting; chats now move in the list when they start or finish instead of repeatedly reordering while a response streams.
+- Chat: jumping to messages in long conversations now lands on the intended message when earlier rows have not been rendered yet.
+- Settings: added an option to hide starter suggestions on the new-session screen.
+- Shortcuts: fixed a regression where double-Escape could be primed when the current session was not active.
+
 ## [1.16.3] - 2026-07-22
 
 - **Chat attachments:** added Office and OpenDocument files (`.docx`, `.pptx`, `.xlsx`, `.odt`, `.odp`, and `.ods`), with readable text and supported embedded images extracted before sending. Attachments also support more source-code formats, notebooks, HAR files with credentials and cookies removed, SVG and Draw.io files, and HEIC/HEIF images; the composer warns when the selected model may ignore an attachment type.

@@ -9,12 +9,25 @@ import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { requestJson } from './lib/cli-http.js';
+import { requestControlAction } from './lib/cli-control.js';
 import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
+import { readInstanceOptions, writeInstanceOptions } from './lib/cli-process.js';
+import { formatGoal } from './lib/commands-schedule.js';
+import {
+  buildSessionCreatePayload,
+  buildSessionPromptPayload,
+  formatSessionLine,
+  sessionCommand,
+} from './lib/commands-session.js';
+import { formatModelsOutput } from './lib/commands-models.js';
+import { formatProjectLine } from './lib/commands-projects.js';
+import { resolveTargetPort } from './lib/cli-api-target.js';
 import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './lib/cli-tunnel-capabilities.js';
 import {
   TUNNEL_PROVIDER_CLOUDFLARE,
   TUNNEL_PROVIDER_NGROK,
 } from '../server/lib/tunnels/types.js';
+import { resolveUiSessionCookieName } from '../server/lib/ui-auth/ui-session-cookie.js';
 import {
   assertAuthenticatedNetworkExposure,
   commands,
@@ -44,6 +57,25 @@ async function withTempOpenChamberDataDir(fn) {
       delete process.env.OPENCHAMBER_DATA_DIR;
     }
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function withUiSessionCookieName(cookieName, fn) {
+  const originalCookieName = process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
+  if (cookieName === undefined) {
+    delete process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
+  } else {
+    process.env.OPENCHAMBER_SESSION_COOKIE_NAME = cookieName;
+  }
+
+  try {
+    return await fn();
+  } finally {
+    if (originalCookieName === undefined) {
+      delete process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
+    } else {
+      process.env.OPENCHAMBER_SESSION_COOKIE_NAME = originalCookieName;
+    }
   }
 }
 
@@ -229,6 +261,351 @@ describe('cli args', () => {
     expect(parsed.options.port).toBe(3002);
   });
 
+  it('parses schedule commands and options', () => {
+    const parsed = parseArgs([
+      'schedule',
+      'create',
+      '--project',
+      'proj_1',
+      '--name',
+      'Daily review',
+      '--prompt',
+      'Review the repo',
+      '--model',
+      'openai/gpt-5.5',
+      '--daily',
+      '09:30',
+      '--timezone',
+      'Europe/Kyiv',
+    ]);
+
+    expect(parsed.command).toBe('schedule');
+    expect(parsed.scheduleAction).toBe('create');
+    expect(parsed.options.project).toBe('proj_1');
+    expect(parsed.options.name).toBe('Daily review');
+    expect(parsed.options.prompt).toBe('Review the repo');
+    expect(parsed.options.model).toBe('openai/gpt-5.5');
+    expect(parsed.options.daily).toBe('09:30');
+    expect(parsed.options.timezone).toBe('Europe/Kyiv');
+  });
+
+  it('parses goal-enabled scheduled task options', () => {
+    const parsed = parseArgs([
+      'schedule',
+      'create',
+      '--dir',
+      '/repo',
+      '--name',
+      'Finish migration',
+      '--prompt',
+      'Complete and verify the migration',
+      '--model',
+      'openai/gpt-5.5',
+      '--daily',
+      '09:30',
+      '--goal',
+      '--goal-token-budget',
+      '200000',
+    ]);
+
+    expect(parsed.options.goal).toBe(true);
+    expect(parsed.options.goalTokenBudget).toBe('200000');
+  });
+
+  it('formats scheduled goal state compactly', () => {
+    expect(formatGoal({})).toBe('goal:no');
+    expect(formatGoal({ goalEnabled: true })).toBe('goal:yes');
+    expect(formatGoal({ goalEnabled: true, goalTokenBudget: 200000 })).toBe('goal:yes budget:200000');
+  });
+
+  it('parses session create options', () => {
+    const parsed = parseArgs([
+      'session',
+      'create',
+      '--dir',
+      '.',
+      '--name',
+      'Side task',
+      '--prompt',
+      'Investigate cache invalidation',
+      '--model',
+      'openai/gpt-5.5',
+      '--worktree',
+      'side-task',
+      '--branch',
+      'openchamber/side-task',
+      '--base',
+      'main',
+      '--no-upstream',
+    ]);
+
+    expect(parsed.command).toBe('session');
+    expect(parsed.sessionAction).toBe('create');
+    expect(parsed.options.directory).toBe('.');
+    expect(parsed.options.name).toBe('Side task');
+    expect(parsed.options.prompt).toBe('Investigate cache invalidation');
+    expect(parsed.options.model).toBe('openai/gpt-5.5');
+    expect(parsed.options.worktree).toBe('side-task');
+    expect(parsed.options.branch).toBe('openchamber/side-task');
+    expect(parsed.options.startRef).toBe('main');
+    expect(parsed.options.setUpstream).toBe(false);
+  });
+
+  it('parses control help command', () => {
+    const parsed = parseArgs(['control', 'help']);
+    expect(parsed.command).toBe('control');
+    expect(parsed.controlAction).toBe('help');
+  });
+
+  it('builds session create payloads from CLI options', () => {
+    expect(buildSessionCreatePayload({
+      directory: '.',
+      name: 'Side task',
+      prompt: 'Investigate cache invalidation',
+      model: 'openai/gpt-5.5',
+      agent: 'build',
+      worktree: 'side-task',
+      branch: 'openchamber/side-task',
+      startRef: 'main',
+      setUpstream: true,
+    })).toEqual({
+      directory: '.',
+      title: 'Side task',
+      worktree: {
+        name: 'side-task',
+        branchName: 'openchamber/side-task',
+        startRef: 'main',
+      },
+      prompt: 'Investigate cache invalidation',
+      model: 'openai/gpt-5.5',
+      agent: 'build',
+      setUpstream: true,
+    });
+  });
+
+  it('allows session create prompts without an explicit model', () => {
+    expect(buildSessionCreatePayload({
+      directory: '.',
+      prompt: 'Investigate cache invalidation',
+    })).toEqual({
+      directory: '.',
+      prompt: 'Investigate cache invalidation',
+    });
+  });
+
+  it('builds goal-enabled session create payloads', () => {
+    const parsed = parseArgs([
+      'session',
+      'create',
+      '--dir',
+      '/repo',
+      '--prompt',
+      'Finish and verify the migration',
+      '--goal',
+      '--goal-token-budget',
+      '200000',
+    ]);
+
+    expect(buildSessionCreatePayload(parsed.options)).toEqual({
+      directory: '/repo',
+      prompt: 'Finish and verify the migration',
+      goal: true,
+      goalTokenBudget: 200000,
+    });
+  });
+
+  it('validates session goal options before HTTP', () => {
+    expect(() => buildSessionCreatePayload({ directory: '/repo', goal: true })).toThrow('--goal requires --prompt.');
+    expect(() => buildSessionCreatePayload({
+      directory: '/repo',
+      prompt: 'Run',
+      goalTokenBudget: '200000',
+    })).toThrow('--goal-token-budget requires --goal.');
+    for (const value of ['999', '1.5', '100000001', 'nope']) {
+      expect(() => buildSessionCreatePayload({
+        directory: '/repo',
+        prompt: 'Run',
+        goal: true,
+        goalTokenBudget: value,
+      })).toThrow('--goal-token-budget must be an integer from 1000 to 100000000.');
+    }
+  });
+
+  it('parses session list filters', () => {
+    const parsed = parseArgs(['session', 'list', '--dir', '/repo', '--limit', '5']);
+
+    expect(parsed.command).toBe('session');
+    expect(parsed.sessionAction).toBe('list');
+    expect(parsed.options.directory).toBe('/repo');
+    expect(parsed.options.limit).toBe(5);
+  });
+
+  it('parses session status and message options', () => {
+    const status = parseArgs(['session', 'status', '--session', 'ses_123', '--dir', '/repo']);
+    expect(status.sessionAction).toBe('status');
+    expect(status.options.session).toBe('ses_123');
+    expect(status.options.directory).toBe('/repo');
+
+    const messages = parseArgs([
+      'session',
+      'messages',
+      '--session',
+      'ses_123',
+      '--dir',
+      '/repo',
+      '--last',
+      '--role',
+      'assistant',
+    ]);
+    expect(messages.sessionAction).toBe('messages');
+    expect(messages.options.last).toBe(true);
+    expect(messages.options.role).toBe('assistant');
+
+    const waiting = parseArgs([
+      'session',
+      'messages',
+      '--session',
+      'ses_123',
+      '--dir',
+      '/repo',
+      '--wait',
+      '--timeout',
+      '30',
+      '--last-assistant',
+    ]);
+    expect(waiting.options.wait).toBe(true);
+    expect(waiting.options.timeout).toBe('30');
+    expect(waiting.options.lastAssistant).toBe(true);
+
+    const list = parseArgs(['session', 'list', '--dir', '/repo', '--with-status']);
+    expect(list.options.withStatus).toBe(true);
+  });
+
+  it('parses session send and fork actions', () => {
+    const send = parseArgs([
+      'session', 'send', '--session', 'ses_123', '--dir', '/repo', '--prompt', 'Continue',
+      '--goal', '--wait', '--last-assistant',
+    ]);
+    expect(send.sessionAction).toBe('send');
+    expect(send.options).toMatchObject({
+      session: 'ses_123',
+      directory: '/repo',
+      prompt: 'Continue',
+      goal: true,
+      wait: true,
+      lastAssistant: true,
+    });
+
+    const fork = parseArgs([
+      'session', 'fork', '--session', 'ses_123', '--dir', '/repo', '--message', 'msg_123',
+      '--prompt', 'Try another approach',
+    ]);
+    expect(fork.sessionAction).toBe('fork');
+    expect(fork.options.message).toBe('msg_123');
+  });
+
+  it('builds session send and fork prompt payloads', () => {
+    expect(buildSessionPromptPayload({
+      session: 'ses_123',
+      directory: '/repo',
+      prompt: 'Continue',
+      model: 'openai/gpt-5.5',
+      agent: 'build',
+      goal: true,
+      goalTokenBudget: '200000',
+    }, 'send')).toEqual({
+      directory: '/repo',
+      prompt: 'Continue',
+      model: 'openai/gpt-5.5',
+      agent: 'build',
+      goal: true,
+      goalTokenBudget: 200000,
+    });
+    expect(buildSessionPromptPayload({
+      session: 'ses_123',
+      directory: '/repo',
+      message: 'msg_123',
+      prompt: 'Try another approach',
+    }, 'fork')).toEqual({
+      directory: '/repo',
+      messageId: 'msg_123',
+      prompt: 'Try another approach',
+    });
+  });
+
+  it('validates session message selectors before HTTP', async () => {
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', all: true, last: true }, 'messages'))
+      .rejects.toThrow('--all cannot be combined with --last or --limit.');
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', role: 'tool' }, 'messages'))
+      .rejects.toThrow('--role must be one of: all, user, assistant.');
+    await expect(sessionCommand({ session: 'ses_123' }, 'status'))
+      .rejects.toThrow('Missing required --dir.');
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', timeout: '30' }, 'messages'))
+      .rejects.toThrow('--timeout requires --wait.');
+    await expect(sessionCommand({ directory: '/repo', lastAssistant: true }, 'create'))
+      .rejects.toThrow('--last-assistant requires --wait for session create.');
+    await expect(sessionCommand({ directory: '/repo', timeout: '30' }, 'create'))
+      .rejects.toThrow('--timeout requires --wait.');
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo' }, 'send'))
+      .rejects.toThrow('Missing required --prompt.');
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', prompt: 'Run', message: 'msg_1' }, 'send'))
+      .rejects.toThrow('--message is only valid for session fork.');
+    await expect(sessionCommand({ session: 'ses_123', directory: '/repo', prompt: 'Run', lastAssistant: true }, 'fork'))
+      .rejects.toThrow('--last-assistant requires --wait for session fork.');
+  });
+
+  it('parses models command', () => {
+    const parsed = parseArgs(['models', '--json']);
+
+    expect(parsed.command).toBe('models');
+    expect(parsed.options.json).toBe(true);
+  });
+
+  it('parses projects command', () => {
+    const parsed = parseArgs(['projects', '--json']);
+
+    expect(parsed.command).toBe('projects');
+    expect(parsed.options.json).toBe(true);
+  });
+
+  it('formats projects compactly', () => {
+    expect(formatProjectLine({
+      id: 'path_repo',
+      label: 'Openchamber',
+      path: '/repo/openchamber',
+    })).toBe('- `Openchamber` — `path_repo` — `/repo/openchamber`');
+  });
+
+  it('formats model defaults and favorites compactly', () => {
+    expect(formatModelsOutput({
+      defaultModel: 'opencode-go/deepseek-v4-flash',
+      defaultAgent: 'build',
+      favoriteModels: [
+        { providerID: 'openai', modelID: 'gpt-5.5' },
+        { providerID: 'opencode-go', modelID: 'deepseek-v4-pro' },
+      ],
+      recentModels: [
+        { providerID: 'zai-coding-plan', modelID: 'glm-5.2' },
+      ],
+    })).toBe('Default: `opencode-go/deepseek-v4-flash` / `build`\n\nFavorites:\n- `openai/gpt-5.5`\n- `opencode-go/deepseek-v4-pro`\n\nRecent:\n- `zai-coding-plan/glm-5.2`\n');
+  });
+
+  it('formats compact session list lines', () => {
+    expect(formatSessionLine({
+      title: 'Default model smoke test',
+      agent: 'build',
+      directory: '/repo',
+      model: { providerID: 'opencode-go', id: 'deepseek-v4-flash', variant: 'default' },
+    })).toBe('- `Default model smoke test` — `opencode-go/deepseek-v4-flash`, `build` — `/repo`');
+    expect(formatSessionLine({
+      title: 'Working session',
+      agent: 'build',
+      directory: '/repo',
+      model: { providerID: 'openai', id: 'gpt-5.4-mini' },
+      status: { type: 'busy' },
+    })).toContain('status:busy');
+  });
+
   it('parses tunnel auto-start server options', () => {
     const parsed = parseArgs(['tunnel', 'start', '--port', '3002', '--api-only', '--lan', '--ui-password', 'secret']);
 
@@ -258,6 +635,50 @@ describe('cli args', () => {
 
     expect(parsed.options.hostname).toBe('app.example.com');
     expect(parsed.options.host).toBeUndefined();
+  });
+});
+
+describe('cli API target resolution', () => {
+  it('uses an explicit port without discovery', async () => {
+    await expect(resolveTargetPort(
+      { explicitPort: true, port: 4567 },
+      {
+        discoverDesktopInstance: async () => { throw new Error('should not discover desktop'); },
+        discoverLifecycleInstances: async () => { throw new Error('should not discover lifecycle'); },
+      },
+    )).resolves.toBe(4567);
+  });
+
+  it('prefers a desktop instance when no port is explicit', async () => {
+    await expect(resolveTargetPort({}, {
+      discoverDesktopInstance: async () => ({ port: 4500 }),
+      discoverLifecycleInstances: async () => [{ port: 3001 }],
+      isServerHealthReady: async () => false,
+    })).resolves.toBe(4500);
+  });
+
+  it('uses the only discovered lifecycle instance', async () => {
+    await expect(resolveTargetPort({}, {
+      discoverDesktopInstance: async () => null,
+      discoverLifecycleInstances: async () => [{ port: 3002 }],
+      isServerHealthReady: async () => false,
+    })).resolves.toBe(3002);
+  });
+
+  it('uses healthy default port when discovery finds no instances', async () => {
+    await expect(resolveTargetPort({}, {
+      discoverDesktopInstance: async () => null,
+      discoverLifecycleInstances: async () => [],
+      isServerHealthReady: async (port) => port === 3000,
+    })).resolves.toBe(3000);
+  });
+
+  it('fails when multiple non-default instances are running', async () => {
+    await expect(resolveTargetPort({}, {
+      discoverDesktopInstance: async () => null,
+      discoverLifecycleInstances: async () => [{ port: 3001 }, { port: 3002 }],
+      isServerHealthReady: async () => false,
+    })).rejects.toThrow('Multiple OpenChamber instances are running');
   });
 });
 
@@ -333,8 +754,9 @@ describe('compatibility exports', () => {
 
   it('includes ngrok in fallback tunnel providers when no server is reachable', async () => {
     await withTempOpenChamberDataDir(async () => {
+      const port = await allocateLoopbackPort();
       const output = await captureStdout(async () => {
-        await commands.tunnel({ json: true }, 'providers');
+        await commands.tunnel({ json: true, explicitPort: true, port }, 'providers');
       });
 
       const body = JSON.parse(output);
@@ -367,35 +789,59 @@ describe('compatibility exports', () => {
   });
 });
 
-describe('CLI HTTP helpers', () => {
-  const withUiSessionCookieName = async (cookieName, fn) => {
-    const originalCookieName = process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
-    if (cookieName === undefined) {
-      delete process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
-    } else {
-      process.env.OPENCHAMBER_SESSION_COOKIE_NAME = cookieName;
-    }
+describe('instance option persistence', () => {
+  it('persists resolved cookie names in foreground and daemon instance records', async () => {
+    await withUiSessionCookieName(undefined, () => withTempOpenChamberDataDir(async () => {
+      const cases = [
+        {
+          port: 45676,
+          launchMode: 'foreground',
+          cookieName: 'oc_ui_session_foreground',
+        },
+        {
+          port: 45677,
+          launchMode: 'daemon',
+          cookieName: 'oc_ui_session_daemon',
+        },
+      ];
 
-    try {
-      return await fn();
-    } finally {
-      if (originalCookieName === undefined) {
-        delete process.env.OPENCHAMBER_SESSION_COOKIE_NAME;
-      } else {
-        process.env.OPENCHAMBER_SESSION_COOKIE_NAME = originalCookieName;
+      for (const entry of cases) {
+        await withUiSessionCookieName(entry.cookieName, async () => {
+          writeInstanceOptions(await getInstanceFilePath(entry.port), {
+            port: entry.port,
+            launchMode: entry.launchMode,
+            uiPassword: 'secret',
+            uiSessionCookieName: resolveUiSessionCookieName(),
+          });
+        });
       }
-    }
-  };
 
+      for (const entry of cases) {
+        expect(readInstanceOptions(await getInstanceFilePath(entry.port))).toEqual(expect.objectContaining({
+          port: entry.port,
+          launchMode: entry.launchMode,
+          uiSessionCookieName: entry.cookieName,
+        }));
+      }
+    }));
+  });
+});
+
+describe('CLI HTTP helpers', () => {
   const runUiAuthenticatedRetry = async ({
     port,
-    cookieName,
+    storedCookieName,
     setCookieHeader,
     expectedCookie,
-  }) => withUiSessionCookieName(cookieName, () => withTempOpenChamberDataDir(async () => {
+  }) => withUiSessionCookieName(undefined, () => withTempOpenChamberDataDir(async () => {
+    const instanceOptions = {
+      port,
+      uiPassword: 'secret',
+      ...(storedCookieName === undefined ? {} : { uiSessionCookieName: storedCookieName }),
+    };
     fs.writeFileSync(
       await getInstanceFilePath(port),
-      JSON.stringify({ port, uiPassword: 'secret' }, null, 2),
+      JSON.stringify(instanceOptions, null, 2),
     );
     const originalFetch = globalThis.fetch;
     const calls = [];
@@ -432,10 +878,75 @@ describe('CLI HTTP helpers', () => {
     }
   }));
 
+  it('sends one typed request to the shared control endpoint', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, options = {}) => {
+      expect(new URL(String(url)).pathname).toBe('/api/openchamber/control');
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({
+        action: 'session.status',
+        input: { sessionId: 'ses_1', directory: '/repo' },
+      });
+      return createMockJsonResponse({ status: 'ok', sessionStatus: { type: 'idle' } });
+    };
+    try {
+      await expect(requestControlAction(45677, 'session.status', {
+        sessionId: 'ses_1',
+        directory: '/repo',
+      })).resolves.toEqual({ status: 'ok', sessionStatus: { type: 'idle' } });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('retries UI-authenticated API requests with the stored instance password', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const port = 45678;
+      fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'secret' }, null, 2));
+      const originalFetch = globalThis.fetch;
+      const calls = [];
+      globalThis.fetch = async (url, options = {}) => {
+        calls.push({ url: String(url), options });
+        if (String(url).endsWith('/auth/session')) {
+          expect(JSON.parse(options.body)).toEqual({ password: 'secret' });
+          return {
+            ok: true,
+            headers: { get: (name) => name.toLowerCase() === 'set-cookie' ? 'oc_ui_session=session-token; Path=/; HttpOnly' : null },
+            json: async () => ({ authenticated: true }),
+          };
+        }
+        if (options.headers?.Cookie === 'oc_ui_session=session-token') {
+          return createMockJsonResponse({ ok: true });
+        }
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ error: 'UI authentication required', locked: true }),
+        };
+      };
+
+      try {
+        const { response, body } = await requestJson(port, '/api/openchamber/tunnel/start', {
+          method: 'POST',
+          body: JSON.stringify({ provider: 'ngrok', mode: 'quick' }),
+        });
+
+        expect(response.ok).toBe(true);
+        expect(body).toEqual({ ok: true });
+        expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+          '/api/openchamber/tunnel/start',
+          '/auth/session',
+          '/api/openchamber/tunnel/start',
+        ]);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  it('falls back to the default cookie for legacy instance files', async () => {
     const { response, body, calls } = await runUiAuthenticatedRetry({
       port: 45678,
-      cookieName: undefined,
       setCookieHeader: 'oc_ui_session=session-token; Path=/; HttpOnly',
       expectedCookie: 'oc_ui_session=session-token',
     });
@@ -447,12 +958,14 @@ describe('CLI HTTP helpers', () => {
       '/auth/session',
       '/api/openchamber/tunnel/start',
     ]);
+    expect(calls[0].options.headers?.Cookie).toBeUndefined();
+    expect(calls[2].options.headers?.Cookie).toBe('oc_ui_session=session-token');
   });
 
-  it('retries UI-authenticated API requests with the configured cookie name', async () => {
+  it('retries later CLI requests with the cookie name stored by the instance', async () => {
     const { response, body, calls } = await runUiAuthenticatedRetry({
       port: 45679,
-      cookieName: 'oc_ui_session_3000',
+      storedCookieName: 'oc_ui_session_3000',
       setCookieHeader: 'oc_ui_session_3000=session-token; Path=/; HttpOnly',
       expectedCookie: 'oc_ui_session_3000=session-token',
     });
@@ -471,7 +984,7 @@ describe('CLI HTTP helpers', () => {
   it('matches configured cookie names containing regular-expression characters exactly', async () => {
     const { response, body, calls } = await runUiAuthenticatedRetry({
       port: 45680,
-      cookieName: 'oc.ui+session',
+      storedCookieName: 'oc.ui+session',
       setCookieHeader: 'ocXuiiisession=wrong-token; Path=/, oc.ui+session=session-token; Path=/; HttpOnly',
       expectedCookie: 'oc.ui+session=session-token',
     });
@@ -479,6 +992,212 @@ describe('CLI HTTP helpers', () => {
     expect(response.ok).toBe(true);
     expect(body).toEqual({ ok: true });
     expect(calls[2].options.headers?.Cookie).toBe('oc.ui+session=session-token');
+  });
+
+  it('falls back to the default cookie for malformed stored cookie names', async () => {
+    for (const [index, storedCookieName] of ['', 42].entries()) {
+      const { response, body, calls } = await runUiAuthenticatedRetry({
+        port: 45681 + index,
+        storedCookieName,
+        setCookieHeader: 'oc_ui_session=session-token; Path=/; HttpOnly',
+        expectedCookie: 'oc_ui_session=session-token',
+      });
+
+      expect(response.ok).toBe(true);
+      expect(body).toEqual({ ok: true });
+      expect(calls[2].options.headers?.Cookie).toBe('oc_ui_session=session-token');
+    }
+  });
+
+  it('uses independent stored cookie names for multiple ports in one CLI process', async () => {
+    await withUiSessionCookieName(undefined, () => withTempOpenChamberDataDir(async () => {
+      const instances = [
+        {
+          port: 45683,
+          uiPassword: 'secret-3000',
+          uiSessionCookieName: 'oc_ui_session_3000',
+          token: 'session-token-3000',
+        },
+        {
+          port: 45684,
+          uiPassword: 'secret-3001',
+          uiSessionCookieName: 'oc_ui_session_3001',
+          token: 'session-token-3001',
+        },
+      ];
+      for (const instance of instances) {
+        fs.writeFileSync(
+          await getInstanceFilePath(instance.port),
+          JSON.stringify({
+            port: instance.port,
+            uiPassword: instance.uiPassword,
+            uiSessionCookieName: instance.uiSessionCookieName,
+          }, null, 2),
+        );
+      }
+
+      const originalFetch = globalThis.fetch;
+      const calls = [];
+      globalThis.fetch = async (url, options = {}) => {
+        const requestUrl = new URL(String(url));
+        const instance = instances.find((entry) => String(entry.port) === requestUrl.port);
+        calls.push({ port: requestUrl.port, path: requestUrl.pathname, options });
+
+        if (requestUrl.pathname === '/auth/session') {
+          expect(JSON.parse(options.body)).toEqual({ password: instance.uiPassword });
+          return {
+            ok: true,
+            headers: {
+              get: (name) => name.toLowerCase() === 'set-cookie'
+                ? `${instance.uiSessionCookieName}=${instance.token}; Path=/; HttpOnly`
+                : null,
+            },
+            json: async () => ({ authenticated: true }),
+          };
+        }
+        if (options.headers?.Cookie === `${instance.uiSessionCookieName}=${instance.token}`) {
+          return createMockJsonResponse({ ok: true });
+        }
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ error: 'UI authentication required', locked: true }),
+        };
+      };
+
+      try {
+        for (const instance of instances) {
+          const { response, body } = await requestJson(
+            instance.port,
+            '/api/openchamber/tunnel/start',
+            {
+              method: 'POST',
+              body: JSON.stringify({ provider: 'ngrok', mode: 'quick' }),
+            },
+          );
+          expect(response.ok).toBe(true);
+          expect(body).toEqual({ ok: true });
+        }
+
+        expect(calls
+          .filter((call) => call.path === '/api/openchamber/tunnel/start')
+          .map((call) => ({ port: call.port, cookie: call.options.headers?.Cookie })))
+          .toEqual([
+            { port: '45683', cookie: undefined },
+            { port: '45683', cookie: 'oc_ui_session_3000=session-token-3000' },
+            { port: '45684', cookie: undefined },
+            { port: '45684', cookie: 'oc_ui_session_3001=session-token-3001' },
+          ]);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }));
+  });
+
+  it('prefers the stored instance password over a non-explicit env password', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const port = 45679;
+      fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'stored-secret' }, null, 2));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (url, options = {}) => {
+        if (String(url).endsWith('/auth/session')) {
+          expect(JSON.parse(options.body)).toEqual({ password: 'stored-secret' });
+          return {
+            ok: true,
+            headers: { getSetCookie: () => ['oc_ui_session=session-token; Path=/; HttpOnly'] },
+            json: async () => ({ authenticated: true }),
+          };
+        }
+        if (options.headers?.Cookie === 'oc_ui_session=session-token') {
+          return createMockJsonResponse({ ok: true });
+        }
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ error: 'UI authentication required', locked: true }),
+        };
+      };
+
+      try {
+        const { response, body } = await requestJson(port, '/api/openchamber/scheduled-tasks/status', {
+          uiPassword: 'stale-env-secret',
+          explicitUiPassword: false,
+        });
+
+        expect(response.ok).toBe(true);
+        expect(body).toEqual({ ok: true });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  it('prefers an explicit password over the stored instance password', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const port = 45685;
+      fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'stored-secret' }, null, 2));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (url, options = {}) => {
+        if (String(url).endsWith('/auth/session')) {
+          expect(JSON.parse(options.body)).toEqual({ password: 'explicit-secret' });
+          return {
+            ok: true,
+            headers: { raw: () => ({ 'set-cookie': ['oc_ui_session=session-token; Path=/; HttpOnly'] }) },
+            json: async () => ({ authenticated: true }),
+          };
+        }
+        if (options.headers?.Cookie === 'oc_ui_session=session-token') {
+          return createMockJsonResponse({ ok: true });
+        }
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ error: 'UI authentication required', locked: true }),
+        };
+      };
+
+      try {
+        const { response, body } = await requestJson(port, '/api/openchamber/scheduled-tasks/status', {
+          uiPassword: 'explicit-secret',
+          explicitUiPassword: true,
+        });
+
+        expect(response.ok).toBe(true);
+        expect(body).toEqual({ ok: true });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  it('authenticates desktop-local API requests with the stored client token', async () => {
+    await withTempOpenChamberDataDir(async (dir) => {
+      const port = 57123;
+      fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
+        desktopLocalPort: port,
+        desktopLocalClientToken: 'oc_client_test',
+      }, null, 2));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (_url, options = {}) => {
+        if (options.headers?.Authorization === 'Bearer oc_client_test') {
+          return createMockJsonResponse({ ok: true });
+        }
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ error: 'Client authentication required', locked: true }),
+        };
+      };
+
+      try {
+        const { response, body } = await requestJson(port, '/api/openchamber/scheduled-tasks/status');
+
+        expect(response.ok).toBe(true);
+        expect(body).toEqual({ ok: true });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
   });
 });
 
@@ -958,5 +1677,46 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
         await server.close();
       }
     });
+  });
+
+  it('restart preserves the stored UI session cookie name for a daemon instance', async () => {
+    await withUiSessionCookieName(undefined, () => withTempOpenChamberDataDir(async () => {
+      const server = await startMockOpenChamberServer({ pid: process.pid });
+      const host = '127.0.0.1';
+      const serveCalls = [];
+      try {
+        fs.writeFileSync(await getPidFilePath(server.port), String(process.pid));
+        writeInstanceOptions(await getInstanceFilePath(server.port), {
+          port: server.port,
+          host,
+          launchMode: 'daemon',
+          uiPassword: 'secret',
+          uiSessionCookieName: 'oc_ui_session_3000',
+        });
+
+        await captureStdout(() => commands.restart.call({
+          stop: async () => {},
+          serve: async (options) => {
+            serveCalls.push(options);
+            return options.port;
+          },
+        }, {
+          explicitPort: true,
+          port: server.port,
+          host,
+          json: true,
+        }));
+
+        expect(serveCalls).toHaveLength(1);
+        expect(serveCalls[0]).toEqual(expect.objectContaining({
+          port: server.port,
+          host,
+          uiPassword: 'secret',
+          uiSessionCookieName: 'oc_ui_session_3000',
+        }));
+      } finally {
+        await server.close();
+      }
+    }));
   });
 });

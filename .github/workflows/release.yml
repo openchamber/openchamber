@@ -363,7 +363,6 @@ jobs:
 
   build-desktop-electron-linux:
     needs: create-release
-    if: ${{ false }}
     strategy:
       fail-fast: false
       matrix:
@@ -461,7 +460,6 @@ jobs:
 
   publish-electron-linux:
     needs: [create-release, build-desktop-electron-linux]
-    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -550,14 +548,14 @@ jobs:
     secrets: inherit
 
   finalize-release:
-    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, publish-npm, combine-electron-manifests, mobile-release]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, build-desktop-electron-linux, publish-electron-linux, publish-npm, combine-electron-manifests, mobile-release]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       DISCORD_UPDATE_ROLE_ID: ${{ secrets.DISCORD_UPDATE_ROLE_ID }}
     steps:
       - name: Verify final Linux release asset inventory
-        if: ${{ false }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}

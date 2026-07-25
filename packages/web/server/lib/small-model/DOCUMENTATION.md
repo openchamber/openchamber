@@ -37,9 +37,14 @@ other runtime API.
   reported as `inputTruncated: true` in the response.
 - `call.js` — wire formats and per-provider auth, replicating OpenCode's
   plugin auth loaders:
-  - **GitHub Copilot**: OpenAI-compatible `/chat/completions` on
-    `https://api.githubcopilot.com` (or `copilot-api.<enterprise>`) with the
-    stored device-OAuth token as the bearer — no token exchange, no expiry.
+  - **GitHub Copilot**: fetches the requested model's authenticated `/models`
+    metadata from `https://api.githubcopilot.com` (or
+    `copilot-api.<enterprise>`) and honors its advertised endpoint, preferring
+    Anthropic-compatible `/v1/messages`, then OpenAI `/responses`, then
+    `/chat/completions`. Models without `supported_endpoints` retain the legacy
+    Chat Completions default; metadata, missing-model, and unsupported-endpoint
+    failures are surfaced instead of guessing. The stored device-OAuth token is
+    used as the bearer with no token exchange or expiry.
   - **OpenAI OAuth (ChatGPT plan)**: streaming Responses API on
     `https://chatgpt.com/backend-api/codex/responses` with
     `ChatGPT-Account-Id`; expired tokens are refreshed against

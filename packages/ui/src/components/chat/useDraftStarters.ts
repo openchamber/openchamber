@@ -107,7 +107,7 @@ export function useDraftStarters(): UseDraftStartersResult {
     const skillNames = React.useMemo(() => new Set(skills.map((s) => s.name)), [skills]);
 
     const resolve = React.useCallback((ref: DraftStarterRef, group: StarterGroup): ResolvedStarter | null => {
-        if (isVSCode && ref.type === 'command' && ref.name === 'craft-goal') return null;
+        if (isVSCode && ref.type === 'command' && (ref.name === 'craft-goal' || ref.name === 'schedule-task')) return null;
         if (ref.type === 'command') {
             const builtin = getBuiltInStarter(ref.name);
             if (builtin) {
@@ -144,7 +144,7 @@ export function useDraftStarters(): UseDraftStartersResult {
     const pinnable = React.useMemo<PinnableItem[]>(() => {
         const items: PinnableItem[] = [];
         for (const b of BUILTIN_STARTERS) {
-            if (isVSCode && b.name === 'craft-goal') continue;
+            if (isVSCode && (b.name === 'craft-goal' || b.name === 'schedule-task')) continue;
             items.push({ type: 'command', name: b.name, label: t(b.labelKey), icon: b.icon, section: 'built-in', scope: 'user' });
         }
         for (const c of commands) {
