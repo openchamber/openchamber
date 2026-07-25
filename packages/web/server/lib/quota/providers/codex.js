@@ -105,7 +105,7 @@ export const fetchQuota = async () => {
       const used = toNumber(spendLimit.used);
       const limit = toNumber(spendLimit.limit);
       const valueLabel = used !== null && limit !== null
-        ? `${used.toFixed(0)} / ${limit.toFixed(0)} left`
+        ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
         : null;
       windows.credits = toUsageWindow({
         usedPercent: toNumber(spendLimit.used_percent),

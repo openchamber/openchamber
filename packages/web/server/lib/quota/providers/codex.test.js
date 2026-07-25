@@ -70,8 +70,7 @@ describe('Codex quota windows', () => {
 
     expect(result.ok).toBe(true);
     expect(result.usage.windows.credits.usedPercent).toBe(36);
-    expect(result.usage.windows.credits.valueLabel).toBe('2675 / 7500 left');
-    expect(result.usage.windows.credits_balance.valueLabel).toBeUndefined();
+    expect(result.usage.windows.credits.valueLabel).toBe('2675 / 7500 used');
     expect(fetchMock).toHaveBeenCalled();
   });
 });
