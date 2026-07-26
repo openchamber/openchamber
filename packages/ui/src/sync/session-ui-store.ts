@@ -27,6 +27,7 @@ import { useCommandsStore } from "@/stores/useCommandsStore"
 import { useSkillsStore } from "@/stores/useSkillsStore"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
+import { normalizePath } from "@/lib/pathNormalization"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
@@ -57,12 +58,17 @@ import {
   fetchMessagesForSession,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
+import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { setSessionGoal } from "@/lib/sessionGoalActions"
+import { wrapSystemReminder } from "@/lib/systemReminder"
+import { useUIStore } from "@/stores/useUIStore"
 import { useSelectionStore } from "./selection-store"
 import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
 import { setSessionOpener } from "./session-navigation"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
 
 export type { AttachedFile }
@@ -167,6 +173,7 @@ export function routeMessage(params: {
 
 type SendMessageOptions = {
   sessionId?: string
+  directory?: string
   delivery?: 'steer'
 }
 
@@ -177,6 +184,7 @@ type AssistantMessageSessionExecution = {
   agent: string
   instructions: string
   createWorktree?: boolean
+  runAsGoal?: boolean
 }
 
 function notifyMessageSent(sessionId: string): void {
@@ -190,12 +198,12 @@ function notifyMessageSent(sessionId: string): void {
 
 export type { SyntheticContextPart } from "./input-store"
 export type { SessionMemoryState } from "./viewport-store"
-export type { VoiceStatus, VoiceMode } from "./voice-store"
 
 export type NewSessionDraftState = {
   open: boolean
   selectedProjectId?: string | null
   directoryOverride: string | null
+  permissionAutoAcceptEnabled?: boolean
   pendingWorktreeRequestId?: string | null
   bootstrapPendingDirectory?: string | null
   preserveDirectoryOverride?: boolean
@@ -252,6 +260,7 @@ export type SessionUIState = {
   closeNewSessionDraft: () => void
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
+  setDraftPermissionAutoAcceptEnabled: (enabled: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
@@ -309,14 +318,6 @@ export type SessionUIState = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const normalizePath = (value?: string | null): string | null => {
-  if (typeof value !== "string") return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const replaced = trimmed.replace(/\\/g, "/")
-  if (replaced === "/") return "/"
-  return replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced
-}
 
 const resolveDirectoryKey = (session: Session): string | null => {
   const sessionRecord = session as Session & {
@@ -393,6 +394,8 @@ type RuntimeSessionMemory = {
   sessionId: string | null
   directory: string | null
   draft: NewSessionDraftState
+  worktreeMetadata: Map<string, WorktreeMetadata>
+  availableWorktreesByProject: Map<string, WorktreeMetadata[]>
 }
 const runtimeSessionMemory = new Map<string, RuntimeSessionMemory>()
 
@@ -409,6 +412,8 @@ const writeRuntimeSessionMemory = (key: string, patch: Partial<RuntimeSessionMem
     sessionId: current?.sessionId ?? null,
     directory: current?.directory ?? null,
     draft: current?.draft ? cloneDraft(current.draft) : { ...DEFAULT_DRAFT },
+    worktreeMetadata: current?.worktreeMetadata ?? new Map(),
+    availableWorktreesByProject: current?.availableWorktreesByProject ?? new Map(),
     ...patch,
   })
 }
@@ -447,6 +452,7 @@ export async function materializeOpenDraftSession(selection: {
   const store = useSessionUIStore.getState()
   const draft = store.newSessionDraft
   if (!draft?.open) return null
+  const draftPermissionAutoAcceptEnabled = draft.permissionAutoAcceptEnabled === true
 
   const trimmedAgent = typeof selection.agent === "string" && selection.agent.trim().length > 0
     ? selection.agent.trim()
@@ -490,6 +496,14 @@ export async function materializeOpenDraftSession(selection: {
 
   store.setCurrentSession(created.id, createdDirectory)
 
+  if (draftPermissionAutoAcceptEnabled) {
+    void import("@/stores/permissionStore")
+      .then(({ usePermissionStore }) => usePermissionStore.getState().setSessionAutoAccept(created.id, true))
+      .catch((error) => {
+        console.warn("Failed to apply draft permission auto-accept to new session:", error)
+      })
+  }
+
   return {
     sessionId: created.id,
     directory: createdDirectory,
@@ -511,37 +525,13 @@ export async function materializeOpenDraftSession(selection: {
 // the FIRST launch — yielding a single project-scoped config load instead of a
 // worktree+project double-load. Discovery refreshes it in the background.
 // ---------------------------------------------------------------------------
-const WORKTREE_MAP_STORAGE_KEY = 'oc.worktreeMap'
-
-const loadPersistedWorktreeMap = (): Map<string, WorktreeMetadata[]> => {
-  try {
-    const raw = getDeferredSafeStorage().getItem(WORKTREE_MAP_STORAGE_KEY)
-    if (!raw) return new Map()
-    const entries = JSON.parse(raw) as Array<[string, WorktreeMetadata[]]>
-    if (!Array.isArray(entries)) return new Map()
-    return new Map(
-      entries.filter((entry) => Array.isArray(entry) && typeof entry[0] === 'string' && Array.isArray(entry[1])),
-    )
-  } catch {
-    return new Map()
-  }
-}
-
-const persistWorktreeMap = (map: Map<string, WorktreeMetadata[]>): void => {
-  try {
-    getDeferredSafeStorage().setItem(WORKTREE_MAP_STORAGE_KEY, JSON.stringify([...map.entries()]))
-  } catch {
-    // quota / serialization error — ignore; discovery still refreshes at runtime
-  }
-}
-
 const flattenWorktreeMap = (map: Map<string, WorktreeMetadata[]>): WorktreeMetadata[] => {
   const out: WorktreeMetadata[] = []
   for (const list of map.values()) out.push(...list)
   return out
 }
 
-const PERSISTED_WORKTREE_MAP = loadPersistedWorktreeMap()
+const PERSISTED_WORKTREE_MAP = readPersistedWorktreeTopology(runtimeMemoryKey())
 
 export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   currentSessionId: null,
@@ -652,6 +642,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       sessionId: currentSessionId,
       directory,
       draft: cloneDraft(get().newSessionDraft),
+      worktreeMetadata: new Map(get().worktreeMetadata),
+      availableWorktreesByProject: new Map(get().availableWorktreesByProject),
     })
   },
 
@@ -661,6 +653,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const restoredSessionId = memory?.sessionId ?? activeSessionByRuntime.get(key) ?? null
     const restoredDraft = memory?.draft ? cloneDraft(memory.draft) : { ...DEFAULT_DRAFT }
     const restoredDirectory = memory?.directory ?? null
+    const availableWorktreesByProject = memory?.availableWorktreesByProject
+      ?? readPersistedWorktreeTopology(key)
     if (restoredDirectory) {
       useDirectoryStore.getState().setDirectory(restoredDirectory, { showOverlay: false })
     }
@@ -671,6 +665,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       abortPromptSessionId: null,
       abortPromptExpiresAt: null,
       error: null,
+      worktreeMetadata: memory?.worktreeMetadata ?? new Map(),
+      availableWorktrees: flattenWorktreeMap(availableWorktreesByProject),
+      availableWorktreesByProject,
       sessionAbortFlags: new Map(),
       pendingChangesBarDismissed: new Map(),
     })
@@ -733,6 +730,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       open: true,
       selectedProjectId: selectedProject?.id ?? null,
       directoryOverride: directory,
+      permissionAutoAcceptEnabled: options?.permissionAutoAcceptEnabled === true,
       pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
       bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
       preserveDirectoryOverride: options?.preserveDirectoryOverride === true,
@@ -770,7 +768,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // (a fresh draft must start from defaults, not inherit the previous session's selection).
     const configDirectory = normalizePath(selectedProject?.path ?? null) ?? directory
     void activateConfigForDirectory(configDirectory).then(() => {
-      useConfigStore.getState().applyDefaultModelAgentSelection()
+      useConfigStore.getState().applyDefaultModelAgentSelection({
+        projectDefaultModel: selectedProject?.defaultModel,
+      })
     })
 
     if (directory && directory !== useDirectoryStore.getState().currentDirectory) {
@@ -782,6 +782,23 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // closeNewSessionDraft
   // ---------------------------------------------------------------------------
   closeNewSessionDraft: () => {
+    const currentDraft = get().newSessionDraft
+    if (
+      !currentDraft.open
+      && currentDraft.selectedProjectId == null
+      && currentDraft.directoryOverride == null
+      && currentDraft.pendingWorktreeRequestId == null
+      && currentDraft.bootstrapPendingDirectory == null
+      && !currentDraft.preserveDirectoryOverride
+      && currentDraft.parentID == null
+      && currentDraft.title === undefined
+      && currentDraft.initialPrompt === undefined
+      && currentDraft.syntheticParts === undefined
+      && currentDraft.targetFolderId === undefined
+      && currentDraft.permissionAutoAcceptEnabled === undefined
+    ) {
+      return
+    }
     const nextDraft: NewSessionDraftState = {
         open: false,
         selectedProjectId: null,
@@ -824,6 +841,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     set((s) => {
       if (!s.newSessionDraft?.open) return s
       return { newSessionDraft: { ...s.newSessionDraft, preserveDirectoryOverride: value } }
+    }),
+
+  setDraftPermissionAutoAcceptEnabled: (enabled) =>
+    set((s) => {
+      if (!s.newSessionDraft?.open) return s
+      return { newSessionDraft: { ...s.newSessionDraft, permissionAutoAcceptEnabled: enabled } }
     }),
 
   acknowledgeSessionAbort: (sessionId) =>
@@ -984,6 +1007,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // sendMessage — calls SDK, reads domain data from sync
   // ---------------------------------------------------------------------------
+  // Armed goal (composer target button): the sent prompt becomes the goal
+  // objective; budget comes from the global default setting. Fire-and-forget —
+  // a failed metadata patch must not fail the send.
   sendMessage: async (
     content: string,
     providerID: string,
@@ -1006,6 +1032,36 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const draft = get().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
+
+    const goalArm = inputMode !== "shell" && content.trim().length > 0
+      ? useSessionGoalArmStore.getState().consume()
+      : { armed: false, objectiveOverride: null }
+    const goalArmed = goalArm.armed
+    if (goalArmed) {
+      // Teach the agent the goal protocol from turn one — without this it
+      // only learns about goal mode from the first server continuation.
+      const uiState = useUIStore.getState()
+      const budgetLine = uiState.sessionGoalDefaultBudgetEnabled
+        ? ` A token budget of ${uiState.sessionGoalDefaultBudget} tokens applies to this goal.`
+        : ""
+      const goalIntro = wrapSystemReminder(
+        "Goal mode is active for this session. The user message above defines the goal objective. "
+        + "Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. "
+        + "Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains."
+        + budgetLine,
+      )
+      additionalParts = [...(additionalParts ?? []), { text: goalIntro, synthetic: true }]
+    }
+    const applyArmedGoal = (goalSessionId: string, goalDirectory: string | null | undefined) => {
+      if (!goalArmed) return
+      const uiState = useUIStore.getState()
+      const tokenBudget = uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null
+      const objective = goalArm.objectiveOverride?.trim() || content
+      void setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null)
+        .catch((error) => {
+          console.warn("[session-ui-store] failed to set goal from armed send", error)
+        })
+    }
 
     // ---- New session from draft ----
     if (!options?.sessionId && draft?.open) {
@@ -1055,6 +1111,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           })),
         })),
       })
+      applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
       return
     }
 
@@ -1094,7 +1151,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     const currentSessionDirectory = targetSessionId
-      ? normalizePath(get().getDirectoryForSession(targetSessionId))
+      ? normalizePath(options?.directory ?? get().getDirectoryForSession(targetSessionId))
       : null
     if (targetSessionId) {
       notifyMessageSent(targetSessionId)
@@ -1134,6 +1191,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         })),
       })),
     })
+    if (targetSessionId) {
+      applyArmedGoal(targetSessionId, currentSessionDirectory)
+    }
   },
 
   // ---------------------------------------------------------------------------
@@ -1142,12 +1202,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   createSession: async (title, directoryOverride, parentID, metadata) => {
     const draft = get().newSessionDraft
     const targetFolderId = draft.targetFolderId
-    get().closeNewSessionDraft()
 
     try {
       const dir = directoryOverride ?? opencodeClient.getDirectory()
       const session = await createSessionAction(title, dir, parentID ?? null, metadata)
       if (!session) return null
+
+      get().closeNewSessionDraft()
 
       if (targetFolderId) {
         const scopeKey = directoryOverride || get().lastLoadedDirectory || session.directory
@@ -1418,6 +1479,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useDirectoryStore.getState().setDirectory(createdWorktree.path, { showOverlay: false })
     }
 
+    // "Run as goal" rides the same arm mechanism as the composer target
+    // button: sendMessage consumes the flag, stamps the goal (objective =
+    // the composed fork message) and attaches the goal-mode intro part.
+    // Set explicitly either way so a stray armed flag cannot leak into a
+    // non-goal fork.
+    useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true)
+
     await get().sendMessage(
       composeForkSessionMessage(execution.instructions, assistantPlanText),
       pID,
@@ -1547,10 +1615,18 @@ setSessionOpener((sessionID, directory) => {
 })
 
 // Write-through persist of the worktree map whenever discovery refreshes it.
-// Cheap reference-equality guard — this fires only when the map actually
-// changes (discovery / worktree create/remove), not on hot session updates.
+// Reference-equality guard filters hot session updates; the serialized
+// comparison avoids redundant localStorage writes when the Map reference
+// changed but the content is identical (e.g., re-discovery that found the
+// same worktrees).
+const lastPersistedWorktreeSerializedByRuntime = new Map<string, string>()
 useSessionUIStore.subscribe((state, prev) => {
   if (state.availableWorktreesByProject !== prev.availableWorktreesByProject) {
-    persistWorktreeMap(state.availableWorktreesByProject)
+    const runtimeKey = runtimeMemoryKey()
+    const serialized = JSON.stringify([...state.availableWorktreesByProject.entries()])
+    if (serialized !== lastPersistedWorktreeSerializedByRuntime.get(runtimeKey)) {
+      lastPersistedWorktreeSerializedByRuntime.set(runtimeKey, serialized)
+      persistWorktreeTopology(runtimeKey, state.availableWorktreesByProject)
+    }
   }
 })

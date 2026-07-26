@@ -1,4 +1,4 @@
-// macOS menu bar (status bar) controller.
+// Native tray/menu bar controller.
 //
 // Surfaces a glanceable, always-visible view of OpenChamber's live state:
 //  1. an aggregate activity indicator (idle / busy / error+retry) in the icon
@@ -16,6 +16,8 @@
 // natively (show-main-window, quit).
 
 import { Tray, Menu, nativeImage } from 'electron';
+
+const isMac = process.platform === 'darwin';
 
 const MAX_SESSIONS = 8;
 const MAX_APPROVALS = 10;
@@ -87,7 +89,7 @@ const ANIM_INTERVAL_MS = 75;
 
 const toTemplateImage = (p) => {
   const image = nativeImage.createFromPath(p);
-  image.setTemplateImage(true);
+  if (isMac) image.setTemplateImage(true);
   return image;
 };
 
@@ -99,6 +101,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
   let lastTitle = null;
 
   // macOS auto-picks the @2x file next to each path and tints the alpha.
+  // Windows uses the regular app icon and ignores template tinting.
   const idleFrame = toTemplateImage(idleIconPath);
   const unseenFrame = toTemplateImage(unseenIconPath);
   const breathFrames = breathIconPaths.map(toTemplateImage);
@@ -122,6 +125,7 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
 
   const startAnim = () => {
     if (animTimer || !tray || tray.isDestroyed?.()) return;
+    if (breathFrames.length < 2) return;
     animIndex = 0;
     animDir = 1;
     animTimer = setInterval(() => {
@@ -139,7 +143,8 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     iconState = nextState;
     if (!tray || tray.isDestroyed?.()) return;
     if (nextState === 'busy') {
-      startAnim();
+      if (breathFrames.length > 1) startAnim();
+      else tray.setImage(breathFrames[0] || idleFrame);
     } else if (nextState === 'unseen') {
       stopAnim();
       tray.setImage(unseenFrame);
@@ -153,6 +158,9 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     if (tray && !tray.isDestroyed?.()) return tray;
     tray = new Tray(idleFrame);
     tray.setIgnoreDoubleClickEvents(true);
+    if (!isMac) {
+      tray.on('click', () => onAction({ type: 'show-main-window' }));
+    }
     return tray;
   };
 

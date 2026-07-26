@@ -1,25 +1,36 @@
 ---
-title: PWA i dostęp z telefonu
-description: Zainstaluj OpenChamber jako aplikację i używaj go z telefonu.
+title: Aplikacje mobilne i PWA
+description: Zainstaluj aplikację OpenChamber na iOS lub Androidzie i połącz ją ze swoim serwerem.
 ---
 
-# PWA i dostęp z telefonu
+# Aplikacje mobilne i PWA
 
-Aplikacja webowa OpenChamber instaluje się jak aplikacja na telefonie (PWA), więc możesz trzymać ją na ekranie głównym i używać jej na pełnym ekranie. Połącz to z [tunelem](/pl/tunnels/), a będziesz mógł zajrzeć do sesji z dowolnego miejsca.
+OpenChamber ma natywne aplikacje na iPhone'a i Androida, więc możesz obserwować sesje, odpowiadać agentom i zarządzać pracą z telefonu — w domu przez Wi-Fi lub z dowolnego miejsca przez [Private Relay](/pl/private-relay/).
 
-## Zainstaluj ją
+## Zainstaluj aplikację
 
-OpenChamber korzysta z wbudowanej instalacji Twojej przeglądarki, więc nie ma osobnego pobierania:
+- **iPhone/iPad** — dołącz do [bety TestFlight](https://testflight.apple.com/join/5ek6GU1E)
+- **Android** — pobierz APK z [najnowszego wydania](https://github.com/openchamber/openchamber/releases/latest)
+
+## Połącz ją ze swoim serwerem
+
+1. Na komputerze z uruchomionym OpenChamber otwórz **Settings → Remote Instances → Połącz z tym serwerem** i naciśnij **Dodaj urządzenie**.
+2. Wybierz **Wszędzie** (lub **Tylko sieć domowa**, jeśli będziesz używać telefonu tylko w domu) i naciśnij **Utwórz kod QR**.
+3. W aplikacji mobilnej stuknij **Skanuj kod QR** i skieruj aparat na kod.
+
+Aplikacja łączy się i zapamiętuje serwer. Kod QR jest jednorazowy, a każde urządzenie dostaje własny, możliwy do unieważnienia token — zobacz [Połącz urządzenie](/pl/connect-devices/), aby dowiedzieć się, dlaczego parowanie jest bezpieczne.
+
+Możesz sparować aplikację z kilkoma serwerami i przełączać się między nimi z listy instancji; aplikacja pokazuje dla każdego z nich, czy jest osiągalny i czy łączysz się przez sieć lokalną, czy przez relay.
+
+## PWA (instalacja z przeglądarki)
+
+Wolisz obejść się bez sklepu z aplikacjami? Aplikacja webowa instaluje się prosto z przeglądarki:
 
 - **przeglądarka na komputerze** — użyj opcji **Install** w pasku adresu
 - **iPhone/iPad (Safari)** — Udostępnij → **Dodaj do ekranu początkowego**
 - **Android (Chrome)** — menu → **Zainstaluj aplikację** / **Dodaj do ekranu głównego**
 
-Po zainstalowaniu otwiera się we własnym oknie, bez elementów przeglądarki.
-
-## Dotrzyj do niej z telefonu
-
-Aby otworzyć OpenChamber na telefonie, gdy serwer działa na Twoim komputerze, uruchom [tunel](/pl/tunnels/) i otwórz link (lub zeskanuj kod QR) na telefonie. Używaj silnego [hasła UI](/pl/security/), gdy tylko to robisz.
+Aby dotrzeć do PWA spoza swojej sieci, potrzebujesz [tunelu](/pl/tunnels/) i silnego [hasła UI](/pl/security/) — natywne aplikacje załatwiają to za Ciebie przez relay.
 
 ## Ustawienia mobilne
 
@@ -27,5 +38,6 @@ W **Settings → OpenChamber** kilka opcji dostraja działanie na telefonie i za
 
 ## Powiązane
 
-- [Tunele](/pl/tunnels/) — dotrzyj do swojej instancji z innej sieci
+- [Połącz urządzenie](/pl/connect-devices/) — parowanie, jednorazowe kody QR i zarządzanie urządzeniami
+- [Private Relay](/pl/private-relay/) — jak działa dostęp „Wszędzie"
 - [Bezpieczeństwo](/pl/security/) — zabezpiecz UI przed udostępnieniem

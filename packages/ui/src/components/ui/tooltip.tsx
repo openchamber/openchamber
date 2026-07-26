@@ -274,14 +274,14 @@ function TooltipContent({
           <BaseTooltip.Popup
             data-slot="tooltip-content"
             className={cn(
-              "bg-muted text-muted-foreground border border-border/60 transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance overflow-hidden",
+              "bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] border border-border/60 transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance overflow-hidden",
               className
             )}
             style={{ ...style }}
             {...props}
           >
             {children}
-            <BaseTooltip.Arrow className="fill-muted z-50 size-2" />
+            <BaseTooltip.Arrow className="fill-[var(--surface-elevated)] z-50 size-2" />
           </BaseTooltip.Popup>
         </BaseTooltip.Positioner>
       </BaseTooltip.Portal>

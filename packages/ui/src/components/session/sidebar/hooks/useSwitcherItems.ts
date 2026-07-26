@@ -6,7 +6,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitAllBranches } from '@/stores/useGitStore';
 import type { SessionNode } from '../types';
-import { compareSessionsByPinnedAndTime, isPathWithinProject } from '../utils';
+import { isPathWithinProject } from '../utils';
+import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 
 export type SwitcherItem = {
   node: SessionNode;
@@ -44,6 +45,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const projects = useProjectsStore((state) => state.projects);
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
+  const sessionOrderRanks = useSessionOrderingStore((state) => state.rankById);
   const branchesByDirectory = useGitAllBranches();
 
   const normalizedProjects = React.useMemo(
@@ -80,7 +82,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
       }
     }
     childrenByParent.forEach((list) => {
-      list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds));
+      list.sort((a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks));
     });
 
     const parents = activeSessions
@@ -91,7 +93,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
         const directory = resolveGlobalSessionDirectory(session);
         return findProjectForDirectory(directory)?.id === scopeProjectId;
       })
-      .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds))
+      .sort((a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks))
       .slice(0, MAX_PARENT_SESSIONS);
 
     const buildNode = (session: Session): SessionNode => {
@@ -118,7 +120,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
         },
       };
     });
-  }, [activeSessions, branchesByDirectory, enabled, findProjectForDirectory, pinnedSessionIds, scopeProjectId]);
+  }, [activeSessions, branchesByDirectory, enabled, findProjectForDirectory, pinnedSessionIds, scopeProjectId, sessionOrderRanks]);
 
   return items;
 };

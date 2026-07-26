@@ -1,31 +1,43 @@
 ---
-title: PWA 및 모바일 접속
-description: OpenChamber를 앱으로 설치하고 휴대폰에서 사용하세요.
+title: 모바일 앱 & PWA
+description: iOS 또는 Android에 OpenChamber 앱을 설치하고 서버에 연결하세요.
 ---
 
-# PWA 및 모바일 접속
+# 모바일 앱 & PWA
 
-OpenChamber 웹 앱은 휴대폰 앱(PWA)처럼 설치되므로 홈 화면에 두고 전체 화면으로 사용할 수 있습니다. [터널](/ko/tunnels/)과 함께 사용하면 어디서든 세션을 확인할 수 있습니다.
+OpenChamber에는 iPhone과 Android용 네이티브 앱이 있어 휴대폰에서 세션을 지켜보고, 에이전트에 답하고, 작업을 관리할 수 있습니다. 집에서는 Wi-Fi로, 밖에서는 [Private Relay](/ko/private-relay/)를 통해 어디서든 가능합니다.
 
-## 설치하기
+## 앱 설치하기
 
-OpenChamber는 브라우저의 내장 설치 기능을 사용하므로 별도의 다운로드가 없습니다.
+- **iPhone/iPad** — [TestFlight 베타](https://testflight.apple.com/join/5ek6GU1E)에 참여하세요
+- **Android** — [최신 릴리스](https://github.com/openchamber/openchamber/releases/latest)에서 APK를 다운로드하세요
 
-- **데스크톱 브라우저** — 주소 표시줄의 **Install** 옵션을 사용합니다
+## 서버에 연결하기
+
+1. OpenChamber가 실행 중인 컴퓨터에서 **Settings → Remote Instances → 이 서버에 연결**을 열고 **기기 추가**를 누릅니다.
+2. **어디서나**를 선택하고(휴대폰을 집에서만 쓸 거라면 **집 네트워크 전용**) **QR 코드 만들기**를 누릅니다.
+3. 모바일 앱에서 **QR 코드 스캔**을 탭하고 카메라를 코드에 향하게 합니다.
+
+앱이 연결되고 서버를 기억합니다. QR 코드는 일회용이며 기기마다 해지 가능한 고유 토큰을 받습니다. 페어링이 안전한 이유는 [기기 연결](/ko/connect-devices/)을 참고하세요.
+
+앱을 여러 서버와 페어링하고 인스턴스 목록에서 전환할 수 있습니다. 앱은 각 서버가 접근 가능한지, 로컬 네트워크와 릴레이 중 어느 경로로 연결되어 있는지 표시합니다.
+
+## PWA (브라우저 설치)
+
+앱 스토어를 전혀 거치고 싶지 않다면? 웹 앱을 브라우저에서 바로 설치할 수 있습니다:
+
+- **데스크톱 브라우저** — 주소창의 **설치** 옵션을 사용하세요
 - **iPhone/iPad (Safari)** — 공유 → **홈 화면에 추가**
 - **Android (Chrome)** — 메뉴 → **앱 설치** / **홈 화면에 추가**
 
-설치되면 브라우저 크롬 없이 자체 창에서 열립니다.
-
-## 휴대폰에서 접근하기
-
-서버가 사용자의 컴퓨터에서 실행될 때 휴대폰에서 OpenChamber를 열려면 [터널](/ko/tunnels/)을 시작하고 휴대폰에서 링크를 열거나 QR 코드를 스캔합니다. 이렇게 할 때는 항상 강력한 [UI 비밀번호](/ko/security/)를 사용하세요.
+네트워크 밖에서 PWA에 접근하려면 [터널](/ko/tunnels/)과 강력한 [UI 비밀번호](/ko/security/)가 필요합니다. 네이티브 앱은 릴레이를 통해 이를 알아서 처리합니다.
 
 ## 모바일 설정
 
-**Settings → OpenChamber** 아래의 몇 가지 옵션은 모바일 및 설치된 경험을 조정합니다. 앱의 설치 이름, 화면 방향, 화면 키보드의 동작 방식이 해당됩니다.
+**Settings → OpenChamber**에서 몇 가지 옵션으로 모바일 및 설치된 앱 경험을 조정할 수 있습니다. 앱의 설치된 이름, 화면 방향, 화면 키보드 동작 등입니다.
 
 ## 관련 항목
 
-- [Tunnels](/ko/tunnels/) — 다른 네트워크에서 인스턴스에 접근하세요
-- [Security](/ko/security/) — 노출하기 전에 UI를 보호하세요
+- [기기 연결](/ko/connect-devices/) — 페어링, 일회용 QR 코드, 기기 관리
+- [Private Relay](/ko/private-relay/) — "어디서나" 접속의 작동 방식
+- [보안](/ko/security/) — 노출하기 전에 UI를 보호하세요

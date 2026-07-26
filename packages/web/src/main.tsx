@@ -1,4 +1,4 @@
-import { createConfiguredWebAPIs } from './runtimeConfig';
+import { createConfiguredWebAPIs, getDesktopRelayRestoreReady } from './runtimeConfig';
 import { registerSW } from 'virtual:pwa-register';
 
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
@@ -110,7 +110,11 @@ if (hostedSurface === 'mobile') {
       renderMobileApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createConfiguredWebAPIs());
     });
 } else {
-  void import('@openchamber/ui/main');
+  // Hold the render (HTML splash stays up) until a desktop relay-host restore
+  // has picked its transport — otherwise the app boots against a not-yet-chosen
+  // endpoint and flashes the auth screen before the tunnel connects. Resolves
+  // immediately when no relay host is involved.
+  void getDesktopRelayRestoreReady().then(() => import('@openchamber/ui/main'));
 }
 
 if (import.meta.env.PROD) {

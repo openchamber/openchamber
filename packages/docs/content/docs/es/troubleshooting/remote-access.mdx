@@ -12,6 +12,15 @@ Cuando no puedes alcanzar OpenChamber desde tu teléfono u otra máquina, la sol
 - abre `http://localhost:3000` en la misma computadora primero; si eso falla, no es un problema remoto; consulta [Conexión de OpenCode](/es/troubleshooting/opencode-connection/)
 - confirma que el servidor está en funcionamiento con `openchamber status`
 
+## Un dispositivo vinculado no se conecta
+
+- el código QR / enlace de vinculación es **de un solo uso**; si ya se escaneó (o caducó), crea uno nuevo desde **Añadir un dispositivo**
+- si el dispositivo se vinculó con **Solo red doméstica**, no puede conectarse desde fuera de esa red; vuelve a vincularlo con **En cualquier lugar**
+- para la vinculación **En cualquier lugar**, comprueba **Settings → Remote Instances → OpenChamber Relay** en el servidor: debería decir **Conectado**; si no, desactívalo y vuelve a activarlo
+- si un dispositivo fue **revocado**, su token desaparece para siempre; vincúlalo de nuevo con un código QR nuevo
+
+Consulta [Conectar un dispositivo](/es/connect-devices/) y [Private Relay](/es/private-relay/) para saber cómo funcionan estas conexiones.
+
 ## El enlace del túnel no funciona
 
 - ejecuta `openchamber tunnel status --all`
@@ -34,5 +43,5 @@ Si pones OpenChamber detrás de un proxy inverso y carga de forma extraña o no 
 
 ## Relacionado
 
-- [Túneles](/es/tunnels/) · [Instancias remotas](/es/remote-instances/) · [Proxy inverso](/es/reverse-proxy/)
+- [Conectar un dispositivo](/es/connect-devices/) · [Private Relay](/es/private-relay/) · [Túneles](/es/tunnels/) · [Instancias remotas](/es/remote-instances/) · [Proxy inverso](/es/reverse-proxy/)
 - [Seguridad](/es/security/) — protege la UI antes de exponerla

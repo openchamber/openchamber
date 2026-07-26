@@ -1,0 +1,68 @@
+---
+title: Conectar um Dispositivo
+description: Pareie seu celular, desktop ou outro navegador com o seu servidor OpenChamber usando um código QR de uso único.
+---
+
+# Conectar um Dispositivo
+
+Pareie outro dispositivo — o app móvel, o app de desktop ou um navegador em outra máquina — com o seu servidor OpenChamber escaneando um código QR de uso único. Esta é a forma recomendada de conectar dispositivos; não há portas para abrir nem endereços para digitar.
+
+## Parear um dispositivo
+
+1. Na máquina que executa o OpenChamber, abra **Settings → Remote Instances → Conectar a este servidor** e pressione **Adicionar um dispositivo**.
+2. Dê um nome ao dispositivo (por exemplo, *Meu iPhone*) para reconhecê-lo depois.
+3. Escolha onde você vai usar o dispositivo:
+   - **Somente este computador** — para aplicativos nesta mesma máquina
+   - **Somente rede doméstica** — conecta diretamente pela sua rede Wi-Fi; não funciona fora dessa rede
+   - **Em qualquer lugar** — funciona em casa e fora; fora de casa o tráfego passa pelo [Private Relay](/pt-br/private-relay/), um túnel criptografado de ponta a ponta sem configuração
+4. Pressione **Criar código QR**.
+5. No outro dispositivo, escaneie o código:
+   - **app móvel** — toque em **Ler código QR** na tela de conexão (ou na lista de instâncias)
+   - **app de desktop** — copie o link de conexão e cole em **Settings → Remote Instances → Outros servidores OpenChamber → Importar link**
+
+O diálogo fecha sozinho assim que o dispositivo se conecta, e o dispositivo aparece na lista com status ao vivo. Pronto — vocês estão pareados.
+
+## Como o pareamento se mantém seguro
+
+- **O código QR é de uso único.** Ele deixa de funcionar no momento em que um dispositivo o resgata, e expira sozinho se nunca for usado.
+- **Cada dispositivo recebe o próprio token.** Escanear um código nunca expõe sua senha de UI, e o token de um dispositivo não pode ser usado para se passar por outro.
+- **Você mantém o controle.** Cada dispositivo pareado é listado com nome, plataforma e status de conexão — revogue qualquer um deles a qualquer momento.
+- **O tráfego fora de casa é criptografado de ponta a ponta.** Com **Em qualquer lugar**, o tráfego fora da sua rede passa pelo [Private Relay](/pt-br/private-relay/), que não consegue ler o que passa por ele.
+
+## Gerenciar dispositivos pareados
+
+**Settings → Remote Instances → Conectar a este servidor** lista todos os dispositivos que podem alcançar este servidor, com um ponto verde quando está online e se está conectado pela rede local ou pelo relay.
+
+- **Revogar** corta o dispositivo imediatamente. Pareie-o de novo com um novo código QR se mudar de ideia.
+- **Limpar revogados** organiza a lista.
+
+O mesmo dispositivo físico mantém uma única entrada mesmo que entre de novo mais tarde — você não vai acumular duplicatas.
+
+## Conectar pela linha de comando
+
+Se o servidor roda headless (sem UI aberta), crie um link de conexão a partir de um terminal nessa máquina.
+
+Para um dispositivo na mesma rede:
+
+```bash
+openchamber connect-url --port 3000 --qr
+```
+
+Para um dispositivo que deve conectar de **qualquer lugar** — o equivalente a escolher **Em qualquer lugar** no diálogo:
+
+```bash
+openchamber connect-url --relay --qr
+```
+
+Um link com `--relay` carrega as duas rotas, igual ao diálogo: o dispositivo conecta diretamente pela sua rede local quando consegue alcançar o servidor e recorre ao [Private Relay](/pt-br/private-relay/) quando está fora. O relay inicia sozinho: uma instância em execução capta o link em até um minuto; uma parada, na próxima vez que iniciar.
+
+> A rota direta só funciona se o servidor de fato escutar na sua rede. Por padrão, o OpenChamber escuta apenas na própria máquina — inicie-o com `--lan` para torná-lo alcançável pelo Wi-Fi. O comando avisa (`[LAN_UNREACHABLE]`) quando a rota direta do link não será utilizável de outros dispositivos; um link com `--relay` ainda funciona nesse caso, só que sempre pelo relay.
+
+O link e o código QR impressos funcionam exatamente como os do diálogo de configurações — de uso único, com expiração e revogáveis.
+
+## Relacionado
+
+- [Private Relay](/pt-br/private-relay/) — como funcionam as conexões "Em qualquer lugar" e o que o relay pode e não pode ver
+- [Apps Móveis](/pt-br/mobile/) — instale o app para iOS ou Android
+- [Instâncias Remotas](/pt-br/remote-instances/) — conecte o app de desktop a servidores via SSH ou links
+- [Acesso remoto](/pt-br/troubleshooting/remote-access/) — quando um dispositivo não conecta

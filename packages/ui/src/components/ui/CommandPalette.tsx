@@ -18,6 +18,12 @@ import {
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import {
+  EMPTY_SESSION_ORDER_RANKS,
+  orderSessionsByLifecycleScopes,
+  useSessionOrderingStore,
+} from '@/sync/session-ordering';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
@@ -33,6 +39,8 @@ import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, type SettingsRuntimeContext } from '@/lib/settings/metadata';
+
+const EMPTY_PINNED_SESSION_IDS = new Set<string>();
 import { getSettingsNavIcon } from '@/components/views/SettingsView';
 import { Icon } from "@/components/icon/Icon";
 import { McpIcon } from '@/components/icons/McpIcon';
@@ -41,6 +49,7 @@ import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
 
 type CommandEntry = {
   id: string;
@@ -52,6 +61,7 @@ type CommandEntry = {
 };
 
 type FileHit = { path: string; name: string; relativePath: string };
+const EMPTY_SESSIONS: Session[] = [];
 
 const normalizePath = (value: string): string => {
   if (!value) return '';
@@ -84,9 +94,21 @@ export const CommandPalette: React.FC = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
 
-  const activeSessions = useGlobalSessionsStore((s) => s.activeSessions);
+  const activeSessions = useGlobalSessionsStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.activeSessions : EMPTY_SESSIONS,
+    [isCommandPaletteOpen],
+  ));
+  const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.ids : EMPTY_PINNED_SESSION_IDS,
+    [isCommandPaletteOpen],
+  ));
+  const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
+    [isCommandPaletteOpen],
+  ));
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
+  const projects = useProjectsStore((s) => s.projects);
   const effectiveDirectory = useEffectiveDirectory();
   const searchFiles = useFileSearchStore((s) => s.searchFiles);
   const { files: filesApi, git: gitApi } = useRuntimeAPIs();
@@ -293,12 +315,9 @@ export const CommandPalette: React.FC = () => {
   // ---------------------------------------------------------------------------
   // Sessions
   // ---------------------------------------------------------------------------
-  const sortedActiveSessions = React.useMemo(() => {
-    const getUpdated = (s: Session) =>
-      (typeof s.time?.updated === 'number' ? s.time.updated : 0) ||
-      (typeof s.time?.created === 'number' ? s.time.created : 0);
-    return [...activeSessions].sort((a, b) => getUpdated(b) - getUpdated(a));
-  }, [activeSessions]);
+  const orderedActiveSessions = React.useMemo(() => {
+    return orderSessionsByLifecycleScopes(activeSessions, pinnedSessionIds, sessionOrderRanks);
+  }, [activeSessions, pinnedSessionIds, sessionOrderRanks]);
 
   const allBranches = useGitAllBranches();
   const worktreeMetadata = useSessionUIStore((s) => s.worktreeMetadata);
@@ -317,21 +336,27 @@ export const CommandPalette: React.FC = () => {
   // File search
   // ---------------------------------------------------------------------------
   const [fileResults, setFileResults] = React.useState<FileHit[]>([]);
-  const [isSearchingFiles, setIsSearchingFiles] = React.useState(false);
+  const [fileResultsKey, setFileResultsKey] = React.useState('');
+
+  const fileSearchKey = buildCommandPaletteFileSearchKey(currentRoot, trimmedQuery);
 
   React.useEffect(() => {
     if (!isCommandPaletteOpen) {
       setFileResults([]);
-      setIsSearchingFiles(false);
+      setFileResultsKey('');
       return;
     }
-    if (!currentRoot || trimmedQuery.length === 0) {
+    if (!fileSearchKey) {
       setFileResults([]);
-      setIsSearchingFiles(false);
+      setFileResultsKey('');
+      return;
+    }
+    if (!currentRoot) {
+      setFileResults([]);
+      setFileResultsKey('');
       return;
     }
     let cancelled = false;
-    setIsSearchingFiles(true);
     void searchFiles(currentRoot, trimmedQuery, 10, { type: 'file' })
       .then((results) => {
         if (cancelled) return;
@@ -342,17 +367,18 @@ export const CommandPalette: React.FC = () => {
             relativePath: file.relativePath,
           })),
         );
+        setFileResultsKey(fileSearchKey);
       })
       .catch(() => {
-        if (!cancelled) setFileResults([]);
-      })
-      .finally(() => {
-        if (!cancelled) setIsSearchingFiles(false);
+        if (!cancelled) {
+          setFileResults([]);
+          setFileResultsKey(fileSearchKey);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [isCommandPaletteOpen, currentRoot, trimmedQuery, searchFiles]);
+  }, [isCommandPaletteOpen, currentRoot, trimmedQuery, fileSearchKey, searchFiles]);
 
   // ---------------------------------------------------------------------------
   // Filter visible items
@@ -376,40 +402,55 @@ export const CommandPalette: React.FC = () => {
   }, [settingsEntries, liveTrimmed, hasQuery]);
 
   const scoredSessions = React.useMemo(() => {
-    if (!hasQuery) return sortedActiveSessions.slice(0, 5).map((item) => ({ item, score: 0 }));
-    return scoreByFuzzyQuery(sortedActiveSessions, liveTrimmed, (s) => s.title || '', {
+    if (!hasQuery) return orderedActiveSessions.slice(0, 5).map((item) => ({ item, score: 0 }));
+    return scoreByFuzzyQuery(orderedActiveSessions, liveTrimmed, (s) => s.title || '', {
       limit: 7,
       threshold: 0.2,
     });
-  }, [sortedActiveSessions, liveTrimmed, hasQuery]);
+  }, [orderedActiveSessions, liveTrimmed, hasQuery]);
 
   const scoredFiles = React.useMemo(() => {
-    if (!hasQuery || fileResults.length === 0) return [];
-    // Server already ranked by relevance; compute a comparable client score on
-    // basename so we can decide file group placement vs sessions/commands.
-    return scoreByFuzzyQuery(fileResults, liveTrimmed, (f) => f.name, {
-      limit: 10,
+    if (!isCommandPaletteOpen) return [];
+    return scoreCommandPaletteFiles(fileResults, trimmedQuery, fileSearchKey, fileResultsKey);
+  }, [isCommandPaletteOpen, fileResults, fileResultsKey, fileSearchKey, trimmedQuery]);
+
+  const isFileSearchStale = isCommandPaletteOpen && fileSearchKey.length > 0 && fileResultsKey !== fileSearchKey;
+
+  // ---------------------------------------------------------------------------
+  // Projects
+  // ---------------------------------------------------------------------------
+  const scoredProjects = React.useMemo(() => {
+    if (!hasQuery) return [];
+    const projectEntries = projects.map((project) => ({
+      ...project,
+      displayName: project.label || project.path.split('/').pop() || project.path,
+      searchText: `${project.label || ''} ${project.path}`,
+    }));
+    return scoreByFuzzyQuery(projectEntries, liveTrimmed, (p) => p.searchText, {
+      limit: 7,
       threshold: 0.4,
     });
-  }, [fileResults, liveTrimmed, hasQuery]);
+  }, [projects, liveTrimmed, hasQuery]);
 
   const visibleCommands = scoredCommands.map((x) => x.item);
   const visibleSettings = scoredSettings.map((x) => x.item);
   const visibleSessions = scoredSessions.map((x) => x.item);
   const visibleFiles = hasQuery ? scoredFiles.map((x) => x.item) : [];
+  const visibleProjects = hasQuery ? scoredProjects.map((x) => x.item) : [];
 
-  const groupOrder = React.useMemo<('commands' | 'settings' | 'sessions' | 'files')[]>(() => {
+  const groupOrder = React.useMemo<('commands' | 'settings' | 'sessions' | 'files' | 'projects')[]>(() => {
     if (!hasQuery) return ['commands', 'sessions'];
     const best = (arr: { score: number }[]): number => (arr.length ? arr[0].score : Infinity);
-    const groups: { key: 'commands' | 'settings' | 'sessions' | 'files'; score: number }[] = [
+    const groups: { key: 'commands' | 'settings' | 'sessions' | 'files' | 'projects'; score: number }[] = [
       { key: 'commands', score: best(scoredCommands) },
       { key: 'settings', score: best(scoredSettings) },
       { key: 'sessions', score: best(scoredSessions) },
       { key: 'files', score: best(scoredFiles) },
+      { key: 'projects', score: best(scoredProjects) },
     ];
     groups.sort((a, b) => a.score - b.score);
     return groups.map((g) => g.key);
-  }, [hasQuery, scoredCommands, scoredSettings, scoredSessions, scoredFiles]);
+  }, [hasQuery, scoredCommands, scoredSettings, scoredSessions, scoredFiles, scoredProjects]);
 
   const handleOpenSession = React.useCallback(
     (session: Session) => {
@@ -431,6 +472,14 @@ export const CommandPalette: React.FC = () => {
       close();
     },
     [currentRoot, filesApi, openContextFile, close],
+  );
+
+  const handleOpenProject = React.useCallback(
+    (projectId: string, projectPath: string) => {
+      close();
+      openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: projectPath });
+    },
+    [close, openNewSessionDraft],
   );
 
   const shortcut = React.useCallback(
@@ -538,10 +587,32 @@ export const CommandPalette: React.FC = () => {
                   </CommandGroup>
                 );
               }
+              if (groupKey === 'projects' && visibleProjects.length > 0) {
+                return (
+                  <CommandGroup key="projects">
+                    {visibleProjects.map((project) => {
+                      const displayName = project.displayName;
+                      return (
+                        <CommandItem
+                          key={`project:${project.id}`}
+                          value={`project:${project.id}`}
+                          onSelect={() => handleOpenProject(project.id, project.path)}
+                        >
+                          <Icon name="folder" className="mr-2 h-4 w-4" />
+                          <span className="truncate">{displayName}</span>
+                          <span className="ml-auto inline-flex items-center text-muted-foreground typography-meta truncate max-w-[160px]">
+                            {project.path}
+                          </span>
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                );
+              }
               return null;
             })}
 
-            {hasQuery && isSearchingFiles && visibleFiles.length === 0 ? (
+            {isFileSearchStale ? (
               <div className="px-3 py-2 typography-meta text-muted-foreground">
                 {t('commandPalette.empty.searchingFiles')}
               </div>

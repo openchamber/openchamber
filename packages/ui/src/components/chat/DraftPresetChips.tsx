@@ -32,6 +32,7 @@ import { useI18n } from '@/lib/i18n';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 import {
     useDraftStarters,
     type ResolvedStarter,
@@ -254,7 +255,7 @@ const AddStarterPicker: React.FC<{
  * Reorder is constrained to within a chip's own group; cross-group hovers are
  * ignored.
  */
-export const DraftPresetChips: React.FC<DraftPresetChipsProps> = ({ onSubmit, className }) => {
+const DraftPresetChipsContent: React.FC<DraftPresetChipsProps> = ({ onSubmit, className }) => {
     const { global, project, pinnable, ensureLoaded, addStarter, removeStarter, reorder } = useDraftStarters();
     const { isMobile } = useDeviceInfo();
     const [isDragging, setIsDragging] = React.useState(false);
@@ -330,4 +331,9 @@ export const DraftPresetChips: React.FC<DraftPresetChipsProps> = ({ onSubmit, cl
             </div>
         </DndContext>
     );
+};
+
+export const DraftPresetChips: React.FC<DraftPresetChipsProps> = (props) => {
+    const visible = useUIStore((state) => state.draftStartersVisible);
+    return visible ? <DraftPresetChipsContent {...props} /> : null;
 };

@@ -6,6 +6,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { Snippet } from '@/types/snippet';
+import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 
 export interface SnippetAutocompleteHandle {
   handleKeyDown: (key: string) => void;
@@ -30,6 +31,8 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
 }, ref) => {
   const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const isMobile = useUIStore((state) => state.isMobile);
+  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, isMobile);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const [filteredSnippets, setFilteredSnippets] = React.useState<Snippet[]>([]);
@@ -120,8 +123,8 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
   }), [chooseSnippet, filteredSnippets, onClose, openNewSnippetSettings]);
 
   return (
-    <div ref={containerRef} className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-60 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col" style={style}>
-      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-0 pb-2">
+    <div ref={containerRef} className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-60 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col" style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}>
+      <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0 pb-2">
         <div
           ref={(el) => { itemRefs.current[0] = el; }}
           className={cn('flex items-center gap-2 px-3 py-1.5 cursor-pointer rounded-lg typography-ui-label', selectedIndex === 0 && 'bg-interactive-selection')}
@@ -135,7 +138,7 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
           <div
             key={`${snippet.source}:${snippet.filePath}`}
             ref={(el) => { itemRefs.current[index + 1] = el; }}
-            className={cn('flex items-start gap-2 px-3 py-1.5 cursor-pointer rounded-lg typography-ui-label', index + 1 === selectedIndex && 'bg-interactive-selection')}
+            className={cn('flex gap-2 px-3 py-1.5 cursor-pointer rounded-lg typography-ui-label', isMobile ? 'items-center' : 'items-start', index + 1 === selectedIndex && 'bg-interactive-selection')}
             onClick={() => chooseSnippet(snippet)}
             onMouseMove={() => setSelectedIndex(index + 1)}
           >
@@ -144,14 +147,18 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
                 <span className="font-semibold truncate">#{snippet.name}</span>
                 <span className="text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0 bg-[var(--surface-muted)] text-muted-foreground border-[var(--interactive-border)]/60">{t(`snippets.source.${snippet.source}`)}</span>
               </div>
-              <div className="typography-meta text-muted-foreground mt-0.5 truncate">{snippetPreview(snippet)}</div>
+              {!isMobile && (
+                <div className="typography-meta text-muted-foreground mt-0.5 truncate">{snippetPreview(snippet)}</div>
+              )}
             </div>
           </div>
         )) : (
           <div className="px-3 py-2 typography-ui-label text-muted-foreground">{t('chat.snippetAutocomplete.empty')}</div>
         )}
       </ScrollableOverlay>
-      <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">{t('chat.snippetAutocomplete.footer')}</div>
+      {!isMobile && (
+        <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">{t('chat.snippetAutocomplete.footer')}</div>
+      )}
     </div>
   );
 });

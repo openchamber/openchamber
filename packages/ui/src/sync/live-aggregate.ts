@@ -1,6 +1,7 @@
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client'
 import type { Session } from '@opencode-ai/sdk/v2'
 import type { State } from './types'
+import { countSyncPerformance } from './performance-diagnostics'
 
 type LiveStateSlice = Pick<State, 'session' | 'session_status'>
 
@@ -158,10 +159,16 @@ export function aggregateLiveSessionStatuses(states: Iterable<LiveStateSlice>): 
   const candidates = new Map<string, StatusCandidate>()
 
   for (const state of states) {
-    for (const sessionId of Object.keys(state.session_status ?? {})) {
-      const next = getStatusCandidate(state, sessionId)
-      if (!next) {
-        continue
+    const sessionUpdatedAtById = new Map<string, number>()
+    for (const session of state.session) {
+      countSyncPerformance('statusAggregationSessionEntries')
+      sessionUpdatedAtById.set(session.id, getSessionUpdatedAt(session))
+    }
+    for (const [sessionId, status] of Object.entries(state.session_status ?? {})) {
+      countSyncPerformance('statusAggregationCandidates')
+      const next: StatusCandidate = {
+        status,
+        sessionUpdatedAt: sessionUpdatedAtById.get(sessionId) ?? -1,
       }
 
       const current = candidates.get(sessionId)

@@ -85,12 +85,6 @@ if (winX64 || winArm64) {
   });
 }
 
-const linuxX64 = await read('latest-yml-x86_64-unknown-linux-gnu', 'latest-linux.yml');
-if (linuxX64) output['latest-linux.yml'] = serialize(linuxX64);
-
-const linuxArm64 = await read('latest-yml-aarch64-unknown-linux-gnu', 'latest-linux-arm64.yml');
-if (linuxArm64) output['latest-linux-arm64.yml'] = serialize(linuxArm64);
-
 const macX64 = await read('latest-yml-x86_64-apple-darwin', 'latest-mac.yml');
 const macArm64 = await read('latest-yml-aarch64-apple-darwin', 'latest-mac.yml');
 if (macX64 || macArm64) {

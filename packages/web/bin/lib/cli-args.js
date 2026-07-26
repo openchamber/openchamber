@@ -63,10 +63,12 @@ function parseArgs(argv = process.argv.slice(2)) {
     all: false,
     follow: true,
     lines: DEFAULT_TAIL_LINES,
+    limit: undefined,
     provider: undefined,
     mode: undefined,
     profile: undefined,
     name: undefined,
+    title: undefined,
     configPath: undefined,
     token: undefined,
     tokenFile: undefined,
@@ -88,6 +90,30 @@ function parseArgs(argv = process.argv.slice(2)) {
     foreground: false,
     lan: false,
     apiOnly: false,
+    project: undefined,
+    task: undefined,
+    session: undefined,
+    message: undefined,
+    prompt: undefined,
+    model: undefined,
+    daily: undefined,
+    weekly: undefined,
+    once: undefined,
+    time: undefined,
+    cron: undefined,
+    timezone: undefined,
+    agent: undefined,
+    variant: undefined,
+    disabled: false,
+    goal: false,
+    goalTokenBudget: undefined,
+    directory: undefined,
+    role: undefined,
+    last: false,
+    wait: false,
+    timeout: undefined,
+    lastAssistant: false,
+    withStatus: false,
   };
 
   const removedFlagErrors = [];
@@ -194,6 +220,140 @@ function parseArgs(argv = process.argv.slice(2)) {
         options.name = typeof value === 'string' ? value : options.name;
         break;
       }
+      case 'title': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.title = typeof value === 'string' ? value : options.title;
+        break;
+      }
+      case 'worktree': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.worktree = typeof value === 'string' ? value : options.worktree;
+        break;
+      }
+      case 'branch': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.branch = typeof value === 'string' ? value : options.branch;
+        break;
+      }
+      case 'start-ref':
+      case 'base': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.startRef = typeof value === 'string' ? value : options.startRef;
+        break;
+      }
+      case 'upstream':
+        options.setUpstream = true;
+        break;
+      case 'no-upstream':
+        options.setUpstream = false;
+        break;
+      case 'project': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.project = typeof value === 'string' ? value : options.project;
+        break;
+      }
+      case 'dir':
+      case 'directory': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.directory = typeof value === 'string' ? value : options.directory;
+        break;
+      }
+      case 'task': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.task = typeof value === 'string' ? value : options.task;
+        break;
+      }
+      case 'session': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.session = typeof value === 'string' ? value : options.session;
+        break;
+      }
+      case 'message': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.message = typeof value === 'string' ? value : options.message;
+        break;
+      }
+      case 'prompt': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.prompt = typeof value === 'string' ? value : options.prompt;
+        break;
+      }
+      case 'model': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.model = typeof value === 'string' ? value : options.model;
+        break;
+      }
+      case 'daily': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.daily = typeof value === 'string' ? value : options.daily;
+        break;
+      }
+      case 'weekly': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.weekly = typeof value === 'string' ? value : options.weekly;
+        break;
+      }
+      case 'once': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.once = typeof value === 'string' ? value : options.once;
+        break;
+      }
+      case 'time': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.time = typeof value === 'string' ? value : options.time;
+        break;
+      }
+      case 'cron': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.cron = typeof value === 'string' ? value : options.cron;
+        break;
+      }
+      case 'timezone': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.timezone = typeof value === 'string' ? value : options.timezone;
+        break;
+      }
+      case 'agent': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.agent = typeof value === 'string' ? value : options.agent;
+        break;
+      }
+      case 'variant': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.variant = typeof value === 'string' ? value : options.variant;
+        break;
+      }
+      case 'disabled':
+        options.disabled = true;
+        break;
+      case 'goal':
+        options.goal = true;
+        break;
+      case 'goal-token-budget': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.goalTokenBudget = value;
+        break;
+      }
       case 'config': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
@@ -249,6 +409,30 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'all':
         options.all = true;
         break;
+      case 'last':
+        options.last = true;
+        break;
+      case 'last-assistant':
+        options.lastAssistant = true;
+        break;
+      case 'wait':
+        options.wait = true;
+        break;
+      case 'timeout': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.timeout = typeof value === 'string' ? value : options.timeout;
+        break;
+      }
+      case 'with-status':
+        options.withStatus = true;
+        break;
+      case 'role': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.role = typeof value === 'string' ? value : options.role;
+        break;
+      }
       case 'no-follow':
         options.follow = false;
         break;
@@ -264,6 +448,19 @@ function parseArgs(argv = process.argv.slice(2)) {
         }
         break;
       }
+      case 'limit': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        const parsed = parseInt(value ?? '', 10);
+        if (!Number.isFinite(parsed) || parsed < 1) {
+          throw new TunnelCliError('Invalid limit value. Provide a positive integer.', EXIT_CODE.USAGE_ERROR);
+        }
+        options.limit = parsed;
+        break;
+      }
+      case 'relay':
+        options.relay = true;
+        break;
       case 'qr':
         options.qr = true;
         options.explicitQr = true;
@@ -339,6 +536,9 @@ function parseArgs(argv = process.argv.slice(2)) {
   const subcommand = command === 'tunnel' ? (positional[1] || 'help') : null;
   const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
   const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
+  const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
+  const sessionAction = command === 'session' ? (positional[1] || 'help') : null;
+  const controlAction = command === 'control' ? (positional[1] || 'help') : null;
 
   if (options.lan && typeof options.host !== 'string') {
     options.host = '0.0.0.0';
@@ -353,6 +553,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     subcommand,
     tunnelAction,
     startupAction,
+    scheduleAction,
+    sessionAction,
+    controlAction,
     options,
     removedFlagErrors,
     helpRequested,
@@ -372,6 +575,11 @@ COMMANDS:
   stop           Stop running instance(s)
   restart        Stop and start the server
   status         Show server status
+  schedule       Manage scheduled tasks
+  session        Create, inspect, and read OpenChamber sessions
+  models         Show default and favorite models
+  projects       Show configured projects and IDs
+  control        Show OpenChamber control-plane commands
   tunnel         Tunnel lifecycle commands
   startup        Manage launch at system startup
   logs           Tail OpenChamber logs
@@ -384,6 +592,7 @@ OPTIONS:
   --hostname              Alias for --host outside tunnel commands
   --lan                   Bind to 0.0.0.0 for LAN access
   --server <url>          Public/server URL for connect-url links
+  --relay                 connect-url: also include the end-to-end-encrypted relay transport
   --ui-password           Protect browser UI with single password
   --api-only              Start API routes only, without serving browser UI assets
   --foreground            Run server in foreground (use with systemd/process managers)
@@ -408,9 +617,49 @@ EXAMPLES:
   openchamber serve --foreground # Start in foreground (for systemd Type=simple)
   openchamber connect-url --port 3000 --qr
   openchamber connect-url --server https://openchamber.example.com
+  openchamber control           # Show control-plane commands for agents/scripts
   openchamber startup enable     # Start OpenChamber at user login
   openchamber tunnel help        # Show tunnel lifecycle help
   openchamber logs               # Follow logs for latest running instance
+`);
+}
+
+function showControlHelp() {
+  console.log(`
+ OpenChamber Control Commands
+
+USAGE:
+  openchamber <COMMAND> [OPTIONS]
+
+COMMANDS:
+  status                         Show running OpenChamber runtimes
+  session                        Create, inspect, and read sessions
+  models                         Show default and favorite models
+  projects                       Show configured projects and IDs
+  schedule                       Manage scheduled tasks
+  tunnel                         Inspect tunnel status/readiness
+  logs                           Tail logs for CLI-managed runtimes
+
+DETAILED HELP:
+  openchamber session --help     Show session creation, status, and message options
+  openchamber models --help      Show model defaults and favorites help
+  openchamber projects --help    Show project list help
+  openchamber schedule --help    Show scheduled task actions and schedule options
+  openchamber tunnel help        Show tunnel lifecycle/status commands
+  openchamber status --help      Show runtime status options
+
+COMMON OPTIONS:
+  --json                         Output machine-readable JSON
+  -q, --quiet                    Print minimal output
+  -p, --port <port>              Target a specific OpenChamber runtime
+  --ui-password <password>       Authenticate to a password-protected runtime
+
+EXAMPLES:
+  openchamber status
+  openchamber models
+  openchamber projects
+  openchamber session --help
+  openchamber schedule --help
 `);
 }
 
@@ -461,6 +710,11 @@ OPTIONS:
   --lan                   Bind to 0.0.0.0 for LAN access when starting
   --server <url>          Public URL saved into the connection link
   --server-url <url>      Alias for --server
+  --relay                 Also include the end-to-end-encrypted relay transport
+                          so the link works away from the local network. The
+                          device prefers the direct connection when reachable;
+                          the instance brings the relay up on its own. Set
+                          OPENCHAMBER_RELAY_URL to use a self-hosted relay.
   --name <label>          Label saved with the remote client token
   --ui-password <value>   Protect browser access when UI routes are enabled
   --api-only              Start in headless/API-only mode when starting
@@ -473,6 +727,7 @@ EXAMPLES:
   openchamber connect-url --port 3000 --qr
   openchamber connect-url --port 3000 --api-only --lan --server http://workstation.local:3000 --qr
   openchamber connect-url --server https://openchamber.example.com --name Workstation
+  openchamber connect-url --relay --name "My laptop"
 `);
 }
 
@@ -569,7 +824,7 @@ _openchamber_tunnel() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="serve stop restart status tunnel logs update"
+    commands="serve stop restart status schedule session models projects tunnel logs update"
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
@@ -621,6 +876,10 @@ _openchamber() {
     'stop:Stop running instance(s)'
     'restart:Stop and start the server'
     'status:Show server status'
+    'schedule:Manage scheduled tasks'
+    'session:Create sessions'
+    'models:Show default and favorite models'
+    'projects:Show configured projects and IDs'
     'tunnel:Tunnel lifecycle commands'
     'logs:Tail OpenChamber logs'
     'update:Check for and install updates'
@@ -718,6 +977,7 @@ export {
   DEFAULT_PORT,
   parseArgs,
   showHelp,
+  showControlHelp,
   showStartupHelp,
   showConnectUrlHelp,
   showTunnelHelp,

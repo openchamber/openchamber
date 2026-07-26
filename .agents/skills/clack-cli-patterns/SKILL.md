@@ -1,6 +1,6 @@
 ---
 name: clack-cli-patterns
-description: Use when creating or modifying terminal CLI commands, prompts, or output formatting in OpenChamber. Enforces Clack UX standards with strict parity and safety across TTY/non-TTY, --quiet, and --json modes.
+description: Use when creating or modifying OpenChamber CLI commands, prompts, terminal output, non-TTY behavior, `--quiet`, or `--json` behavior.
 license: MIT
 compatibility: opencode
 ---
@@ -150,56 +150,9 @@ For each command/subcommand, manually verify:
 4. non-TTY behavior (e.g. piped)
 5. error path in both human and json modes
 
-## Copy/Paste Snippets
+## Reusable Snippets
 
-### Prompt Guard
-
-```js
-if (canPrompt(options)) {
-  const value = await select({
-    message: 'Choose an option',
-    options: [{ value: 'a', label: 'Option A' }],
-  });
-  if (isCancel(value)) {
-    cancel('Operation cancelled.');
-    return;
-  }
-}
-```
-
-### Non-Interactive Fallback
-
-```js
-if (!resolvedValue) {
-  if (canPrompt(options)) {
-    // prompt path
-  } else {
-    throw new Error('Missing required value. Provide --flag <value>.');
-  }
-}
-```
-
-### Spinner Guard
-
-```js
-const spin = createSpinner(options);
-spin?.start('Running operation...');
-// ...work...
-spin?.stop('Done');
-```
-
-### JSON vs Human Output
-
-```js
-if (options.json) {
-  printJson({ ok: true, data });
-  return;
-}
-
-intro('Operation');
-log.success('Completed');
-outro('done');
-```
+Load `references/snippets.md` when implementing prompt guards, non-interactive fallback, spinner lifecycle, or JSON/human output branching.
 
 ## Implementation Checklist
 
@@ -211,6 +164,6 @@ outro('done');
 
 ## References
 
-- Policy source: `AGENTS.md` (CLI Parity and Safety Policy)
+- This skill is the canonical CLI parity and safety policy.
 - Terminal CLI precedent: `packages/web/bin/cli.js`
 - Output adapter precedent: `packages/web/bin/cli-output.js`

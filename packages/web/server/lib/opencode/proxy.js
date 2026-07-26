@@ -181,6 +181,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     os,
     path,
     OPEN_CODE_READY_GRACE_MS,
+    LONG_REQUEST_TIMEOUT_MS,
     getRuntime,
     getOpenCodeAuthHeaders,
     buildOpenCodeUrl,
@@ -291,11 +292,46 @@ export const registerOpenCodeProxy = (app, deps) => {
       return externalBase;
     }
 
-    if (runtimeState.openCodePort) {
-      return `http://localhost:${runtimeState.openCodePort}`;
-    }
-
     return FALLBACK_PROXY_TARGET;
+  };
+
+  const normalizeProxyTimeout = (value) => {
+    return Number.isFinite(value) && value > 0 ? value : 4 * 60 * 1000;
+  };
+
+  const PROXY_REQUEST_TIMEOUT_MS = normalizeProxyTimeout(LONG_REQUEST_TIMEOUT_MS);
+  const PROXY_TIMEOUT_MARKER = Symbol('openchamberProxyTimedOut');
+
+  const isProxyTimeoutError = (error) => {
+    const code = typeof error?.code === 'string' ? error.code : '';
+    const message = typeof error?.message === 'string' ? error.message.toLowerCase() : '';
+    return code === 'ETIMEDOUT'
+      || code === 'ESOCKETTIMEDOUT'
+      || message.includes('timeout')
+      || message.includes('timed out');
+  };
+
+  const sendProxyErrorResponse = (res, statusCode) => {
+    if (!res || res.headersSent || res.writableEnded || typeof res.status !== 'function') {
+      return false;
+    }
+    res.status(statusCode).json({ error: statusCode === 504 ? 'OpenCode upstream timed out' : 'OpenCode service unavailable' });
+    return true;
+  };
+
+  const applyProxyResponseDeadline = (req, res, next) => {
+    const timeout = setTimeout(() => {
+      req[PROXY_TIMEOUT_MARKER] = true;
+      if (sendProxyErrorResponse(res, 504)) {
+        res.once('finish', () => req.destroy?.());
+      }
+    }, PROXY_REQUEST_TIMEOUT_MS);
+    timeout.unref?.();
+
+    const clear = () => clearTimeout(timeout);
+    res.once('finish', clear);
+    res.once('close', clear);
+    next();
   };
 
   const forwardSseRequest = async (req, res) => {
@@ -665,6 +701,8 @@ export const registerOpenCodeProxy = (app, deps) => {
     target: resolveProxyTarget(),
     changeOrigin: true,
     pathRewrite: { '^/api': '' },
+    timeout: PROXY_REQUEST_TIMEOUT_MS,
+    proxyTimeout: PROXY_REQUEST_TIMEOUT_MS,
     // Dynamic target — port can change after restart
     router: () => resolveProxyTarget(),
     on: {
@@ -700,11 +738,13 @@ export const registerOpenCodeProxy = (app, deps) => {
           }
         }
       },
-      error: (err, _req, res) => {
+      error: (err, req, res) => {
         console.error('[proxy] OpenCode proxy error:', err.message);
-        if (res && !res.headersSent && typeof res.status === 'function') {
-          res.status(503).json({ error: 'OpenCode service unavailable' });
+        if (req?.[PROXY_TIMEOUT_MARKER]) {
+          return;
         }
+        const statusCode = isProxyTimeoutError(err) ? 504 : 503;
+        sendProxyErrorResponse(res, statusCode);
       },
     },
   });
@@ -724,5 +764,6 @@ export const registerOpenCodeProxy = (app, deps) => {
     next();
   });
 
+  app.use('/api', applyProxyResponseDeadline);
   app.use('/api', apiProxy);
 };

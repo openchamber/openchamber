@@ -13,7 +13,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
+import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
@@ -25,6 +25,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getPreviewTargetRecoveryAction } from '@/lib/preview/proxy-response';
 import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
@@ -541,6 +542,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
+  const effectiveDirectory = useEffectiveDirectory();
   const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const addAttachedFile = useInputStore((state) => state.addAttachedFile);
 
@@ -687,7 +689,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
 
   const attachPreviewAnnotation = React.useCallback((target: PreviewElementMetadata) => {
     const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!sessionKey) {
+    if (!sessionKey || !effectiveDirectory) {
       toast.error(t('contextPanel.preview.inspect.attachNoSession'));
       return;
     }
@@ -711,8 +713,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         attachedScreenshot = false;
       }
 
-      addInlineCommentDraft({
-        sessionKey,
+      addInlineCommentDraft({ directory: effectiveDirectory, sessionKey }, {
         source: 'preview-annotation',
         fileLabel: pageUrl || 'preview',
         startLine: 1,
@@ -730,7 +731,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       });
       toast.success(t('contextPanel.preview.inspect.attached'));
     })();
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, effectiveDirectory, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
 
   React.useEffect(() => {
     setBridgeReady(false);
@@ -920,7 +921,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
 
   const attachConsoleEvents = React.useCallback(() => {
     const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!sessionKey) {
+    if (!sessionKey || !effectiveDirectory) {
       toast.error(t('contextPanel.preview.console.attachNoSession'));
       return;
     }
@@ -936,8 +937,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return `[${timestamp}] [${event.level}] ${event.message}${details}`;
     }).join('\n');
 
-    addInlineCommentDraft({
-      sessionKey,
+    addInlineCommentDraft({ directory: effectiveDirectory, sessionKey }, {
       source: 'preview-console',
       fileLabel: rawUrl || effectiveSrc || 'preview',
       startLine: 1,
@@ -947,31 +947,41 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       text: t('contextPanel.preview.console.attachAnnotation'),
     });
     toast.success(t('contextPanel.preview.console.attached'));
-  }, [addInlineCommentDraft, consoleEvents, currentSessionId, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
+  }, [addInlineCommentDraft, consoleEvents, currentSessionId, effectiveDirectory, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
 
   // Out-of-band upstream probe: iframes don't expose HTTP status to the parent,
   // so when the proxy returns a 502 (upstream dev server is offline) the iframe
-  // would just render the raw JSON error body. Probe the proxy URL with a HEAD
+  // would just render the raw JSON error body. Probe the proxy URL with a GET
   // request and surface a friendly overlay when the upstream is unreachable.
   type UpstreamState = 'unknown' | 'starting' | 'reachable' | 'unreachable';
   const [upstreamState, setUpstreamState] = React.useState<UpstreamState>('unknown');
   const upstreamProbeStartedAtRef = React.useRef<number>(0);
   const upstreamProbeAttemptRef = React.useRef<number>(0);
+  const upstreamProbeKeyRef = React.useRef<string>('');
+  const proxyRecoveryAttemptedKeyRef = React.useRef<string>('');
   const PREVIEW_STARTUP_GRACE_MS = 15_000;
 
   React.useEffect(() => {
     if (!proxySrc) {
       setUpstreamState('unknown');
+      upstreamProbeKeyRef.current = '';
       upstreamProbeStartedAtRef.current = 0;
       upstreamProbeAttemptRef.current = 0;
       return;
     }
 
     let cancelled = false;
-    if (!upstreamProbeStartedAtRef.current) {
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+    if (upstreamProbeKeyRef.current !== proxyCacheKey) {
+      upstreamProbeKeyRef.current = proxyCacheKey;
       upstreamProbeStartedAtRef.current = Date.now();
       upstreamProbeAttemptRef.current = 0;
     }
+    const scheduleRetry = (delay: number) => {
+      retryTimeout = setTimeout(() => {
+        if (!cancelled) bumpReload();
+      }, delay);
+    };
     setUpstreamState('unknown');
 
     void (async () => {
@@ -993,21 +1003,36 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       if (cancelled) return;
 
       if (!response) {
-        // Network-level failure (e.g. server itself is down) — treat as unreachable.
         setUpstreamState('unreachable');
+        scheduleRetry(5000);
         return;
       }
 
-      if (response.status === 403 || response.status === 404) {
+      const recoveryAction = getPreviewTargetRecoveryAction(
+        response.headers,
+        proxyRecoveryAttemptedKeyRef.current === proxyCacheKey,
+      );
+      if (recoveryAction !== 'none') {
         previewProxyTargetCache.delete(proxyCacheKey);
-        setProxyState({ status: 'loading' });
-        bumpProxyRegistration();
+        if (recoveryAction === 'retry-registration') {
+          proxyRecoveryAttemptedKeyRef.current = proxyCacheKey;
+          setProxyState({ status: 'loading' });
+          bumpProxyRegistration();
+        } else {
+          const errorBody = await response.json().catch(() => ({}));
+          if (cancelled) return;
+          const message = typeof errorBody?.error === 'string'
+            ? errorBody.error
+            : `HTTP ${response.status}`;
+          setProxyState({ status: 'error', message });
+        }
         return;
       }
 
       // The proxy emits 502 when the upstream is unreachable. Anything else
       // (including 4xx from the upstream) means the upstream answered.
       if (response.status !== 502) {
+        proxyRecoveryAttemptedKeyRef.current = '';
         setUpstreamState('reachable');
         return;
       }
@@ -1021,19 +1046,17 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         upstreamProbeAttemptRef.current += 1;
         const attempt = upstreamProbeAttemptRef.current;
         const delay = Math.min(2000, 250 * Math.pow(2, Math.min(4, attempt)));
-        setTimeout(() => {
-          if (!cancelled) {
-            bumpReload();
-          }
-        }, delay).unref?.();
+        scheduleRetry(delay);
         return;
       }
 
       setUpstreamState('unreachable');
+      scheduleRetry(5000);
     })();
 
     return () => {
       cancelled = true;
+      if (retryTimeout) clearTimeout(retryTimeout);
     };
   }, [proxyCacheKey, proxySrc, reloadNonce]);
 
@@ -1306,6 +1329,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   const startUrl = normalized !== 'about:blank' ? normalized : '';
   const [urlInput, setUrlInput] = React.useState(startUrl);
   const [currentUrl, setCurrentUrl] = React.useState(startUrl);
+  const [loadedUrl, setLoadedUrl] = React.useState(startUrl);
   const [history, setHistory] = React.useState<string[]>(() => startUrl ? [startUrl] : []);
   const [historyIndex, setHistoryIndex] = React.useState(() => startUrl ? 0 : -1);
   const [reloadNonce, bumpReload] = React.useReducer((value: number) => value + 1, 0);
@@ -1324,12 +1348,17 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     setContextPanelTabTargetPath(directory, tabID, url);
   }, [directory, tabID, setContextPanelTabTargetPath]);
 
-  const applyUrl = React.useCallback((url: string, options?: { replaceHistory?: boolean }) => {
+  const applyUrl = React.useCallback((url: string, options?: { replaceHistory?: boolean; inFrame?: boolean }) => {
     const normalizedUrl = normalizeBrowserUrl(url);
     const nextUrl = normalizedUrl !== 'about:blank' ? normalizedUrl : '';
     setCurrentUrl(nextUrl);
     setUrlInput(nextUrl);
-    setIsLoading(Boolean(nextUrl));
+    if (!options?.inFrame) {
+      setLoadedUrl(nextUrl);
+      setIsLoading(Boolean(nextUrl));
+    } else {
+      setIsLoading(false);
+    }
     persistUrl(nextUrl);
 
     setHistory((current) => {
@@ -1360,6 +1389,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     if (!nextUrl) return;
     setHistoryIndex(nextIndex);
     setCurrentUrl(nextUrl);
+    setLoadedUrl(nextUrl);
     setUrlInput(nextUrl);
     setIsLoading(true);
     persistUrl(nextUrl);
@@ -1376,12 +1406,12 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   }, [currentUrl]);
 
   React.useEffect(() => {
-    if (!currentUrl) {
+    if (!loadedUrl) {
       setProxyState({ status: 'idle' });
       return;
     }
 
-    const proxyTargetKey = getBrowserProxyTargetKey(currentUrl);
+    const proxyTargetKey = getBrowserProxyTargetKey(loadedUrl);
     const cached = getCachedProxyTarget(proxyTargetKey);
     if (cached?.previewToken) {
       setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, previewToken: cached.previewToken, expiresAt: cached.expiresAt });
@@ -1401,7 +1431,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ url: currentUrl, allowExternal: true }),
+          body: JSON.stringify({ url: loadedUrl, allowExternal: true }),
         });
 
         if (!response.ok) {
@@ -1441,9 +1471,9 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     return () => {
       cancelled = true;
     };
-  }, [currentUrl, t]);
+  }, [loadedUrl, t]);
 
-  const proxyUrlAuthKey = currentUrl && proxyState.status === 'ready'
+  const proxyUrlAuthKey = loadedUrl && proxyState.status === 'ready'
     ? `${proxyState.proxyBasePath}|${proxyState.previewToken || ''}|${reloadNonce}`
     : '';
 
@@ -1468,9 +1498,9 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
   const proxySrc = React.useMemo(() => {
     if (urlAuthReadyKey !== proxyUrlAuthKey) return '';
-    if (!currentUrl || proxyState.status !== 'ready') return '';
+    if (!loadedUrl || proxyState.status !== 'ready') return '';
     try {
-      const parsed = new URL(currentUrl);
+      const parsed = new URL(loadedUrl);
       const path = parsed.pathname || '/';
       const searchParams = new URLSearchParams(parsed.search);
       searchParams.delete('oc_url_token');
@@ -1482,12 +1512,12 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     } catch {
       return '';
     }
-  }, [currentUrl, proxyState, proxyUrlAuthKey, reloadNonce, urlAuthReadyKey]);
+  }, [loadedUrl, proxyState, proxyUrlAuthKey, reloadNonce, urlAuthReadyKey]);
 
-  const iframeSrc = proxySrc || (proxyState.status === 'error' ? currentUrl : '');
+  const iframeSrc = proxySrc || (proxyState.status === 'error' ? loadedUrl : '');
 
   const getCurrentUrlFromFrameUrl = React.useCallback((frameUrl: string): string => {
-    if (!frameUrl || !currentUrl || proxyState.status !== 'ready') return '';
+    if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
     try {
       const parsedFrameUrl = new URL(frameUrl, window.location.origin);
       const proxyBasePath = proxyState.proxyBasePath.endsWith('/')
@@ -1498,18 +1528,18 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       }
 
       const rest = parsedFrameUrl.pathname.slice(proxyBasePath.length) || '/';
-      const upstreamOrigin = new URL(currentUrl).origin;
+      const upstreamOrigin = new URL(loadedUrl).origin;
       return stripPreviewQueryParams(new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
     } catch {
       return '';
     }
-  }, [currentUrl, proxyState]);
+  }, [loadedUrl, proxyState]);
 
   const getUpstreamUrlFromLocalFrameUrl = React.useCallback((frameUrl: string): string => {
-    if (!frameUrl || !currentUrl || proxyState.status !== 'ready') return '';
+    if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
     try {
       const parsedFrameUrl = new URL(frameUrl, window.location.origin);
-      const upstreamOrigin = new URL(currentUrl).origin;
+      const upstreamOrigin = new URL(loadedUrl).origin;
       if (parsedFrameUrl.origin !== window.location.origin || upstreamOrigin === window.location.origin) {
         return '';
       }
@@ -1525,7 +1555,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     } catch {
       return '';
     }
-  }, [currentUrl, proxyState]);
+  }, [loadedUrl, proxyState]);
 
   const postInspectMode = React.useCallback((enabled: boolean) => {
     const frameWindow = iframeRef.current?.contentWindow;
@@ -1559,8 +1589,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       await addAttachedFile(file);
     }
 
-    addInlineCommentDraft({
-      sessionKey,
+    addInlineCommentDraft({ directory, sessionKey }, {
       source: 'preview-annotation',
       fileLabel: currentUrl || 'browser',
       startLine: 1,
@@ -1579,7 +1608,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       text: '',
     });
     toast.success(t('contextPanel.preview.inspect.attached'));
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, newSessionDraftOpen, t]);
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, directory, newSessionDraftOpen, t]);
 
   const cancelInspect = React.useCallback(() => {
     const iframe = iframeRef.current;
@@ -1614,7 +1643,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         const frameUrl = typeof data.url === 'string' ? data.url : '';
         const nextUrl = getCurrentUrlFromFrameUrl(frameUrl);
         if (nextUrl && nextUrl !== currentUrl) {
-          applyUrl(nextUrl);
+          applyUrl(nextUrl, { inFrame: true });
         }
         return;
       }
@@ -1685,8 +1714,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       const frameUrl = iframeRef.current?.contentWindow?.location.href || '';
       const upstreamUrl = getUpstreamUrlFromLocalFrameUrl(frameUrl);
       if (upstreamUrl) {
-        setIsLoading(true);
-        applyUrl(upstreamUrl);
+        applyUrl(upstreamUrl, { inFrame: true });
         return;
       }
     } catch {
@@ -1739,7 +1767,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         {iframeSrc ? (
           <div className="absolute inset-0">
             <iframe
-              key={`${iframeSrc}:${reloadNonce}`}
+              key={`${tabID}:${reloadNonce}`}
               ref={iframeRef}
               src={iframeSrc}
               title={t('contextPanel.browser.empty')}
@@ -1788,6 +1816,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
   const normalized = normalizeBrowserUrl(initialUrl);
   const startUrl = normalized !== 'about:blank' ? normalized : '';
+  const initialWebviewSrcRef = React.useRef(normalizeBrowserUrl(initialUrl));
   const [urlInput, setUrlInput] = React.useState(startUrl);
   const [currentUrl, setCurrentUrl] = React.useState(startUrl);
   const [isInspecting, setIsInspecting] = React.useState(false);
@@ -1967,8 +1996,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
           await addAttachedFile(file);
         }
 
-        addInlineCommentDraft({
-          sessionKey,
+        addInlineCommentDraft({ directory, sessionKey }, {
           source: 'preview-annotation',
           fileLabel: currentUrl || 'browser',
           startLine: 1,
@@ -1987,7 +2015,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         toast.success(t('contextPanel.preview.inspect.attached'));
       })
       .catch(() => setIsInspecting(false));
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, isInspecting, newSessionDraftOpen, t]);
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, directory, isInspecting, newSessionDraftOpen, t]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
@@ -2027,7 +2055,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
       <div className="relative min-h-0 flex-1 bg-background">
         <webview
           ref={webviewRef}
-          src={normalizeBrowserUrl(initialUrl)}
+          src={initialWebviewSrcRef.current}
           partition="persist:openchamber-browser"
           allowpopups
           style={{ width: '100%', height: '100%', border: 'none' }}
@@ -2063,6 +2091,7 @@ export const ContextPanel: React.FC = () => {
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const openContextPreview = useUIStore((state) => state.openContextPreview);
+  const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
   const { themeMode, setThemeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
@@ -2298,7 +2327,7 @@ export const ContextPanel: React.FC = () => {
     }
   }, [tabs]);
 
-  const handleDiffScopeChange = React.useCallback((nextScope: 'working' | 'staged') => {
+  const handleDiffScopeChange = React.useCallback((nextScope: PendingDiffScope) => {
     if (!directoryKey || activeTab?.mode !== 'diff') {
       return;
     }
@@ -2307,6 +2336,7 @@ export const ContextPanel: React.FC = () => {
       mode: 'diff',
       targetPath: activeTab.targetPath,
       stagedDiff: nextScope === 'staged',
+      diffScope: nextScope,
     });
   }, [activeTab, directoryKey, openContextPanelTab]);
 
@@ -2350,6 +2380,30 @@ export const ContextPanel: React.FC = () => {
       );
     }
   }, [currentTheme, darkThemeId, lightThemeId, themeMode]);
+
+  const postChatSettingsSyncToEmbeddedChat = React.useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    const payload = { allowPromptingSubagentSessions };
+    for (const frame of chatFrameRefs.current.values()) {
+      const frameWindow = frame.contentWindow;
+      if (!frameWindow) continue;
+
+      const directSync = (frameWindow as unknown as {
+        __openchamberApplyChatSettingsSync?: (settings: typeof payload) => void;
+      }).__openchamberApplyChatSettingsSync;
+      if (typeof directSync === 'function') {
+        try {
+          directSync(payload);
+          continue;
+        } catch {
+          // fallback to postMessage below
+        }
+      }
+
+      frameWindow.postMessage({ type: 'openchamber:chat-settings-sync', payload }, window.location.origin);
+    }
+  }, [allowPromptingSubagentSessions]);
 
   const postEmbeddedVisibilityToChats = React.useCallback(() => {
     if (typeof window === 'undefined') {
@@ -2403,6 +2457,10 @@ export const ContextPanel: React.FC = () => {
       }
 
       const data = event.data as { type?: unknown };
+      if (data?.type === 'openchamber:chat-settings-request') {
+        postChatSettingsSyncToEmbeddedChat();
+        return;
+      }
       if (data?.type !== 'openchamber:cycle-theme-request') {
         return;
       }
@@ -2415,7 +2473,7 @@ export const ContextPanel: React.FC = () => {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [setThemeMode, themeMode]);
+  }, [postChatSettingsSyncToEmbeddedChat, setThemeMode, themeMode]);
 
   React.useLayoutEffect(() => {
     const hasAnyChatTab = tabs.some((tab) => tab.mode === 'chat');
@@ -2424,8 +2482,9 @@ export const ContextPanel: React.FC = () => {
     }
 
     postThemeSyncToEmbeddedChat();
+    postChatSettingsSyncToEmbeddedChat();
     postEmbeddedVisibilityToChats();
-  }, [darkThemeId, lightThemeId, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
+  }, [darkThemeId, lightThemeId, postChatSettingsSyncToEmbeddedChat, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
   const tabItems = React.useMemo(() => tabs.map((tab) => {
     const rawLabel = getTabLabel(tab, sessionTitleById, t);
@@ -2620,6 +2679,7 @@ export const ContextPanel: React.FC = () => {
               )}
               onLoad={() => {
                 postThemeSyncToEmbeddedChat();
+                postChatSettingsSyncToEmbeddedChat();
                 postEmbeddedVisibilityToChats();
               }}
             />
@@ -2649,7 +2709,7 @@ export const ContextPanel: React.FC = () => {
               stackedDefaultCollapsedAll
               pinSelectedFileHeaderToTopOnNavigate
               showOpenInEditorAction
-              diffScope={tab.stagedDiff ? 'staged' : 'working'}
+              diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
               onDiffScopeChange={handleDiffScopeChange}
               targetFilePath={tab.targetPath}
               flushContent

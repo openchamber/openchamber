@@ -29,7 +29,8 @@ const getWorker = (): Worker | undefined => {
   if (typeof window === 'undefined' || typeof Worker === 'undefined') return undefined;
   try {
     worker = new Worker(MarkdownShikiWorkerUrl, { type: 'module' });
-  } catch {
+  } catch (err) {
+    console.error('Failed to create Shiki worker:', err);
     return undefined;
   }
   worker.onmessage = (event: MessageEvent<MarkdownWorkerResponse>) => {

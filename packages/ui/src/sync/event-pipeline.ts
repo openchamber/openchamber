@@ -6,7 +6,7 @@
  * snapshot belongs in the reducer, which has access to the current state.
  *
  * Plain closure API:
- *   const { cleanup } = createEventPipeline({ sdk, onEvent })
+ *   const { cleanup } = createEventPipeline({ sdk, onEvents })
  *
  * No class, no start/stop lifecycle. One pipeline per mount.
  * Abort controller created once at init, cleaned up via returned cleanup fn.
@@ -16,7 +16,10 @@ import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/c
 import { opencodeClient } from "@/lib/opencode/client"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
+import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
+import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
+import { countSyncPerformance } from "./performance-diagnostics"
 
 const FLUSH_FRAME_MS = 33
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
@@ -36,9 +39,16 @@ const RETRY_BACKOFF_BASE_MS = 250
 const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
 const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
 const RETRY_BACKOFF_MAX_EXPONENT = 8
+type EventPipelineDelivery = {
+  onEvent: (directory: string, payload: Event) => void
+  onEvents?: never
+} | {
+  onEvent?: never
+  onEvents: (directory: string, payloads: readonly Event[]) => void
+}
+
 export type EventPipelineInput = {
   sdk: OpencodeClient
-  onEvent: (directory: string, payload: Event) => void
   routeDirectory?: (directory: string, payload: Event) => string
   /** Called after stream reconnects (visibility restore or heartbeat timeout). */
   onReconnect?: () => void
@@ -50,7 +60,7 @@ export type EventPipelineInput = {
   heartbeatTimeoutMs?: number
   reconnectDelayMs?: number
   wsReadyTimeoutMs?: number
-}
+} & EventPipelineDelivery
 
 export type EventPipeline = {
   cleanup: () => void
@@ -212,6 +222,17 @@ function buildGlobalEventWsUrl(lastEventId?: string): string {
   )
 }
 
+// In relay mode the global-event WebSocket rides the E2EE tunnel instead of a
+// native network socket. The resolver still builds the authenticated URL (it
+// carries the oc_url_token the host replays to the loopback origin); we hand
+// its path+query to the tunnel, which returns a socket-like with the exact
+// on* handler surface this pipeline uses. Direct-URL runtimes keep the native
+// WebSocket path, wrapped to the same shape so the caller holds one type.
+function openGlobalEventSocket(lastEventId?: string): RelayTunnelWebSocket {
+  const url = buildGlobalEventWsUrl(lastEventId)
+  return openRuntimeWebSocket(url)
+}
+
 type DirectoryQueue = {
   queue: Event[]
   buffer: Event[]
@@ -229,6 +250,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const {
     sdk,
     onEvent,
+    onEvents,
     onReconnect,
     onDisconnect,
     onTransportSwitch,
@@ -295,8 +317,13 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
     d.last = Date.now()
     syncDebug.pipeline.flush(events.length)
-    for (const payload of events) {
-      onEvent(directory, payload)
+    for (let index = 0; index < events.length; index += 1) {
+      countSyncPerformance("pipelineDeliveredEvents")
+    }
+    if (onEvents) {
+      onEvents(directory, events)
+    } else if (onEvent) {
+      for (const payload of events) onEvent(directory, payload)
     }
 
     d.buffer.length = 0
@@ -437,6 +464,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const enqueueEvent = (directory: string, payload: Event) => {
+    countSyncPerformance("pipelineRawEvents")
     const normalizedPayload = normalizeEventType(payload)
     const routedDirectory = routeDirectory?.(directory, normalizedPayload) || directory
     const d = getOrCreateDir(routedDirectory)
@@ -460,6 +488,29 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       }
     }
 
+    if (
+      normalizedPayload.type === "session.idle"
+      || normalizedPayload.type === "session.error"
+      || normalizedPayload.type === "session.created"
+      || normalizedPayload.type === "session.deleted"
+    ) {
+      const properties = normalizedPayload.properties as {
+        sessionID?: unknown
+        info?: { id?: unknown }
+      }
+      const sessionID = typeof properties.sessionID === "string"
+        ? properties.sessionID
+        : typeof properties.info?.id === "string"
+          ? properties.info.id
+          : undefined
+      if (sessionID) {
+        d.coalesced.delete(`session.status:${sessionID}`)
+        if (normalizedPayload.type === "session.created" || normalizedPayload.type === "session.deleted") {
+          d.coalesced.delete(`session.updated:${sessionID}`)
+        }
+      }
+    }
+
     const k = key(normalizedPayload)
     if (k) {
       const i = d.coalesced.get(k)
@@ -477,6 +528,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         } else {
           d.queue[i] = normalizedPayload
         }
+        countSyncPerformance("pipelineCoalescedEvents")
         syncDebug.pipeline.coalesced(normalizedPayload.type, k)
         return
       }
@@ -569,7 +621,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       let settled = false
       let opened = false
       let readyAt = 0
-      const socket = new WebSocket(buildGlobalEventWsUrl(lastEventId))
+      const socket: RelayTunnelWebSocket = openGlobalEventSocket(lastEventId)
       const setFallbackCode = (error: Error, force = false) => {
         if ((force || !opened) && transport === "auto") {
           wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS

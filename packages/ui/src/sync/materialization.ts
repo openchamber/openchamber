@@ -1,5 +1,6 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { mergeMessages } from "./optimistic"
+import type { SessionMaterializationReason } from "./event-reducer"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const STREAMING_PART_FIELDS = ["text", "output"] as const
@@ -33,6 +34,40 @@ export type SessionMaterializationStatus = {
   missingPartMessageIDs: string[]
 }
 
+export type SessionMaterializationRequest = {
+  reason: SessionMaterializationReason
+  messageID?: string
+  partID?: string
+}
+
+export const getSessionMaterializationRequestKey = (
+  runtimeKey: string,
+  directory: string,
+  sessionID: string,
+): string => JSON.stringify([runtimeKey, directory, sessionID])
+
+export function isSessionMaterializationStillNeeded(
+  state: MaterializedState,
+  sessionID: string,
+  request: SessionMaterializationRequest,
+): boolean {
+  if (request.reason === "empty-assistant-message") {
+    return !request.messageID || !Object.prototype.hasOwnProperty.call(state.part, request.messageID)
+  }
+
+  if (request.reason === "missing-owning-message") {
+    if (!request.messageID) return true
+    return !(state.message[sessionID] ?? []).some((message) => message.id === request.messageID)
+  }
+
+  if (request.reason === "orphan-delta" || request.reason === "missing-delta-part") {
+    if (!request.messageID || !request.partID) return true
+    return !(state.part[request.messageID] ?? []).some((part) => part.id === request.partID)
+  }
+
+  return true
+}
+
 function sortParts(parts: Part[], skipPartTypes: ReadonlySet<string>) {
   return parts
     .filter((part) => !!part?.id && !skipPartTypes.has(part.type))
@@ -40,13 +75,17 @@ function sortParts(parts: Part[], skipPartTypes: ReadonlySet<string>) {
 }
 
 function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): boolean {
-  if (!left) return right.length === 0
+  // `undefined` means "parts never fetched", which is NOT equivalent to a
+  // fetched-empty snapshot — the empty array must be committed so
+  // getSessionMaterializationStatus can tell the two apart.
+  if (!left) return false
   if (left.length !== right.length) return false
 
   for (let index = 0; index < left.length; index += 1) {
     const leftPart = left[index]
     const rightPart = right[index]
     if (!leftPart || !rightPart) return false
+    if (leftPart === rightPart) continue
     if (leftPart.id !== rightPart.id) return false
     if (JSON.stringify(leftPart) !== JSON.stringify(rightPart)) return false
   }
@@ -69,6 +108,13 @@ function getStringField(part: Part, field: "text" | "output"): string | undefine
   return typeof value === "string" ? value : undefined
 }
 
+function getPartStateAttachments(part: Part): Array<unknown> | undefined {
+  const state = (part as Record<string, unknown>).state as Record<string, unknown> | undefined
+  if (!state) return undefined
+  const attachments = state.attachments
+  return Array.isArray(attachments) ? attachments : undefined
+}
+
 function hasLiveStreamingField(part: Part): boolean {
   if (getPartEndTime(part) !== undefined) return false
   return STREAMING_PART_FIELDS.some((field) => {
@@ -87,7 +133,18 @@ function getPartStateTime(part: Part): { start?: number; end?: number } | undefi
 }
 
 function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
-  if (!existing || getPartEndTime(next) !== undefined) return next
+  if (!existing) return next
+
+  if (getPartEndTime(next) !== undefined) {
+    const existingAttachments = getPartStateAttachments(existing)
+    if (existingAttachments?.length && getPartStateAttachments(next) === undefined) {
+      const nextRecord = { ...next }
+      const nextState = { ...((next as Record<string, unknown>).state as Record<string, unknown> ?? {}), attachments: existingAttachments }
+      ;(nextRecord as Record<string, unknown>).state = nextState
+      return nextRecord
+    }
+    return next
+  }
 
   let merged: Part = next
   for (const field of STREAMING_PART_FIELDS) {
@@ -103,6 +160,15 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
     mergedRecord[field] = existingValue
   }
 
+  const existingAttachments = getPartStateAttachments(existing)
+  if (existingAttachments?.length && getPartStateAttachments(next) === undefined) {
+    if (merged === next) merged = { ...next }
+    const mergedRecord = merged as Record<string, unknown>
+    const nextState = (next as Record<string, unknown>).state as Record<string, unknown> | undefined
+    const newState = { ...(nextState ?? {}), attachments: existingAttachments }
+    mergedRecord.state = newState
+  }
+
   const existingTime = getPartStateTime(existing)
   if (existingTime) {
     const nextTime = getPartStateTime(next)
@@ -111,8 +177,8 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
     if (preservedStart !== nextTime?.start || preservedEnd !== nextTime?.end) {
       if (merged === next) merged = { ...next }
       const mergedRecord = merged as Record<string, unknown>
-      const nextState = (next as Record<string, unknown>).state as Record<string, unknown> | undefined
-      const newState = { ...(nextState ?? {}), time: { start: preservedStart, end: preservedEnd } }
+      const currentState = (mergedRecord.state as Record<string, unknown> | undefined) ?? (next as Record<string, unknown>).state as Record<string, unknown> | undefined
+      const newState = { ...(currentState ?? {}), time: { start: preservedStart, end: preservedEnd } }
       mergedRecord.state = newState
     }
   }
@@ -168,25 +234,38 @@ export function materializeSessionSnapshots(
   const messagesChanged = messages !== currentMessages || (existingMessages === undefined && snapshots.length === 0)
 
   let partsChanged = false
-  const nextPartState = { ...state.part }
+  let nextPartState = state.part
   const isPrepend = options.mode === "prepend"
 
   for (const record of snapshots) {
     const messageID = record.info.id
     if (isPrepend && nextPartState[messageID]) continue
 
+    const isAssistant = record.info.role === "assistant"
     const existing = nextPartState[messageID]
     const nextParts = mergeMaterializedParts(
       existing,
       sortParts(record.parts ?? [], skipPartTypes),
       skipPartTypes,
-      record.info.role === "assistant",
+      isAssistant,
     )
-    if (haveEquivalentPartSnapshots(existing, nextParts)) continue
+    // For non-assistant messages an empty snapshot keeps the old "absent"
+    // representation; only assistant messages need the explicit [] marker
+    // (getSessionMaterializationStatus checks only assistant messages).
+    const equivalent = existing
+      ? haveEquivalentPartSnapshots(existing, nextParts)
+      : nextParts.length === 0 && !isAssistant
+    if (equivalent) continue
 
-    if (nextParts.length === 0) {
+    if (nextPartState === state.part) nextPartState = { ...state.part }
+
+    if (nextParts.length === 0 && !isAssistant) {
       delete nextPartState[messageID]
     } else {
+      // Store fetched-empty as an explicit [] (not absence): an assistant
+      // message the server returned with zero parts (e.g. aborted before any
+      // output) is authoritatively empty and must count as renderable, or
+      // the ensure-renderable effects retry syncSession forever.
       nextPartState[messageID] = nextParts
     }
     partsChanged = true
@@ -213,8 +292,12 @@ export function getSessionMaterializationStatus(
   const missingPartMessageIDs: string[] = []
   for (const message of messages) {
     if (message.role !== "assistant") continue
+    // `undefined` = parts never fetched (not renderable yet). An explicit []
+    // is a fetched-empty snapshot (e.g. aborted assistant turn) and counts
+    // as renderable — otherwise sessions containing such a message can never
+    // reach renderable state and ensure-renderable callers loop forever.
     const parts = state.part[message.id]
-    if (!parts || parts.length === 0) {
+    if (!parts) {
       missingPartMessageIDs.push(message.id)
     }
   }

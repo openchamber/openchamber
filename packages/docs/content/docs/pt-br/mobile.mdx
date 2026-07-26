@@ -1,25 +1,36 @@
 ---
-title: PWA e Acesso Móvel
-description: Instale o OpenChamber como um app e use-o pelo seu celular.
+title: Apps Móveis e PWA
+description: Instale o app do OpenChamber no iOS ou Android e conecte-o ao seu servidor.
 ---
 
-# PWA e Acesso Móvel
+# Apps Móveis e PWA
 
-O app web do OpenChamber instala como um app de celular (um PWA), então você pode mantê-lo na tela inicial e usá-lo em tela cheia. Combine-o com um [túnel](/pt-br/tunnels/) e você poderá acompanhar uma sessão de qualquer lugar.
+O OpenChamber tem apps nativos para iPhone e Android, então você pode acompanhar sessões, responder aos agentes e gerenciar o trabalho pelo celular — em casa pelo Wi-Fi ou de qualquer lugar pelo [Private Relay](/pt-br/private-relay/).
 
-## Instalar
+## Instalar o app
 
-O OpenChamber usa a instalação integrada do seu navegador, então não há download separado:
+- **iPhone/iPad** — participe do [beta no TestFlight](https://testflight.apple.com/join/5ek6GU1E)
+- **Android** — baixe o APK da [versão mais recente](https://github.com/openchamber/openchamber/releases/latest)
+
+## Conectar ao seu servidor
+
+1. No computador que executa o OpenChamber, abra **Settings → Remote Instances → Conectar a este servidor** e pressione **Adicionar um dispositivo**.
+2. Escolha **Em qualquer lugar** (ou **Somente rede doméstica** se você só vai usar o celular em casa) e pressione **Criar código QR**.
+3. No app móvel, toque em **Ler código QR** e aponte a câmera para ele.
+
+O app conecta e memoriza o servidor. O código QR é de uso único e cada dispositivo recebe o próprio token revogável — veja [Conectar um Dispositivo](/pt-br/connect-devices/) para saber como o pareamento se mantém seguro.
+
+Você pode parear o app com vários servidores e alternar entre eles pela lista de instâncias; para cada um, o app mostra se ele está alcançável e se você está conectado pela rede local ou pelo relay.
+
+## PWA (instalação pelo navegador)
+
+Prefere dispensar loja de apps? O app web instala direto do navegador:
 
 - **navegador no desktop** — use a opção **Install** na barra de endereço
 - **iPhone/iPad (Safari)** — Compartilhar → **Adicionar à Tela de Início**
 - **Android (Chrome)** — menu → **Instalar app** / **Adicionar à tela inicial**
 
-Uma vez instalado, ele abre em sua própria janela sem os controles do navegador.
-
-## Acessar pelo seu celular
-
-Para abrir o OpenChamber no seu celular quando o servidor roda no seu computador, inicie um [túnel](/pt-br/tunnels/) e abra o link (ou escaneie o QR code) no celular. Use uma [senha de UI](/pt-br/security/) forte sempre que fizer isso.
+Para alcançar o PWA de fora da sua rede você vai precisar de um [túnel](/pt-br/tunnels/) e de uma [senha de UI](/pt-br/security/) forte — os apps nativos cuidam disso por você via relay.
 
 ## Configurações de celular
 
@@ -27,5 +38,6 @@ Em **Settings → OpenChamber**, algumas opções ajustam a experiência móvel 
 
 ## Relacionado
 
-- [Túneis](/pt-br/tunnels/) — acesse sua instância de outra rede
+- [Conectar um Dispositivo](/pt-br/connect-devices/) — pareamento, códigos QR de uso único e gerenciamento de dispositivos
+- [Private Relay](/pt-br/private-relay/) — como funciona o acesso "Em qualquer lugar"
 - [Segurança](/pt-br/security/) — proteja a UI antes de expô-la

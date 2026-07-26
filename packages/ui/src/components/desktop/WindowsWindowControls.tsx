@@ -4,12 +4,17 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { invokeDesktop } from '@/lib/desktop';
+import type { DesktopWindowControlsSide } from '@/lib/desktop';
 
 type WindowsWindowControlsProps = {
   visible: boolean;
+  position?: DesktopWindowControlsSide;
 };
 
-export const WindowsWindowControls = React.memo(function WindowsWindowControls({ visible }: WindowsWindowControlsProps) {
+export const WindowsWindowControls = React.memo(function WindowsWindowControls({
+  visible,
+  position = 'right',
+}: WindowsWindowControlsProps) {
   const { t } = useI18n();
   const [isMaximized, setIsMaximized] = React.useState(false);
 
@@ -43,10 +48,22 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
     return null;
   }
 
-  const buttonClassName = 'app-region-no-drag inline-flex h-12 w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+  // Left-side controls sit in the same cluster as h-8 titlebar icon buttons
+  // (app menu / sidebar / project actions). Match that size and avoid negative
+  // margins so TitlebarLeftControls can publish an accurate reserved width —
+  // otherwise the project-actions chevron overlaps the session title.
+  // Right-side controls keep a taller Windows-style hit target.
+  const isLeft = position === 'left';
+  const buttonClassName = cn(
+    'app-region-no-drag inline-flex items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+    isLeft ? 'h-8 w-8 rounded-md' : 'h-12 w-11',
+  );
+  const containerClassName = isLeft
+    ? 'app-region-no-drag mr-1 flex h-8 shrink-0 items-center'
+    : 'app-region-no-drag ml-1 flex h-12 shrink-0 items-center';
 
   return (
-    <div className="app-region-no-drag -mr-3 ml-2 flex h-12 shrink-0 items-center" aria-label={t('header.windowControls.groupAria')}>
+    <div className={containerClassName} aria-label={t('header.windowControls.groupAria')}>
       <button
         type="button"
         className={buttonClassName}

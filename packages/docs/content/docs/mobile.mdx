@@ -1,25 +1,36 @@
 ---
-title: PWA & Mobile Access
-description: Install OpenChamber as an app and use it from your phone.
+title: Mobile Apps & PWA
+description: Install the OpenChamber app on iOS or Android and connect it to your server.
 ---
 
-# PWA & Mobile Access
+# Mobile Apps & PWA
 
-The OpenChamber web app installs like a phone app (a PWA), so you can keep it on your home screen and use it full-screen. Pair it with a [tunnel](/tunnels/) and you can check in on a session from anywhere.
+OpenChamber has native apps for iPhone and Android, so you can watch sessions, reply to agents, and manage work from your phone — at home over Wi-Fi or from anywhere over the [Private Relay](/private-relay/).
 
-## Install it
+## Install the app
 
-OpenChamber uses your browser's built-in install, so there's no separate download:
+- **iPhone/iPad** — join the [TestFlight beta](https://testflight.apple.com/join/5ek6GU1E)
+- **Android** — download the APK from the [latest release](https://github.com/openchamber/openchamber/releases/latest)
+
+## Connect it to your server
+
+1. On the computer running OpenChamber, open **Settings → Remote Instances → Connect to this server** and press **Add a device**.
+2. Pick **Anywhere** (or **Home network only** if you'll only use the phone at home) and press **Create QR code**.
+3. In the mobile app, tap **Scan QR code** and point the camera at it.
+
+The app connects and remembers the server. The QR code is single-use and each device gets its own revocable token — see [Connect a Device](/connect-devices/) for how pairing stays safe.
+
+You can pair the app with several servers and switch between them from the instances list; the app shows for each one whether it's reachable and whether you're connected over the local network or the relay.
+
+## PWA (browser install)
+
+Prefer no app store at all? The web app installs straight from the browser:
 
 - **desktop browser** — use the **Install** option in the address bar
 - **iPhone/iPad (Safari)** — Share → **Add to Home Screen**
 - **Android (Chrome)** — menu → **Install app** / **Add to Home Screen**
 
-Once installed, it opens in its own window without browser chrome.
-
-## Reach it from your phone
-
-To open OpenChamber on your phone when the server runs on your computer, start a [tunnel](/tunnels/) and open the link (or scan the QR code) on the phone. Use a strong [UI password](/security/) whenever you do this.
+To reach the PWA from outside your network you'll need a [tunnel](/tunnels/) and a strong [UI password](/security/) — the native apps handle this for you via the relay.
 
 ## Mobile settings
 
@@ -27,5 +38,6 @@ Under **Settings → OpenChamber**, a few options tune the mobile and installed 
 
 ## Related
 
-- [Tunnels](/tunnels/) — reach your instance from another network
+- [Connect a Device](/connect-devices/) — pairing, one-time QR codes, and managing devices
+- [Private Relay](/private-relay/) — how "Anywhere" access works
 - [Security](/security/) — protect the UI before exposing it

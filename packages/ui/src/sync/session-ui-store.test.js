@@ -228,6 +228,24 @@ describe('routeMessage directory scoping', () => {
   });
 });
 
+describe('runtime worktree topology', () => {
+  test('restores independent in-memory maps across A -> B -> A', () => {
+    const topologyA = new Map([['/repo', [{ path: '/repo/a', branch: 'a' }]]]);
+    const topologyB = new Map([['/repo', [{ path: '/repo/b', branch: 'b' }]]]);
+
+    useSessionUIStore.setState({ availableWorktreesByProject: topologyA, availableWorktrees: topologyA.get('/repo') });
+    useSessionUIStore.getState().prepareForRuntimeSwitch('runtime-a');
+    useSessionUIStore.setState({ availableWorktreesByProject: topologyB, availableWorktrees: topologyB.get('/repo') });
+    useSessionUIStore.getState().prepareForRuntimeSwitch('runtime-b');
+
+    useSessionUIStore.getState().restoreForRuntimeSwitch('runtime-a');
+    expect(useSessionUIStore.getState().availableWorktreesByProject.get('/repo')?.[0]?.path).toBe('/repo/a');
+
+    useSessionUIStore.getState().restoreForRuntimeSwitch('runtime-b');
+    expect(useSessionUIStore.getState().availableWorktreesByProject.get('/repo')?.[0]?.path).toBe('/repo/b');
+  });
+});
+
 describe('openNewSessionDraft project binding', () => {
   const projectA = { id: 'proj-a', path: '/projects/alpha', label: 'Alpha' };
   const projectB = { id: 'proj-b', path: '/projects/beta', label: 'Beta' };
@@ -280,6 +298,35 @@ describe('openNewSessionDraft project binding', () => {
 
     expect(draft.open).toBe(true);
     expect(draft.selectedProjectId).toBe(projectB.id);
+  });
+});
+
+describe('createSession draft lifecycle', () => {
+  let originalCreateSession;
+
+  beforeEach(() => {
+    originalCreateSession = opencodeClient.createSession;
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: { open: true, directoryOverride: '/projects/alpha', parentID: null, title: 'Draft title' },
+    });
+  });
+
+  afterEach(() => {
+    opencodeClient.createSession = originalCreateSession;
+  });
+
+  test('keeps the draft open when session creation fails', async () => {
+    opencodeClient.createSession = async () => {
+      throw new Error('offline');
+    };
+
+    const session = await useSessionUIStore.getState().createSession('Draft title', '/projects/alpha');
+
+    expect(session).toBeNull();
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true);
+    expect(useSessionUIStore.getState().newSessionDraft.title).toBe('Draft title');
   });
 });
 

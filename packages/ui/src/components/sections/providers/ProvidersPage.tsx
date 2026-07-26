@@ -1,5 +1,8 @@
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsSection, SETTINGS_CUSTOM_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -12,7 +15,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
@@ -511,18 +513,15 @@ export const ProvidersPage: React.FC = () => {
 
   if (isAddMode) {
     return (
-      <ScrollableOverlay outerClassName="h-full" className="w-full">
-        <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-          <div data-settings-item="providers.connect" className="mb-4">
-            <h1 className="typography-ui-header font-semibold text-foreground">{t('settings.providers.page.connect.title')}</h1>
-          </div>
-
-          <div className="mb-8">
-            <div className="mb-1 px-1">
-              <h2 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.connect.selectProviderTitle')}</h2>
-            </div>
-
-            <section className="px-2 pb-2 pt-0">
+      <SettingsPageLayout
+        title={t('settings.providers.page.connect.title')}
+        showSaveStatus={false}
+      >
+        <SettingsSection
+          title={t('settings.providers.page.connect.selectProviderTitle')}
+          divider={false}
+          settingsItem="providers.connect"
+        >
               <div className="flex flex-wrap items-center gap-2 py-1.5">
                 <span className="typography-ui-label text-foreground">{t('settings.providers.page.connect.providerField')}</span>
                   {availableLoading ? (
@@ -539,9 +538,7 @@ export const ProvidersPage: React.FC = () => {
                       <DropdownMenuTrigger asChild>
                         <button
                           type="button"
-                          className={cn(
-                            "flex items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-2 py-2 typography-ui-label whitespace-nowrap shadow-none outline-none hover:bg-interactive-hover h-6 w-fit",
-                          )}
+                          className={SETTINGS_CUSTOM_TRIGGER_CLASS}
                         >
                           <span className="flex items-center gap-2 min-w-0">
                             {candidateProviderId ? <ProviderLogo providerId={candidateProviderId} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
@@ -608,32 +605,24 @@ export const ProvidersPage: React.FC = () => {
                     </DropdownMenu>
                    )}
               </div>
-            </section>
-          </div>
+        </SettingsSection>
 
           {candidateProviderId && (
-            <div data-settings-item="providers.auth" className="mb-8">
-              <div className="mb-1 px-1">
-                <h2 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.auth.title')}</h2>
-              </div>
-
+            <SettingsSection
+              title={t('settings.providers.page.auth.title')}
+              settingsItem="providers.auth"
+              contentClassName="space-y-4"
+            >
               {authLoading ? (
-                <p className="typography-meta text-muted-foreground px-2">{t('settings.providers.page.auth.loadingMethods')}</p>
+                <p className="typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</p>
               ) : (
-                <section className="px-2 pb-2 pt-0 space-y-4">
+                <>
                   <div className="py-1.5">
                     <label className="typography-ui-label text-foreground flex items-center gap-1.5">
                       {t('settings.providers.page.auth.apiKeyLabel')}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                        </TooltipTrigger>
-                        <TooltipContent sideOffset={8} className="max-w-xs">
-                          {t('settings.providers.page.auth.apiKeyTooltip')}
-                        </TooltipContent>
-                      </Tooltip>
+                      <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
                     </label>
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-1.5">
+                    <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
                       <Input
                         type="password"
                         value={apiKeyInputs[candidateProviderId] ?? ''}
@@ -749,12 +738,11 @@ export const ProvidersPage: React.FC = () => {
                       </div>
                     );
                   })()}
-                </section>
+                </>
               )}
-            </div>
+            </SettingsSection>
           )}
-        </div>
-      </ScrollableOverlay>
+      </SettingsPageLayout>
     );
   }
 
@@ -783,42 +771,32 @@ export const ProvidersPage: React.FC = () => {
   });
 
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
-
-        {/* Header */}
-        <div className="mb-4 flex items-center gap-3">
-          <ProviderLogo providerId={selectedProvider.id} className="h-5 w-5 shrink-0" />
-          <div className="min-w-0">
-            <h2 className="typography-ui-header font-semibold text-foreground truncate">
-              {selectedProvider.name || selectedProvider.id}
-            </h2>
-            <p className="typography-meta text-muted-foreground truncate">
-              <span className="font-mono">{selectedProvider.id}</span>
-            </p>
-          </div>
-        </div>
-
-        {/* Authentication */}
-        <div data-settings-item="providers.auth" className="mb-8">
-          <div className="mb-1 px-1 flex items-center justify-between gap-2">
-            <h3 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.auth.title')}</h3>
-            <Button
-              variant="outline"
-              size="xs"
-              className="!font-normal"
-              onClick={() => setShowAuthPanel((prev) => !prev)}
-            >
-              {showAuthPanel ? t('settings.providers.page.actions.hide') : t('settings.providers.page.actions.reconnect')}
-            </Button>
-          </div>
-
-          <section className="px-2 pb-2 pt-0">
+    <SettingsPageLayout
+      title={selectedProvider.name || selectedProvider.id}
+      titleLeading={<ProviderLogo providerId={selectedProvider.id} className="h-5 w-5 shrink-0" />}
+      description={<span className="font-mono typography-settings-description text-muted-foreground">{selectedProvider.id}</span>}
+      showSaveStatus={false}
+    >
+      <SettingsSection
+        title={t('settings.providers.page.auth.title')}
+        divider={false}
+        headerAction={(
+          <Button
+            variant="outline"
+            size="xs"
+            className="!font-normal"
+            onClick={() => setShowAuthPanel((prev) => !prev)}
+          >
+            {showAuthPanel ? t('settings.providers.page.actions.hide') : t('settings.providers.page.actions.reconnect')}
+          </Button>
+        )}
+        settingsItem="providers.auth"
+      >
             {!showAuthPanel ? (
               <div className="flex items-center gap-1.5 py-1.5">
                 <Icon name="check" className="w-4 h-4 text-[var(--status-success)] shrink-0" />
                 <span className="typography-ui-label text-foreground">{t('settings.providers.page.auth.connected')}</span>
-                <span className="typography-meta text-muted-foreground ml-1">{t('settings.providers.page.auth.useReconnectHint')}</span>
+                <SettingsInfoHint>{t('settings.providers.page.auth.useReconnectHint')}</SettingsInfoHint>
               </div>
             ) : authLoading ? (
               <div className="py-1.5 typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</div>
@@ -827,16 +805,9 @@ export const ProvidersPage: React.FC = () => {
                 <div className="py-1.5">
                   <label className="typography-ui-label text-foreground flex items-center gap-1.5">
                     {t('settings.providers.page.auth.apiKeyLabel')}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent sideOffset={8} className="max-w-xs">
-                        {t('settings.providers.page.auth.apiKeyTooltip')}
-                      </TooltipContent>
-                    </Tooltip>
+                    <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
                   </label>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-1.5">
+                  <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
                     <Input
                       type="password"
                       value={apiKeyInputs[selectedProvider.id] ?? ''}
@@ -943,17 +914,14 @@ export const ProvidersPage: React.FC = () => {
                 )}
               </div>
             )}
-          </section>
-        </div>
+      </SettingsSection>
 
-        {/* Connection Details */}
-        <div data-settings-item="providers.connection-details" className="mb-8">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">{t('settings.providers.page.connectionDetails.title')}</h3>
-          </div>
 
-          <section className="px-2 pb-2 pt-0">
-            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+      <SettingsSection
+        title={t('settings.providers.page.connectionDetails.title')}
+        settingsItem="providers.connection-details"
+      >
+            <div className="flex flex-col gap-2 py-1.5 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-8">
               <div className="flex min-w-0 flex-col">
                 {selectedSources && (selectedSources.auth.exists || selectedSources.user.exists || selectedSources.project.exists || selectedSources.custom?.exists) ? (
                   <span className="typography-meta text-muted-foreground">
@@ -980,46 +948,44 @@ export const ProvidersPage: React.FC = () => {
                 {authBusyKey === `disconnect:${selectedProvider.id}` ? t('settings.providers.page.actions.disconnecting') : t('settings.providers.page.actions.disconnect')}
               </Button>
             </div>
-          </section>
-        </div>
+      </SettingsSection>
 
-        {/* Models */}
-        <div data-settings-item="providers.models" className="mb-8">
-          <div className="mb-1 px-1 flex items-center justify-between gap-2">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.providers.page.models.title')}
-              {providerModels.length > 0 && (
-                <span className="ml-1.5 typography-micro text-muted-foreground font-normal">
-                  ({providerModels.length})
-                </span>
-              )}
-            </h3>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                onClick={() => {
-                  const allIds = providerModels
-                    .map((model) => (typeof model?.id === 'string' ? model.id : ''))
-                    .filter((id) => id.length > 0);
-                  hideAllModels(selectedProvider.id, allIds);
-                }}
-              >
-                {t('settings.providers.page.actions.hideAll')}
-              </Button>
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                onClick={() => showAllModels(selectedProvider.id)}
-              >
-                {t('settings.providers.page.actions.showAll')}
-              </Button>
-            </div>
+      <SettingsSection
+        title={t('settings.providers.page.models.title')}
+        titleAccessory={
+          providerModels.length > 0 ? (
+            <span className="typography-micro text-muted-foreground font-normal">
+              ({providerModels.length})
+            </span>
+          ) : null
+        }
+        headerAction={(
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={() => {
+                const allIds = providerModels
+                  .map((model) => (typeof model?.id === 'string' ? model.id : ''))
+                  .filter((id) => id.length > 0);
+                hideAllModels(selectedProvider.id, allIds);
+              }}
+            >
+              {t('settings.providers.page.actions.hideAll')}
+            </Button>
+            <Button
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={() => showAllModels(selectedProvider.id)}
+            >
+              {t('settings.providers.page.actions.showAll')}
+            </Button>
           </div>
-
-          <section className="px-2 pb-2 pt-0">
+        )}
+        settingsItem="providers.models"
+      >
             <div className="relative mb-2">
               <Icon name="search" className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
@@ -1099,9 +1065,7 @@ export const ProvidersPage: React.FC = () => {
                 })}
               </div>
             )}
-          </section>
-        </div>
-      </div>
-    </ScrollableOverlay>
+      </SettingsSection>
+    </SettingsPageLayout>
   );
 };

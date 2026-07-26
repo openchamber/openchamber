@@ -623,7 +623,7 @@ const StaticToolRowInner: React.FC<{
         return entries;
     }, [activities, currentDirectory, isReadGroup]);
 
-    const handleReadFileClick = React.useCallback((filePath: string, offset?: number) => {
+    const handleFileClick = React.useCallback((filePath: string, offset?: number) => {
         const absolutePath = toAbsoluteFilePath(currentDirectory, filePath);
         if (!absolutePath) {
             return;
@@ -655,14 +655,6 @@ const StaticToolRowInner: React.FC<{
         }
         uiStore.openContextFile(contextDirectory, absolutePath);
     }, [currentDirectory, runtime]);
-
-    const handleSkillClick = React.useCallback((skillPath: string) => {
-        if (!skillPath) {
-            return;
-        }
-        const uiStore = useUIStore.getState();
-        uiStore.openContextFile(currentDirectory || getDirectoryForFilePath('', skillPath), skillPath);
-    }, [currentDirectory]);
 
     const normalizedToolName = toolName.toLowerCase();
     const isSearchGroup = normalizedToolName === 'grep'
@@ -699,7 +691,7 @@ const StaticToolRowInner: React.FC<{
                         onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            handleReadFileClick(entry.path, entry.offset);
+                            handleFileClick(entry.path, entry.offset);
                         }}
                         className={cn('inline-flex !min-h-0 items-center justify-start gap-1 min-w-0 flex-1 text-left hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
                         style={{ color: 'var(--tools-description)' }}
@@ -751,7 +743,7 @@ const StaticToolRowInner: React.FC<{
                         onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            handleSkillClick(entry.path);
+                            handleFileClick(entry.path);
                         }}
                         className={cn('!min-h-0 min-w-0 flex-1 truncate whitespace-nowrap text-left hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
                         style={{ color: 'var(--tools-description)' }}

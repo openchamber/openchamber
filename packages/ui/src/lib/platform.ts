@@ -7,6 +7,21 @@ export const isCapacitorApp = (): boolean => {
   return capacitor?.isNativePlatform?.() === true || window.location.protocol === 'capacitor:';
 };
 
+/**
+ * True when running inside the native Capacitor shell on an iPad.
+ * Capacitor reports 'ios' for both iPhone and iPad; iPadOS WKWebView
+ * masquerades as macOS Safari, so the only reliable tell is a Mac-like
+ * platform with real touch points (or a legacy explicit iPad UA).
+ */
+export const isIPadApp = (): boolean => {
+  if (typeof window === 'undefined' || !isCapacitorApp()) return false;
+  if (getClientPlatform() !== 'ios') return false;
+  const userAgent = navigator.userAgent || '';
+  const maxTouchPoints = navigator.maxTouchPoints ?? 0;
+  return /iPad/i.test(userAgent)
+    || (/Macintosh|MacIntel/i.test(userAgent) && maxTouchPoints > 1);
+};
+
 export type ClientPlatform = 'ios' | 'android' | 'vscode' | 'desktop' | 'web';
 
 /**

@@ -6,7 +6,9 @@ import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensi
 import { getSyncChildStores, getAllSyncSessions } from '@/sync/sync-refs';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useGlobalSessionStatusStore, applyGlobalSessionStatusSnapshot } from '@/sync/global-session-status';
+import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useNotificationStore } from '@/sync/notification-store';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { respondToPermission } from '@/sync/session-actions';
 import {
   useGlobalSessionsStore,
@@ -27,12 +29,12 @@ import { toast } from '@/components/ui';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 
-// macOS menu bar bridge. The Electron main process owns the Tray UI; this hook
+// Native tray/menu bar bridge. The Electron main process owns the Tray UI; this hook
 // streams a compact snapshot of live session/approval state to it via the
 // `desktop_tray_update` IPC command, and routes tray clicks back into the app.
 //
-// Only meaningful on the macOS desktop shell — main.mjs no-ops the command on
-// other platforms, but we still gate here to avoid pointless work.
+// Only meaningful on desktop platforms with a native tray/menu bar — main.mjs
+// no-ops the command elsewhere, but we still gate here to avoid pointless work.
 
 const TRAY_ACTION_EVENT = 'openchamber:tray-action';
 // Event-driven updates do the real work; this is just a slow safety net.
@@ -99,10 +101,14 @@ type DesktopBridgeGlobal = {
   ) => Promise<() => void>;
 };
 
-const isMac = (): boolean => {
+const isTrayPlatform = (): boolean => {
   if (typeof window === 'undefined') return false;
-  return (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin';
+  const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
+  return platform === 'darwin' || platform === 'win32' || platform === 'linux';
 };
+
+const isTrayEnabled = (): boolean =>
+  typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.trayEnabled !== false;
 
 const permissionLabel = (request: PermissionRequest): string => {
   const head = typeof request.permission === 'string' ? request.permission : 'Permission';
@@ -115,8 +121,14 @@ const questionLabel = (request: QuestionRequest): string => {
   return first?.header || first?.question || 'Question';
 };
 
-const updatedAt = (session: Session): number =>
-  session.time?.updated ?? session.time?.created ?? 0;
+const compareSessionOrder = (left: Session, right: Session): number => (
+  compareSessionsByLifecycleOrder(
+    left,
+    right,
+    useSessionPinnedStore.getState().ids,
+    useSessionOrderingStore.getState().rankById,
+  )
+);
 
 const basenameOf = (p: string): string => {
   const norm = p.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -296,7 +308,7 @@ const collectStatusPollDirectories = (): Map<string, string[]> => {
   allSessions
     .filter((s) => s?.id && !s.parentID)
     .slice()
-    .sort((a, b) => updatedAt(b) - updatedAt(a))
+    .sort(compareSessionOrder)
     .slice(0, MAX_SESSIONS)
     .forEach((session) => {
       const directory = resolveGlobalSessionDirectory(session);
@@ -358,7 +370,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   const resolveStatus = (id: string): TraySessionStatus => {
     const fromStores = live.statusById.get(id);
     if (fromStores && fromStores !== 'idle') return fromStores;
-    return globalStatusById.get(id)?.status ?? fromStores ?? 'idle';
+    return globalStatusById.get(id)?.status.type ?? fromStores ?? 'idle';
   };
 
   const rollupStatus = (family: string[]): TraySessionStatus => {
@@ -374,7 +386,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   const sessions: TraySession[] = allSessions
     .filter((s) => s?.id && !s.parentID) // root rows; sub-session work rolls up
     .slice()
-    .sort((a, b) => updatedAt(b) - updatedAt(a)) // most recently updated first
+    .sort(compareSessionOrder)
     .slice(0, MAX_SESSIONS)
     .map((session) => {
       const family = [session.id, ...collectDescendants(session.id)];
@@ -417,7 +429,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
 
 export const useTraySync = (): void => {
   React.useEffect(() => {
-    if (!isMac() || !canUseElectronDesktopIPC()) return;
+    if (!isTrayPlatform() || !isTrayEnabled() || !canUseElectronDesktopIPC()) return;
 
     let disposed = false;
     let lastSerialized = '';
@@ -520,6 +532,8 @@ export const useTraySync = (): void => {
     // Cross-project status map: fed live by the sync dispatcher from the global
     // event stream, and seeded/reconciled by the poll below.
     const unsubscribeGlobalStatus = useGlobalSessionStatusStore.subscribe(() => scheduleFlush());
+    const unsubscribeSessionOrder = useSessionOrderingStore.subscribe(() => scheduleFlush());
+    const unsubscribePinnedSessions = useSessionPinnedStore.subscribe(() => scheduleFlush());
 
     // Make the tray self-sufficient: load the full cross-project list now
     // (independent of the sidebar) and refresh it periodically so sessions from
@@ -569,6 +583,8 @@ export const useTraySync = (): void => {
       unsubscribeGit();
       unsubscribeUI();
       unsubscribeGlobalStatus();
+      unsubscribeSessionOrder();
+      unsubscribePinnedSessions();
       unsubscribeQuota();
       unsubscribeRegistry?.();
       for (const unsub of storeUnsubs.values()) unsub();
@@ -577,7 +593,7 @@ export const useTraySync = (): void => {
   }, []);
 
   React.useEffect(() => {
-    if (!isMac() || typeof window === 'undefined') return;
+    if (!isTrayPlatform() || !isTrayEnabled() || typeof window === 'undefined') return;
     const bridge = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
     const listen = bridge?.listen;
     if (typeof listen !== 'function') return;

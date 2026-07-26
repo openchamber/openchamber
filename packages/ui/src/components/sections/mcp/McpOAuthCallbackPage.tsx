@@ -3,6 +3,8 @@ import { Button } from '@/components/ui/button';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { SETTINGS_PAGE_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
+import { cn } from '@/lib/utils';
 
 const parseQueryParam = (params: URLSearchParams, key: string): string | null => {
   const value = params.get(key);
@@ -94,14 +96,21 @@ export const McpOAuthCallbackPage: React.FC = () => {
     <div className="flex min-h-screen items-center justify-center bg-background px-6 py-12 text-foreground">
       <div className="w-full max-w-xl rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-8 shadow-sm">
         <div className="space-y-3 text-center">
-          <div
-            className={status === 'error' ? 'text-[var(--status-error)]' : status === 'success' ? 'text-[var(--status-success)]' : 'text-[var(--status-info)]'}
+          <h1 className={SETTINGS_PAGE_TITLE_CLASS}>
+            {status === 'working' ? 'Completing Authorization' : status === 'success' ? 'Authorization Complete' : 'Authorization Failed'}
+          </h1>
+          <p
+            className={cn(
+              'typography-body',
+              status === 'error'
+                ? 'text-[var(--status-error)]'
+                : status === 'success'
+                  ? 'text-[var(--status-success)]'
+                  : 'text-[var(--status-info)]',
+            )}
           >
-            <h1 className="typography-hero font-semibold">
-              {status === 'working' ? 'Completing Authorization' : status === 'success' ? 'Authorization Complete' : 'Authorization Failed'}
-            </h1>
-          </div>
-          <p className="typography-body text-muted-foreground">{message}</p>
+            {message}
+          </p>
         </div>
 
         {status !== 'working' && (

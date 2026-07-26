@@ -54,6 +54,9 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
               'transition-all duration-150 ease-out',
               'data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]',
               'data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]',
+              // Dim this window when a nested dialog (e.g. "Add a device") opens
+              // on top of it, mirroring how the page behind a dialog is dimmed.
+              'data-[nested-dialog-open]:brightness-[0.55] dark:data-[nested-dialog-open]:brightness-[0.4]',
             )}
           >
             <Dialog.Description id={descriptionId} className="sr-only">

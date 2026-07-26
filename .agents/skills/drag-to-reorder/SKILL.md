@@ -1,6 +1,6 @@
 ---
 name: drag-to-reorder
-description: Use when implementing drag-to-reorder / sortable lists or chips in OpenChamber with @dnd-kit — covers the correct setup for BOTH desktop and mobile (touch), the variable-width "stretch" fix, the wrapping multi-row strategy choice, and the pitfalls (infinite update loop, offset overlay) we already hit and fixed.
+description: Use when implementing or modifying OpenChamber sortable or drag-to-reorder behavior, especially `@dnd-kit`, touch/mobile interactions, variable-width items, or wrapping layouts.
 license: MIT
 compatibility: opencode
 ---

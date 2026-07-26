@@ -21,16 +21,17 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
-import { useAllLiveSessions, useSession, useSessionMessagesResolved } from '@/sync/sync-context';
-import { getAllSyncSessions } from '@/sync/sync-refs';
+import { useSessionMessagesResolved } from '@/sync/sync-context';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
@@ -63,7 +64,6 @@ import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
-import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
@@ -74,7 +74,7 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import type { Session } from '@opencode-ai/sdk/v2/client';
+import { useShallow } from 'zustand/react/shallow';
 import type { IconName } from "@/components/icon/icons";
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
@@ -480,22 +480,23 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
               </div>
             ) : null}
 
-            <div className="py-2">
-              {rateLimitGroups.map((group, index) => {
+            {/* One elevated card per provider (same card language as the mobile
+                usage popover) instead of a flat run of divider-separated rows. */}
+            <div className="space-y-2 px-3 py-2.5">
+              {rateLimitGroups.map((group) => {
                 const providerExpandedFamilies = expandedFamilies[group.providerId] ?? [];
                 return (
-                  <React.Fragment key={group.providerId}>
-                    {index > 0 ? <div className="mx-4 my-2 border-t border-[var(--interactive-border)]" /> : null}
-                    <div className="flex items-center gap-2 px-4 py-2">
+                  <div key={group.providerId} className="min-w-0 rounded-xl bg-[var(--surface-muted)] p-3">
+                    <div className="flex items-center gap-2 pb-2">
                       <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
                       <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
                     </div>
                     {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
-                      <div className="px-4 pb-2">
-              <span className="typography-ui-label text-muted-foreground">{group.error ?? t('header.services.noRateLimitsReported')}</span>
+                      <div>
+                        <span className="typography-ui-label text-muted-foreground">{group.error ?? t('header.services.noRateLimitsReported')}</span>
                       </div>
                     ) : (
-                      <div className="space-y-3 px-4 pb-2">
+                      <div className="space-y-3">
                         {group.entries.map(([label, window]) => {
                           const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
                           const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
@@ -584,7 +585,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                         ) : null}
                       </div>
                     )}
-                  </React.Fragment>
+                  </div>
                 );
               })}
             </div>
@@ -702,12 +703,20 @@ interface HeaderProps {
   rightDrawerOpen?: boolean;
 }
 
+type HeaderSessionSnapshot = {
+  title: string | null;
+  directory: string | null;
+  created: number | null;
+  slug: string | null;
+};
+
 export const Header: React.FC<HeaderProps> = ({
   onToggleLeftDrawer,
   onToggleRightDrawer,
   leftDrawerOpen,
   rightDrawerOpen,
 }) => {
+  streamPerfCount('ui.header.render');
   const { t } = useI18n();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
@@ -719,7 +728,6 @@ export const Header: React.FC<HeaderProps> = ({
   const openContextBrowser = useUIStore((state) => state.openContextBrowser);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
-  const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
@@ -733,15 +741,28 @@ export const Header: React.FC<HeaderProps> = ({
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
-  const currentSyncedSession = useSession(currentSessionId ?? null);
-  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const liveSessions = useAllLiveSessions();
-  const activeProject = useProjectsStore((state) => {
+  const currentGlobalSession = useGlobalSessionsStore(useShallow(React.useCallback(
+    (state): HeaderSessionSnapshot | null => {
+      if (!currentSessionId) return null;
+      const session = state.activeSessions.find((candidate) => candidate.id === currentSessionId);
+      if (!session) return null;
+      const record = session as typeof session & { directory?: string | null; slug?: string | null };
+      return {
+        title: session.title ?? null,
+        directory: record.directory ?? null,
+        created: session.time?.created ?? null,
+        slug: record.slug ?? null,
+      };
+    },
+    [currentSessionId],
+  )));
+  const activeProject = useProjectsStore(useShallow((state) => {
     if (!state.activeProjectId) {
       return null;
     }
-    return state.projects.find((project) => project.id === state.activeProjectId) ?? null;
-  });
+    const project = state.projects.find((candidate) => candidate.id === state.activeProjectId);
+    return project ? { id: project.id, path: project.path, label: project.label } : null;
+  }));
   const activeProjectLabel = React.useMemo(() => {
     if (!activeProject) {
       return null;
@@ -788,12 +809,7 @@ export const Header: React.FC<HeaderProps> = ({
     return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
   }, []);
 
-  const isWindowsElectronDesktop = React.useMemo(() => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    return Boolean(window.__OPENCHAMBER_ELECTRON__) && window.__OPENCHAMBER_PLATFORM__ === 'win32';
-  }, []);
+  const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const macosMajorVersion = React.useMemo(() => {
     if (typeof window === 'undefined') {
@@ -1134,18 +1150,13 @@ export const Header: React.FC<HeaderProps> = ({
     });
   }, [fetchAllQuotas, isUsageRefreshSpinning]);
 
-  const currentSessionLive = React.useMemo(() => {
-    if (!currentSessionId) return null;
-    return liveSessions.find((s) => s.id === currentSessionId)
-      ?? globalActiveSessions.find((s) => s.id === currentSessionId)
-      ?? currentSyncedSession
-      ?? getAllSyncSessions().find((s) => s.id === currentSessionId)
-      ?? null;
-  }, [currentSessionId, currentSyncedSession, globalActiveSessions, liveSessions]);
+  const currentSessionSnapshot = currentSessionId
+    ? currentGlobalSession ?? null
+    : null;
 
   const lastResolvedSessionRef = React.useRef<{
     sessionId: string;
-    session: Session;
+    session: HeaderSessionSnapshot;
     expiresAt: number;
   } | null>(null);
   const [sessionFallbackVersion, setSessionFallbackVersion] = React.useState(0);
@@ -1159,10 +1170,10 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    if (currentSessionLive) {
+    if (currentSessionSnapshot) {
       lastResolvedSessionRef.current = {
         sessionId: currentSessionId,
-        session: currentSessionLive,
+        session: currentSessionSnapshot,
         expiresAt: Date.now() + 2000,
       };
       return;
@@ -1190,12 +1201,12 @@ export const Header: React.FC<HeaderProps> = ({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [currentSessionId, currentSessionLive]);
+  }, [currentSessionId, currentSessionSnapshot]);
 
   void sessionFallbackVersion;
   const currentSession = (() => {
-    if (currentSessionLive) {
-      return currentSessionLive;
+    if (currentSessionSnapshot) {
+      return currentSessionSnapshot;
     }
 
     if (!currentSessionId) {
@@ -1260,6 +1271,10 @@ export const Header: React.FC<HeaderProps> = ({
   const openDirectory = React.useMemo(() => {
     return worktreeDirectory || sessionDirectory || draftDirectory;
   }, [draftDirectory, sessionDirectory, worktreeDirectory]);
+  const activeContextMode = useUIStore(React.useCallback((state) => {
+    const directory = normalize(openDirectory || '');
+    return directory ? getActiveContextMode(state.contextPanelByDirectory[directory]) : null;
+  }, [openDirectory]));
 
   const catalogWorktreeBranch = useSessionUIStore((state) => {
     const candidateDirectory = normalize(worktreeDirectory || sessionDirectory || '');
@@ -1340,7 +1355,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     if (!currentSessionId) return;
 
-    const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.time?.created || 0}:${currentSession?.slug || 'none'}`;
+    const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.created || 0}:${currentSession?.slug || 'none'}`;
     if (lastPlanSessionKeyRef.current !== sessionKey) {
       lastPlanSessionKeyRef.current = sessionKey;
     }
@@ -1353,7 +1368,7 @@ export const Header: React.FC<HeaderProps> = ({
     planModeEnabled,
     planTabAvailable,
     currentSession?.slug,
-    currentSession?.time?.created,
+    currentSession?.created,
     currentSessionId,
     sessionDirectory,
   ]);
@@ -1453,23 +1468,16 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'context') {
       closeContextPanel(directory);
       return;
     }
 
     openContextOverview(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextOverview, openDirectory]);
+  }, [closeContextPanel, openContextOverview, openDirectory]);
 
-  const isContextPanelActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'context';
-  }, [contextPanelByDirectory, openDirectory]);
+  const isContextPanelActive = activeContextMode === 'context';
 
   const handleOpenContextPlan = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -1477,14 +1485,14 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'plan') {
       closeContextPanel(directory);
       return;
     }
 
     openContextPlan(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextPlan, openDirectory]);
+  }, [closeContextPanel, openContextPlan, openDirectory]);
 
   const handleOpenContextChanges = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -1492,14 +1500,14 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'diff') {
       closeContextPanel(directory);
       return;
     }
 
     openContextPanelTab(directory, { mode: 'diff', stagedDiff: false });
-  }, [closeContextPanel, contextPanelByDirectory, openContextPanelTab, openDirectory]);
+  }, [closeContextPanel, openContextPanelTab, openDirectory]);
 
   const handleOpenContextBrowser = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -1507,41 +1515,18 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'browser') {
       closeContextPanel(directory);
       return;
     }
 
     openContextBrowser(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextBrowser, openDirectory]);
+  }, [closeContextPanel, openContextBrowser, openDirectory]);
 
-  const isContextPlanActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'plan';
-  }, [contextPanelByDirectory, openDirectory]);
-
-  const isContextChangesActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'diff';
-  }, [contextPanelByDirectory, openDirectory]);
-
-  const isContextBrowserActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'browser';
-  }, [contextPanelByDirectory, openDirectory]);
+  const isContextPlanActive = activeContextMode === 'plan';
+  const isContextChangesActive = activeContextMode === 'diff';
+  const isContextBrowserActive = activeContextMode === 'browser';
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;
@@ -1597,11 +1582,11 @@ export const Header: React.FC<HeaderProps> = ({
     if (isTabletStandalonePwa) {
       return 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)';
     }
-    if ((!isDesktopApp || isWindowsElectronDesktop) && !isVSCode) {
+    if ((!isDesktopApp || usesFramelessChrome) && !isVSCode) {
       return 'calc(0.75rem + var(--oc-wco-left-inset, 0px))';
     }
     return '0.75rem';
-  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, isVSCode, isWindowsElectronDesktop]);
+  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, isVSCode, usesFramelessChrome]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -1670,7 +1655,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isDesktopApp, isMacPlatform, macosMajorVersion]);
 
   const webWindowControlsOverlayStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-    if ((isDesktopApp && !isWindowsElectronDesktop) || isVSCode) {
+    if ((isDesktopApp && !usesFramelessChrome) || isVSCode) {
       return undefined;
     }
 
@@ -1681,7 +1666,7 @@ export const Header: React.FC<HeaderProps> = ({
       minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
       height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
     };
-  }, [isDesktopApp, isVSCode, isWindowsElectronDesktop]);
+  }, [isDesktopApp, isVSCode, usesFramelessChrome]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -1779,7 +1764,8 @@ export const Header: React.FC<HeaderProps> = ({
   }, [shortcutOverrides]);
 
   useEffect(() => {
-    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'terminal' || activeMainTab === 'diff' || activeMainTab === 'files' || activeMainTab === 'context')) {
+    // Project actions may intentionally promote the terminal to the desktop main view.
+    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'diff' || activeMainTab === 'files' || activeMainTab === 'context')) {
       setActiveMainTab('chat');
     }
   }, [activeMainTab, isMobile, setActiveMainTab]);
@@ -1834,7 +1820,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       try {
         // Ensure preview/dev terminals don't linger.
-        await forceKillTerminal({});
+        await runtimeApis.terminal.forceKill?.({});
       } catch {
         // ignore
       }
@@ -1859,7 +1845,7 @@ export const Header: React.FC<HeaderProps> = ({
         setIsDevShutdownInFlight(false);
       }
     }
-  }, [isDevShutdownInFlight, setIsDesktopServicesOpen]);
+  }, [isDevShutdownInFlight, runtimeApis.terminal, setIsDesktopServicesOpen]);
 
   const quotaDisplayTabs = React.useMemo(() => {
     return [
@@ -2216,7 +2202,7 @@ export const Header: React.FC<HeaderProps> = ({
             Icon={'picture-in-picture-2'}
           />
           {desktopSidebarActions}
-          <WindowsWindowControls visible={isWindowsElectronDesktop} />
+          <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>
       </div>
     </div>

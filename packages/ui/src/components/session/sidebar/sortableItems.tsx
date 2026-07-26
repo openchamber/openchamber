@@ -17,6 +17,7 @@ import { useI18n } from '@/lib/i18n';
 
 export interface SortableProjectItemProps {
   id: string;
+  disabled?: boolean;
   projectLabel: string;
   projectDescription: string;
   projectIcon?: string;
@@ -51,6 +52,7 @@ export type SortableDragHandleProps = {
 
 export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   id,
+  disabled = false,
   projectLabel,
   projectDescription,
   projectIcon,
@@ -85,7 +87,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, disabled });
 
   const suppressNextToggleRef = React.useRef(false);
   const menuInstanceKey = `project:${id}`;
@@ -110,7 +112,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
       )}
       <Item onClick={onRenameStart}>
         <Icon name="pencil-ai" className="mr-1.5 h-4 w-4" />
-        {t('sessions.sidebar.session.menu.rename')}
+        {t('sessions.sidebar.project.actions.edit')}
       </Item>
       <Item onClick={onClose} className="text-destructive focus:text-destructive">
         <Icon name="close" className="mr-1.5 h-4 w-4" />

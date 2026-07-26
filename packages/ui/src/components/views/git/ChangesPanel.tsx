@@ -1,5 +1,5 @@
 import React from 'react';
-import { Virtualizer, type VirtualizerHandle } from 'virtua';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -195,16 +195,26 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
 
   const rowCount = rows.length;
   const shouldVirtualize = rowCount >= CHANGE_LIST_VIRTUALIZE_THRESHOLD;
-  const rowVirtualizerRef = React.useRef<VirtualizerHandle | null>(null);
-  const [visibleStartIndex, setVisibleStartIndex] = React.useState(0);
-
-  const updateVisibleStartIndex = React.useCallback((offset: number) => {
-    const virtualizer = rowVirtualizerRef.current;
-    const next = virtualizer
-      ? virtualizer.findItemIndex(offset)
-      : Math.floor(offset / CHANGE_ROW_ESTIMATE_PX);
-    setVisibleStartIndex((previous) => (previous === next ? previous : next));
-  }, []);
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: rowCount,
+    enabled: shouldVirtualize,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => CHANGE_ROW_ESTIMATE_PX,
+    overscan: 12,
+    getItemKey: (index) => rows[index]?.key ?? index,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  // First VISIBLE row index drives the visible-path prefetch window (the
+  // virtua findItemIndex/onScroll pair this replaces). virtualRows starts at
+  // the overscan boundary — up to `overscan` rows above the viewport — so
+  // skip rows that end above the current scroll offset; otherwise the
+  // prefetch budget leaks to offscreen files above the viewport.
+  const visibleStartIndex = React.useMemo(() => {
+    if (!shouldVirtualize) return 0;
+    const scrollTop = scrollRef.current?.scrollTop ?? 0;
+    const firstVisible = virtualRows.find((item) => item.end > scrollTop);
+    return firstVisible?.index ?? 0;
+  }, [shouldVirtualize, virtualRows, scrollRef]);
 
   React.useEffect(() => {
     if (!onVisiblePathsChange) {
@@ -481,27 +491,34 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           className="overlay-scrollbar-target overlay-scrollbar-container min-h-0 w-full flex-1 overflow-x-hidden overflow-y-auto"
         >
           {shouldVirtualize ? (
-            <Virtualizer
-              ref={rowVirtualizerRef}
-              data={rows}
-              itemSize={CHANGE_ROW_ESTIMATE_PX}
-              bufferSize={CHANGE_ROW_ESTIMATE_PX * 12}
-              scrollRef={scrollRef}
-              onScroll={updateVisibleStartIndex}
-            >
-              {(row, index) => (
-                <div
-                  key={row.key}
-                  className={cn(
-                    'relative',
-                    showDivider(index) &&
-                      'before:pointer-events-none before:absolute before:left-0 before:right-2 before:top-0 before:border-t before:border-border/60'
-                  )}
-                >
-                  {renderRow(row, index === 0)}
-                </div>
-              )}
-            </Virtualizer>
+            <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative' }}>
+              {/* Absolutely positioned rows: variable-height rows can drift from
+                  the computed total height under flow stacking until measured. */}
+              {virtualRows.map((item) => {
+                const row = rows[item.index];
+                if (!row) return null;
+                return (
+                  <div
+                    key={row.key}
+                    data-index={item.index}
+                    ref={rowVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${item.start}px)`,
+                    }}
+                    className={cn(
+                      showDivider(item.index) &&
+                        'before:pointer-events-none before:absolute before:left-0 before:right-2 before:top-0 before:border-t before:border-border/60'
+                    )}
+                  >
+                    {renderRow(row, item.index === 0)}
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <div role="list" aria-label={t('gitView.changes.changedFilesAria')}>
               {rows.map((row, index) => (

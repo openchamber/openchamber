@@ -68,6 +68,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const setDisplayMode = useSessionDisplayStore((state) => state.setDisplayMode);
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
+  const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
+  const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   // VS Code forces the expanded layout, so the mode toggle is meaningless there.
   const showDisplayModeToggle = !isVSCodeRuntime();
 
@@ -182,6 +184,60 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     <button
                       type="button"
                       className={headerActionButtonClass}
+                      aria-label={t('sessions.sidebar.header.actions.sortProjects')}
+                    >
+                      <Icon name="sort-desc" className={headerActionIconClass} />
+                    </button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.sortProjects')}</p></TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" className="min-w-[160px]">
+                <DropdownMenuItem
+                  onClick={() => setProjectSortOrder('manual')}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.projectSort.manual')}</span>
+                  {projectSortOrder === 'manual' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setProjectSortOrder('a-z')}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.projectSort.aToZ')}</span>
+                  {projectSortOrder === 'a-z' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setProjectSortOrder('z-a')}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.projectSort.zToA')}</span>
+                  {projectSortOrder === 'z-a' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setProjectSortOrder('date-added')}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.projectSort.dateAdded')}</span>
+                  {projectSortOrder === 'date-added' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setProjectSortOrder('recent')}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.projectSort.recent')}</span>
+                  {projectSortOrder === 'recent' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className={headerActionButtonClass}
                       aria-label={t('sessions.sidebar.header.actions.sessionDisplayMode')}
                     >
                       <Icon name="equalizer-2" className={headerActionIconClass} />
@@ -237,6 +293,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   <Icon name="expand-up-down" className="h-4 w-4" />
                   <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
                 </DropdownMenuItem>
+
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

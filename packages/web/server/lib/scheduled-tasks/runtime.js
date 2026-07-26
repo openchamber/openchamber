@@ -2,6 +2,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { DateTime } from 'luxon';
 import parser from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
+import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -225,6 +226,7 @@ export const createScheduledTasksRuntime = (deps) => {
     getOpenCodeAuthHeaders,
     waitForOpenCodeReady,
     emitTaskRunEvent,
+    setSessionAutoAccept,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -418,6 +420,9 @@ export const createScheduledTasksRuntime = (deps) => {
         type: 'text',
         text: expandSnippets(task.execution.prompt, projectPath),
       },
+      ...(task.execution.goalEnabled
+        ? [{ type: 'text', text: buildGoalIntroText(task.execution.goalTokenBudget), synthetic: true }]
+        : []),
     ],
   });
 
@@ -509,6 +514,31 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID,
       });
     } catch {
+    }
+
+    if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
+      // Enroll before the prompt goes out so the very first permission request
+      // is already auto-approved. Enrollment failure must not kill the run —
+      // the task still executes, permissions just wait for the user.
+      try {
+        await setSessionAutoAccept(sessionID, true, projectPath);
+      } catch (error) {
+        logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
+      }
+    }
+
+    if (task.execution.goalEnabled) {
+      await createSessionGoal({
+        baseUrl,
+        authHeaders,
+        sessionID,
+        directory: projectPath,
+        objective: expandSnippets(task.execution.prompt, projectPath),
+        tokenBudget: task.execution.goalTokenBudget,
+        providerID: task.execution.providerID,
+        modelID: task.execution.modelID,
+        onWarning: (message, error) => console.warn(`[scheduled-tasks] ${message}:`, error?.message || error),
+      });
     }
 
     const executedAsCommand = await runScheduledCommandIfApplicable({

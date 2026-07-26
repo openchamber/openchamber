@@ -49,7 +49,13 @@ import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSess
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
+import {
+  EMPTY_SESSION_ORDER_RANKS,
+  orderSessionsByLifecycleScopes,
+  useSessionOrderingStore,
+} from '@/sync/session-ordering';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -60,7 +66,12 @@ import { MobileSurfaceShell } from './MobileSurfaceShell';
 type MobileSessionsSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 'sheet' (default) wraps the content in the swipe-dismiss MobileSurfaceShell;
+      'sidebar' renders the same content inline for the iPad persistent sidebar. */
+  variant?: 'sheet' | 'sidebar';
 };
+
+const EMPTY_PINNED_SESSION_IDS = new Set<string>();
 
 type ProjectMeta = {
   id: string;
@@ -511,11 +522,19 @@ const SortableProjectRow: React.FC<{
   );
 };
 
-export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange }) => {
+export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'sheet' }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const liveSessions = useAllLiveSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
+    (state) => open || variant === 'sidebar' ? state.ids : EMPTY_PINNED_SESSION_IDS,
+    [open, variant],
+  ));
+  const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
+    (state) => open || variant === 'sidebar' ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
+    [open, variant],
+  ));
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -688,7 +707,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
     for (const node of nodes) {
       for (const bucket of node.buckets) {
-        bucket.sessions.sort((a, b) => getSessionTimestamp(b) - getSessionTimestamp(a));
+        bucket.sessions = orderSessionsByLifecycleScopes(bucket.sessions, pinnedSessionIds, sessionOrderRanks);
         for (const session of bucket.sessions) {
           if (!getParentId(session)) node.totalSessions += 1;
         }
@@ -696,7 +715,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, projectsMeta, sessions]);
+  }, [activeProjectId, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessions]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -920,14 +939,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // Flat lists used only by the dedicated search-results view.
   const searchSessionMatches = React.useMemo(() => {
     if (!normalizedQuery) return [] as Session[];
-    return sessions
-      .filter((session) => {
+    return orderSessionsByLifecycleScopes(
+      sessions.filter((session) => {
         const directory = getSessionDirectory(session);
         const project = findExactProjectMatch(projectsMeta, directory);
         return sessionMatchesQuery(session, project?.label ?? '', normalizedQuery);
-      })
-      .sort((a, b) => getSessionTimestamp(b) - getSessionTimestamp(a));
-  }, [normalizedQuery, projectsMeta, sessions]);
+      }),
+      pinnedSessionIds,
+      sessionOrderRanks,
+    );
+  }, [normalizedQuery, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessions]);
 
   const searchProjectMatches = React.useMemo(() => {
     if (!normalizedQuery) return [] as Array<ProjectMeta & { sessionCount: number }>;
@@ -999,14 +1020,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       </>
     ) : null;
 
-  return (
-    <MobileSurfaceShell
-      open={open}
-      onClose={() => onOpenChange(false)}
-      ariaLabel={t('mobile.sessions.sheet.title')}
-      title={t('mobile.sessions.sheet.title')}
-      trailing={trailingActions}
-    >
+  const surfaceContent = (
       <div className="flex h-full flex-col">
         <div className={cn('shrink-0 px-4 pb-2 pt-1', editingOrder && 'hidden')}>
           <div className="relative">
@@ -1294,6 +1308,34 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           onWorktreesChanged={() => setWorktreeRefreshKey((value) => value + 1)}
         />
       </div>
+  );
+
+  if (variant === 'sidebar') {
+    if (!open) return null;
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center justify-between gap-2 border-b border-border/30 px-4">
+          <h2 className="truncate typography-ui-label font-semibold text-foreground">
+            {t('mobile.sessions.sheet.title')}
+          </h2>
+          {trailingActions ? (
+            <div className="flex shrink-0 items-center gap-2">{trailingActions}</div>
+          ) : null}
+        </div>
+        {surfaceContent}
+      </div>
+    );
+  }
+
+  return (
+    <MobileSurfaceShell
+      open={open}
+      onClose={() => onOpenChange(false)}
+      ariaLabel={t('mobile.sessions.sheet.title')}
+      title={t('mobile.sessions.sheet.title')}
+      trailing={trailingActions}
+    >
+      {surfaceContent}
     </MobileSurfaceShell>
   );
 };

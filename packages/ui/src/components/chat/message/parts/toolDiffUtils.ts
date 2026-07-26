@@ -22,6 +22,109 @@ const normalizePatchText = (patch: string): string => {
     return patch.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 };
 
+const normalizeBareUnifiedHeaderLines = (patch: string): string => {
+    let reachedHunk = false;
+    return patch.split('\n').map((line) => {
+        if (line.startsWith('@@')) {
+            reachedHunk = true;
+            return line;
+        }
+
+        if (reachedHunk) {
+            return line;
+        }
+
+        const headerMatch = line.match(/^\s*(---|\+\+\+)\s+(.+)$/);
+        if (!headerMatch) {
+            return line;
+        }
+
+        const marker = headerMatch[1];
+        const rawPath = headerMatch[2] ?? '';
+        if (rawPath.trim() === '/dev/null') {
+            return `${marker} /dev/null`;
+        }
+
+        return `${marker} ${rawPath.replace(/\\/g, '/')}`;
+    }).join('\n');
+};
+
+const normalizeLooseUnifiedHunkBody = (patch: string): string => {
+    let inHunk = false;
+    return patch.split('\n').map((line) => {
+        if (line.startsWith('@@')) {
+            inHunk = true;
+            return line;
+        }
+
+        if (!inHunk || line.startsWith('--- ') || line.startsWith('+++ ') || line.startsWith('diff --git')) {
+            return line;
+        }
+
+        if (line.length === 0) {
+            return ' ';
+        }
+
+        const first = line[0];
+        if (first === ' ' || first === '+' || first === '-' || first === '\\') {
+            return line;
+        }
+
+        return ` ${line}`;
+    }).join('\n');
+};
+
+const formatHunkRange = (start: string, count: number): string => {
+    return count === 1 ? start : `${start},${count}`;
+};
+
+const recountUnifiedHunkHeaders = (patch: string): string => {
+    const lines = patch.split('\n');
+    const result = [...lines];
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const header = lines[index] ?? '';
+        const match = header.match(/^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@(.*)$/);
+        if (!match) {
+            continue;
+        }
+
+        let oldCount = 0;
+        let newCount = 0;
+        for (let bodyIndex = index + 1; bodyIndex < lines.length; bodyIndex += 1) {
+            const line = lines[bodyIndex] ?? '';
+            if (line.startsWith('@@') || line.startsWith('--- ') || line.startsWith('diff --git')) {
+                break;
+            }
+
+            if (line.startsWith('\\')) {
+                continue;
+            }
+
+            if (line.startsWith('+')) {
+                newCount += 1;
+                continue;
+            }
+
+            if (line.startsWith('-')) {
+                oldCount += 1;
+                continue;
+            }
+
+            oldCount += 1;
+            newCount += 1;
+        }
+
+        result[index] = `@@ -${formatHunkRange(match[1] ?? '0', oldCount)} +${formatHunkRange(match[2] ?? '0', newCount)} @@${match[3] ?? ''}`;
+    }
+
+    return result.join('\n');
+};
+
+const normalizeLooseUnifiedPatch = (patch: string): string => {
+    return recountUnifiedHunkHeaders(normalizeLooseUnifiedHunkBody(normalizeBareUnifiedHeaderLines(normalizePatchText(patch))));
+};
+
 export const getPatchText = (value: unknown): string | undefined => {
     if (typeof value === 'string') {
         return /\S/.test(value) ? value : undefined;
@@ -75,7 +178,7 @@ const hasOnlyUnifiedDiffBodyLines = (patch: string): boolean => {
 };
 
 export const getRenderablePatchInfo = (patch: string): { patch: string; title?: string } | null => {
-    const normalized = normalizePatchText(patch);
+    const normalized = normalizeLooseUnifiedPatch(patch);
     if (
         !normalized
         || APPLY_PATCH_ENVELOPE_PATTERN.test(normalized)
@@ -125,7 +228,7 @@ const getPatchEntriesFromText = (
     idPrefix: string,
     resolveTitle: (path: string) => string,
 ): DiffPatchEntry[] => {
-    const normalized = normalizePatchText(patch);
+    const normalized = normalizeLooseUnifiedPatch(patch);
     if (!normalized) {
         return [];
     }

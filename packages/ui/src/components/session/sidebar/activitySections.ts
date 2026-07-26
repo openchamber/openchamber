@@ -22,23 +22,19 @@ const getSessionUpdatedAt = (session: Session): number => {
   return 0;
 };
 
-const sortSessionsByUpdated = (sessions: Session[]): Session[] => {
-  return [...sessions].sort((a, b) => getSessionUpdatedAt(b) - getSessionUpdatedAt(a));
-};
-
-// Recent sessions are simply every non-archived, top-level session updated
-// within the last RECENT_SESSION_MAX_AGE_MS. No persisted history or live-busy
-// tracking — membership is derived directly from session timestamps.
+// Recent contains non-archived root sessions that are active now or were
+// updated within the retention window. The caller applies shared lifecycle
+// ordering after this membership filter.
 export const deriveRecentSessions = (
   sessions: Session[],
+  activeSessionIds: ReadonlySet<string>,
   now = Date.now(),
 ): Session[] => {
   const minUpdatedAt = now - RECENT_SESSION_MAX_AGE_MS;
-  const recent = sessions.filter((session) => {
+  return sessions.filter((session) => {
     if (isArchivedSession(session) || isSubtaskSession(session)) {
       return false;
     }
-    return getSessionUpdatedAt(session) >= minUpdatedAt;
+    return activeSessionIds.has(session.id) || getSessionUpdatedAt(session) >= minUpdatedAt;
   });
-  return sortSessionsByUpdated(recent);
 };

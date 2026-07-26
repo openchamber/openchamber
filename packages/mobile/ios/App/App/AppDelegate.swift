@@ -1,6 +1,7 @@
 import UIKit
 import Capacitor
 import UserNotifications
+import WebKit
 import WidgetKit
 
 @UIApplicationMain
@@ -58,6 +59,42 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
     }
 
+}
+
+/// APNs environment of this build: "development" for Xcode/dev-signed installs,
+/// "production" for TestFlight/App Store. Read from the embedded provisioning profile's
+/// aps-environment entitlement; App Store builds carry no embedded profile and are
+/// production. Exposed to the web layer so the server can deliver each device token to
+/// the APNs endpoint that actually knows it (sandbox vs production).
+let apnsEnvironment: String = {
+    guard let path = Bundle.main.path(forResource: "embedded", ofType: "mobileprovision"),
+          let data = FileManager.default.contents(atPath: path),
+          // isoLatin1, not ascii/utf8: the profile is a binary CMS envelope around the XML
+          // plist, and only Latin-1 decodes arbitrary bytes without returning nil.
+          let profile = String(data: data, encoding: .isoLatin1) else {
+        return "production"
+    }
+    let pattern = "<key>aps-environment</key>\\s*<string>development</string>"
+    return profile.range(of: pattern, options: .regularExpression) != nil ? "development" : "production"
+}()
+
+/// Bridge subclass (referenced from Main.storyboard) whose only job is to expose the APNs
+/// environment as a document-start user script. This runs before any page JS, so token
+/// registration (useNativePushRegistration) always sees it — injecting later from the scene
+/// lifecycle raced the registration call and lost on first launch.
+///
+/// The script must be added in capacitorDidLoad(), NOT webViewConfiguration(for:): Capacitor's
+/// prepareWebView replaces the configuration's userContentController with its own right after
+/// calling webViewConfiguration(for:), which silently discards any user script added there.
+/// capacitorDidLoad() runs after that swap but before loadWebView() starts the initial page load.
+class BridgeViewController: CAPBridgeViewController {
+    override func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        let source = "window.__OPENCHAMBER_APNS_ENV__ = '\(apnsEnvironment)';"
+        webView?.configuration.userContentController.addUserScript(
+            WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        )
+    }
 }
 
 // iOS 26 (TN3187) requires apps built with the latest SDK to adopt the UIScene
@@ -146,8 +183,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
         if #available(iOS 26.0, *) {
-            webView.scrollView.topEdgeEffect.isHidden = true
-            webView.scrollView.bottomEdgeEffect.isHidden = true
+            // KVC keeps this compiling with pre-26 SDKs, but the effect object is a
+            // UIScrollEdgeEffect — NOT a UIView — so it must be handled as a plain
+            // NSObject ("hidden" is the ObjC key behind isHidden). The previous
+            // `as? UIView` cast silently returned nil and left the system's dark
+            // edge band visible behind the status bar.
+            for key in ["topEdgeEffect", "bottomEdgeEffect"] {
+                guard webView.scrollView.responds(to: NSSelectorFromString(key)) else { continue }
+                (webView.scrollView.value(forKey: key) as? NSObject)?.setValue(true, forKey: "hidden")
+            }
         }
     }
 

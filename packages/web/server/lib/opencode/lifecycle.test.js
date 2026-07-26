@@ -128,6 +128,34 @@ describe('OpenCode lifecycle', () => {
     await server.close();
   });
 
+  it('adds managed OpenChamber tool environment without allowing it to replace launch invariants', async () => {
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+    const getManagedOpenCodeEnv = vi.fn(async () => ({
+      OPENCODE_CONFIG_CONTENT: '{"plugin":["file:///tool.js"]}',
+      OPENCHAMBER_AGENT_TOOL_TOKEN: 'ephemeral',
+      PATH: '/untrusted/path',
+      OPENCODE_SERVER_PASSWORD: 'untrusted-password',
+    }));
+
+    const runtime = createRuntime({ getManagedOpenCodeEnv });
+    const server = await runtime.startOpenCode();
+    const [, , options] = spawnMock.mock.calls[0];
+
+    expect(getManagedOpenCodeEnv).toHaveBeenCalledOnce();
+    expect(options.env.OPENCODE_CONFIG_CONTENT).toBe('{"plugin":["file:///tool.js"]}');
+    expect(options.env.OPENCHAMBER_AGENT_TOOL_TOKEN).toBe('ephemeral');
+    expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
+    expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
+
+    await server.close();
+  });
+
   it('falls back to buildAugmentedPath when buildManagedOpenCodePath is not provided', async () => {
     delete process.env.OPENCODE_BINARY;
     const child = createMockChild();
