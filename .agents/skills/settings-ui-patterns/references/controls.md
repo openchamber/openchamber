@@ -1,83 +1,83 @@
 # Settings Controls
 
-Load `theme-system` for button/icon/color contracts and `locale-ui-patterns` for every visible or accessible string.
+Load `theme-system` for button/icon/color contracts and `locale-ui-patterns`
+for every visible or accessible string. All primitives/constants come from
+`packages/ui/src/components/sections/shared/SettingsSection.tsx` (+
+`SettingsInfoHint.tsx`).
 
-## Choosing A Control
+## Standard Sizes And Widths
 
-- Short chip-like option set: shared `Button variant="chip" size="xs"` with `aria-pressed`.
-- Explicit mutually exclusive list: shared `Radio`.
-- Boolean value: shared `Checkbox`, not paired show/hide buttons.
-- Numeric value: shared `NumberInput`.
-- Text/path value: shared `Input` plus shared actions.
+One control size across Settings — `h-8`:
 
-Do not couple unrelated toggles beneath a synthetic heading.
+- `SelectTrigger`: `size={SETTINGS_SELECT_SIZE}` ('settings' → h-8, rounded-md, px-3).
+- Custom dropdown triggers (ModelSelector / AgentSelector): `SETTINGS_CUSTOM_TRIGGER_CLASS`.
+- Text `Input` next to dropdowns: `h-8 rounded-md px-3` (match the trigger footprint).
+- Icon action next to a control: `SETTINGS_ICON_BUTTON_CLASS`.
 
-## Segmented Option
+Widths are capped — never let controls span the pane:
+
+- Field-row control cluster / stacked-field default cap: `max-w-[24rem]` (built into `SettingsStackedField`; use `SETTINGS_CONTROL_CLUSTER_CLASS` elsewhere).
+- Field-row selects: `SETTINGS_SELECT_ROW_TRIGGER_CLASS` (full width narrow, `@xl:w-56` wide).
+- Stacked-field selects: `SETTINGS_SELECT_TRIGGER_CLASS` (fills the capped container).
+- Genuinely full-width content (dialog textareas): opt out with `controlClassName="w-full max-w-none"`.
+
+## Field Rows
 
 ```tsx
-<Button variant="chip" size="xs" aria-pressed={isSelected}>
-  {t(labelKey)}
-</Button>
+<SettingsFieldRow
+  label={t('...label')}
+  info={t('...hint')}                 // helper text behind the info icon
+  settingsItem="page.some-setting"
+>
+  <Select …>
+    <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('...aria')}>…
 ```
 
-## Radio Row
+Use `SettingsStackedField` (label above control) inside `SettingsTwoColumn`
+cells or when the control is wide; same `info` / `settingsItem` props.
+
+## Boolean
 
 ```tsx
-<div role="radiogroup" aria-label={t(groupLabelKey)}>
-  <div className="flex items-center gap-2 py-0.5">
-    <Radio checked={selected} onChange={onSelect} ariaLabel={t(labelKey)} />
-    <span className={cn('typography-ui-label', selected ? 'text-foreground' : 'text-foreground/50')}>
-      {t(labelKey)}
-    </span>
-  </div>
-</div>
-```
-
-## Checkbox Row
-
-```tsx
-<div className="flex cursor-pointer items-center gap-2 py-1.5">
-  <Checkbox checked={value} onChange={setValue} ariaLabel={t(labelKey)} />
-  <span className="typography-ui-label">{t(labelKey)}</span>
-</div>
-```
-
-Preserve row click and keyboard behavior when the container is interactive.
-
-## Optional Numeric Override
-
-Empty means “inherit/default.” Provide fallback stepping and explicit clear:
-
-```tsx
-<NumberInput
-  value={temperature}
-  fallbackValue={0.7}
-  onValueChange={setTemperature}
-  onClear={() => setTemperature(undefined)}
-  min={0}
-  max={2}
-  step={0.1}
-  inputMode="decimal"
-  emptyLabel="—"
+<SettingsCheckboxRow
+  checked={value}
+  onChange={setValue}
+  label={t('...label')}
+  ariaLabel={t('...aria')}
+  info={t('...explanation')}          // optional; see Description Policy
+  settingsItem="page.some-setting"
 />
 ```
 
-Keep reset adjacent. Prefer an info tooltip over persistent helper text when the explanation is secondary.
+Row click + keyboard toggling are built in. A visible `description` is only
+for text that must stay visible (warnings, dynamic status).
 
-## Inputs And Icon Actions
+## Mutually Exclusive Options
 
 ```tsx
-<div className="flex items-center gap-2">
-  <Input className="h-7" />
-  <Button variant="outline" size="icon" aria-label={t(browseLabelKey)}>
-    <Icon name="folder" className="size-4" />
-  </Button>
-</div>
+<SettingsRadioGroup aria-label={t('...group')}>
+  <SettingsRadioOption selected={…} onSelect={…} label={t('...')} ariaLabel={t('...')} />
+</SettingsRadioGroup>
 ```
 
-- Prefer compact inputs in dense rows.
-- Avoid large select triggers in Settings.
-- Use shared `Button` and sprite `Icon`, never wrapper buttons or direct Remixicon imports.
+Skip per-option descriptions when labels are self-explanatory. For short
+segmented choices use `SettingsChipGroup` (chips with `aria-pressed`).
+
+## Numeric Value / Override
+
+`NumberInput` inside `SETTINGS_NUMBER_STEPPER_ROW_CLASS`, with
+`SETTINGS_NUMBER_UNIT_CLASS` for the unit and an adjacent
+`SETTINGS_ICON_BUTTON_CLASS` reset button. Never flex-grow the stepper.
+Optional overrides: empty means "inherit"; provide `fallbackValue`,
+`onClear`, `emptyLabel="—"`.
+
+## Info Hints
+
+`SettingsInfoHint` is the only info-icon implementation: it opens on hover
+AND on click (touch devices have no hover), and closes on outside tap.
+Prefer the `info` prop of the enclosing primitive; use the component
+directly only next to raw labels/headings. Never build info icons from raw
+`<Tooltip>` + `<Icon name="information">` — those don't work on mobile.
 
 ## Mobile Constraints
 
@@ -89,3 +89,10 @@ Keep reset adjacent. Prefer an info tooltip over persistent helper text when the
 - Place icon/color palettes beneath their label.
 - Keep option dimensions and gaps consistent.
 - Use stable border/ring/background selection; avoid scale transforms that shift layout.
+
+## Dialogs
+
+Dialogs reuse the same primitives (`SettingsCheckboxRow`,
+`SETTINGS_FIELD_LABEL_CLASS`, `SettingsStackedField`) and the same sizes.
+Dividers between dialog form groups are acceptable; wizard step
+instructions guiding an active flow stay visible (not behind info).

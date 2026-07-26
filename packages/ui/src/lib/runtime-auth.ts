@@ -14,7 +14,10 @@ let runtimeUrlAuthTokenExpiresAt = 0;
 let runtimeUrlAuthRefreshPromise: Promise<string> | null = null;
 let localRuntimeUrlAuthToken = '';
 let localRuntimeUrlAuthTokenExpiresAt = 0;
+let localRuntimeUrlAuthOrigin = '';
 let localRuntimeUrlAuthRefreshPromise: Promise<string> | null = null;
+let localRuntimeUrlAuthRefreshOrigin = '';
+let localRuntimeUrlAuthGeneration = 0;
 let runtimeAuthGeneration = 0;
 
 const URL_AUTH_REFRESH_SKEW_MS = 10_000;
@@ -66,11 +69,27 @@ const buildAuthUrl = (apiBaseUrl: string | null | undefined, path: string): stri
   }
 };
 
+const normalizeOrigin = (value: string): string => {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return '';
+  }
+};
+
+const clearLocalRuntimeUrlAuthToken = (): void => {
+  localRuntimeUrlAuthToken = '';
+  localRuntimeUrlAuthTokenExpiresAt = 0;
+  localRuntimeUrlAuthOrigin = '';
+  localRuntimeUrlAuthRefreshPromise = null;
+  localRuntimeUrlAuthRefreshOrigin = '';
+  localRuntimeUrlAuthGeneration += 1;
+};
+
 export const clearRuntimeUrlAuthToken = (): void => {
   runtimeUrlAuthToken = '';
   runtimeUrlAuthTokenExpiresAt = 0;
-  localRuntimeUrlAuthToken = '';
-  localRuntimeUrlAuthTokenExpiresAt = 0;
+  clearLocalRuntimeUrlAuthToken();
 };
 
 const resetRuntimeAuthGeneration = (): void => {
@@ -135,15 +154,20 @@ export const setRuntimeUrlAuthToken = (token: string | null | undefined, expires
   }
 };
 
-export const setLocalRuntimeUrlAuthToken = (token: string | null | undefined, expiresAt: number | null | undefined): void => {
+export const setLocalRuntimeUrlAuthToken = (
+  token: string | null | undefined,
+  expiresAt: number | null | undefined,
+  localOrigin?: string | null,
+): void => {
   const normalized = normalizeBearerToken(token);
-  if (!normalized || typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) {
-    localRuntimeUrlAuthToken = '';
-    localRuntimeUrlAuthTokenExpiresAt = 0;
+  const origin = typeof localOrigin === 'string' ? normalizeOrigin(localOrigin) : '';
+  if (!normalized || typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || !origin) {
+    clearLocalRuntimeUrlAuthToken();
     return;
   }
   localRuntimeUrlAuthToken = normalized;
   localRuntimeUrlAuthTokenExpiresAt = expiresAt;
+  localRuntimeUrlAuthOrigin = origin;
 };
 
 const readValidRuntimeUrlAuthTokenSync = (): string => {
@@ -154,10 +178,13 @@ const readValidRuntimeUrlAuthTokenSync = (): string => {
   return runtimeUrlAuthToken;
 };
 
-const readValidLocalRuntimeUrlAuthTokenSync = (): string => {
+const readValidLocalRuntimeUrlAuthTokenSync = (localOrigin: string): string => {
+  const origin = normalizeOrigin(localOrigin);
+  if (!origin || localRuntimeUrlAuthOrigin !== origin) return '';
   if (!localRuntimeUrlAuthToken || localRuntimeUrlAuthTokenExpiresAt <= Date.now() + URL_AUTH_REFRESH_SKEW_MS) {
     localRuntimeUrlAuthToken = '';
     localRuntimeUrlAuthTokenExpiresAt = 0;
+    localRuntimeUrlAuthOrigin = '';
     return '';
   }
   return localRuntimeUrlAuthToken;
@@ -172,7 +199,7 @@ export const getRuntimeUrlAuthTokenSync = (): string => {
 };
 
 export const getLocalRuntimeUrlAuthTokenSync = (localOrigin?: string | null): string => {
-  const token = readValidLocalRuntimeUrlAuthTokenSync();
+  const token = localOrigin ? readValidLocalRuntimeUrlAuthTokenSync(localOrigin) : '';
   if (!token && localOrigin && typeof window !== 'undefined') {
     void refreshLocalRuntimeUrlAuthToken(localOrigin).catch(() => {});
   }
@@ -242,15 +269,23 @@ const mintRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<string> =>
 };
 
 const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
-  if (localRuntimeUrlAuthRefreshPromise) return localRuntimeUrlAuthRefreshPromise;
+  const origin = normalizeOrigin(localOrigin);
+  if (!origin) return Promise.reject(new Error('Local runtime URL auth origin was invalid'));
+  if (localRuntimeUrlAuthRefreshPromise && localRuntimeUrlAuthRefreshOrigin === origin) {
+    return localRuntimeUrlAuthRefreshPromise;
+  }
+  const generation = localRuntimeUrlAuthGeneration;
   const refreshPromise = (async () => {
-    const response = await fetch(buildAuthUrl(localOrigin, '/auth/url-token'), {
+    const response = await fetch(buildAuthUrl(origin, '/auth/url-token'), {
       method: 'POST',
       credentials: 'include',
     });
     if (!response.ok) {
-      localRuntimeUrlAuthToken = '';
-      localRuntimeUrlAuthTokenExpiresAt = 0;
+      if (generation === localRuntimeUrlAuthGeneration && origin === localRuntimeUrlAuthRefreshOrigin) {
+        localRuntimeUrlAuthToken = '';
+        localRuntimeUrlAuthTokenExpiresAt = 0;
+        localRuntimeUrlAuthOrigin = '';
+      }
       throw new Error(`Failed to mint local runtime URL auth token (${response.status})`);
     }
     const payload = await response.json().catch(() => null) as { token?: unknown; expiresAt?: unknown } | null;
@@ -259,16 +294,22 @@ const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
     if (!token || !Number.isFinite(expiresAt)) {
       throw new Error('Local runtime URL auth token response was invalid');
     }
+    if (generation !== localRuntimeUrlAuthGeneration || origin !== localRuntimeUrlAuthRefreshOrigin) {
+      throw new Error('Local runtime URL auth token response is stale');
+    }
     localRuntimeUrlAuthToken = token;
     localRuntimeUrlAuthTokenExpiresAt = expiresAt;
+    localRuntimeUrlAuthOrigin = origin;
     return token;
   })();
   const trackedPromise = refreshPromise.finally(() => {
     if (localRuntimeUrlAuthRefreshPromise === trackedPromise) {
       localRuntimeUrlAuthRefreshPromise = null;
+      localRuntimeUrlAuthRefreshOrigin = '';
     }
   });
   localRuntimeUrlAuthRefreshPromise = trackedPromise;
+  localRuntimeUrlAuthRefreshOrigin = origin;
   return localRuntimeUrlAuthRefreshPromise;
 };
 
@@ -281,9 +322,17 @@ export const refreshRuntimeUrlAuthToken = async (apiBaseUrl?: string | null): Pr
 };
 
 export const refreshLocalRuntimeUrlAuthToken = async (localOrigin: string): Promise<string> => {
-  const existing = readValidLocalRuntimeUrlAuthTokenSync();
+  const origin = normalizeOrigin(localOrigin);
+  if (!origin) throw new Error('Local runtime URL auth origin was invalid');
+  const existing = readValidLocalRuntimeUrlAuthTokenSync(origin);
   if (existing) return existing;
-  return mintLocalRuntimeUrlAuthToken(localOrigin);
+  if (
+    (localRuntimeUrlAuthOrigin && localRuntimeUrlAuthOrigin !== origin)
+    || (localRuntimeUrlAuthRefreshOrigin && localRuntimeUrlAuthRefreshOrigin !== origin)
+  ) {
+    clearLocalRuntimeUrlAuthToken();
+  }
+  return mintLocalRuntimeUrlAuthToken(origin);
 };
 
 // ── Proactive URL auth token refresh ──────────────────────────────────────

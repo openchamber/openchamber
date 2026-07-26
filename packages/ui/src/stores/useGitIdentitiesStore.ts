@@ -10,7 +10,7 @@ import {
   discoverGitCredentials,
   getGlobalGitIdentity
 } from "@/lib/gitApi";
-import { updateDesktopSettings } from "@/lib/persistence";
+import { reportSettingsSaveState, updateDesktopSettings } from "@/lib/persistence";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 
@@ -206,11 +206,14 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
               icon: profileData.icon || 'branch'
             };
 
+            reportSettingsSaveState('saving');
             await createGitIdentity(profile);
+            reportSettingsSaveState('saved');
 
             await get().loadProfiles();
             return true;
           } catch (error) {
+            reportSettingsSaveState('error');
             console.error("Failed to create git identity profile:", error);
             return false;
           }
@@ -225,11 +228,14 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
             }
 
             const updated = { ...existing, ...updates };
+            reportSettingsSaveState('saving');
             await updateGitIdentity(id, updated);
+            reportSettingsSaveState('saved');
 
             await get().loadProfiles();
             return true;
           } catch (error) {
+            reportSettingsSaveState('error');
             console.error("Failed to update git identity profile:", error);
             return false;
           }
@@ -237,7 +243,9 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
 
         deleteProfile: async (id) => {
           try {
+            reportSettingsSaveState('saving');
             await deleteGitIdentity(id);
+            reportSettingsSaveState('saved');
 
             if (get().selectedProfileId === id) {
               set({ selectedProfileId: null });
@@ -246,6 +254,7 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
             await get().loadProfiles();
             return true;
           } catch (error) {
+            reportSettingsSaveState('error');
             console.error("Failed to delete git identity profile:", error);
             return false;
           }

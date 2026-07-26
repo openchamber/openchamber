@@ -12,6 +12,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { Icon } from "@/components/icon/Icon";
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useNotificationStore } from '@/sync/notification-store';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useI18n } from '@/lib/i18n';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 
@@ -21,9 +23,7 @@ interface MobileSessionStatusBarProps {
 
 interface SessionWithStatus extends Session {
   _statusType?: 'busy' | 'retry' | 'idle';
-  _hasRunningChildren?: boolean;
   _runningChildrenCount?: number;
-  _childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }
 
 // Cross-project session source. Mirrors the dedicated MobileSessionsSheet:
@@ -79,17 +79,21 @@ function useSessionGrouping(
   sessionStatus: Record<string, { type: string }> | undefined
 ) {
   const unseenCounts = useNotificationStore((s) => s.index.session.unseenCount);
+  const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
+  const sessionOrderRanks = useSessionOrderingStore((state) => state.rankById);
 
   const parentChildMap = React.useMemo(() => {
     const map = new Map<string, Session[]>();
     const allIds = new Set(sessions.map((s) => s.id));
 
-    sessions.forEach((session) => {
+    for (const session of sessions) {
       const parentID = (session as { parentID?: string }).parentID;
       if (parentID && allIds.has(parentID)) {
-        map.set(parentID, [...(map.get(parentID) || []), session]);
+        const children = map.get(parentID);
+        if (children) children.push(session);
+        else map.set(parentID, [session]);
       }
-    });
+    }
     return map;
   }, [sessions]);
 
@@ -99,24 +103,6 @@ function useSessionGrouping(
     return 'idle';
   }, [sessionStatus]);
 
-  const hasRunningChildren = React.useCallback((sessionId: string): boolean => {
-    const children = parentChildMap.get(sessionId) || [];
-    return children.some((child) => getStatusType(child.id) !== 'idle');
-  }, [parentChildMap, getStatusType]);
-
-  const getRunningChildrenCount = React.useCallback((sessionId: string): number => {
-    const children = parentChildMap.get(sessionId) || [];
-    return children.filter((child) => getStatusType(child.id) !== 'idle').length;
-  }, [parentChildMap, getStatusType]);
-
-  const getChildIndicators = React.useCallback((sessionId: string): Array<{ session: Session; isRunning: boolean }> => {
-    const children = parentChildMap.get(sessionId) || [];
-    return children
-      .filter((child) => getStatusType(child.id) !== 'idle')
-      .map((child) => ({ session: child, isRunning: true }))
-      .slice(0, 3);
-  }, [parentChildMap, getStatusType]);
-
   const processedSessions = React.useMemo(() => {
     const sessionIds = new Set(sessions.map((s) => s.id));
     const topLevel = sessions.filter((session) => {
@@ -124,42 +110,23 @@ function useSessionGrouping(
       return !parentID || !sessionIds.has(parentID);
     });
 
-    const running: SessionWithStatus[] = [];
-    const viewed: SessionWithStatus[] = [];
-
-    topLevel.forEach((session) => {
+    const ordered = topLevel.map((session): SessionWithStatus => {
       const statusType = getStatusType(session.id);
-      const hasRunning = hasRunningChildren(session.id);
-      const attention = (unseenCounts[session.id] ?? 0) > 0;
-
-      const enriched: SessionWithStatus = {
+      const runningChildrenCount = (parentChildMap.get(session.id) ?? [])
+        .filter((child) => getStatusType(child.id) !== 'idle')
+        .length;
+      return {
         ...session,
         _statusType: statusType,
-        _hasRunningChildren: hasRunning,
-        _runningChildrenCount: getRunningChildrenCount(session.id),
-        _childIndicators: getChildIndicators(session.id),
+        _runningChildrenCount: runningChildrenCount,
       };
-
-      if (statusType !== 'idle' || hasRunning) {
-        running.push(enriched);
-      } else if (attention) {
-        running.push(enriched);
-      } else {
-        viewed.push(enriched);
-      }
     });
 
-    const sortByUpdated = (a: Session, b: Session) => {
-      const aTime = (a as unknown as { time?: { updated?: number } }).time?.updated ?? 0;
-      const bTime = (b as unknown as { time?: { updated?: number } }).time?.updated ?? 0;
-      return bTime - aTime;
-    };
-
-    running.sort(sortByUpdated);
-    viewed.sort(sortByUpdated);
-
-    return [...running, ...viewed];
-  }, [sessions, getStatusType, hasRunningChildren, getRunningChildrenCount, getChildIndicators, unseenCounts]);
+    const compare = (a: Session, b: Session) => (
+      compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks)
+    );
+    return ordered.sort(compare);
+  }, [sessions, getStatusType, parentChildMap, pinnedSessionIds, sessionOrderRanks]);
 
   const totalRunning = processedSessions.reduce((sum, s) => {
     const selfRunning = s._statusType !== 'idle' ? 1 : 0;
@@ -188,7 +155,6 @@ function useSessionHelpers() {
 
 // Per-project status indicators (running / unread) for the filter chips.
 function useProjectStatus(
-  sessions: Session[],
   sessionStatus: Record<string, { type: string }> | undefined,
   currentSessionId: string | null
 ) {
@@ -450,12 +416,11 @@ export const MobileSessionPanelTrigger: React.FC<MobileSessionPanelTriggerProps>
   );
 };
 
-export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
+const MobileSessionStatusOpenPanel: React.FC<MobileSessionStatusBarProps> = ({
   onSessionSwitch,
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
-  const isMobile = useUIStore((state) => state.isMobile);
   const sessions = useAllProjectSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessionStatus = useAllSessionStatuses();
@@ -469,7 +434,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
 
   const { sessions: sortedSessions, totalRunning, totalUnread } = useSessionGrouping(sessions, sessionStatus);
   const { getSessionTitle, needsAttention } = useSessionHelpers();
-  const getProjectStatus = useProjectStatus(sessions, sessionStatus, currentSessionId);
+  const getProjectStatus = useProjectStatus(sessionStatus, currentSessionId);
   const resolveProjectRoots = useProjectRootsResolver();
 
   // Project filter, persisted in the UI store so the choice survives closing and
@@ -531,11 +496,12 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
         return;
       }
     }
-    const mostRecent = [...sessions].sort((a, b) => {
-      const aTime = (a as { time?: { updated?: number } }).time?.updated ?? 0;
-      const bTime = (b as { time?: { updated?: number } }).time?.updated ?? 0;
-      return bTime - aTime;
-    })[0];
+    const mostRecent = [...sessions].sort((a, b) => compareSessionsByLifecycleOrder(
+      a,
+      b,
+      useSessionPinnedStore.getState().ids,
+      useSessionOrderingStore.getState().rankById,
+    ))[0];
     const directory = mostRecent ? sessionDirectory(mostRecent) : '';
     openNewSessionDraft(directory ? { directoryOverride: directory } : undefined);
   }, [filterProjectId, projects, sessions, openNewSessionDraft, setOpen]);
@@ -605,10 +571,6 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
     </div>
   ), [t, totalRunning, totalUnread, projects, filterProjectId, setFilterProjectId, formatProjectLabel, currentTheme, getProjectStatus, handleNewChat, setOpen]);
 
-  if (!isMobile) {
-    return null;
-  }
-
   return (
     <MobileOverlayPanel
       open={open}
@@ -638,4 +600,12 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
       </div>
     </MobileOverlayPanel>
   );
+};
+
+export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = (props) => {
+  const isMobile = useUIStore((state) => state.isMobile);
+  const open = useUIStore((state) => state.mobileSessionPanelOpen);
+
+  if (!isMobile || !open) return null;
+  return <MobileSessionStatusOpenPanel {...props} />;
 };

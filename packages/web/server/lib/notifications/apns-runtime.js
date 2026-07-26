@@ -149,6 +149,11 @@ export const createApnsRuntime = (deps) => {
           userAgent: typeof entry.userAgent === 'string' ? entry.userAgent : undefined,
           // 'ios' (APNs) or 'android' (FCM). Older entries without one are APNs by default.
           platform: entry.platform === 'android' ? 'android' : 'ios',
+          // APNs delivery environment for this token. Xcode/dev-signed installs produce
+          // sandbox tokens, TestFlight/App Store produce production ones; the client reports
+          // which at registration. Older entries without one default to production (matches
+          // released builds).
+          environment: entry.environment === 'sandbox' ? 'sandbox' : 'production',
         };
       })
       .filter(Boolean);
@@ -158,10 +163,13 @@ export const createApnsRuntime = (deps) => {
   // was the only registrant before Android/FCM existed.
   const normalizePlatform = (platform) => (platform === 'android' ? 'android' : 'ios');
 
-  const addOrUpdateApnsToken = async (uiSessionToken, deviceToken, userAgent, platform) => {
+  const normalizeEnvironment = (environment) => (environment === 'sandbox' ? 'sandbox' : 'production');
+
+  const addOrUpdateApnsToken = async (uiSessionToken, deviceToken, userAgent, platform, environment) => {
     if (!uiSessionToken || typeof deviceToken !== 'string' || deviceToken.trim().length === 0) return;
     const token = deviceToken.trim();
     const tokenPlatform = normalizePlatform(platform);
+    const tokenEnvironment = normalizeEnvironment(environment);
     const now = Date.now();
 
     await persistTokenUpdate((current) => {
@@ -174,6 +182,7 @@ export const createApnsRuntime = (deps) => {
         lastSeenAt: now,
         userAgent: typeof userAgent === 'string' && userAgent.length > 0 ? userAgent : undefined,
         platform: tokenPlatform,
+        environment: tokenEnvironment,
       });
       tokensBySession[uiSessionToken] = filtered.slice(0, MAX_TOKENS_PER_SESSION);
       return { version: APNS_TOKENS_VERSION, tokensBySession };
@@ -256,7 +265,9 @@ export const createApnsRuntime = (deps) => {
       teamId,
       p8,
       bundleId: bundleId || DEFAULT_BUNDLE_ID,
-      environment: environment === 'production' ? 'production' : 'sandbox',
+      // Explicit env/settings value forces every send to that environment; when unset (null),
+      // each token is delivered to the environment it registered with.
+      environment: environment === 'sandbox' ? 'sandbox' : environment === 'production' ? 'production' : null,
     };
   };
 
@@ -370,17 +381,17 @@ export const createApnsRuntime = (deps) => {
   const resolveRelayConfig = () => {
     if (trimmedEnv('OPENCHAMBER_PUSH_RELAY_DISABLED') === 'true') return null;
     const url = trimmedEnv('OPENCHAMBER_PUSH_RELAY_URL') || DEFAULT_RELAY_URL;
+    const override = (trimmedEnv('OPENCHAMBER_APNS_ENVIRONMENT') || '').toLowerCase();
     return {
       url,
       registerUrl: url.replace(/\/send$/, '/register-token'),
-      environment:
-        (trimmedEnv('OPENCHAMBER_APNS_ENVIRONMENT') || 'sandbox').toLowerCase() === 'production'
-          ? 'production'
-          : 'sandbox',
+      // Explicit OPENCHAMBER_APNS_ENVIRONMENT forces every send to that environment; when
+      // unset (null), each token is delivered to the environment it registered with.
+      environment: override === 'sandbox' ? 'sandbox' : override === 'production' ? 'production' : null,
     };
   };
 
-  const sendViaRelay = async (deviceTokens, payload, relay) => {
+  const sendViaRelay = async (deviceTokens, payload, relay, environment) => {
     const tokens = deviceTokens.slice(0, 100);
     const title = typeof payload?.title === 'string' && payload.title.length > 0 ? payload.title : 'OpenChamber';
     const { privateKey, publicJwk } = await getOrCreateRelayKeypair();
@@ -393,7 +404,7 @@ export const createApnsRuntime = (deps) => {
       body: typeof payload?.body === 'string' ? payload.body : '',
       badge: Number.isFinite(payload?.badge) && payload.badge >= 0 ? Math.trunc(payload.badge) : undefined,
       collapseId: typeof payload?.tag === 'string' ? payload.tag.slice(0, 64) : undefined,
-      env: relay.environment,
+      env: environment,
       data: payload?.data && typeof payload.data === 'object' ? payload.data : undefined,
       publicKeyJwk: relayPublicJwk(publicJwk),
       ts,
@@ -421,7 +432,7 @@ export const createApnsRuntime = (deps) => {
     }
   };
 
-  const sendViaDirectApns = async (deviceTokens, payload) => {
+  const sendViaDirectApns = async (tokenGroups, payload) => {
     const config = await resolveApnsConfig();
     if (!config) {
       if (!warnedUnconfigured) {
@@ -433,39 +444,45 @@ export const createApnsRuntime = (deps) => {
       return;
     }
 
-    const host = config.environment === 'production' ? APNS_HOST_PRODUCTION : APNS_HOST_SANDBOX;
     const jwt = getJwt(config);
     const body = buildBody(payload);
     const sendConfig = { ...config, tag: typeof payload?.tag === 'string' ? payload.tag : undefined };
 
-    let client;
-    try {
-      client = http2.connect(host);
-    } catch (error) {
-      console.warn('[APNs] connect failed:', error?.message ?? error);
-      return;
-    }
+    // One HTTP/2 session per APNs environment; a sandbox token sent to the production host
+    // (or vice versa) gets BadDeviceToken and would be wrongly dropped as dead.
+    for (const [environment, deviceTokens] of tokenGroups) {
+      const effectiveEnvironment = config.environment ?? environment;
+      const host = effectiveEnvironment === 'sandbox' ? APNS_HOST_SANDBOX : APNS_HOST_PRODUCTION;
 
-    await new Promise((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        try {
-          client.close();
-        } catch {
-          // ignore close errors
-        }
-        resolve();
-      };
-      client.on('error', (error) => {
-        console.warn('[APNs] session error:', error?.message ?? error);
-        finish();
+      let client;
+      try {
+        client = http2.connect(host);
+      } catch (error) {
+        console.warn('[APNs] connect failed:', error?.message ?? error);
+        continue;
+      }
+
+      await new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          try {
+            client.close();
+          } catch {
+            // ignore close errors
+          }
+          resolve();
+        };
+        client.on('error', (error) => {
+          console.warn('[APNs] session error:', error?.message ?? error);
+          finish();
+        });
+        Promise.all(
+          deviceTokens.map((token) => sendOne(client, token, body, jwt, sendConfig)),
+        ).finally(finish);
       });
-      Promise.all(
-        deviceTokens.map((token) => sendOne(client, token, body, jwt, sendConfig)),
-      ).finally(finish);
-    });
+    }
   };
 
   // NOT gated on UI visibility (unlike web push). A backgrounded WKWebView can't reliably
@@ -475,24 +492,30 @@ export const createApnsRuntime = (deps) => {
   // capacitor.config) — so there is no notification when the app is active, with no race.
   const sendApnsToAllUiSessions = async (payload, _options = {}) => {
     const store = await readTokensFromDisk();
-    const deviceTokens = [];
+    // Tokens are grouped by their registered APNs environment so each batch goes to the
+    // endpoint that actually knows the token (Xcode builds → sandbox, TestFlight/App Store
+    // → production). Mixing them gets BadDeviceToken and the token wrongly dropped as dead.
+    const tokensByEnvironment = new Map();
     const seen = new Set();
     for (const record of Object.values(store.tokensBySession || {})) {
       for (const entry of normalizeTokens(record)) {
-        if (!seen.has(entry.deviceToken)) {
-          seen.add(entry.deviceToken);
-          deviceTokens.push(entry.deviceToken);
-        }
+        if (seen.has(entry.deviceToken)) continue;
+        seen.add(entry.deviceToken);
+        const group = tokensByEnvironment.get(entry.environment) || [];
+        group.push(entry.deviceToken);
+        tokensByEnvironment.set(entry.environment, group);
       }
     }
-    if (deviceTokens.length === 0) return;
+    if (seen.size === 0) return;
 
     const relay = resolveRelayConfig();
     if (relay) {
-      await sendViaRelay(deviceTokens, payload, relay);
+      for (const [environment, deviceTokens] of tokensByEnvironment) {
+        await sendViaRelay(deviceTokens, payload, relay, relay.environment ?? environment);
+      }
       return;
     }
-    await sendViaDirectApns(deviceTokens, payload);
+    await sendViaDirectApns(tokensByEnvironment, payload);
   };
 
   return {

@@ -111,6 +111,7 @@
 - Closed or merged PR -> stop regular polling.
 - Hidden tab -> skip polling.
 - Non-forced refreshes use a `90s` TTL.
+- Failed non-forced attempts also observe the `90s` TTL so transient server or rate-limit failures cannot retry on every sidebar update. Forced user/action refreshes bypass this guard.
 
 ## Background tracking rules
 

@@ -1,6 +1,8 @@
 import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2";
 import { retry } from "@/sync/retry";
 import { stripSessionListDetails } from "@/sync/sanitize";
+import { getRuntimeKey } from "@/lib/runtime-switch";
+import { startSessionLoadPerformanceEvent } from "@/sync/session-load-performance";
 
 export type GlobalSessionRecord = Session & {
     project?: {
@@ -86,21 +88,49 @@ export async function listGlobalSessionPages(
     const all: GlobalSessionRecord[] = [];
     const seenIds = new Set<string>();
     let cursor: number | undefined;
+    let operation: string;
+    if (!options.directory) {
+        operation = `global-sessions.${options.archived ? "archived" : "active"}`;
+    } else if (options.roots === true) {
+        operation = "bootstrap.sessions.roots";
+    } else if (options.archived) {
+        operation = "bootstrap.sessions.archived";
+    } else {
+        operation = "bootstrap.sessions.all";
+    }
 
     while (true) {
-        const response = await retry(
-            () => apiClient.experimental.session.list({
-                ...(options.directory ? { directory: options.directory } : {}),
-                archived: options.archived,
-                ...(options.roots !== undefined ? { roots: options.roots } : {}),
-                limit: options.pageSize,
-                ...(cursor !== undefined ? { cursor } : {}),
-            }),
+        let attempts = 0;
+        const finishPerformanceEvent = startSessionLoadPerformanceEvent({
+            operation,
+            runtimeKey: getRuntimeKey(),
+            directory: options.directory,
+            caller: cursor === undefined ? "initial-page" : "pagination",
+        });
+        const { response, payload } = await retry(
+            async () => {
+                attempts += 1;
+                const response = await apiClient.experimental.session.list({
+                    ...(options.directory ? { directory: options.directory } : {}),
+                    archived: options.archived,
+                    ...(options.roots !== undefined ? { roots: options.roots } : {}),
+                    limit: options.pageSize,
+                    ...(cursor !== undefined ? { cursor } : {}),
+                });
+                const payload = unwrapSessionList(response, "experimental.session.list")
+                    .map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
+                return { response, payload };
+            },
             { attempts: 3, delay: 500, retryIf: () => true },
-        );
+        ).catch((error) => {
+            finishPerformanceEvent("error", { retryCount: Math.max(0, attempts - 1) });
+            throw error;
+        });
 
-        const payload = unwrapSessionList(response, "experimental.session.list")
-            .map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
+        finishPerformanceEvent("complete", {
+            retryCount: Math.max(0, attempts - 1),
+            recordCount: payload.length,
+        });
         if (payload.length === 0) break;
 
         let appended = 0;

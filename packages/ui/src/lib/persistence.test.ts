@@ -5,7 +5,16 @@ import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
 import { useUIStore } from '@/stores/useUIStore';
-import { applyPersistedHomeDirectoryToWindow, invalidateSettingsCache, syncDesktopSettings, updateDesktopSettings } from './persistence';
+import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import {
+  applyPersistedHomeDirectoryToWindow,
+  getRuntimeSettingsMirrorStorageKey,
+  getSettingsSaveState,
+  invalidateSettingsCache,
+  subscribeToSettingsSaveState,
+  syncDesktopSettings,
+  updateDesktopSettings,
+} from './persistence';
 import { switchRuntimeEndpoint } from './runtime-switch';
 
 type TestWindow = {
@@ -216,6 +225,22 @@ describe('updateDesktopSettings', () => {
     expect(secondResolved).toBe(true);
   });
 
+  test('publishes saving and saved states for an immediate setting update', async () => {
+    const states: string[] = [];
+    registerSettingsSave(async (changes) => changes as SettingsPayload);
+    const unsubscribe = subscribeToSettingsSaveState(() => {
+      states.push(getSettingsSaveState());
+    });
+
+    try {
+      await updateDesktopSettings({ useSystemTheme: false, themeVariant: 'light' });
+      // Success is silent: the shared state machine maps 'saved' back to 'idle'.
+      expect(states).toEqual(['saving', 'idle']);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   test('drains a pending save to the previous runtime and ignores its stale response', async () => {
     switchRuntimeEndpoint({ apiBaseUrl: 'https://settings-a.example', runtimeKey: 'settings-a' });
     const saveResult = deferred<SettingsPayload>();
@@ -270,7 +295,7 @@ describe('updateDesktopSettings', () => {
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://load-b.example', runtimeKey: 'load-b' });
     registerSettingsApi(async () => ({}), async () => ({
-      settings: { terminalShell: 'fish', draftStartersCraftGoalAdded: true },
+      settings: { terminalShell: 'fish', draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
       source: 'web',
     }));
     await syncDesktopSettings();
@@ -278,18 +303,103 @@ describe('updateDesktopSettings', () => {
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://load-a.example', runtimeKey: 'load-a' });
     registerSettingsApi(async () => ({}), async () => ({
-      settings: { terminalShell: 'bash', draftStartersCraftGoalAdded: true },
+      settings: { terminalShell: 'bash', draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
       source: 'web',
     }));
     await syncDesktopSettings();
     expect(useUIStore.getState().terminalShell).toBe('bash');
 
     originalLoad.resolve({
-      settings: { terminalShell: 'zsh', draftStartersCraftGoalAdded: true },
+      settings: { terminalShell: 'zsh', draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
       source: 'web',
     });
     await firstSync;
     expect(useUIStore.getState().terminalShell).toBe('bash');
+  });
+
+  test('isolates local settings mirrors and removes values omitted by the next runtime', async () => {
+    getWindow();
+    localStorage.clear();
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://mirror-a.example', runtimeKey: 'mirror-a' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        themeId: 'theme-a',
+        directoryShowHidden: true,
+        sttModel: 'model-a',
+        draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://mirror-b.example', runtimeKey: 'mirror-b' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    expect(localStorage.getItem('selectedThemeId')).toBeNull();
+    expect(localStorage.getItem('directoryTreeShowHidden')).toBeNull();
+    expect(localStorage.getItem('sttModel')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(getRuntimeSettingsMirrorStorageKey('mirror-a')) ?? '{}')).toEqual({
+      themeId: 'theme-a',
+      directoryShowHidden: true,
+      sttModel: 'model-a',
+    });
+    expect(JSON.parse(localStorage.getItem(getRuntimeSettingsMirrorStorageKey('mirror-b')) ?? '{}')).toEqual({});
+  });
+
+  test('resets in-memory preferences omitted by an authoritative runtime snapshot', async () => {
+    getWindow();
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-a.example', runtimeKey: 'preferences-a' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        showReasoningTraces: false,
+        terminalShell: 'fish',
+        favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
+        followUpBehavior: 'steer',
+        draftStarters: [{ type: 'command', name: 'runtime-a' }],
+        draftStartersVisible: false,
+        draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
+      },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+    expect(useUIStore.getState().favoriteModels).toHaveLength(1);
+    expect(useUIStore.getState().globalDraftStarters).toEqual([{ type: 'command', name: 'runtime-a' }]);
+    expect(useUIStore.getState().draftStartersVisible).toBe(false);
+    expect(useMessageQueueStore.getState().followUpBehavior).toBe('steer');
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-b.example', runtimeKey: 'preferences-b' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(true);
+    expect(useUIStore.getState().terminalShell).toBe('auto');
+    expect(useUIStore.getState().favoriteModels).toEqual([]);
+    expect(useUIStore.getState().globalDraftStarters).toBeNull();
+    expect(useUIStore.getState().draftStartersVisible).toBe(true);
+    expect(useMessageQueueStore.getState().followUpBehavior).toBe('queue');
+  });
+
+  test('treats settings save responses as partial patches', async () => {
+    getWindow();
+    localStorage.setItem('selectedThemeId', 'existing-theme');
+    useUIStore.getState().setTerminalShell('fish');
+    registerSettingsSave(async () => ({ showReasoningTraces: false }));
+
+    await updateDesktopSettings({ showReasoningTraces: false });
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+    expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
   });
 
   test('applies model selector settings from server settings', async () => {
@@ -301,7 +411,7 @@ describe('updateDesktopSettings', () => {
       recentModels: [{ providerID: 'google', modelID: 'gemini-pro' }],
       recentAgents: ['build', 'plan'],
       recentEfforts: { 'anthropic/claude-haiku-4': ['high', 'default'] },
-      draftStartersCraftGoalAdded: true,
+      draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     } satisfies SettingsPayload;
     registerSettingsApi(async () => ({}), async () => ({ settings, source: 'web' }));
 
@@ -356,7 +466,7 @@ describe('updateDesktopSettings', () => {
 
       expect(saveCalls).toHaveLength(1);
       expect(saveCalls[0]).toEqual({
-        draftStartersCraftGoalAdded: true,
+        draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
         favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }],
         hiddenModels: [{ providerID: 'openai', modelID: 'gpt-5' }],
         collapsedModelProviders: ['openai'],

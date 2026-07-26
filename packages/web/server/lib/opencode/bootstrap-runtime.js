@@ -7,6 +7,7 @@ export const createBootstrapRuntime = (dependencies) => {
     registerTtsRoutes,
     registerNotificationRoutes,
     registerOpenChamberRoutes,
+    registerAgentToolRoutes = () => {},
     express,
   } = dependencies;
 
@@ -59,6 +60,7 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       setAutoAcceptSession,
+      agentToolRuntime,
     } = options;
 
     const uiAuthController = createUiAuth({
@@ -84,6 +86,8 @@ export const createBootstrapRuntime = (dependencies) => {
     });
 
     registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
+
+    registerAgentToolRoutes(app, { express, agentToolRuntime });
 
     registerAuthAndAccessRoutes(app, {
       express,

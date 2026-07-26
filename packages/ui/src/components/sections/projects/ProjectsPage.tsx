@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ProjectSettingsPanel } from '@/components/sections/projects/ProjectSettingsPanel';
@@ -42,19 +42,22 @@ export const ProjectsPage: React.FC = () => {
 
   if (!selectedProject) {
     return (
-      <ScrollableOverlay outerClassName="h-full" className="w-full">
-        <div className="mx-auto w-full max-w-4xl p-3 sm:p-6 sm:pt-8">
-          <p className="typography-meta text-muted-foreground">{t('settings.projects.page.empty.noProjects')}</p>
-        </div>
-      </ScrollableOverlay>
+      <SettingsPageLayout title={t('settings.page.projects.title')} showSaveStatus>
+        <p className="typography-meta text-muted-foreground">{t('settings.projects.page.empty.noProjects')}</p>
+      </SettingsPageLayout>
     );
   }
 
+  const headerLabel = selectedProject.label ?? t('settings.projects.page.title.default');
+
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full bg-background">
-      <div className="mx-auto w-full max-w-4xl p-3 sm:p-6 sm:pt-8">
-        <ProjectSettingsPanel project={selectedProject} onIdentitySave={handleIdentitySave} />
-      </div>
-    </ScrollableOverlay>
+    <SettingsPageLayout
+      title={headerLabel}
+      description={selectedProject.path}
+      showSaveStatus
+      outerClassName="bg-background"
+    >
+      <ProjectSettingsPanel project={selectedProject} onIdentitySave={handleIdentitySave} />
+    </SettingsPageLayout>
   );
 };

@@ -451,3 +451,187 @@ describe('callSmallModel — Google thinking configuration', () => {
     expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
   });
 });
+
+describe('callSmallModel — GitHub Copilot endpoint routing', () => {
+  let fetchMock;
+  let originalFetch;
+
+  const copilotAuth = (overrides = {}) => ({
+    'github-copilot': {
+      type: 'oauth',
+      access: 'test-token',
+      refresh: 'test-token',
+      expires: 0,
+      ...overrides,
+    },
+  });
+
+  const jsonResponse = (payload, status = 200) => new Response(
+    JSON.stringify(payload),
+    {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    },
+  );
+
+  const callCopilot = (modelID, options = {}) => callSmallModel({
+    auth: copilotAuth(options.auth),
+    catalog: {},
+    workingDirectory: '/proj',
+    providerID: 'github-copilot',
+    modelID,
+    prompt: 'summarize this diff',
+    system: 'Write a commit message',
+    maxOutputTokens: 100,
+  });
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    readConfig.mockReset();
+    readConfig.mockReturnValue({});
+    readConfigLayers.mockReset();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('routes a model advertising /responses through the Responses API', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        data: [{
+          id: 'mai-code-1-flash-picker',
+          supported_endpoints: ['/responses'],
+        }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: 'feat: add summary' }],
+        }],
+      }));
+
+    await expect(callCopilot('mai-code-1-flash-picker')).resolves.toBe('feat: add summary');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://api.githubcopilot.com/models');
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://api.githubcopilot.com/responses');
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body).toMatchObject({
+      model: 'mai-code-1-flash-picker',
+      instructions: 'Write a commit message',
+      max_output_tokens: 100,
+      stream: false,
+      store: false,
+      input: [{
+        role: 'user',
+        content: [{ type: 'input_text', text: 'summarize this diff' }],
+      }],
+    });
+    expect(JSON.stringify(body)).not.toContain('test-token');
+  });
+
+  it('prefers /v1/messages when a model advertises multiple endpoints', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        data: [{
+          id: 'claude-opus-4.7',
+          supported_endpoints: ['/chat/completions', '/responses', '/v1/messages'],
+        }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        content: [{ type: 'text', text: 'fix: route Claude correctly' }],
+      }));
+
+    await expect(callCopilot('claude-opus-4.7')).resolves.toBe('fix: route Claude correctly');
+
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://api.githubcopilot.com/v1/messages');
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body).toMatchObject({
+      model: 'claude-opus-4.7',
+      system: 'Write a commit message',
+      max_tokens: 100,
+      messages: [{ role: 'user', content: 'summarize this diff' }],
+    });
+  });
+
+  it('uses /chat/completions when the model advertises the chat endpoint', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        data: [{
+          id: 'gpt-5.4-nano',
+          supported_endpoints: ['/chat/completions'],
+        }],
+      }))
+      .mockResolvedValueOnce(ok('chore: update summary'));
+
+    await expect(callCopilot('gpt-5.4-nano')).resolves.toBe('chore: update summary');
+
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://api.githubcopilot.com/chat/completions');
+  });
+
+  it('keeps chat completions as the legacy default when endpoint metadata is absent', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        data: [{ id: 'gpt-4o-mini' }],
+      }))
+      .mockResolvedValueOnce(ok('docs: clarify behavior'));
+
+    await expect(callCopilot('gpt-4o-mini')).resolves.toBe('docs: clarify behavior');
+
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://api.githubcopilot.com/chat/completions');
+  });
+
+  it('uses the enterprise Copilot host for metadata and generation', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        data: [{
+          id: 'mai-code-1-flash-picker',
+          supported_endpoints: ['/responses'],
+        }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        output_text: 'fix: support enterprise routing',
+      }));
+
+    await expect(callCopilot('mai-code-1-flash-picker', {
+      auth: { enterpriseUrl: 'https://ghe.example.com/' },
+    })).resolves.toBe('fix: support enterprise routing');
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://copilot-api.ghe.example.com/models');
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://copilot-api.ghe.example.com/responses');
+  });
+
+  it('surfaces Copilot model metadata request failures without generating', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'unavailable' }, 503));
+
+    await expect(callCopilot('mai-code-1-flash-picker'))
+      .rejects.toThrow('GitHub Copilot models request failed with 503');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects missing models and unsupported advertised endpoints', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      data: [{ id: 'different-model', supported_endpoints: ['/responses'] }],
+    }));
+
+    await expect(callCopilot('mai-code-1-flash-picker'))
+      .rejects.toThrow('GitHub Copilot model "mai-code-1-flash-picker" was not returned by /models');
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      data: [{
+        id: 'mai-code-1-flash-picker',
+        supported_endpoints: ['/future'],
+      }],
+    }));
+
+    await expect(callCopilot('mai-code-1-flash-picker'))
+      .rejects.toThrow('GitHub Copilot model "mai-code-1-flash-picker" has no supported text endpoint');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

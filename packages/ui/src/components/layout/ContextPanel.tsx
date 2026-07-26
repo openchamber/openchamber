@@ -542,6 +542,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
+  const effectiveDirectory = useEffectiveDirectory();
   const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const addAttachedFile = useInputStore((state) => state.addAttachedFile);
 
@@ -688,7 +689,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
 
   const attachPreviewAnnotation = React.useCallback((target: PreviewElementMetadata) => {
     const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!sessionKey) {
+    if (!sessionKey || !effectiveDirectory) {
       toast.error(t('contextPanel.preview.inspect.attachNoSession'));
       return;
     }
@@ -712,8 +713,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         attachedScreenshot = false;
       }
 
-      addInlineCommentDraft({
-        sessionKey,
+      addInlineCommentDraft({ directory: effectiveDirectory, sessionKey }, {
         source: 'preview-annotation',
         fileLabel: pageUrl || 'preview',
         startLine: 1,
@@ -731,7 +731,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       });
       toast.success(t('contextPanel.preview.inspect.attached'));
     })();
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, effectiveDirectory, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
 
   React.useEffect(() => {
     setBridgeReady(false);
@@ -921,7 +921,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
 
   const attachConsoleEvents = React.useCallback(() => {
     const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!sessionKey) {
+    if (!sessionKey || !effectiveDirectory) {
       toast.error(t('contextPanel.preview.console.attachNoSession'));
       return;
     }
@@ -937,8 +937,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return `[${timestamp}] [${event.level}] ${event.message}${details}`;
     }).join('\n');
 
-    addInlineCommentDraft({
-      sessionKey,
+    addInlineCommentDraft({ directory: effectiveDirectory, sessionKey }, {
       source: 'preview-console',
       fileLabel: rawUrl || effectiveSrc || 'preview',
       startLine: 1,
@@ -948,7 +947,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       text: t('contextPanel.preview.console.attachAnnotation'),
     });
     toast.success(t('contextPanel.preview.console.attached'));
-  }, [addInlineCommentDraft, consoleEvents, currentSessionId, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
+  }, [addInlineCommentDraft, consoleEvents, currentSessionId, effectiveDirectory, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
 
   // Out-of-band upstream probe: iframes don't expose HTTP status to the parent,
   // so when the proxy returns a 502 (upstream dev server is offline) the iframe
@@ -1590,8 +1589,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       await addAttachedFile(file);
     }
 
-    addInlineCommentDraft({
-      sessionKey,
+    addInlineCommentDraft({ directory, sessionKey }, {
       source: 'preview-annotation',
       fileLabel: currentUrl || 'browser',
       startLine: 1,
@@ -1610,7 +1608,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       text: '',
     });
     toast.success(t('contextPanel.preview.inspect.attached'));
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, newSessionDraftOpen, t]);
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, directory, newSessionDraftOpen, t]);
 
   const cancelInspect = React.useCallback(() => {
     const iframe = iframeRef.current;
@@ -1998,8 +1996,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
           await addAttachedFile(file);
         }
 
-        addInlineCommentDraft({
-          sessionKey,
+        addInlineCommentDraft({ directory, sessionKey }, {
           source: 'preview-annotation',
           fileLabel: currentUrl || 'browser',
           startLine: 1,
@@ -2018,7 +2015,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         toast.success(t('contextPanel.preview.inspect.attached'));
       })
       .catch(() => setIsInspecting(false));
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, isInspecting, newSessionDraftOpen, t]);
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, directory, isInspecting, newSessionDraftOpen, t]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">

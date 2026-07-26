@@ -38,9 +38,9 @@ type Props = {
     renderContext?: 'project' | 'recent',
     renderExtras?: SessionNodeRenderExtras,
   ) => React.ReactNode;
-  currentSessionId: string | null;
   editingId: string | null;
   openSidebarMenuKey: string | null;
+  expansionState?: ReadonlySet<string>;
   variant?: 'section' | 'flat';
   initialVisibleCount?: number;
   batchSize?: number;
@@ -50,16 +50,16 @@ type RenderExtras = SessionNodeRenderExtras;
 
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
 
-export function SidebarActivitySections({
-  sections,
-  renderSessionNode,
-  currentSessionId,
-  editingId,
-  openSidebarMenuKey,
-  variant = 'section',
-  initialVisibleCount = MAX_VISIBLE_RECENT_SESSIONS,
-  batchSize = MAX_VISIBLE_RECENT_SESSIONS,
-}: Props): React.ReactNode {
+export function SidebarActivitySections(props: Props): React.ReactNode {
+  const {
+    sections,
+    renderSessionNode,
+    editingId,
+    openSidebarMenuKey,
+    variant = 'section',
+    initialVisibleCount = MAX_VISIBLE_RECENT_SESSIONS,
+    batchSize = MAX_VISIBLE_RECENT_SESSIONS,
+  } = props;
   const { t } = useI18n();
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const [visibleCountBySection, setVisibleCountBySection] = React.useState<Map<string, number>>(new Map());
@@ -101,8 +101,6 @@ export function SidebarActivitySections({
   }, [batchSize]);
 
   const buildRenderExtras = React.useCallback((nodes: SessionNode[]) => {
-    const subtreeContainsActive = new Set<string>();
-    collectSubtreeContainingId(nodes, currentSessionId, subtreeContainsActive);
     const subtreeContainsEditing = new Set<string>();
     collectSubtreeContainingId(nodes, editingId, subtreeContainsEditing);
     const menuOpenSessionId = resolveMenuOpenSessionId(nodes, openSidebarMenuKey, 'recent', false);
@@ -114,7 +112,6 @@ export function SidebarActivitySections({
     nodes.forEach(visit);
 
     const childRenderExtrasFor = (child: SessionNode): RenderExtras => ({
-      subtreeContainsActive,
       subtreeContainsEditing,
       menuOpenSessionId,
       nodeStructureKey: nodeStructureKeyByNode.get(child) ?? '',
@@ -122,13 +119,12 @@ export function SidebarActivitySections({
     });
 
     return (node: SessionNode): RenderExtras => ({
-      subtreeContainsActive,
       subtreeContainsEditing,
       menuOpenSessionId,
       nodeStructureKey: nodeStructureKeyByNode.get(node) ?? '',
       childRenderExtrasFor,
     });
-  }, [currentSessionId, editingId, openSidebarMenuKey]);
+  }, [editingId, openSidebarMenuKey]);
 
   const visibleSections = sections.filter((section) => section.items.length > 0);
   if (visibleSections.length === 0) {

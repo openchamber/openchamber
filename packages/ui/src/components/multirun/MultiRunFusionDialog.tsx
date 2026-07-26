@@ -211,7 +211,7 @@ export function MultiRunFusionDialog({
               maxModels={1}
               addButtonLabel={selectedModelLabel}
               showChips={false}
-              addButtonClassName="h-8 w-fit max-w-[min(28rem,calc(100vw-8rem))] justify-start rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] px-3 py-1.5"
+              addButtonClassName="w-fit max-w-[min(28rem,calc(100vw-8rem))] justify-start"
               dropdownSide="bottom"
               dropdownClassName="w-[min(28rem,calc(100vw-8rem))]"
               triggerIcon={providerID ? <ProviderLogo providerId={providerID} className="h-3.5 w-3.5 mr-1" /> : undefined}
@@ -220,7 +220,7 @@ export function MultiRunFusionDialog({
 
           {variantKeys.length > 0 ? (
             <Select value={variant || '__default__'} onValueChange={(value) => setVariant(value === '__default__' ? '' : value)}>
-              <SelectTrigger size="lg" className="h-8 w-fit rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] !border-border/80 !bg-[var(--surface-subtle)] hover:!bg-[var(--interactive-hover)]/70 typography-meta font-medium text-foreground px-3 py-1.5">
+              <SelectTrigger size="lg" className="w-fit">
                 <Icon name="brain-ai-3" className="h-3.5 w-3.5 text-muted-foreground" />
                 <SelectValue>{(value) => value === '__default__' ? t('multirun.modelMultiSelect.variant.default') : value}</SelectValue>
               </SelectTrigger>
@@ -231,7 +231,7 @@ export function MultiRunFusionDialog({
             </Select>
           ) : null}
 
-          <AgentSelector value={agent} onChange={setAgent} portalToBody className="h-8 rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] px-3 py-1.5" />
+          <AgentSelector value={agent} onChange={setAgent} portalToBody />
         </div>
 
         <div className="space-y-2">

@@ -10,7 +10,17 @@ type ScheduledTaskRanEvent = {
   sessionId?: string;
 };
 
-type OpenChamberEvent = ScheduledTaskRanEvent;
+type SessionCreatedEvent = {
+  type: 'session-created';
+  sessionId: string;
+  directory: string;
+  projectId?: string;
+  createdAt: number;
+  promptDispatched: boolean;
+  dispatchedAsCommand: boolean;
+};
+
+type OpenChamberEvent = ScheduledTaskRanEvent | SessionCreatedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -80,6 +90,13 @@ const parseEnvelope = (raw: string): { type: string; properties: unknown } | nul
   }
 };
 
+const getEventProperties = (properties: unknown): Record<string, unknown> | null => {
+  if (!properties || typeof properties !== 'object') {
+    return null;
+  }
+  return properties as Record<string, unknown>;
+};
+
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
   if (envelope.type === 'openchamber:event-stream-ready') {
     reconnectAttempt = 0;
@@ -90,17 +107,40 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'openchamber:session-created') {
+    const properties = getEventProperties(envelope.properties);
+    const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
+    const directory = typeof properties?.directory === 'string' ? properties.directory : '';
+    if (!sessionId || !directory) {
+      return;
+    }
+
+    const nextEvent: SessionCreatedEvent = {
+      type: 'session-created',
+      sessionId,
+      directory,
+      createdAt: typeof properties?.createdAt === 'number' ? properties.createdAt : Date.now(),
+      promptDispatched: properties?.promptDispatched === true,
+      dispatchedAsCommand: properties?.dispatchedAsCommand === true,
+      ...(typeof properties?.projectId === 'string' && properties.projectId.length > 0
+        ? { projectId: properties.projectId }
+        : {}),
+    };
+    for (const listener of listeners) {
+      listener(nextEvent);
+    }
+    return;
+  }
+
   if (envelope.type !== 'openchamber:scheduled-task-ran') {
     return;
   }
 
-  const parsed = envelope.properties && typeof envelope.properties === 'object'
-    ? envelope.properties as Record<string, unknown>
-    : null;
-  const projectId = typeof parsed?.projectId === 'string' ? parsed.projectId : '';
-  const taskId = typeof parsed?.taskId === 'string' ? parsed.taskId : '';
-  const ranAt = typeof parsed?.ranAt === 'number' ? parsed.ranAt : Date.now();
-  const rawStatus = parsed?.status;
+  const properties = getEventProperties(envelope.properties);
+  const projectId = typeof properties?.projectId === 'string' ? properties.projectId : '';
+  const taskId = typeof properties?.taskId === 'string' ? properties.taskId : '';
+  const ranAt = typeof properties?.ranAt === 'number' ? properties.ranAt : Date.now();
+  const rawStatus = properties?.status;
   const status = rawStatus === 'running' || rawStatus === 'error' ? rawStatus : 'success';
   if (!projectId || !taskId) {
     return;
@@ -112,7 +152,9 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     taskId,
     ranAt,
     status,
-    ...(typeof parsed?.sessionId === 'string' && parsed.sessionId.length > 0 ? { sessionId: parsed.sessionId } : {}),
+    ...(typeof properties?.sessionId === 'string' && properties.sessionId.length > 0
+      ? { sessionId: properties.sessionId }
+      : {}),
   };
   for (const listener of listeners) {
     listener(nextEvent);

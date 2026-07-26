@@ -618,9 +618,9 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const [gitLogDialogMode, setGitLogDialogMode] = React.useState<GitLogDialogMode | null>(null);
 
   const actionTabItems = React.useMemo(() => [
-    { id: 'commit', label: t('gitView.tabs.commit'), icon: <Icon name="git-commit" className="h-3.5 w-3.5" /> },
-    { id: 'branch', label: t('gitView.tabs.update'), icon: <Icon name="git-merge" className="h-3.5 w-3.5" /> },
-    { id: 'pr', label: t('gitView.tabs.pr'), icon: <Icon name="git-pull-request" className="h-3.5 w-3.5" /> },
+    { id: 'commit', label: t('gitView.tabs.commit') },
+    { id: 'branch', label: t('gitView.tabs.update') },
+    { id: 'pr', label: t('gitView.tabs.pr') },
   ], [t]);
   const [actionTab, setActionTab] = React.useState<ActionTab>(() => {
     if (typeof window === 'undefined') {

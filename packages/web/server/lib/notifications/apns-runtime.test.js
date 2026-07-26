@@ -69,6 +69,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.OPENCHAMBER_PUSH_RELAY_URL;
   delete process.env.OPENCHAMBER_PUSH_RELAY_DISABLED;
+  delete process.env.OPENCHAMBER_APNS_ENVIRONMENT;
 });
 
 describe('apns runtime relay mode (default)', () => {
@@ -116,6 +117,7 @@ describe('apns runtime relay mode (default)', () => {
     expect(sent.title).toBe('Agent response is ready');
     expect(sent.body).toBe('My session');
     expect(sent.badge).toBe(3);
+    expect(sent.env).toBe('production');
     expect(sent.data).toEqual({ sessionId: 'sess1' });
     expect(sent.publicKeyJwk).toMatchObject({ kty: 'EC', crv: 'P-256' });
     const sendMessage = `${sent.ts}.${[...sent.tokens].sort().join(',')}.${sent.title}`;
@@ -144,6 +146,40 @@ describe('apns runtime relay mode (default)', () => {
     expect(deps.writeSettingsToDisk).toHaveBeenCalledTimes(1);
   });
 
+  it('honors an explicit sandbox environment override for every token', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    process.env.OPENCHAMBER_APNS_ENVIRONMENT = 'sandbox';
+
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenA', undefined, 'ios', 'production');
+    await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+
+    const sent = JSON.parse(fetchMock.mock.calls.find(isSend)[1].body);
+    expect(sent.env).toBe('sandbox');
+  });
+
+  it('routes each token to its registered environment (dev build sandbox, release production)', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenXcode', undefined, 'ios', 'sandbox');
+    await runtime.addOrUpdateApnsToken('s2', 'tokenStore', undefined, 'ios', 'production');
+    await runtime.addOrUpdateApnsToken('s3', 'tokenLegacy'); // no environment → production
+
+    fetchMock.mockClear();
+    await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+
+    const sends = fetchMock.mock.calls.filter(isSend).map(([, init]) => JSON.parse(init.body));
+    expect(sends).toHaveLength(2);
+    const byEnv = Object.fromEntries(sends.map((s) => [s.env, new Set(s.tokens)]));
+    expect(byEnv.sandbox).toEqual(new Set(['tokenXcode']));
+    expect(byEnv.production).toEqual(new Set(['tokenStore', 'tokenLegacy']));
+  });
+
   it('no-ops (no relay call) when no tokens are registered', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -154,6 +190,56 @@ describe('apns runtime relay mode (default)', () => {
 });
 
 describe('apns runtime direct fallback (relay disabled)', () => {
+  it('leaves direct APNs environment unset without an explicit override (per-token routing)', async () => {
+    const { environment: _environment, ...configWithoutEnvironment } = APNS_CONFIG;
+    const runtime = createApnsRuntime(
+      makeDeps({ readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: configWithoutEnvironment })) }),
+    );
+
+    await expect(runtime.resolveApnsConfig()).resolves.toMatchObject({ environment: null });
+  });
+
+  it('sends each token to the APNs host of its registered environment', async () => {
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const { environment: _environment, ...configWithoutEnvironment } = APNS_CONFIG;
+    const hosts = [];
+    const http2 = {
+      connect: (host) => {
+        const targeted = [];
+        hosts.push({ host, targeted });
+        return {
+          on: () => {},
+          close: () => {},
+          request: (headers) => {
+            targeted.push(String(headers[':path']).replace('/3/device/', ''));
+            const listeners = {};
+            const req = {
+              on: (event, cb) => { listeners[event] = cb; return req; },
+              setEncoding: () => req,
+              end: () => {
+                queueMicrotask(() => {
+                  listeners.response?.({ ':status': '200' });
+                  listeners.end?.();
+                });
+              },
+            };
+            return req;
+          },
+        };
+      },
+    };
+    const runtime = createApnsRuntime(
+      makeDeps({ http2, readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: configWithoutEnvironment })) }),
+    );
+    await runtime.addOrUpdateApnsToken('s1', 'tokenXcode', undefined, 'ios', 'sandbox');
+    await runtime.addOrUpdateApnsToken('s2', 'tokenStore', undefined, 'ios', 'production');
+    await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'ready-x' });
+
+    const byHost = Object.fromEntries(hosts.map(({ host, targeted }) => [host, targeted]));
+    expect(byHost['https://api.sandbox.push.apple.com']).toEqual(['tokenXcode']);
+    expect(byHost['https://api.push.apple.com']).toEqual(['tokenStore']);
+  });
+
   it('signs an ES256 JWT and sends over http2 when relay is disabled', async () => {
     process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
     const targeted = [];

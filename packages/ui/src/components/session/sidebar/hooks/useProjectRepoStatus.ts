@@ -5,8 +5,10 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 
 type Project = { id: string; path: string; normalizedPath: string };
+const ROOT_BRANCH_TTL_MS = 5 * 60_000;
 
 type Args = {
+  enabled?: boolean;
   normalizedProjects: Project[];
   gitRepoStatus: Map<string, { isGitRepo: boolean | null; branch: string | null }>;
   setProjectRepoStatus: React.Dispatch<React.SetStateAction<Map<string, boolean | null>>>;
@@ -16,6 +18,7 @@ type Args = {
 export const useProjectRepoStatus = (args: Args): void => {
   const {
     normalizedProjects,
+    enabled = true,
     gitRepoStatus,
     setProjectRepoStatus,
     setProjectRootBranches,
@@ -26,7 +29,7 @@ export const useProjectRepoStatus = (args: Args): void => {
 
   // Derive repo status from centralized Git store
   React.useEffect(() => {
-    if (!git || normalizedProjects.length === 0) {
+    if (!enabled || !git || normalizedProjects.length === 0) {
       setProjectRepoStatus(new Map());
       return;
     }
@@ -35,16 +38,17 @@ export const useProjectRepoStatus = (args: Args): void => {
     normalizedProjects.forEach((project) => {
       void ensureStatus(project.normalizedPath, git);
     });
-  }, [normalizedProjects, git, ensureStatus, setProjectRepoStatus]);
+  }, [enabled, normalizedProjects, git, ensureStatus, setProjectRepoStatus]);
 
   // Read isGitRepo from the store-populated state
   React.useEffect(() => {
+    if (!enabled) return;
     const next = new Map<string, boolean | null>();
     normalizedProjects.forEach((project) => {
       next.set(project.id, gitRepoStatus.get(project.normalizedPath)?.isGitRepo ?? null);
     });
     setProjectRepoStatus(next);
-  }, [normalizedProjects, gitRepoStatus, setProjectRepoStatus]);
+  }, [enabled, normalizedProjects, gitRepoStatus, setProjectRepoStatus]);
 
   const projectGitBranchesKey = React.useMemo(() => {
     return normalizedProjects
@@ -69,9 +73,9 @@ export const useProjectRepoStatus = (args: Args): void => {
   // background updates and only re-resolve on cold start or actual
   // branch changes (those still invalidate via the input-key check).
   const rootBranchCacheRef = React.useRef<Map<string, { branch: string; at: number }>>(new Map());
-  const ROOT_BRANCH_TTL_MS = 5 * 60_000;
 
   React.useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
 
     // Debounce so the initial burst of per-project `ensureStatus` updates
@@ -164,9 +168,5 @@ export const useProjectRepoStatus = (args: Args): void => {
       cancelled = true;
       clearTimeout(timer);
     };
-    // ROOT_BRANCH_TTL_MS is a module-level constant; intentionally not
-    // in the deps array since it never changes during the component
-    // lifetime.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [normalizedProjects, projectGitBranchesKey, gitRepoStatus, setProjectRootBranches]);
+  }, [enabled, normalizedProjects, projectGitBranchesKey, gitRepoStatus, setProjectRootBranches]);
 };

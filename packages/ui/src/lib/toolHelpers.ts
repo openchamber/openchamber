@@ -101,7 +101,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     ]
   },
 
-  task: {
+    task: {
     displayName: 'Agent Task',
     category: 'ai',
     outputLanguage: 'markdown',
@@ -185,6 +185,13 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
         { key: 'character', label: 'Character', type: 'text' },
         { key: 'query', label: 'Query', type: 'text' }
       ]
+    },
+
+    openchamber: {
+      displayName: 'OpenChamber',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
     },
 
     plan_enter: {
