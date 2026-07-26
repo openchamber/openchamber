@@ -3065,6 +3065,7 @@ export function useEnsureSessionMessages(sessionID: string, directory?: string) 
 
     const state = store.getState()
     // Already loaded into a renderable message/part snapshot — nothing to do.
+    // Empty [] is renderable; Claude empty hydration is owned by SessionMessageLoader.ensure.
     if (getSessionMaterializationStatus(state, sessionID).renderable) return
     // Session doesn't exist — nothing to load
     if (!state.session.some((s) => s.id === sessionID)) return

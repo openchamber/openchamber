@@ -289,6 +289,13 @@ export function getSessionMaterializationStatus(
     return { hasMessages: false, renderable: false, missingPartMessageIDs: [] }
   }
 
+  // Explicit empty array means "fetched, no messages" — renderable so empty
+  // OpenCode sessions stop skeletons, but hasMessages stays false so sync can
+  // still attempt Claude harness overlay hydration when appropriate.
+  if (messages.length === 0) {
+    return { hasMessages: false, renderable: true, missingPartMessageIDs: [] }
+  }
+
   const missingPartMessageIDs: string[] = []
   for (const message of messages) {
     if (message.role !== "assistant") continue

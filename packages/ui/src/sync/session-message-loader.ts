@@ -43,6 +43,12 @@ export type SessionMessageLoadState = {
   complete: boolean
   generation: number
   updatedAt: number | undefined
+  /**
+   * An early empty [] snapshot looks renderable and would skip Claude harness
+   * overlay hydration forever. After one empty hydration attempt we stop
+   * retrying until messages appear or force=true.
+   */
+  emptyHydrated: boolean
 }
 
 type LoaderEntry = {
@@ -115,6 +121,7 @@ const createDefaultState = (generation = 0): SessionMessageLoadState => ({
   complete: false,
   generation,
   updatedAt: undefined,
+  emptyHydrated: false,
 })
 
 export const EMPTY_SESSION_MESSAGE_LOAD_STATE = createDefaultState()
@@ -167,13 +174,18 @@ export class SessionMessageLoader {
     const entry = this.getEntry(normalized)
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
     const materialization = getSessionMaterializationStatus(store.getState(), normalized.sessionID)
-    if (!options?.force && materialization.renderable) {
+    const localCount = store.getState().message[normalized.sessionID]?.length ?? 0
+    // Claude turns are served via the harness message overlay. An early empty
+    // [] snapshot looks "renderable" and would skip hydration forever — force
+    // one fetch when the local transcript is still empty.
+    const needsEmptyHydration = localCount === 0 && !entry.snapshot.emptyHydrated
+    if (!options?.force && materialization.renderable && !needsEmptyHydration) {
       if (!entry.snapshot.resolved) {
         this.patchEntry(entry, {
           status: "ready",
           error: null,
           resolved: true,
-          limit: Math.max(entry.snapshot.limit, store.getState().message[normalized.sessionID]?.length ?? 0),
+          limit: Math.max(entry.snapshot.limit, localCount),
         })
       }
       return entry.inflight ?? Promise.resolve()
@@ -188,6 +200,11 @@ export class SessionMessageLoader {
     const kind: SessionMessageLoadKind = options?.reason === "prefetch" ? "prefetch" : "initial"
     return this.startLoad(normalized, entry, store, kind, async (isCurrent) => {
       await this.loadInitial(normalized, entry, store, isCurrent)
+      if (!isCurrent()) return
+      const hydratedCount = store.getState().message[normalized.sessionID]?.length ?? 0
+      this.patchEntry(entry, {
+        emptyHydrated: hydratedCount === 0,
+      })
       if (!isMobileSurfaceRuntime() && isCurrent()) {
         queueMicrotask(() => {
           if (isCurrent() && entry.snapshot.cursor && !entry.snapshot.complete) {
