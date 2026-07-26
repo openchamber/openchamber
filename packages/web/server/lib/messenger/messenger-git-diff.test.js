@@ -7,6 +7,7 @@ describe('buildMessengerGitDiffReply', () => {
       projectPath: '/repo/project',
       getStatusFn: vi.fn(async () => ({ isClean: true, files: [], diffStats: {} })),
       getDiffFn: vi.fn(async () => ''),
+      uploadDiffFn: vi.fn(async () => ({ error: 'should not run' })),
     });
 
     expect(result.ok).toBe(true);
@@ -14,7 +15,11 @@ describe('buildMessengerGitDiffReply', () => {
     expect(result.reply).toContain('Working tree is clean');
   });
 
-  it('summarizes changed files with a reviewable diff preview', async () => {
+  it('summarizes changed files with a shareable critique URL and preview', async () => {
+    const uploadDiffFn = vi.fn(async () => ({
+      url: 'https://critique.work/v/abc123',
+      id: 'abc123',
+    }));
     const result = await buildMessengerGitDiffReply({
       projectPath: '/repo/project',
       getStatusFn: vi.fn(async () => ({
@@ -27,13 +32,36 @@ describe('buildMessengerGitDiffReply', () => {
           ? 'diff --git a/src/app.ts b/src/app.ts\n+const staged = true;'
           : 'diff --git a/src/app.ts b/src/app.ts\n-const old = false;\n+const next = true;',
       ),
+      uploadDiffFn,
     });
 
     expect(result.ok).toBe(true);
+    expect(uploadDiffFn).toHaveBeenCalledWith({
+      title: 'project: Discord /diff',
+      cwd: '/repo/project',
+    });
     expect(result.reply).toContain('Files changed: 1 · +3 / -1');
     expect(result.reply).toContain('`src/app.ts` MM');
+    expect(result.reply).toContain('Review: https://critique.work/v/abc123');
     expect(result.reply).toContain('```diff');
     expect(result.reply).toContain('--- staged ---');
     expect(result.reply).toContain('--- unstaged ---');
+    expect(result.critiqueUrl).toBe('https://critique.work/v/abc123');
+  });
+
+  it('keeps the inline preview when critique upload fails', async () => {
+    const result = await buildMessengerGitDiffReply({
+      projectPath: '/repo/project',
+      getStatusFn: vi.fn(async () => ({
+        isClean: false,
+        files: [{ path: 'a.ts', index: ' ', working_dir: 'M' }],
+        diffStats: {},
+      })),
+      getDiffFn: vi.fn(async () => 'diff --git a/a.ts b/a.ts\n+x'),
+      uploadDiffFn: vi.fn(async () => ({ error: 'critique not available (need bun/bunx)' })),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.reply).toContain('```diff');
+    expect(result.reply).not.toContain('Review:');
   });
 });

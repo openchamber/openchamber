@@ -46,6 +46,7 @@ import {
   MERGE_CONFLICT_PROMPT,
 } from './messenger-worktrees.js';
 import { buildMessengerGitDiffReply } from './messenger-git-diff.js';
+import { buildCritiqueInstructions } from './messenger-critique.js';
 import parser from 'cron-parser';
 
 /**
@@ -1333,27 +1334,33 @@ export function createMessengerOpencodeBridge({
         return { ok: false, error: e?.message ?? 'abort failed' };
       }
     },
-    async revertSession(sessionId, messageId) {
+    async revertSession(sessionId, messageId, directory) {
       try {
-        const body = messageId ? { messageID: messageId } : {};
-        const r = await opencodeFetch(`/session/${encodeURIComponent(sessionId)}/revert`, {
+        if (!messageId) {
+          return { ok: false, error: 'messageID is required for revert' };
+        }
+        const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+        const r = await opencodeFetch(`/session/${encodeURIComponent(sessionId)}/revert${params}`, {
           method: 'POST',
-          body: JSON.stringify(body),
+          body: JSON.stringify({ messageID: messageId }),
         });
         if (!r.ok) return { ok: false, error: `OpenCode ${r.status}: ${(await r.text()).slice(0, 200)}` };
-        return { ok: true };
+        const session = await r.json().catch(() => null);
+        return { ok: true, session };
       } catch (e) {
         return { ok: false, error: e?.message ?? 'revert failed' };
       }
     },
-    async unrevertSession(sessionId) {
+    async unrevertSession(sessionId, directory) {
       try {
-        const r = await opencodeFetch(`/session/${encodeURIComponent(sessionId)}/unrevert`, {
+        const params = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+        const r = await opencodeFetch(`/session/${encodeURIComponent(sessionId)}/unrevert${params}`, {
           method: 'POST',
           body: JSON.stringify({}),
         });
         if (!r.ok) return { ok: false, error: `OpenCode ${r.status}: ${(await r.text()).slice(0, 200)}` };
-        return { ok: true };
+        const session = await r.json().catch(() => null);
+        return { ok: true, session };
       } catch (e) {
         return { ok: false, error: e?.message ?? 'unrevert failed' };
       }
@@ -4159,7 +4166,8 @@ export function createMessengerOpencodeBridge({
           const preview = firstTextOfMessage(m);
           return !preview.startsWith('<project-memory>')
             && !preview.startsWith('<scheduling>')
-            && !preview.startsWith('<discord>');
+            && !preview.startsWith('<discord>')
+            && !preview.startsWith('<diffs>');
         });
         const messageId = lastUserMessage?.info?.id ?? lastUserMessage?.id ?? null;
         if (!messageId) return { ok: false, error: 'no user message found in this session to fork from.' };
@@ -4894,6 +4902,11 @@ export function createMessengerOpencodeBridge({
       if (discordInstructions) {
         contextSyntheticParts.push({ type: 'text', text: discordInstructions, synthetic: true });
       }
+      contextSyntheticParts.push({
+        type: 'text',
+        text: buildCritiqueInstructions(),
+        synthetic: true,
+      });
     }
 
     // A new message supersedes unanswered permission requests for this

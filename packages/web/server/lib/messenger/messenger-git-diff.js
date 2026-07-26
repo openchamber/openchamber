@@ -1,5 +1,7 @@
+import path from 'node:path';
 import { getDiff, getStatus } from '../git/service.js';
 import { clipBlock, escapeMd } from './messenger-render.js';
+import { uploadGitDiffViaCritique } from './messenger-critique.js';
 
 const DIFF_PREVIEW_LIMIT = 1500;
 const FILE_LIST_LIMIT = 12;
@@ -34,6 +36,7 @@ export async function buildMessengerGitDiffReply({
   projectPath,
   getStatusFn = getStatus,
   getDiffFn = getDiff,
+  uploadDiffFn = uploadGitDiffViaCritique,
 } = {}) {
   if (!projectPath) return { ok: false, error: 'no project bound to this conversation.' };
 
@@ -71,13 +74,27 @@ export async function buildMessengerGitDiffReply({
       lines.push(`_...and ${files.length - FILE_LIST_LIMIT} more file${files.length - FILE_LIST_LIMIT === 1 ? '' : 's'}._`);
     }
   }
+
+  // Shareable critique.work URL (kimaki-style). Best-effort — keep the inline
+  // preview even when upload fails or critique/bunx is unavailable.
+  const projectName = path.basename(projectPath);
+  const uploaded = await uploadDiffFn({
+    title: `${projectName}: Discord /diff`,
+    cwd: projectPath,
+  }).catch(() => null);
+  if (uploaded?.url) {
+    lines.push('', `Review: ${uploaded.url}`);
+  } else if (uploaded?.error && uploaded.error !== 'critique not available (need bun/bunx)') {
+    lines.push('', `_Diff URL unavailable: ${escapeMd(clipBlock(uploaded.error, 120))}_`);
+  }
+
   if (preview) {
     lines.push('', '```diff', preview, '```');
   } else {
     lines.push('', '_No tracked diff preview is available. Untracked files are listed above._');
   }
   if (truncated) {
-    lines.push('_Diff preview truncated. Run `/shell git diff --stat && git diff` for the full output._');
+    lines.push('_Diff preview truncated. Open the review URL above or run `/shell git diff --stat && git diff` for the full output._');
   }
-  return { ok: true, reply: lines.join('\n') };
+  return { ok: true, reply: lines.join('\n'), critiqueUrl: uploaded?.url ?? null };
 }

@@ -94,7 +94,7 @@ export function buildSlashCommandDefinitions() {
       ],
     },
     { name: 'mention-mode', description: 'Toggle mention-only mode for this channel' },
-    { name: 'diff', description: 'Show a reviewable git diff for this project/worktree' },
+    { name: 'diff', description: 'Share a critique.work diff URL for this project/worktree' },
     { name: 'usage', description: 'Show estimated token usage for this session' },
     { name: 'credits', description: 'Alias for /usage — show session usage' },
     {

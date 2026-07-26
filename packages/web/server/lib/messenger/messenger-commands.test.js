@@ -176,13 +176,60 @@ describe('/help includes verbosity and skill', () => {
 
 describe('P1 messenger commands', () => {
   it('/diff delegates to the bridge git diff helper', async () => {
-    const gitDiff = vi.fn(async () => ({ ok: true, reply: '**Git diff**\n_Working tree is clean._' }));
+    const gitDiff = vi.fn(async () => ({ ok: true, reply: '**Git diff**\nReview: https://critique.work/v/abc\n_Working tree is clean._' }));
     const { result } = await run('/diff', {
       binding: { projectPath: '/p' },
       bridgeOps: { gitDiff },
     });
     expect(gitDiff).toHaveBeenCalledTimes(1);
     expect(result.reply).toContain('**Git diff**');
+    expect(result.reply).toContain('critique.work');
+  });
+
+  it('/undo resolves a messageID and includes the files-touched diff', async () => {
+    const revertSession = vi.fn(async (_sessionId, messageId) => ({
+      ok: true,
+      session: { revert: { messageID: messageId, diff: 'diff --git a/a.ts b/a.ts\n+x' } },
+    }));
+    const { result } = await run('/undo', {
+      binding: { sessionId: 'ses-1', projectPath: '/p' },
+      opencode: {
+        abortSession: vi.fn(async () => ({ ok: true })),
+        getSession: vi.fn(async () => ({ id: 'ses-1' })),
+        listMessages: vi.fn(async () => [
+          { info: { role: 'user', id: 'msg_1' } },
+          { info: { role: 'assistant', id: 'msg_2', parentID: 'msg_1' } },
+        ]),
+        revertSession,
+      },
+    });
+    expect(revertSession).toHaveBeenCalledWith('ses-1', 'msg_2', '/p');
+    expect(result.reply).toContain('✓ Reverted one turn.');
+    expect(result.reply).toContain('**Files touched**');
+    expect(result.reply).toContain('```diff');
+  });
+
+  it('/redo steps forward with messageID when a later user turn exists', async () => {
+    const revertSession = vi.fn(async () => ({
+      ok: true,
+      session: { revert: { messageID: 'msg_2', diff: 'diff --git a/b.ts b/b.ts\n+y' } },
+    }));
+    const { result } = await run('/redo', {
+      binding: { sessionId: 'ses-1', projectPath: '/p' },
+      opencode: {
+        abortSession: vi.fn(async () => ({ ok: true })),
+        getSession: vi.fn(async () => ({ revert: { messageID: 'msg_1' } })),
+        listMessages: vi.fn(async () => [
+          { info: { role: 'user', id: 'msg_1' } },
+          { info: { role: 'user', id: 'msg_2' } },
+        ]),
+        revertSession,
+        unrevertSession: vi.fn(),
+      },
+    });
+    expect(revertSession).toHaveBeenCalledWith('ses-1', 'msg_2', '/p');
+    expect(result.reply).toContain('Stepped forward');
+    expect(result.reply).toContain('**Files touched**');
   });
 
   it('/tunnel passes provider/mode arguments to the bridge tunnel helper', async () => {

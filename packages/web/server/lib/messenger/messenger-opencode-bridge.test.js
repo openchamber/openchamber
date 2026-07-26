@@ -894,15 +894,17 @@ describe('discord inbound mirroring', () => {
     const body = JSON.parse(promptCall[1].body);
     expect(body.parts[0]).toEqual({ type: 'text', text: 'sdsfs' });
     const synthetic = body.parts.slice(1);
-    expect(synthetic.length).toBe(3);
+    expect(synthetic.length).toBe(4);
     expect(synthetic.every((part) => part.type === 'text' && part.synthetic === true)).toBe(true);
     expect(synthetic[0].text).toContain('<project-memory>');
     expect(synthetic[0].text).toContain('remember this');
     expect(synthetic[1].text).toContain('<scheduling>');
     expect(synthetic[2].text).toContain('<discord>');
+    expect(synthetic[3].text).toContain('<diffs>');
     expect(JSON.stringify(body.parts[0])).not.toContain('<scheduling>');
     expect(JSON.stringify(body.parts[0])).not.toContain('<discord>');
     expect(JSON.stringify(body.parts[0])).not.toContain('<project-memory>');
+    expect(JSON.stringify(body.parts[0])).not.toContain('<diffs>');
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });

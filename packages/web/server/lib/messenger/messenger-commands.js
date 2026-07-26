@@ -39,6 +39,7 @@ import {
   PERMISSION_MODE_DESCRIPTIONS,
   PERMISSION_MODE_LABELS,
 } from './messenger-permissions.js';
+import { executeMessengerRedo, executeMessengerUndo } from './messenger-undo-redo.js';
 
 const VERBOSITY_DESCRIPTIONS = {
   quiet: 'final answer only — hides reasoning and tool activity',
@@ -92,7 +93,7 @@ const COMMAND_HELP = [
   {
     name: 'diff',
     usage: '/diff',
-    summary: 'Show a reviewable git diff for this conversation\'s bound project/worktree',
+    summary: 'Upload a shareable critique.work diff URL (plus an inline preview) for this project/worktree',
   },
   {
     name: 'tunnel',
@@ -331,8 +332,10 @@ function fmtTable(rows, columns) {
  *   listAgents: () => Promise<Array<{ name, description?, model?, hidden? }>>,
  *   listSessions: (directory?: string) => Promise<Array<any>>,
  *   abortSession: (sessionId: string, directory?: string) => Promise<{ ok, error? }>,
- *   revertSession: (sessionId: string, messageId?: string) => Promise<{ ok, error? }>,
- *   unrevertSession: (sessionId: string) => Promise<{ ok, error? }>,
+ *   revertSession: (sessionId: string, messageId: string, directory?: string) => Promise<{ ok, session?, error? }>,
+ *   unrevertSession: (sessionId: string, directory?: string) => Promise<{ ok, session?, error? }>,
+ *   listMessages: (sessionId: string, directory?: string) => Promise<Array<any>>,
+ *   getSession: (sessionId: string, directory?: string) => Promise<object|null>,
  *   summarizeSession: (sessionId: string, modelRef: string) => Promise<{ ok, error? }>,
  *   sendOpencodeCommand: (sessionId: string, name: string, argumentsText: string) => Promise<{ ok, error? }>,
  *   sendPrompt: (sessionId: string, projectPath: string | null, text: string) => Promise<{ ok, error? }>,
@@ -518,14 +521,22 @@ export async function executeMessengerCommand({
 
     case 'undo': {
       if (!sessionId) return { reply: '✗ No session is active on this conversation.' };
-      const r = await opencode.revertSession(sessionId);
-      return { reply: r.ok ? '✓ Reverted one turn.' : `✗ Revert failed: ${r.error ?? 'unknown error'}` };
+      const r = await executeMessengerUndo({
+        sessionId,
+        projectPath: binding?.projectPath ?? null,
+        opencode,
+      });
+      return { reply: r.ok ? r.reply : `✗ Revert failed: ${r.error ?? 'unknown error'}` };
     }
 
     case 'redo': {
       if (!sessionId) return { reply: '✗ No session is active on this conversation.' };
-      const r = await opencode.unrevertSession(sessionId);
-      return { reply: r.ok ? '✓ Stepped forward.' : `✗ Redo failed: ${r.error ?? 'unknown error'}` };
+      const r = await executeMessengerRedo({
+        sessionId,
+        projectPath: binding?.projectPath ?? null,
+        opencode,
+      });
+      return { reply: r.ok ? r.reply : `✗ Redo failed: ${r.error ?? 'unknown error'}` };
     }
 
     case 'compact': {
