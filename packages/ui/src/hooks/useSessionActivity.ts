@@ -10,6 +10,12 @@ export interface SessionActivityResult {
   isWorking: boolean;
   isBusy: boolean;
   isCooldown: boolean;
+  /**
+   * Whether Stop should be available. Unlike `phase`, this stays true while a
+   * turn is busy even if a permission/question card is open (so abort remains
+   * reachable for Claude harness turns bridged through canUseTool).
+   */
+  canAbort: boolean;
 }
 
 const IDLE_RESULT: SessionActivityResult = {
@@ -17,6 +23,7 @@ const IDLE_RESULT: SessionActivityResult = {
   isWorking: false,
   isBusy: false,
   isCooldown: false,
+  canAbort: false,
 };
 
 /**
@@ -36,10 +43,6 @@ function useSessionActivity(sessionId: string | null | undefined, directory?: st
   return React.useMemo<SessionActivityResult>(() => {
     if (!sessionId) return IDLE_RESULT;
 
-    // Permissions or questions pending → idle (the blocking indicator takes
-    // priority and the send button must remain a send, not a stop).
-    if (permissions.length > 0 || questions.length > 0) return IDLE_RESULT;
-
     const phase: SessionActivityPhase = (status?.type ?? 'idle') as SessionActivityPhase;
 
     // Only trust the trailing assistant message as a transient fallback while
@@ -53,6 +56,18 @@ function useSessionActivity(sessionId: string | null | undefined, directory?: st
 
     const hasAuthoritativeStatus = status !== undefined;
     const statusWorking = hasAuthoritativeStatus && phase !== 'idle';
+    const canAbort = statusWorking || (!hasAuthoritativeStatus && hasPendingAssistant);
+
+    // Permissions or questions pending → idle for send UX (the blocking
+    // indicator takes priority and the send button must remain a send), but
+    // keep canAbort when the turn is still authoritatively busy.
+    if (permissions.length > 0 || questions.length > 0) {
+      return {
+        ...IDLE_RESULT,
+        canAbort,
+      };
+    }
+
     const isWorking = statusWorking || hasPendingAssistant;
 
     if (hasAuthoritativeStatus && !statusWorking) return IDLE_RESULT;
@@ -64,6 +79,7 @@ function useSessionActivity(sessionId: string | null | undefined, directory?: st
       isWorking: true,
       isBusy: phase === 'busy' || (!statusWorking && hasPendingAssistant),
       isCooldown: false,
+      canAbort: true,
     };
   }, [sessionId, status, messages, permissions, questions]);
 }

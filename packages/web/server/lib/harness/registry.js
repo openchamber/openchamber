@@ -86,10 +86,11 @@ const CLAUDE_MODEL_MODALITIES = Object.freeze({
  *   id: string,
  *   name: string,
  *   limit: Readonly<{ context: number, output: number }>,
+ *   resolvedId?: string,
  * }} entry
  */
 function buildClaudeModel(entry) {
-  return Object.freeze({
+  const model = {
     id: entry.id,
     name: entry.name,
     supportsImages: true,
@@ -98,23 +99,56 @@ function buildClaudeModel(entry) {
     toolCall: true,
     limit: entry.limit,
     modalities: CLAUDE_MODEL_MODALITIES,
-  });
+  };
+  if (entry.resolvedId) model.resolvedId = entry.resolvedId;
+  return Object.freeze(model);
 }
 
 /**
- * Static Claude Code model catalog for v1 (no provider nesting).
- * Alias rows use current Anthropic API resolutions; pinned full IDs keep older
- * versions selectable (e.g. Opus 4.8) after aliases move forward.
+ * Claude Code model source rows for v1 (no provider nesting). Alias rows use
+ * current Anthropic API resolutions; pinned full IDs keep older versions
+ * selectable after aliases move forward.
  */
-export const CLAUDE_CODE_MODELS = Object.freeze([
+const CLAUDE_CODE_ALIAS_MODELS = Object.freeze([
   buildClaudeModel({ id: 'fable', name: 'Fable 5', limit: CLAUDE_MODEL_LIMIT_1M }),
   buildClaudeModel({ id: 'opus', name: 'Opus 5', limit: CLAUDE_MODEL_LIMIT_1M }),
   buildClaudeModel({ id: 'sonnet', name: 'Sonnet 5', limit: CLAUDE_MODEL_LIMIT_1M }),
-  buildClaudeModel({ id: 'haiku', name: 'Haiku 4.5', limit: CLAUDE_MODEL_LIMIT_200K }),
+  buildClaudeModel({
+    id: 'haiku',
+    name: 'Haiku 4.5',
+    resolvedId: 'claude-haiku-4-5',
+    limit: CLAUDE_MODEL_LIMIT_200K,
+  }),
+]);
+
+const CLAUDE_CODE_PINNED_MODELS = Object.freeze([
   buildClaudeModel({ id: 'claude-opus-4-8', name: 'Opus 4.8', limit: CLAUDE_MODEL_LIMIT_1M }),
   buildClaudeModel({ id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', limit: CLAUDE_MODEL_LIMIT_1M }),
   buildClaudeModel({ id: 'claude-haiku-4-5', name: 'Haiku 4.5', limit: CLAUDE_MODEL_LIMIT_200K }),
 ]);
+
+/**
+ * @returns {ReadonlyArray<ReturnType<typeof buildClaudeModel>>}
+ */
+function buildClaudeCodeModels() {
+  const aliasResolvedIds = new Set(
+    CLAUDE_CODE_ALIAS_MODELS
+      .map((model) => model.resolvedId)
+      .filter((id) => typeof id === 'string' && id.length > 0),
+  );
+  const aliasNames = new Set(CLAUDE_CODE_ALIAS_MODELS.map((model) => model.name));
+  const visiblePins = CLAUDE_CODE_PINNED_MODELS.filter((model) => (
+    !aliasResolvedIds.has(model.id) && !aliasNames.has(model.name)
+  ));
+
+  return Object.freeze([
+    ...CLAUDE_CODE_ALIAS_MODELS,
+    ...visiblePins,
+  ]);
+}
+
+/** Visible Claude Code model catalog for picker/API responses. */
+export const CLAUDE_CODE_MODELS = buildClaudeCodeModels();
 
 /** Named Claude Agent SDK effort levels accepted on ExecutionTarget. */
 export const CLAUDE_EFFORT_LEVELS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);

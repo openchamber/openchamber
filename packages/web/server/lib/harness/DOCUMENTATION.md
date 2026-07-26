@@ -206,6 +206,22 @@ Capability `goal: partial`. Session-goal listens to harness events through
 turns). Continuations call `harnessRouter.prompt` / `/api/harness/prompt`.
 Token budget accounting is best-effort until Claude usage tokens are mapped.
 
+## Follow-ups while busy
+
+Claude rejects a second `prompt` for the same session with HTTP `409`
+`TURN_IN_PROGRESS` (no second Claude process). The UI must not steer into an
+active Claude turn. Follow-ups use the OpenChamber message queue (reorder +
+idle auto-send). Abort interrupts the active turn and always clears busy via
+`session.status: idle`.
+
+## Session titles on Claude
+
+Claude prompts bypass OpenCode `session.promptAsync`, so upstream
+`ensureTitle` never runs. `session-title/runtime.js` listens to harness idle
+events, generates a title once via the small-model helper from harness turn
+text, and PATCHes the OpenCode shell session. Manual rename still uses
+`session.update`.
+
 ## Claude auth-env policy
 
 `translators/claude-code/auth-env.js` builds child env from `process.env` and

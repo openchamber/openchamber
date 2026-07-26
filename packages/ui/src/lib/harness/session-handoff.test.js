@@ -120,8 +120,21 @@ describe('createEngineHandoffSession', () => {
     });
 
     expect(createSession).toHaveBeenCalledTimes(1);
+    expect(createSession).toHaveBeenCalledWith(undefined, '/repo');
     expect(result.sessionId).toBe('ses_new');
     expect(result.directory).toBe('/repo');
     expect(result.sessionId).not.toBe('ses_source');
+  });
+
+  test('passes source title through to createSession', async () => {
+    const createSession = mock(async () => ({ id: 'ses_named', directory: '/repo' }));
+    await createEngineHandoffSession({
+      sourceSessionId: 'ses_source',
+      directory: '/repo',
+      title: 'Fix auth flow',
+      sourceHarnessId: 'claude-code',
+      createSession,
+    });
+    expect(createSession).toHaveBeenCalledWith('Fix auth flow', '/repo');
   });
 });

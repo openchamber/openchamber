@@ -9,6 +9,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     openCodeWatcherRuntime,
     sessionRuntime,
     sessionAssistRuntime,
+    sessionTitleRuntime,
     sessionGoalRuntime,
     contextObligatoryRuntime,
     scheduledTasksRuntime,
@@ -45,6 +46,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     openCodeWatcherRuntime.stop();
     sessionRuntime.dispose();
     sessionAssistRuntime?.stop?.();
+    sessionTitleRuntime?.stop?.();
     sessionGoalRuntime?.stop?.();
     contextObligatoryRuntime?.stop?.();
     scheduledTasksRuntime?.stop?.();

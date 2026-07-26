@@ -1066,6 +1066,19 @@ export async function abortCurrentOperation(sessionId: string): Promise<void> {
       })
       return
     }
+
+    // Sticky Claude bindings can outlive local selection (reload / overwrite).
+    // When the local target is missing or unknown, try harness abort first.
+    if (!target || target.harnessId !== "opencode") {
+      const harnessResult = await harnessAbort({
+        sessionId,
+        ...(directory ? { directory } : {}),
+      }).catch(() => null)
+      if (harnessResult?.aborted) {
+        return
+      }
+    }
+
     await sdk().session.abort({ sessionID: sessionId, directory })
   } catch (error) {
     console.error("[session-actions] abort failed", error)

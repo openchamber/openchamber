@@ -28,11 +28,16 @@ describe('harness registry', () => {
     expect(claude.capabilities['openchamber-tool']).toBe('none');
     expect(CLAUDE_CODE_MODELS.length).toBeGreaterThan(0);
     const byId = Object.fromEntries(CLAUDE_CODE_MODELS.map((model) => [model.id, model]));
+    const displayNames = CLAUDE_CODE_MODELS.map((model) => model.name);
     expect(byId.fable?.name).toBe('Fable 5');
     expect(byId.opus?.name).toBe('Opus 5');
     expect(byId.sonnet?.name).toBe('Sonnet 5');
     expect(byId.haiku?.name).toBe('Haiku 4.5');
+    expect(byId.haiku?.resolvedId).toBe('claude-haiku-4-5');
     expect(byId['claude-opus-4-8']?.name).toBe('Opus 4.8');
+    expect(byId['claude-sonnet-4-6']?.name).toBe('Sonnet 4.6');
+    expect(byId['claude-haiku-4-5']).toBeUndefined();
+    expect(new Set(displayNames).size).toBe(displayNames.length);
     expect(byId.fable?.limit?.context).toBe(1_000_000);
     expect(byId.sonnet?.limit?.context).toBe(1_000_000);
     expect(byId.haiku?.limit?.context).toBe(200_000);

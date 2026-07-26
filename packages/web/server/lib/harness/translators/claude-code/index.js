@@ -26,6 +26,40 @@ import {
 import { getHarnessCapabilities } from '../../registry.js';
 import { detectClaudeCode } from '../../detect.js';
 
+const ABORT_INTERRUPT_TIMEOUT_MS = 2_000;
+
+/**
+ * @param {object} event
+ * @param {string} sessionId
+ * @returns {boolean}
+ */
+function isIdleStatusEvent(event, sessionId) {
+  return event?.type === 'session.status'
+    && event.properties?.sessionID === sessionId
+    && event.properties?.status?.type === 'idle';
+}
+
+/**
+ * @param {object} handle
+ * @param {number} timeoutMs
+ */
+async function interruptWithTimeout(handle, timeoutMs = ABORT_INTERRUPT_TIMEOUT_MS) {
+  if (typeof handle?.interrupt !== 'function') return;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  try {
+    await Promise.race([
+      Promise.resolve().then(() => handle.interrupt()),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+        if (typeof timer.unref === 'function') timer.unref();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Build SDK prompt: string when text-only; AsyncIterable when attachments present.
  * @param {string} text
@@ -63,7 +97,7 @@ export function buildClaudePrompt(text, files, options = {}) {
  * @param {typeof detectClaudeCode} [deps.detect]
  */
 export function createClaudeCodeTranslator(deps = {}) {
-  /** @type {Map<string, { handle: object, aborting: boolean }>} */
+  /** @type {Map<string, { handle: object, aborting: boolean, idleEmitted: boolean }>} */
   const activeTurns = new Map();
   const getBroadcast = deps.getBroadcast || (() => null);
   const startQuery = deps.startQuery || startClaudeQuery;
@@ -201,7 +235,22 @@ export function createClaudeCodeTranslator(deps = {}) {
       throw wrapped;
     }
 
-    activeTurns.set(sessionId, { handle, aborting: false });
+    const activeTurn = { handle, aborting: false, idleEmitted: false };
+    activeTurns.set(sessionId, activeTurn);
+    const emitEvents = (events) => {
+      if (events.some((event) => isIdleStatusEvent(event, sessionId))) {
+        activeTurn.idleEmitted = true;
+      }
+      emitHarnessEvents(getBroadcast(), directory, events);
+    };
+    const emitIdleOnce = () => {
+      if (activeTurn.idleEmitted) return;
+      activeTurn.idleEmitted = true;
+      emitHarnessEvents(getBroadcast(), directory, [{
+        type: 'session.status',
+        properties: { sessionID: sessionId, status: { type: 'idle' } },
+      }]);
+    };
 
     // Stream in background; HTTP returns accepted immediately.
     void (async () => {
@@ -211,10 +260,14 @@ export function createClaudeCodeTranslator(deps = {}) {
           if (foreignSessionId) {
             setForeignSessionId(sessionId, foreignSessionId);
           }
-          emitHarnessEvents(getBroadcast(), directory, events);
+          emitEvents(events);
         }
         updateSessionBinding(sessionId, { lastError: undefined });
       } catch (error) {
+        const active = activeTurns.get(sessionId);
+        if (active?.aborting || activeTurn.aborting) {
+          return;
+        }
         const rawMessage = error instanceof Error ? error.message : 'Claude Code turn failed';
         const rawCode = error && typeof error === 'object' && 'code' in error
           ? String(error.code)
@@ -227,7 +280,7 @@ export function createClaudeCodeTranslator(deps = {}) {
           code: isEnotdir ? 'CLAUDE_SPAWN_ENOTDIR' : 'CLAUDE_TURN_ERROR',
           message,
         });
-        emitHarnessEvents(getBroadcast(), directory, [
+        emitEvents([
           {
             type: 'session.status',
             properties: { sessionID: sessionId, status: { type: 'idle' } },
@@ -238,7 +291,12 @@ export function createClaudeCodeTranslator(deps = {}) {
           },
         ]);
       } finally {
-        rejectPendingForSession(sessionId);
+        try {
+          rejectPendingForSession(sessionId);
+        } catch {
+          // cleanup must still close the turn and clear busy status
+        }
+        emitIdleOnce();
         try {
           handle.close();
         } catch {
@@ -278,18 +336,24 @@ export function createClaudeCodeTranslator(deps = {}) {
     }
 
     active.aborting = true;
-    rejectPendingForSession(sessionId);
+    active.idleEmitted = true;
     try {
-      await active.handle.interrupt();
+      rejectPendingForSession(sessionId);
     } catch {
-      // ignore
+      // abort cleanup must still close and remove the active turn
     }
     try {
-      active.handle.close();
+      await interruptWithTimeout(active.handle);
     } catch {
       // ignore
+    } finally {
+      try {
+        active.handle.close();
+      } catch {
+        // ignore
+      }
+      activeTurns.delete(sessionId);
     }
-    activeTurns.delete(sessionId);
 
     if (binding?.directory) {
       // Emit MessageAbortedError so session-goal pauses immediately (same

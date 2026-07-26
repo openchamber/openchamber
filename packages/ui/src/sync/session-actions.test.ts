@@ -1365,4 +1365,24 @@ describe("abortCurrentOperation", () => {
       directory: "/test/project",
     })
   })
+
+  test("tries harness abort when local target is missing, then OpenCode", async () => {
+    const store = createStore({}, { session: [{ id: "session-a", time: { created: 1 } } as Session] })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { abortCurrentOperation, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await abortCurrentOperation("session-a")
+
+    expect(harnessAbortCalls).toEqual([
+      { sessionId: "session-a", directory: "/test/project" },
+    ])
+    const abortCalls = replyCalls.filter((call) => call.method === "session.abort")
+    expect(abortCalls).toHaveLength(1)
+    expect(abortCalls[0].params).toEqual({
+      sessionID: "session-a",
+      directory: "/test/project",
+    })
+  })
 })

@@ -176,9 +176,16 @@ export function routeMessage(params: {
     const seedParts = (params.additionalParts ?? [])
       .filter((part) => part.synthetic && typeof part.text === "string" && part.text.trim().length > 0)
       .map((part) => part.text.trim())
-    const harnessText = seedParts.length > 0
-      ? `${seedParts.join("\n\n")}\n\n${params.content}`
-      : params.content
+    // Queued follow-ups arrive as non-synthetic additionalParts. Claude has no
+    // multi-prompt steer, so fold them into one harness turn text (same order
+    // as OpenCode additional parts) rather than dropping them.
+    const queuedParts = (params.additionalParts ?? [])
+      .filter((part) => !part.synthetic && typeof part.text === "string" && part.text.trim().length > 0)
+      .map((part) => part.text.trim())
+    const harnessSections = [...seedParts, params.content, ...queuedParts]
+      .map((text) => text.trim())
+      .filter((text) => text.length > 0)
+    const harnessText = harnessSections.join("\n\n")
 
     // Normal prompt — optimistic insert; transport is /api/harness/prompt (not OpenCode SDK).
     return optimisticSend({
@@ -1252,10 +1259,24 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       && pendingHandoff.harnessId !== sourceHarnessId
     ) {
       const sourceSessionId = targetSessionId
+      const sourceSession = getDirectoryState(currentSessionDirectory ?? undefined)?.session?.find(
+        (session) => session.id === sourceSessionId,
+      )
+      const globalSource = useGlobalSessionsStore.getState().activeSessions.find(
+        (session) => session.id === sourceSessionId,
+      ) ?? useGlobalSessionsStore.getState().archivedSessions.find(
+        (session) => session.id === sourceSessionId,
+      )
+      const handoffTitleCandidate = sourceSession?.title ?? globalSource?.title
+      const handoffTitle = typeof handoffTitleCandidate === "string" && handoffTitleCandidate.trim()
+        ? handoffTitleCandidate.trim()
+        : undefined
       const handoff = await createEngineHandoffSession({
         sourceSessionId,
         directory: currentSessionDirectory,
+        sourceHarnessId,
         createSession: (title, directoryOverride) => get().createSession(title, directoryOverride),
+        title: handoffTitle,
       })
 
       clearPendingHandoffTarget(sourceSessionId)
@@ -1281,6 +1302,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           variant,
         )
       }
+
+      // Continue in the same window: switch UI to the destination session.
+      get().setCurrentSession(handoff.sessionId, createdDirectory)
 
       notifyMessageSent(handoff.sessionId)
       markPendingUserSendAnimation(handoff.sessionId)

@@ -73,6 +73,7 @@ import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
+import { createSessionTitleRuntime } from './lib/session-title/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
@@ -740,6 +741,14 @@ const sessionAssistRuntime = createSessionAssistRuntime({
   getSmallModelService: async () => import('./lib/small-model/index.js'),
 });
 
+const sessionTitleRuntime = createSessionTitleRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getSmallModelService: async () => import('./lib/small-model/index.js'),
+  getHarnessRecentMessages,
+  getSessionBinding: (sessionId) => getSessionBinding(sessionId),
+});
+
 const sessionGoalRuntime = createSessionGoalRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -810,9 +819,10 @@ notificationTriggerRuntime.setGetIsSessionAutoAccepting(
   (sessionId, directory) => permissionAutoAcceptRuntime.isSessionAutoAccepting(sessionId, directory),
 );
 
-// Harness events are not on the OpenCode global hub — fan them into Goal and
-// permission auto-accept so backend loops work without a connected UI.
+// Harness events are not on the OpenCode global hub — fan them into title,
+// Goal, and permission auto-accept so backend loops work without a connected UI.
 addHarnessEventObserver((payload, directory) => {
+  sessionTitleRuntime.processHarnessPayload(payload, directory);
   sessionGoalRuntime.processPayload(payload, directory);
   permissionAutoAcceptRuntime.processHarnessPayload(payload, directory);
 });
@@ -1210,6 +1220,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   syncToHmrState,
   openCodeWatcherRuntime,
   sessionAssistRuntime,
+  sessionTitleRuntime,
   sessionGoalRuntime,
   contextObligatoryRuntime,
   sessionRuntime,

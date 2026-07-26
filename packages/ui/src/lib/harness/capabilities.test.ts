@@ -3,9 +3,11 @@ import type { EngineCatalog, HarnessId } from '@/types/harness';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useHarnessStore } from '@/stores/useHarnessStore';
 import {
+  engineSupportsSteerDelivery,
   getHarnessCapabilityLevel,
   resolveSessionHarnessId,
   sessionSupports,
+  sessionSupportsSteerDelivery,
   STATIC_HARNESS_CAPABILITIES,
 } from './capabilities';
 
@@ -71,6 +73,18 @@ describe('sessionSupports', () => {
     });
     expect(sessionSupports(null, 'goal')).toBe(true);
     expect(sessionSupports(null, 'multirun')).toBe(false);
+  });
+
+  test('Claude sessions do not support steer delivery', () => {
+    expect(engineSupportsSteerDelivery('opencode')).toBe(true);
+    expect(engineSupportsSteerDelivery('claude-code')).toBe(false);
+    useSelectionStore.getState().saveSessionTarget('ses_claude', {
+      harnessId: 'claude-code',
+      modelRef: 'sonnet',
+    });
+    expect(sessionSupportsSteerDelivery('ses_claude')).toBe(false);
+    useSelectionStore.setState({ lastUsedTarget: null });
+    expect(sessionSupportsSteerDelivery('ses_unknown')).toBe(true);
   });
 
   test('prefers catalog capability levels when present', () => {

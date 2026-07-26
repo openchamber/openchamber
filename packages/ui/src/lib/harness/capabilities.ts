@@ -85,3 +85,16 @@ export function sessionSupports(
   const harnessId = resolveSessionHarnessId(sessionId);
   return getHarnessCapabilityLevel(harnessId, capability) !== 'none';
 }
+
+/**
+ * OpenCode can inject follow-ups into an active turn (`delivery: 'steer'`).
+ * Claude Code rejects concurrent prompts with TURN_IN_PROGRESS — follow-ups
+ * must use the OpenChamber message queue and wait for idle auto-send.
+ */
+export function engineSupportsSteerDelivery(harnessId: HarnessId): boolean {
+  return harnessId === 'opencode';
+}
+
+export function sessionSupportsSteerDelivery(sessionId: string | null | undefined): boolean {
+  return engineSupportsSteerDelivery(resolveSessionHarnessId(sessionId));
+}

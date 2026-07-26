@@ -10,7 +10,7 @@ import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, typ
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { sessionSupports } from '@/lib/harness/capabilities';
+import { sessionSupports, sessionSupportsSteerDelivery } from '@/lib/harness/capabilities';
 import { resolveComposerAttachmentModel } from '@/lib/harness/composer-attachment-model';
 import { useHarnessStore } from '@/stores/useHarnessStore';
 import { useInputStore } from '@/sync/input-store';
@@ -1850,7 +1850,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [clearPendingDraftPersist, persistChatDraft, persistDraftImmediately]);
 
     // Session activity for queue availability and controls
-    const { phase: sessionPhase } = useCurrentSessionActivity();
+    const { phase: sessionPhase, canAbort: sessionCanAbort } = useCurrentSessionActivity();
     const autoReviewRunning = useAutoReviewStore(React.useCallback((state) => {
         if (!currentSessionId) return false;
         const run = state.runsByOriginalSessionID[currentSessionId];
@@ -1897,7 +1897,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const hasQueuedMessages = queuedMessages.length > 0;
     const canSend = hasContent || hasQueuedMessages;
 
-    const canAbort = sessionPhase !== 'idle';
+    // Prefer activity-derived canAbort (keeps Stop available during Claude
+    // permission waits while status remains busy). Fall back to phase for
+    // older callers that only expose phase.
+    const canAbort = sessionCanAbort || sessionPhase !== 'idle';
+    const supportsSteer = sessionSupportsSteerDelivery(currentSessionId);
 
     const getCurrentInputSnapshot = React.useCallback(() => {
         const currentMessage = textareaRef.current?.value ?? message;
@@ -1965,9 +1969,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, []);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
-        // Force-sending from the queue during a busy session counts as steer
-        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId, delivery: 'steer' });
-    }, []);
+        // Force-sending from the queue during a busy OpenCode session steers
+        // into the turn. Claude rejects concurrent prompts — leave the item
+        // queued for idle auto-send (reorder still works via chips).
+        if (!supportsSteer && sessionPhase !== 'idle') {
+            return;
+        }
+        void handleSubmitRef.current({
+            queuedOnly: true,
+            queuedMessageId: messageId,
+            delivery: supportsSteer ? 'steer' : undefined,
+        });
+    }, [sessionPhase, supportsSteer]);
 
     const handleOpenAgentPanel = React.useCallback(() => {
         setMobileControlsPanel('agent');
@@ -1988,7 +2001,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
-        const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
+        const wantsSteer = options?.delivery === 'steer' && sessionPhase !== 'idle';
+        // Claude has no steer path — concurrent prompts 409 TURN_IN_PROGRESS.
+        const delivery = wantsSteer && supportsSteer ? 'steer' : undefined;
         const inputSnapshot = options?.presetText != null
             ? {
                 message: options.presetText,
@@ -2005,6 +2020,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         if (queuedOnly) {
             if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
+            // Claude cannot accept a second prompt while busy; keep queued.
+            if (!supportsSteer && sessionPhase !== 'idle') {
+                return;
+            }
         } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
             return;
         }
@@ -2017,6 +2036,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         if (!providerIdToSend || !modelIdToSend) {
             console.warn('Cannot send message: provider or model not selected');
+            return;
+        }
+
+        // Claude has no steer path — while a turn is active, enqueue so the
+        // OpenChamber queue (reorder + idle auto-send) owns follow-ups.
+        if (
+            currentSessionId
+            && !queuedOnly
+            && inputSnapshot.hasContent
+            && (sessionPhase !== 'idle' || autoReviewRunning)
+            && !supportsSteer
+        ) {
+            handleQueueMessage();
             return;
         }
 
@@ -2582,6 +2614,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
 
             if (error instanceof HarnessClientError) {
+                // Concurrent Claude prompt — restore into the OpenChamber queue
+                // instead of surfacing TURN_IN_PROGRESS as a hard send failure.
+                if (error.code === 'TURN_IN_PROGRESS' && currentSessionId && messageQueueTarget) {
+                    if (primaryText.trim() || allAttachments.length > 0) {
+                        addToQueue(messageQueueTarget, {
+                            content: primaryText,
+                            attachments: allAttachments.length > 0 ? allAttachments : undefined,
+                            sendConfig: providerIdToSend && modelIdToSend ? {
+                                providerID: providerIdToSend,
+                                modelID: modelIdToSend,
+                                agent: agentNameToSend ?? undefined,
+                                variant: variantToSend ?? undefined,
+                            } : undefined,
+                        });
+                    }
+                    return;
+                }
                 const harnessMessage = error.code === 'CLAUDE_NOT_READY'
                     || error.code === 'CLAUDE_MISSING_CLI'
                     || error.code === 'CLAUDE_NEEDS_LOGIN'
@@ -2632,14 +2681,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
         const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
-        if (followUpBehavior === 'queue' && canQueue) {
+        // Claude never steers; always queue while busy.
+        if (canQueue && (!supportsSteer || followUpBehavior === 'queue')) {
             handleQueueMessage();
-        } else if (followUpBehavior === 'steer' && canQueue) {
+        } else if (followUpBehavior === 'steer' && canQueue && supportsSteer) {
             void handleSubmitRef.current({ delivery: 'steer' });
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage, supportsSteer]);
 
     // Draft welcome presets: submit immediately.
     const submitPresetPrompt = React.useCallback((text: string) => {
@@ -2908,10 +2958,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const isCtrlEnter = e.ctrlKey || e.metaKey;
 
             // Queueing / steering only works when there's an existing busy
-            // session (or an active auto-review run).
+            // session (or an active auto-review run). Claude always queues.
             const canQueue = inputMode === 'normal' && hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
 
-            if (followUpBehavior === 'queue') {
+            if (!supportsSteer || followUpBehavior === 'queue') {
                 if (isCtrlEnter || !canQueue) {
                     handleSubmit();
                 } else {

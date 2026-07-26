@@ -100,6 +100,7 @@ function buildHandoffSeedText(
   sessionId: string,
   directory?: string | null,
   budget: number = HANDOFF_SEED_CHAR_BUDGET,
+  sourceHarnessId: HarnessId = 'opencode',
 ): HandoffSeedResult {
   const messages = getSyncMessages(sessionId, directory ?? undefined);
   const turns: string[] = [];
@@ -139,8 +140,9 @@ function buildHandoffSeedText(
     ? `Prior conversation truncated for handoff; ${omittedTurns} earlier turns omitted.\n\n`
     : '';
 
+  const sourceLabel = sourceHarnessId === 'claude-code' ? 'Claude Code' : 'OpenCode';
   const text = [
-    'Prior conversation context from an OpenCode session (handoff). This is background only; respond to the user message that follows.',
+    `Prior conversation context from a ${sourceLabel} session (handoff). This is background only; respond to the user message that follows.`,
     '',
     truncationNote + turns.join('\n\n'),
   ].join('\n');
@@ -181,13 +183,20 @@ export type CreatedHandoffSession = {
 export async function createEngineHandoffSession(args: {
   sourceSessionId: string;
   directory?: string | null;
+  sourceHarnessId?: HarnessId;
+  title?: string;
   createSession: (
     title?: string,
     directoryOverride?: string | null,
   ) => Promise<{ id: string; directory?: string | null } | null>;
 }): Promise<CreatedHandoffSession> {
-  const seed = buildHandoffSeedText(args.sourceSessionId, args.directory);
-  const created = await args.createSession(undefined, args.directory ?? null);
+  const seed = buildHandoffSeedText(
+    args.sourceSessionId,
+    args.directory,
+    HANDOFF_SEED_CHAR_BUDGET,
+    args.sourceHarnessId ?? 'opencode',
+  );
+  const created = await args.createSession(args.title, args.directory ?? null);
   if (!created?.id) {
     throw new Error('Failed to create handoff session');
   }

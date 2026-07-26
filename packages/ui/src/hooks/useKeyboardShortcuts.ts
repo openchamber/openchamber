@@ -45,7 +45,7 @@ export const useKeyboardShortcuts = () => {
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const { themeMode, setThemeMode } = useThemeSystem();
-  const { phase: sessionPhase } = useCurrentSessionActivity();
+  const { phase: sessionPhase, canAbort: sessionCanAbort } = useCurrentSessionActivity();
   const abortPrimedUntilRef = React.useRef<number | null>(null);
   const abortPrimedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const themeModeRef = React.useRef(themeMode);
@@ -586,7 +586,7 @@ export const useKeyboardShortcuts = () => {
 
         // Double-ESC abort logic - only when on chat tab with no overlays
         const sessionId = currentSessionId;
-        const canAbortNow = sessionPhase !== 'idle' && Boolean(sessionId);
+        const canAbortNow = (sessionCanAbort || sessionPhase !== 'idle') && Boolean(sessionId);
         if (!canAbortNow) {
           resetAbortPriming();
           return;
@@ -649,6 +649,7 @@ export const useKeyboardShortcuts = () => {
     toggleExpandedInput,
     setThemeMode,
     sessionPhase,
+    sessionCanAbort,
     armAbortPrompt,
     resetAbortPriming,
     currentSessionId,

@@ -42,6 +42,8 @@ export type HarnessAbortResult = {
   ok: boolean;
   sessionId?: string;
   status?: string;
+  aborted?: boolean;
+  reason?: string;
 };
 
 export type HarnessPermissionReply = 'once' | 'always' | 'reject';
@@ -220,6 +222,8 @@ export async function harnessAbort(params: HarnessAbortParams): Promise<HarnessA
     ok: payload.ok !== false,
     ...(typeof payload.sessionId === 'string' ? { sessionId: payload.sessionId } : { sessionId: params.sessionId }),
     ...(typeof payload.status === 'string' ? { status: payload.status } : {}),
+    ...(typeof payload.aborted === 'boolean' ? { aborted: payload.aborted } : {}),
+    ...(typeof payload.reason === 'string' ? { reason: payload.reason } : {}),
   };
 }
 
