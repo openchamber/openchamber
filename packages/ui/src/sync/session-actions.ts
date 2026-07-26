@@ -28,6 +28,7 @@ import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/l
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { ascendingRuntimeId, getRuntimeTimestamp } from "@/lib/runtime-id"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -803,40 +804,6 @@ export async function unshareSession(sessionId: string): Promise<Session | null>
 // Optimistic message send — insert user message before API call, rollback on error
 // ---------------------------------------------------------------------------
 
-// ID generator matching OpenCode's Identifier.ascending format.
-// Uses BigInt(timestamp) * 0x1000 + counter, encoded as 6 hex bytes + random base62.
-// This ensures client-generated IDs sort correctly with server-generated ones.
-let lastIdTimestamp = 0
-let idCounter = 0
-
-function ascendingId(prefix: string): string {
-  const now = Date.now()
-  if (now !== lastIdTimestamp) {
-    lastIdTimestamp = now
-    idCounter = 0
-  }
-  idCounter += 1
-
-  const value = BigInt(now) * BigInt(0x1000) + BigInt(idCounter)
-  const bytes = new Uint8Array(6)
-  for (let i = 0; i < 6; i++) {
-    bytes[i] = Number((value >> BigInt(40 - 8 * i)) & BigInt(0xff))
-  }
-
-  let hex = ""
-  for (let i = 0; i < bytes.length; i++) {
-    hex += bytes[i].toString(16).padStart(2, "0")
-  }
-
-  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-  let rand = ""
-  for (let i = 0; i < 14; i++) {
-    rand += chars[Math.floor(Math.random() * 62)]
-  }
-
-  return `${prefix}_${hex}${rand}`
-}
-
 /**
  * Wraps an async send operation with optimistic user-message insertion.
  * Uses useSync()'s optimistic infrastructure — message + parts are inserted
@@ -889,16 +856,18 @@ export async function optimisticSend(input: {
     store.setState({ session, message, part })
   }
 
-  const messageID = ascendingId("msg")
+  const runtimeKey = getRuntimeKey()
+  const createdAt = getRuntimeTimestamp(runtimeKey)
+  const messageID = ascendingRuntimeId("msg", runtimeKey)
   input.onMessageID?.(messageID)
-  const textPartId = ascendingId("prt")
+  const textPartId = ascendingRuntimeId("prt", runtimeKey)
 
   const optimisticParts: Part[] = [
     { id: textPartId, type: "text", text: input.content } as Part,
   ]
   if (input.files) {
     for (const f of input.files) {
-      optimisticParts.push({ id: ascendingId("prt"), type: "file", mime: f.mime, url: f.url, filename: f.filename } as Part)
+      optimisticParts.push({ id: ascendingRuntimeId("prt", runtimeKey), type: "file", mime: f.mime, url: f.url, filename: f.filename } as Part)
     }
   }
 
@@ -913,7 +882,7 @@ export async function optimisticSend(input: {
     agent: input.agent ?? "",
     model: `${input.providerID}/${input.modelID}`,
     metadata: {} as Record<string, unknown>,
-    time: { created: Date.now(), completed: 0 },
+    time: { created: createdAt, completed: 0 },
   } as unknown as Message
 
   // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)

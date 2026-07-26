@@ -3,6 +3,8 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
+import { ascendingRuntimeId, resetRuntimeIdStateForTests } from './runtime-id';
+import { getRuntimeKey } from './runtime-switch';
 
 const originalFetch = globalThis.fetch;
 
@@ -49,6 +51,36 @@ describe('buildRuntimeFetchUrl', () => {
 });
 
 describe('runtimeFetch transport contract', () => {
+  test('records the runtime response clock for subsequent IDs', async () => {
+    const previous = getRuntimeUrlResolver();
+    const originalNow = Date.now;
+    const serverTime = Date.parse('2026-07-25T12:00:00.000Z');
+    const clientTime = serverTime + 80_000;
+
+    try {
+      resetRuntimeIdStateForTests();
+      Date.now = () => clientTime;
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.example' });
+      globalThis.fetch = (async () => new Response('{}', {
+        status: 200,
+        headers: { Date: new Date(serverTime).toUTCString() },
+      })) as typeof fetch;
+
+      await runtimeFetch('/api/session');
+
+      const id = ascendingRuntimeId('msg', getRuntimeKey());
+      const idTimestamp = Number(BigInt(`0x${id.slice(4, 16)}`) / BigInt(0x1000));
+      const encodedServerTime = serverTime % 2 ** 36;
+      expect(idTimestamp).toBeGreaterThanOrEqual(encodedServerTime);
+      expect(idTimestamp).toBeLessThan(encodedServerTime + 1_000);
+    } finally {
+      Date.now = originalNow;
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
   test('preserves bodies from actual SDK mutation requests on same-origin runtimes', async () => {
     const previous = getRuntimeUrlResolver();
     const originalWindow = globalThis.window;
@@ -257,6 +289,33 @@ describe('runtimeFetch transport contract', () => {
       expect(String(calls[0].input)).toBe('https://old-runtime.example/api/config/settings');
       expect(new Headers(calls[0].init?.headers).has('authorization')).toBe(false);
     } finally {
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('does not accept clock samples from non-runtime absolute URLs', async () => {
+    const previous = getRuntimeUrlResolver();
+    const originalNow = Date.now;
+    const clientTime = Date.parse('2026-07-25T12:00:00.000Z');
+
+    try {
+      resetRuntimeIdStateForTests();
+      Date.now = () => clientTime;
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.example' });
+      globalThis.fetch = (async () => new Response(null, {
+        status: 204,
+        headers: { Date: new Date(clientTime + 86_400_000).toUTCString() },
+      })) as typeof fetch;
+
+      await runtimeFetch('https://external.example/resource');
+
+      const id = ascendingRuntimeId('msg', getRuntimeKey(), clientTime, 0);
+      const idTimestamp = Number(BigInt(`0x${id.slice(4, 16)}`) / BigInt(0x1000));
+      expect(idTimestamp).toBe(clientTime % 2 ** 36);
+    } finally {
+      Date.now = originalNow;
       setRuntimeUrlResolver(previous);
       globalThis.fetch = originalFetch;
       clearRuntimeAuthCredentialProvider();

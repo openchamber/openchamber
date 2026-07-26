@@ -2,6 +2,8 @@ import { getActiveRelayTunnel } from './relay/runtime-tunnel';
 import { TUNNEL_PARSE_BASE } from './relay/tunnel-payloads';
 import { buildRuntimeAuthHeaders } from './runtime-auth';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
+import { getRuntimeKey } from './runtime-switch';
+import { observeRuntimeResponseDate } from './runtime-id';
 
 export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
@@ -234,16 +236,17 @@ const resolveRuntimeFetchInput = (input: string | URL | Request, query?: Runtime
 const COALESCE_READ_PATH = /\/api\/(config|path|app\/agents|agent|project|command)(\b|\/|\?|$)/;
 const READ_COALESCE = new Map<string, Promise<Response>>();
 
-const coalesceReadKey = (method: string, url: string, hasSignal: boolean): string | null => {
+const coalesceReadKey = (method: string, url: string, runtimeKey: string, hasSignal: boolean): string | null => {
   if (hasSignal) return null;
   if (method !== 'GET') return null;
   if (url.includes('/event')) return null;
   if (!COALESCE_READ_PATH.test(url)) return null;
-  return `GET ${url}`;
+  return `${runtimeKey} GET ${url}`;
 };
 
 export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
   const { query, ...requestInit } = init;
+  const runtimeKey = getRuntimeKey();
 
   // Resolve the transport once — relay tunnel or network — then apply the SAME
   // read-coalescing to both. On a relay the tunnel is bandwidth/latency-bound, so
@@ -254,6 +257,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   let doFetch: () => Promise<Response>;
   let url: string;
   let method: string;
+  let isRuntimeRequest: boolean;
   if (relay && relayPath !== null) {
     const inputHeaders = input instanceof Request ? input.headers : undefined;
     const headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
@@ -262,10 +266,12 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
       : () => relay.fetch(relayPath, { ...requestInit, headers });
     url = relayPath;
     method = String(requestInit.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    isRuntimeRequest = true;
   } else {
     const resolvedInput = resolveRuntimeFetchInput(input, query);
     const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
-    const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
+    isRuntimeRequest = shouldAttachRuntimeAuth(resolvedInput);
+    const headers = await mergeHeaders(inputHeaders, requestInit.headers, isRuntimeRequest);
     doFetch = resolvedInput instanceof Request
       ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
       : () => fetch(resolvedInput, { ...requestInit, headers });
@@ -282,13 +288,19 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   // an explicit init.signal, as "has signal" and skip coalescing for safety.
   const hasSignal = requestInit.signal != null || input instanceof Request;
 
-  const key = coalesceReadKey(method, url, hasSignal);
-  if (!key) return doFetch();
+  const key = coalesceReadKey(method, url, runtimeKey, hasSignal);
+  const fetchAndObserve = async (): Promise<Response> => {
+    const response = await doFetch();
+    if (isRuntimeRequest) observeRuntimeResponseDate(runtimeKey, response);
+    return response;
+  };
+
+  if (!key) return fetchAndObserve();
 
   const existing = READ_COALESCE.get(key);
   if (existing) return existing.then((res) => res.clone());
 
-  const pending = doFetch();
+  const pending = fetchAndObserve();
   READ_COALESCE.set(key, pending);
   pending.then(
     () => READ_COALESCE.delete(key),
