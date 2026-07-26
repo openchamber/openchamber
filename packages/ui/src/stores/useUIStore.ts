@@ -21,7 +21,7 @@ export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
-export type DesktopWindowControlsPosition = 'auto' | 'left' | 'right';
+export type DesktopWindowControlsPosition = 'left' | 'right';
 export type FileEditorKeymap = 'default' | 'vim';
 
 function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
@@ -971,7 +971,7 @@ export const useUIStore = create<UIStore>()(
         showExpandedEditTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
-        desktopWindowControlsPosition: 'auto',
+        desktopWindowControlsPosition: 'right',
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
@@ -2148,7 +2148,7 @@ export const useUIStore = create<UIStore>()(
           set({ weekStartPreference: value });
         },
         setDesktopWindowControlsPosition: (value) => {
-          set({ desktopWindowControlsPosition: value });
+          set({ desktopWindowControlsPosition: value === 'left' ? 'left' : 'right' });
         },
         setMermaidRenderingMode: (value) => {
           set({ mermaidRenderingMode: value });
@@ -2234,12 +2234,19 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 11,
+        version: 12,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v11 -> v12: drop legacy window-controls "auto" (always meant right).
+          if (version < 12) {
+            if (state.desktopWindowControlsPosition === 'auto' || state.desktopWindowControlsPosition == null) {
+              state.desktopWindowControlsPosition = 'right';
+            }
+          }
 
           // v10 -> v11: move the previous terminal font default forward.
           if (version < 11 && state.terminalFontSize === 13) {
