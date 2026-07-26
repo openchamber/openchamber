@@ -175,6 +175,8 @@ export const useInputStore = create<InputState>()((set, get) => ({
       if (hasGeneratedFilenameCollision(generatedFilenames, get().attachedFiles)) continue
 
       const attachedFiles: AttachedFile[] = []
+      const isDocumentExtraction = preparedFiles.length > 1
+      const sourceDocumentId = isDocumentExtraction ? `${Date.now()}-${Math.random().toString(36).slice(2)}` : undefined
       for (const prepared of preparedFiles) {
         let dataUrl: string
         try {
@@ -191,6 +193,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
           filename: prepared.file.name,
           size: prepared.file.size,
           source: "local",
+          sourceDocumentId,
         })
       }
 
@@ -202,7 +205,13 @@ export const useInputStore = create<InputState>()((set, get) => ({
   },
 
   removeAttachedFile: (id) =>
-    set((s) => ({ attachedFiles: s.attachedFiles.filter((f) => f.id !== id) })),
+    set((s) => {
+      const target = s.attachedFiles.find((f) => f.id === id)
+      if (target?.sourceDocumentId) {
+        return { attachedFiles: s.attachedFiles.filter((f) => f.sourceDocumentId !== target.sourceDocumentId) }
+      }
+      return { attachedFiles: s.attachedFiles.filter((f) => f.id !== id) }
+    }),
 
   setAttachedFiles: (files) => {
     attachmentReadGeneration += 1

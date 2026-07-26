@@ -276,4 +276,98 @@ describe("input-store attachments", () => {
     const textAttachment = useInputStore.getState().attachedFiles[1]
     expect((await textAttachment?.file.text())?.includes("[design-image-2.png]")).toBe(true)
   })
+
+  testWithMockFileReader("extracted document entries share a sourceDocumentId for cascade removal", async () => {
+    const archive = zipSync({
+      "word/document.xml": strToU8(`<w:document xmlns:w="w" xmlns:a="a" xmlns:r="r"><w:body><w:p><w:t>Diagram</w:t><a:blip r:embed="rId1"/></w:p></w:body></w:document>`),
+      "word/_rels/document.xml.rels": strToU8(`<Relationships><Relationship Id="rId1" Target="media/image.png" Type="image"/></Relationships>`),
+      "word/media/image.png": pngBytes,
+    })
+    const addPromise = useInputStore.getState().addAttachedFile(new File([archive], "design.docx"))
+
+    await waitForReaderCount(1)
+    resolveReader(pendingReaders[0], "data:text/plain;base64,RG9jdW1lbnQ=")
+    await waitForReaderCount(2)
+    resolveReader(pendingReaders[1], "data:image/png;base64,AQID")
+
+    expect(await addPromise).toBe(true)
+    const files = useInputStore.getState().attachedFiles
+    expect(files).toHaveLength(2)
+    expect(files[0].filename).toBe("design.docx")
+    expect(files[1].filename).toBe("design-image-1.png")
+
+    // All entries from the same document extraction share the same sourceDocumentId
+    expect(files[0].sourceDocumentId).toBeDefined()
+    expect(files[0].sourceDocumentId).toBe(files[1].sourceDocumentId)
+
+    // Removing any entry in the group cascade-removes all entries
+    useInputStore.getState().removeAttachedFile(files[0].id)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  testWithMockFileReader("removing an extracted image child also cascade-removes the document group", async () => {
+    const archive = zipSync({
+      "word/document.xml": strToU8(`<w:document xmlns:w="w" xmlns:a="a" xmlns:r="r"><w:body><w:p><w:t>Diagram</w:t><a:blip r:embed="rId1"/></w:p></w:body></w:document>`),
+      "word/_rels/document.xml.rels": strToU8(`<Relationships><Relationship Id="rId1" Target="media/image.png" Type="image"/></Relationships>`),
+      "word/media/image.png": pngBytes,
+    })
+    const addPromise = useInputStore.getState().addAttachedFile(new File([archive], "design.docx"))
+
+    await waitForReaderCount(1)
+    resolveReader(pendingReaders[0], "data:text/plain;base64,RG9jdW1lbnQ=")
+    await waitForReaderCount(2)
+    resolveReader(pendingReaders[1], "data:image/png;base64,AQID")
+
+    expect(await addPromise).toBe(true)
+    const files = useInputStore.getState().attachedFiles
+    expect(files).toHaveLength(2)
+    expect(files[0].filename).toBe("design.docx")
+    expect(files[1].filename).toBe("design-image-1.png")
+
+    // Removing the image child also cascade-removes the entire group
+    useInputStore.getState().removeAttachedFile(files[1].id)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  testWithMockFileReader("non-document attachments do not have sourceDocumentId and remove individually", async () => {
+    const addPromise = useInputStore.getState().addAttachedFile(
+      new File(["hello"], "hello.txt", { type: "text/plain" })
+    )
+    expect(pendingReaders).toHaveLength(1)
+    resolveReader(pendingReaders[0], "data:text/plain;base64,aGVsbG8=")
+
+    expect(await addPromise).toBe(true)
+    const files = useInputStore.getState().attachedFiles
+    expect(files).toHaveLength(1)
+    expect(files[0].sourceDocumentId).toBeUndefined()
+
+    useInputStore.getState().removeAttachedFile(files[0].id)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  testWithMockFileReader("PPTX slide extraction cascades removal of all slide images", async () => {
+    const archive = zipSync({
+      "ppt/slides/slide1.xml": strToU8(`<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:pic><p:nvPicPr/><p:blipFill><a:blip r:embed="rId1"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>`),
+      "ppt/slides/_rels/slide1.xml.rels": strToU8(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Target="../media/image1.png" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"/></Relationships>`),
+      "ppt/media/image1.png": pngBytes,
+    })
+    const addPromise = useInputStore.getState().addAttachedFile(new File([archive], "deck.pptx"))
+
+    await waitForReaderCount(1)
+    resolveReader(pendingReaders[0], "data:text/plain;base64,RG9jdW1lbnQ=")
+    await waitForReaderCount(2)
+    resolveReader(pendingReaders[1], "data:image/png;base64,AQID")
+
+    expect(await addPromise).toBe(true)
+    const files = useInputStore.getState().attachedFiles
+    expect(files).toHaveLength(2)
+    expect(files[0].filename).toBe("deck.pptx")
+    expect(files[1].filename).toBe("deck-image-1.png")
+    expect(files[0].sourceDocumentId).toBeDefined()
+    expect(files[0].sourceDocumentId).toBe(files[1].sourceDocumentId)
+
+    // Removing the text entry cascades to the slide image
+    useInputStore.getState().removeAttachedFile(files[0].id)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
 })
