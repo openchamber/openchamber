@@ -127,6 +127,23 @@ function settlePending(requestId, entry, reply) {
 }
 
 /**
+ * Build Always-Allow patterns for the OpenChamber PermissionCard.
+ * Prefer concrete command/path patterns; fall back to the tool name so
+ * "Always Allow" remains available and labeled (full permissions support).
+ *
+ * @param {string[]} patterns
+ * @param {string} toolName
+ * @returns {string[]}
+ */
+export function buildAlwaysPatterns(patterns, toolName) {
+  if (Array.isArray(patterns) && patterns.length > 0) {
+    return [...patterns];
+  }
+  const tool = typeof toolName === 'string' && toolName.trim() ? toolName.trim() : 'tool';
+  return [tool];
+}
+
+/**
  * Create an Agent SDK canUseTool callback for one OpenChamber session.
  *
  * @param {object} params
@@ -135,6 +152,7 @@ function settlePending(requestId, entry, reply) {
  * @param {() => ((payload: object, options?: object) => void) | null | undefined} params.getBroadcast
  * @param {number} [params.timeoutMs]
  * @param {() => string} [params.createId]
+ * @param {string} [params.assistantMessageId]
  * @returns {(toolName: string, input: Record<string, unknown>, options: object) => Promise<object>}
  */
 export function createCanUseTool(params) {
@@ -147,6 +165,9 @@ export function createCanUseTool(params) {
   const createId = typeof params?.createId === 'function'
     ? params.createId
     : () => createOpenCodeId('perm');
+  const assistantMessageId = typeof params?.assistantMessageId === 'string'
+    ? params.assistantMessageId
+    : '';
 
   return async (toolName, input, options = {}) => {
     if (!sessionId || !directory) {
@@ -170,6 +191,7 @@ export function createCanUseTool(params) {
       blockedPath: typeof options.blockedPath === 'string' ? options.blockedPath : undefined,
       title: typeof options.title === 'string' ? options.title : undefined,
     });
+    const always = buildAlwaysPatterns(patterns, tool);
 
     /** @type {Record<string, unknown>} */
     const metadata = {
@@ -180,6 +202,7 @@ export function createCanUseTool(params) {
       ...(typeof options.displayName === 'string' ? { displayName: options.displayName } : {}),
       ...(typeof options.toolUseID === 'string' ? { toolUseID: options.toolUseID } : {}),
       ...(typeof options.requestId === 'string' ? { sdkRequestId: options.requestId } : {}),
+      always,
     };
 
     const permissionRequest = {
@@ -188,10 +211,10 @@ export function createCanUseTool(params) {
       permission: tool,
       patterns,
       metadata,
-      always: [],
+      always,
       ...(typeof options.toolUseID === 'string' ? {
         tool: {
-          messageID: '',
+          messageID: assistantMessageId,
           callID: options.toolUseID,
         },
       } : {}),

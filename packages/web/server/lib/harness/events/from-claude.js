@@ -1,16 +1,66 @@
 /**
  * Map Claude Agent SDK messages → OpenCode-shaped canonical events.
  * Unknown event types are ignored safely (no throw).
+ *
+ * Part/message IDs use OpenCode ascending format so the UI Binary.search
+ * ordering matches chronological stream order (random UUIDs break tool/text
+ * interleaving in the transcript).
  */
 
 import crypto from 'node:crypto';
 
+const ID_RANDOM_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+const ID_RANDOM_LENGTH = 14;
+
+let lastIdTimestamp = 0;
+let idCounter = 0;
+
 /**
+ * @param {number} length
+ * @returns {string}
+ */
+function randomBase62(length) {
+  const bytes = crypto.randomBytes(length);
+  let result = '';
+  for (let i = 0; i < length; i += 1) {
+    result += ID_RANDOM_CHARS[bytes[i] % ID_RANDOM_CHARS.length];
+  }
+  return result;
+}
+
+/**
+ * OpenCode-compatible ascending id (`msg_*` / `prt_*` / `perm_*` / `call_*`).
+ * Lexicographic order matches creation order across the UI event reducer.
+ *
  * @param {string} prefix
  * @returns {string}
  */
 export function createOpenCodeId(prefix) {
-  return `${prefix}_${crypto.randomUUID().replace(/-/g, '')}`;
+  const now = Date.now();
+  if (now !== lastIdTimestamp) {
+    lastIdTimestamp = now;
+    idCounter = 0;
+  }
+  idCounter += 1;
+
+  const value = BigInt(now) * BigInt(0x1000) + BigInt(idCounter);
+  const bytes = new Uint8Array(6);
+  for (let i = 0; i < 6; i += 1) {
+    bytes[i] = Number((value >> BigInt(40 - 8 * i)) & BigInt(0xff));
+  }
+
+  let hex = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+
+  return `${prefix}_${hex}${randomBase62(ID_RANDOM_LENGTH)}`;
+}
+
+/** Test helper — reset ascending id clock state. */
+export function resetOpenCodeIdState() {
+  lastIdTimestamp = 0;
+  idCounter = 0;
 }
 
 /**
@@ -21,10 +71,12 @@ export function createOpenCodeId(prefix) {
  * @property {string} assistantMessageId
  * @property {string} [modelRef]
  * @property {string} [textPartId]
- * @property {Map<string, string>} [toolPartIds]
+ * @property {Map<string, { partId: string, toolName: string }>} [toolParts]
  * @property {string} [foreignSessionId]
  * @property {number} [assistantCreatedAt]
  * @property {string} [accumulatedText]
+ * @property {boolean} [needsNewTextSegment]
+ * @property {boolean} [textPartStarted]
  */
 
 /**
@@ -32,6 +84,16 @@ export function createOpenCodeId(prefix) {
  * @returns {ClaudeMapperContext}
  */
 export function createClaudeMapperContext(input) {
+  /** @type {Map<string, { partId: string, toolName: string }>} */
+  let toolParts = input.toolParts || new Map();
+  // Back-compat for older callers/tests that passed toolPartIds: Map<callId, partId>
+  if (!input.toolParts && input.toolPartIds instanceof Map) {
+    toolParts = new Map();
+    for (const [callId, partId] of input.toolPartIds.entries()) {
+      toolParts.set(callId, { partId, toolName: 'tool' });
+    }
+  }
+
   return {
     sessionId: input.sessionId,
     directory: input.directory,
@@ -39,22 +101,24 @@ export function createClaudeMapperContext(input) {
     assistantMessageId: input.assistantMessageId || createOpenCodeId('msg'),
     modelRef: input.modelRef || 'sonnet',
     textPartId: input.textPartId || createOpenCodeId('prt'),
-    toolPartIds: input.toolPartIds || new Map(),
+    toolParts,
     foreignSessionId: input.foreignSessionId,
     assistantCreatedAt: input.assistantCreatedAt || Date.now(),
     accumulatedText: input.accumulatedText || '',
+    needsNewTextSegment: input.needsNewTextSegment === true,
+    textPartStarted: input.textPartStarted === true || Boolean(input.accumulatedText),
   };
 }
 
 /**
  * @param {ClaudeMapperContext} ctx
  * @param {string} text
+ * @param {Array<{ mime?: string, url?: string, filename?: string }>} [files]
  * @returns {object[]}
  */
-export function buildUserMessageEvents(ctx, text) {
+export function buildUserMessageEvents(ctx, text, files) {
   const now = Date.now();
-  const partId = createOpenCodeId('prt');
-  return [
+  const events = [
     {
       type: 'message.updated',
       properties: {
@@ -76,7 +140,7 @@ export function buildUserMessageEvents(ctx, text) {
       properties: {
         sessionID: ctx.sessionId,
         part: {
-          id: partId,
+          id: createOpenCodeId('prt'),
           sessionID: ctx.sessionId,
           messageID: ctx.userMessageId,
           type: 'text',
@@ -85,14 +149,45 @@ export function buildUserMessageEvents(ctx, text) {
         },
       },
     },
-    {
-      type: 'session.status',
-      properties: {
-        sessionID: ctx.sessionId,
-        status: { type: 'busy' },
-      },
-    },
   ];
+
+  if (Array.isArray(files)) {
+    for (const file of files) {
+      if (!file || typeof file !== 'object') continue;
+      const mime = typeof file.mime === 'string' ? file.mime : '';
+      const url = typeof file.url === 'string' ? file.url : '';
+      const filename = typeof file.filename === 'string' && file.filename.trim()
+        ? file.filename.trim()
+        : 'attachment';
+      if (!url) continue;
+      events.push({
+        type: 'message.part.updated',
+        properties: {
+          sessionID: ctx.sessionId,
+          part: {
+            id: createOpenCodeId('prt'),
+            sessionID: ctx.sessionId,
+            messageID: ctx.userMessageId,
+            type: 'file',
+            mime,
+            url,
+            filename,
+            time: { start: now, end: now },
+          },
+        },
+      });
+    }
+  }
+
+  events.push({
+    type: 'session.status',
+    properties: {
+      sessionID: ctx.sessionId,
+      status: { type: 'busy' },
+    },
+  });
+
+  return events;
 }
 
 /**
@@ -130,6 +225,19 @@ function assistantInfo(ctx, completed) {
 }
 
 /**
+ * After a tool part, subsequent assistant text must use a fresh part id so the
+ * transcript shows text → tools → text instead of merging all text above tools.
+ *
+ * @param {ClaudeMapperContext} ctx
+ */
+function beginNewTextSegment(ctx) {
+  ctx.textPartId = createOpenCodeId('prt');
+  ctx.accumulatedText = '';
+  ctx.textPartStarted = false;
+  ctx.needsNewTextSegment = false;
+}
+
+/**
  * @param {ClaudeMapperContext} ctx
  * @param {string} delta
  * @returns {object[]}
@@ -137,7 +245,12 @@ function assistantInfo(ctx, completed) {
 function textDeltaEvents(ctx, delta) {
   if (typeof delta !== 'string' || !delta) return [];
   const events = [];
-  if (!ctx.accumulatedText) {
+
+  if (ctx.needsNewTextSegment) {
+    beginNewTextSegment(ctx);
+  }
+
+  if (!ctx.textPartStarted) {
     events.push({
       type: 'message.updated',
       properties: { info: assistantInfo(ctx, false) },
@@ -156,7 +269,9 @@ function textDeltaEvents(ctx, delta) {
         },
       },
     });
+    ctx.textPartStarted = true;
   }
+
   ctx.accumulatedText = (ctx.accumulatedText || '') + delta;
   events.push({
     type: 'message.part.delta',
@@ -179,8 +294,9 @@ function textDeltaEvents(ctx, delta) {
 function mapContentBlock(ctx, block) {
   if (!block || typeof block !== 'object') return [];
   if (block.type === 'text' && typeof block.text === 'string') {
-    // Prefer deltas for streaming; full text block fills when no partials arrived.
-    if (!ctx.accumulatedText) {
+    // Prefer deltas for streaming; full text block fills when no partials arrived
+    // for the current segment.
+    if (!ctx.accumulatedText || ctx.needsNewTextSegment) {
       return textDeltaEvents(ctx, block.text);
     }
     const remainder = block.text.startsWith(ctx.accumulatedText)
@@ -192,13 +308,19 @@ function mapContentBlock(ctx, block) {
 
   if (block.type === 'tool_use') {
     const callId = typeof block.id === 'string' ? block.id : createOpenCodeId('call');
-    let partId = ctx.toolPartIds.get(callId);
-    if (!partId) {
-      partId = createOpenCodeId('prt');
-      ctx.toolPartIds.set(callId, partId);
+    let entry = ctx.toolParts.get(callId);
+    if (!entry) {
+      entry = {
+        partId: createOpenCodeId('prt'),
+        toolName: typeof block.name === 'string' && block.name.trim() ? block.name.trim() : 'tool',
+      };
+      ctx.toolParts.set(callId, entry);
+    } else if (typeof block.name === 'string' && block.name.trim()) {
+      entry.toolName = block.name.trim();
     }
-    const toolName = typeof block.name === 'string' ? block.name : 'tool';
     const input = block.input && typeof block.input === 'object' ? block.input : {};
+    // Next assistant text belongs after this tool in transcript order.
+    ctx.needsNewTextSegment = true;
     return [
       {
         type: 'message.updated',
@@ -209,12 +331,12 @@ function mapContentBlock(ctx, block) {
         properties: {
           sessionID: ctx.sessionId,
           part: {
-            id: partId,
+            id: entry.partId,
             sessionID: ctx.sessionId,
             messageID: ctx.assistantMessageId,
             type: 'tool',
             callID: callId,
-            tool: toolName,
+            tool: entry.toolName,
             state: {
               status: 'running',
               input,
@@ -238,10 +360,10 @@ function mapToolResultBlock(ctx, block) {
   if (!block || block.type !== 'tool_result') return [];
   const callId = typeof block.tool_use_id === 'string' ? block.tool_use_id : '';
   if (!callId) return [];
-  let partId = ctx.toolPartIds.get(callId);
-  if (!partId) {
-    partId = createOpenCodeId('prt');
-    ctx.toolPartIds.set(callId, partId);
+  let entry = ctx.toolParts.get(callId);
+  if (!entry) {
+    entry = { partId: createOpenCodeId('prt'), toolName: 'tool' };
+    ctx.toolParts.set(callId, entry);
   }
   const output = typeof block.content === 'string'
     ? block.content
@@ -255,12 +377,12 @@ function mapToolResultBlock(ctx, block) {
       properties: {
         sessionID: ctx.sessionId,
         part: {
-          id: partId,
+          id: entry.partId,
           sessionID: ctx.sessionId,
           messageID: ctx.assistantMessageId,
           type: 'tool',
           callID: callId,
-          tool: 'tool',
+          tool: entry.toolName,
           state: isError
             ? {
               status: 'error',
@@ -272,7 +394,7 @@ function mapToolResultBlock(ctx, block) {
               status: 'completed',
               input: {},
               output: output || '',
-              title: 'tool',
+              title: entry.toolName,
               metadata: {},
               time: { start: Date.now(), end: Date.now() },
             },
@@ -280,6 +402,29 @@ function mapToolResultBlock(ctx, block) {
       },
     },
   ];
+}
+
+/**
+ * Finalize the current open text segment (if any).
+ * @param {ClaudeMapperContext} ctx
+ * @returns {object[]}
+ */
+function finalizeCurrentTextPart(ctx) {
+  if (!ctx.textPartStarted) return [];
+  return [{
+    type: 'message.part.updated',
+    properties: {
+      sessionID: ctx.sessionId,
+      part: {
+        id: ctx.textPartId,
+        sessionID: ctx.sessionId,
+        messageID: ctx.assistantMessageId,
+        type: 'text',
+        text: ctx.accumulatedText || '',
+        time: { start: ctx.assistantCreatedAt, end: Date.now() },
+      },
+    },
+  }];
 }
 
 /**
@@ -324,25 +469,29 @@ export function mapClaudeMessageToEvents(ctx, message) {
         const block = event.content_block;
         if (block?.type === 'tool_use') {
           events.push(...mapContentBlock(ctx, block));
-        } else if (block?.type === 'text' && !ctx.accumulatedText) {
-          events.push({
-            type: 'message.updated',
-            properties: { info: assistantInfo(ctx, false) },
-          });
-          events.push({
-            type: 'message.part.updated',
-            properties: {
-              sessionID: ctx.sessionId,
-              part: {
-                id: ctx.textPartId,
+        } else if (block?.type === 'text') {
+          if (ctx.needsNewTextSegment || !ctx.textPartStarted) {
+            if (ctx.needsNewTextSegment) beginNewTextSegment(ctx);
+            events.push({
+              type: 'message.updated',
+              properties: { info: assistantInfo(ctx, false) },
+            });
+            events.push({
+              type: 'message.part.updated',
+              properties: {
                 sessionID: ctx.sessionId,
-                messageID: ctx.assistantMessageId,
-                type: 'text',
-                text: '',
-                time: { start: Date.now() },
+                part: {
+                  id: ctx.textPartId,
+                  sessionID: ctx.sessionId,
+                  messageID: ctx.assistantMessageId,
+                  type: 'text',
+                  text: '',
+                  time: { start: Date.now() },
+                },
               },
-            },
-          });
+            });
+            ctx.textPartStarted = true;
+          }
         }
       }
       break;
@@ -393,27 +542,23 @@ export function mapClaudeMessageToEvents(ctx, message) {
     }
 
     case 'result': {
-      if (ctx.accumulatedText || ctx.toolPartIds.size > 0) {
-        events.push({
-          type: 'message.part.updated',
-          properties: {
-            sessionID: ctx.sessionId,
-            part: {
-              id: ctx.textPartId,
-              sessionID: ctx.sessionId,
-              messageID: ctx.assistantMessageId,
-              type: 'text',
-              text: ctx.accumulatedText || '',
-              time: { start: ctx.assistantCreatedAt, end: Date.now() },
-            },
-          },
-        });
+      const hasContent = ctx.textPartStarted || ctx.toolParts.size > 0
+        || (typeof message.result === 'string' && message.result);
+
+      if (ctx.textPartStarted) {
+        events.push(...finalizeCurrentTextPart(ctx));
         events.push({
           type: 'message.updated',
           properties: { info: assistantInfo(ctx, true) },
         });
       } else if (typeof message.result === 'string' && message.result) {
         events.push(...textDeltaEvents(ctx, message.result));
+        events.push(...finalizeCurrentTextPart(ctx));
+        events.push({
+          type: 'message.updated',
+          properties: { info: assistantInfo(ctx, true) },
+        });
+      } else if (hasContent) {
         events.push({
           type: 'message.updated',
           properties: { info: assistantInfo(ctx, true) },

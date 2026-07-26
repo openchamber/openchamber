@@ -32,8 +32,11 @@ import { detectClaudeCode } from '../../detect.js';
  * @param {unknown[]} files
  * @returns {string | AsyncIterable<object>}
  */
-export function buildClaudePrompt(text, files) {
-  const blocks = mapAttachmentsToContentBlocks(files);
+export function buildClaudePrompt(text, files, options = {}) {
+  const blocks = mapAttachmentsToContentBlocks(files, {
+    cwd: typeof options.cwd === 'string' ? options.cwd : undefined,
+    preferPathReferences: options.preferPathReferences,
+  });
   if (blocks.length === 0) {
     return typeof text === 'string' ? text : '';
   }
@@ -148,12 +151,13 @@ export function createClaudeCodeTranslator(deps = {}) {
     });
 
     const broadcast = getBroadcast();
-    const userEvents = buildUserMessageEvents(ctx, text);
+    const files = Array.isArray(body?.files) ? body.files : [];
+    const userEvents = buildUserMessageEvents(ctx, text, files);
     emitHarnessEvents(broadcast, directory, userEvents);
 
     let promptInput;
     try {
-      promptInput = buildClaudePrompt(text, body?.files);
+      promptInput = buildClaudePrompt(text, files, { cwd: directory });
     } catch (error) {
       setBindingError(sessionId, {
         code: error.code || 'ATTACHMENT_ERROR',
@@ -170,6 +174,7 @@ export function createClaudeCodeTranslator(deps = {}) {
       sessionId,
       directory,
       getBroadcast,
+      assistantMessageId,
     });
 
     let handle;

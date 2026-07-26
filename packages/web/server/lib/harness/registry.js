@@ -53,9 +53,13 @@ const CLAUDE_CODE_CAPABILITIES = Object.freeze({
   resume: 'full',
   'streaming-text': 'full',
   'streaming-tools': 'full',
-  permissions: 'partial',
+  // canUseTool ↔ permission.asked/replied with Always patterns, tool call
+  // linkage, fail-closed timeout/abort, and agent-derived permissionMode.
+  permissions: 'full',
   images: 'full',
-  'file-attachments': 'partial',
+  // data: embeds + sandboxed file:// / project-path attachments (images,
+  // text-like, PDF); opaque binaries reject with named errors.
+  'file-attachments': 'full',
   shell: 'full',
   'slash-commands': 'partial',
   mcp: 'partial',

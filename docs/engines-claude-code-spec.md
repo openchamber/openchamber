@@ -171,9 +171,9 @@ type HarnessDescriptor = {
 | prompt / abort / resume | full | SDK query + interrupt + resume |
 | streaming-text | full | partial messages |
 | streaming-tools | full | map tool_use/tool_result |
-| permissions | partial | `canUseTool` + permission modes → OpenChamber permission UI |
+| permissions | full | `canUseTool` + Always patterns + tool linkage + agent-derived permissionMode → OpenChamber permission UI |
 | images | full | base64 image blocks |
-| file-attachments | partial | images, text/plain-like, PDF; reject opaque binaries |
+| file-attachments | full | data: embeds; sandboxed `file://` / project-path refs; images, text/plain-like, PDF; reject opaque binaries |
 | slash-commands | partial | user skills via prompt text where CLI expands; no interactive-only cmds |
 | mcp | partial | whatever Claude loads natively; no OpenChamber MCP editor bridge |
 | subagents | partial | appear in stream if CLI emits; limited UI affordances |

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
+  buildAlwaysPatterns,
   createCanUseTool,
   getPendingPermissionCount,
   replyPermission,
@@ -20,8 +21,18 @@ describe('extractPermissionPatterns', () => {
   });
 });
 
+describe('buildAlwaysPatterns', () => {
+  it('uses concrete patterns when present', () => {
+    expect(buildAlwaysPatterns(['echo hi'], 'Bash')).toEqual(['echo hi']);
+  });
+
+  it('falls back to tool name so Always Allow stays available', () => {
+    expect(buildAlwaysPatterns([], 'Edit')).toEqual(['Edit']);
+  });
+});
+
 describe('createCanUseTool / replyPermission', () => {
-  it('allows once and emits asked + replied events', async () => {
+  it('allows once and emits asked + replied events with always patterns + tool linkage', async () => {
     const events = [];
     const canUseTool = createCanUseTool({
       sessionId: 'ses_1',
@@ -29,6 +40,7 @@ describe('createCanUseTool / replyPermission', () => {
       getBroadcast: () => (payload) => events.push(payload),
       createId: () => 'perm_fixed',
       timeoutMs: 5_000,
+      assistantMessageId: 'msg_assistant',
     });
 
     const pending = canUseTool('Bash', { command: 'echo hi' }, {
@@ -43,7 +55,11 @@ describe('createCanUseTool / replyPermission', () => {
       sessionID: 'ses_1',
       permission: 'Bash',
       patterns: ['echo hi'],
-      always: [],
+      always: ['echo hi'],
+      tool: {
+        messageID: 'msg_assistant',
+        callID: 'tool_1',
+      },
     });
 
     const reply = replyPermission({

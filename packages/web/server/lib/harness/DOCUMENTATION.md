@@ -171,14 +171,20 @@ a mocked `router` / `detectAll` / `detectOne`, and set `initBindings: false` or
 
 ## Permissions bridge
 
+Capability: `permissions: full`.
+
 `translators/claude-code/permissions.js`:
 
-1. `createCanUseTool({ sessionId, directory, getBroadcast })` → Agent SDK option.
+1. `createCanUseTool({ sessionId, directory, getBroadcast, assistantMessageId })`
+   → Agent SDK option.
 2. On tool ask: emit OpenCode-shaped `permission.asked` (`PermissionRequest`-like:
-   `id`, `sessionID`, `permission`, `patterns`, `metadata`, `always: []`).
-3. Pending map: `requestId → { resolve, reject, sessionId, timer, … }`.
-4. Timeout (~120s) and abort/turn-end → fail-closed deny + `permission.replied`.
-5. `replyPermission({ sessionId, requestId, reply })`:
+   `id`, `sessionID`, `permission`, `patterns`, `metadata`, `always`, optional
+   `tool: { messageID, callID }`).
+3. `always` is populated from concrete command/path patterns, or falls back to
+   the tool name so PermissionCard “Always Allow” stays labeled and available.
+4. Pending map: `requestId → { resolve, reject, sessionId, timer, … }`.
+5. Timeout (~120s) and abort/turn-end → fail-closed deny + `permission.replied`.
+6. `replyPermission({ sessionId, requestId, reply })`:
    - `once` → SDK `{ behavior: 'allow', updatedInput }`
    - `always` → allow + `updatedPermissions` from SDK suggestions when present
    - `reject` → `{ behavior: 'deny', message }`
@@ -234,16 +240,24 @@ If the SDK import fails:
 Packaged Desktop also sets electron-builder `asarUnpack` for
 `@anthropic-ai/claude-agent-sdk-*` native packages.
 
-## Attachments (foundation)
+## Attachments
 
-OpenChamber `{ mime, url, filename }` data URLs → SDK content blocks:
+Capability: `file-attachments: full`.
 
-| MIME | Mapping |
+OpenChamber `{ mime, url, filename }` → SDK content blocks:
+
+| Source | Mapping |
 | --- | --- |
-| `image/png|jpeg|gif|webp` | `image` base64 block |
-| `text/*`, json/yaml-like | labeled `text` block |
-| `application/pdf` | `document` base64 block |
+| `data:` image (`png|jpeg|gif|webp`) | `image` base64 block |
+| `data:` text-like / json/yaml/svg | labeled `text` block |
+| `data:` `application/pdf` | `document` base64 block |
+| `file://` or absolute path under session cwd | path reference text (`Attached project file: …`) after sandbox + MIME/size checks; Claude can `Read` the file natively |
+| `file://` with `preferPathReferences: false` | embed bytes like `data:` |
+| path outside cwd | reject `400 ATTACHMENT_PATH_OUTSIDE_CWD` |
 | other binary (e.g. zip) | reject `400 ATTACHMENT_UNSUPPORTED_TYPE` |
+
+User message events also emit OpenCode-shaped `file` parts so the transcript
+reconciles optimistic attachments.
 
 Turns with attachments use `AsyncIterable<SDKUserMessage>`; text-only may use
 a string prompt.
@@ -255,8 +269,14 @@ a string prompt.
 stream WS clients deliver them into `event-pipeline` / `event-reducer` without
 a parallel harness channel.
 
-Message/part IDs: OpenCode-compatible `msg_*` / `prt_*`. Prompt may echo
-client-provided `messageId` / `assistantMessageId` for optimistic reconcile.
+Message/part IDs: OpenCode-compatible **ascending** `msg_*` / `prt_*` (timestamp
++ counter prefix, same shape as UI `ascendingId`). The UI sorts parts by id via
+`Binary.search`, so random UUIDs reorder tool/text blocks in the transcript.
+After each `tool_use`, the mapper starts a **new text part** so post-tool reply
+text sorts after tools (`text → tool → text`), not merged above them.
+
+Prompt may echo client-provided `messageId` / `assistantMessageId` for
+optimistic reconcile.
 
 ## UI send path (shared UI)
 
