@@ -971,9 +971,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
 
     React.useEffect(() => {
         if (!active || !currentSessionId) return;
-        if (hasRenderableSessionSnapshot) return;
+        // Empty [] is renderable (stops skeletons) but Claude transcripts may
+        // still need a harness overlay fetch. Force one ensure while local
+        // message count is still zero.
+        if (hasRenderableSessionSnapshot && sessionMessageCount > 0) return;
         void ensureSessionRenderable(currentSessionId);
-    }, [active, currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot]);
+    }, [active, currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot, sessionMessageCount]);
 
 	if (!currentSessionId && !draftOpen) {
 		// With auto-open, the draft welcome opens on the next tick (effect below),
