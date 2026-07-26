@@ -553,6 +553,56 @@ function removeQuestionRequestFromChildStores(sessionId: string, requestId: stri
   return removed
 }
 
+function isPermissionRequestNotFoundError(error: unknown): boolean {
+  if (error && typeof error === "object") {
+    const status = (error as { status?: unknown }).status
+    if (status === 404) return true
+  }
+
+  let message = ""
+  if (error instanceof Error) {
+    message = error.message
+  } else if (typeof error === "string") {
+    message = error
+  }
+
+  return /Permission(?:\.)?NotFoundError|Permission request not found/i.test(message)
+}
+
+function removePermissionRequestFromChildStores(sessionId: string, requestId: string): boolean {
+  const stores = _childStores
+  if (!stores || !requestId) return false
+
+  let removed = false
+  for (const [, store] of stores.children) {
+    const current = store.getState().permission ?? {}
+    let nextPermission: typeof current | null = null
+    const sessionIds = new Set([sessionId, ...Object.keys(current)].filter(Boolean))
+
+    for (const candidateSessionId of sessionIds) {
+      const requests = current[candidateSessionId]
+      if (!requests?.length) continue
+
+      const nextRequests = requests.filter((request) => request.id !== requestId)
+      if (nextRequests.length === requests.length) continue
+
+      nextPermission ??= { ...current }
+      if (nextRequests.length > 0) {
+        nextPermission[candidateSessionId] = nextRequests
+      } else {
+        delete nextPermission[candidateSessionId]
+      }
+      removed = true
+    }
+
+    if (nextPermission) {
+      store.setState({ permission: nextPermission })
+    }
+  }
+
+  return removed
+}
+
 function getRequestReplyClient(
   type: "permission" | "question",
   sessionId: string,
@@ -1093,14 +1143,87 @@ export async function dismissPermission(
   const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
-    requestID: requestId,
-    reply: "reject",
-    ...(directory ? { directory } : {}),
-  })
-  if (assertSdkData(result, "permission.reply") !== true) {
-    throw new Error("Permission dismissal failed")
+  try {
+    const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
+      requestID: requestId,
+      reply: "reject",
+      ...(directory ? { directory } : {}),
+    })
+    if (assertSdkData(result, "permission.reply") !== true) {
+      throw new Error("Permission dismissal failed")
+    }
+  } catch (error) {
+    if (isPermissionRequestNotFoundError(error)) {
+      removePermissionRequestFromChildStores(sessionId, requestId)
+    }
+    throw error
   }
+}
+
+/**
+ * Dismiss every pending permission for the session subtree rooted at `sessionId`
+ * (the session itself plus any subagent children). Used by the chat send path:
+ * sending a message while a permission prompt is open must cancel/supersede the
+ * open permission so it cannot linger or block the new turn.
+ *
+ * The permissions are removed from the local store OPTIMISTICALLY (before any
+ * network call) so the prompt disappears instantly instead of waiting on the
+ * `permission.reply` round-trip. Each permission is then formally rejected on
+ * the backend via `permission.reply` with `reply: "reject"`, which fires
+ * `permission.replied` for reconciliation.
+ *
+ * Returns true when at least one permission was dismissed. Rejection failures are
+ * swallowed (a stranded permission must never block the send);
+ * PermissionNotFoundError also clears the stale entry from the child store via
+ * {@link dismissPermission}.
+ *
+ * NOTE: rejecting unblocks the agent's tool but does NOT end its turn. Callers
+ * that need to send the next message right away (the chat send path) must also
+ * queue the message so the OpenCode runner reaches `idle` — otherwise the new
+ * prompt arrives while the run is still active and is discarded by the runner's
+ * `ensureRunning`.
+ */
+export async function dismissOpenPermissionsForSession(sessionId: string): Promise<boolean> {
+  if (!sessionId) return false
+  const stores = _childStores
+  if (!stores) return false
+
+  const toDismiss: Array<{ sessionId: string; requestId: string }> = []
+  for (const [, store] of stores.children) {
+    const state = store.getState()
+    const scopedIds = computeSubtreeIds(state.session, sessionId)
+    if (scopedIds.size === 0) continue
+    const permissionsBySession = state.permission ?? {}
+    for (const scopedId of scopedIds) {
+      const requests = permissionsBySession[scopedId]
+      if (!requests) continue
+      for (const request of requests) {
+        toDismiss.push({ sessionId: scopedId, requestId: request.id })
+      }
+    }
+  }
+
+  if (toDismiss.length === 0) return false
+
+  // Optimistically clear the permissions from the local store so the prompt
+  // disappears immediately, before the reject round-trip.
+  for (const { sessionId: scopedSessionId, requestId } of toDismiss) {
+    removePermissionRequestFromChildStores(scopedSessionId, requestId)
+  }
+
+  await Promise.all(
+    toDismiss.map(async ({ sessionId: scopedSessionId, requestId }) => {
+      try {
+        await dismissPermission(scopedSessionId, requestId)
+      } catch (error) {
+        if (isPermissionRequestNotFoundError(error)) return
+        // Swallow: a failed dismissal must not block the send. The next
+        // permission.asked / permission.replied event reconciles the store.
+        console.error("[session-actions] Failed to dismiss open permission on send:", error)
+      }
+    }),
+  )
+  return true
 }
 
 // ---------------------------------------------------------------------------
