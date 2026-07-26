@@ -70,7 +70,7 @@ describe('embedded session chat URL', () => {
     expect(url.searchParams.get('currentTheme')).toBeNull();
   });
 
-  test('keeps the URL bounded for themes with many syntax tokens', () => {
+  test('does not encode syntax tokens in the URL', () => {
     const currentTheme = makeTheme('token-rich-dark', 'dark');
     currentTheme.colors.syntax.tokens = Object.fromEntries(
       Array.from({ length: 500 }, (_, index) => [`token-${index}`, `#${index.toString(16).padStart(6, '0')}`]),
@@ -88,8 +88,20 @@ describe('embedded session chat URL', () => {
       },
     );
 
+    const srcWithoutTokens = buildEmbeddedSessionChatURL(
+      'ses_abcdefghijklmnopqrstuvwxyz0123456789',
+      '/workspace/projects/openchamber',
+      true,
+      {
+        mode: 'system',
+        lightThemeId: 'token-rich-light',
+        darkThemeId: 'token-rich-dark',
+        currentTheme: makeTheme('token-rich-dark', 'dark'),
+      },
+    );
+
     expect(new URL(src).searchParams.get('currentTheme')).toBeNull();
-    expect(src.length).toBeLessThan(512);
+    expect(src).toBe(srcWithoutTokens);
   });
 
   test('freezes bootstrap src per tab so live theme changes do not reload iframe', () => {
