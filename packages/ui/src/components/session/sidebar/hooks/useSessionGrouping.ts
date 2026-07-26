@@ -3,12 +3,12 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionGroup, SessionNode } from '../types';
 import {
-  compareSessionsByPinnedAndTime,
   dedupeSessionsById,
   getArchivedScopeKey,
   normalizeForBranchComparison,
   normalizePath,
 } from '../utils';
+import { compareSessionsByLifecycleOrder, getSessionLifecycleOrderValue } from '@/sync/session-ordering';
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
@@ -17,6 +17,7 @@ type Args = {
   homeDirectory: string | null;
   worktreeMetadata: Map<string, WorktreeMetadata>;
   pinnedSessionIds: Set<string>;
+  sessionOrderRanks: ReadonlyMap<string, number>;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
 };
@@ -68,7 +69,7 @@ export const useSessionGrouping = (args: Args) => {
     ) => {
       const normalizedProjectRoot = normalizePath(projectRoot ?? null);
       const sortedProjectSessions = dedupeSessionsById(projectSessions)
-        .sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds));
+        .sort((a, b) => compareSessionsByLifecycleOrder(a, b, args.pinnedSessionIds, args.sessionOrderRanks));
 
       const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));
       const childrenMap = new Map<string, Session[]>();
@@ -83,7 +84,7 @@ export const useSessionGrouping = (args: Args) => {
         collection.push(session);
         childrenMap.set(parentID, collection);
       });
-      childrenMap.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds)));
+      childrenMap.forEach((list) => list.sort((a, b) => compareSessionsByLifecycleOrder(a, b, args.pinnedSessionIds, args.sessionOrderRanks)));
 
       const worktreeByPath = new Map<string, WorktreeMetadata>();
       availableWorktrees.forEach((meta) => {
@@ -160,15 +161,15 @@ export const useSessionGrouping = (args: Args) => {
         sessions: groupedNodes.get(rootKey) ?? [],
       }];
 
-      // Calculate activity info for each worktree to determine sorting priority
+      // Calculate display-order activity for each worktree.
       const worktreeActivityInfo = new Map<string, { hasActiveSession: boolean; lastUpdatedAt: number }>();
       availableWorktrees.forEach((meta) => {
         const directory = normalizePath(meta.path) ?? meta.path;
         const sessionsInWorktree = groupedNodes.get(directory) ?? [];
         const hasActiveSession = sessionsInWorktree.length > 0;
-        // Calculate the latest update time among all sessions in this worktree
+        // Lifecycle rank wins when present; timestamps seed bootstrap ordering.
         const lastUpdatedAt = sessionsInWorktree.reduce((max, node) => {
-          const updatedAt = Number(node.session.time?.updated ?? node.session.time?.created ?? 0);
+          const updatedAt = getSessionLifecycleOrderValue(node.session, args.sessionOrderRanks);
           if (!Number.isFinite(updatedAt)) {
             return max;
           }
@@ -178,7 +179,7 @@ export const useSessionGrouping = (args: Args) => {
         worktreeActivityInfo.set(directory, { hasActiveSession, lastUpdatedAt });
       });
 
-      // Sort worktrees: active first (by last updated desc), then inactive (by label asc)
+      // Sort populated worktrees by shared session activity, then empty ones by label.
       const sortedWorktrees = [...availableWorktrees].sort((a, b) => {
         const aDir = normalizePath(a.path) ?? a.path;
         const bDir = normalizePath(b.path) ?? b.path;
@@ -190,7 +191,7 @@ export const useSessionGrouping = (args: Args) => {
           return aInfo.hasActiveSession ? -1 : 1;
         }
 
-        // Second priority: for active worktrees, sort by last updated (desc)
+        // Second priority: for populated worktrees, sort by latest display activity.
         if (aInfo.hasActiveSession && bInfo.hasActiveSession) {
           return bInfo.lastUpdatedAt - aInfo.lastUpdatedAt;
         }
@@ -246,7 +247,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode, t],
+    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.sessionOrderRanks, args.gitBranches, args.isVSCode, t],
   );
 
   return {

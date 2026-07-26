@@ -382,8 +382,8 @@ export const PullRequestSection: React.FC<{
   const canShow = Boolean(directory && branch && baseBranch && (branch !== baseBranch || isFork));
 
   const prStatusKey = React.useMemo(
-    () => getGitHubPrStatusKey(directory, branch),
-    [directory, branch],
+    () => getGitHubPrStatusKey(directory, branch, selectedRemote?.name ?? null),
+    [directory, branch, selectedRemote?.name],
   );
   const statusEntry = useGitHubPrStatusStore((state) => state.entries[prStatusKey]);
 
@@ -1697,7 +1697,7 @@ export const PullRequestSection: React.FC<{
                             onValueChange={(value) => setMergeMethod(value as MergeMethod)}
                             disabled={isMerging || pr.state !== 'open'}
                           >
-                            <SelectTrigger size="lg" className="h-7 w-auto min-w-0">
+                            <SelectTrigger size="sm" className="w-auto min-w-0">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -1761,7 +1761,7 @@ export const PullRequestSection: React.FC<{
                   <div className="typography-micro text-muted-foreground">{t('gitView.pr.field.baseBranch')}</div>
                   {availableBaseBranches.length > 0 ? (
                     <Select value={targetBaseBranch} onValueChange={setTargetBaseBranch}>
-                      <SelectTrigger className="h-9">
+                      <SelectTrigger size="lg">
                         <SelectValue placeholder={t('gitView.pr.placeholder.selectBaseBranch')} />
                       </SelectTrigger>
                       <SelectContent>

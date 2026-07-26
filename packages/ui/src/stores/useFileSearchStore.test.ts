@@ -7,6 +7,7 @@ type Deferred<T> = {
 };
 
 const searchRequests: Array<Deferred<Array<{ path: string }>>> = [];
+let runtimeKey = 'runtime-a';
 
 const createDeferred = <T>(): Deferred<T> => {
   let resolve!: (value: T) => void;
@@ -29,12 +30,14 @@ mock.module('@/lib/opencode/client', () => ({
     searchFiles: searchFilesMock,
   },
 }));
+mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
 
 const { useFileSearchStore } = await import('./useFileSearchStore');
 
 describe('useFileSearchStore', () => {
   beforeEach(() => {
     searchRequests.length = 0;
+    runtimeKey = 'runtime-a';
     useFileSearchStore.setState({
       cache: {},
       cacheKeys: [],
@@ -100,5 +103,21 @@ describe('useFileSearchStore', () => {
 
     searchRequests[1].resolve([{ path: 'second.ts' }]);
     expect(await secondPromise).toEqual([{ path: 'second.ts' }]);
+  });
+
+  test('isolates cache and in-flight ownership by runtime', async () => {
+    const firstPromise = useFileSearchStore.getState().searchFiles('/project', 'foo');
+    runtimeKey = 'runtime-b';
+    const secondPromise = useFileSearchStore.getState().searchFiles('/project', 'foo');
+    expect(searchRequests).toHaveLength(2);
+
+    searchRequests[1].resolve([{ path: 'runtime-b.ts' }]);
+    expect(await secondPromise).toEqual([{ path: 'runtime-b.ts' }]);
+    searchRequests[0].resolve([{ path: 'runtime-a.ts' }]);
+    await firstPromise;
+
+    runtimeKey = 'runtime-b';
+    expect(await useFileSearchStore.getState().searchFiles('/project', 'foo')).toEqual([{ path: 'runtime-b.ts' }]);
+    expect(searchRequests).toHaveLength(2);
   });
 });

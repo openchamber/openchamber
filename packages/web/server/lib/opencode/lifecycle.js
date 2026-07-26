@@ -38,6 +38,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildAugmentedPath,
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
+    getManagedOpenCodeEnv = async () => ({}),
     getActiveSessionCount = () => 0,
   } = deps;
 
@@ -474,14 +475,16 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     await applyOpencodeBinaryFromSettings({ strict: true });
     ensureOpencodeCliEnv();
     const openCodePassword = await ensureLocalOpenCodeServerPassword({ rotateManaged: true });
-    const envPath = typeof buildManagedOpenCodePath === 'function'
-      ? buildManagedOpenCodePath()
-      : typeof buildAugmentedPath === 'function'
-        ? buildAugmentedPath()
-      : process.env.PATH;
+    let envPath = process.env.PATH;
+    if (typeof buildManagedOpenCodePath === 'function') {
+      envPath = buildManagedOpenCodePath();
+    } else if (typeof buildAugmentedPath === 'function') {
+      envPath = buildAugmentedPath();
+    }
     const shellEnv = typeof getManagedOpenCodeShellEnvSnapshot === 'function'
       ? getManagedOpenCodeShellEnvSnapshot() || {}
       : {};
+    const managedOpenCodeEnv = await getManagedOpenCodeEnv();
 
     try {
       const serverInstance = await createManagedOpenCodeServerProcess({
@@ -493,6 +496,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         env: {
           ...shellEnv,
           ...process.env,
+          ...managedOpenCodeEnv,
           PATH: envPath,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
         },

@@ -347,9 +347,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
     }
 
-    // The bundled CLI is the LAST resort (see bundledOpenCodeCliFallback at the
-    // exit points below): a user's own OpenCode install — PATH, known install
-    // locations, or shell-resolved — must win over the pinned bundled copy.
+    const bundled = bundledOpenCodeCliFallback();
+    if (bundled) return bundled;
+
     const resolvedFromPath = searchPathFor('opencode');
     if (resolvedFromPath) {
       clearWslOpencodeResolution();
@@ -427,7 +427,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       // Do not auto-detect OpenCode from WSL. OpenCode sessions are keyed by
       // server-visible directories, and mixing Windows paths with WSL paths
       // creates duplicate/missing project state in the desktop app.
-      return bundledOpenCodeCliFallback();
+      return null;
     }
 
     const shells = [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean);
@@ -451,7 +451,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
     }
 
-    return bundledOpenCodeCliFallback();
+    return null;
   };
 
   const resolveNodeCliPath = () => {

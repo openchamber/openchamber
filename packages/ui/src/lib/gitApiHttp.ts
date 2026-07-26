@@ -1,5 +1,3 @@
-
-
 import type {
   GitStatus,
   GitDiffResponse,
@@ -37,6 +35,7 @@ import type {
 } from './api/types';
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
+import { getRuntimeKey } from './runtime-switch';
 
 const API_BASE = '/api/git';
 const GIT_STATUS_CACHE_TTL_MS = 1200;
@@ -48,24 +47,22 @@ const gitRepoCache = new Map<string, { value: boolean; expiresAt: number }>();
 const gitRepoInFlight = new Map<string, Promise<boolean>>();
 
 const normalizeDirectoryKey = (directory: string): string => directory.trim();
-const getStatusCacheKey = (directory: string, mode?: 'light'): string =>
-  mode === 'light' ? `${normalizeDirectoryKey(directory)}::light` : normalizeDirectoryKey(directory);
+const getDirectoryCacheKey = (runtimeKey: string, directory: string): string =>
+  JSON.stringify([runtimeKey, normalizeDirectoryKey(directory)]);
+const getStatusCacheKey = (runtimeKey: string, directory: string, mode?: 'light'): string =>
+  JSON.stringify([runtimeKey, normalizeDirectoryKey(directory), mode ?? 'full']);
 
-const getStatusCacheVersion = (directory: string): number =>
-  gitStatusCacheVersions.get(normalizeDirectoryKey(directory)) ?? 0;
+const getStatusCacheVersion = (runtimeKey: string, directory: string): number =>
+  gitStatusCacheVersions.get(getDirectoryCacheKey(runtimeKey, directory)) ?? 0;
 
 const invalidateGitStatusCache = (directory: string): void => {
-  const key = normalizeDirectoryKey(directory);
-  gitStatusCacheVersions.set(key, getStatusCacheVersion(directory) + 1);
-  for (const cacheKey of Array.from(gitStatusCache.keys())) {
-    if (cacheKey === key || cacheKey.startsWith(`${key}::`)) {
-      gitStatusCache.delete(cacheKey);
-    }
-  }
-  for (const cacheKey of Array.from(gitStatusInFlight.keys())) {
-    if (cacheKey === key || cacheKey.startsWith(`${key}::`)) {
-      gitStatusInFlight.delete(cacheKey);
-    }
+  const runtimeKey = getRuntimeKey();
+  const key = getDirectoryCacheKey(runtimeKey, directory);
+  gitStatusCacheVersions.set(key, getStatusCacheVersion(runtimeKey, directory) + 1);
+  for (const mode of [undefined, 'light'] as const) {
+    const statusKey = getStatusCacheKey(runtimeKey, directory, mode);
+    gitStatusCache.delete(statusKey);
+    gitStatusInFlight.delete(statusKey);
   }
 };
 
@@ -81,7 +78,7 @@ function buildUrl(
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
-  const key = normalizeDirectoryKey(directory);
+  const key = getDirectoryCacheKey(getRuntimeKey(), directory);
   const now = Date.now();
   const cached = gitRepoCache.get(key);
   if (cached && cached.expiresAt > now) {
@@ -119,7 +116,8 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
 
 export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus> {
   const mode = options?.mode;
-  const key = getStatusCacheKey(directory, mode);
+  const runtimeKey = getRuntimeKey();
+  const key = getStatusCacheKey(runtimeKey, directory, mode);
   const now = Date.now();
   const cached = gitStatusCache.get(key);
   if (cached && cached.expiresAt > now) {
@@ -132,13 +130,13 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   }
 
   const task = (async () => {
-    const cacheVersion = getStatusCacheVersion(directory);
+    const cacheVersion = getStatusCacheVersion(runtimeKey, directory);
     const response = await runtimeFetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
     if (!response.ok) {
       throw new Error(`Failed to get git status: ${response.statusText}`);
     }
     const payload = await response.json() as GitStatus;
-    if (getStatusCacheVersion(directory) === cacheVersion) {
+    if (getStatusCacheVersion(runtimeKey, directory) === cacheVersion) {
       gitStatusCache.set(key, {
         value: payload,
         expiresAt: Date.now() + GIT_STATUS_CACHE_TTL_MS,

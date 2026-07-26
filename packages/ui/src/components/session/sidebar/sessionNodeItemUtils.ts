@@ -1,3 +1,5 @@
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
 import type { SessionNode } from './types';
 
 /**
@@ -10,7 +12,6 @@ import type { SessionNode } from './types';
  * each child's extras object.
  */
 export type SessionNodeChildRenderExtras = {
-  subtreeContainsActive: Set<string>;
   subtreeContainsEditing: Set<string>;
   menuOpenSessionId: string | null;
   nodeStructureKey: string;
@@ -24,7 +25,7 @@ export type SessionNodeRenderExtras<TNode = SessionNode> = SessionNodeChildRende
  * Walk `nodes` and add `node.session.id` to `result` for every node
  * whose subtree contains `targetId`. This is used to precompute, once
  * per SessionGroupSection render, which rows need to update when
- * `currentSessionId` or `editingId` changes. With M visible rows, this
+ * `editingId` changes. With M visible rows, this
  * turns an O(M × subtree-depth) walk inside `SessionNodeItem.areEqual`
  * into a single O(M) `Set.has` per row.
  */
@@ -69,12 +70,45 @@ export const nodeContainsSessionId = (node: SessionNode, sessionId: string | nul
   return false;
 };
 
+export const selectFolderRootNodes = (
+  sessionIds: string[],
+  nodeBySessionId: ReadonlyMap<string, SessionNode>,
+): SessionNode[] => {
+  const assignedSessionIds = new Set(sessionIds);
+
+  return sessionIds
+    .map((sessionId) => nodeBySessionId.get(sessionId))
+    .filter((node): node is SessionNode => {
+      if (!node) return false;
+
+      const visited = new Set<string>();
+      let parentID = (node.session as SessionNode['session'] & { parentID?: string | null }).parentID ?? null;
+      while (parentID && !visited.has(parentID)) {
+        if (assignedSessionIds.has(parentID) && nodeBySessionId.has(parentID)) return false;
+        visited.add(parentID);
+        const parentNode = nodeBySessionId.get(parentID);
+        parentID = (parentNode?.session as (SessionNode['session'] & { parentID?: string | null }) | undefined)?.parentID ?? null;
+      }
+      return true;
+    });
+};
+
+const sessionObjectVersions = new WeakMap<object, number>();
+let nextSessionObjectVersion = 1;
+
+const getSessionObjectVersion = (session: object): number => {
+  const existing = sessionObjectVersions.get(session);
+  if (existing !== undefined) return existing;
+  const version = nextSessionObjectVersion;
+  nextSessionObjectVersion += 1;
+  sessionObjectVersions.set(session, version);
+  return version;
+};
+
 /**
- * Build a structural key for `node` that encodes the IDs of all
- * descendants. Used by `SessionNodeItem.areEqual` so a reference-only
- * rebuild of the tree (which happens on every `buildGroupedSessions`
- * pass) can be detected with a single string compare instead of a
- * recursive walk per row.
+ * Build a key encoding descendant IDs and session object versions. This lets
+ * row memoization detect one changed descendant without recursively comparing
+ * every subtree after a reference-only grouping rebuild.
  */
 export const computeNodeStructureKey = (node: SessionNode): string => {
   if (node.children.length === 0) {
@@ -82,13 +116,47 @@ export const computeNodeStructureKey = (node: SessionNode): string => {
   }
 
   const childKeys = node.children.map((child) => {
+    const childVersion = getSessionObjectVersion(child.session);
     if (child.children.length === 0) {
-      return child.session.id;
+      return `${child.session.id}@${childVersion}`;
     }
-    return `${child.session.id}:${computeNodeStructureKey(child)}`;
+    return `${child.session.id}@${childVersion}:${computeNodeStructureKey(child)}`;
   });
 
   return childKeys.join('|');
+};
+
+export const nodeHasPinnedMembershipChange = (
+  prevNode: SessionNode,
+  nextNode: SessionNode,
+  prevPinnedSessionIds: Set<string>,
+  nextPinnedSessionIds: Set<string>,
+  prevGroupDirectory?: string | null,
+  nextGroupDirectory?: string | null,
+): boolean => {
+  const runtimeKey = getRuntimeKey();
+  const visit = (previous: SessionNode, current: SessionNode): boolean => {
+    if (previous.session.id !== current.session.id || previous.children.length !== current.children.length) {
+      return true;
+    }
+
+    const prevDirectory = (previous.session as SessionNode['session'] & { directory?: string | null }).directory
+      ?? prevGroupDirectory;
+    const nextDirectory = (current.session as SessionNode['session'] & { directory?: string | null }).directory
+      ?? nextGroupDirectory;
+    const prevKey = getPinnedSessionKey(runtimeKey, prevDirectory ?? '', previous.session.id);
+    const nextKey = getPinnedSessionKey(runtimeKey, nextDirectory ?? '', current.session.id);
+    if (
+      (prevKey ? prevPinnedSessionIds.has(prevKey) : false)
+      !== (nextKey ? nextPinnedSessionIds.has(nextKey) : false)
+    ) {
+      return true;
+    }
+
+    return previous.children.some((child, index) => visit(child, current.children[index]));
+  };
+
+  return visit(prevNode, nextNode);
 };
 
 /**

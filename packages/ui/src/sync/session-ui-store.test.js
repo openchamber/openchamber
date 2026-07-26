@@ -228,6 +228,24 @@ describe('routeMessage directory scoping', () => {
   });
 });
 
+describe('runtime worktree topology', () => {
+  test('restores independent in-memory maps across A -> B -> A', () => {
+    const topologyA = new Map([['/repo', [{ path: '/repo/a', branch: 'a' }]]]);
+    const topologyB = new Map([['/repo', [{ path: '/repo/b', branch: 'b' }]]]);
+
+    useSessionUIStore.setState({ availableWorktreesByProject: topologyA, availableWorktrees: topologyA.get('/repo') });
+    useSessionUIStore.getState().prepareForRuntimeSwitch('runtime-a');
+    useSessionUIStore.setState({ availableWorktreesByProject: topologyB, availableWorktrees: topologyB.get('/repo') });
+    useSessionUIStore.getState().prepareForRuntimeSwitch('runtime-b');
+
+    useSessionUIStore.getState().restoreForRuntimeSwitch('runtime-a');
+    expect(useSessionUIStore.getState().availableWorktreesByProject.get('/repo')?.[0]?.path).toBe('/repo/a');
+
+    useSessionUIStore.getState().restoreForRuntimeSwitch('runtime-b');
+    expect(useSessionUIStore.getState().availableWorktreesByProject.get('/repo')?.[0]?.path).toBe('/repo/b');
+  });
+});
+
 describe('openNewSessionDraft project binding', () => {
   const projectA = { id: 'proj-a', path: '/projects/alpha', label: 'Alpha' };
   const projectB = { id: 'proj-b', path: '/projects/beta', label: 'Beta' };

@@ -24,6 +24,8 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMac: boolean;
   // Windows desktop shell — for controls that only render on win32.
   isWindows: boolean;
+  // Linux desktop shell — for controls that only render on linux.
+  isLinux: boolean;
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
@@ -125,7 +127,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'appearance.terminal-shell',
-    page: 'appearance',
+    page: 'general',
     titleKey: 'settings.openchamber.visual.field.terminalShell',
     descriptionKey: 'settings.openchamber.visual.field.terminalShellHint',
     keywords: ['terminal', 'shell', 'bash', 'zsh', 'fish', 'pwsh', 'powershell'],
@@ -149,22 +151,25 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.inputBarOffset',
     descriptionKey: 'settings.openchamber.visual.field.inputBarOffsetTooltip',
     keywords: ['input', 'home bar', 'offset'],
+    // Only the mobile composer applies this offset (ChatInput gates on isMobile).
+    isAvailable: (ctx) => ctx.isMobile,
   },
   {
     id: 'appearance.expanded-editor-toolbar',
-    page: 'appearance',
+    page: 'general',
     titleKey: 'settings.openchamber.visual.field.expandedEditorToolbar',
     keywords: ['editor', 'toolbar', 'tabs', 'docked', 'files'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'appearance.file-editor-keymap',
-    page: 'appearance',
+    page: 'general',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',
     keywords: ['editor', 'vim', 'keymap'],
   },
   {
     id: 'appearance.terminal-quick-keys',
-    page: 'appearance',
+    page: 'general',
     titleKey: 'settings.openchamber.visual.field.terminalQuickKeys',
     descriptionKey: 'settings.openchamber.visual.field.terminalQuickKeysTooltip',
     keywords: ['terminal', 'keyboard', 'esc', 'ctrl', 'arrows'],
@@ -172,7 +177,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'appearance.usage-reports',
-    page: 'appearance',
+    page: 'general',
     titleKey: 'settings.openchamber.visual.field.sendAnonymousUsageReports',
     descriptionKey: 'settings.openchamber.visual.field.sendAnonymousUsageReportsHint',
     keywords: ['telemetry', 'analytics'],
@@ -185,7 +190,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'chat.message-transport',
-    page: 'chat',
+    page: 'general',
     titleKey: 'settings.openchamber.visual.section.messageStreamTransport',
     keywords: ['streaming', 'sse', 'websocket'],
   },
@@ -276,6 +281,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.showSplitAssistantMessageActions',
     descriptionKey: 'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip',
     keywords: ['copy', 'save image', 'read aloud'],
+  },
+  {
+    id: 'chat.draft-starters-visible',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.draftStartersVisible',
+    keywords: ['starter', 'starters', 'new session', 'welcome', 'suggestions'],
   },
   {
     id: 'chat.subagent-read-only-banner',
@@ -386,31 +397,39 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'sessions.desktop-launch-at-login',
-    page: 'sessions',
+    page: 'general',
     titleKey: 'settings.openchamber.desktopNetwork.field.launchAtLogin',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.launchAtLoginDescription',
-    keywords: ['desktop', 'startup', 'login'],
+    keywords: ['desktop', 'startup', 'login', 'launch', 'background', 'autostart'],
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
     id: 'sessions.desktop-window-controls-position',
-    page: 'sessions',
+    page: 'appearance',
     titleKey: 'settings.openchamber.desktopNetwork.field.windowControlsPosition',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.windowControlsPositionDescription',
     keywords: ['desktop', 'window', 'controls', 'minimize', 'maximize', 'close', 'titlebar', 'linux', 'windows'],
     isAvailable: (ctx) => ctx.isDesktop && (ctx.isWindows || !ctx.isMac),
   },
   {
+    id: 'sessions.desktop-mac-menu-bar',
+    page: 'general',
+    titleKey: 'settings.openchamber.desktopNetwork.field.macMenuBar',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.macMenuBarDescription',
+    keywords: ['desktop', 'menu bar', 'tray', 'status item', 'macos', 'background'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && ctx.isMac,
+  },
+  {
     id: 'sessions.desktop-minimize-to-tray',
-    page: 'sessions',
+    page: 'general',
     titleKey: 'settings.openchamber.desktopNetwork.field.minimizeToTray',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.minimizeToTrayDescription',
-    keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows'],
-    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && ctx.isWindows,
+    keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows', 'linux'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && (ctx.isWindows || ctx.isLinux),
   },
   {
     id: 'sessions.desktop-keep-awake',
-    page: 'sessions',
+    page: 'general',
     titleKey: 'settings.openchamber.desktopNetwork.field.keepAwake',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.keepAwakeDescription',
     keywords: ['desktop', 'sleep', 'awake', 'server', 'mobile', 'phone'],
@@ -418,7 +437,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'sessions.desktop-ui-password',
-    page: 'sessions',
+    page: 'general',
     titleKey: 'settings.openchamber.desktopPassword.field.password',
     descriptionKey: 'settings.openchamber.desktopPassword.field.passwordDescription',
     keywords: ['desktop', 'password', 'auth', 'login'],
@@ -426,7 +445,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'sessions.desktop-lan-access',
-    page: 'sessions',
+    page: 'general',
     titleKey: 'settings.openchamber.desktopNetwork.field.allowLanAccess',
     descriptionKey: 'settings.openchamber.desktopNetwork.field.allowLanAccessDescription',
     keywords: ['desktop', 'lan', 'network', 'phone', 'tablet'],
@@ -434,16 +453,24 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'sessions.opencode-binary',
-    page: 'sessions',
+    page: 'general',
     titleKey: 'settings.openchamber.opencodeCli.field.binaryPath',
     keywords: ['opencode', 'cli', 'binary', 'path'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'sessions.opencode-update-notifications',
-    page: 'sessions',
+    page: 'general',
     titleKey: 'settings.openchamber.opencodeCli.field.showUpdateNotifications',
     keywords: ['opencode', 'cli', 'updates'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-control-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.opencodeCli.field.agentControlTool',
+    descriptionKey: 'settings.openchamber.opencodeCli.field.agentControlToolInfo',
+    keywords: ['agent', 'tool', 'orchestration', 'openchamber', 'sessions', 'schedule', 'control'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

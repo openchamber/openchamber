@@ -76,7 +76,11 @@ device token of a server sees the same badge.
 
 Server (`apns-runtime.js`):
 - `OPENCHAMBER_PUSH_RELAY_URL` (default the public relay), `OPENCHAMBER_APNS_ENVIRONMENT`
-  (`sandbox` default / `production`). The signing keypair is auto-generated — nothing to set.
+  (optional override forcing every send to `sandbox` or `production`; normally unset — each
+  token is delivered to the environment it registered with: the iOS shell reads the
+  `aps-environment` entitlement from the embedded provisioning profile and reports it at
+  registration, so Xcode dev builds go to sandbox and TestFlight/App Store to production).
+  The signing keypair is auto-generated — nothing to set.
 - Direct fallback: `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8`
   (or `_P8_PATH`), `OPENCHAMBER_APNS_BUNDLE_ID`, `OPENCHAMBER_PUSH_RELAY_DISABLED=true`.
 

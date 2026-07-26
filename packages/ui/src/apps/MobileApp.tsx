@@ -73,6 +73,7 @@ import { useEdgeSwipeSessionSwitch } from './useEdgeSwipeSessionSwitch';
 import { useNativePushRegistration } from './useNativePushRegistration';
 
 const MOBILE_SETTINGS_PAGES = [
+  'general',
   'appearance',
   'chat',
   'notifications',

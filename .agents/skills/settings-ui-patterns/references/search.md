@@ -5,9 +5,10 @@ Settings search uses an explicit registry; it does not scrape JSX.
 ## Required Integration
 
 - Add/update items in `packages/ui/src/lib/settings/search.ts`.
-- Add a matching `data-settings-item="..."` anchor to the rendered setting.
+- Add a matching `data-settings-item="..."` anchor to the rendered setting — shared primitives take it via their `settingsItem` prop.
 - Use localized labels/descriptions from every `packages/ui/src/lib/i18n/messages/*.settings.ts` dictionary.
-- For a new top-level page, add metadata in `packages/ui/src/lib/settings/metadata.ts` and searchable content unless the page is purely navigational.
+- For a new top-level page, add metadata in `packages/ui/src/lib/settings/metadata.ts` and searchable content unless the page is purely navigational; also extend `pageOrder`/nav icon in `SettingsView.tsx` and `MOBILE_SETTINGS_PAGES` in `MobileApp.tsx` when the page applies to mobile.
+- When a control moves between pages (e.g. into General), update the registry item's `page` — item `id`s stay stable even if they carry the old page prefix.
 
 ## Registry Rules
 

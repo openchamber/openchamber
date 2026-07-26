@@ -5,8 +5,10 @@
 
 import { create } from "zustand"
 import type { AttachedFile } from "@/stores/types/sessionTypes"
+import { prepareAttachmentFiles } from "./attachment-files"
 
 const FILE_URI_PREFIX = "file://"
+const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
 const pendingVSCodeSelectionKeys = new Set<string>()
 let attachmentReadGeneration = 0
 
@@ -34,9 +36,19 @@ const toFileUrl = (filepath: string): string => {
 
 const getVSCodeSelectionKey = (path: string, filename: string): string => `${path}\u0000${filename}`
 
-const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+const hasGeneratedFilenameCollision = (filenames: string[], attachedFiles: AttachedFile[]): boolean => {
+  if (filenames.length === 0) return false
+  const attachedFilenames = new Set(attachedFiles.map((attachment) => attachment.filename.toLowerCase()))
+  return filenames.some((filename) => attachedFilenames.has(filename.toLowerCase()))
+}
+
+const readFileAsDataUrl = (file: File, mime: string): Promise<string> => new Promise((resolve, reject) => {
   const reader = new FileReader()
-  reader.onload = () => resolve(reader.result as string)
+  reader.onload = () => {
+    const value = typeof reader.result === "string" ? reader.result : ""
+    const commaIndex = value.indexOf(",")
+    resolve(commaIndex === -1 ? value : `data:${mime};base64,${value.slice(commaIndex + 1)}`)
+  }
   reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"))
   reader.onabort = () => reject(new Error("File read aborted"))
   reader.readAsDataURL(file)
@@ -103,7 +115,7 @@ export type InputState = {
   consumePendingPresetSubmit: () => string | null
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null) => void
   consumePendingSyntheticParts: () => SyntheticContextPart[] | null
-  addAttachedFile: (file: File) => Promise<void>
+  addAttachedFile: (file: File) => Promise<boolean>
   removeAttachedFile: (id: string) => void
   setAttachedFiles: (files: AttachedFile[]) => void
   clearAttachedFiles: () => void
@@ -152,25 +164,41 @@ export const useInputStore = create<InputState>()((set, get) => ({
   },
 
   addAttachedFile: async (file: File) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
-    let dataUrl: string
-    try {
-      dataUrl = await readFileAsDataUrl(file)
-    } catch {
-      return
+    for (let attempt = 0; attempt < MAX_ATTACHMENT_PREPARATION_ATTEMPTS; attempt += 1) {
+      const reservedFilenames = get().attachedFiles.map((attachment) => attachment.filename)
+      const preparedOrPending = prepareAttachmentFiles(file, reservedFilenames)
+      const preparedFiles = preparedOrPending instanceof Promise ? await preparedOrPending : preparedOrPending
+      if (!preparedFiles || preparedFiles.length === 0 || generation !== attachmentReadGeneration) return false
+
+      const generatedFilenames = preparedFiles.slice(1).map((prepared) => prepared.file.name)
+      if (hasGeneratedFilenameCollision(generatedFilenames, get().attachedFiles)) continue
+
+      const attachedFiles: AttachedFile[] = []
+      for (const prepared of preparedFiles) {
+        let dataUrl: string
+        try {
+          dataUrl = await readFileAsDataUrl(prepared.file, prepared.mimeType)
+        } catch {
+          return false
+        }
+        if (!dataUrl || generation !== attachmentReadGeneration) return false
+        attachedFiles.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          file: prepared.file,
+          dataUrl,
+          mimeType: prepared.mimeType,
+          filename: prepared.file.name,
+          size: prepared.file.size,
+          source: "local",
+        })
+      }
+
+      if (hasGeneratedFilenameCollision(generatedFilenames, get().attachedFiles)) continue
+      set((state) => ({ attachedFiles: [...state.attachedFiles, ...attachedFiles] }))
+      return true
     }
-    if (generation !== attachmentReadGeneration) return
-    const attached: AttachedFile = {
-      id,
-      file,
-      dataUrl,
-      mimeType: file.type,
-      filename: file.name,
-      size: file.size,
-      source: "local",
-    }
-    set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
+    return false
   },
 
   removeAttachedFile: (id) =>
@@ -221,7 +249,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
     pendingVSCodeSelectionKeys.add(selectionKey)
     let dataUrl: string
     try {
-      dataUrl = await readFileAsDataUrl(file)
+      dataUrl = await readFileAsDataUrl(file, file.type)
     } catch {
       return
     } finally {

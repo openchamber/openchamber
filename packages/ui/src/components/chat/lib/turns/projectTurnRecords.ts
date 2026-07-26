@@ -1,3 +1,4 @@
+import { isHiddenUserMessage } from '../../message/hiddenUserMessage';
 import { projectTurnActivity } from './projectTurnActivity';
 import { projectTurnIndexes } from './projectTurnIndexes';
 import { projectTurnChangedFiles, projectTurnDiffStats, projectTurnSummary } from './projectTurnSummary';
@@ -84,12 +85,19 @@ interface ProjectTurnRecordsOptions {
     previousProjection?: TurnProjectionResult | null;
     showTextJustificationActivity: boolean;
     showTurnChangedFiles: boolean;
+    /**
+     * When set, a turn whose user message is hidden (no visible display parts,
+     * e.g. synthetic subagent-completion nudges) is merged into the previous
+     * turn instead of starting a new one.
+     */
+    mergeHiddenUserTurns?: { planModeEnabled: boolean };
 }
 
 const DEFAULT_OPTIONS: ProjectTurnRecordsOptions = {
     previousProjection: null,
     showTextJustificationActivity: false,
     showTurnChangedFiles: false,
+    mergeHiddenUserTurns: undefined,
 };
 
 const areSameMessageRefs = (left: ChatMessageEntry[], right: ChatMessageEntry[]): boolean => {
@@ -191,9 +199,23 @@ export const projectTurnRecords = (
     const turnByUserId = new Map<string, TurnRecord>();
     const groupedMessageIds = new Set<string>();
 
+    const mergeHiddenUserTurns = effectiveOptions.mergeHiddenUserTurns;
+
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
         if (role !== 'user') {
+            return;
+        }
+
+        const previousTurn = turns[turns.length - 1];
+        if (
+            mergeHiddenUserTurns
+            && previousTurn
+            && isHiddenUserMessage(message, { planModeEnabled: mergeHiddenUserTurns.planModeEnabled })
+        ) {
+            turnByUserId.set(message.info.id, previousTurn);
+            previousTurn.messages.push(createTurnMessageRecord(message, index));
+            groupedMessageIds.add(message.info.id);
             return;
         }
 

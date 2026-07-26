@@ -19,6 +19,7 @@ type BuildLiveStreamingEntryOptions = {
     liveParts: Part[];
     showTextJustificationActivity: boolean;
     showTurnChangedFiles: boolean;
+    mergeHiddenUserTurns?: { planModeEnabled: boolean };
 };
 
 const withLiveParts = (
@@ -69,9 +70,21 @@ export const buildLiveStreamingEntry = <TEntry extends StreamingTailEntry>(
         return entry;
     }
 
-    const projection = projectTurnRecords([entry.turn.userMessage, ...assistantMessages], {
+    // Re-project from the turn's full ordered message records (not just
+    // userMessage + assistants) so hidden user messages merged into this turn
+    // keep parenting their assistant replies.
+    const liveMessageById = new Map(assistantMessages.map((message) => [message.info.id, message]));
+    const sourceMessages = entry.turn.messages.length > 0
+        ? entry.turn.messages
+            .slice()
+            .sort((left, right) => left.order - right.order)
+            .map((record) => liveMessageById.get(record.messageId) ?? record.message)
+        : [entry.turn.userMessage, ...assistantMessages];
+
+    const projection = projectTurnRecords(sourceMessages, {
         showTextJustificationActivity: options.showTextJustificationActivity,
         showTurnChangedFiles: options.showTurnChangedFiles,
+        mergeHiddenUserTurns: options.mergeHiddenUserTurns,
     });
     const turn = projection.turns[0] ?? {
         ...entry.turn,

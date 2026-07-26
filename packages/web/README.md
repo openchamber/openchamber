@@ -49,6 +49,10 @@ openchamber update                   # Update to latest version
 
 `startup enable` snapshots your current environment into the native service so startup behaves like you launched `openchamber` from the same shell. This preserves provider tokens, PATH, SSH agent settings, and other CLI auth/config env vars. Use `--no-env-snapshot` for a minimal service env.
 
+When OpenChamber launches the local OpenCode server, it also registers a native
+`openchamber` agent tool for project, session, and scheduled-task orchestration.
+The tool is not injected when connecting to an external OpenCode server.
+
 ### Tunnel behavior notes
 
 - One active tunnel per running OpenChamber instance (port).

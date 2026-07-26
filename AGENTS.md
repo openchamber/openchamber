@@ -8,14 +8,17 @@ This file contains only always-on repository rules and routing. Detailed workflo
 
 ## Instruction Order
 
-Before editing:
+These steps are mandatory. Before editing, you **MUST**:
 
 1. Follow this root guide.
-2. Load every matching project skill.
+2. Load every matching project skill and every task-required reference from
+   those skills.
 3. Read the nearest `DOCUMENTATION.md` and package `README.md` when present.
 4. Follow local code and test precedent.
 
 If these sources materially conflict, stop and resolve the conflict instead of silently choosing one.
+Do not start editing when a matching skill or required reference has not been
+read. Skill loading is a required part of the task, not optional guidance.
 
 ## Runtime Boundaries
 
@@ -68,7 +71,12 @@ High-value anchors:
 
 ## Project Skills
 
-Project skills live under `.agents/skills/*/SKILL.md`. Before editing, load every matching skill; multiple skills may apply. Skills are canonical for their detailed workflows and checklists.
+Project skills live under `.agents/skills/*/SKILL.md`. You **MUST** load every
+skill matching the character of the change before editing; multiple skills may
+apply, including companion skills required by another skill. Read every
+task-required reference named by those skills. Skills are canonical for their
+detailed workflows and checklists. Treating this table as optional advice is a
+process violation.
 
 | Trigger | Required skill |
 |---|---|
@@ -96,3 +104,11 @@ Pure code-reading or explanation does not require implementation skills unless n
 - Do not assume TypeScript/lint covers server JS, CLI JS, Electron helpers, or native behavior; run focused tests, syntax checks, builds, or runtime validation for the touched surface.
 - For docs-only or isolated config changes, run the narrowest relevant validation.
 - Report exactly what was and was not validated. Static checks alone do not prove runtime, relay, performance, or platform correctness.
+
+## Pull Request Handoff
+
+Before creating or updating a pull request, read `CONTRIBUTING.md` and
+`.github/PULL_REQUEST_TEMPLATE.md`. Complete the template with concrete,
+current evidence for the final PR HEAD; do not make the reviewer reconstruct
+intent, affected surfaces, applicable guidance, validation, visual behavior,
+or failure and rollback considerations from the diff alone.

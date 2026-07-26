@@ -167,7 +167,7 @@ describe('buildQueuedAutoSendPayload', () => {
     ]);
 
     expect(payload).not.toBeNull();
-    await sendQueuedAutoSendPayload('session-original', payload!, {
+    await sendQueuedAutoSendPayload('session-original', '/repo', payload!, {
       providerID: 'provider-1',
       modelID: 'model-1',
       agent: 'agent-1',
@@ -185,7 +185,7 @@ describe('buildQueuedAutoSendPayload', () => {
       undefined,
       'variant-1',
       'normal',
-      { sessionId: 'session-original' },
+      { sessionId: 'session-original', directory: '/repo' },
     ]);
   });
 });

@@ -18,32 +18,34 @@
  * This makes it easier to add new states without updating multiple files and
  * allows UI to reason about outcomes with simple status checks.
  */
+type DesktopBootAvailability = { localAvailable?: boolean };
+
 export type DesktopBootOutcome =
   // Main screens - CLI or remote connection is working
-  | { target: 'local'; status: 'ok' }
-  | { target: 'remote'; status: 'ok'; hostId: string; url: string }
+  | ({ target: 'local'; status: 'ok' } & DesktopBootAvailability)
+  | ({ target: 'remote'; status: 'ok'; hostId: string; url: string } & DesktopBootAvailability)
 
   // First launch - user hasn't made a choice yet
-  | { target: null; status: 'not-configured' }
+  | ({ target: null; status: 'not-configured' } & DesktopBootAvailability)
 
   // Recovery screens - something is wrong
-  | { target: 'local'; status: 'unreachable' }
-  | { target: 'remote'; status: 'unreachable'; hostId: string; url: string }
-  | { target: 'remote'; status: 'incompatible'; hostId: string; url: string }
-  | { target: 'remote'; status: 'wrong-service'; hostId: string; url: string }
-  | { target: 'remote'; status: 'missing'; hostId: string };
+  | ({ target: 'local'; status: 'unreachable' } & DesktopBootAvailability)
+  | ({ target: 'remote'; status: 'unreachable'; hostId: string; url: string } & DesktopBootAvailability)
+  | ({ target: 'remote'; status: 'incompatible'; hostId: string; url: string } & DesktopBootAvailability)
+  | ({ target: 'remote'; status: 'wrong-service'; hostId: string; url: string } & DesktopBootAvailability)
+  | ({ target: 'remote'; status: 'missing'; hostId: string } & DesktopBootAvailability);
 
 // ── UI-facing view ──
 
 export type DesktopBootView =
-  | { screen: 'main' }
-  | { screen: 'main'; hostId: string; url: string }
-  | { screen: 'chooser' }
-  | { screen: 'recovery'; variant: 'local-unavailable' }
-  | { screen: 'recovery'; variant: 'remote-unreachable'; hostId: string; url: string }
-  | { screen: 'recovery'; variant: 'remote-incompatible'; hostId: string; url: string }
-  | { screen: 'recovery'; variant: 'remote-wrong-service'; hostId: string; url: string }
-  | { screen: 'recovery'; variant: 'remote-missing'; hostId: string };
+  | ({ screen: 'main' } & DesktopBootAvailability)
+  | ({ screen: 'main'; hostId: string; url: string } & DesktopBootAvailability)
+  | ({ screen: 'chooser' } & DesktopBootAvailability)
+  | ({ screen: 'recovery'; variant: 'local-unavailable' } & DesktopBootAvailability)
+  | ({ screen: 'recovery'; variant: 'remote-unreachable'; hostId: string; url: string } & DesktopBootAvailability)
+  | ({ screen: 'recovery'; variant: 'remote-incompatible'; hostId: string; url: string } & DesktopBootAvailability)
+  | ({ screen: 'recovery'; variant: 'remote-wrong-service'; hostId: string; url: string } & DesktopBootAvailability)
+  | ({ screen: 'recovery'; variant: 'remote-missing'; hostId: string } & DesktopBootAvailability);
 
 // ── Resolver inputs ──
 
@@ -76,6 +78,7 @@ function validateBootOutcome(raw: unknown): ValidationResult {
   }
 
   const record = raw as Record<string, unknown>;
+  const availability = record.localAvailable === false ? { localAvailable: false } : {};
   const target = record.target;
   const status = record.status;
 
@@ -93,7 +96,7 @@ function validateBootOutcome(raw: unknown): ValidationResult {
   if (target === 'remote' || target === 'local') {
     if (status === 'ok' && target === 'local') {
       // { target: 'local'; status: 'ok' } is valid
-      return { valid: true, outcome: { target: 'local', status: 'ok' } };
+      return { valid: true, outcome: { target: 'local', status: 'ok', ...availability } };
     }
 
     if (status === 'ok' && target === 'remote') {
@@ -101,19 +104,19 @@ function validateBootOutcome(raw: unknown): ValidationResult {
       if (typeof record.hostId !== 'string' || typeof record.url !== 'string') {
         return { valid: false };
       }
-      return { valid: true, outcome: { target: 'remote', status: 'ok', hostId: record.hostId, url: record.url } };
+      return { valid: true, outcome: { target: 'remote', status: 'ok', hostId: record.hostId, url: record.url, ...availability } };
     }
 
     if (status === 'unreachable') {
       if (target === 'local') {
         // { target: 'local'; status: 'unreachable' } is valid
-        return { valid: true, outcome: { target: 'local', status: 'unreachable' } };
+        return { valid: true, outcome: { target: 'local', status: 'unreachable', ...availability } };
       } else {
         // { target: 'remote'; status: 'unreachable' } requires hostId and url
         if (typeof record.hostId !== 'string' || typeof record.url !== 'string') {
           return { valid: false };
         }
-        return { valid: true, outcome: { target: 'remote', status: 'unreachable', hostId: record.hostId, url: record.url } };
+        return { valid: true, outcome: { target: 'remote', status: 'unreachable', hostId: record.hostId, url: record.url, ...availability } };
       }
     }
 
@@ -122,7 +125,7 @@ function validateBootOutcome(raw: unknown): ValidationResult {
       if (typeof record.hostId !== 'string' || typeof record.url !== 'string') {
         return { valid: false };
       }
-      return { valid: true, outcome: { target: 'remote', status, hostId: record.hostId, url: record.url } };
+      return { valid: true, outcome: { target: 'remote', status, hostId: record.hostId, url: record.url, ...availability } };
     }
 
     if (status === 'missing') {
@@ -130,14 +133,14 @@ function validateBootOutcome(raw: unknown): ValidationResult {
       if (typeof record.hostId !== 'string') {
         return { valid: false };
       }
-      return { valid: true, outcome: { target: 'remote', status: 'missing', hostId: record.hostId } };
+      return { valid: true, outcome: { target: 'remote', status: 'missing', hostId: record.hostId, ...availability } };
     }
   }
 
   if (target === null) {
     if (status === 'not-configured') {
       // { target: null; status: 'not-configured' } is valid (first launch)
-      return { valid: true, outcome: { target: null, status: 'not-configured' } };
+      return { valid: true, outcome: { target: null, status: 'not-configured', ...availability } };
     }
 
     if (status === 'missing') {
@@ -166,35 +169,36 @@ export function resolveDesktopBootView(
   if (!outcome) {
     return null;
   }
+  const availability = outcome.localAvailable === false ? { localAvailable: false } : {};
 
   // Main screens - CLI or remote connection is working
   if (outcome.status === 'ok') {
     if (outcome.target === 'local') {
-      return { screen: 'main' };
+      return { screen: 'main', ...availability };
     } else if (outcome.target === 'remote') {
-      return { screen: 'main', hostId: outcome.hostId, url: outcome.url };
+      return { screen: 'main', hostId: outcome.hostId, url: outcome.url, ...availability };
     }
   }
 
   // First launch - user hasn't made a choice yet
   if (outcome.target === null && outcome.status === 'not-configured') {
-    return { screen: 'chooser' };
+    return { screen: 'chooser', ...availability };
   }
 
   // Recovery screens - something is wrong
   if (outcome.target === 'local' && outcome.status === 'unreachable') {
-    return { screen: 'recovery', variant: 'local-unavailable' };
+    return { screen: 'chooser', ...availability };
   }
 
   if (outcome.target === 'remote') {
     if (outcome.status === 'unreachable') {
-      return { screen: 'recovery', variant: 'remote-unreachable', hostId: outcome.hostId, url: outcome.url };
+      return { screen: 'recovery', variant: 'remote-unreachable', hostId: outcome.hostId, url: outcome.url, ...availability };
     } else if (outcome.status === 'incompatible') {
-      return { screen: 'recovery', variant: 'remote-incompatible', hostId: outcome.hostId, url: outcome.url };
+      return { screen: 'recovery', variant: 'remote-incompatible', hostId: outcome.hostId, url: outcome.url, ...availability };
     } else if (outcome.status === 'wrong-service') {
-      return { screen: 'recovery', variant: 'remote-wrong-service', hostId: outcome.hostId, url: outcome.url };
+      return { screen: 'recovery', variant: 'remote-wrong-service', hostId: outcome.hostId, url: outcome.url, ...availability };
     } else if (outcome.status === 'missing') {
-      return { screen: 'recovery', variant: 'remote-missing', hostId: outcome.hostId };
+      return { screen: 'recovery', variant: 'remote-missing', hostId: outcome.hostId, ...availability };
     }
   }
 
