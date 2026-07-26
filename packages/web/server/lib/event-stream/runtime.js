@@ -27,10 +27,20 @@ export function createGlobalUiEventBroadcaster({
       return;
     }
 
+    const directory = typeof options.directory === 'string' && options.directory.length > 0
+      ? options.directory
+      : null;
+
     if (hasSseClients) {
+      // Preserve directory for SSE the same way WS frames do. Harness and other
+      // synthetic emitters pass options.directory; without this stamp the UI
+      // event pipeline routes those events to "global" and skips directory stores.
+      const ssePayload = directory
+        ? { directory, payload }
+        : payload;
       for (const res of sseClients) {
         try {
-          writeSseEvent(res, payload);
+          writeSseEvent(res, ssePayload);
         } catch {
         }
       }
@@ -39,7 +49,7 @@ export function createGlobalUiEventBroadcaster({
     if (hasWsClients) {
       for (const socket of Array.from(wsClients)) {
         const sent = sendMessageStreamWsEvent(socket, payload, {
-          directory: typeof options.directory === 'string' && options.directory.length > 0 ? options.directory : 'global',
+          directory: directory || 'global',
           eventId: typeof options.eventId === 'string' && options.eventId.length > 0 ? options.eventId : undefined,
         });
         if (!sent) {

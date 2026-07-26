@@ -929,6 +929,7 @@ export async function optimisticSend(input: {
 
   // Set busy status
   const current = store.getState()
+  const previousStatus = current.session_status?.[input.sessionId]
   store.setState({
     session_status: {
       ...current.session_status,
@@ -979,13 +980,20 @@ export async function optimisticSend(input: {
       }
     }
 
+    // Preserve a pre-existing busy/retry status (e.g. TURN_IN_PROGRESS while a
+    // Claude turn is still active). Forcing idle here would hide Stop and stall
+    // queued auto-send until another status edge arrives.
+    const restoredStatus = previousStatus?.type === "busy" || previousStatus?.type === "retry"
+      ? previousStatus
+      : { type: "idle" as const }
+
     store.setState({
       session,
       message,
       part,
       session_status: {
         ...rollbackState.session_status,
-        [input.sessionId]: { type: "idle" as const },
+        [input.sessionId]: restoredStatus,
       },
     })
     throw error

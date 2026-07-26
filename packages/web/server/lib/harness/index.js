@@ -54,6 +54,7 @@ export {
   getHarnessTurnSnapshot,
   getHarnessRecentMessages,
   isHarnessSessionWorking,
+  listHarnessBusyStatuses,
   resetHarnessTurnSnapshots,
 } from './turn-snapshot.js';
 

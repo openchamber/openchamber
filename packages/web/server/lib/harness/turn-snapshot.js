@@ -158,6 +158,27 @@ export function isHarnessSessionWorking(sessionId) {
 }
 
 /**
+ * Active harness session statuses for OpenCode `/session/status` overlays.
+ * Matches OpenCode's contract: only non-idle entries are returned.
+ *
+ * @param {string} [directory]
+ * @returns {Record<string, { type: 'busy' }>}
+ */
+export function listHarnessBusyStatuses(directory) {
+  const filter = typeof directory === 'string' && directory.trim()
+    ? directory.trim()
+    : '';
+  /** @type {Record<string, { type: 'busy' }>} */
+  const result = {};
+  for (const snap of snapshots.values()) {
+    if (snap.status !== 'busy') continue;
+    if (filter && snap.directory && snap.directory !== filter) continue;
+    result[snap.sessionId] = { type: 'busy' };
+  }
+  return result;
+}
+
+/**
  * Build OpenCode-shaped message list for session-goal ticks.
  * @param {string} sessionId
  * @returns {Array<{ info: object, parts: object[] }> | null}

@@ -89,7 +89,10 @@ describe('event stream broadcaster', () => {
     expect(sseEvents).toEqual([
       {
         res: sseClient,
-        payload: { type: 'openchamber:session-status' },
+        payload: {
+          directory: '/tmp/project',
+          payload: { type: 'openchamber:session-status' },
+        },
       },
     ]);
     expect(wsPayloads).toEqual([

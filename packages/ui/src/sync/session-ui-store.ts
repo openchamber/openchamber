@@ -173,8 +173,17 @@ export function routeMessage(params: {
 
     const providerID = "claude-code"
     const modelID = target.modelRef
+    // Goal intro / other <system-reminder> synthetics are OpenCode-oriented.
+    // Folding them into Claude harness text makes them visible as the user
+    // message and confuses the turn. Goal metadata + server continuations
+    // still drive the loop; handoff seed context is kept.
     const seedParts = (params.additionalParts ?? [])
-      .filter((part) => part.synthetic && typeof part.text === "string" && part.text.trim().length > 0)
+      .filter((part) => (
+        part.synthetic
+        && typeof part.text === "string"
+        && part.text.trim().length > 0
+        && !part.text.includes("<system-reminder>")
+      ))
       .map((part) => part.text.trim())
     // Queued follow-ups arrive as non-synthetic additionalParts. Claude has no
     // multi-prompt steer, so fold them into one harness turn text (same order

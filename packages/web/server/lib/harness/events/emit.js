@@ -29,6 +29,33 @@ export function resetHarnessEventObservers() {
 }
 
 /**
+ * Stamp directory into event properties so SSE consumers (which do not receive
+ * the broadcaster's options.directory) still route into the correct project
+ * store via resolveEventDirectory / parseSseEventEnvelope.
+ * @param {object} payload
+ * @param {string} directory
+ * @returns {object}
+ */
+export function withHarnessEventDirectory(payload, directory) {
+  if (!payload || typeof payload !== 'object' || !directory) {
+    return payload;
+  }
+  const properties = payload.properties && typeof payload.properties === 'object'
+    ? payload.properties
+    : {};
+  if (typeof properties.directory === 'string' && properties.directory.length > 0) {
+    return payload;
+  }
+  return {
+    ...payload,
+    properties: {
+      ...properties,
+      directory,
+    },
+  };
+}
+
+/**
  * @param {(payload: object, options?: { directory?: string, eventId?: string }) => void} broadcast
  * @param {object} payload
  * @param {{ directory?: string, eventId?: string }} [options]
@@ -44,10 +71,12 @@ export function emitHarnessEvent(broadcast, payload, options = {}) {
     ? options.eventId
     : undefined;
 
-  applyHarnessEventToSnapshot(payload, directory);
+  const scopedPayload = withHarnessEventDirectory(payload, directory);
+
+  applyHarnessEventToSnapshot(scopedPayload, directory);
   for (const observer of observers) {
     try {
-      observer(payload, directory);
+      observer(scopedPayload, directory);
     } catch (error) {
       console.warn('[harness] event observer failed:', error?.message || error);
     }
@@ -56,7 +85,7 @@ export function emitHarnessEvent(broadcast, payload, options = {}) {
   if (typeof broadcast !== 'function') {
     return;
   }
-  broadcast(payload, {
+  broadcast(scopedPayload, {
     ...(directory ? { directory } : {}),
     ...(eventId ? { eventId } : {}),
   });

@@ -7,9 +7,9 @@ import { useContextStore } from '@/stores/contextStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { getDirectoryState } from '@/sync/sync-refs';
-import { useDirectorySync } from '@/sync/sync-context';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { HarnessClientError } from '@/lib/harness/client';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
@@ -138,22 +138,55 @@ export const shouldDispatchQueuedAutoSend = (
     && currentStatusType === 'idle';
 };
 
+/**
+ * Prefer the live global busy index (covers Claude harness events even when a
+ * directory child store missed them), then fall back to the directory store.
+ */
+export const resolveQueuedSessionStatusType = (
+  sessionId: string,
+  directory: string,
+): SessionStatusType => {
+  const globalEntry = useGlobalSessionStatusStore.getState().statusById.get(sessionId);
+  if (globalEntry?.status?.type === 'busy' || globalEntry?.status?.type === 'retry') {
+    return globalEntry.status.type;
+  }
+  const directoryStatus = getDirectoryState(directory)?.session_status?.[sessionId]?.type;
+  if (directoryStatus === 'busy' || directoryStatus === 'retry') {
+    return directoryStatus;
+  }
+  // Global absence means idle; directory absence also means idle.
+  return 'idle';
+};
+
+const isTurnInProgressError = (error: unknown): boolean => (
+  error instanceof HarnessClientError && error.code === 'TURN_IN_PROGRESS'
+);
+
 export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?: boolean }) {
   const enabled = typeof enabledOrOptions === 'boolean' ? enabledOrOptions : (enabledOrOptions?.enabled ?? true);
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
   const autoReviewRuns = useAutoReviewStore((state) => state.runsByOriginalSessionID);
-  const sessionStatusRecord = useDirectorySync((state) => state.session_status);
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const globalStatusById = useGlobalSessionStatusStore((state) => state.statusById);
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
   const sendFailuresRef = React.useRef<Map<string, QueuedAutoSendFailure>>(new Map());
   const previousStatusRef = React.useRef<Map<string, SessionStatusType>>(new Map());
   const autoReviewBlockedSessionsRef = React.useRef<Set<string>>(new Set());
+  const [retryClock, setRetryClock] = React.useState(0);
 
   React.useEffect(() => {
     if (!enabled) {
       return;
     }
+
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const armRetryTimer = (delayMs: number) => {
+      if (retryTimer) return;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        setRetryClock((value) => value + 1);
+      }, Math.max(delayMs, 0));
+    };
 
     const dispatchSessionQueue = async (target: MessageQueueTarget, queueSnapshot: QueuedMessage[]) => {
       const { sessionId } = target;
@@ -172,7 +205,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
-      const currentStatus = getDirectoryState(target.directory)?.session_status?.[sessionId]?.type ?? 'idle';
+      const currentStatus = resolveQueuedSessionStatusType(sessionId, target.directory);
       if (currentStatus !== 'idle') {
         return;
       }
@@ -186,6 +219,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       if (failure && failure.messageId !== payload.queuedMessageId) {
         sendFailuresRef.current.delete(targetKey);
       } else if (isQueuedAutoSendBackedOff(failure, payload.queuedMessageId, Date.now())) {
+        armRetryTimer((failure?.nextAttemptAt ?? Date.now()) - Date.now());
         return;
       }
 
@@ -211,32 +245,33 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         sendFailuresRef.current.delete(targetKey);
       } catch (error) {
         console.warn('[queue] queued auto-send failed:', error);
+        if (isTurnInProgressError(error)) {
+          // Claude turn still active — leave the item queued and wait for the
+          // next busy→idle edge instead of exponential backoff forever.
+          sendFailuresRef.current.delete(targetKey);
+          return;
+        }
         const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
         const failures = priorFailures + 1;
+        const nextAttemptAt = Date.now() + getQueuedAutoSendRetryDelayMs(failures);
         sendFailuresRef.current.set(targetKey, {
           messageId: payload.queuedMessageId,
           failures,
-          nextAttemptAt: Date.now() + getQueuedAutoSendRetryDelayMs(failures),
+          nextAttemptAt,
         });
+        armRetryTimer(nextAttemptAt - Date.now());
       } finally {
         inFlightSessionsRef.current.delete(targetKey);
       }
     };
 
-    const statusRecord = sessionStatusRecord ?? {};
     const nextStatusMap = new Map(previousStatusRef.current);
-    for (const [sessionId, status] of Object.entries(statusRecord)) {
-      if (status) {
-        nextStatusMap.set(sessionId, status.type as SessionStatusType);
-      }
-    }
-
     const queueEntries = Object.entries(queuedMessages);
     queueEntries.forEach(([key, queue]) => {
       const target = parseMessageQueueKey(key);
-      if (!target || target.runtimeKey !== getRuntimeKey() || target.directory !== currentDirectory) return;
+      if (!target || target.runtimeKey !== getRuntimeKey()) return;
       const { sessionId } = target;
-      const currentStatusType = (statusRecord[sessionId]?.type ?? 'idle') as SessionStatusType;
+      const currentStatusType = resolveQueuedSessionStatusType(sessionId, target.directory);
       const previousStatusType = previousStatusRef.current.get(sessionId);
       const wasAutoReviewBlocked = autoReviewBlockedSessionsRef.current.has(sessionId);
       const isAutoReviewRunning = useAutoReviewStore.getState().isRunningForSession(sessionId);
@@ -257,5 +292,9 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, sessionStatusRecord, autoReviewRuns, currentDirectory]);
+
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [enabled, queuedMessages, globalStatusById, autoReviewRuns, retryClock]);
 }

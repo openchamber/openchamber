@@ -273,6 +273,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenCodeReady: typeof getOpenCodeReady === 'function'
         ? getOpenCodeReady
         : () => true,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
       ...(harnessRouter ? { router: harnessRouter } : {}),
     });
     registerSessionGoalRoutes(app);
