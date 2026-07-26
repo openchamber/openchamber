@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { Event, OpencodeClient, Session, SessionStatus, Message, Part } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -30,6 +30,7 @@ import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { harnessAbort, harnessPermissionReply } from "@/lib/harness/client"
 import { useSelectionStore } from "./selection-store"
+import { applyGlobalSessionStatusEvent } from "./global-session-status"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -927,15 +928,20 @@ export async function optimisticSend(input: {
   })
   input.onOptimisticInsert?.()
 
-  // Set busy status
+  // Set busy status (directory child store + global index so Stop / queue
+  // auto-send both observe the optimistic busy edge immediately).
   const current = store.getState()
   const previousStatus = current.session_status?.[input.sessionId]
+  const optimisticBusy = { type: "busy" as const }
   store.setState({
     session_status: {
       ...current.session_status,
-      [input.sessionId]: { type: "busy" as const },
+      [input.sessionId]: optimisticBusy,
     },
   })
+  if (targetDirectory) {
+    mirrorSessionStatusToGlobal(targetDirectory, input.sessionId, optimisticBusy)
+  }
 
   try {
     await input.send(messageID)
@@ -983,9 +989,10 @@ export async function optimisticSend(input: {
     // Preserve a pre-existing busy/retry status (e.g. TURN_IN_PROGRESS while a
     // Claude turn is still active). Forcing idle here would hide Stop and stall
     // queued auto-send until another status edge arrives.
-    const restoredStatus = previousStatus?.type === "busy" || previousStatus?.type === "retry"
-      ? previousStatus
-      : { type: "idle" as const }
+    const restoredStatus: SessionStatus | { type: "idle" } =
+      previousStatus?.type === "busy" || previousStatus?.type === "retry"
+        ? previousStatus
+        : { type: "idle" as const }
 
     store.setState({
       session,
@@ -996,8 +1003,25 @@ export async function optimisticSend(input: {
         [input.sessionId]: restoredStatus,
       },
     })
+    if (targetDirectory) {
+      mirrorSessionStatusToGlobal(targetDirectory, input.sessionId, restoredStatus)
+    }
     throw error
   }
+}
+
+function mirrorSessionStatusToGlobal(
+  directory: string,
+  sessionId: string,
+  status: SessionStatus | { type: "idle" },
+): void {
+  applyGlobalSessionStatusEvent(directory, {
+    type: "session.status",
+    properties: {
+      sessionID: sessionId,
+      status,
+    },
+  } as Event)
 }
 
 async function fetchRecentSendConfirmationRecords(

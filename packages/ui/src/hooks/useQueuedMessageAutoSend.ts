@@ -7,6 +7,7 @@ import { useContextStore } from '@/stores/contextStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { getDirectoryState } from '@/sync/sync-refs';
+import { useDirectorySync } from '@/sync/sync-context';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { HarnessClientError } from '@/lib/harness/client';
@@ -17,6 +18,8 @@ const RECENT_ABORT_WINDOW_MS = 2000;
 
 const AUTO_SEND_RETRY_BASE_DELAY_MS = 2000;
 const AUTO_SEND_RETRY_MAX_DELAY_MS = 60000;
+/** Re-check soon after TURN_IN_PROGRESS when busy/idle edges may be missed. */
+const TURN_IN_PROGRESS_WAKE_MS = 1500;
 
 export type QueuedAutoSendFailure = {
   messageId: string;
@@ -166,6 +169,10 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const enabled = typeof enabledOrOptions === 'boolean' ? enabledOrOptions : (enabledOrOptions?.enabled ?? true);
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
   const autoReviewRuns = useAutoReviewStore((state) => state.runsByOriginalSessionID);
+  // Directory child-store status must wake this effect: optimistic busy and
+  // some Claude turns land here first, while global absence alone does not
+  // re-render when the directory flips busy→idle.
+  const directorySessionStatus = useDirectorySync((state) => state.session_status);
   const globalStatusById = useGlobalSessionStatusStore((state) => state.statusById);
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
@@ -246,9 +253,12 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       } catch (error) {
         console.warn('[queue] queued auto-send failed:', error);
         if (isTurnInProgressError(error)) {
-          // Claude turn still active — leave the item queued and wait for the
-          // next busy→idle edge instead of exponential backoff forever.
+          // Claude turn still active — leave the item queued. Treat as busy so
+          // the next idle edge (or wake timer) can dispatch instead of stalling
+          // on idle→idle with no status Map change.
           sendFailuresRef.current.delete(targetKey);
+          previousStatusRef.current.set(sessionId, 'busy');
+          armRetryTimer(TURN_IN_PROGRESS_WAKE_MS);
           return;
         }
         const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
@@ -266,6 +276,13 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     };
 
     const nextStatusMap = new Map(previousStatusRef.current);
+    // Keep previous busy/retry edges for sessions that only appear in the
+    // directory status map (optimistic send / child-store events).
+    for (const [sessionId, status] of Object.entries(directorySessionStatus ?? {})) {
+      if (status?.type === 'busy' || status?.type === 'retry') {
+        nextStatusMap.set(sessionId, status.type);
+      }
+    }
     const queueEntries = Object.entries(queuedMessages);
     queueEntries.forEach(([key, queue]) => {
       const target = parseMessageQueueKey(key);
@@ -296,5 +313,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     return () => {
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [enabled, queuedMessages, globalStatusById, autoReviewRuns, retryClock]);
+  }, [enabled, queuedMessages, directorySessionStatus, globalStatusById, autoReviewRuns, retryClock]);
 }

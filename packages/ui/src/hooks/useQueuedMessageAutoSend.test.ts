@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Agent } from '@opencode-ai/sdk/v2';
 import type { QueuedMessage } from '../stores/messageQueueStore';
+import {
+  applyGlobalSessionStatusEvent,
+  useGlobalSessionStatusStore,
+} from '../sync/global-session-status';
 
 let visibleAgents: Agent[] = [];
 const sendMessageCalls: unknown[][] = [];
@@ -31,6 +35,7 @@ import {
   buildQueuedAutoSendPayload,
   getQueuedAutoSendRetryDelayMs,
   isQueuedAutoSendBackedOff,
+  resolveQueuedSessionStatusType,
   sendQueuedAutoSendPayload,
   shouldDispatchQueuedAutoSend,
 } from './useQueuedMessageAutoSend';
@@ -48,6 +53,32 @@ describe('shouldDispatchQueuedAutoSend', () => {
 
   test('dispatches when idle→idle and queue has items', () => {
     expect(shouldDispatchQueuedAutoSend('idle', 'idle', true)).toBe(true);
+  });
+
+  test('busy→idle with queued items still dispatches', () => {
+    expect(shouldDispatchQueuedAutoSend('busy', 'idle', true)).toBe(true);
+  });
+});
+
+describe('resolveQueuedSessionStatusType', () => {
+  beforeEach(() => {
+    useGlobalSessionStatusStore.setState({ statusById: new Map() });
+  });
+
+  test('prefers global busy over directory absence', () => {
+    applyGlobalSessionStatusEvent('/repo', {
+      type: 'session.status',
+      properties: {
+        sessionID: 'ses_1',
+        status: { type: 'busy' },
+      },
+    } as never);
+
+    expect(resolveQueuedSessionStatusType('ses_1', '/repo')).toBe('busy');
+  });
+
+  test('reports idle when global and directory have no busy entry', () => {
+    expect(resolveQueuedSessionStatusType('ses_missing', '/repo')).toBe('idle');
   });
 });
 
