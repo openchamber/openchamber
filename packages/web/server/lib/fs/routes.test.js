@@ -200,6 +200,27 @@ const registerMkdir = (fsPromises) => {
   return getRoute('POST', '/api/fs/mkdir');
 };
 
+const registerReveal = ({ fsPromises, spawn, platform = 'linux' }) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      ...fsPromises,
+    },
+    spawn,
+    platform,
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('POST', '/api/fs/reveal');
+};
+
 const callExec = async (handler, body) => {
   const res = createMockResponse();
   await handler({ body }, res);
@@ -225,6 +246,12 @@ const callRaw = async (handler, query) => {
 };
 
 const callMkdir = async (handler, body) => {
+  const res = createMockResponse();
+  await handler({ body }, res);
+  return res;
+};
+
+const callReveal = async (handler, body) => {
   const res = createMockResponse();
   await handler({ body }, res);
   return res;
@@ -428,6 +455,77 @@ describe('fs read', () => {
     expect(fsPromises.readFile).toHaveBeenCalledTimes(4);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Read retry exhausted for /repo/file.txt'));
     warn.mockRestore();
+  });
+});
+
+describe('fs reveal', () => {
+  it.each([
+    ['linux', 'xdg-open', ['/repo']],
+    ['darwin', 'open', ['-R', '/repo/file.txt']],
+  ])('returns a controlled error when the %s launcher is unavailable', async (platform, command, args) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const child = new EventEmitter();
+    child.unref = vi.fn();
+    const spawn = vi.fn(() => {
+      queueMicrotask(() => child.emit('error', Object.assign(new Error('not found'), { code: 'ENOENT' })));
+      return child;
+    });
+    const handler = registerReveal({
+      fsPromises: {
+        access: vi.fn(async () => undefined),
+        stat: vi.fn(async () => ({ isDirectory: () => false })),
+      },
+      spawn,
+      platform,
+    });
+
+    const res = await callReveal(handler, { path: '/repo/file.txt' });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual({ error: 'Failed to launch file browser' });
+    expect(spawn).toHaveBeenCalledWith(command, args, { windowsHide: true, stdio: 'ignore', detached: true });
+    expect(child.unref).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('unrefs a detached launcher only after it spawns successfully', async () => {
+    const child = new EventEmitter();
+    child.unref = vi.fn();
+    const spawn = vi.fn(() => {
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    });
+    const handler = registerReveal({
+      fsPromises: {
+        access: vi.fn(async () => undefined),
+        stat: vi.fn(async () => ({ isDirectory: () => false })),
+      },
+      spawn,
+    });
+
+    const res = await callReveal(handler, { path: '/repo/file.txt' });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
+    expect(child.unref).toHaveBeenCalledOnce();
+  });
+
+  it('returns a controlled error when the launcher throws synchronously', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const spawnError = Object.assign(new Error('not found'), { code: 'ENOENT' });
+    const handler = registerReveal({
+      fsPromises: {
+        access: vi.fn(async () => undefined),
+        stat: vi.fn(async () => ({ isDirectory: () => false })),
+      },
+      spawn: vi.fn(() => { throw spawnError; }),
+    });
+
+    const res = await callReveal(handler, { path: '/repo/file.txt' });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual({ error: 'Failed to launch file browser' });
+    expect(error).toHaveBeenCalledWith('Failed to reveal path:', expect.objectContaining({ cause: spawnError }));
+    error.mockRestore();
   });
 });
 
