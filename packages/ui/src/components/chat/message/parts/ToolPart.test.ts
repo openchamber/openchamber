@@ -4,7 +4,7 @@ import { getStreamingOutputAppend, getToolOutput, renderTerminalOutput } from '.
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { tryParseJsonOutput } from '../toolRenderers';
 import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
-import { getToolDescriptionFallback } from './toolRenderUtils';
+import { getToolDescriptionFallback, getToolHeaderTitle, getToolSecondaryText } from './toolRenderUtils';
 
 describe('getToolOutput', () => {
     test('prefers state.output for completed tools', () => {
@@ -126,6 +126,31 @@ describe('streaming output transitions', () => {
 
     test('preserves monotonic streaming text by default', () => {
         expect(getStreamingThrottleText('long output', 'short', true, false)).toBe('long output');
+    });
+});
+
+describe('getToolHeaderTitle', () => {
+    test('uses authoritative completed and running titles', () => {
+        expect(getToolHeaderTitle({ status: 'completed', title: 'Listed projects' }, 'OpenChamber')).toBe('Listed projects');
+        expect(getToolHeaderTitle({ status: 'running', title: 'Listing projects' }, 'OpenChamber')).toBe('Listing projects');
+    });
+
+    test('trims authoritative titles', () => {
+        expect(getToolHeaderTitle({ status: 'completed', title: '  Listed projects  ' }, 'OpenChamber')).toBe('Listed projects');
+    });
+
+    test('falls back to the metadata display name for blank or missing titles', () => {
+        expect(getToolHeaderTitle({ status: 'running', title: '   ' }, 'OpenChamber')).toBe('OpenChamber');
+        expect(getToolHeaderTitle({ status: 'completed' }, 'OpenChamber')).toBe('OpenChamber');
+    });
+
+    test('suppresses only secondary text matching an authoritative title', () => {
+        const state = { status: 'completed', title: '  Listed projects  ' };
+        expect(getToolSecondaryText('Listed projects', state)).toBeNull();
+        expect(getToolSecondaryText('  Listed projects  ', state)).toBeNull();
+        expect(getToolSecondaryText('src/file.ts', { status: 'completed', title: 'src\\file.ts' })).toBeNull();
+        expect(getToolSecondaryText('3 projects', state)).toBe('3 projects');
+        expect(getToolSecondaryText('OpenChamber', { status: 'completed' })).toBe('OpenChamber');
     });
 });
 

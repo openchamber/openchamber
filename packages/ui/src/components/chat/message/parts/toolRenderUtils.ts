@@ -18,6 +18,26 @@ const normalizeToolName = (toolName: unknown): string => {
     return withoutIndex;
 };
 
+const getAuthoritativeToolTitle = (state: unknown): string | null => {
+    const title = typeof state === 'object' && state !== null && 'title' in state
+        ? state.title
+        : undefined;
+    if (typeof title !== 'string') return null;
+    const trimmedTitle = title.trim();
+    return trimmedTitle.length > 0 ? trimmedTitle : null;
+};
+
+export const getToolHeaderTitle = (state: unknown, displayName: string): string => {
+    return getAuthoritativeToolTitle(state) ?? displayName;
+};
+
+export const getToolSecondaryText = (value: unknown, state: unknown): string | null => {
+    if (typeof value !== 'string' || value.trim().length === 0) return null;
+    const normalizedValue = value.trim().replace(/\\/g, '/');
+    const normalizedTitle = getAuthoritativeToolTitle(state)?.replace(/\\/g, '/');
+    return normalizedValue === normalizedTitle ? null : value;
+};
+
 export const isExpandableTool = (toolName: unknown): boolean => {
     return !isStaticTool(toolName);
 };
