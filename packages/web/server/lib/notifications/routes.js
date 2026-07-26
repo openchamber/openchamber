@@ -162,8 +162,11 @@ export const registerNotificationRoutes = (app, dependencies) => {
     }
 
     const platform = req.body?.platform === 'android' ? 'android' : 'ios';
+    // APNs environment the token belongs to: Xcode/dev-signed installs report 'sandbox',
+    // TestFlight/App Store report 'production'. Absent (older clients, Android) → production.
+    const environment = req.body?.environment === 'sandbox' ? 'sandbox' : 'production';
     if (typeof addOrUpdateApnsToken === 'function') {
-      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform);
+      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform, environment);
     }
     return res.json({ ok: true });
   });

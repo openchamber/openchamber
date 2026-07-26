@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import type { GitWorktreeBootstrapStatus } from '@/lib/api/types';
 
 const bootstrapStatusCalls: string[] = [];
-let bootstrapStatusResult: { status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number } = {
+let bootstrapStatusResult: GitWorktreeBootstrapStatus = {
   status: 'ready',
   error: null,
   updatedAt: 1,
 };
+let getBootstrapStatus = (): Promise<GitWorktreeBootstrapStatus> => Promise.resolve(bootstrapStatusResult);
 const toastErrors: Array<{ title: string; description?: string }> = [];
 
 mock.module('@/components/ui', () => ({
@@ -29,7 +31,7 @@ mock.module('@/contexts/runtimeAPIRegistry', () => ({
       worktree: {
         bootstrapStatus: (directory: string) => {
           bootstrapStatusCalls.push(directory);
-          return Promise.resolve(bootstrapStatusResult);
+          return getBootstrapStatus();
         },
       },
     },
@@ -39,7 +41,7 @@ mock.module('@/contexts/runtimeAPIRegistry', () => ({
 mock.module('@/lib/gitApiHttp', () => ({
   getGitWorktreeBootstrapStatus: (directory: string) => {
     bootstrapStatusCalls.push(directory);
-    return Promise.resolve(bootstrapStatusResult);
+    return getBootstrapStatus();
   },
 }));
 
@@ -47,8 +49,10 @@ const {
   clearWorktreeBootstrapState,
   getWorktreeBootstrapState,
   markWorktreeBootstrapPending,
+  setWorktreeBootstrapState,
   startWorktreeBootstrapWatcher,
   waitForWorktreeBootstrap,
+  waitForWorktreeGitReady,
 } = await import('./worktreeBootstrap');
 
 const waitFor = async (predicate: () => boolean): Promise<void> => {
@@ -64,6 +68,7 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     bootstrapStatusCalls.length = 0;
     toastErrors.length = 0;
     bootstrapStatusResult = { status: 'ready', error: null, updatedAt: 1 };
+    getBootstrapStatus = () => Promise.resolve(bootstrapStatusResult);
     clearWorktreeBootstrapState('/repo');
     clearWorktreeBootstrapState('/repo-wt');
   });
@@ -76,6 +81,108 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
 
   test('polls when the directory was explicitly marked pending', async () => {
     markWorktreeBootstrapPending('/repo-wt');
+
+    await waitForWorktreeBootstrap('/repo-wt');
+
+    expect(bootstrapStatusCalls).toEqual(['/repo-wt']);
+  });
+
+  test('git-ready wait does not wait for setup-ready', async () => {
+    setWorktreeBootstrapState('/repo-wt', {
+      status: 'pending',
+      phase: 'git-ready',
+      error: null,
+      updatedAt: 1,
+    });
+
+    await waitForWorktreeGitReady('/repo-wt');
+
+    expect(bootstrapStatusCalls).toEqual([]);
+  });
+
+  test('git-ready wait remains compatible with ready responses that omit phase', async () => {
+    markWorktreeBootstrapPending('/repo-wt');
+
+    await waitForWorktreeGitReady('/repo-wt');
+
+    expect(bootstrapStatusCalls).toEqual(['/repo-wt']);
+    expect(getWorktreeBootstrapState('/repo-wt')).toEqual(bootstrapStatusResult);
+  });
+
+  test('dedupes concurrent waiters for the same phase', async () => {
+    let resolveStatus!: (status: GitWorktreeBootstrapStatus) => void;
+    getBootstrapStatus = () => new Promise((resolve) => {
+      resolveStatus = resolve;
+    });
+    markWorktreeBootstrapPending('/repo-wt');
+
+    const first = waitForWorktreeGitReady('/repo-wt');
+    const second = waitForWorktreeGitReady('/repo-wt');
+    await waitFor(() => bootstrapStatusCalls.length === 1);
+    resolveStatus({ status: 'pending', phase: 'git-ready', error: null, updatedAt: 2 });
+
+    await Promise.all([first, second]);
+    expect(bootstrapStatusCalls).toEqual(['/repo-wt']);
+  });
+
+  test('does not let a cleared waiter restore stale state or remove a replacement waiter', async () => {
+    const statusResolvers: Array<(status: GitWorktreeBootstrapStatus) => void> = [];
+    getBootstrapStatus = () => new Promise((resolve) => {
+      statusResolvers.push(resolve);
+    });
+    markWorktreeBootstrapPending('/repo-wt');
+
+    const staleWaiter = waitForWorktreeGitReady('/repo-wt');
+    await waitFor(() => statusResolvers.length === 1);
+    clearWorktreeBootstrapState('/repo-wt');
+    markWorktreeBootstrapPending('/repo-wt');
+    const replacementWaiter = waitForWorktreeGitReady('/repo-wt');
+    await waitFor(() => statusResolvers.length === 2);
+
+    statusResolvers[0]({ status: 'pending', phase: 'git-ready', error: null, updatedAt: 2 });
+    await expect(staleWaiter).rejects.toThrow('cancelled');
+    expect(getWorktreeBootstrapState('/repo-wt')?.phase).toBe('directory-created');
+
+    statusResolvers[1]({ status: 'pending', phase: 'git-ready', error: null, updatedAt: 3 });
+    await replacementWaiter;
+    expect(getWorktreeBootstrapState('/repo-wt')?.phase).toBe('git-ready');
+    expect(bootstrapStatusCalls).toEqual(['/repo-wt', '/repo-wt']);
+  });
+
+  test('does not regress a newer phase when concurrent polls resolve out of order', async () => {
+    const statusResolvers: Array<(status: GitWorktreeBootstrapStatus) => void> = [];
+    getBootstrapStatus = () => new Promise((resolve) => {
+      statusResolvers.push(resolve);
+    });
+    markWorktreeBootstrapPending('/repo-wt');
+
+    startWorktreeBootstrapWatcher('/repo-wt', { pollIntervalMs: 1000 });
+    await waitFor(() => statusResolvers.length === 1);
+    const gitReadyWaiter = waitForWorktreeGitReady('/repo-wt');
+    await waitFor(() => statusResolvers.length === 2);
+
+    statusResolvers[1]({ status: 'pending', phase: 'git-ready', error: null, updatedAt: 3 });
+    await gitReadyWaiter;
+    statusResolvers[0]({ status: 'pending', phase: 'directory-created', error: null, updatedAt: 2 });
+    await Promise.resolve();
+
+    expect(getWorktreeBootstrapState('/repo-wt')?.phase).toBe('git-ready');
+    clearWorktreeBootstrapState('/repo-wt');
+  });
+
+  test('full bootstrap wait continues through git-ready until setup-ready', async () => {
+    setWorktreeBootstrapState('/repo-wt', {
+      status: 'pending',
+      phase: 'git-ready',
+      error: null,
+      updatedAt: 1,
+    });
+    bootstrapStatusResult = {
+      status: 'ready',
+      phase: 'setup-ready',
+      error: null,
+      updatedAt: 2,
+    };
 
     await waitForWorktreeBootstrap('/repo-wt');
 

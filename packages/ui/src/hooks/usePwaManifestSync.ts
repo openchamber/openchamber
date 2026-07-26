@@ -69,6 +69,7 @@ export const usePwaManifestSync = () => {
   }, [currentSessionId, sessions]);
 
   const signature = React.useMemo(() => JSON.stringify(recentShortcuts), [recentShortcuts]);
+  const hasRecentShortcuts = recentShortcuts.length > 0;
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !isWebRuntime()) {
@@ -76,7 +77,7 @@ export const usePwaManifestSync = () => {
     }
 
     try {
-      if (recentShortcuts.length === 0) {
+      if (!hasRecentShortcuts) {
         localStorage.removeItem(PWA_RECENT_SESSIONS_STORAGE_KEY);
       } else {
         localStorage.setItem(PWA_RECENT_SESSIONS_STORAGE_KEY, signature);
@@ -87,5 +88,5 @@ export const usePwaManifestSync = () => {
 
     const win = window as ManifestSyncWindow;
     win.__OPENCHAMBER_UPDATE_PWA_MANIFEST__?.();
-  }, [recentShortcuts, signature]);
+  }, [hasRecentShortcuts, signature]);
 };

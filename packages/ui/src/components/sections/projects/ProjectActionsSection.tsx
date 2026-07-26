@@ -20,7 +20,6 @@ import {
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
@@ -41,6 +40,8 @@ import {
   PROJECT_SETTINGS_CONTROL_WIDTH,
   ProjectSettingsSubsection,
 } from '@/components/sections/projects/ProjectSettingsSubsection';
+import { SETTINGS_SELECT_SIZE } from '@/components/sections/shared/SettingsSection';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -228,7 +229,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
   return (
     <ProjectSettingsSubsection
       title={t('settings.projects.actions.title')}
-      description={t('settings.projects.actions.description')}
+      info={t('settings.projects.actions.description')}
       settingsItem="projects.actions"
       headerAction={(
         <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={handleAddAction}>
@@ -387,14 +388,9 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                               placeholder={t('settings.projects.actions.field.overrideUrlPlaceholder')}
                               className="h-7 w-full max-w-[24rem]"
                             />
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Icon name="information" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60 cursor-help" />
-                              </TooltipTrigger>
-                              <TooltipContent sideOffset={8} className="max-w-xs">
-                                {t('settings.projects.actions.field.overrideUrlTooltip')}
-                              </TooltipContent>
-                            </Tooltip>
+                            <SettingsInfoHint contentClassName="max-w-xs">
+                              {t('settings.projects.actions.field.overrideUrlTooltip')}
+                            </SettingsInfoHint>
                           </div>
 
                           {isDesktopShellApp ? (
@@ -414,7 +410,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                                     }));
                                   }}
                                 >
-                                  <SelectTrigger className="h-7 w-full">
+                                  <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-full">
                                     <SelectValue placeholder={t('settings.projects.actions.field.useOutputManualUrl')} />
                                   </SelectTrigger>
                                   <SelectContent>

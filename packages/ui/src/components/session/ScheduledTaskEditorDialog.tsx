@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -17,17 +18,23 @@ import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo }
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '@/components/chat/SnippetAutocomplete';
 import { Icon } from "@/components/icon/Icon";
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
+import { canonicalizeTimezone } from '@/lib/timezones';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
+// Mirrors the composer's footer icon toggles (PermissionAutoAcceptButton /
+// SessionGoalButton) so the state reads the same in both places.
+const EDITOR_TOGGLE_BUTTON_CLASS = 'flex h-6 w-6 cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0';
+
 const TIMEZONE_OPTIONS = (() => {
   if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
-    return Intl.supportedValuesOf('timeZone');
+    return [...new Set(Intl.supportedValuesOf('timeZone').map(canonicalizeTimezone))];
   }
   return [
     'UTC',
@@ -469,6 +476,7 @@ type ScheduledTaskDraft = {
     agent: string;
     goalEnabled: boolean;
     goalTokenBudget: number | null;
+    permissionAutoAccept: boolean;
   };
   state?: ScheduledTask['state'];
 };
@@ -498,7 +506,7 @@ const toDraft = (
     agent: string;
   },
 ): ScheduledTaskDraft => {
-  const timezoneFallback = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const timezoneFallback = canonicalizeTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   if (!task) {
     return {
       name: '',
@@ -520,6 +528,7 @@ const toDraft = (
         agent: defaults.agent,
         goalEnabled: false,
         goalTokenBudget: null,
+        permissionAutoAccept: false,
       },
     };
   }
@@ -542,7 +551,7 @@ const toDraft = (
         ? task.schedule.time
         : '09:00',
       weekdays: Array.isArray(task.schedule.weekdays) ? task.schedule.weekdays : [1],
-      timezone: task.schedule.timezone || timezoneFallback,
+      timezone: canonicalizeTimezone(task.schedule.timezone || timezoneFallback),
       cronExpression: task.schedule.kind === 'cron' && typeof task.schedule.cron === 'string'
         ? task.schedule.cron
         : '',
@@ -557,6 +566,7 @@ const toDraft = (
       goalTokenBudget: typeof task.execution.goalTokenBudget === 'number' && task.execution.goalTokenBudget > 0
         ? task.execution.goalTokenBudget
         : null,
+      permissionAutoAccept: task.execution.permissionAutoAccept === true,
     },
     state: task.state,
   };
@@ -701,7 +711,7 @@ const CronScheduleSection: React.FC<{
             }));
           }}
         >
-          <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+          <SelectTrigger size="lg" className="w-fit max-w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
             {TIMEZONE_OPTIONS.map((timezone) => (
               <SelectItem key={timezone} value={timezone}>{timezone}</SelectItem>
@@ -1162,6 +1172,7 @@ export function ScheduledTaskEditorDialog(props: {
         modelID: draft.execution.modelID,
         ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
         ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
+        ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
         ...(draft.execution.goalEnabled ? { goalEnabled: true } : {}),
         ...(draft.execution.goalEnabled && draft.execution.goalTokenBudget
           ? { goalTokenBudget: draft.execution.goalTokenBudget }
@@ -1186,7 +1197,7 @@ export function ScheduledTaskEditorDialog(props: {
     if (typeof document === 'undefined') return false;
     return Boolean(
       document.querySelector(
-        '[data-slot="dropdown-menu-content"], [data-slot="select-content"]'
+        '[data-slot="dropdown-menu-content"][data-open], [data-slot="select-content"][data-open]'
       )
     );
   }, []);
@@ -1226,7 +1237,7 @@ export function ScheduledTaskEditorDialog(props: {
                         }));
                       }}
                     >
-                      <SelectTrigger className="w-fit max-w-full">
+                      <SelectTrigger size="lg" className="w-fit max-w-full">
                         <SelectValue>
                           {(value) => value === 'daily'
                             ? t('sessions.scheduledTasks.editor.scheduleType.daily')
@@ -1257,7 +1268,7 @@ export function ScheduledTaskEditorDialog(props: {
                 <div className="relative">
                   <button
                     type="button"
-                    className="inline-flex h-9 w-fit max-w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-3 text-left hover:bg-interactive-hover"
+                    className={cn(dropdownTriggerVariants({ size: 'default' }), 'w-fit max-w-full')}
                     onClick={() => setIsDatePickerOpen((prev) => !prev)}
                   >
                     <span className="inline-flex items-center gap-2">
@@ -1386,7 +1397,7 @@ export function ScheduledTaskEditorDialog(props: {
                       }));
                     }}
                   >
-                    <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                    <SelectTrigger size="lg" className="w-fit max-w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {TIMEZONE_OPTIONS.map((timezone) => (
                         <SelectItem key={timezone} value={timezone}>{timezone}</SelectItem>
@@ -1474,7 +1485,7 @@ export function ScheduledTaskEditorDialog(props: {
                     }));
                   }}
                 >
-                  <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                  <SelectTrigger size="lg" className="w-fit max-w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {TIMEZONE_OPTIONS.map((timezone) => (
                       <SelectItem key={timezone} value={timezone}>{timezone}</SelectItem>
@@ -1520,7 +1531,7 @@ export function ScheduledTaskEditorDialog(props: {
                   }));
                 }}
               >
-                <SelectTrigger className="w-fit max-w-full">
+                <SelectTrigger size="lg" className="w-fit max-w-full">
                   <SelectValue>
                     {(value) => value === '__default'
                       ? t('sessions.scheduledTasks.editor.thinkingLevel.default')
@@ -1622,19 +1633,8 @@ export function ScheduledTaskEditorDialog(props: {
             </div>
           </div>
 
+          {draft.execution.goalEnabled ? (
           <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
-            <label className="inline-flex cursor-pointer items-center gap-2">
-              <Checkbox
-                checked={draft.execution.goalEnabled}
-                onChange={(goalEnabled) => setDraft((prev) => ({
-                  ...prev,
-                  execution: { ...prev.execution, goalEnabled },
-                }))}
-                ariaLabel={t('sessions.scheduledTasks.editor.goal.aria')}
-              />
-              <span className="typography-meta">{t('sessions.scheduledTasks.editor.goal.label')}</span>
-            </label>
-            {draft.execution.goalEnabled ? (
               <label className="inline-flex cursor-pointer items-center gap-2">
                 <Checkbox
                   checked={draft.execution.goalTokenBudget !== null}
@@ -1646,8 +1646,7 @@ export function ScheduledTaskEditorDialog(props: {
                 />
                 <span className="typography-meta">{t('sessions.scheduledTasks.editor.goal.budgetLabel')}</span>
               </label>
-            ) : null}
-            {draft.execution.goalEnabled && draft.execution.goalTokenBudget !== null ? (
+            {draft.execution.goalTokenBudget !== null ? (
               <NumberInput
                 value={draft.execution.goalTokenBudget}
                 onValueChange={(value) => {
@@ -1664,6 +1663,7 @@ export function ScheduledTaskEditorDialog(props: {
               />
             ) : null}
           </div>
+          ) : null}
     </div>
   );
 
@@ -1679,6 +1679,48 @@ export function ScheduledTaskEditorDialog(props: {
       </label>
 
       <div className="flex items-center gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className={cn(EDITOR_TOGGLE_BUTTON_CLASS)}
+              onClick={() => setDraft((prev) => ({
+                ...prev,
+                execution: { ...prev.execution, permissionAutoAccept: !prev.execution.permissionAutoAccept },
+              }))}
+              aria-pressed={draft.execution.permissionAutoAccept}
+              aria-label={t('sessions.scheduledTasks.editor.permissionAutoAccept.aria')}
+            >
+              {draft.execution.permissionAutoAccept ? (
+                <Icon name="shield-check" className="h-[18px] w-[18px]" style={{ color: 'var(--status-info)' }} aria-hidden="true" />
+              ) : (
+                <Icon name="shield-user" className="h-[18px] w-[18px]" aria-hidden="true" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('sessions.scheduledTasks.editor.permissionAutoAccept.label')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className={cn(EDITOR_TOGGLE_BUTTON_CLASS, draft.execution.goalEnabled && 'text-[var(--status-info)]')}
+              onClick={() => setDraft((prev) => ({
+                ...prev,
+                execution: { ...prev.execution, goalEnabled: !prev.execution.goalEnabled },
+              }))}
+              aria-pressed={draft.execution.goalEnabled}
+              aria-label={t('sessions.scheduledTasks.editor.goal.aria')}
+            >
+              {draft.execution.goalEnabled ? (
+                <Icon name="target-fill" className="h-[18px] w-[18px] text-current" aria-hidden="true" />
+              ) : (
+                <Icon name="target" className="h-[18px] w-[18px] text-current" aria-hidden="true" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('sessions.scheduledTasks.editor.goal.label')}</TooltipContent>
+        </Tooltip>
         <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
           {t('sessions.scheduledTasks.editor.actions.cancel')}
         </Button>

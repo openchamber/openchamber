@@ -12,7 +12,8 @@ const normalizePolicy = (value) => {
   for (const [sessionId, enabled] of entries) {
     if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
   }
-  return { sessions };
+  const revision = Number.isSafeInteger(source.revision) && source.revision >= 0 ? source.revision : 0;
+  return { sessions, revision };
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -38,6 +39,7 @@ export function createPermissionAutoAcceptRuntime({
 
   const snapshot = () => ({
     sessions: { ...policy.sessions },
+    revision: policy.revision,
   });
 
   const load = async () => {
@@ -76,6 +78,7 @@ export function createPermissionAutoAcceptRuntime({
     const result = await persistUpdate((current) => ({
       ...current,
       sessions: { ...current.sessions, [sessionId.trim()]: enabled },
+      revision: current.revision + 1,
     }));
     if (enabled) await reconcilePending({ directories: [directory] });
     return result;

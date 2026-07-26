@@ -23,6 +23,7 @@ export type ScheduledTask = {
     agent?: string;
     goalEnabled?: boolean;
     goalTokenBudget?: number;
+    permissionAutoAccept?: boolean;
   };
   state: {
     createdAt: number;

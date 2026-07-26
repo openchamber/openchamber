@@ -25,6 +25,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getPreviewTargetRecoveryAction } from '@/lib/preview/proxy-response';
 import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
@@ -541,6 +542,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
+  const effectiveDirectory = useEffectiveDirectory();
   const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const addAttachedFile = useInputStore((state) => state.addAttachedFile);
 
@@ -687,7 +689,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
 
   const attachPreviewAnnotation = React.useCallback((target: PreviewElementMetadata) => {
     const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!sessionKey) {
+    if (!sessionKey || !effectiveDirectory) {
       toast.error(t('contextPanel.preview.inspect.attachNoSession'));
       return;
     }
@@ -711,8 +713,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         attachedScreenshot = false;
       }
 
-      addInlineCommentDraft({
-        sessionKey,
+      addInlineCommentDraft({ directory: effectiveDirectory, sessionKey }, {
         source: 'preview-annotation',
         fileLabel: pageUrl || 'preview',
         startLine: 1,
@@ -730,7 +731,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       });
       toast.success(t('contextPanel.preview.inspect.attached'));
     })();
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, effectiveDirectory, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
 
   React.useEffect(() => {
     setBridgeReady(false);
@@ -920,7 +921,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
 
   const attachConsoleEvents = React.useCallback(() => {
     const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!sessionKey) {
+    if (!sessionKey || !effectiveDirectory) {
       toast.error(t('contextPanel.preview.console.attachNoSession'));
       return;
     }
@@ -936,8 +937,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return `[${timestamp}] [${event.level}] ${event.message}${details}`;
     }).join('\n');
 
-    addInlineCommentDraft({
-      sessionKey,
+    addInlineCommentDraft({ directory: effectiveDirectory, sessionKey }, {
       source: 'preview-console',
       fileLabel: rawUrl || effectiveSrc || 'preview',
       startLine: 1,
@@ -947,31 +947,41 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       text: t('contextPanel.preview.console.attachAnnotation'),
     });
     toast.success(t('contextPanel.preview.console.attached'));
-  }, [addInlineCommentDraft, consoleEvents, currentSessionId, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
+  }, [addInlineCommentDraft, consoleEvents, currentSessionId, effectiveDirectory, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
 
   // Out-of-band upstream probe: iframes don't expose HTTP status to the parent,
   // so when the proxy returns a 502 (upstream dev server is offline) the iframe
-  // would just render the raw JSON error body. Probe the proxy URL with a HEAD
+  // would just render the raw JSON error body. Probe the proxy URL with a GET
   // request and surface a friendly overlay when the upstream is unreachable.
   type UpstreamState = 'unknown' | 'starting' | 'reachable' | 'unreachable';
   const [upstreamState, setUpstreamState] = React.useState<UpstreamState>('unknown');
   const upstreamProbeStartedAtRef = React.useRef<number>(0);
   const upstreamProbeAttemptRef = React.useRef<number>(0);
+  const upstreamProbeKeyRef = React.useRef<string>('');
+  const proxyRecoveryAttemptedKeyRef = React.useRef<string>('');
   const PREVIEW_STARTUP_GRACE_MS = 15_000;
 
   React.useEffect(() => {
     if (!proxySrc) {
       setUpstreamState('unknown');
+      upstreamProbeKeyRef.current = '';
       upstreamProbeStartedAtRef.current = 0;
       upstreamProbeAttemptRef.current = 0;
       return;
     }
 
     let cancelled = false;
-    if (!upstreamProbeStartedAtRef.current) {
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+    if (upstreamProbeKeyRef.current !== proxyCacheKey) {
+      upstreamProbeKeyRef.current = proxyCacheKey;
       upstreamProbeStartedAtRef.current = Date.now();
       upstreamProbeAttemptRef.current = 0;
     }
+    const scheduleRetry = (delay: number) => {
+      retryTimeout = setTimeout(() => {
+        if (!cancelled) bumpReload();
+      }, delay);
+    };
     setUpstreamState('unknown');
 
     void (async () => {
@@ -993,21 +1003,36 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       if (cancelled) return;
 
       if (!response) {
-        // Network-level failure (e.g. server itself is down) — treat as unreachable.
         setUpstreamState('unreachable');
+        scheduleRetry(5000);
         return;
       }
 
-      if (response.status === 403 || response.status === 404) {
+      const recoveryAction = getPreviewTargetRecoveryAction(
+        response.headers,
+        proxyRecoveryAttemptedKeyRef.current === proxyCacheKey,
+      );
+      if (recoveryAction !== 'none') {
         previewProxyTargetCache.delete(proxyCacheKey);
-        setProxyState({ status: 'loading' });
-        bumpProxyRegistration();
+        if (recoveryAction === 'retry-registration') {
+          proxyRecoveryAttemptedKeyRef.current = proxyCacheKey;
+          setProxyState({ status: 'loading' });
+          bumpProxyRegistration();
+        } else {
+          const errorBody = await response.json().catch(() => ({}));
+          if (cancelled) return;
+          const message = typeof errorBody?.error === 'string'
+            ? errorBody.error
+            : `HTTP ${response.status}`;
+          setProxyState({ status: 'error', message });
+        }
         return;
       }
 
       // The proxy emits 502 when the upstream is unreachable. Anything else
       // (including 4xx from the upstream) means the upstream answered.
       if (response.status !== 502) {
+        proxyRecoveryAttemptedKeyRef.current = '';
         setUpstreamState('reachable');
         return;
       }
@@ -1021,19 +1046,17 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         upstreamProbeAttemptRef.current += 1;
         const attempt = upstreamProbeAttemptRef.current;
         const delay = Math.min(2000, 250 * Math.pow(2, Math.min(4, attempt)));
-        setTimeout(() => {
-          if (!cancelled) {
-            bumpReload();
-          }
-        }, delay).unref?.();
+        scheduleRetry(delay);
         return;
       }
 
       setUpstreamState('unreachable');
+      scheduleRetry(5000);
     })();
 
     return () => {
       cancelled = true;
+      if (retryTimeout) clearTimeout(retryTimeout);
     };
   }, [proxyCacheKey, proxySrc, reloadNonce]);
 
@@ -1566,8 +1589,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       await addAttachedFile(file);
     }
 
-    addInlineCommentDraft({
-      sessionKey,
+    addInlineCommentDraft({ directory, sessionKey }, {
       source: 'preview-annotation',
       fileLabel: currentUrl || 'browser',
       startLine: 1,
@@ -1586,7 +1608,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       text: '',
     });
     toast.success(t('contextPanel.preview.inspect.attached'));
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, newSessionDraftOpen, t]);
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, directory, newSessionDraftOpen, t]);
 
   const cancelInspect = React.useCallback(() => {
     const iframe = iframeRef.current;
@@ -1974,8 +1996,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
           await addAttachedFile(file);
         }
 
-        addInlineCommentDraft({
-          sessionKey,
+        addInlineCommentDraft({ directory, sessionKey }, {
           source: 'preview-annotation',
           fileLabel: currentUrl || 'browser',
           startLine: 1,
@@ -1994,7 +2015,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         toast.success(t('contextPanel.preview.inspect.attached'));
       })
       .catch(() => setIsInspecting(false));
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, isInspecting, newSessionDraftOpen, t]);
+  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, directory, isInspecting, newSessionDraftOpen, t]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">

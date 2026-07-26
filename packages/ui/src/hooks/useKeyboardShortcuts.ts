@@ -1,10 +1,11 @@
 import React from 'react';
+import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useUIStore } from '@/stores/useUIStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { useAssistantStatus } from '@/hooks/useAssistantStatus';
+import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
@@ -42,7 +43,7 @@ export const useKeyboardShortcuts = () => {
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const { themeMode, setThemeMode } = useThemeSystem();
-  const { working } = useAssistantStatus();
+  const { phase: sessionPhase } = useCurrentSessionActivity();
   const abortPrimedUntilRef = React.useRef<number | null>(null);
   const abortPrimedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const themeModeRef = React.useRef(themeMode);
@@ -62,17 +63,6 @@ export const useKeyboardShortcuts = () => {
 
   React.useEffect(() => {
     const combo = (actionId: string) => getEffectiveShortcutCombo(actionId, shortcutOverrides);
-    const isTerminalEventTarget = (target: EventTarget | null) => {
-      if (!(target instanceof Element)) {
-        return false;
-      }
-
-      return Boolean(
-        target.closest('.terminal-viewport-container') ||
-        target.getAttribute('data-terminal-hidden-input') === 'true'
-      );
-    };
-
     const dropdownTargetSelector = [
       '[data-slot="dropdown-menu-content"]',
       '[data-slot="select-content"]',
@@ -528,10 +518,7 @@ export const useKeyboardShortcuts = () => {
         const target = e.target as Element | null;
         const isInsideDialog = Boolean(target?.closest('[role="dialog"]'));
         const isSettingsMounted = Boolean(document.querySelector('[data-settings-view="true"]'));
-        const isInsideTerminal = Boolean(
-          target?.closest('.terminal-viewport-container') ||
-          target?.getAttribute('data-terminal-hidden-input') === 'true'
-        );
+        const isInsideTerminal = isTerminalEventTarget(target);
         const hasDropdownInteraction = isDropdownEventTarget(target) || hasOpenDropdown();
 
         const {
@@ -582,7 +569,7 @@ export const useKeyboardShortcuts = () => {
 
         // Double-ESC abort logic - only when on chat tab with no overlays
         const sessionId = currentSessionId;
-        const canAbortNow = working.canAbort && Boolean(sessionId);
+        const canAbortNow = sessionPhase !== 'idle' && Boolean(sessionId);
         if (!canAbortNow) {
           resetAbortPriming();
           return;
@@ -644,7 +631,7 @@ export const useKeyboardShortcuts = () => {
     setPromptNavigatorPanelOpen,
     toggleExpandedInput,
     setThemeMode,
-    working,
+    sessionPhase,
     armAbortPrompt,
     resetAbortPriming,
     currentSessionId,

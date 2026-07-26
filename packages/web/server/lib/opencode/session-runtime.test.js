@@ -148,4 +148,84 @@ describe('session runtime', () => {
       vi.useRealTimers();
     }
   });
+
+  it('maintains an idempotent active session count', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent() {},
+    });
+    runtimes.push(runtime);
+    const status = (sessionID, type) => runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID, status: { type } },
+    });
+
+    expect(runtime.getActiveSessionCount()).toBe(0);
+    status('session-1', 'busy');
+    status('session-1', 'busy');
+    status('session-1', 'retry');
+    expect(runtime.getActiveSessionCount()).toBe(1);
+
+    status('session-2', 'busy');
+    expect(runtime.getActiveSessionCount()).toBe(2);
+
+    status('session-1', 'idle');
+    expect(runtime.getActiveSessionCount()).toBe(1);
+    status('session-1', 'idle');
+    expect(runtime.getActiveSessionCount()).toBe(1);
+
+    runtime.resetAllSessionActivityToIdle();
+    expect(runtime.getActiveSessionCount()).toBe(0);
+  });
+
+  it('restores activity when busy interrupts cooldown without timer underflow', () => {
+    vi.useFakeTimers();
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent() {},
+    });
+    const status = (type) => runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type } },
+    });
+
+    try {
+      status('busy');
+      status('idle');
+      expect(runtime.getActiveSessionCount()).toBe(0);
+
+      status('retry');
+      expect(runtime.getActiveSessionCount()).toBe(1);
+      vi.advanceTimersByTime(2000);
+
+      expect(runtime.getActiveSessionCount()).toBe(1);
+      expect(runtime.getSessionActivitySnapshot()['session-1']).toEqual({ type: 'busy' });
+    } finally {
+      runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('releases retained session state when disposed', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent() {},
+    });
+    runtimes.push(runtime);
+
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    runtime.markUserMessageSent('session-1');
+    runtime.dispose();
+
+    expect(runtime.getActiveSessionCount()).toBe(0);
+    expect(runtime.getSessionActivitySnapshot()).toEqual({});
+    expect(runtime.getSessionStateSnapshot()).toEqual({});
+    expect(runtime.getSessionAttentionSnapshot()).toEqual({});
+  });
 });

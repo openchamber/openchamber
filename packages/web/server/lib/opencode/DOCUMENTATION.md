@@ -28,6 +28,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/opencode-resolution-runtime.js`: OpenCode binary resolution snapshot runtime for settings routes and diagnostics.
 - `packages/web/server/lib/opencode/tunnel-wiring-runtime.js`: tunnel service/routes composition runtime and active-port wiring for main server startup.
 - `packages/web/server/lib/opencode/startup-pipeline-runtime.js`: server startup tail orchestration runtime for terminal/proxy/static/start-listen flow.
+- `packages/web/server/lib/agent-tool/runtime.js`: managed OpenCode custom-tool materialization, environment injection, loopback authentication, and fixed CLI action dispatch.
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/opencode/openchamber-routes.js`: OpenChamber update and models metadata route registration.
 - `packages/web/server/lib/opencode/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
@@ -87,6 +88,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - Returned API:
   - `processOpenCodeSsePayload(payload)`
   - `getSessionActivitySnapshot()`
+  - `getActiveSessionCount()`
   - `getSessionStateSnapshot()`
   - `getSessionAttentionSnapshot()`
   - `getSessionState(sessionId)`
@@ -96,6 +98,8 @@ This module provides OpenCode server integration utilities for the web server ru
   - `markUserMessageSent(sessionId)`
   - `resetAllSessionActivityToIdle()`
   - `dispose()`
+
+The runtime maintains active-session count incrementally from idempotent activity phase transitions. Upstream stall-timeout and lifecycle health checks read it in O(1); the hourly cleanup removes activity phases older than 24 hours without broadcasting synthetic state transitions. Snapshot generation remains reserved for the session-activity API.
 
 ## Public exports (lifecycle.js)
 - `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration.
@@ -110,8 +114,14 @@ This module provides OpenCode server integration utilities for the web server ru
   - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
 
+Managed OpenCode launch also merges the environment returned by the agent-tool
+runtime. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
+be replaced by injected values. External OpenCode processes receive no
+OpenChamber tool injection.
+
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
+- OpenCode CLI resolution order is persisted settings, environment overrides, bundled Desktop CLI when available, PATH, known install locations, then platform shell discovery.
 - Returned API:
   - `applyLoginShellEnvSnapshot()`
   - `getLoginShellEnvSnapshot()`
@@ -123,7 +133,7 @@ This module provides OpenCode server integration utilities for the web server ru
   - `resolveWslExecutablePath()`
   - `buildWslExecArgs(execArgs, distroOverride?)`
   - `isExecutable(filePath)`
-  - `searchPathFor(binaryName)`
+  - `searchPathFor(binaryName, searchPath?)`: resolves an executable from the supplied PATH value, defaulting to the process PATH.
   - `clearResolvedOpenCodeBinary()`
 
 ## Public exports (env-config.js)
@@ -306,6 +316,10 @@ This module provides OpenCode server integration utilities for the web server ru
 - `createStartupPipelineRuntime(dependencies)`: creates runtime for terminal wiring, proxy/bootstrap scheduling, static route registration, and server startup/listen flow.
 - Returned API:
   - `run(options)`
+
+The pipeline binds the OpenChamber listener and publishes its active port
+before starting managed OpenCode. The managed custom tool therefore receives
+an authoritative loopback callback URL even when OpenChamber binds port `0`.
 
 ## Public exports (openchamber-routes.js)
 - `registerOpenChamberRoutes(app, dependencies)`: registers OpenChamber endpoints:

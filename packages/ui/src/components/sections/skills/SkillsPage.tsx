@@ -8,6 +8,15 @@ import { toast } from '@/components/ui';
 import { useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import {
+  SettingsSection,
+  SettingsFieldRow,
+  SettingsStackedField,
+  SETTINGS_FIELD_LABEL_CLASS,
+  SETTINGS_SELECT_SIZE,
+} from '@/components/sections/shared/SettingsSection';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import {
   Select,
   SelectContent,
@@ -504,113 +513,103 @@ const SkillsInstalledPage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay outerClassName="h-full" className="w-full">
-      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+    <>
+      <SettingsPageLayout
+        title={isNewSkill ? t('settings.skills.page.title.newSkill') : selectedSkillName}
+        description={selectedSkill
+          ? t('settings.skills.page.subtitle.skillLocation', {
+              location: locationLabelText(locationValueFrom(selectedSkill.scope, selectedSkill.source)),
+            })
+          : t('settings.skills.page.subtitle.newSkill')}
+        showSaveStatus={false}
+      >
 
-        {/* Header */}
-        <div className="mb-4">
-          <div className="min-w-0">
-            <h2 className="typography-ui-header font-semibold text-foreground truncate flex items-center gap-2">
-              {isNewSkill ? t('settings.skills.page.title.newSkill') : selectedSkillName}
-            </h2>
-            <p className="typography-meta text-muted-foreground truncate">
-              {selectedSkill
-                ? t('settings.skills.page.subtitle.skillLocation', {
-                    location: locationLabelText(locationValueFrom(selectedSkill.scope, selectedSkill.source)),
-                  })
-                : t('settings.skills.page.subtitle.newSkill')}
-            </p>
-          </div>
-        </div>
 
-        {/* Basic Information */}
-        <div data-settings-item="skills.basic-information" className="mb-8">
-          <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.skills.page.section.basicInformation')}
-            </h3>
-          </div>
 
-          <section className="px-2 pb-2 pt-0 space-y-0">
+        <SettingsSection
+          title={t('settings.skills.page.section.basicInformation')}
+          divider={false}
+          settingsItem="skills.basic-information"
+          contentClassName="space-y-0"
+        >
 
             {isNewSkill && (
-              <div className="py-1.5">
-                <span className="typography-ui-label text-foreground">{t('settings.skills.page.field.skillNameLocation')}</span>
-                <span className="typography-meta text-muted-foreground ml-2">{t('settings.skills.page.field.skillNameHint')}</span>
-                <div className="flex items-center gap-2 mt-1.5">
-                  <Input
-                    value={draftName}
-                    onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
-                    placeholder={t('settings.skills.page.field.skillNamePlaceholder')}
-                    className="h-7 w-40 px-2"
-                  />
-                  <Select
-                    value={locationValueFrom(draftScope, draftSource)}
-                    onValueChange={(v) => {
-                      const next = locationPartsFrom(v as SkillLocationValue);
-                      setDraftScope(next.scope);
-                      setDraftSource(next.source === 'agents' ? 'agents' : 'opencode');
-                    }}
-                  >
-                    <SelectTrigger className="w-fit gap-1.5">
-                      {draftScope === 'user' ? (
-                        <Icon name="user-3" className="h-3.5 w-3.5" />
-                      ) : (
-                        <Icon name="folder" className="h-3.5 w-3.5" />
-                      )}
-                      {draftSource === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
-                      <span>{locationLabelText(locationValueFrom(draftScope, draftSource))}</span>
-                    </SelectTrigger>
-                    <SelectContent align="start">
-                      {SKILL_LOCATION_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2">
-                              {option.scope === 'user' ? <Icon name="user-3" className="h-3.5 w-3.5" /> : <Icon name="folder" className="h-3.5 w-3.5" />}
-                              {option.source === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
-                              <span>{locationLabelText(option.value)}</span>
-                            </div>
-                            <span className="typography-micro text-muted-foreground ml-6">{locationDescriptionText(option.value)}</span>
+              <SettingsFieldRow
+                label={t('settings.skills.page.field.skillNameLocation')}
+                info={t('settings.skills.page.field.skillNameHint')}
+              >
+                <Input
+                  value={draftName}
+                  onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
+                  placeholder={t('settings.skills.page.field.skillNamePlaceholder')}
+                  className="h-7 w-40 px-2"
+                />
+                <Select
+                  value={locationValueFrom(draftScope, draftSource)}
+                  onValueChange={(v) => {
+                    const next = locationPartsFrom(v as SkillLocationValue);
+                    setDraftScope(next.scope);
+                    setDraftSource(next.source === 'agents' ? 'agents' : 'opencode');
+                  }}
+                >
+                  <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit gap-1.5">
+                    {draftScope === 'user' ? (
+                      <Icon name="user-3" className="h-3.5 w-3.5" />
+                    ) : (
+                      <Icon name="folder" className="h-3.5 w-3.5" />
+                    )}
+                    {draftSource === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
+                    <span>{locationLabelText(locationValueFrom(draftScope, draftSource))}</span>
+                  </SelectTrigger>
+                  <SelectContent align="start">
+                    {SKILL_LOCATION_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-2">
+                            {option.scope === 'user' ? <Icon name="user-3" className="h-3.5 w-3.5" /> : <Icon name="folder" className="h-3.5 w-3.5" />}
+                            {option.source === 'agents' ? <Icon name="robot-2" className="h-3.5 w-3.5" /> : null}
+                            <span>{locationLabelText(option.value)}</span>
                           </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+                          <span className="typography-micro text-muted-foreground ml-6">{locationDescriptionText(option.value)}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </SettingsFieldRow>
             )}
 
-            <div className="py-1.5">
-              <span className="typography-ui-label text-foreground">{t('settings.common.field.description')} <span className="text-[var(--status-error)]">*</span></span>
-              <span className="typography-meta text-muted-foreground ml-2">{t('settings.skills.page.field.descriptionHint')}</span>
-              <div className="mt-1.5">
-                <Textarea
-                  value={description}
-                  onChange={(e) => handleDescriptionChange(e.target.value)}
-                  placeholder={t('settings.skills.page.field.descriptionPlaceholder')}
-                  rows={2}
-                  className="w-full resize-none min-h-[60px] max-h-32 bg-transparent"
-                  disabled={isReadOnlySkill}
-                />
-              </div>
-            </div>
+            <SettingsStackedField
+              label={(
+                <>
+                  {t('settings.common.field.description')} <span className="text-[var(--status-error)]">*</span>
+                </>
+              )}
+              info={t('settings.skills.page.field.descriptionHint')}
+              controlClassName="w-full max-w-none"
+            >
+              <Textarea
+                value={description}
+                onChange={(e) => handleDescriptionChange(e.target.value)}
+                placeholder={t('settings.skills.page.field.descriptionPlaceholder')}
+                rows={2}
+                className="w-full resize-none min-h-[60px] max-h-32 bg-transparent"
+                disabled={isReadOnlySkill}
+              />
+            </SettingsStackedField>
 
-          </section>
-        </div>
+        </SettingsSection>
 
-        {/* Instructions */}
-        <div data-settings-item="skills.instructions" className="mb-8">
-          <div className="mb-1 px-1 flex items-center justify-between gap-2">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.skills.page.section.instructions')}
-            </h3>
+        <SettingsSection
+          title={t('settings.skills.page.section.instructions')}
+          headerAction={(
             <PreviewToggleButton
               currentMode={skillEditorMode === 'preview' ? 'preview' : 'edit'}
               onToggle={() => setSkillEditorMode((mode) => mode === 'preview' ? 'edit' : 'preview')}
             />
-          </div>
-
-          <section className="px-2 pb-2 pt-0">
+          )}
+          settingsItem="skills.instructions"
+        >
             <div
               className={cn(
                 'overflow-hidden rounded-md border border-[var(--surface-subtle)] bg-background',
@@ -639,21 +638,17 @@ const SkillsInstalledPage: React.FC = () => {
                 />
               )}
             </div>
-          </section>
-        </div>
+        </SettingsSection>
 
-        {/* Supporting Files */}
-        <div data-settings-item="skills.supporting-files" className="mb-2">
-          <div className="mb-1 px-1 flex items-center gap-2">
-            <h3 className="typography-ui-header font-medium text-foreground">
-              {t('settings.skills.page.section.supportingFiles')}
-            </h3>
+        <SettingsSection
+          title={t('settings.skills.page.section.supportingFiles')}
+          headerAction={(
             <Button variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile} disabled={isReadOnlySkill}>
               <Icon name="add" className="h-3.5 w-3.5" /> {t('settings.skills.page.actions.addFile')}
             </Button>
-          </div>
-
-          <section className="px-2 pb-2 pt-0">
+          )}
+          settingsItem="skills.supporting-files"
+        >
             {(() => {
               const filesToShow = isNewSkill ? pendingFiles : supportingFiles;
 
@@ -697,11 +692,9 @@ const SkillsInstalledPage: React.FC = () => {
                 </div>
               );
             })()}
-          </section>
-        </div>
+        </SettingsSection>
 
-        {/* Save action */}
-        <div className="px-2 py-1">
+        <SettingsSection>
           <Button
             onClick={handleSave}
             disabled={isReadOnlySkill || isSaving || !hasSkillChanges}
@@ -710,9 +703,9 @@ const SkillsInstalledPage: React.FC = () => {
           >
             {isSaving ? t('settings.common.actions.saving') : isNewSkill ? t('settings.skills.page.actions.createSkill') : t('settings.common.actions.saveChanges')}
           </Button>
-        </div>
+        </SettingsSection>
+      </SettingsPageLayout>
 
-      </div>
 
       {/* Add/Edit File Dialog */}
       <Dialog
@@ -764,9 +757,14 @@ const SkillsInstalledPage: React.FC = () => {
           ) : (
             <div className="space-y-4 flex-1 min-h-0 flex flex-col pt-2">
               <div className="space-y-2 flex-shrink-0">
-                <label className="typography-ui-label font-medium text-foreground">
-                  {t('settings.skills.page.fileDialog.field.filePath')}
-                </label>
+                <div className="flex items-center gap-1">
+                  <label className={SETTINGS_FIELD_LABEL_CLASS}>
+                    {t('settings.skills.page.fileDialog.field.filePath')}
+                  </label>
+                  {!editingFilePath && (
+                    <SettingsInfoHint>{t('settings.skills.page.fileDialog.field.filePathHint')}</SettingsInfoHint>
+                  )}
+                </div>
                 <Input
                   value={newFileName}
                   onChange={(e) => setNewFileName(e.target.value)}
@@ -774,14 +772,9 @@ const SkillsInstalledPage: React.FC = () => {
                   className="text-foreground placeholder:text-muted-foreground focus-visible:ring-[var(--primary-base)]"
                   disabled={editingFilePath !== null}
                 />
-                {!editingFilePath && (
-                  <p className="typography-micro text-muted-foreground">
-                    {t('settings.skills.page.fileDialog.field.filePathHint')}
-                  </p>
-                )}
               </div>
               <div className="space-y-2 flex-1 min-h-0 flex flex-col">
-                <label className="typography-ui-label font-medium text-foreground flex-shrink-0">
+                <label className={`${SETTINGS_FIELD_LABEL_CLASS} flex-shrink-0`}>
                   {t('settings.skills.page.fileDialog.field.content')}
                 </label>
                 <div className="h-[45vh] min-h-[250px] max-h-[55vh] overflow-hidden rounded-md border border-[var(--surface-subtle)] bg-background">
@@ -813,7 +806,8 @@ const SkillsInstalledPage: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </ScrollableOverlay>
+
+    </>
   );
 };
 

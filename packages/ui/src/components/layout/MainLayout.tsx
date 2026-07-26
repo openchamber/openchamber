@@ -16,6 +16,7 @@ import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { MultiRunLauncher } from '@/components/multirun';
+import { TerminalView } from '@/components/views/TerminalView';
 import { DrawerProvider } from '@/contexts/DrawerContext';
 
 import { useUIStore } from '@/stores/useUIStore';
@@ -31,8 +32,9 @@ import { FilesView } from '@/components/views/FilesView';
 import { GitView } from '@/components/views/GitView';
 import { PlanView } from '@/components/views/PlanView';
 
-// Heavy views loaded on-demand to reduce initial bundle parse time.
-const TerminalView = lazyWithChunkRecovery(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
+// Keep TerminalView eager: the bottom dock reserves its height immediately, so
+// suspending here leaves a large blank panel on slower machines.
+// Other heavy views stay on-demand to reduce initial bundle parse time.
 const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
@@ -70,7 +72,6 @@ export const MainLayout: React.FC = () => {
         setMobileLeftDrawerOpen(open);
         useUIStore.getState().setSessionSwitcherOpen(open);
     }, []);
-    const mobileRightDrawerOpenRef = React.useRef(false);
     const initialDrawerWidthRef = React.useRef(typeof window === 'undefined' ? 0 : window.innerWidth);
 
     // Left drawer motion value
@@ -112,7 +113,6 @@ export const MainLayout: React.FC = () => {
             setMobileRightDrawerVisible(false);
             return;
         }
-        mobileRightDrawerOpenRef.current = mobileRightSidebarOpen;
         if (mobileRightSidebarOpen) {
             setMobileRightDrawerVisible(true);
         }
@@ -365,7 +365,7 @@ export const MainLayout: React.FC = () => {
             case 'diff':
                 return <React.Suspense fallback={null}><DiffView /></React.Suspense>;
             case 'terminal':
-                return <React.Suspense fallback={null}><TerminalView /></React.Suspense>;
+                return <TerminalView />;
             case 'files':
                 return <React.Suspense fallback={null}><FilesView /></React.Suspense>;
             case 'context':
@@ -439,7 +439,7 @@ export const MainLayout: React.FC = () => {
                     >
                         <main className="w-full h-full overflow-hidden bg-background relative" data-page-scroll-lock="true">
                             <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
-                                <ErrorBoundary><ChatView /></ErrorBoundary>
+                                <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen} /></ErrorBoundary>
                             </div>
                             {secondaryView && (
                                 <div className="absolute inset-0">
@@ -478,7 +478,7 @@ export const MainLayout: React.FC = () => {
                                 aria-hidden={!mobileLeftDrawerOpen}
                             >
                                 <ErrorBoundary>
-                                    <SessionSidebar mobileVariant />
+                                    <SessionSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />
                                 </ErrorBoundary>
                             </motion.div>
                             {mobileRightDrawerVisible && (
@@ -518,7 +518,7 @@ export const MainLayout: React.FC = () => {
                             className="border-border/50"
                             topBar={<SidebarTopBar />}
                         >
-                            <SessionSidebar />
+                            <SessionSidebar isVisible={isSidebarOpen} />
                         </Sidebar>
                         <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                             <Header />
@@ -528,7 +528,7 @@ export const MainLayout: React.FC = () => {
                                         <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
                                             <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                                 <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
-                                                    <ErrorBoundary><ChatView /></ErrorBoundary>
+                                                    <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen} /></ErrorBoundary>
                                                 </div>
                                                 {secondaryView && (
                                                     <div className="absolute inset-0">
@@ -539,12 +539,10 @@ export const MainLayout: React.FC = () => {
                                             <ContextPanel />
                                         </div>
                                     </div>
-                                    <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>
-                                        {isBottomTerminalOpen ? (
+                                    <BottomTerminalDock isOpen={isBottomTerminalOpen && activeMainTab !== 'terminal'} isMobile={isMobile}>
+                                        {isBottomTerminalOpen && activeMainTab !== 'terminal' ? (
                                             <ErrorBoundary>
-                                                <React.Suspense fallback={null}>
-                                                    <TerminalView />
-                                                </React.Suspense>
+                                                <TerminalView />
                                             </ErrorBoundary>
                                         ) : null}
                                     </BottomTerminalDock>

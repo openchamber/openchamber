@@ -77,10 +77,10 @@ export function getGhosttyTerminalOptions(
   const augmentedFontFamily = `${fontFamily}, ${powerlineFallbacks}`;
 
   return {
+    // TerminalViewport enables blinking only while its input owns focus.
     cursorBlink: false,
     cursorStyle: 'bar' as const,
     fontSize,
-    lineHeight: 1.15,
     fontFamily: augmentedFontFamily,
     allowTransparency: false,
     theme: {

@@ -5,6 +5,8 @@ export const SEMANTIC_TYPOGRAPHY = {
   uiLabel: '0.8750rem',
   meta: '0.875rem',
   micro: '0.875rem',
+  /** Settings page / detail-pane title — larger than section headers */
+  settingsPageTitle: '1.125rem',
 } as const;
 
 export const VSCODE_TYPOGRAPHY = {
@@ -15,6 +17,7 @@ export const VSCODE_TYPOGRAPHY = {
   uiLabel: '0.8438rem',
   meta: '0.8438rem',
   micro: '0.7813rem',
+  settingsPageTitle: '1.0625rem',
 } as const;
 
 export type SemanticTypographyKey = keyof typeof SEMANTIC_TYPOGRAPHY;

@@ -199,6 +199,16 @@ export class SessionEditorPanelProvider {
     }
   }
 
+  public notifyPermissionAutoAcceptSynced(snapshot: unknown): void {
+    for (const entry of this._panels.values()) {
+      entry.panel.webview.postMessage({
+        type: 'command',
+        command: 'permissionAutoAcceptSynced',
+        payload: snapshot,
+      });
+    }
+  }
+
   public notifyWindowFocusChanged(focused: boolean): void {
     for (const entry of this._panels.values()) {
       entry.panel.webview.postMessage({
@@ -427,7 +437,8 @@ export class SessionEditorPanelProvider {
         headers: this._buildSseHeaders(headers),
         signal: controller.signal,
         onChunk: (chunk) => {
-          entry.panel.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk });
+          // Panel may be disposed before SSE callbacks fire.
+          entry.panel?.webview?.postMessage({ type: 'api:sse:chunk', streamId, chunk });
         },
       });
 
@@ -435,12 +446,12 @@ export class SessionEditorPanelProvider {
 
       start.run
         .then(() => {
-          entry.panel.webview.postMessage({ type: 'api:sse:end', streamId });
+          entry.panel?.webview?.postMessage({ type: 'api:sse:end', streamId });
         })
         .catch((error) => {
           if (!controller.signal.aborted) {
             const messageText = error instanceof Error ? error.message : String(error);
-            entry.panel.webview.postMessage({ type: 'api:sse:end', streamId, error: messageText });
+            entry.panel?.webview?.postMessage({ type: 'api:sse:end', streamId, error: messageText });
           }
         })
         .finally(() => {

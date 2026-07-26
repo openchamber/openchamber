@@ -39,6 +39,8 @@ export type MobileSurfaceShellProps = {
   onBack?: () => void;
   /** If true, disable swipe-down-to-dismiss (e.g. when a nested view should keep gesture for itself). */
   disableSwipeDismiss?: boolean;
+  /** If true, leave Escape available to nested content instead of dismissing the surface. */
+  disableEscapeDismiss?: boolean;
   /** If true, render only the drag handle and let the child render its own header. */
   headerless?: boolean;
   ariaLabel?: string;
@@ -53,6 +55,7 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
   trailing,
   onBack,
   disableSwipeDismiss = false,
+  disableEscapeDismiss = false,
   headerless = false,
   ariaLabel,
   children,
@@ -120,7 +123,7 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
     };
     const focusTimer = window.setTimeout(focusFirstElement, ENTER_DELAY_MS);
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !disableEscapeDismiss) {
         onCloseRef.current();
         return;
       }
@@ -154,7 +157,7 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
       previousFocusRef.current?.focus?.({ preventScroll: true });
       previousFocusRef.current = null;
     };
-  }, [open]);
+  }, [disableEscapeDismiss, open]);
 
   const handleDragStart = (event: React.TouchEvent<HTMLDivElement>) => {
     if (disableSwipeDismiss) return;
@@ -259,9 +262,13 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
           onTouchEnd={handleDragEnd}
           onTouchCancel={handleDragEnd}
         >
-          <div className="flex items-center justify-center pt-2 pb-1">
-            <span className="h-1 w-10 rounded-full bg-[var(--surface-muted)]" aria-hidden />
-          </div>
+          {disableSwipeDismiss ? (
+            <div className="h-3" />
+          ) : (
+            <div className="flex items-center justify-center pt-2 pb-1">
+              <span className="h-1 w-10 rounded-full bg-[var(--surface-muted)]" aria-hidden />
+            </div>
+          )}
           {!headerless ? (
             <header className="flex h-[var(--oc-header-height,56px)] items-center gap-2 px-3">
               {leading}

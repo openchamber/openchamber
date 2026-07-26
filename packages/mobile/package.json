@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun run --cwd ../web build && node scripts/prepare-web-assets.mjs",
+    "build": "bun run --cwd ../web build && bun run build:assets",
+    "build:assets": "node scripts/prepare-web-assets.mjs",
     "sync": "node scripts/with-mobile-env.mjs \"bun run build && cap sync\"",
     "add:ios": "cap add ios",
     "add:android": "cap add android",

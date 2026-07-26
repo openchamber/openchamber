@@ -25,6 +25,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useI18n } from '@/lib/i18n';
 
 type OperationType = 'merge' | 'rebase';
@@ -300,12 +301,15 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
         </p>
         <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen} modal={false}>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="lg" className="w-full justify-between">
+            <button
+              type="button"
+              className={cn(dropdownTriggerVariants({ size: 'default' }), 'w-full')}
+            >
               <span className={cn('truncate', !selectedBranch && 'text-muted-foreground')}>
                 {selectedBranch || t('gitView.branch.selectBranch')}
               </span>
               <Icon name="arrow-down-s" className="size-4 opacity-60 shrink-0" />
-            </Button>
+            </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"

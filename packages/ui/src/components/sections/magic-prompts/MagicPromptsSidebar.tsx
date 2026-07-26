@@ -3,6 +3,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useMagicPromptsStore } from '@/stores/useMagicPromptsStore';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 
 interface MagicPromptsSidebarProps {
   onItemSelect?: () => void;
@@ -62,7 +63,7 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground">{t('settings.magicPrompts.sidebar.title')}</h2>
+        <h2 className={SETTINGS_PANEL_TITLE_CLASS}>{t('settings.magicPrompts.sidebar.title')}</h2>
         <p className="typography-meta mt-1 text-muted-foreground">{t('settings.magicPrompts.sidebar.description')}</p>
       </div>
 

@@ -5,11 +5,6 @@ import type { Session } from '@opencode-ai/sdk/v2';
 // Archived buckets routinely grow into the hundreds/thousands; virtualize
 // when we cross this row count so the DOM stays bounded.
 const ARCHIVED_VIRTUALIZE_THRESHOLD = 50;
-// Active/worktree groups can also grow large (a single worktree with 80+
-// sessions), and unlike the archive they're interactive from the start.
-// Virtualize eagerly for non-archived groups to keep the rendered row
-// count bounded. With overscan ~8 the visible behavior is identical.
-const ACTIVE_VIRTUALIZE_THRESHOLD = 30;
 // Compact rows in the archived bucket without nested subagents render
 // around 24-32px; virtua measures mounted rows and uses this as the initial hint.
 const ARCHIVED_ROW_ESTIMATE_PX = 28;
@@ -22,12 +17,15 @@ import { SessionFolderItem } from '../SessionFolderItem';
 import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDnd';
 import type { SortableDragHandleProps } from './sortableItems';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
-import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePath, renderHighlightedText } from './utils';
+import { isBranchDifferentFromLabel, normalizePath, renderHighlightedText } from './utils';
+import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
 import {
   collectSubtreeContainingId,
   computeNodeStructureKey,
+  nodeHasPinnedMembershipChange,
   nodeContainsSessionId,
   resolveMenuOpenSessionId,
+  selectFolderRootNodes,
 } from './sessionNodeItemUtils';
 import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
@@ -36,6 +34,7 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { openExternalUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { useChildStoreManager } from '@/sync/sync-context';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -92,11 +91,9 @@ type Props = {
   pinnedSessionIds: Set<string>;
   expandedParents: Set<string>;
   sessionOrderIndex: Map<string, number>;
-  currentSessionId: string | null;
   editingId: string | null;
   editTitle: string;
   openSidebarMenuKey: string | null;
-  liveSessionById: Map<string, Session>;
   prVisualStateByDirectoryBranch: Map<string, {
     visualState: 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
     number: number;
@@ -142,12 +139,14 @@ const groupHasPinnedMembershipChange = (
   prevPinnedSessionIds: Set<string>,
   nextPinnedSessionIds: Set<string>,
 ): boolean => {
-  const visit = (node: SessionNode): boolean => {
-    const sessionId = node.session.id;
-    if (prevPinnedSessionIds.has(sessionId) !== nextPinnedSessionIds.has(sessionId)) return true;
-    return node.children.some(visit);
-  };
-  return group.sessions.some(visit);
+  return group.sessions.some((node) => nodeHasPinnedMembershipChange(
+    node,
+    node,
+    prevPinnedSessionIds,
+    nextPinnedSessionIds,
+    group.directory,
+    group.directory,
+  ));
 };
 
 const groupHasSessionOrderChange = (
@@ -172,21 +171,6 @@ const groupHasExpansionMembershipChange = (
   const visit = (node: SessionNode): boolean => {
     const key = `project:${bucketTag}:${node.session.id}`;
     if (prevExpandedParents.has(key) !== nextExpandedParents.has(key)) return true;
-    return node.children.some(visit);
-  };
-  return group.sessions.some(visit);
-};
-
-const groupHasResolvedSessionChange = (
-  group: SessionGroup,
-  prevLiveSessionById: Map<string, Session>,
-  nextLiveSessionById: Map<string, Session>,
-): boolean => {
-  const visit = (node: SessionNode): boolean => {
-    const sessionId = node.session.id;
-    if ((prevLiveSessionById.get(sessionId) ?? node.session) !== (nextLiveSessionById.get(sessionId) ?? node.session)) {
-      return true;
-    }
     return node.children.some(visit);
   };
   return group.sessions.some(visit);
@@ -236,11 +220,6 @@ const areGroupPropsEqual = (prev: Props, next: Props): boolean => {
     return false;
   }
 
-  if (prev.currentSessionId !== next.currentSessionId
-    && (groupContainsSessionId(prev.group, prev.currentSessionId) || groupContainsSessionId(next.group, next.currentSessionId))) {
-    return false;
-  }
-
   if (prev.editingId !== next.editingId
     && (groupContainsSessionId(prev.group, prev.editingId) || groupContainsSessionId(next.group, next.editingId))) {
     return false;
@@ -255,11 +234,6 @@ const areGroupPropsEqual = (prev: Props, next: Props): boolean => {
     const prevMenuSessionId = resolveMenuOpenSessionId(prev.group.sessions, prev.openSidebarMenuKey, 'project', Boolean(prev.group.isArchivedBucket));
     const nextMenuSessionId = resolveMenuOpenSessionId(next.group.sessions, next.openSidebarMenuKey, 'project', Boolean(next.group.isArchivedBucket));
     if (prevMenuSessionId || nextMenuSessionId) return false;
-  }
-
-  if (prev.liveSessionById !== next.liveSessionById
-    && groupHasResolvedSessionChange(next.group, prev.liveSessionById, next.liveSessionById)) {
-    return false;
   }
 
   // Per-row / per-state props. The PR-visual-state map flips frequently
@@ -352,7 +326,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     pinnedSessionIds,
     expandedParents,
     sessionOrderIndex,
-    currentSessionId,
     editingId,
     openSidebarMenuKey,
     prVisualStateByDirectoryBranch,
@@ -370,7 +343,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
       if (bIndex === undefined) return -1;
       if (aIndex !== bIndex) return aIndex - bIndex;
     }
-    return compareSessionsByPinnedAndTime(a.session, b.session, pinnedSessionIds);
+    return compareSessionsByLifecycleOrder(a.session, b.session, pinnedSessionIds, EMPTY_SESSION_ORDER_RANKS);
   }, [pinnedSessionIds, sessionOrderIndex]);
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
@@ -379,6 +352,19 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   // VS Code always uses the expanded layout (see SessionNodeItem).
   const isMinimalMode = displayMode === 'minimal' && !isVSCodeRuntime();
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
+  const childStores = useChildStoreManager();
+  const bootstrapDirectory = normalizePath(group.directory ?? null);
+  const bootstrapState = React.useSyncExternalStore(
+    React.useCallback(
+      (notify) => bootstrapDirectory ? childStores.subscribeBootstrap(notify) : () => undefined,
+      [bootstrapDirectory, childStores],
+    ),
+    React.useCallback(
+      () => bootstrapDirectory ? childStores.getBootstrapState(bootstrapDirectory) : undefined,
+      [bootstrapDirectory, childStores],
+    ),
+    React.useCallback(() => undefined, []),
+  );
   const maxVisible = hideDirectoryControls ? 10 : 5;
   const nonArchivedVisibleCount = Math.max(maxVisible, visibleSessionCount ?? maxVisible);
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
@@ -409,10 +395,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   }, [sourceGroupNodes]);
 
   const allFoldersForGroupBase = React.useMemo(() => scopeFolders.map((folder) => {
-    const nodes = folder.sessionIds
-      .map((sid) => nodeBySessionId.get(sid))
-      .filter((n): n is SessionNode => Boolean(n))
-      .sort(compareSessionNodes);
+    const nodes = selectFolderRootNodes(folder.sessionIds, nodeBySessionId).sort(compareSessionNodes);
     return { folder, nodes };
   }), [scopeFolders, nodeBySessionId, compareSessionNodes]);
 
@@ -472,21 +455,12 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   const ungroupedSessions = React.useMemo(() => sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)), [sourceGroupNodes, sessionIdsInFolders]);
   const rootFolders = React.useMemo(() => allFoldersForGroup.filter(({ folder }) => !folder.parentId), [allFoldersForGroup]);
 
-  // Precompute per-row "subtree contains active session" and "subtree contains
-  // editing session" lookups once per render. The previous design walked the
+  // Precompute the per-row "subtree contains editing session" lookup once per
+  // render. The previous design walked the
   // node tree inside SessionNodeItem.areEqual for every row, which is O(M^2)
   // across the whole sidebar. These sets let areEqual answer with a single
   // Set.has lookup, so the cost is O(M) once per SessionGroupSection render.
   const renderContextForGroup = 'project' as const;
-  const subtreeContainsActive = React.useMemo(() => {
-    const set = new Set<string>();
-    collectSubtreeContainingId(sourceGroupNodes, currentSessionId, set);
-    allFoldersForGroup.forEach(({ nodes }) => {
-      collectSubtreeContainingId(nodes, currentSessionId, set);
-    });
-    return set;
-  }, [sourceGroupNodes, allFoldersForGroup, currentSessionId]);
-
   const subtreeContainsEditing = React.useMemo(() => {
     const set = new Set<string>();
     collectSubtreeContainingId(sourceGroupNodes, editingId, set);
@@ -539,11 +513,10 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   }, [nodeStructureKeyBySourceNode, nodeStructureKeyByFolderNode]);
 
   const childRenderExtrasFor = React.useCallback((child: SessionNode) => ({
-    subtreeContainsActive,
     subtreeContainsEditing,
     menuOpenSessionId,
     nodeStructureKey: resolveNodeStructureKey(child),
-  }), [subtreeContainsActive, subtreeContainsEditing, menuOpenSessionId, resolveNodeStructureKey]);
+  }), [subtreeContainsEditing, menuOpenSessionId, resolveNodeStructureKey]);
 
   const totalSessions = ungroupedSessions.length;
   const visibleSessions = group.isArchivedBucket
@@ -554,21 +527,14 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   const remainingCount = totalSessions - visibleSessions.length;
   const canShowLess = !group.isArchivedBucket && !hasSessionSearchQuery && totalSessions > maxVisible && remainingCount === 0;
 
-  // Virtualize large groups. Archived buckets grow into the hundreds or
-  // thousands of rows; active/worktree groups can also hit 80+ sessions
-  // when a single worktree accumulates over time. Both paths share the
-  // same virtua Virtualizer; the threshold just controls when we mount
-  // it. The visible behavior is identical because virtua uses overscan
-  // (8) for the buffer zone. All hooks below MUST stay above the
-  // search-empty early-return so they fire in the same order every
-  // render — rules-of-hooks.
-  const shouldVirtualizeArchived = group.isArchivedBucket === true
+  // Virtualize archived buckets, which can grow into the thousands. Active
+  // groups retain normal flow because their incremental Show more control and
+  // the shared ancestor scroller cannot expose an unmounted virtual tail.
+  // Hooks below MUST stay above the search-empty early-return so they fire in
+  // the same order every render — rules-of-hooks.
+  const shouldVirtualize = group.isArchivedBucket === true
     && !hasSessionSearchQuery
     && visibleSessions.length >= ARCHIVED_VIRTUALIZE_THRESHOLD;
-  const shouldVirtualizeActive = group.isArchivedBucket !== true
-    && !hasSessionSearchQuery
-    && visibleSessions.length >= ACTIVE_VIRTUALIZE_THRESHOLD;
-  const shouldVirtualize = shouldVirtualizeArchived || shouldVirtualizeActive;
 
   // Check if any parent node is expanded - expanded parents render their
   // children inline, making them much taller than the fixed estimate.
@@ -864,7 +830,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             renderSessionNode={renderSessionNode}
             getRenderExtras={resolveNodeStructureKey
               ? (node) => ({
-                subtreeContainsActive,
                 subtreeContainsEditing,
                 menuOpenSessionId,
                 nodeStructureKey: resolveNodeStructureKey(node),
@@ -941,7 +906,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             // meanwhile keeps the container's height real so the scroller
             // never collapses/clamps during the flip.
             visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
-              subtreeContainsActive,
               subtreeContainsEditing,
               menuOpenSessionId,
               nodeStructureKey: resolveNodeStructureKey(node),
@@ -980,7 +944,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
                   }}
                 >
                   {renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
-                    subtreeContainsActive,
                     subtreeContainsEditing,
                     menuOpenSessionId,
                     nodeStructureKey: resolveNodeStructureKey(node),
@@ -994,7 +957,6 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         </div>
       ) : (
         visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true, undefined, 'project', {
-          subtreeContainsActive,
           subtreeContainsEditing,
           menuOpenSessionId,
           nodeStructureKey: resolveNodeStructureKey(node),
@@ -1005,6 +967,31 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
         <div className="py-1 text-left typography-micro text-muted-foreground">
           {group.isArchivedBucket
             ? t('sessions.sidebar.group.empty.noArchivedSessions')
+            : bootstrapState === 'queued' || bootstrapState === 'running'
+              ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon name="loader-4" className="size-3 animate-spin" />
+                  {t('sessions.sidebar.group.empty.loadingSessions')}
+                </span>
+              )
+              : bootstrapState === 'failed' && bootstrapDirectory
+                ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    {t('sessions.sidebar.group.empty.loadFailed')}
+                    <button
+                      type="button"
+                      className="text-foreground hover:underline"
+                      onClick={() => childStores.requestBootstrap({
+                        directory: bootstrapDirectory,
+                        priority: isCollapsed ? 'visible' : 'expanded',
+                        reason: group.isMain ? 'project-expanded' : 'worktree-expanded',
+                        force: true,
+                      })}
+                    >
+                      {t('sessions.sidebar.group.empty.retry')}
+                    </button>
+                  </span>
+                )
             : t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
         </div>
       ) : null}

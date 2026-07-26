@@ -95,4 +95,29 @@ describe('listGlobalSessionPages', () => {
     expect(calls[1]).toEqual({ directory: '/repo', archived: false, roots: false, limit: 2, cursor: 10 })
     expect(sessions.map((session) => session.id)).toEqual(['ses_root', 'ses_child_1', 'ses_child_2'])
   })
+
+  test('retries SDK error responses before treating the load as failed', async () => {
+    let calls = 0
+    const apiClient = {
+      experimental: {
+        session: {
+          list: async () => {
+            calls += 1
+            if (calls === 1) {
+              return { error: { message: 'warming up' }, response: { status: 503 } }
+            }
+            return {
+              data: [{ id: 'ses_1', time: { updated: 1 } }],
+              response: { headers: new Headers() },
+            }
+          },
+        },
+      },
+    } as unknown as OpencodeClient
+
+    const sessions = await listGlobalSessionPages(apiClient, { archived: false, pageSize: 500 })
+
+    expect(calls).toBe(2)
+    expect(sessions.map((session) => session.id)).toEqual(['ses_1'])
+  })
 })

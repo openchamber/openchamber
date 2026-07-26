@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 import { useGitStore, useGitBranches, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -171,7 +172,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
         <SelectTrigger
           id={id}
           size="lg"
-          className={className ?? 'w-fit typography-meta text-foreground'}
+          className={cn('min-w-0 max-w-full *:data-[slot=select-value]:truncate', className ?? 'w-fit')}
         >
           <SelectValue placeholder={isLoading ? t('multiRun.branchSelector.status.loadingBranches') : t('multiRun.branchSelector.placeholder.selectSourceBranch')} />
         </SelectTrigger>

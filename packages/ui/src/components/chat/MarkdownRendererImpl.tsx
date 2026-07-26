@@ -40,6 +40,7 @@ import {
   parseFileReference,
   type ParsedFileReference,
 } from './fileReferenceParser';
+import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -754,69 +755,6 @@ const useMermaidInlineInteractions = ({
 // Rendering core: marked -> math -> shiki -> sanitize -> decorate -> morphdom
 // ---------------------------------------------------------------------------
 
-// Single tuning knob: the streaming reveal cadence. Lower = smoother but more
-// CPU (more re-parse steps/sec); higher = cheaper but chunkier. Step sizes are
-// auto-scaled from this so reveal throughput (chars/sec) stays constant no
-// matter the cadence — text always keeps up with the incoming stream.
-const TEXT_PACE_MS = 64;
-const PACE_BASELINE_MS = 24;
-const PACE_RATIO = TEXT_PACE_MS / PACE_BASELINE_MS;
-const TEXT_SNAP = /[\s.,!?;:)\]]/;
-
-const paceStep = (remaining: number): number => {
-  const base = remaining <= 12 ? 2 : remaining <= 48 ? 4 : remaining <= 96 ? 8 : Math.min(24, Math.ceil(remaining / 8));
-  return Math.max(1, Math.round(base * PACE_RATIO));
-};
-
-const nextRevealIndex = (text: string, start: number): number => {
-  const end = Math.min(text.length, start + paceStep(text.length - start));
-  for (let i = end; i < Math.min(text.length, end + 8); i += 1) {
-    if (TEXT_SNAP.test(text[i] ?? '')) return i + 1;
-  }
-  return end;
-};
-
-// Granular streaming reveal. Cheap because each step only re-runs the
-// marked->morphdom pipeline (patching changed DOM nodes), with no React tree
-// reconciliation of the markdown body.
-const usePacedText = (content: string, streaming: boolean): string => {
-  const [shown, setShown] = React.useState<number>(() => (streaming ? 0 : content.length));
-  const shownRef = React.useRef(shown);
-  shownRef.current = shown;
-
-  React.useEffect(() => {
-    if (!streaming || typeof window === 'undefined') {
-      setShown(content.length);
-      return;
-    }
-    if (shownRef.current > content.length) {
-      setShown(content.length);
-    }
-
-    let timer: number | null = null;
-    const tick = () => {
-      const current = Math.min(shownRef.current, content.length);
-      if (current >= content.length) {
-        timer = null;
-        return;
-      }
-      setShown(nextRevealIndex(content, current));
-      timer = window.setTimeout(tick, TEXT_PACE_MS);
-    };
-
-    if (shownRef.current < content.length) {
-      timer = window.setTimeout(tick, TEXT_PACE_MS);
-    }
-
-    return () => {
-      if (timer !== null) window.clearTimeout(timer);
-    };
-  }, [content, streaming]);
-
-  if (!streaming) return content;
-  return content.slice(0, Math.min(shown, content.length));
-};
-
 // Mermaid layout is expensive; `decorate` would otherwise re-render every
 // diagram on every paced-stream step (~40/sec). Memoize by theme+mode+source
 // so a stable diagram is laid out once and served from cache thereafter.
@@ -1094,6 +1032,9 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   onShowPopup,
   enableFileReferences = true,
 }) => {
+  streamPerfCount('ui.markdown_renderer.render');
+  if (isStreaming) streamPerfCount('ui.markdown_renderer.render.streaming');
+  streamPerfObserve('ui.markdown_renderer.content_len', content.length);
   const currentTheme = useCurrentMermaidTheme();
   const { editor, runtime } = useRuntimeAPIs();
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -1106,7 +1047,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   }, [effectiveDirectory, openContextPreview]);
 
   const live = isStreaming && !disableStreamAnimation;
-  const pacedText = usePacedText(content, live);
 
   useMermaidInlineInteractions({
     containerRef,
@@ -1127,7 +1067,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
   const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
-  useMorphdomMarkdown({ containerRef, text: pacedText, streaming: live, cacheKey, syntaxVars, ctx });
+  useMorphdomMarkdown({ containerRef, text: content, streaming: live, cacheKey, syntaxVars, ctx });
 
   const markdownContent = (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>

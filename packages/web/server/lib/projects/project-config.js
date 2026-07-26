@@ -214,6 +214,7 @@ const normalizeExecution = (value) => {
   const variant = asNonEmptyString(value.variant);
   const agent = asNonEmptyString(value.agent);
   const goalEnabled = value.goalEnabled === true;
+  const permissionAutoAccept = value.permissionAutoAccept === true;
   const goalTokenBudget = typeof value.goalTokenBudget === 'number'
     && Number.isFinite(value.goalTokenBudget)
     && value.goalTokenBudget > 0
@@ -238,6 +239,7 @@ const normalizeExecution = (value) => {
     ...(agent ? { agent } : {}),
     ...(goalEnabled ? { goalEnabled: true } : {}),
     ...(goalEnabled && goalTokenBudget ? { goalTokenBudget } : {}),
+    ...(permissionAutoAccept ? { permissionAutoAccept: true } : {}),
   };
 };
 

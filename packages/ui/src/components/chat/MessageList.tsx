@@ -12,9 +12,11 @@ import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 import { getNormalizedMessageForDisplay, hasCompactionPart } from './lib/messageDisplayNormalization';
 import { useUIStore } from '@/stores/useUIStore';
+import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
+import { isHiddenUserMessage } from './message/hiddenUserMessage';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
-import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
+import { streamPerfCount, streamPerfMark, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionParts } from '@/sync/sync-context';
@@ -385,7 +387,7 @@ type RenderEntry =
         previousMessage?: ChatMessageEntry;
         nextMessage?: ChatMessageEntry;
     }
-    | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean };
+    | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean; nextEntryFirstMessage?: ChatMessageEntry };
 
 type TurnUiState = { isExpanded: boolean };
 
@@ -469,6 +471,7 @@ MessageRow.displayName = 'MessageRow';
 interface TurnBlockProps {
     turn: TurnRecord;
     isLastTurn: boolean;
+    nextEntryFirstMessage?: ChatMessageEntry;
     sessionIsWorking: boolean;
     defaultActivityExpanded: boolean;
     turnUiStates: Map<string, TurnUiState>;
@@ -488,6 +491,7 @@ interface TurnBlockProps {
 const TurnBlock = React.memo(({
     turn,
     isLastTurn,
+    nextEntryFirstMessage,
     sessionIsWorking,
     defaultActivityExpanded,
     turnUiStates,
@@ -503,6 +507,11 @@ const TurnBlock = React.memo(({
     activeStreamingPhase,
     reviewTransferDirection,
 }: TurnBlockProps) => {
+    const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
+    const userMessageHidden = React.useMemo(
+        () => isHiddenUserMessage(turn.userMessage, { planModeEnabled }),
+        [planModeEnabled, turn.userMessage]
+    );
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };
     const handleToggleTurnGroup = React.useCallback(() => {
         onToggleTurnGroup(turn.turnId);
@@ -682,7 +691,7 @@ const TurnBlock = React.memo(({
                     : (typeof messageIndex === 'number' && messageIndex > 0
                         ? messageOrder.ordered[messageIndex - 1]
                         : undefined));
-            const nextMessage = undefined;
+            const nextMessage = isAssistantMessage && isLastAssistant ? nextEntryFirstMessage : undefined;
 
             const turnGroupingContext = isAssistantMessage
                 ? {
@@ -735,6 +744,7 @@ const TurnBlock = React.memo(({
         [
             getAnimationHandlers,
             isLastTurn,
+            nextEntryFirstMessage,
             messageOrder.lookup,
             messageOrder.ordered,
             onMessageContentChange,
@@ -772,7 +782,11 @@ const TurnBlock = React.memo(({
     }, [turn, visibleAssistantMessages]);
 
     return (
-        <TurnItem turn={renderableTurn} stickyUserHeader={stickyUserHeader} renderMessage={renderMessage} />
+        <TurnItem
+            turn={renderableTurn}
+            stickyUserHeader={stickyUserHeader && !userMessageHidden}
+            renderMessage={renderMessage}
+        />
     );
 });
 
@@ -871,6 +885,7 @@ const MessageListEntry = React.memo(({
     activeStreamingPhase,
     reviewTransferDirection,
 }: MessageListEntryProps) => {
+    streamPerfCount('ui.message_list_entry.render');
     if (entry.kind === 'ungrouped') {
         return (
             <UngroupedMessageRow
@@ -893,6 +908,7 @@ const MessageListEntry = React.memo(({
         <TurnBlock
             turn={entry.turn}
             isLastTurn={entry.isLastTurn}
+            nextEntryFirstMessage={entry.nextEntryFirstMessage}
             sessionIsWorking={sessionIsWorking}
             defaultActivityExpanded={defaultActivityExpanded}
             turnUiStates={turnUiStates}
@@ -1204,12 +1220,14 @@ const StreamingTailContent: React.FC<{
     reviewTransferDirection,
 }) => {
     const liveParts = useSessionParts(activeStreamingMessageId ?? '', directory);
+    const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
     const liveEntry = React.useMemo(() => buildLiveStreamingEntry(entry, {
         activeStreamingMessageId,
         liveParts,
         showTextJustificationActivity: chatRenderMode === 'sorted',
         showTurnChangedFiles,
-    }), [activeStreamingMessageId, chatRenderMode, entry, liveParts, showTurnChangedFiles]);
+        mergeHiddenUserTurns: { planModeEnabled },
+    }), [activeStreamingMessageId, chatRenderMode, entry, liveParts, showTurnChangedFiles, planModeEnabled]);
 
     return (
         <MessageListEntry
@@ -1247,6 +1265,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     scrollRef,
     directory,
 }, ref) => {
+    streamPerfMark('react.message_list_render');
     streamPerfCount('ui.message_list.render');
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
@@ -1358,10 +1377,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         });
     }), [baseDisplayMessages, retryOverlay]);
 
+    const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
     const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
         sessionKey,
         showTextJustificationActivity: chatRenderMode === 'sorted',
         showTurnChangedFiles,
+        planModeEnabled,
     });
     const hasUngroupedStaticEntries = projection.ungroupedMessageIds.size > 0;
     const staticEntryMessages = hasUngroupedStaticEntries ? displayMessages : EMPTY_STATIC_ENTRY_MESSAGES;
@@ -1439,7 +1460,29 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         streamPerfCount('ui.message_list.render.streaming');
     }
 
-    const historyEntries = staticRenderEntries;
+    // Depend on the trailing entry's first message (stable while its assistant
+    // streams), not the trailing entry itself, so streaming updates do not
+    // recreate every static entry and re-render every turn block.
+    const trailingEntryFirstMessage = trailingStreamingEntry
+        ? (trailingStreamingEntry.kind === 'turn' ? trailingStreamingEntry.turn.userMessage : trailingStreamingEntry.message)
+        : undefined;
+    const historyEntries = React.useMemo<RenderEntry[]>(() => {
+        return staticRenderEntries.map((entry, index) => {
+            if (entry.kind !== 'turn') {
+                return entry;
+            }
+            const nextEntryFirstMessage = index < staticRenderEntries.length - 1
+                ? (() => {
+                    const nextEntry = staticRenderEntries[index + 1];
+                    return nextEntry.kind === 'turn' ? nextEntry.turn.userMessage : nextEntry.message;
+                })()
+                : trailingEntryFirstMessage;
+            if (!nextEntryFirstMessage) {
+                return entry;
+            }
+            return { ...entry, nextEntryFirstMessage };
+        });
+    }, [staticRenderEntries, trailingEntryFirstMessage]);
     // All surfaces virtualize with @tanstack/react-virtual (see the engine
     // note at the top of the file). An unvirtualized list is kept only for
     // tiny histories where windowing overhead is not worth it.
@@ -1544,7 +1587,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return container.querySelector(`[data-message-id="${messageId}"]`);
     }, [resolveScrollContainer]);
 
-    const scrollHistoryIndexIntoView = React.useCallback((index: number, behavior: ScrollBehavior = 'auto') => {
+    const scrollHistoryIndexIntoView = React.useCallback((index: number) => {
         if (index < 0 || index >= historyEntries.length) {
             return false;
         }
@@ -1558,7 +1601,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             return false;
         }
 
-        virtualizer.scrollToIndex(index, { align: 'start', behavior: behavior === 'smooth' ? 'smooth' : 'auto' });
+        // Smooth scrolling can stop at a stale offset while unmounted,
+        // variable-height rows replace estimates with real measurements. Use
+        // exact auto-reconciliation; mounted targets still take the smooth DOM
+        // path below.
+        virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' });
         return true;
     }, [historyEntries.length, shouldVirtualizeHistory]);
 
@@ -1608,7 +1655,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
-                return scrollHistoryIndexIntoView(index, behavior);
+                return scrollHistoryIndexIntoView(index);
             },
 
             scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => {
@@ -1622,7 +1669,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     || (
                         trailingStreamingEntry !== undefined && index >= historyEntries.length
                             ? false
-                            : scrollHistoryIndexIntoView(index, behavior)
+                            : scrollHistoryIndexIntoView(index)
                     );
             },
 
@@ -1731,7 +1778,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 if (!applyAnchor()) {
                     const index = messageIndexMap.get(anchor.messageId);
                     if (typeof index === 'number' && index < historyEntries.length) {
-                        return scrollHistoryIndexIntoView(index, 'auto');
+                        return scrollHistoryIndexIntoView(index);
                     }
                 }
 
@@ -1745,7 +1792,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 }
                 const container = resolveScrollContainer();
                 if (!container) return;
-                container.scrollTop = container.scrollHeight;
+                // Overshoot so the browser clamps to the exact fractional
+                // maximum (scrollHeight is integer-rounded) — see useChatAutoFollow.
+                container.scrollTop = container.scrollHeight + 4096;
             },
         };
 

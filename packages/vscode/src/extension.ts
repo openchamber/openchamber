@@ -201,6 +201,14 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.internal.permissionAutoAcceptSynced', (snapshot: unknown) => {
+      chatViewProvider?.notifyPermissionAutoAcceptSynced(snapshot);
+      sessionEditorProvider?.notifyPermissionAutoAcceptSynced(snapshot);
+      agentManagerProvider?.notifyPermissionAutoAcceptSynced(snapshot);
+    })
+  );
+
+  context.subscriptions.push(
     vscode.window.onDidChangeWindowState((state) => {
       chatViewProvider?.notifyWindowFocusChanged(state.focused);
       sessionEditorProvider?.notifyWindowFocusChanged(state.focused);

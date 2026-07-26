@@ -8,6 +8,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { TerminalShell } from '@/lib/api/types';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
@@ -590,7 +591,10 @@ interface UIStore {
   fontSize: number;
   // Global draft welcome starters; null = unset (use the default built-in set).
   globalDraftStarters: DraftStarterRef[] | null;
+  draftStartersVisible: boolean;
   terminalFontSize: number;
+  terminalShell: TerminalShell;
+  terminalLoginShells: TerminalShell[];
   editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
@@ -642,6 +646,7 @@ interface UIStore {
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
+  agentControlToolEnabled: boolean;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
@@ -747,7 +752,10 @@ interface UIStore {
   setMessageLimit: (value: number) => void;
   setFontSize: (size: number) => void;
   setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
+  setDraftStartersVisible: (value: boolean) => void;
   setTerminalFontSize: (size: number) => void;
+  setTerminalShell: (shell: TerminalShell) => void;
+  setTerminalLoginShells: (shells: TerminalShell[]) => void;
   setEditorFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
@@ -800,6 +808,7 @@ interface UIStore {
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
+  setAgentControlToolEnabled: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
@@ -903,7 +912,9 @@ export const useUIStore = create<UIStore>()(
         messageLimit: 200,
         fontSize: 100,
         globalDraftStarters: null,
-        terminalFontSize: 13,
+        terminalFontSize: 14,
+        terminalShell: 'auto',
+        terminalLoginShells: [],
         editorFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
@@ -950,6 +961,7 @@ export const useUIStore = create<UIStore>()(
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: true,
+        agentControlToolEnabled: true,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
@@ -968,6 +980,7 @@ export const useUIStore = create<UIStore>()(
         expandedEditorToolbar: false,
         showSplitAssistantMessageActions: false,
         allowPromptingSubagentSessions: false,
+        draftStartersVisible: true,
         isMobileSessionStatusBarCollapsed: false,
         mobileSessionPanelOpen: false,
         mobileSessionFilterProjectId: null,
@@ -1665,10 +1678,22 @@ export const useUIStore = create<UIStore>()(
           set({ globalDraftStarters: refs });
         },
 
+        setDraftStartersVisible: (value) => {
+          set({ draftStartersVisible: value });
+        },
+
         setTerminalFontSize: (size) => {
           const rounded = Math.round(size);
           const clamped = Math.max(9, Math.min(52, rounded));
           set({ terminalFontSize: clamped });
+        },
+
+        setTerminalShell: (shell) => {
+          set({ terminalShell: shell });
+        },
+
+        setTerminalLoginShells: (shells) => {
+          set({ terminalLoginShells: [...new Set(shells)] });
         },
 
         setEditorFontSize: (size) => {
@@ -2090,6 +2115,9 @@ export const useUIStore = create<UIStore>()(
         setShowOpenCodeUpdateNotifications: (value) => {
           set({ showOpenCodeUpdateNotifications: value });
         },
+        setAgentControlToolEnabled: (value) => {
+          set({ agentControlToolEnabled: value });
+        },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
@@ -2206,12 +2234,17 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 10,
+        version: 11,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v10 -> v11: move the previous terminal font default forward.
+          if (version < 11 && state.terminalFontSize === 13) {
+            state.terminalFontSize = 14;
+          }
 
           // v9 -> v10: remove obsolete single-file diff view mode setting
           if (version < 10) {
@@ -2343,6 +2376,8 @@ export const useUIStore = create<UIStore>()(
           fontSize: state.fontSize,
           globalDraftStarters: state.globalDraftStarters,
           terminalFontSize: state.terminalFontSize,
+          terminalShell: state.terminalShell,
+          terminalLoginShells: state.terminalLoginShells,
           editorFontSize: state.editorFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,
@@ -2373,6 +2408,7 @@ export const useUIStore = create<UIStore>()(
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
+          agentControlToolEnabled: state.agentControlToolEnabled,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
@@ -2391,6 +2427,7 @@ export const useUIStore = create<UIStore>()(
           expandedEditorToolbar: state.expandedEditorToolbar,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
+          draftStartersVisible: state.draftStartersVisible,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,
