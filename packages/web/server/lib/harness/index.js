@@ -58,6 +58,9 @@ export {
   resetHarnessTurnSnapshots,
 } from './turn-snapshot.js';
 
+export { mergeHarnessBusyIntoSessionStatuses } from './session-status.js';
+export { mergeHarnessMessagesIntoSessionMessages } from './session-messages.js';
+
 export { createHarnessRouter } from './router.js';
 export { registerHarnessRoutes } from './routes.js';
 export { createClaudeCodeTranslator, buildClaudePrompt } from './translators/claude-code/index.js';

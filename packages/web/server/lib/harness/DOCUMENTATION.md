@@ -217,7 +217,9 @@ idle auto-send). Abort interrupts the active turn and always clears busy via
 Harness events stamp `properties.directory` and SSE fan-out preserves the
 directory envelope so UI directory stores receive busy/idle (Stop + queue
 auto-send). `GET /api/session/status` overlays active Claude busy entries so
-OpenCode status polls cannot clear harness turns.
+OpenCode status polls cannot clear harness turns. `GET /api/session/:id/message`
+overlays the turn-snapshot last user/assistant so OpenCode's empty message list
+cannot wipe Claude chat on materialization/refetch.
 
 ## Session titles on Claude
 

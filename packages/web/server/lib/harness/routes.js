@@ -11,6 +11,7 @@ import {
 } from './session-bindings.js';
 import { createHarnessRouter } from './router.js';
 import { mergeHarnessBusyIntoSessionStatuses } from './session-status.js';
+import { mergeHarnessMessagesIntoSessionMessages } from './session-messages.js';
 
 /**
  * @param {import('express').Express} app
@@ -62,6 +63,9 @@ export function registerHarnessRoutes(app, deps = {}) {
 
   // Overlay Claude busy onto OpenCode session status so UI poll/resync cannot
   // clear Stop / queue auto-send while a harness turn is active.
+  // Also overlay harness turn-snapshot messages onto /session/:id/message —
+  // OpenCode stores nothing for Claude turns, and an authoritative empty
+  // refetch would wipe optimistic / event-applied chat (and stall the queue).
   if (buildOpenCodeUrl) {
     app.get('/api/session/status', async (req, res, next) => {
       try {
@@ -85,6 +89,36 @@ export function registerHarnessRoutes(app, deps = {}) {
         }
         const openCodeStatuses = await response.json().catch(() => ({}));
         res.json(mergeHarnessBusyIntoSessionStatuses(openCodeStatuses, directory));
+      } catch {
+        next();
+      }
+    });
+
+    app.get('/api/session/:sessionId/message', async (req, res, next) => {
+      try {
+        const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+        if (!sessionId) return next();
+        const directory = typeof req.query?.directory === 'string' ? req.query.directory : '';
+        const limit = typeof req.query?.limit === 'string' ? req.query.limit : '';
+        const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/message`, '');
+        const params = new URLSearchParams();
+        if (directory) params.set('directory', directory);
+        if (limit) params.set('limit', limit);
+        const search = params.toString();
+        const url = search ? `${base}?${search}` : base;
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            ...getOpenCodeAuthHeaders(),
+          },
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok) {
+          return next();
+        }
+        const openCodeMessages = await response.json().catch(() => []);
+        res.json(mergeHarnessMessagesIntoSessionMessages(openCodeMessages, sessionId));
       } catch {
         next();
       }
