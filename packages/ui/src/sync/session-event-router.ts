@@ -17,7 +17,7 @@ const flushPendingGlobalSessionUpdate = (sessionID: string): void => {
   if (!update) return
   const runtimeKey = getRuntimeKey()
   if (update.runtimeKey !== runtimeKey) return
-  const currentSession = getGlobalSessionSnapshot(update.session.id)
+  const currentSession = useGlobalSessionsStore.getState().getSessionById(update.session.id)
   if (
     !currentSession
     || shouldSkipStaleSessionEvent(currentSession, update.session)
@@ -58,11 +58,6 @@ const getSessionInfoFromPayload = (event: Event): Session | null => {
   return stripSessionDiffSnapshots(session as Session)
 }
 
-const getGlobalSessionSnapshot = (sessionId: string): Session | null => {
-  const global = useGlobalSessionsStore.getState()
-  return [...global.activeSessions, ...global.archivedSessions].find((session) => session.id === sessionId) ?? null
-}
-
 export const applySessionEventToGlobalSessions = (payload: Event): void => {
   if (payload.type === "session.idle" || payload.type === "session.error") {
     const sessionID = (payload as { properties?: { sessionID?: unknown } }).properties?.sessionID
@@ -73,7 +68,7 @@ export const applySessionEventToGlobalSessions = (payload: Event): void => {
   if (payload.type === "session.created") {
     const session = getSessionInfoFromPayload(payload)
     if (session) {
-      const currentSession = getGlobalSessionSnapshot(session.id)
+      const currentSession = useGlobalSessionsStore.getState().getSessionById(session.id)
       if (!shouldSkipStaleSessionEvent(currentSession, session)) {
         useGlobalSessionsStore.getState().upsertSession(session)
       }
@@ -84,7 +79,7 @@ export const applySessionEventToGlobalSessions = (payload: Event): void => {
   if (payload.type === "session.updated") {
     const session = getSessionInfoFromPayload(payload)
     if (session) {
-      const currentSession = getGlobalSessionSnapshot(session.id)
+      const currentSession = useGlobalSessionsStore.getState().getSessionById(session.id)
       if (!shouldSkipStaleSessionEvent(currentSession, session)) {
         if (currentSession && isGlobalSessionRecencyOnlyUpdate(currentSession, session)) {
           scheduleGlobalSessionUpdate(session)

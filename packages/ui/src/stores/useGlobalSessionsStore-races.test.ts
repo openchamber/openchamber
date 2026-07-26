@@ -55,6 +55,22 @@ describe("global session mutation reconciliation", () => {
     expect(useGlobalSessionsStore.getState().activeSessions.map((item) => item.id)).toEqual(["created"])
   })
 
+  test("keeps a newer direct-only disposable session across a stale full snapshot", async () => {
+    const loading = useGlobalSessionsStore.getState().loadSessions()
+    const directOnly = {
+      ...session("side"), directory: "/source",
+      metadata: { openchamber: { sideChat: { disposable: true, parentSessionID: "parent" } } },
+    } as Session
+    useGlobalSessionsStore.getState().upsertSession(directOnly)
+
+    activeRequest.resolve([])
+    archivedRequest.resolve([])
+    await loading
+
+    expect(useGlobalSessionsStore.getState().getSessionById("side")).toEqual(directOnly)
+    expect(useGlobalSessionsStore.getState().activeSessions).toEqual([])
+  })
+
   test("does not resurrect a session deleted after a full load starts", async () => {
     const stale = session("deleted")
     useGlobalSessionsStore.getState().applySnapshot([stale], [])

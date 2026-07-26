@@ -78,6 +78,27 @@ describe('createSessionOwnershipIndex', () => {
     ]);
   });
 
+  test('excludes disposable sessions from active and archived sidebar ownership', () => {
+    const disposableMetadata = {
+      openchamber: { sideChat: { disposable: true, parentSessionID: 'parent' } },
+    };
+    const ownership = createSessionOwnershipIndex(
+      [
+        { id: 'ordinary', directory: '/projects/app' },
+        { id: 'side', directory: '/projects/app', metadata: disposableMetadata },
+      ] as unknown as Session[],
+      [{ id: 'app', normalizedPath: '/projects/app' }],
+      new Map(),
+      false,
+      [{ id: 'archived-side', directory: '/projects/app', metadata: disposableMetadata, time: { archived: 1 } }] as unknown as Session[],
+    );
+
+    expect(ownership.bySessionId.has('ordinary')).toBe(true);
+    expect(ownership.bySessionId.has('side')).toBe(false);
+    expect(ownership.sessionsByProject.get('app')?.map((session) => session.id)).toEqual(['ordinary']);
+    expect(ownership.archivedSessionsByProject.get('app')).toBe(undefined);
+  });
+
   test('requires exact workspace directories in VS Code', () => {
     const ownership = createSessionOwnershipIndex(
       [

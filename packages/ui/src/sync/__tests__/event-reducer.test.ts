@@ -152,6 +152,20 @@ describe("applyDirectoryEvent", () => {
     expect(draft.session[0]?.title).toBe("New Title")
   })
 
+  test("retains a disposable session in directory state for direct-id rendering", () => {
+    const draft = state()
+    const disposable = {
+      ...buildSession("Side", { created: 1, updated: 10 }),
+      metadata: { openchamber: { sideChat: { disposable: true, parentSessionID: "parent" } } },
+    } as Session
+
+    expect(applyDirectoryEvent(draft, {
+      type: "session.created",
+      properties: { info: disposable },
+    } as Event)).toBe(true)
+    expect(draft.session.find((session) => session.id === disposable.id)).toBe(disposable)
+  })
+
   test("applies part update without materialization when owning message exists", () => {
     const draft = state({
       message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "assistant", time: { created: 1 } } as never] },

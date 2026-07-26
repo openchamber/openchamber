@@ -24,6 +24,15 @@ In chat, type `/` as the **first** character of the message to bring up commands
 
 The built-in `init` and `review` commands can be reset but not deleted.
 
+## OpenChamber control commands
+
+OpenChamber also provides control commands that perform app actions instead of expanding a saved prompt. They are not managed in **Settings → Commands**.
+
+- `/side [message]` — opens a disposable chat beside the current desktop or web conversation. Text after the command is sent immediately. Closing the side chat deletes its conversation unless you choose **Promote** first.
+- `/btw [message]` — alias for `/side`.
+
+Only one side chat can be open for a conversation. These commands are unavailable on mobile, in VS Code, and inside a side chat.
+
 ## Snippets
 
 A snippet is reusable text you reference inline with a hashtag, like `#signoff`. Manage them at **Settings → Snippets**.

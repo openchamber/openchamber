@@ -1800,6 +1800,7 @@ export function SyncProvider(props: {
   }
   const messageLoader = messageLoaderRef.current
   messageLoader.configure({ sdk: props.sdk, runtimeKey })
+  const disposalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
   const routingIndex = routingIndexRef.current
@@ -2260,9 +2261,18 @@ export function SyncProvider(props: {
     }
   }, [props.sdk, props.directory, childStores, messageLoader, routingIndex])
 
-  useEffect(() => () => {
-    messageLoader.dispose()
-    childStores.disposeAll()
+  useEffect(() => {
+    if (disposalTimerRef.current) {
+      clearTimeout(disposalTimerRef.current)
+      disposalTimerRef.current = null
+    }
+    return () => {
+      disposalTimerRef.current = setTimeout(() => {
+        disposalTimerRef.current = null
+        messageLoader.dispose()
+        childStores.disposeAll()
+      }, 0)
+    }
   }, [childStores, messageLoader])
 
   // Subscribe to child store for streaming state derivation

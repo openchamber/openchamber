@@ -39,4 +39,17 @@ describe('i18n dictionaries', () => {
       expect(dictionary['common.language.japanese']).toBeTruthy();
     }
   });
+
+  test('side-chat copy is translated in every non-English locale', () => {
+    const sideChatKeys = Object.keys(enDict).filter((key) => (
+      key.startsWith('sideChat.') || key === 'chat.commandAutocomplete.command.sideDescription' || key === 'chat.commandAutocomplete.command.btwDescription'
+    )) as Array<keyof typeof enDict>;
+
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      if (locale === 'en') continue;
+      for (const key of sideChatKeys) {
+        expect(dictionary[key]).not.toBe(enDict[key]);
+      }
+    }
+  });
 });

@@ -46,6 +46,7 @@ Examples:
 
 - `useProjectsStore.ts`
 - `useGlobalSessionsStore.ts`
+- `useDisposableSideChatsStore.ts`
 - `useSessionFoldersStore.ts`
 
 These stores coordinate persistent project/session metadata across multiple views.
@@ -53,6 +54,12 @@ These stores coordinate persistent project/session metadata across multiple view
 `useGlobalSessionsStore.ts` owns cold/global active and archived session coverage, including `sessionsByDirectory`. It is complementary to directory child stores: it is not the source of live busy/retry status or session messages.
 
 User-visible session ordering is also not owned by the global cache array order. `sync/session-ordering.ts` combines lifecycle rank with timestamp fallbacks, and session surfaces must use that shared comparator instead of independently sorting global sessions by `time.updated`.
+
+`useDisposableSideChatsStore.ts` owns the version-1 recovery registry keyed by runtime, normalized directory, parent session, and side session. Missing, valid empty, and malformed persistence are distinct states. Hydration commits only when its runtime generation and starting mutation revision remain current; runtime switches keep inert namespaces but reject stale UI completions. Cross-tab storage and BroadcastChannel snapshots merge by monotonic entry revisions and deletion tombstones, so an older tab cannot overwrite newer ownership or resurrect completed cleanup. Cleanup- and promotion-pending ownership is never evicted by ordinary registry bounds. Authoritative session metadata repairs missing registry ownership. The global sessions store keeps disposable records in its direct-ID index while excluding them from normal navigation arrays.
+
+Context-panel memory bounds protect the entire directory root when any tab in that root owns a disposable side chat. If protected roots alone exceed the normal root cap, the store intentionally overflows rather than silently dropping cleanup ownership from the panel.
+
+Registry phases are lifecycle authority, not presentation state: `opening` suppresses early create-event discovery, `open` owns the rendered panel, `cleanup-pending` survives failed/interrupted deletion, and `promotion-pending` survives marker removal. Startup recovery may clear an entry without deletion only when authoritative session detail proves the session is absent or no longer marked disposable.
 
 Global refresh rules:
 

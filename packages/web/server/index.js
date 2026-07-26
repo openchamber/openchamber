@@ -1595,6 +1595,7 @@ async function main(options = {}) {
     isUnsafeSkillRelativePath,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    isRequestOriginAllowed,
     getOpenCodePort: () => openCodePort,
     buildAugmentedPath,
     projectConfigRuntime,
@@ -1607,6 +1608,7 @@ async function main(options = {}) {
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
     permissionAutoAcceptRuntime,
+    express,
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({

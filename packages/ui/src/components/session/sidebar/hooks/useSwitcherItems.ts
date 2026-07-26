@@ -8,6 +8,7 @@ import { useGitAllBranches } from '@/stores/useGitStore';
 import type { SessionNode } from '../types';
 import { isPathWithinProject } from '../utils';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
+import { filterDiscoverableSessions } from '@/stores/useDisposableSideChatsStore';
 
 export type SwitcherItem = {
   node: SessionNode;
@@ -68,9 +69,10 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
 
   const items = React.useMemo<SwitcherItem[]>(() => {
     if (!enabled) return [];
+    const discoverableSessions = filterDiscoverableSessions(activeSessions);
 
     const childrenByParent = new Map<string, Session[]>();
-    for (const session of activeSessions) {
+    for (const session of discoverableSessions) {
       const parentId = (session as Session & { parentID?: string | null }).parentID;
       if (!parentId) continue;
       if (session.time?.archived) continue;
@@ -85,7 +87,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
       list.sort((a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks));
     });
 
-    const parents = activeSessions
+    const parents = discoverableSessions
       .filter((session) => !session.time?.archived)
       .filter((session) => !(session as Session & { parentID?: string | null }).parentID)
       .filter((session) => {

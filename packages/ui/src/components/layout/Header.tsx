@@ -17,6 +17,7 @@ import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/s
 
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
+import { requestContextPanelClose } from './contextPanelCloseRequest';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
@@ -1470,7 +1471,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'context') {
-      closeContextPanel(directory);
+      if (!requestContextPanelClose(directory)) closeContextPanel(directory);
       return;
     }
 
@@ -1487,7 +1488,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'plan') {
-      closeContextPanel(directory);
+      if (!requestContextPanelClose(directory)) closeContextPanel(directory);
       return;
     }
 
@@ -1502,7 +1503,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'diff') {
-      closeContextPanel(directory);
+      if (!requestContextPanelClose(directory)) closeContextPanel(directory);
       return;
     }
 
@@ -1517,7 +1518,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'browser') {
-      closeContextPanel(directory);
+      if (!requestContextPanelClose(directory)) closeContextPanel(directory);
       return;
     }
 

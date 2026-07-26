@@ -24,6 +24,15 @@ En el chat, escribe `/` como **primer** carácter del mensaje para abrir los com
 
 Los comandos integrados `init` y `review` se pueden restablecer, pero no eliminar.
 
+## Comandos de control de OpenChamber
+
+OpenChamber también ofrece comandos de control que realizan acciones en la aplicación en lugar de expandir un prompt guardado. No se administran en **Settings → Commands**.
+
+- `/side [mensaje]` — abre un chat desechable junto a la conversación actual en escritorio o web. El texto posterior al comando se envía de inmediato. Al cerrar el chat lateral se elimina la conversación, salvo que antes elijas **Conservar**.
+- `/btw [mensaje]` — alias de `/side`.
+
+Solo puede haber un chat lateral abierto por conversación. Estos comandos no están disponibles en móvil, VS Code ni dentro de un chat lateral.
+
 ## Fragmentos
 
 Un fragmento es texto reutilizable que referencias en línea con una almohadilla, como `#signoff`. Gestiónalos en **Settings → Snippets**.
