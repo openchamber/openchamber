@@ -203,7 +203,7 @@ describe('P1 messenger commands', () => {
         revertSession,
       },
     });
-    expect(revertSession).toHaveBeenCalledWith('ses-1', 'msg_2', '/p');
+    expect(revertSession).toHaveBeenCalledWith('ses-1', 'msg_1', '/p');
     expect(result.reply).toContain('✓ Reverted one turn.');
     expect(result.reply).toContain('**Files touched**');
     expect(result.reply).toContain('```diff');

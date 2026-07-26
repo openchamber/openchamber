@@ -23,10 +23,6 @@ function messageId(message) {
   return message?.info?.id ?? message?.id ?? message?.messageID ?? message?.messageId ?? null;
 }
 
-function messageParentId(message) {
-  return message?.info?.parentID ?? message?.info?.parentId ?? message?.parentID ?? message?.parentId ?? null;
-}
-
 function sessionRevertMessageId(session) {
   return session?.revert?.messageID ?? session?.revert?.messageId ?? null;
 }
@@ -38,8 +34,9 @@ function sessionRevertDiff(session) {
 
 /**
  * Pick the messageID OpenCode should revert to for one undo step.
- * Prefers the assistant reply for the target user turn (kimaki/TUI), falling
- * back to the user message itself.
+ * Matches the OpenChamber UI: always target the user message for the turn
+ * being undone so a subsequent `/undo` steps to the prior user turn
+ * (`user.id < revert.messageID`).
  */
 export function resolveUndoRevertMessageId(messages, currentRevertMessageId = null) {
   const list = Array.isArray(messages) ? messages : [];
@@ -48,13 +45,7 @@ export function resolveUndoRevertMessageId(messages, currentRevertMessageId = nu
     const id = messageId(m);
     return !currentRevertMessageId || (id && id < currentRevertMessageId);
   });
-  if (!targetUser) return null;
-
-  const targetUserId = messageId(targetUser);
-  const targetAssistant = [...list].reverse().find((m) => {
-    return messageRole(m) === 'assistant' && messageParentId(m) === targetUserId && messageId(m);
-  });
-  return messageId(targetAssistant) || targetUserId;
+  return targetUser ? messageId(targetUser) : null;
 }
 
 /**

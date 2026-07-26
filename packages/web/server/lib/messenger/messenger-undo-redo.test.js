@@ -13,14 +13,14 @@ function msg(role, id, parentID = undefined) {
 }
 
 describe('resolveUndoRevertMessageId', () => {
-  it('targets the assistant reply for the last user turn', () => {
+  it('targets the last user turn', () => {
     const messages = [
       msg('user', 'msg_1'),
       msg('assistant', 'msg_2', 'msg_1'),
       msg('user', 'msg_3'),
       msg('assistant', 'msg_4', 'msg_3'),
     ];
-    expect(resolveUndoRevertMessageId(messages)).toBe('msg_4');
+    expect(resolveUndoRevertMessageId(messages)).toBe('msg_3');
   });
 
   it('steps back before an existing revert cursor', () => {
@@ -30,7 +30,7 @@ describe('resolveUndoRevertMessageId', () => {
       msg('user', 'msg_3'),
       msg('assistant', 'msg_4', 'msg_3'),
     ];
-    expect(resolveUndoRevertMessageId(messages, 'msg_4')).toBe('msg_2');
+    expect(resolveUndoRevertMessageId(messages, 'msg_3')).toBe('msg_1');
   });
 
   it('falls back to the user message when no assistant reply exists', () => {
@@ -105,7 +105,7 @@ describe('executeMessengerUndo / Redo', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(revertSession).toHaveBeenCalledWith('ses', 'msg_4', '/repo');
+    expect(revertSession).toHaveBeenCalledWith('ses', 'msg_3', '/repo');
     expect(result.reply).toContain('✓ Reverted one turn.');
     expect(result.reply).toContain('DIFF:diff --git a/x.ts');
   });
