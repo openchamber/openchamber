@@ -69,7 +69,7 @@ import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedC
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { getStreamingOutputAppend, getToolOutput } from './toolOutput';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
-import { getToolDescriptionFallback } from './toolRenderUtils';
+import { getToolDescriptionFallback, getToolHeaderTitle, getToolSecondaryText } from './toolRenderUtils';
 import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 
@@ -523,7 +523,7 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
         return getLspToolDescription(input, currentDirectory);
     }
 
-    const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
+    const desc = input?.description || metadata?.description || '';
     return getToolDescriptionFallback(part.tool, desc, input);
 };
 
@@ -1937,6 +1937,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
     const description = getToolDescription(normalizedPart, state, currentDirectory);
     const displayName = getToolMetadata(normalizedPartTool || part.tool).displayName;
+    const headerTitle = getToolHeaderTitle(state, displayName);
+    const secondaryDescription = getToolSecondaryText(description, state);
     
     // Tool title/description — shown inline as context
     const justificationText = React.useMemo(() => {
@@ -1955,16 +1957,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         ) {
             return null;
         }
-        const title = (stateWithData as { title?: string }).title;
-        if (typeof title === 'string' && title.trim().length > 0) {
-            return title;
-        }
         const inputDesc = input?.description;
-        if (typeof inputDesc === 'string' && inputDesc.trim().length > 0) {
-            return inputDesc;
-        }
-        return null;
-    }, [descriptionPath, normalizedPartTool, stateWithData, input]);
+        return getToolSecondaryText(inputDesc, state);
+    }, [descriptionPath, normalizedPartTool, input, state]);
     const runtime = React.useContext(RuntimeAPIContext);
     const mobileActions = useMobileAppActions();
 
@@ -2115,7 +2110,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 role="button"
                 tabIndex={0}
             >
-                <div className={cn('flex gap-1.5', isMultiFileApplyPatch ? 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5' : 'items-center flex-shrink-0')}>
+                <div className={cn('flex gap-1.5', isMultiFileApplyPatch ? 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5' : 'items-center min-w-0')}>
                     {isMultiFileApplyPatch ? (
                         <>
                             <div className="flex h-5 flex-shrink-0 items-center gap-1.5">
@@ -2137,10 +2132,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 <MinDurationShineText
                                     active={Boolean(isActive && !isError)}
                                     minDurationMs={300}
-                                    className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
+                                    className={cn(TOOL_ROW_TITLE_CLASS, 'min-w-0 max-w-full truncate')}
                                     style={titleStyle}
+                                    title={headerTitle}
                                 >
-                                    {displayName}
+                                    {headerTitle}
                                 </MinDurationShineText>
                             </div>
                             <ApplyPatchFileButtons
@@ -2185,11 +2181,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 <MinDurationShineText
                                     active={Boolean(isActive && !isError)}
                                     minDurationMs={300}
-                                    className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
+                                    className={cn(TOOL_ROW_TITLE_CLASS, 'min-w-0 max-w-full truncate')}
                                     style={titleStyle}
-                                    title={displayName}
+                                    title={headerTitle}
                                 >
-                                    {displayName}
+                                    {headerTitle}
                                 </MinDurationShineText>
                                 {quickOpenTarget ? (
                                     <button
@@ -2232,20 +2228,20 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                     {justificationText}
                                 </span>
                             )}
-                            {!justificationText && normalizedPartTool === 'lsp' && descriptionPath ? (
+                            {!justificationText && secondaryDescription && normalizedPartTool === 'lsp' && descriptionPath ? (
                                 renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                             ) : null}
-                            {!justificationText && normalizedPartTool !== 'lsp' && description && (
-                                descriptionPath && description === descriptionPath ? (
+                            {!justificationText && normalizedPartTool !== 'lsp' && secondaryDescription && (
+                                descriptionPath && secondaryDescription === descriptionPath ? (
                                     renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                                 ) : (
                                     <Text
                                         variant={animateTailText ? 'generate-effect' : 'static'}
                                         className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
                                         style={{ color: 'var(--tools-description)' }}
-                                        title={description}
+                                        title={secondaryDescription}
                                     >
-                                        {description}
+                                        {secondaryDescription}
                                     </Text>
                                 )
                             )}
