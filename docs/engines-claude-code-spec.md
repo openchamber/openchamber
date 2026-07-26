@@ -1,8 +1,11 @@
 # Engines & Claude Code Harness — Detailed Spec
 
-Status: draft (design-only; not implemented)  
+Status: **implemented** (Phases A–C complete; Phase D mostly complete — see §19 / §24)  
 Primary engine for v1: `claude-code`  
-Related product intent: keep OpenChamber UI/API as the primary surface; expand execution backends via a translator layer (Paseo-like: native CLI process, native subscription limits).
+Owning runtime docs: [`packages/web/server/lib/harness/DOCUMENTATION.md`](../packages/web/server/lib/harness/DOCUMENTATION.md)  
+Related plan: [`docs/engines-claude-code-implementation-plan.md`](./engines-claude-code-implementation-plan.md)
+
+Product intent: keep OpenChamber UI/API as the primary surface; expand execution backends via a translator layer (Paseo-like: native CLI process, native subscription limits).
 
 ---
 
@@ -40,6 +43,9 @@ Related product intent: keep OpenChamber UI/API as the primary surface; expand e
 | Mid-session engine change | Duplicate into new session + seed transcript; prefer handoff over in-place switch |
 | Billing handoff notice | On by default; dismiss forever; re-enable from Engines settings |
 | Attachments | Supported via SDK streaming input content blocks |
+| Permission mode UI | Derived from OpenCode agent edit permission — **no** separate Claude chip |
+| Session identity | Reuse OpenCode session IDs as the UI shell; Claude `session_id` stored as `foreignSessionId` |
+| Event transport | OpenCode-shaped payloads via `createGlobalUiEventBroadcaster` (same WS/SSE path) |
 
 ---
 
@@ -69,11 +75,11 @@ Canonical Session Protocol (OpenChamber-shaped)
         ▼
 Harness Router  (packages/web/server/lib/harness)
         │
-        ├── translator/opencode     → existing OpenCode SDK path (default)
+        ├── translator/opencode     → existing OpenCode SDK path (default; UI SDK)
         └── translator/claude-code  → @anthropic-ai/claude-agent-sdk → claude CLI
                 │
                 ▼
-        Canonical events → sync/transcript stores (UI unchanged)
+        OpenCode-shaped events → createGlobalUiEventBroadcaster → sync/transcript
 ```
 
 ### Invariants
@@ -84,6 +90,16 @@ Harness Router  (packages/web/server/lib/harness)
 4. One failed Claude session must not clear or block OpenCode sessions.
 5. Live status comes from the live harness channel, not reconstructed only from persisted history.
 6. Fetch/detect failure must not masquerade as “engine ready with empty catalog”.
+7. Claude `harnessId` on a session binding is sticky; engine switch requires handoff (new session).
+
+### Session shell model (as built)
+
+1. UI creates an OpenCode session id (`session.create`) — same list/sync shell as today.
+2. First Claude prompt creates a durable binding
+   `{ sessionId, harnessId: 'claude-code', directory, target, foreignSessionId? }`.
+3. `routeMessage` sees sticky/pending Claude target → `POST /api/harness/prompt` (not `session.promptAsync`).
+4. Translator emits OpenCode-shaped events with that `sessionID` into the existing stream.
+5. Claude native `session_id` is stored as `foreignSessionId` for resume.
 
 ---
 
@@ -115,8 +131,10 @@ type ClaudePermissionMode =
   | 'acceptEdits'
   | 'plan'
   | 'dontAsk'
-  | 'bypassPermissions' // if/when exposed; default hidden or advanced
+  | 'bypassPermissions' // typed; not exposed as a composer control in v1
 ```
+
+**As built:** types live in `packages/ui/src/types/harness.ts`. Server registry mirrors the same ids/capabilities in JS.
 
 ### 5.2 Harness descriptor
 
@@ -144,7 +162,7 @@ type HarnessRuntimeStatus =
   | 'ready'
   | 'needs-login'
   | 'missing-cli'
-  | 'unsupported-host'
+  | 'unsupported-host'  // typed + localized; not emitted by v1 local detect yet
   | 'error'
 
 type HarnessDescriptor = {
@@ -153,7 +171,6 @@ type HarnessDescriptor = {
   shortName: string            // "Claude"
   auth: {
     mode: 'subscription-cli' | 'opencode-providers'
-    // claude-code: subscription-cli only
   }
   capabilities: Record<HarnessCapability, CapabilityLevel>
   install: {
@@ -164,21 +181,21 @@ type HarnessDescriptor = {
 }
 ```
 
-### 5.3 Claude Code v1 capability matrix
+### 5.3 Claude Code v1 capability matrix (as built)
 
 | Capability | Level | Notes |
 |---|---|---|
-| prompt / abort / resume | full | SDK query + interrupt + resume |
-| streaming-text | full | partial messages |
-| streaming-tools | full | map tool_use/tool_result |
-| permissions | full | `canUseTool` + Always patterns + tool linkage + agent-derived permissionMode → OpenChamber permission UI |
+| prompt / abort / resume | full | SDK `query` + interrupt + resume via `foreignSessionId` |
+| streaming-text | full | `includePartialMessages` + ascending text parts / deltas |
+| streaming-tools | full | `tool_use` / `tool_result`; new text segment after each tool so transcript order is `text → tool → text` |
+| permissions | full | `canUseTool` → `permission.asked` with Always patterns + tool linkage; agent-derived `permissionMode`; fail-closed timeout/abort |
 | images | full | base64 image blocks |
-| file-attachments | full | data: embeds; sandboxed `file://` / project-path refs; images, text/plain-like, PDF; reject opaque binaries |
-| slash-commands | partial | user skills via prompt text where CLI expands; no interactive-only cmds |
+| file-attachments | full | `data:` embeds; sandboxed `file://` / project-path refs; images, text-like, PDF; reject opaque binaries |
+| slash-commands | partial | known OpenCode slash/skills blocked on Claude send; CLI-native skills via prompt text only |
 | mcp | partial | whatever Claude loads natively; no OpenChamber MCP editor bridge |
 | subagents | partial | appear in stream if CLI emits; limited UI affordances |
 | goal | partial | Server loop via harness turn snapshots + `/api/harness/prompt` continuations; token budget best-effort |
-| multirun / openchamber-tool | none | OpenCode-only |
+| multirun / openchamber-tool | none | OpenCode-only (`multirun` UI gated; `openchamber-tool` / schedule-task starters still need tighter UI gating — §24) |
 
 ### 5.4 Session binding
 
@@ -197,35 +214,35 @@ type SessionHarnessBinding = {
 }
 ```
 
+**As built:** durable JSON at `$OPENCHAMBER_DATA_DIR/harness-session-bindings.json` (fallback `~/.config/openchamber/…`); atomic write; prune ~200; secrets never persisted (`sanitizeSessionBinding`).
+
 Rules:
 
-- Binding is created at session create or first successful route to a harness.
+- Binding is created on first Claude prompt (or when handoff seeds a Claude session).
 - `harnessId` is sticky for the lifetime of that session.
 - Changing engine never mutates an existing binding’s `harnessId`.
 
-### 5.5 Selection / persistence (UI)
-
-Extend selection + settings (names indicative):
+### 5.5 Selection / persistence (UI) — as built
 
 ```ts
-// selection-store (or successor)
-sessionTargets: Map<sessionId, ExecutionTarget>
+// selection-store
+sessionTargets: Map<sessionId, ExecutionTarget>       // sticky per session
+pendingHandoffTargets: Map<sessionId, ExecutionTarget> // used sessions awaiting Send handoff
 lastUsedTarget: ExecutionTarget | null
 
-// ui favorites become target-aware
+// ui store favorites / recents (ExecutionTarget-aware)
 favoriteTargets: ExecutionTarget[]
+recentTargets: ExecutionTarget[]
 
-// settings
-engines: {
-  defaultHarnessId: HarnessId  // default 'opencode'
-  claudeCode: {
-    warnOnOpenCodeHandoff: boolean  // default true
-  }
-}
-engineOrder: HarnessId[]
+// DesktopSettings (flat camelCase; sanitized in lib/harness/settings.ts)
+enginesDefaultHarnessId: HarnessId              // default 'opencode'
+enginesClaudeCodeWarnOnOpenCodeHandoff: boolean // default true
+enginesClaudeCodeEnabled: boolean               // default true (feature flag)
 ```
 
-Favorites / recents / shortcuts must key by `harnessId + model identity` to avoid collisions with OpenCode `anthropic/...`.
+Favorites / recents / shortcuts key by `harnessId + model identity` (Claude uses `providerID: 'claude-code'` compatibility shape where needed) to avoid collisions with OpenCode `anthropic/...`.
+
+**Not implemented:** `engineOrder: HarnessId[]` (picker order is fixed OpenCode then Claude).
 
 ### 5.6 Engine catalog (API → picker)
 
@@ -242,6 +259,7 @@ type EngineCatalog = {
     models: Array<{
       id: string
       name: string
+      // as built: limits, modalities, reasoning/toolCall flags from registry
       supportsImages?: boolean
       supportsDocuments?: boolean
     }>
@@ -249,48 +267,65 @@ type EngineCatalog = {
 }
 ```
 
-For Claude Code v1, a single models section is enough (no provider nesting).
+**As built:** Claude models come from a **static catalog** in `packages/web/server/lib/harness/registry.js` (aliases + full ids, context/output limits, modalities). Single models section; no provider nesting.
 
 ---
 
-## 6. Module layout
+## 6. Module layout (as built)
 
 ```text
 packages/web/server/lib/harness/
   DOCUMENTATION.md
   index.js
-  registry.js                 # descriptors
-  router.js                   # prompt/abort/resume dispatch
-  session-bindings.js
-  detect.js
+  registry.js                 # descriptors + Claude model catalog
+  detect.js                   # binary + login probe
+  binary-path.js
+  router.js                   # prompt/abort/permission dispatch
+  routes.js                   # registerHarnessRoutes → /api/harness/*
+  session-bindings.js         # durable sticky bindings
+  turn-snapshot.js            # last-turn text for goal continuations
   events/
-    canonical.js
-    from-claude.js
+    from-claude.js            # SDK message → OpenCode-shaped events
+    emit.js                   # broadcaster wrapper
   translators/
-    opencode/
-      index.js                # thin delegate to existing SDK path
+    opencode/index.js         # intentional no-op (SDK path stays in UI)
     claude-code/
-      index.js
+      index.js                # prompt/abort orchestration
       auth-env.js             # subscription-only env policy
-      spawn.js / query.js     # Agent SDK wiring
-      permissions.js
-      attachments.js
-      catalog.js
-  routes.js                   # /api/harness/*
+      query.js                # Agent SDK wiring + tree-kill
+      executable-path.js      # PATH / CLAUDE_CODE_EXECUTABLE / asarUnpack
+      permissions.js          # canUseTool bridge
+      attachments.js          # MIME / file:// mapping
 
 packages/ui/src/
+  types/harness.ts
   stores/useHarnessStore.ts
-  lib/harness/catalog.ts
-  components/harness/
-    EngineStatusBadge.tsx
-    HandoffConfirmDialog.tsx
+  lib/harness/
+    client.ts                 # runtimeFetch prompt/abort/permission
+    catalog.ts
+    settings.ts
+    capabilities.ts
+    resolve-execution-target.ts
+    session-handoff.ts
+    favorite-targets.ts
+    apply-favorite-target.ts
+    claude-models.ts
+    claude-permission-mode.ts
+    composer-attachment-model.ts
+    active-model-limits.ts
   components/sections/engines/
-    EnginesSidebar.tsx
     EnginesPage.tsx
+    EnginesSidebar.tsx
+    OpenCodeEngineDetail.tsx
     ClaudeCodeEngineDetail.tsx
+  components/chat/HandoffConfirmDialog.tsx
+  components/ui/EngineLogo.tsx
+  sync/session-ui-store.ts    # routeMessage harness branch
+  sync/selection-store.ts     # sessionTargets / pendingHandoffTargets
+  sync/session-actions.ts     # permission reply/dismiss → harness
 ```
 
-OpenCode proxy and Providers pages remain unchanged in ownership. Harness routes register **before** the generic OpenCode proxy.
+OpenCode proxy and Providers pages remain unchanged in ownership. Harness routes register **before** the generic OpenCode proxy (`feature-routes-runtime.js`).
 
 ---
 
@@ -298,7 +333,7 @@ OpenCode proxy and Providers pages remain unchanged in ownership. Harness routes
 
 ### 7.1 Runtime choice
 
-Use official `@anthropic-ai/claude-agent-sdk` which spawns the local `claude` CLI.
+Uses official `@anthropic-ai/claude-agent-sdk` (dependency in `packages/web/package.json`), which spawns the local `claude` CLI.
 
 Rationale:
 
@@ -306,148 +341,154 @@ Rationale:
 - Subscription billing when CLI OAuth/login is active.
 - Structured messages + `canUseTool` (better than raw PTY scraping).
 
-Dependency policy: adding `@anthropic-ai/claude-agent-sdk` requires an explicit dependency-add approval at implementation time (repo rule). Spec assumes that approval.
-
-### 7.2 Auth policy (subscription only)
-
-Hard requirements:
+### 7.2 Auth policy (subscription only) — as built
 
 1. Claude engine **never** presents API-key entry.
-2. Before spawn, child env must **not** prefer API billing credentials over subscription login.
-3. Concrete policy for translator process env:
-   - Unset/strip `ANTHROPIC_API_KEY` for Claude engine child processes.
-   - Unset/strip other API-priority vars that would outrank Claude Code OAuth per Claude auth order, when the goal is subscription mode.
-   - Do not copy OpenCode `auth.json` Anthropic API keys into Claude engine.
-4. Ready criteria:
-   - `claude` binary resolvable on the execution host.
-   - Subscription login detectable (CLI auth probe / SDK auth state).
-   - If only an API key exists and subscription login is absent → status `needs-login` (not `ready`).
-5. Settings copy must state: API keys stay under OpenCode; Claude Code engine uses Claude subscription.
+2. Child env strips API-priority keys (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`) via `auth-env.js`.
+3. Does not copy OpenCode `auth.json` Anthropic API keys into Claude engine.
+4. Ready criteria (`detect.js`):
+   - `claude` binary resolvable on the execution host (PATH / `CLAUDE_CODE_EXECUTABLE` / Electron unpacked native package).
+   - SDK importable.
+   - Subscription login: `claude auth status --json` (API-priority env stripped) with OAuth-like methods → ready; API-key-only / logged-out → continue to fallbacks.
+   - Fallbacks (in order): non-empty `CLAUDE_CODE_OAUTH_TOKEN`; structured `claudeAiOauth.accessToken` under `CLAUDE_CONFIG_DIR` or `~/.claude/.credentials.json`.
+   - If only an API key exists and subscription login is absent → `needs-login` (not `ready`).
+5. Settings copy states: API keys stay under OpenCode; Claude Code engine uses Claude subscription.
+6. Never log tokens, OAuth material, or credential env values.
 
-### 7.3 Query shape
+### 7.3 Query shape — as built
 
 - Text-only turns may use string prompt **or** streaming user messages.
 - Any turn with attachments **must** use `AsyncIterable<SDKUserMessage>` content blocks.
 - Resume uses stored `foreignSessionId`.
-- Working directory = session/project directory.
-- Do **not** default to `--bare` for product sessions (bare skips CLAUDE.md/skills/MCP and hurts nativity). Bare may exist later as an advanced opt-in; not v1 default.
-- Permission mode derived from the selected OpenCode agent's edit permission
+- Working directory = session/project directory (validated before spawn).
+- Not defaulted to `--bare`.
+- `permissionMode` derived from the selected OpenCode agent's edit permission
   (`allow`→`acceptEdits`, `ask`→`default`, `deny`→`plan`); not a separate Claude UI control.
-  Session permission auto-accept replies through `/api/harness/permission/reply`.
-- `canUseTool` bridges into OpenChamber permission requests.
+- Session permission auto-accept replies through `/api/harness/permission/reply` (never OpenCode `/permission/:id/reply` for Claude-bound sessions).
+- `canUseTool` bridges into OpenChamber `permission.asked` / `permission.replied`.
+- `includePartialMessages: true` for streaming deltas.
+- Optional Claude Agent SDK `effort` forwarded when present on the target.
 
-### 7.4 Process lifecycle
+### 7.4 Process lifecycle — as built
 
-- One Claude query/session binding per OpenChamber session (unless resume spawns a replacement query).
-- Abort → SDK interrupt + terminate process tree (Claude + MCP children), Paseo-style tree kill.
-- Crash → canonical `session.status=error` + `harness.notice`; keep binding for retry/resume when possible.
-- Never log tokens, OAuth material, or raw credential env.
+- One active Claude turn per OpenChamber session (409 if already in progress).
+- Abort → SDK `interrupt` + `killProcessTree` + fail-closed pending permissions + `MessageAbortedError`-shaped assistant event + idle.
+- Crash → `session.status=idle` + `session.error`; binding kept for retry/resume when foreign id known.
+- Electron: resolve executable outside `app.asar` (`executable-path.js` + builder `asarUnpack` for native SDK packages).
 
-### 7.5 Event mapping (Claude → Canonical)
-
-Map at least:
+### 7.5 Event mapping (Claude → Canonical) — as built
 
 | Claude / SDK | Canonical |
 |---|---|
-| assistant text / text_delta | `part.delta` / message upsert |
-| thinking (if emitted) | reasoning part (optional display) |
-| tool_use / tool_result | tool start/update/end |
-| permission prompt via canUseTool | `permission.request` |
-| result / completion | `session.status=idle` + finalize |
-| api_retry / rate_limit errors | error + user-visible notice |
+| assistant text / text_delta | `message.part.updated` + `message.part.delta` |
+| tool_use / tool_result | tool part start/update/end (tool name preserved) |
+| post-tool assistant text | **new** text part (ascending id) so UI order is chronological |
+| permission via canUseTool | `permission.asked` / `permission.replied` |
+| result / completion | finalize open text part + `message.updated` + `session.status=idle` |
+| rate_limit / overloaded | assistant error with retryable flag when applicable |
 | session_id | persist `foreignSessionId` |
 
-Unknown event types: ignore safely or surface as `harness.notice` debug-level; do not crash the pump.
+**Part IDs:** OpenCode-compatible **ascending** `msg_*` / `prt_*` (timestamp + counter). The UI sorts parts by id via `Binary.search`; random UUIDs reorder tool/text blocks.
 
-### 7.6 Catalog / detect API
+Unknown event types: ignored safely (no throw). Thinking/reasoning parts are optional/not required for v1 display completeness.
 
-`GET /api/harness` → list descriptors + runtime status per host/directory scope.  
-`GET /api/harness/claude-code` → detail: version, login state, models, capabilities.  
-`POST /api/harness/claude-code/detect` → force refresh (no silent success-on-failure).
+### 7.6 Catalog / detect API — as built
 
-Detection must run on the **execution host** (local server, desktop backend, or remote SSH host), not on a UI-only device that lacks the binary.
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/harness` | List engines + runtime status |
+| GET | `/api/harness/:id` | Engine detail + catalog |
+| POST | `/api/harness/:id/detect` | Force refresh (no silent success-on-failure) |
+
+Detection runs on the **execution host** (local server, desktop backend, or remote SSH host), not on a UI-only device that lacks the binary.
+
+Status matrix: `ready` / `needs-login` / `missing-cli` / `error`. `unsupported-host` is reserved for mobile-only / no-exec hosts and is **not emitted** by current local detect.
 
 ---
 
 ## 8. Routing & session flows
 
-### 8.1 Send path
+### 8.1 Send path — as built
 
 ```
 sendMessage / routeMessage
-  read ExecutionTarget for current session (or pending handoff target)
+  resolve ExecutionTarget (sticky session → pending handoff → last-used)
   if harnessId === 'opencode':
     existing opencodeClient path
-  else:
-    POST /api/harness/prompt {
-      sessionId, directory, target, parts, attachments, delivery?
+  else if harnessId === 'claude-code':
+    block if catalog status ≠ ready (toast + deep-link Engines)
+    block shell mode and known OpenCode slash/skills
+    optimisticSend → POST /api/harness/prompt {
+      sessionId, directory, target, text, files?, messageId?, assistantMessageId?, seedFromSessionId?
     }
 ```
 
 Server:
 
-1. Validate binding/target consistency.
-2. Validate capabilities (e.g. images required ⇒ `images != none`).
-3. Translate attachments.
-4. Start/resume Claude query.
-5. Stream canonical events to the UI event pipeline.
+1. Validate session/directory/target; reject non-ready Claude.
+2. Bind/update sticky session binding.
+3. Emit user message events (text + file parts).
+4. Translate attachments (cwd-sandboxed).
+5. Start/resume Claude query with `canUseTool`.
+6. Stream canonical events via broadcaster; return HTTP `202` immediately.
+
+Client: `packages/ui/src/lib/harness/client.ts` (`harnessPrompt` / `harnessAbort` / `harnessPermissionReply` via `runtimeFetch`).
 
 ### 8.2 Session create
 
-- New chat with last-used / default engine.
-- OpenChamber still owns the session list row and local/optimistic messages.
+- New chat uses last-used / default engine (`enginesDefaultHarnessId`, default OpenCode).
+- OpenChamber owns the session list row and optimistic messages.
 - Claude foreign id filled when SDK reports `session_id`.
 
-### 8.3 Engine switch / handoff (required behavior)
+### 8.3 Engine switch / handoff — as built
 
-When user selects a different engine in an existing session:
+When user selects a different engine in an existing **used** session:
 
-1. Mark target as **pending handoff** (do not rewrite binding).
-2. On Send (or explicit Continue):
-   - If notice enabled and `opencode → claude-code`: show confirm dialog.
-   - Create **new** OpenChamber session with `harnessId: claude-code`.
-   - Set `seedFromSessionId`.
-   - Seed transcript (see §9).
-   - Send the pending user message (with attachments) to the new session.
+1. Mark target as **pending handoff** (do not rewrite sticky binding).
+2. On Send:
+   - If notice enabled and `opencode → claude-code`: show `HandoffConfirmDialog`.
+   - Create **new** OpenChamber session.
+   - Seed synthetic context (see §9); set `seedFromSessionId` on binding.
+   - Persist sticky target on the new session; send pending user message (with attachments).
    - Navigate UI to the new session.
    - Leave the source session untouched.
 
-Empty/nearly-empty source sessions may skip seed and only create a fresh Claude session (still show notice if billing gate applies and setting on).
+Empty/unused source sessions update sticky target **in place** (no duplicate).
 
 If Claude engine is not `ready`, block send and deep-link to Settings → Engines → Claude Code.
 
-In-place rewrite of `harnessId` on an existing session is **out of spec**.
+In-place rewrite of `harnessId` on a used session is **out of spec**.
 
 ---
 
-## 9. Handoff seeding
+## 9. Handoff seeding — as built
 
 ### 9.1 Include
 
-- User and assistant **text** turns (most recent first, up to budget).
-- Attachment images/docs from the **pending outbound message** in full (subject to size clamps).
-- Optional: last N image attachments from history if budget remains.
+- User and assistant **text** turns (most recent first) up to **24_000** characters (`HANDOFF_SEED_CHAR_BUDGET`).
+- Attachment images/docs from the **pending outbound message** in full (subject to translator clamps).
 
 ### 9.2 Exclude / degrade
 
-- Full tool call/result transcripts by default (optional short textual summaries).
+- Full tool call/result transcripts (not seeded as structured tools).
 - Permission history.
 - OpenCode-only synthetic parts that have no Claude meaning.
+- **Historical** attachments from prior turns (not seeded in v1; pending outbound only).
 - Oversized binaries.
 
 ### 9.3 Budget
 
-Implementation-defined token/char budget (configurable constant). When truncated, prepend a short system/user note:
+When truncated, prepend:
 
 `Prior conversation truncated for handoff; N earlier turns omitted.`
 
 ### 9.4 Seed delivery to Claude
 
-Prefer a first synthetic user message (or structured streaming user messages) that clearly labels prior context, then the real user prompt as the actionable turn. Do not claim the Claude native session is the same session as OpenCode.
+Synthetic user context is prepended into the harness prompt text (labeled prior context), then the real user prompt as the actionable turn. Does not claim the Claude native session is the same session as OpenCode.
 
 ---
 
-## 10. Handoff billing notice
+## 10. Handoff billing notice — as built
 
 ### 10.1 When
 
@@ -455,7 +496,7 @@ Show only if all are true:
 
 - source `harnessId === 'opencode'`
 - target `harnessId === 'claude-code'`
-- `settings.engines.claudeCode.warnOnOpenCodeHandoff !== false`
+- `enginesClaudeCodeWarnOnOpenCodeHandoff !== false`
 - user is about to create/continue via handoff (Send/Continue)
 
 Do not show for:
@@ -466,102 +507,96 @@ Do not show for:
 
 ### 10.2 Dialog
 
-- Title: Continue on Claude Code?
-- Body: Explains new session uses Claude **subscription usage limits**; API providers remain on OpenCode; conversation text is copied as context.
+Implemented as `HandoffConfirmDialog`:
+
+- Title / body explain new session uses Claude **subscription usage limits**; API providers remain on OpenCode; conversation text is copied as context.
 - Primary: Continue
 - Secondary: Cancel
-- Checkbox: Don’t show this again  
-  - Applied only when user confirms Continue (Cancel must not persist dismissal).
+- Checkbox: Don’t show this again — applied **only** when user confirms Continue (Cancel must not persist dismissal).
+
+Locale keys: `chat.handoff.*`.
 
 ### 10.3 Settings control
 
-Settings → Engines → Claude Code:
+Settings → Engines → Claude Code → Warnings toggle bound to `enginesClaudeCodeWarnOnOpenCodeHandoff`.
 
-```
-Warnings
-[ ] Warn when switching from OpenCode to Claude Code
-    Explain that the new session uses your Claude subscription, not API billing.
-```
-
-Default: enabled.  
-Dialog “Don’t show again” sets this to disabled.  
-User can re-enable anytime on this page.
+Default: enabled. Dialog “Don’t show again” sets this to disabled. User can re-enable anytime on this page.
 
 ### 10.4 Persistence
 
-Persist under user settings (same durability path as other OpenChamber settings), not a write-only localStorage tombstone without settings UI.
-
-```ts
-engines.claudeCode.warnOnOpenCodeHandoff: boolean // default true
-```
+Same durability path as other OpenChamber desktop settings (sanitized flat keys) — not a write-only localStorage tombstone without settings UI.
 
 ---
 
-## 11. Attachments
+## 11. Attachments — as built
+
+Capability: `file-attachments: full`.
 
 ### 11.1 OpenChamber input
 
-Reuse composer `AttachedFile` → `{ mime, url, filename }` (data URLs or resolvable URLs), including existing HEIC→JPEG and text MIME normalization where applicable **before** or inside translator ingress.
+Composer `AttachedFile` → `{ mime, url, filename }`. HEIC→JPEG, Office/OpenDocument extraction, HAR/notebook sanitization happen in shared UI (`attachment-files.ts` / `document-attachments.ts`) **before** harness send. Composer modality warnings follow the active `ExecutionTarget` (`composer-attachment-model.ts`), not leftover OpenCode `currentModel`.
 
 ### 11.2 Claude mapping
 
-| MIME / kind | Mapping |
+| Source / kind | Mapping |
 |---|---|
-| `image/png`, `image/jpeg`, `image/gif`, `image/webp` | SDK `image` base64 block |
-| `image/heic`, `image/heif` | convert to JPEG first, then image block |
-| text-like (`text/*`, json, yaml, …) | document/text content block |
-| `application/pdf` | document block when supported; else explicit error |
-| other binary | reject with clear error; do not silent-drop |
+| `data:` `image/png\|jpeg\|gif\|webp` | SDK `image` base64 block |
+| `data:` text-like / json / yaml / svg | labeled `text` block |
+| `data:` `application/pdf` | `document` base64 block |
+| `file://` or absolute path **under session cwd** | path-reference text (`Attached project file: …`) after sandbox + MIME/size checks (Claude can `Read` natively) |
+| `file://` with embed mode | bytes embedded like `data:` when path refs disabled |
+| path outside cwd | reject `ATTACHMENT_PATH_OUTSIDE_CWD` |
+| other binary (e.g. zip) | reject `ATTACHMENT_UNSUPPORTED_TYPE` — never silent-drop |
 
-Turns with attachments must use streaming SDK user messages (string prompt path insufficient).
+Turns with attachments use streaming SDK user messages. User message events also emit OpenCode-shaped `file` parts for transcript reconcile.
 
 ### 11.3 Size / safety clamps
 
-- Max per-file and per-turn bytes (constants in translator).
+- Max per-file and per-turn bytes (`MAX_ATTACHMENT_BYTES`, `MAX_TURN_ATTACHMENT_BYTES`).
 - On exceed: fail the send with user-visible error identifying the file.
 - Never log attachment contents.
 
 ### 11.4 Project files vs attachments
 
-Files already on disk in cwd should preferably be referenced by path in text when the user attaches via file picker from the project; clipboard/drag-drop images remain embedded attachments.
+Files already on disk in cwd are preferably referenced by path; clipboard/drag-drop `data:` images remain embedded.
 
 ### 11.5 Handoff + attachments
 
-- Pending message attachments always attempt full transfer.
-- Historical attachments best-effort within budget; omit with notice when needed.
+- Pending message attachments attempt full transfer on the new session send.
+- Historical attachments are **not** seeded in v1 (text-only prior turns).
 
 ### 11.6 UI capability gating
 
-Paperclip remains available on Claude engine. Unsupported type → error on send. If detect reports `images: none` (should not happen for healthy Claude), disable image attach explicitly.
+Paperclip remains available on Claude engine. Unsupported type → error on send. Healthy Claude catalog reports images supported.
 
 ---
 
-## 12. UI / IA
+## 12. UI / IA — as built
 
 ### 12.1 Settings
 
-Group conceptually “Engines & models” (internal group id may remain `opencode` initially if slug churn is costly; user-visible titles should say Engines where needed):
+Settings slug `engines` (split page) in the OpenCode nav group (Engines before Providers):
 
 | Page | Role |
 |---|---|
-| **Engines** (new, split) | OpenCode, Claude Code (later Codex/Gemini): status, login, capabilities, warnings |
+| **Engines** | OpenCode + Claude Code: status, login guidance, capabilities, warnings |
 | **Providers** | OpenCode providers + API auth only |
-| **Agents** | OpenCode agents; Claude detail links to permission modes / note about CLI agents |
-| Behavior / Commands / MCP / Plugins | OpenCode-scoped; Claude detail explains native CLI ownership |
+| **Agents** | OpenCode agents; Claude uses agent edit permission to derive `permissionMode` |
+| Behavior / Commands / MCP / Plugins | OpenCode-scoped |
 
-Engines → Claude Code detail sections:
+Engines → Claude Code detail:
 
 1. Status (Ready / Needs login / Missing CLI / Error) + version  
 2. Actions: Login guidance / Open docs / Re-detect  
-3. Capabilities summary  
-4. Warnings toggle (`warnOnOpenCodeHandoff`)  
+3. Capabilities summary (from descriptor)  
+4. Warnings toggle (`enginesClaudeCodeWarnOnOpenCodeHandoff`)  
 5. Note: API keys are configured under Providers on OpenCode  
+
+Locale: `settings.engines.*`.
 
 ### 12.2 Chat picker (ModelControls)
 
-Compact chip:
-
-`[Claude · Sonnet 5 ▾]  [Accept edits ▾]`
+Compact chip uses Claude model display names (e.g. Sonnet 5) when engine is Claude.
 
 Picker structure:
 
@@ -579,26 +614,25 @@ Manage engines…
 Add provider…          # only when active engine is OpenCode
 ```
 
-Mobile: engine chips, then models sheet.
+Mobile: engine chips, then models sheet. Session list: Claude `EngineLogo` + tooltip on Claude-bound sessions.
 
-Session list: small engine glyph + tooltip.
+Feature flag: `enginesClaudeCodeEnabled` (default `true`).
 
 ### 12.3 Visual rules
 
 - Reuse theme tokens; no new purple glow aesthetic.
 - Engine rows: icon + name + status text; active = foreground + leading indicator.
-- Notices in transcript: rare meta lines, not sticker overlays.
-- Disabled OpenCode-only features from Claude session: grey + one-line reason or deep-link to Engines.
+- Disabled OpenCode-only features from Claude session: grey + one-line reason or deep-link to Engines (multirun done; see §24 for remaining gates).
 
 ### 12.4 Copy guidelines
 
 - User-facing: **Engine**, **Claude Code**, **subscription**, **usage limits**.
 - Avoid “harness” in UI strings.
-- Locale keys under something like `settings.engines.*`, `chat.engines.*`, `chat.handoff.*`.
+- Locale keys under `settings.engines.*`, `chat.engines.*`, `chat.handoff.*`.
 
 ---
 
-## 13. HTTP API (indicative)
+## 13. HTTP API — as built
 
 All routes authenticated like other OpenChamber runtime APIs. No secrets in responses.
 
@@ -612,28 +646,32 @@ All routes authenticated like other OpenChamber runtime APIs. No secrets in resp
 | POST | `/api/harness/permission/reply` | Resolve bridged permission |
 | GET | `/api/harness/sessions/:sessionId` | Binding + foreign id (debug/UI) |
 
-OpenCode traffic stays on existing SDK/`/api/*` proxy path.
+OpenCode traffic stays on existing SDK / `/api/*` proxy path.
 
-Event delivery: prefer reusing the existing OpenChamber event/stream pipeline with canonical event envelopes tagged by `sessionId` (exact transport left to implementation, but must satisfy sync invariants).
-
----
-
-## 14. Permissions bridge
-
-1. Claude `canUseTool` → create OpenChamber permission request for session.
-2. UI uses existing permission cards/flows where possible.
-3. Reply → translator resolves the pending Claude permission promise.
-4. Permission mode chip maps to Claude modes; unsupported modes hidden.
-5. If permission UI cannot be shown (disconnected client), fail closed per mode (deny / dontAsk semantics), never auto-bypass unless mode explicitly allows.
+Event delivery: OpenCode-shaped envelopes through `createGlobalUiEventBroadcaster` with `{ directory }` so existing message-stream WS/SSE clients deliver into `event-pipeline` / `event-reducer`.
 
 ---
 
-## 15. Usage / quota
+## 14. Permissions bridge — as built
 
-- Settings → Usage continues to show Claude subscription windows when credentials for that fetcher exist.
-- Claude **engine** readiness must not depend on OpenCode `auth.json` API keys.
-- Prefer a Claude-Code-aware usage probe aligned with CLI subscription auth (separate from small-model Anthropic API path).
-- Do not display API-credit usage as if it were Claude Code engine usage.
+Capability: `permissions: full`.
+
+1. Claude `canUseTool` → OpenChamber `permission.asked` for the session (`id`, `sessionID`, `permission`, `patterns`, `metadata`, `always`, optional `tool: { messageID, callID }`).
+2. `always` is populated from concrete command/path patterns, or falls back to the tool name so PermissionCard “Always Allow” stays labeled.
+3. UI uses existing permission cards; Claude sessions reply via `harnessPermissionReply` (`once` / `always` / `reject`).
+4. `permissionMode` is **not** a separate Claude composer control — derived from agent edit permission on each send.
+5. Timeout (~120s), abort, and turn-end fail closed (deny). Never auto-bypass unless mode/SDK path explicitly allows.
+6. Server permission-auto-accept reconciles harness pending asks via `listPendingPermissions` / harness reply (not OpenCode permission reply routes).
+
+---
+
+## 15. Usage / quota — as built
+
+- Settings → Usage shows **Claude subscription** windows via `quota/providers/claude.js`.
+- Auth resolution prefers Claude CLI OAuth / `CLAUDE_CODE_OAUTH_TOKEN`, then falls back to OpenCode `auth.json` aliases when present (`claude-cli-auth.js`).
+- Claude **engine** readiness does **not** depend on OpenCode `auth.json` API keys.
+- Do not display API-credit usage as if it were Claude Code engine usage; label remains “Claude subscription”.
+- Context usage meters for Claude sessions use Claude catalog limits (`active-model-limits.ts`), not leftover OpenCode model limits.
 
 ---
 
@@ -641,11 +679,11 @@ Event delivery: prefer reusing the existing OpenChamber event/stream pipeline wi
 
 | Surface | Claude engine v1 |
 |---|---|
-| Desktop (Electron, in-process server) | Supported when `claude` installed for the user |
+| Desktop (Electron, in-process server) | Supported when `claude` installed for the user (asar-safe executable resolution) |
 | Web local server | Supported on server host |
-| VS Code | Supported when backend host has CLI |
+| VS Code | Supported when backend host has CLI; `file://` attachments sandboxed to cwd |
 | Remote SSH / tunnel | Supported only if **remote** host has CLI + login |
-| Mobile client alone | Engine shown; execution requires connected host with CLI — otherwise `unsupported-host` / unavailable |
+| Mobile client alone | Engine shown; execution requires connected host with CLI — `unsupported-host` reserved (not yet emitted by local detect) |
 
 UI must surface host-scoped status, not pretend mobile has a local Claude binary.
 
@@ -654,9 +692,9 @@ UI must surface host-scoped status, not pretend mobile has a local Claude binary
 ## 17. Security & privacy
 
 1. Never log bearer tokens, OAuth tokens, `CLAUDE_CODE_OAUTH_TOKEN`, auth.json contents, or attachment bytes.
-2. Do not persist Claude credentials inside OpenChamber settings; rely on CLI login store.
+2. Do not persist Claude credentials inside OpenChamber settings; rely on CLI login store / injected env for automated hosts.
 3. Strip API keys from Claude child env (subscription-only policy).
-4. Enforce cwd sandbox = project directory expectations already used by server file/terminal ops.
+4. Enforce cwd sandbox for `file://` / path attachments.
 5. Tree-kill child processes on abort/close to avoid orphan MCP servers.
 6. Treat permission fail-closed as correctness, not only UI hiding.
 
@@ -666,91 +704,86 @@ UI must surface host-scoped status, not pretend mobile has a local Claude binary
 
 | Failure | User-visible | State |
 |---|---|---|
-| CLI missing | Engines status Missing CLI | No session binding corruption |
+| CLI missing | Engines status Missing CLI | No session binding corruption; sends blocked |
 | Needs login | CTA to login | Sends blocked |
-| Auth became API-key-only due to env leak | Treat as misconfiguration; do not silently bill API | Detect + error/notice |
+| Auth became API-key-only due to env leak | Treat as misconfiguration; do not silently bill API | Detect → `needs-login` / error |
 | Mid-turn crash | Error status on that session | Other sessions intact; resume if foreign id known |
 | Unsupported attachment | Send fails with file name/reason | Composer keeps files for retry |
-| Handoff seed truncate | Notice in new session | Source session unchanged |
-| Handoff cancel | No new session | Pending target cleared or kept per UX choice (prefer clear) |
-| Permission timeout | Deny/fail closed | Turn ends error or waits per existing permission UX |
+| Path outside cwd | `ATTACHMENT_PATH_OUTSIDE_CWD` | No read outside project |
+| Handoff seed truncate | Truncation notice in seed text | Source session unchanged |
+| Handoff cancel | No new session | Pending target cleared on cancel path |
+| Permission timeout | Deny/fail closed | Pending map cleared; turn can continue/deny per SDK |
+| Turn already active | HTTP 409 `TURN_IN_PROGRESS` | No second Claude process for same session |
 
-Optimistic UI messages for Claude sends must reconcile with translator accept/reject; failed send must not look like authoritative success.
+Optimistic UI messages for Claude sends reconcile with translator accept/reject; failed send must not look like authoritative success.
 
 ---
 
-## 19. Phased delivery
+## 19. Phased delivery (status)
 
-### Phase A — Contracts
+| Phase | Status | Notes |
+|---|---|---|
+| **A — Contracts & UI shells** | **Done** | Types, settings, store, Engines page, picker grouping (`enginesClaudeCodeEnabled` default on) |
+| **B — Claude vertical slice** | **Done** | SDK wrapper, bindings, prompt/abort, events, `routeMessage`, permissions, detect/login |
+| **C — Attachments + handoff** | **Done** | Attachment mapping + clamps + path refs; handoff duplicate/seed; billing notice |
+| **D — Polish** | **Mostly done** | Favorites/recents by target; session glyph; mobile engine chips; usage probe; multirun gated; goal partial. Remaining: §24 |
 
-- `HarnessId`, bindings, settings keys, catalog types.
-- Engines settings page shell + Claude detail status/detect (can be read-only).
-- Picker engine grouping wired to OpenCode-only until Phase B lands.
-
-### Phase B — Claude vertical slice
-
-- Dependency + translator prompt/stream/abort/resume.
-- Subscription env policy + detect/login status.
-- Canonical event ingest into transcript.
-- Permission mode + canUseTool bridge (basic).
-
-### Phase C — Attachments + handoff
-
-- Attachment mapping + clamps.
-- Handoff duplicate + seed.
-- Billing notice + settings toggle + don’t-show-again.
-
-### Phase D — Polish
-
-- Favorites/recents by target.
-- Usage probe alignment.
-- Capability gating for OpenCode-only features.
-- Session glyph + mobile engine chips.
-
-Codex/Gemini engines are post-v1 registry additions following the same router contracts.
+Codex/Gemini engines remain post-v1 registry additions following the same router contracts.
 
 ---
 
 ## 20. Testing requirements
 
-Minimum focused coverage:
+Focused coverage present under:
+
+- `packages/web/server/lib/harness/**/*.test.js` (registry, detect, routes, bindings, from-claude, attachments, permissions, auth-env, query, turn-snapshot, …)
+- `packages/ui/src/lib/harness/**` tests + `route-message-harness.test.js` + permission harness branches in `session-actions.test.ts`
+- Quota: `claude.test.js` / `claude-cli-auth.test.js`
+- Session-goal harness continuation tests
+
+Minimum contracts to keep green:
 
 1. Router dispatches opencode vs claude-code without cross-talk.
 2. Auth-env policy strips API key for Claude child env.
-3. Detect status matrix: ready / needs-login / missing-cli / error.
-4. Event mapper: text + tool + permission + result fixtures.
-5. Attachments: image/text/pdf accept; unknown binary reject; HEIC conversion path.
+3. Detect status matrix: ready / needs-login / missing-cli / error (never ready+empty on failure).
+4. Event mapper: ascending ids; text → tool → text interleaving; permissions; result finalize.
+5. Attachments: image/text/pdf accept; unknown binary reject; `file://` sandbox; HEIC conversion on UI path.
 6. Handoff: creates new session, seeds text, preserves source, sets `seedFromSessionId`.
 7. Notice setting: default on; checkbox persists off only on Continue; settings re-enable works.
 8. Capability gate: multirun not offered on Claude sessions; goal is offered (`partial`).
 9. Failure isolation: Claude crash leaves OpenCode sessions usable.
 
-Runtime validation on desktop/web host with real `claude` login is required before calling the feature done; typecheck alone is insufficient.
+Runtime validation on desktop/web host with real `claude` login remains required before calling the feature “production proven”; typecheck alone is insufficient.
 
 ---
 
-## 21. Open implementation choices (resolve at coding time)
+## 21. Resolved implementation choices
 
-1. Exact event transport into existing sync bus (mirror OpenCode SSE shapes vs parallel harness channel + adapter).
-2. Whether OpenChamber session ids are purely local for Claude rows or also mirrored into an OpenCode-compatible session store stub.
-3. Precise Claude model catalog source (static map vs CLI/SDK discovery).
-4. Permission mode set exposed in v1 UI.
-5. Numeric attachment/seed budgets.
+| Choice | Resolution |
+|---|---|
+| Event transport | OpenCode-shaped events via `createGlobalUiEventBroadcaster` + existing WS/SSE clients |
+| Session ids | Reuse OpenCode session ids as UI shell; Claude id = `foreignSessionId` |
+| Claude model catalog | Static map in `registry.js` (aliases + full ids + limits/modalities) |
+| Permission mode UI | Derived from OpenCode agent edit permission; no separate Claude chip |
+| Attachment / seed budgets | Attachment constants in translator; handoff seed **24_000** chars |
+| Part ordering | Ascending OpenCode-compatible ids + new text segment after each `tool_use` |
 
-These must not change locked product decisions in §2.
+These do not change locked product decisions in §2.
 
 ---
 
-## 22. Acceptance criteria (v1)
+## 22. Acceptance criteria (v1) — code readiness
 
-1. User can select Engine **Claude Code** in the chat picker as a top-level engine.
-2. With Claude CLI installed and subscription login present, user can chat with streaming text and tools in the normal OpenChamber transcript.
-3. Usage consumes Claude subscription limits (not Anthropic API credits) under the subscription-only env policy.
-4. API-key Anthropic use remains available only via OpenCode Providers.
-5. Images and common text attachments send successfully; unsupported types error clearly.
-6. Switching OpenCode → Claude Code on Send creates a **new** session with seeded context and optional billing notice.
-7. Notice can be permanently dismissed and re-enabled from Settings → Engines → Claude Code.
-8. Missing CLI / needs login are explicit and block sends without corrupting other sessions.
+| # | Criterion | Status |
+|---|---|---|
+| 1 | User can select Engine **Claude Code** in the chat picker as a top-level engine | **Met** |
+| 2 | With Claude CLI + subscription login, chat with streaming text and tools in the normal transcript | **Met in code** (needs host smoke with real CLI) |
+| 3 | Usage consumes Claude subscription limits under subscription-only env policy | **Met** (auth-env + detect + Usage labeling) |
+| 4 | API-key Anthropic use remains available only via OpenCode Providers | **Met** |
+| 5 | Images and common text attachments send successfully; unsupported types error clearly | **Met** |
+| 6 | Switching OpenCode → Claude Code on Send creates a **new** session with seeded context and optional billing notice | **Met** (text seed; historical attachments not seeded) |
+| 7 | Notice can be permanently dismissed and re-enabled from Settings → Engines → Claude Code | **Met** |
+| 8 | Missing CLI / needs login are explicit and block sends without corrupting other sessions | **Met** |
 
 ---
 
@@ -759,4 +792,30 @@ These must not change locked product decisions in §2.
 - Paseo Claude provider: official Agent SDK / process ownership, tree-kill, timeline translation, native credentials.
 - Claude Code headless / Agent SDK: `query()`, stream-json/SDK messages, resume, permissions, image blocks via streaming input.
 - OpenChamber existing seams: `routeMessage`, Providers settings, quota `claude` provider, skill source `claude`, sync invariants.
-)
+
+---
+
+## 24. Remaining gaps / follow-ups
+
+| Item | Priority | Notes |
+|---|---|---|
+| Emit `unsupported-host` for no-exec / mobile-only hosts | Polish | Typed + localized; detect never returns it yet |
+| Favorite/recent cycle skip unavailable engines/models | Polish | Target-aware keys exist; cycle does not yet skip unavailable |
+| Gate `openchamber-tool` / schedule-task starters on Claude | Correctness | Capability is `none`; some starters may still appear |
+| MCP/Agents settings explainers from Claude context | Polish | Engines page notes exist; deep Claude-context copy incomplete |
+| Historical attachment handoff seed | Optional | Spec §9.1 optional; pending outbound attachments already transfer |
+| Goal token budget completeness | Partial | Continuations work; Claude usage tokens → budget still best-effort |
+| Locale cleanup (`goalUnsupported` “OpenCode only”) | Polish | Stale vs `goal: partial` |
+| `engineOrder` setting | Deferred | Not required for v1 two-engine picker |
+
+---
+
+## 25. How to verify (manual)
+
+1. **Picker:** Settings → Engines shows Claude status; chat picker Engines section selects Claude models.
+2. **Chat:** With CLI + login, send a turn that uses tools then answers — transcript order is text → tools → final text.
+3. **Permissions:** Agent edit = Ask → PermissionCard Allow once / Always / Reject; timeout fails closed.
+4. **Attachments:** PNG + text data URL; project `file://` path; reject zip / outside-cwd.
+5. **Handoff:** On a used OpenCode session, pick Claude → Send → confirm notice → new session with seed; source intact; Don’t show again only on Continue.
+6. **Gating:** MultiRun disabled on Claude; Goal available; Usage labeled Claude subscription.
+7. **Failure isolation:** Stop Claude mid-turn / missing CLI does not clear OpenCode sessions.
