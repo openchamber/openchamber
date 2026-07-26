@@ -696,7 +696,7 @@ describe("optimisticSend target directory", () => {
     expect(targetStore.getState().part.msg_2).toEqual([revertedPart])
   })
 
-  test("rejects a captured send when the runtime changes before optimistic insert", async () => {
+  test("rolls back a captured send when the runtime changes after optimistic insert", async () => {
     const targetStore = createStore({})
     const childStores = createChildStores([["/target/project", targetStore]])
     let optimisticAdd: OptimisticAddCall | null = null
@@ -725,7 +725,7 @@ describe("optimisticSend target directory", () => {
         content: "hello",
         providerID: "provider",
         modelID: "model",
-        beforeOptimisticInsert: () => {
+        onOptimisticInsert: () => {
           expect(getRuntimeKey()).toBe("runtime-a")
           switchRuntimeEndpoint({ apiBaseUrl: "http://runtime-b.test", runtimeKey: "runtime-b" })
         },
@@ -740,10 +740,11 @@ describe("optimisticSend target directory", () => {
     expect(caught).toBeInstanceOf(Error)
     expect((caught as Error).message).toContain("runtime changed")
 
-    expect(optimisticAdd).toBeNull()
+    expect(optimisticAdd).not.toBeNull()
     expect(finalSendCalled).toBe(false)
-    expect(optimisticRemove).toBeNull()
-    expect(targetStore.getState().session_status["session-race"]).toBe(undefined)
+    expect(optimisticRemove).not.toBeNull()
+    expect((optimisticRemove as unknown as OptimisticRemoveCall).sessionID).toBe("session-race")
+    expect(targetStore.getState().session_status["session-race"]?.type).toBe("idle")
   })
 
   test("confirms an ambiguous send failure with a recent message refetch", async () => {

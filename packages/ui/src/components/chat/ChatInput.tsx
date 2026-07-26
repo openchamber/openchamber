@@ -1907,6 +1907,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setPrPickerOpen(true);
     }, []);
 
+    const getSubmitErrorMessage = (error: unknown, fallback: string) => {
+        const message = error instanceof Error ? error.message : '';
+        return message.toLowerCase().includes('runtime changed')
+            ? t('chat.chatInput.toast.messageSendFailed')
+            : message || fallback;
+    };
+
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
@@ -2149,7 +2156,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
                     await opencodeClient.summarizeSession(currentSessionId, currentProviderId, currentModelId, compactDirectory);
                 } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
+                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.compactFailed')));
                 }
                 return;
             }
@@ -2179,7 +2186,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     );
                     scrollToBottom?.();
                 } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.summaryFailed'));
+                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.summaryFailed')));
                 }
                 return;
             }
@@ -2202,7 +2209,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     );
                     scrollToBottom?.();
                 } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.reviewFailed'));
+                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.reviewFailed')));
                 }
                 return;
             }
@@ -2229,7 +2236,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     );
                     scrollToBottom?.();
                 } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.planFeatureFailed'));
+                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.planFeatureFailed')));
                 }
                 return;
             }
@@ -2255,7 +2262,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     );
                     scrollToBottom?.();
                 } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.craftGoalFailed'));
+                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.craftGoalFailed')));
                 }
                 return;
             }
@@ -2281,7 +2288,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     );
                     scrollToBottom?.();
                 } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.scheduleTaskFailed'));
+                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.scheduleTaskFailed')));
                 }
                 return;
             }
@@ -2304,7 +2311,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     );
                     scrollToBottom?.();
                 } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.catchUpFailed'));
+                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.catchUpFailed')));
                 }
                 return;
             }
@@ -2327,7 +2334,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     );
                     scrollToBottom?.();
                 } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.debugFailed'));
+                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.debugFailed')));
                 }
                 return;
             }
@@ -2350,7 +2357,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     );
                     scrollToBottom?.();
                 } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.weighFailed'));
+                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.weighFailed')));
                 }
                 return;
             }
@@ -2373,7 +2380,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     );
                     scrollToBottom?.();
                 } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.exploreFailed'));
+                    toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.exploreFailed')));
                 }
                 return;
             }
