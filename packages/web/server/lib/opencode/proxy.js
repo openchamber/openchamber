@@ -259,6 +259,12 @@ export const registerOpenCodeProxy = (app, deps) => {
     if (!body) return;
     proxyReq.setHeader('content-length', String(body.length));
     proxyReq.write(body);
+    // End the stream immediately — body-parser has already consumed req's body.
+    // Without this, http-proxy-middleware may pipe the (already-consumed) req
+    // stream, which under relay-tunnel reconnection races can carry stale
+    // buffered data. That would write the parsed body a second time, causing
+    // OpenCode to process prompt_async twice (double AI response, issue #2425).
+    proxyReq.end();
   };
 
   const normalizeProxyTarget = (candidate) => {
