@@ -844,6 +844,7 @@ function ascendingId(prefix: string): string {
  * handles deduplication when the server echoes back the real message.
  */
 export async function optimisticSend(input: {
+  runtimeKey?: string
   sessionId: string
   content: string
   providerID: string
@@ -860,9 +861,20 @@ export async function optimisticSend(input: {
   if (!_optimisticAdd || !_optimisticRemove) {
     throw new Error("Optimistic refs not set — is useSync() mounted?")
   }
+  const optimisticAdd = _optimisticAdd
+  const optimisticRemove = _optimisticRemove
+  const optimisticConfirm = _optimisticConfirm
 
+  const assertRuntimeUnchanged = () => {
+    if (input.runtimeKey && input.runtimeKey !== getRuntimeKey()) {
+      throw new Error("Message was not sent because the runtime changed.")
+    }
+  }
+
+  assertRuntimeUnchanged()
   await waitForConnectionOrThrow()
   input.beforeOptimisticInsert?.()
+  assertRuntimeUnchanged()
 
   const targetDirectory = input.directory ?? dir()
   const store = targetDirectory ? dirStoreForDirectory(targetDirectory) : dirStore()
@@ -917,7 +929,7 @@ export async function optimisticSend(input: {
   } as unknown as Message
 
   // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)
-  _optimisticAdd({
+  optimisticAdd({
     sessionID: input.sessionId,
     directory: targetDirectory,
     message: optimisticMessage,
@@ -935,6 +947,7 @@ export async function optimisticSend(input: {
   })
 
   try {
+    assertRuntimeUnchanged()
     await input.send(messageID)
   } catch (error) {
     const acceptedRecords = isAmbiguousSendFailure(error)
@@ -943,7 +956,7 @@ export async function optimisticSend(input: {
 
     if (acceptedRecords) {
       materializeConfirmedSendRecords(store, input.sessionId, messageID, acceptedRecords)
-      _optimisticConfirm?.({
+      optimisticConfirm?.({
         sessionID: input.sessionId,
         directory: targetDirectory,
         messageID,
@@ -952,7 +965,7 @@ export async function optimisticSend(input: {
     }
 
     // Rollback via optimistic infrastructure
-    _optimisticRemove({
+    optimisticRemove({
       sessionID: input.sessionId,
       directory: targetDirectory,
       messageID,

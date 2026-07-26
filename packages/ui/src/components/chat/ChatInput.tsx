@@ -1964,7 +1964,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const sendMessageOptions = delivery ? { delivery } : undefined;
+        const sendMessageOptions = messageQueueTarget
+            ? { target: messageQueueTarget, ...(delivery ? { delivery } : {}) }
+            : delivery ? { delivery } : undefined;
 
         // Build the primary message (first part) and additional parts
         let primaryText = '';
@@ -2377,9 +2379,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const currentSessionDirectory = currentSessionId
-            ? useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory
-            : currentDirectory;
+        const currentSessionDirectory = messageQueueTarget?.directory ?? currentDirectory;
         const shouldAddResponseStyle = newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false);
         if (shouldAddResponseStyle) {
             const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
@@ -2483,6 +2483,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     useInputStore.getState().setAttachedFiles(allAttachments);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
+                return;
+            }
+
+            if (normalized.includes('runtime changed')) {
+                if (allAttachments.length > 0) {
+                    useInputStore.getState().setAttachedFiles(allAttachments);
+                }
+                toast.error(t('chat.chatInput.toast.messageSendFailed'));
                 return;
             }
 

@@ -167,7 +167,11 @@ describe('buildQueuedAutoSendPayload', () => {
     ]);
 
     expect(payload).not.toBeNull();
-    await sendQueuedAutoSendPayload('session-original', '/repo', payload!, {
+    await sendQueuedAutoSendPayload({
+      runtimeKey: 'runtime-original',
+      sessionId: 'session-original',
+      directory: '/repo',
+    }, payload!, {
       providerID: 'provider-1',
       modelID: 'model-1',
       agent: 'agent-1',
@@ -185,7 +189,13 @@ describe('buildQueuedAutoSendPayload', () => {
       undefined,
       'variant-1',
       'normal',
-      { sessionId: 'session-original', directory: '/repo' },
+      {
+        target: {
+          runtimeKey: 'runtime-original',
+          sessionId: 'session-original',
+          directory: '/repo',
+        },
+      },
     ]);
   });
 });

@@ -696,7 +696,7 @@ describe("optimisticSend target directory", () => {
     expect(targetStore.getState().part.msg_2).toEqual([revertedPart])
   })
 
-  test("allows callers to block final send when runtime changes after optimistic insert", async () => {
+  test("rejects a captured send when the runtime changes before optimistic insert", async () => {
     const targetStore = createStore({})
     const childStores = createChildStores([["/target/project", targetStore]])
     let optimisticAdd: OptimisticAddCall | null = null
@@ -721,15 +721,15 @@ describe("optimisticSend target directory", () => {
       await optimisticSend({
         sessionId: "session-race",
         directory: "/target/project",
+        runtimeKey: "runtime-a",
         content: "hello",
         providerID: "provider",
         modelID: "model",
         beforeOptimisticInsert: () => {
           expect(getRuntimeKey()).toBe("runtime-a")
+          switchRuntimeEndpoint({ apiBaseUrl: "http://runtime-b.test", runtimeKey: "runtime-b" })
         },
         send: async () => {
-          switchRuntimeEndpoint({ apiBaseUrl: "http://runtime-b.test", runtimeKey: "runtime-b" })
-          if (getRuntimeKey() !== "runtime-a") throw new Error("Auto-review stopped because the runtime changed.")
           finalSendCalled = true
         },
       })
@@ -740,11 +740,10 @@ describe("optimisticSend target directory", () => {
     expect(caught).toBeInstanceOf(Error)
     expect((caught as Error).message).toContain("runtime changed")
 
-    expect(optimisticAdd).not.toBeNull()
+    expect(optimisticAdd).toBeNull()
     expect(finalSendCalled).toBe(false)
-    expect(optimisticRemove).not.toBeNull()
-    expect((optimisticRemove as unknown as OptimisticRemoveCall).sessionID).toBe("session-race")
-    expect(targetStore.getState().session_status["session-race"]?.type).toBe("idle")
+    expect(optimisticRemove).toBeNull()
+    expect(targetStore.getState().session_status["session-race"]).toBe(undefined)
   })
 
   test("confirms an ambiguous send failure with a recent message refetch", async () => {
