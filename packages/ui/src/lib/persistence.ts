@@ -542,10 +542,11 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     notifyOnCompletion: defaults.notifyOnCompletion,
     notifyOnError: defaults.notifyOnError,
     notifyOnQuestion: defaults.notifyOnQuestion,
+    notifyOnPermission: defaults.notifyOnPermission,
     notificationTemplates: defaults.notificationTemplates,
     notificationSoundEnabled: defaults.notificationSoundEnabled,
     notificationSoundVolume: defaults.notificationSoundVolume,
-    notificationSoundPack: defaults.notificationSoundPack,
+    notificationSoundEventSounds: defaults.notificationSoundEventSounds,
     summarizeLastMessage: defaults.summarizeLastMessage,
     summaryThreshold: defaults.summaryThreshold,
     summaryLength: defaults.summaryLength,
@@ -689,6 +690,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.notifyOnQuestion === 'boolean' && settings.notifyOnQuestion !== store.notifyOnQuestion) {
     store.setNotifyOnQuestion(settings.notifyOnQuestion);
   }
+  if (typeof settings.notifyOnPermission === 'boolean' && settings.notifyOnPermission !== store.notifyOnPermission) {
+    store.setNotifyOnPermission(settings.notifyOnPermission);
+  }
   if (settings.notificationTemplates && typeof settings.notificationTemplates === 'object') {
     store.setNotificationTemplates(settings.notificationTemplates);
   }
@@ -698,10 +702,8 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.notificationSoundVolume === 'number' && Number.isFinite(settings.notificationSoundVolume) && settings.notificationSoundVolume !== store.notificationSoundVolume) {
     store.setNotificationSoundVolume(settings.notificationSoundVolume);
   }
-  if (settings.notificationSoundPack === 'bip-bop' || settings.notificationSoundPack === 'alert') {
-    if (settings.notificationSoundPack !== store.notificationSoundPack) {
-      store.setNotificationSoundPack(settings.notificationSoundPack);
-    }
+  if (settings.notificationSoundEventSounds && typeof settings.notificationSoundEventSounds === 'object') {
+    store.setNotificationSoundEventSounds(settings.notificationSoundEventSounds);
   }
   if (typeof settings.summarizeLastMessage === 'boolean' && settings.summarizeLastMessage !== store.summarizeLastMessage) {
     store.setSummarizeLastMessage(settings.summarizeLastMessage);
@@ -1214,6 +1216,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.notifyOnQuestion === 'boolean') {
     result.notifyOnQuestion = candidate.notifyOnQuestion;
+  }
+  if (typeof candidate.notifyOnPermission === 'boolean') {
+    result.notifyOnPermission = candidate.notifyOnPermission;
   }
   if (candidate.notificationTemplates && typeof candidate.notificationTemplates === 'object') {
     const templates = candidate.notificationTemplates as Record<string, unknown>;

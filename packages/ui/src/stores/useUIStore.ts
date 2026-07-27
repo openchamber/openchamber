@@ -11,6 +11,10 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
+import {
+  DEFAULT_EVENT_SOUNDS,
+  type NotificationSoundEventSounds,
+} from '@/lib/notificationSound';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
@@ -668,6 +672,7 @@ interface UIStore {
   notifyOnCompletion: boolean;
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
+  notifyOnPermission: boolean;
 
   // Per-event notification templates
   notificationTemplates: {
@@ -680,7 +685,7 @@ interface UIStore {
   // Notification sounds (audio cues)
   notificationSoundEnabled: boolean;
   notificationSoundVolume: number; // 0..1
-  notificationSoundPack: 'bip-bop' | 'alert';
+  notificationSoundEventSounds: NotificationSoundEventSounds;
 
   // Summarization settings
   summarizeLastMessage: boolean;
@@ -847,10 +852,12 @@ interface UIStore {
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
+  setNotifyOnPermission: (value: boolean) => void;
   setNotificationTemplates: (templates: UIStore['notificationTemplates']) => void;
   setNotificationSoundEnabled: (value: boolean) => void;
   setNotificationSoundVolume: (value: number) => void;
-  setNotificationSoundPack: (pack: 'bip-bop' | 'alert') => void;
+  setNotificationSoundEventSounds: (sounds: NotificationSoundEventSounds) => void;
+  setNotificationSoundForEvent: (event: keyof NotificationSoundEventSounds, soundId: string) => void;
   setSummarizeLastMessage: (value: boolean) => void;
   setSummaryThreshold: (value: number) => void;
   setSummaryLength: (value: number) => void;
@@ -993,6 +1000,7 @@ export const useUIStore = create<UIStore>()(
         notifyOnCompletion: true,
         notifyOnError: true,
         notifyOnQuestion: true,
+        notifyOnPermission: true,
         notificationTemplates: {
           completion: { ...EMPTY_NOTIFICATION_TEMPLATES.completion },
           error: { ...EMPTY_NOTIFICATION_TEMPLATES.error },
@@ -1003,7 +1011,7 @@ export const useUIStore = create<UIStore>()(
         // Notification sounds (audio cues) - off by default
         notificationSoundEnabled: false,
         notificationSoundVolume: 0.5,
-        notificationSoundPack: 'bip-bop',
+        notificationSoundEventSounds: { ...DEFAULT_EVENT_SOUNDS },
 
         // Summarization settings
         summarizeLastMessage: false,
@@ -2149,10 +2157,19 @@ export const useUIStore = create<UIStore>()(
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
+        setNotifyOnPermission: (value) => { set({ notifyOnPermission: value }); },
         setNotificationTemplates: (templates) => { set({ notificationTemplates: templates }); },
         setNotificationSoundEnabled: (value) => { set({ notificationSoundEnabled: value }); },
         setNotificationSoundVolume: (value) => { set({ notificationSoundVolume: value }); },
-        setNotificationSoundPack: (pack) => { set({ notificationSoundPack: pack }); },
+        setNotificationSoundEventSounds: (sounds) => { set({ notificationSoundEventSounds: sounds }); },
+        setNotificationSoundForEvent: (event, soundId) => {
+          set((state) => ({
+            notificationSoundEventSounds: {
+              ...state.notificationSoundEventSounds,
+              [event]: soundId,
+            },
+          }));
+        },
         setSummarizeLastMessage: (value) => { set({ summarizeLastMessage: value }); },
         setSummaryThreshold: (value) => { set({ summaryThreshold: value }); },
         setSummaryLength: (value) => { set({ summaryLength: value }); },
@@ -2477,10 +2494,11 @@ export const useUIStore = create<UIStore>()(
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
+          notifyOnPermission: state.notifyOnPermission,
           notificationTemplates: state.notificationTemplates,
           notificationSoundEnabled: state.notificationSoundEnabled,
           notificationSoundVolume: state.notificationSoundVolume,
-          notificationSoundPack: state.notificationSoundPack,
+          notificationSoundEventSounds: state.notificationSoundEventSounds,
           summarizeLastMessage: state.summarizeLastMessage,
           summaryThreshold: state.summaryThreshold,
           summaryLength: state.summaryLength,

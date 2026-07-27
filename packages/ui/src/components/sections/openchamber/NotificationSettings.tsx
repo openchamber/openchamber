@@ -8,7 +8,12 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
-import { previewSoundPack } from '@/lib/notificationSound';
+import {
+  previewSound,
+  SOUND_PACK_GROUPS,
+  DEFAULT_EVENT_SOUNDS,
+  type NotificationEventKind,
+} from '@/lib/notificationSound';
 import {
   SettingsSection,
   SettingsTwoColumn,
@@ -43,6 +48,14 @@ const TEMPLATE_EVENT_LABEL_KEYS = {
   question: 'settings.notifications.page.template.event.question',
 } as const satisfies Record<NotificationTemplateEvent, string>;
 
+const SOUND_EVENT_LABEL_KEYS = {
+  completion: 'settings.notifications.page.events.completionLabel',
+  error: 'settings.notifications.page.events.errorLabel',
+  question: 'settings.notifications.page.events.questionLabel',
+  permission: 'settings.notifications.page.events.permissionLabel',
+  subtask: 'settings.notifications.page.events.subtaskLabel',
+} as const satisfies Record<NotificationEventKind, string>;
+
 export const NotificationSettings: React.FC = () => {
   const { t } = useI18n();
   const isDesktop = React.useMemo(() => isDesktopShell(), []);
@@ -68,14 +81,16 @@ export const NotificationSettings: React.FC = () => {
   const setNotifyOnError = useUIStore(state => state.setNotifyOnError);
   const notifyOnQuestion = useUIStore(state => state.notifyOnQuestion);
   const setNotifyOnQuestion = useUIStore(state => state.setNotifyOnQuestion);
+  const notifyOnPermission = useUIStore(state => state.notifyOnPermission);
+  const setNotifyOnPermission = useUIStore(state => state.setNotifyOnPermission);
   const notificationTemplates = useUIStore(state => state.notificationTemplates);
   const setNotificationTemplates = useUIStore(state => state.setNotificationTemplates);
   const notificationSoundEnabled = useUIStore(state => state.notificationSoundEnabled);
   const setNotificationSoundEnabled = useUIStore(state => state.setNotificationSoundEnabled);
   const notificationSoundVolume = useUIStore(state => state.notificationSoundVolume);
   const setNotificationSoundVolume = useUIStore(state => state.setNotificationSoundVolume);
-  const notificationSoundPack = useUIStore(state => state.notificationSoundPack);
-  const setNotificationSoundPack = useUIStore(state => state.setNotificationSoundPack);
+  const notificationSoundEventSounds = useUIStore(state => state.notificationSoundEventSounds);
+  const setNotificationSoundForEvent = useUIStore(state => state.setNotificationSoundForEvent);
 
   const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission>('default');
   const [pushSupported, setPushSupported] = React.useState(false);
@@ -555,30 +570,50 @@ export const NotificationSettings: React.FC = () => {
                     aria-label={t('settings.notifications.page.sounds.volumeLabel')}
                   />
                 </div>
-                <div className="flex items-center gap-3 py-1">
-                  <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[5rem]">
-                    {t('settings.notifications.page.sounds.packLabel')}
-                  </span>
-                  <Select value={notificationSoundPack} onValueChange={(v) => setNotificationSoundPack(v as 'bip-bop' | 'alert')}>
-                    <SelectTrigger className="h-8 w-auto min-w-[8rem]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="bip-bop">{t('settings.notifications.page.sounds.packBipBop')}</SelectItem>
-                      <SelectItem value="alert">{t('settings.notifications.page.sounds.packAlert')}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="py-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => previewSoundPack(notificationSoundPack, notificationSoundVolume)}
-                    aria-label={t('settings.notifications.page.sounds.previewAria')}
-                  >
-                    {t('settings.notifications.page.sounds.previewAction')}
-                  </Button>
+                <div className="space-y-1.5 py-1">
+                  <SettingsGroupTitle className="text-xs uppercase tracking-wide text-muted-foreground">
+                    {t('settings.notifications.page.sounds.perEventTitle')}
+                  </SettingsGroupTitle>
+                  {(['completion', 'error', 'question', 'permission', 'subtask'] as const).map((event) => (
+                    <div key={event} className="flex items-center gap-2 py-0.5">
+                      <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[6rem]">
+                        {t(SOUND_EVENT_LABEL_KEYS[event])}
+                      </span>
+                      <Select
+                        value={notificationSoundEventSounds[event] ?? DEFAULT_EVENT_SOUNDS[event]}
+                        onValueChange={(v) => setNotificationSoundForEvent(event, v)}
+                      >
+                        <SelectTrigger className="h-8 w-auto min-w-[9rem] flex-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SOUND_PACK_GROUPS.map((group) => (
+                            <React.Fragment key={group.pack}>
+                              <div className="px-2 py-1 text-xs font-semibold text-muted-foreground">
+                                {group.label}
+                              </div>
+                              {group.sounds.map((sound) => (
+                                <SelectItem key={sound.id} value={sound.id}>
+                                  {sound.label}
+                                </SelectItem>
+                              ))}
+                            </React.Fragment>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2"
+                        onClick={() => previewSound(notificationSoundEventSounds[event] ?? DEFAULT_EVENT_SOUNDS[event], notificationSoundVolume)}
+                        aria-label={t('settings.notifications.page.sounds.previewAria')}
+                        title={t('settings.notifications.page.sounds.previewAction')}
+                      >
+                        ▶
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               </>
             )}
@@ -618,6 +653,13 @@ export const NotificationSettings: React.FC = () => {
                   onChange={setNotifyOnQuestion}
                   label={t('settings.notifications.page.events.questionLabel')}
                   ariaLabel={t('settings.notifications.page.events.questionAria')}
+                />
+
+                <SettingsCheckboxRow
+                  checked={notifyOnPermission}
+                  onChange={setNotifyOnPermission}
+                  label={t('settings.notifications.page.events.permissionLabel')}
+                  ariaLabel={t('settings.notifications.page.events.permissionAria')}
                 />
               </div>
             </SettingsSection>

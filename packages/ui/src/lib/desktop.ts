@@ -4,6 +4,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import type { NotificationSoundEventSounds } from '@/lib/notificationSound';
 
 type ManagedRemoteTunnelPreset = {
   id: string;
@@ -78,6 +79,7 @@ export type DesktopSettings = {
   notifyOnCompletion?: boolean;
   notifyOnError?: boolean;
   notifyOnQuestion?: boolean;
+  notifyOnPermission?: boolean;
 
   // Per-event notification templates
   notificationTemplates?: {
@@ -90,7 +92,7 @@ export type DesktopSettings = {
   // Notification sounds (audio cues)
   notificationSoundEnabled?: boolean;
   notificationSoundVolume?: number; // 0..1
-  notificationSoundPack?: 'bip-bop' | 'alert';
+  notificationSoundEventSounds?: NotificationSoundEventSounds;
 
   // Summarization settings
   summarizeLastMessage?: boolean;
