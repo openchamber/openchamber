@@ -1867,6 +1867,23 @@ input[aria-label="Terminal input"] {
   display: none;
 }
 
+/* Windows keeps Settings scrollbars persistently visible for discoverability. */
+[data-settings-view="true"][data-settings-platform="windows"] :is(.overflow-y-auto, .overlay-scrollbar-target) {
+  scrollbar-width: auto !important;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 80%, transparent) transparent !important;
+  -ms-overflow-style: auto !important;
+}
+
+[data-settings-view="true"][data-settings-platform="windows"] :is(.overflow-y-auto, .overlay-scrollbar-target)::-webkit-scrollbar {
+  display: block !important;
+  width: 10px !important;
+}
+
+[data-settings-view="true"][data-settings-platform="windows"] :is(.overflow-y-auto, .overlay-scrollbar-target)::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent) !important;
+  border-width: 1px;
+}
+
 /* Desktop app shell (Electron/native window): native apps use the arrow cursor
    for clickable controls, not the web's hand/pointer. Neutralize pointer
    cursors under the desktop runtime only — web in a browser keeps them.
