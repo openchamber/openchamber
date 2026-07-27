@@ -12,7 +12,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { getHarnessCapabilityLevel } from '@/lib/harness/capabilities';
 import { useSelectionStore } from '@/sync/selection-store';
 import { isHarnessId } from '@/types/harness';
-import { useClaudeSessionCapabilitiesStore } from '@/stores/useClaudeSessionCapabilitiesStore';
+import { useClaudeSessionCapabilitiesStore, selectClaudeSlashCommands } from '@/stores/useClaudeSessionCapabilitiesStore';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 
 type CommandSource = 'openchamber' | 'opencode' | 'skill' | 'claude';
@@ -85,7 +85,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const canUseGoalCommand = canStartSessionCommand
     && getHarnessCapabilityLevel(activeHarnessId, 'goal') !== 'none';
   const claudeSlashCommands = useClaudeSessionCapabilitiesStore((s) => (
-    currentSessionId ? s.getSlashCommands(currentSessionId) : s.getSlashCommands(null)
+    selectClaudeSlashCommands(s, currentSessionId)
   ));
   const refreshClaudeCapabilities = useClaudeSessionCapabilitiesStore((s) => s.refresh);
 

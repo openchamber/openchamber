@@ -105,7 +105,7 @@ import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore'
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
-import { useClaudeSessionCapabilitiesStore } from '@/stores/useClaudeSessionCapabilitiesStore';
+import { useClaudeSessionCapabilitiesStore, selectClaudeSlashCommands } from '@/stores/useClaudeSessionCapabilitiesStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
@@ -1337,7 +1337,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const availableCommands = useCommandsStore((s) => s.commands);
     const availableSkills = useSkillsStore((s) => s.skills);
     const claudeSlashCommands = useClaudeSessionCapabilitiesStore((s) => (
-      currentSessionId ? s.getSlashCommands(currentSessionId) : s.getSlashCommands(null)
+      selectClaudeSlashCommands(s, currentSessionId)
     ));
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([

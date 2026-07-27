@@ -5,7 +5,7 @@ import {
 } from '@/lib/harness/client';
 
 /** Built-in Claude slash commands offered before the first system/init. */
-export const CLAUDE_BUILTIN_SLASH_COMMANDS = [
+export const CLAUDE_BUILTIN_SLASH_COMMANDS = Object.freeze([
   'clear',
   'compact',
   'context',
@@ -16,27 +16,45 @@ export const CLAUDE_BUILTIN_SLASH_COMMANDS = [
   'review',
   'security-review',
   'usage',
-] as const;
+]) as readonly string[];
 
 type ClaudeCapabilitiesStore = {
   bySessionId: Record<string, ClaudeSessionCapabilities>;
   loadingBySessionId: Record<string, boolean>;
   errorBySessionId: Record<string, string | null>;
   getCapabilities: (sessionId: string | null | undefined) => ClaudeSessionCapabilities | null;
-  getSlashCommands: (sessionId: string | null | undefined) => string[];
+  getSlashCommands: (sessionId: string | null | undefined) => readonly string[];
   refresh: (sessionId: string) => Promise<ClaudeSessionCapabilities | null>;
   reset: () => void;
 };
 
 const emptyCapabilities = (sessionId: string): ClaudeSessionCapabilities => ({
   sessionId,
-  slashCommands: [...CLAUDE_BUILTIN_SLASH_COMMANDS],
+  // Freeze so selectors can return this array by reference without reallocating.
+  slashCommands: CLAUDE_BUILTIN_SLASH_COMMANDS as string[],
   skills: [],
   agents: [],
   tools: [],
   mcpServers: [],
   updatedAt: 0,
 });
+
+/**
+ * Stable slash-command list for React selectors. Never allocate a fresh array
+ * for the built-in fallback — that would break referential equality and can
+ * infinite-loop effects that depend on the list.
+ */
+export function selectClaudeSlashCommands(
+  state: Pick<ClaudeCapabilitiesStore, 'bySessionId'>,
+  sessionId: string | null | undefined,
+): readonly string[] {
+  const id = typeof sessionId === 'string' ? sessionId.trim() : '';
+  if (id) {
+    const caps = state.bySessionId[id];
+    if (caps?.slashCommands?.length) return caps.slashCommands;
+  }
+  return CLAUDE_BUILTIN_SLASH_COMMANDS;
+}
 
 export const useClaudeSessionCapabilitiesStore = create<ClaudeCapabilitiesStore>((set, get) => ({
   bySessionId: {},
@@ -49,11 +67,7 @@ export const useClaudeSessionCapabilitiesStore = create<ClaudeCapabilitiesStore>
     return get().bySessionId[id] ?? null;
   },
 
-  getSlashCommands: (sessionId) => {
-    const caps = get().getCapabilities(sessionId);
-    if (caps?.slashCommands?.length) return caps.slashCommands;
-    return [...CLAUDE_BUILTIN_SLASH_COMMANDS];
-  },
+  getSlashCommands: (sessionId) => selectClaudeSlashCommands(get(), sessionId),
 
   refresh: async (sessionId) => {
     const id = sessionId.trim();
@@ -64,11 +78,20 @@ export const useClaudeSessionCapabilitiesStore = create<ClaudeCapabilitiesStore>
     }));
     try {
       const result = await harnessSessionCapabilities(id);
+      const capabilities = result.capabilities;
+      // Prefer the server list when present; otherwise keep the stable built-in
+      // reference so subscribers do not see a new array identity on every refresh.
+      const slashCommands = capabilities.slashCommands.length > 0
+        ? capabilities.slashCommands
+        : (CLAUDE_BUILTIN_SLASH_COMMANDS as string[]);
       set((state) => ({
-        bySessionId: { ...state.bySessionId, [id]: result.capabilities },
+        bySessionId: {
+          ...state.bySessionId,
+          [id]: { ...capabilities, slashCommands },
+        },
         loadingBySessionId: { ...state.loadingBySessionId, [id]: false },
       }));
-      return result.capabilities;
+      return get().bySessionId[id] ?? null;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load Claude capabilities';
       // Keep built-in slash defaults available on failure — do not clear prior success.
