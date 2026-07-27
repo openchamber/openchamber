@@ -1578,7 +1578,7 @@ export const settingsDict = {
   'settings.notifications.page.sounds.perEventTitle': 'Son par évènement',
   'settings.notifications.page.sounds.focusOnlyLabel': 'Jouer uniquement hors focus',
   'settings.notifications.page.sounds.focusOnlyAria': 'Jouer les sons uniquement lorsque la fenêtre n\'est pas au premier plan',
-  'settings.notifications.page.sounds.focusOnlyHint': 'Activé : tous les sons ne jouent que hors focus. Désactivé : les sons de fin, d\'erreur et de sous-tâche jouent aussi en focus.',
+  'settings.notifications.page.sounds.focusOnlyHint': 'Activé : tous les sons ne jouent que hors focus. Désactivé (par défaut) : tous les sons jouent quel que soit le focus.',
   'settings.voice.page.section.speechRecognition': 'Reconnaissance vocale',
   'settings.voice.page.field.enableVoiceInput': 'Activer la saisie vocale',
   'settings.voice.page.field.enableVoiceInputAria': 'Activer la saisie vocale (dictée)',

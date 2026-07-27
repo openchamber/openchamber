@@ -1690,7 +1690,7 @@ export const settingsDict = {
   'settings.notifications.page.sounds.perEventTitle': 'イベントごとのサウンド',
   'settings.notifications.page.sounds.focusOnlyLabel': 'フォーカス外の時のみ再生',
   'settings.notifications.page.sounds.focusOnlyAria': 'ウィンドウがフォーカスされていない時のみサウンドを再生',
-  'settings.notifications.page.sounds.focusOnlyHint': 'オンの場合、すべてのサウンドはウィンドウがフォーカスされていない時のみ再生されます。オフの場合、完了・エラー・サブタスクのサウンドはフォーカス中も再生されます。',
+  'settings.notifications.page.sounds.focusOnlyHint': 'オンの場合、すべてのサウンドはウィンドウがフォーカスされていない時のみ再生されます。オフの場合（デフォルト）、すべてのサウンドはフォーカスに関係なく再生されます。',
   'settings.voice.page.section.speechRecognition': '音声認識',
   'settings.voice.page.field.enableVoiceInput': '音声入力を有効にする',
   'settings.voice.page.field.enableVoiceInputAria': '音声入力（ディクテーション）を有効にする',

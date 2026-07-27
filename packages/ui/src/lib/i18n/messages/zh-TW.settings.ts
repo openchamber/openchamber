@@ -1563,7 +1563,7 @@
   'settings.notifications.page.sounds.perEventTitle': '每個事件的音效',
   'settings.notifications.page.sounds.focusOnlyLabel': '僅在未聚焦時播放音效',
   'settings.notifications.page.sounds.focusOnlyAria': '僅在視窗未聚焦時播放音效',
-  'settings.notifications.page.sounds.focusOnlyHint': '開啟時，所有音效僅在視窗未聚焦時播放。關閉時，完成、錯誤和子任務音效在聚焦時也會播放。',
+  'settings.notifications.page.sounds.focusOnlyHint': '開啟時，所有音效僅在視窗未聚焦時播放。關閉時（預設），所有音效不受焦點限制，始終播放。',
   'settings.voice.page.section.speechRecognition': '語音辨識',
   'settings.voice.page.field.enableVoiceInput': '啟用語音輸入',
   'settings.voice.page.field.enableVoiceInputAria': '啟用語音輸入（聽寫）',

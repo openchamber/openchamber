@@ -1657,7 +1657,7 @@ export const settingsDict = {
   "settings.notifications.page.sounds.perEventTitle": "Som por evento",
   "settings.notifications.page.sounds.focusOnlyLabel": "Tocar apenas sem foco",
   "settings.notifications.page.sounds.focusOnlyAria": "Tocar sons apenas quando a janela não está em foco",
-  "settings.notifications.page.sounds.focusOnlyHint": "Ativado: todos os sons tocam apenas sem foco. Desativado: sons de conclusão, erro e subtarefa tocam também com foco.",
+  "settings.notifications.page.sounds.focusOnlyHint": "Ativado: todos os sons tocam apenas sem foco. Desativado (padrão): todos os sons tocam independentemente do foco.",
   "settings.voice.page.section.speechRecognition": "Reconhecimento de voz",
   "settings.voice.page.field.enableVoiceInput": "Ativar entrada por voz",
   "settings.voice.page.field.enableVoiceInputAria": "Ativar entrada por voz (ditado)",

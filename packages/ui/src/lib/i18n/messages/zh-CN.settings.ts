@@ -1657,7 +1657,7 @@ export const settingsDict = {
   'settings.notifications.page.sounds.perEventTitle': '每个事件的声音',
   'settings.notifications.page.sounds.focusOnlyLabel': '仅在未聚焦时播放声音',
   'settings.notifications.page.sounds.focusOnlyAria': '仅在窗口未聚焦时播放声音',
-  'settings.notifications.page.sounds.focusOnlyHint': '开启时，所有声音仅在窗口未聚焦时播放。关闭时，完成、错误和子任务声音在聚焦时也会播放。',
+  'settings.notifications.page.sounds.focusOnlyHint': '开启时，所有声音仅在窗口未聚焦时播放。关闭时（默认），所有声音不受焦点限制，始终播放。',
   'settings.voice.page.section.speechRecognition': '语音识别',
   'settings.voice.page.field.enableVoiceInput': '启用语音输入',
   'settings.voice.page.field.enableVoiceInputAria': '启用语音输入（听写）',

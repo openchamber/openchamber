@@ -1657,7 +1657,7 @@ export const settingsDict = {
   "settings.notifications.page.sounds.perEventTitle": "Звук для події",
   "settings.notifications.page.sounds.focusOnlyLabel": "Відтворювати лише без фокусу",
   "settings.notifications.page.sounds.focusOnlyAria": "Відтворювати звуки лише коли вікно не у фокусі",
-  "settings.notifications.page.sounds.focusOnlyHint": "Увімкнено: усі звуки відтворюються лише без фокусу. Вимкнено: звуки завершення, помилки та підзадачі відтворюються й у фокусі.",
+  "settings.notifications.page.sounds.focusOnlyHint": "Увімкнено: усі звуки відтворюються лише без фокусу. Вимкнено (за замовчуванням): усі звуки відтворюються незалежно від фокусу.",
   "settings.voice.page.section.speechRecognition": "Розпізнавання мовлення",
   "settings.voice.page.field.enableVoiceInput": "Увімкнути голосовий ввід",
   "settings.voice.page.field.enableVoiceInputAria": "Увімкнути голосовий ввід (диктування)",

@@ -16,9 +16,8 @@
  *   / `notifyOnSubtasks` toggles for per-event gating, plus a new
  *   `notifyOnPermission` toggle, instead of duplicating them as
  *   sound-specific toggles.
- * - Focus gating follows opencode's per-event policy by default
- *   (`EVENT_FOCUS_POLICY`): done/error/subtask always play, question/permission
- *   play only when the session is not being viewed. A global
+ * - Focus gating: all events default to always playing regardless of view state
+ *   (matching opencode's `sound.when: "always"` default). A global
  *   `notificationSoundFocusOnly` toggle (default off) overrides this so every
  *   event plays only when not viewed. This is independent of the native
  *   notification `notificationMode`, which only governs OS notifications.
@@ -253,15 +252,17 @@ const EVENT_TOGGLE_ENABLED: Record<NotificationEventKind, (s: NotificationSoundS
 
 /**
  * Per-event focus policy mirroring opencode's `packages/tui/src/attention.ts`.
- * - `always`: play regardless of view state (done/error/subtask).
- * - `blurred`: play only when the session is not being viewed (question/permission).
+ * All events default to `'always'` (play regardless of view state), matching
+ * opencode's `sound.when: "always"` default for every built-in event.
+ * The `notificationSoundFocusOnly` toggle overrides this so every event only
+ * plays when the session is not being viewed.
  */
 const EVENT_FOCUS_POLICY: Record<NotificationEventKind, 'always' | 'blurred'> = {
   completion: 'always',
   error: 'always',
+  question: 'always',
+  permission: 'always',
   subtask: 'always',
-  question: 'blurred',
-  permission: 'blurred',
 };
 
 /**
@@ -273,9 +274,8 @@ const EVENT_FOCUS_POLICY: Record<NotificationEventKind, 'always' | 'blurred'> = 
  * 3. Focus gating:
  *    - `notificationSoundFocusOnly` (default off): when enabled, every event
  *      plays only when the session is not being viewed.
- *    - Otherwise, follow opencode's per-event policy (`EVENT_FOCUS_POLICY`):
- *      `always` events play regardless of view state, `blurred` events play
- *      only when not viewed.
+ *    - Otherwise, all events play regardless of view state (matching opencode's
+ *      `sound.when: "always"` default).
  */
 function shouldPlaySoundForEvent(
   event: NotificationEventKind,

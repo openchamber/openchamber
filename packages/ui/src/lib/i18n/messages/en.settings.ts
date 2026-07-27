@@ -1690,7 +1690,7 @@ export const settingsDict = {
   'settings.notifications.page.sounds.perEventTitle': 'Sound per event',
   'settings.notifications.page.sounds.focusOnlyLabel': 'Only play sounds when unfocused',
   'settings.notifications.page.sounds.focusOnlyAria': 'Only play sounds when window is not focused',
-  'settings.notifications.page.sounds.focusOnlyHint': 'When on, all sounds play only when the window is unfocused. When off, completion, error, and subtask sounds also play while focused.',
+  'settings.notifications.page.sounds.focusOnlyHint': 'When on, all sounds play only when the window is unfocused. When off (default), all sounds play regardless of focus.',
   'settings.voice.page.section.speechRecognition': 'Speech Recognition',
   'settings.voice.page.field.enableVoiceInput': 'Enable voice input',
   'settings.voice.page.field.enableVoiceInputAria': 'Enable voice input (dictation)',

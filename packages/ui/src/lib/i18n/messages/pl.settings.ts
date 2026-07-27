@@ -717,7 +717,7 @@ export const settingsDict = {
   'settings.notifications.page.sounds.perEventTitle': 'Dźwięk na zdarzenie',
   'settings.notifications.page.sounds.focusOnlyLabel': 'Odtwarzaj tylko bez focusu',
   'settings.notifications.page.sounds.focusOnlyAria': 'Odtwarzaj dźwięki tylko gdy okno nie ma focusu',
-  'settings.notifications.page.sounds.focusOnlyHint': 'Włączone: wszystkie dźwięki grają tylko bez focusu. Wyłączone: dźwięki ukończenia, błędu i podzadania grają też z focusem.',
+  'settings.notifications.page.sounds.focusOnlyHint': 'Włączone: wszystkie dźwięki grają tylko bez focusu. Wyłączone (domyślne): wszystkie dźwięki grają niezależnie od focusu.',
   'settings.notifications.page.testNotification.title': 'Powiadomienie testowe',
   'settings.notifications.page.toast.backgroundDisabled': 'Powiadomienia w tle zostały wyłączone',
   'settings.notifications.page.toast.backgroundEnabled': 'Powiadomienia w tle zostały włączone',
