@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import {
   extractClaudeOAuthAccessToken,
+  extractClaudeOAuthCredentials,
   hasClaudeCliOAuthCredentials,
   listClaudeCredentialsCandidates,
   readClaudeCliOAuthAccessToken,
+  readClaudeCliOAuthCredentials,
   readClaudeCodeOAuthTokenFromEnv,
 } from './claude-cli-auth.js';
 
@@ -20,6 +22,20 @@ describe('claude-cli-auth', () => {
     })).toBe('sk-ant-oat01-snake');
   });
 
+  it('extracts refresh token and expiry with access token', () => {
+    expect(extractClaudeOAuthCredentials({
+      claudeAiOauth: {
+        accessToken: 'access',
+        refreshToken: 'refresh',
+        expiresAt: 1_700_000_000_000,
+      },
+    })).toEqual({
+      accessToken: 'access',
+      refreshToken: 'refresh',
+      expiresAt: 1_700_000_000_000,
+    });
+  });
+
   it('returns null for empty or missing oauth blocks', () => {
     expect(extractClaudeOAuthAccessToken(null)).toBeNull();
     expect(extractClaudeOAuthAccessToken({})).toBeNull();
@@ -34,6 +50,16 @@ describe('claude-cli-auth', () => {
       existsSync: () => true,
       readFile: () => JSON.stringify({ claudeAiOauth: { accessToken: 'file-token' } }),
     })).toBe('env-token');
+    expect(readClaudeCliOAuthCredentials({
+      env: { CLAUDE_CODE_OAUTH_TOKEN: 'env-token' },
+      homeDir: '/home/u',
+      existsSync: () => true,
+      readFile: () => JSON.stringify({ claudeAiOauth: { accessToken: 'file-token' } }),
+    })).toMatchObject({
+      accessToken: 'env-token',
+      source: 'env',
+      refreshToken: null,
+    });
   });
 
   it('includes CLAUDE_CONFIG_DIR candidates first', () => {

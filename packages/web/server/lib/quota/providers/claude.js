@@ -7,6 +7,11 @@ import {
   toNumber,
   toTimestamp
 } from '../utils/index.js';
+import {
+  CLAUDE_SESSION_EXPIRED_ERROR,
+  ensureClaudeUsageAccessToken,
+  fetchClaudeUsagePayload,
+} from './claude-oauth.js';
 import { readClaudeCliOAuthAccessToken } from './claude-cli-auth.js';
 
 export const providerId = 'claude';
@@ -14,30 +19,17 @@ export const providerName = 'Claude subscription';
 const aliases = ['anthropic', 'claude'];
 
 /**
- * Resolve a bearer token for Claude subscription usage windows.
+ * Resolve whether Claude subscription usage can be probed.
  * Prefers Claude Code CLI OAuth (engine-aligned), then OpenCode auth.json.
- * Never logs token values.
  *
- * @returns {{ accessToken: string | null, source: 'claude-cli' | 'opencode-auth' | null }}
+ * @returns {boolean}
  */
-function resolveClaudeUsageAccessToken() {
-  const cliToken = readClaudeCliOAuthAccessToken();
-  if (cliToken) {
-    return { accessToken: cliToken, source: 'claude-cli' };
-  }
-
+export const isConfigured = () => {
+  if (readClaudeCliOAuthAccessToken()) return true;
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const openCodeToken = entry?.access ?? entry?.token;
-  if (typeof openCodeToken === 'string' && openCodeToken.trim()) {
-    return { accessToken: openCodeToken.trim(), source: 'opencode-auth' };
-  }
-
-  return { accessToken: null, source: null };
-}
-
-export const isConfigured = () => {
-  return Boolean(resolveClaudeUsageAccessToken().accessToken);
+  return typeof openCodeToken === 'string' && Boolean(openCodeToken.trim());
 };
 
 /**
@@ -83,10 +75,29 @@ export function mapClaudeUsageWindows(payload) {
   return windows;
 }
 
-export const fetchQuota = async () => {
-  const { accessToken } = resolveClaudeUsageAccessToken();
+/**
+ * @param {number} status
+ */
+function usageAuthError(status) {
+  if (status === 401) return CLAUDE_SESSION_EXPIRED_ERROR;
+  return `API error: ${status}`;
+}
 
-  if (!accessToken) {
+export const fetchQuota = async () => {
+  let access;
+  try {
+    access = await ensureClaudeUsageAccessToken();
+  } catch {
+    return buildResult({
+      providerId,
+      providerName,
+      ok: false,
+      configured: true,
+      error: CLAUDE_SESSION_EXPIRED_ERROR,
+    });
+  }
+
+  if (!access?.accessToken) {
     return buildResult({
       providerId,
       providerName,
@@ -97,13 +108,33 @@ export const fetchQuota = async () => {
   }
 
   try {
-    const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'anthropic-beta': 'oauth-2025-04-20'
+    let response = await fetchClaudeUsagePayload(access.accessToken);
+
+    if (response.status === 401 && access.canRefresh) {
+      try {
+        access = await ensureClaudeUsageAccessToken({ forceRefresh: true });
+      } catch {
+        return buildResult({
+          providerId,
+          providerName,
+          ok: false,
+          configured: true,
+          error: CLAUDE_SESSION_EXPIRED_ERROR,
+        });
       }
-    });
+
+      if (!access?.accessToken) {
+        return buildResult({
+          providerId,
+          providerName,
+          ok: false,
+          configured: true,
+          error: CLAUDE_SESSION_EXPIRED_ERROR,
+        });
+      }
+
+      response = await fetchClaudeUsagePayload(access.accessToken);
+    }
 
     if (!response.ok) {
       return buildResult({
@@ -111,7 +142,7 @@ export const fetchQuota = async () => {
         providerName,
         ok: false,
         configured: true,
-        error: `API error: ${response.status}`
+        error: usageAuthError(response.status)
       });
     }
 
