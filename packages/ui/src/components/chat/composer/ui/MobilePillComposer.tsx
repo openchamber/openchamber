@@ -19,6 +19,7 @@ import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { Theme } from '@/types/theme';
+import { ComposerStopButton } from '../../ComposerStopButton';
 import { MobileSessionPanelTrigger } from '../../MobileSessionStatusBar';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
 
@@ -31,6 +32,8 @@ export interface MobilePillComposerProps {
     isVSCode: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
+    stopIconSizeClass: string;
+    canAbort: boolean;
     theme: Theme;
     onExpand: () => void;
     onApplySuggestion: (text: string) => void;
@@ -40,6 +43,7 @@ export interface MobilePillComposerProps {
     onOpenPrPicker: () => void;
     onOpenAttachSheet: () => void;
     onStartDictation: () => void;
+    onAbort: () => void;
 }
 
 export function MobilePillComposer(props: MobilePillComposerProps) {
@@ -53,6 +57,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         isVSCode,
         footerIconButtonClass,
         iconSizeClass,
+        stopIconSizeClass,
+        canAbort,
         theme: currentTheme,
         onExpand,
         onApplySuggestion,
@@ -62,6 +68,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         onOpenPrPicker,
         onOpenAttachSheet,
         onStartDictation,
+        onAbort,
     } = props;
 
     return (
@@ -114,17 +121,25 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                                 : t('chat.chatInput.placeholder.selectSession')}
                     </span>
                 </button>
-                <button
-                    type="button"
-                    className={footerIconButtonClass}
-                    // Starts recording in place; the composer morphs into the
-                    // voice variant once dictation actually goes live.
-                    onClick={onStartDictation}
-                    title={t('chat.dictation.start')}
-                    aria-label={t('chat.dictation.start')}
-                >
-                    <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
-                </button>
+                {canAbort ? (
+                    <ComposerStopButton
+                        buttonClassName={cn(footerIconButtonClass, 'min-h-[44px] min-w-[44px]')}
+                        iconClassName={stopIconSizeClass}
+                        onStop={onAbort}
+                    />
+                ) : (
+                    <button
+                        type="button"
+                        className={footerIconButtonClass}
+                        // Starts recording in place; the composer morphs into the
+                        // voice variant once dictation actually goes live.
+                        onClick={onStartDictation}
+                        title={t('chat.dictation.start')}
+                        aria-label={t('chat.dictation.start')}
+                    >
+                        <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
+                    </button>
+                )}
             </div>
             {/* New-session button: fades/shrinks away when the draft is
                 already open, letting the pill expand into its place. */}

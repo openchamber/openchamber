@@ -9,9 +9,9 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
-import { StopIcon } from '@/components/icons/StopIcon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { ComposerStopButton } from '../../ComposerStopButton';
 
 type ComposerActionButtonsProps = {
     isMobile: boolean;
@@ -95,17 +95,11 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                     <Icon name="send-plane-2" className={cn(sendIconSizeClass, '-rotate-90')} />
                 </button>
             ) : null}
-            <button
-                type="button"
-                onClick={onAbort}
-                className={cn(
-                    footerIconButtonClass,
-                    'text-[var(--status-error)] hover:text-[var(--status-error)]'
-                )}
-                aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
-            >
-                <StopIcon className={cn(stopIconSizeClass)} />
-            </button>
+            <ComposerStopButton
+                buttonClassName={footerIconButtonClass}
+                iconClassName={stopIconSizeClass}
+                onStop={onAbort}
+            />
         </div>
     );
 }, (prev, next) => (
