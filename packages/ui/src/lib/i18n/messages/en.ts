@@ -708,6 +708,8 @@ export const dict = {
   'gitView.header.noIdentity': 'No identity',
   'gitView.header.noProfiles': 'No profiles available to apply.',
   'gitView.header.repositoryViews': 'Repository views',
+  'gitView.header.worktreeTargetTooltip': 'Point this tab at another worktree',
+  'gitView.header.worktreeTargetRootLabel': 'Repository root',
   'gitView.header.removeRemoteAria': 'Remove remote {name}',
   'gitView.header.removeRemoteTitle': 'Remove remote {name}',
   'gitView.header.upstreamSynced': 'synced',

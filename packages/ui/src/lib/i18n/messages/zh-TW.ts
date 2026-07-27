@@ -722,6 +722,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.header.noIdentity': '無身分',
   'gitView.header.noProfiles': '沒有可套用的設定。',
   'gitView.header.repositoryViews': '儲存庫檢視',
+  'gitView.header.worktreeTargetTooltip': '將此分頁指向另一個 worktree',
+  'gitView.header.worktreeTargetRootLabel': '儲存庫根目錄',
   'gitView.header.removeRemoteAria': '移除遠端 {name}',
   'gitView.header.removeRemoteTitle': '移除 {name}',
   'gitView.header.upstreamSynced': '已同步',

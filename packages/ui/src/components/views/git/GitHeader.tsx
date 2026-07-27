@@ -13,6 +13,7 @@ import type { IconName } from "@/components/icon/icons";
 import { BranchSelector } from './BranchSelector';
 import { WorktreeBranchDisplay } from './WorktreeBranchDisplay';
 import { SyncActions } from './SyncActions';
+import { WorktreeTargetDropdown, type WorktreeTargetOption } from './WorktreeTargetDropdown';
 import type {
   GitStatus,
   GitIdentityProfile,
@@ -48,6 +49,9 @@ interface GitHeaderProps {
   actionTabItems?: SortableTabsStripItem[];
   activeActionTab?: string;
   onSelectActionTab?: (tabID: string) => void;
+  worktreeTargetOptions?: WorktreeTargetOption[];
+  activeWorktreeTargetPath?: string | null;
+  onSelectWorktreeTarget?: (option: WorktreeTargetOption) => void;
 }
 
 const IDENTITY_ICON_MAP: Record<string, IconName> = {
@@ -252,6 +256,9 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   actionTabItems,
   activeActionTab,
   onSelectActionTab,
+  worktreeTargetOptions,
+  activeWorktreeTargetPath,
+  onSelectWorktreeTarget,
 }) => {
   const { t } = useI18n();
   if (!status) {
@@ -338,6 +345,15 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     />
   );
 
+  const worktreeTargetControl =
+    worktreeTargetOptions && onSelectWorktreeTarget ? (
+      <WorktreeTargetDropdown
+        options={worktreeTargetOptions}
+        activePath={activeWorktreeTargetPath ?? null}
+        onSelect={onSelectWorktreeTarget}
+      />
+    ) : null;
+
   return (
     <header className="@container/git-header px-3 py-2 bg-transparent">
       <div className="flex items-center justify-between gap-2 min-w-0">
@@ -360,6 +376,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {worktreeTargetControl}
           {managementButtons}
           {identityControl}
         </div>

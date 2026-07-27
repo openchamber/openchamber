@@ -706,6 +706,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.header.noIdentity': 'IDがありません',
   'gitView.header.noProfiles': '適用できるプロファイルがありません。',
   'gitView.header.repositoryViews': 'リポジトリビュー',
+  'gitView.header.worktreeTargetTooltip': 'このタブを別の worktree に切り替える',
+  'gitView.header.worktreeTargetRootLabel': 'リポジトリのルート',
   'gitView.header.removeRemoteAria': 'リモート{name}を削除',
   'gitView.header.removeRemoteTitle': 'リモート{name}を削除',
   'gitView.header.upstreamSynced': '同期済み',

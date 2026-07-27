@@ -709,6 +709,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.header.noIdentity': '无身份',
   'gitView.header.noProfiles': '没有可应用的配置。',
   'gitView.header.repositoryViews': '仓库视图',
+  'gitView.header.worktreeTargetTooltip': '将此选项卡指向另一个工作树',
+  'gitView.header.worktreeTargetRootLabel': '仓库根目录',
   'gitView.header.removeRemoteAria': '移除远程 {name}',
   'gitView.header.removeRemoteTitle': '移除 {name}',
   'gitView.header.upstreamSynced': '已同步',

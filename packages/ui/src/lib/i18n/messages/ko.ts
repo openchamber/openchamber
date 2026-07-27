@@ -709,6 +709,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.header.noIdentity': '인증 정보 없음',
   'gitView.header.noProfiles': '적용할 프로필 없음',
   'gitView.header.repositoryViews': '저장소 보기',
+  'gitView.header.worktreeTargetTooltip': '이 탭을 다른 worktree로 전환',
+  'gitView.header.worktreeTargetRootLabel': '저장소 루트',
   'gitView.header.removeRemoteAria': '리모트 제거',
   'gitView.header.removeRemoteTitle': '리모트 제거',
   'gitView.header.upstreamSynced': '동기화됨',
