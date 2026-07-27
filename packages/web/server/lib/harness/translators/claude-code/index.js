@@ -5,6 +5,10 @@
 import { mapAttachmentsToContentBlocks } from './attachments.js';
 import { startClaudeQuery } from './query.js';
 import {
+  buildClaudeMcpServersFromOpenChamber,
+  buildMcpAllowedToolPatterns,
+} from './mcp-config.js';
+import {
   createCanUseTool,
   rejectPendingForSession,
   replyPermission as replyPendingPermission,
@@ -26,6 +30,7 @@ import {
 } from '../../session-bindings.js';
 import { getHarnessCapabilities } from '../../registry.js';
 import { detectClaudeCode } from '../../detect.js';
+import { updateSessionCapabilities } from '../../session-capabilities.js';
 
 const ABORT_INTERRUPT_TIMEOUT_MS = 2_000;
 
@@ -211,6 +216,13 @@ export function createClaudeCodeTranslator(deps = {}) {
       assistantMessageId,
     });
 
+    const mcpServers = buildClaudeMcpServersFromOpenChamber(directory);
+    const allowedTools = [
+      'Agent',
+      'Skill',
+      ...buildMcpAllowedToolPatterns(mcpServers),
+    ];
+
     let handle;
     try {
       handle = await startQuery({
@@ -222,6 +234,12 @@ export function createClaudeCodeTranslator(deps = {}) {
         effort: binding.target?.effort,
         canUseTool,
         includePartialMessages: true,
+        mcpServers,
+        allowedTools,
+        skills: 'all',
+        settingSources: ['user', 'project', 'local'],
+        forwardSubagentText: true,
+        agentProgressSummaries: true,
       });
     } catch (error) {
       const wrapped = error instanceof Error ? error : new Error(String(error));
@@ -256,9 +274,12 @@ export function createClaudeCodeTranslator(deps = {}) {
     void (async () => {
       try {
         for await (const message of handle.stream) {
-          const { events, foreignSessionId } = mapClaudeMessageToEvents(ctx, message);
+          const { events, foreignSessionId, capabilities } = mapClaudeMessageToEvents(ctx, message);
           if (foreignSessionId) {
             setForeignSessionId(sessionId, foreignSessionId);
+          }
+          if (capabilities) {
+            updateSessionCapabilities(sessionId, capabilities);
           }
           emitEvents(events);
         }

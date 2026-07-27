@@ -21,6 +21,19 @@ mock.module('@/lib/harness/client', () => ({
   harnessPrompt: harnessPromptMock,
   harnessAbort: mock(async () => ({ ok: true })),
   harnessPermissionReply: mock(async () => ({ ok: true })),
+  harnessSessionCapabilities: mock(async (sessionId) => ({
+    sessionId,
+    harnessId: 'claude-code',
+    capabilities: {
+      sessionId,
+      slashCommands: ['compact', 'usage', 'clear'],
+      skills: [],
+      agents: [],
+      tools: [],
+      mcpServers: [],
+      updatedAt: 0,
+    },
+  })),
   buildHarnessPromptBody: (params) => params,
 }));
 
@@ -221,6 +234,51 @@ describe('routeMessage Claude harness branch', () => {
     }
 
     expect(caught?.code).toBe('CLAUDE_NOT_READY');
+    expect(harnessPromptCalls).toHaveLength(0);
+  });
+
+  test('routes Claude-native /compact through harnessPrompt', async () => {
+    useSelectionStore.getState().saveSessionTarget('session-claude', {
+      harnessId: 'claude-code',
+      modelRef: 'sonnet',
+    });
+
+    await routeMessage({
+      sessionId: 'session-claude',
+      directory: '/claude/project',
+      content: '/compact',
+      providerID: 'anthropic',
+      modelID: 'claude-sonnet',
+    });
+
+    expect(harnessPromptCalls).toHaveLength(1);
+    expect(harnessPromptCalls[0].text).toBe('/compact');
+    expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('rejects OpenCode-only slash commands on Claude sessions', async () => {
+    useSelectionStore.getState().saveSessionTarget('session-claude', {
+      harnessId: 'claude-code',
+      modelRef: 'sonnet',
+    });
+    useCommandsStore.setState({
+      commands: [{ name: 'opencode-only-cmd', description: 'oc', scope: 'global' }],
+    });
+
+    let caught = null;
+    try {
+      await routeMessage({
+        sessionId: 'session-claude',
+        directory: '/claude/project',
+        content: '/opencode-only-cmd',
+        providerID: 'anthropic',
+        modelID: 'claude-sonnet',
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught?.code).toBe('CLAUDE_SLASH_UNSUPPORTED');
     expect(harnessPromptCalls).toHaveLength(0);
   });
 });

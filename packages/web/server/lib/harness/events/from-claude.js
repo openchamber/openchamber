@@ -81,6 +81,23 @@ export function resetOpenCodeIdState() {
  * @property {string} [accumulatedReasoning]
  * @property {boolean} [needsNewReasoningSegment]
  * @property {boolean} [reasoningPartStarted]
+ * @property {Map<string, {
+ *   sessionId: string,
+ *   assistantMessageId: string,
+ *   userMessageId: string,
+ *   title: string,
+ *   textPartId: string,
+ *   reasoningPartId: string,
+ *   toolParts: Map<string, { partId: string, toolName: string, input: object, settled?: boolean }>,
+ *   accumulatedText: string,
+ *   textPartStarted: boolean,
+ *   needsNewTextSegment: boolean,
+ *   accumulatedReasoning: string,
+ *   reasoningPartStarted: boolean,
+ *   needsNewReasoningSegment: boolean,
+ *   created: boolean,
+ * }>} [subagentByToolUseId]
+ * @property {object | null} [lastInitCapabilities]
  */
 
 /**
@@ -136,7 +153,143 @@ export function createClaudeMapperContext(input) {
     needsNewReasoningSegment: input.needsNewReasoningSegment === true,
     reasoningPartStarted: input.reasoningPartStarted === true
       || Boolean(input.accumulatedReasoning),
+    subagentByToolUseId: input.subagentByToolUseId || new Map(),
+    lastInitCapabilities: input.lastInitCapabilities || null,
   };
+}
+
+/**
+ * Deterministic child session id for a Claude Agent tool_use call.
+ * @param {string} parentSessionId
+ * @param {string} toolUseId
+ * @returns {string}
+ */
+export function claudeSubagentSessionId(parentSessionId, toolUseId) {
+  const safeTool = String(toolUseId || 'agent').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'agent';
+  return `ses_claude_sub_${parentSessionId.slice(-12)}_${safeTool}`;
+}
+
+/**
+ * @param {ClaudeMapperContext} parentCtx
+ * @param {string} toolUseId
+ * @param {string} [title]
+ */
+function ensureSubagentContext(parentCtx, toolUseId, title) {
+  if (!toolUseId) return null;
+  let child = parentCtx.subagentByToolUseId.get(toolUseId);
+  if (child) {
+    if (title && title.trim() && child.title === 'Subagent') {
+      child.title = title.trim().slice(0, 120);
+    }
+    return child;
+  }
+  const sessionId = claudeSubagentSessionId(parentCtx.sessionId, toolUseId);
+  child = {
+    sessionId,
+    assistantMessageId: createOpenCodeId('msg'),
+    userMessageId: createOpenCodeId('msg'),
+    title: (typeof title === 'string' && title.trim() ? title.trim() : 'Subagent').slice(0, 120),
+    textPartId: createOpenCodeId('prt'),
+    reasoningPartId: createOpenCodeId('prt'),
+    toolParts: new Map(),
+    accumulatedText: '',
+    textPartStarted: false,
+    needsNewTextSegment: false,
+    accumulatedReasoning: '',
+    reasoningPartStarted: false,
+    needsNewReasoningSegment: false,
+    created: false,
+  };
+  parentCtx.subagentByToolUseId.set(toolUseId, child);
+  return child;
+}
+
+/**
+ * @param {ClaudeMapperContext} parentCtx
+ * @param {ReturnType<typeof ensureSubagentContext>} child
+ * @returns {object[]}
+ */
+function buildSubagentCreatedEvents(parentCtx, child) {
+  if (!child || child.created) return [];
+  child.created = true;
+  const now = Date.now();
+  return [{
+    type: 'session.created',
+    properties: {
+      info: {
+        id: child.sessionId,
+        parentID: parentCtx.sessionId,
+        title: child.title,
+        time: { created: now, updated: now },
+      },
+    },
+  }];
+}
+
+/**
+ * Temporarily project a child subagent onto the mapper context fields that
+ * content-block helpers read/write, then restore.
+ *
+ * @param {ClaudeMapperContext} parentCtx
+ * @param {NonNullable<ReturnType<typeof ensureSubagentContext>>} child
+ * @param {() => object[]} fn
+ * @returns {object[]}
+ */
+function withSubagentContext(parentCtx, child, fn) {
+  const snapshot = {
+    sessionId: parentCtx.sessionId,
+    assistantMessageId: parentCtx.assistantMessageId,
+    userMessageId: parentCtx.userMessageId,
+    textPartId: parentCtx.textPartId,
+    reasoningPartId: parentCtx.reasoningPartId,
+    toolParts: parentCtx.toolParts,
+    accumulatedText: parentCtx.accumulatedText,
+    textPartStarted: parentCtx.textPartStarted,
+    needsNewTextSegment: parentCtx.needsNewTextSegment,
+    accumulatedReasoning: parentCtx.accumulatedReasoning,
+    reasoningPartStarted: parentCtx.reasoningPartStarted,
+    needsNewReasoningSegment: parentCtx.needsNewReasoningSegment,
+  };
+
+  parentCtx.sessionId = child.sessionId;
+  parentCtx.assistantMessageId = child.assistantMessageId;
+  parentCtx.userMessageId = child.userMessageId;
+  parentCtx.textPartId = child.textPartId;
+  parentCtx.reasoningPartId = child.reasoningPartId;
+  parentCtx.toolParts = child.toolParts;
+  parentCtx.accumulatedText = child.accumulatedText;
+  parentCtx.textPartStarted = child.textPartStarted;
+  parentCtx.needsNewTextSegment = child.needsNewTextSegment;
+  parentCtx.accumulatedReasoning = child.accumulatedReasoning;
+  parentCtx.reasoningPartStarted = child.reasoningPartStarted;
+  parentCtx.needsNewReasoningSegment = child.needsNewReasoningSegment;
+
+  try {
+    return fn();
+  } finally {
+    child.textPartId = parentCtx.textPartId;
+    child.reasoningPartId = parentCtx.reasoningPartId;
+    child.toolParts = parentCtx.toolParts;
+    child.accumulatedText = parentCtx.accumulatedText;
+    child.textPartStarted = parentCtx.textPartStarted;
+    child.needsNewTextSegment = parentCtx.needsNewTextSegment;
+    child.accumulatedReasoning = parentCtx.accumulatedReasoning;
+    child.reasoningPartStarted = parentCtx.reasoningPartStarted;
+    child.needsNewReasoningSegment = parentCtx.needsNewReasoningSegment;
+
+    parentCtx.sessionId = snapshot.sessionId;
+    parentCtx.assistantMessageId = snapshot.assistantMessageId;
+    parentCtx.userMessageId = snapshot.userMessageId;
+    parentCtx.textPartId = snapshot.textPartId;
+    parentCtx.reasoningPartId = snapshot.reasoningPartId;
+    parentCtx.toolParts = snapshot.toolParts;
+    parentCtx.accumulatedText = snapshot.accumulatedText;
+    parentCtx.textPartStarted = snapshot.textPartStarted;
+    parentCtx.needsNewTextSegment = snapshot.needsNewTextSegment;
+    parentCtx.accumulatedReasoning = snapshot.accumulatedReasoning;
+    parentCtx.reasoningPartStarted = snapshot.reasoningPartStarted;
+    parentCtx.needsNewReasoningSegment = snapshot.needsNewReasoningSegment;
+  }
 }
 
 /**
@@ -413,7 +566,8 @@ function mapContentBlock(ctx, block) {
     // Next assistant output belongs after this tool in transcript order.
     ctx.needsNewTextSegment = true;
     ctx.needsNewReasoningSegment = true;
-    return [
+
+    const events = [
       {
         type: 'message.updated',
         properties: { info: assistantInfo(ctx, false) },
@@ -438,6 +592,26 @@ function mapContentBlock(ctx, block) {
         },
       },
     ];
+
+    // Claude Agent tool → nested OpenChamber child session (subagent UI).
+    const isAgentTool = entry.toolName === 'Agent' || entry.toolName === 'Task';
+    if (isAgentTool && callId) {
+      const description = typeof input.description === 'string' && input.description.trim()
+        ? input.description.trim()
+        : typeof input.prompt === 'string' && input.prompt.trim()
+          ? input.prompt.trim().slice(0, 80)
+          : typeof input.subagent_type === 'string' && input.subagent_type.trim()
+            ? input.subagent_type.trim()
+            : 'Subagent';
+      const child = ensureSubagentContext(ctx, callId, description);
+      events.unshift(...buildSubagentCreatedEvents(ctx, child));
+      events[events.length - 1].properties.part.state.metadata = {
+        sessionId: child.sessionId,
+        title: child.title,
+      };
+    }
+
+    return events;
   }
 
   return [];
@@ -585,7 +759,7 @@ export function buildTurnAbortEvents(ctx, reason = 'Aborted by user') {
  *
  * @param {ClaudeMapperContext} ctx
  * @param {object} message
- * @returns {{ events: object[], foreignSessionId?: string }}
+ * @returns {{ events: object[], foreignSessionId?: string, capabilities?: object }}
  */
 export function mapClaudeMessageToEvents(ctx, message) {
   if (!message || typeof message !== 'object') {
@@ -594,59 +768,61 @@ export function mapClaudeMessageToEvents(ctx, message) {
 
   const events = [];
   let foreignSessionId;
+  /** @type {object | undefined} */
+  let capabilities;
 
   if (typeof message.session_id === 'string' && message.session_id) {
     foreignSessionId = message.session_id;
     ctx.foreignSessionId = foreignSessionId;
   }
 
+  const parentToolUseId = typeof message.parent_tool_use_id === 'string'
+    ? message.parent_tool_use_id.trim()
+    : '';
+
+  /**
+   * @param {() => object[]} mapFn
+   */
+  const mapMaybeNested = (mapFn) => {
+    if (!parentToolUseId) {
+      events.push(...mapFn());
+      return;
+    }
+    const child = ensureSubagentContext(ctx, parentToolUseId);
+    events.push(...buildSubagentCreatedEvents(ctx, child));
+    events.push(...withSubagentContext(ctx, child, mapFn));
+  };
+
   switch (message.type) {
     case 'system': {
-      if (message.subtype === 'init' && typeof message.session_id === 'string') {
-        foreignSessionId = message.session_id;
-        ctx.foreignSessionId = foreignSessionId;
-      }
-      break;
-    }
-
-    case 'stream_event': {
-      const event = message.event;
-      if (!event || typeof event !== 'object') break;
-      if (event.type === 'content_block_delta') {
-        const delta = event.delta;
-        if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
-          events.push(...segmentDeltaEvents(ctx, 'text', delta.text));
-        } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-          events.push(...segmentDeltaEvents(ctx, 'reasoning', delta.thinking));
+      if (message.subtype === 'init') {
+        if (typeof message.session_id === 'string') {
+          foreignSessionId = message.session_id;
+          ctx.foreignSessionId = foreignSessionId;
         }
-      } else if (event.type === 'content_block_start') {
-        const block = event.content_block;
-        if (block?.type === 'tool_use') {
-          events.push(...mapContentBlock(ctx, block));
-        } else {
-          const kind = block?.type === 'text'
-            ? 'text'
-            : block?.type === 'thinking' ? 'reasoning' : null;
-          if (kind) {
-            const field = SEGMENT_FIELDS[kind];
-            if (ctx[field.needsNew] || !ctx[field.started]) {
-              if (ctx[field.needsNew]) beginNewSegment(ctx, kind);
-              events.push(...startSegmentEvents(ctx, kind));
-            }
-          }
-        }
-      }
-      break;
-    }
-
-    case 'assistant': {
-      const content = message.message?.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          events.push(...mapContentBlock(ctx, block));
-        }
-      }
-      if (message.error) {
+        capabilities = {
+          slash_commands: Array.isArray(message.slash_commands) ? message.slash_commands : [],
+          skills: Array.isArray(message.skills) ? message.skills : [],
+          agents: Array.isArray(message.agents) ? message.agents : [],
+          tools: Array.isArray(message.tools) ? message.tools : [],
+          mcp_servers: Array.isArray(message.mcp_servers) ? message.mcp_servers : [],
+          session_id: foreignSessionId,
+        };
+        ctx.lastInitCapabilities = capabilities;
+      } else if (message.subtype === 'compact_boundary') {
+        const pre = message.compact_metadata?.pre_tokens;
+        const trigger = message.compact_metadata?.trigger;
+        const notice = [
+          'Conversation compacted',
+          typeof pre === 'number' ? `(pre-compaction tokens: ${pre})` : '',
+          trigger ? `trigger: ${trigger}` : '',
+        ].filter(Boolean).join(' · ');
+        events.push(...segmentDeltaEvents(ctx, 'text', notice));
+        events.push(...finalizeOpenSegments(ctx));
+        events.push({
+          type: 'message.updated',
+          properties: { info: assistantInfo(ctx, true) },
+        });
         events.push({
           type: 'session.status',
           properties: {
@@ -654,32 +830,93 @@ export function mapClaudeMessageToEvents(ctx, message) {
             status: { type: 'idle' },
           },
         });
-        events.push({
-          type: 'message.updated',
-          properties: {
-            info: {
-              ...assistantInfo(ctx, true),
-              error: {
-                name: 'APIError',
-                data: {
-                  message: String(message.error),
-                  isRetryable: message.error === 'rate_limit' || message.error === 'overloaded',
-                },
-              },
-            },
-          },
-        });
       }
       break;
     }
 
-    case 'user': {
-      const content = message.message?.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          events.push(...mapToolResultBlock(ctx, block));
+    case 'stream_event': {
+      const event = message.event;
+      if (!event || typeof event !== 'object') break;
+      mapMaybeNested(() => {
+        const nested = [];
+        if (event.type === 'content_block_delta') {
+          const delta = event.delta;
+          if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+            nested.push(...segmentDeltaEvents(ctx, 'text', delta.text));
+          } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+            nested.push(...segmentDeltaEvents(ctx, 'reasoning', delta.thinking));
+          }
+        } else if (event.type === 'content_block_start') {
+          const block = event.content_block;
+          if (block?.type === 'tool_use') {
+            nested.push(...mapContentBlock(ctx, block));
+          } else {
+            const kind = block?.type === 'text'
+              ? 'text'
+              : block?.type === 'thinking' ? 'reasoning' : null;
+            if (kind) {
+              const field = SEGMENT_FIELDS[kind];
+              if (ctx[field.needsNew] || !ctx[field.started]) {
+                if (ctx[field.needsNew]) beginNewSegment(ctx, kind);
+                nested.push(...startSegmentEvents(ctx, kind));
+              }
+            }
+          }
         }
-      }
+        return nested;
+      });
+      break;
+    }
+
+    case 'assistant': {
+      mapMaybeNested(() => {
+        const nested = [];
+        const content = message.message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            nested.push(...mapContentBlock(ctx, block));
+          }
+        }
+        if (message.error && !parentToolUseId) {
+          nested.push({
+            type: 'session.status',
+            properties: {
+              sessionID: ctx.sessionId,
+              status: { type: 'idle' },
+            },
+          });
+          nested.push({
+            type: 'message.updated',
+            properties: {
+              info: {
+                ...assistantInfo(ctx, true),
+                error: {
+                  name: 'APIError',
+                  data: {
+                    message: String(message.error),
+                    isRetryable: message.error === 'rate_limit' || message.error === 'overloaded',
+                  },
+                },
+              },
+            },
+          });
+        }
+        return nested;
+      });
+      break;
+    }
+
+    case 'user': {
+      mapMaybeNested(() => {
+        const nested = [];
+        const content = message.message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            nested.push(...mapToolResultBlock(ctx, block));
+          }
+        }
+        return nested;
+      });
       break;
     }
 
@@ -724,5 +961,5 @@ export function mapClaudeMessageToEvents(ctx, message) {
       break;
   }
 
-  return { events, foreignSessionId };
+  return { events, foreignSessionId, capabilities };
 }

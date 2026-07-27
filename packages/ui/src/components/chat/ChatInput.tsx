@@ -105,6 +105,7 @@ import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore'
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
+import { useClaudeSessionCapabilitiesStore } from '@/stores/useClaudeSessionCapabilitiesStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
@@ -1335,6 +1336,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // matching /tokens in the composer, the same way confirmed @files are.
     const availableCommands = useCommandsStore((s) => s.commands);
     const availableSkills = useSkillsStore((s) => s.skills);
+    const claudeSlashCommands = useClaudeSessionCapabilitiesStore((s) => (
+      currentSessionId ? s.getSlashCommands(currentSessionId) : s.getSlashCommands(null)
+    ));
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
             'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
@@ -1342,8 +1346,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
         for (const skill of availableSkills) names.add(skill.name.toLowerCase());
+        for (const command of claudeSlashCommands) names.add(command.toLowerCase());
         return names;
-    }, [availableCommands, availableSkills, isMobile]);
+    }, [availableCommands, availableSkills, claudeSlashCommands, isMobile]);
 
     // /command and /skill spans (primary color). Only tokens that match a known
     // command/skill name are highlighted — partial/unknown tokens stay plain.
@@ -2278,6 +2283,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 return;
             }
             else if (commandName === 'compact' && currentSessionId) {
+                const compactTarget = pendingHandoffTarget ?? sessionTarget ?? lastUsedTarget;
+                if (compactTarget?.harnessId === 'claude-code') {
+                    // Claude-native /compact via harness prompt (not OpenCode summarize).
+                    await sendMessage(
+                        '/compact',
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [],
+                        variantToSend,
+                        inputMode,
+                        sendMessageOptions,
+                    );
+                    return;
+                }
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;

@@ -152,6 +152,13 @@ export function killProcessTree(pid, options = {}) {
  * @param {(toolName: string, input: Record<string, unknown>, options: object) => Promise<object | null>} [params.canUseTool]
  * @param {Record<string, string | undefined>} [params.env]
  * @param {boolean} [params.includePartialMessages]
+ * @param {Record<string, object>} [params.mcpServers]
+ * @param {string[]} [params.allowedTools]
+ * @param {Record<string, object>} [params.agents]
+ * @param {string[] | 'all'} [params.skills]
+ * @param {Array<'user' | 'project' | 'local'>} [params.settingSources]
+ * @param {boolean} [params.forwardSubagentText]
+ * @param {boolean} [params.agentProgressSummaries]
  * @param {(mod: typeof import('@anthropic-ai/claude-agent-sdk')) => unknown} [params.queryImpl]
  * @returns {Promise<ClaudeQueryHandle>}
  */
@@ -179,6 +186,15 @@ export async function startClaudeQuery(params) {
     cwd,
     env,
     includePartialMessages: params.includePartialMessages !== false,
+    // Nested Agent transcripts + progress so OpenChamber can render subagents.
+    forwardSubagentText: params.forwardSubagentText !== false,
+    agentProgressSummaries: params.agentProgressSummaries !== false,
+    // Load user/project/local Claude settings so .claude/{commands,agents,skills}
+    // and project .mcp.json participate (matches CLI defaults when omitted, but
+    // set explicitly so capability "full" is intentional).
+    settingSources: Array.isArray(params.settingSources)
+      ? params.settingSources
+      : ['user', 'project', 'local'],
   };
   if (pathToClaudeCodeExecutable) {
     // Avoid Electron asar ENOTDIR when the SDK resolves a path inside app.asar.
@@ -203,6 +219,27 @@ export async function startClaudeQuery(params) {
   }
   if (typeof params.canUseTool === 'function') {
     options.canUseTool = params.canUseTool;
+  }
+  if (params.mcpServers && typeof params.mcpServers === 'object' && !Array.isArray(params.mcpServers)) {
+    const names = Object.keys(params.mcpServers);
+    if (names.length > 0) {
+      options.mcpServers = params.mcpServers;
+    }
+  }
+  if (Array.isArray(params.allowedTools) && params.allowedTools.length > 0) {
+    options.allowedTools = params.allowedTools.filter((tool) => typeof tool === 'string' && tool.trim());
+  }
+  if (params.agents && typeof params.agents === 'object' && !Array.isArray(params.agents)) {
+    const names = Object.keys(params.agents);
+    if (names.length > 0) {
+      options.agents = params.agents;
+    }
+  }
+  if (params.skills === 'all' || (Array.isArray(params.skills) && params.skills.length > 0)) {
+    options.skills = params.skills;
+  } else if (params.skills === undefined) {
+    // Enable every discovered skill so /skill and Skill tool work on Claude sessions.
+    options.skills = 'all';
   }
 
   let result;

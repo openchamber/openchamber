@@ -61,9 +61,14 @@ const CLAUDE_CODE_CAPABILITIES = Object.freeze({
   // text-like, PDF); opaque binaries reject with named errors.
   'file-attachments': 'full',
   shell: 'full',
-  'slash-commands': 'partial',
-  mcp: 'partial',
-  subagents: 'partial',
+  // Claude-native slash/skills via prompt text + system/init discovery;
+  // OpenCode-only commands stay blocked in the UI send path.
+  'slash-commands': 'full',
+  // OpenChamber MCP configs bridged into SDK mcpServers; project .mcp.json
+  // still loads via settingSources; status from system/init.
+  mcp: 'full',
+  // Agent tool + forwardSubagentText → nested child sessions in the sidebar.
+  subagents: 'full',
   multirun: 'none',
   // Goal loop is supported via harness turn snapshots + /api/harness/prompt
   // continuations. Token budget accounting stays best-effort (Claude token

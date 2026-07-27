@@ -40,6 +40,39 @@ describe('startClaudeQuery effort option', () => {
       effort: 'high',
       permissionMode: 'default',
       cwd: tempDir,
+      skills: 'all',
+      forwardSubagentText: true,
+      agentProgressSummaries: true,
+      settingSources: ['user', 'project', 'local'],
+    });
+    await handle.close?.();
+  });
+
+  it('forwards mcpServers and allowedTools', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'oc-claude-mcp-'));
+    /** @type {unknown} */
+    let seenOptions;
+    const handle = await startClaudeQuery({
+      prompt: 'hi',
+      cwd: tempDir,
+      includePartialMessages: false,
+      mcpServers: {
+        fs: { type: 'stdio', command: 'node', args: ['server.js'] },
+      },
+      allowedTools: ['Agent', 'mcp__fs__*'],
+      queryImpl: ({ options }) => {
+        seenOptions = options;
+        return {
+          async *[Symbol.asyncIterator]() {},
+          interrupt: async () => {},
+        };
+      },
+    });
+    expect(seenOptions).toMatchObject({
+      mcpServers: {
+        fs: { type: 'stdio', command: 'node', args: ['server.js'] },
+      },
+      allowedTools: ['Agent', 'mcp__fs__*'],
     });
     await handle.close?.();
   });

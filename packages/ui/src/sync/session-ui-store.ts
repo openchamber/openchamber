@@ -25,6 +25,10 @@ import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
 import { useSkillsStore } from "@/stores/useSkillsStore"
+import {
+  CLAUDE_BUILTIN_SLASH_COMMANDS,
+  useClaudeSessionCapabilitiesStore,
+} from "@/stores/useClaudeSessionCapabilitiesStore"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -88,7 +92,7 @@ import type { ExecutionTarget } from "@/types/harness"
 export type { AttachedFile }
 
 const CLAUDE_SLASH_UNSUPPORTED =
-  "Slash commands are not available on Claude Code. Switch to OpenCode or send a normal message."
+  "This OpenCode slash command is not available on Claude Code. Use a Claude-native /command or send a normal message."
 const CLAUDE_NOT_READY_MESSAGE =
   "Claude Code is not ready. Open Settings → Engines to install, log in, or re-detect."
 
@@ -153,20 +157,37 @@ export function routeMessage(params: {
   }
 
   if (target.harnessId === "claude-code") {
-    // Reject known OpenCode slash/skills on Claude rather than silently falling
-    // back to OpenCode command dispatch.
+    // Claude-native slash/skills go through harnessPrompt as literal prompt text.
+    // Known OpenCode-only commands/skills that are NOT Claude-native are rejected
+    // rather than silently falling back to OpenCode command dispatch.
     if (params.content.startsWith("/")) {
       const [head] = params.content.split(" ")
       const cmdName = head.slice(1)
-      const dirState = getDirectoryState(requestDirectory)
-      const syncCommands = dirState?.command ?? []
-      const storeCommands = useCommandsStore.getState().commands
-      const isCommand = syncCommands.find((c) => c.name === cmdName)
-        || storeCommands.find((c) => c.name === cmdName)
-        || useSkillsStore.getState().skills.some((s) => s.name === cmdName)
-      if (isCommand) {
-        return Promise.reject(new HarnessClientError(CLAUDE_SLASH_UNSUPPORTED, "CLAUDE_SLASH_UNSUPPORTED", 400))
+      const claudeSlash = new Set(
+        useClaudeSessionCapabilitiesStore.getState().getSlashCommands(params.sessionId)
+          .map((name) => name.toLowerCase()),
+      )
+      for (const name of CLAUDE_BUILTIN_SLASH_COMMANDS) {
+        claudeSlash.add(name.toLowerCase())
       }
+      const claudeSkills = useClaudeSessionCapabilitiesStore.getState()
+        .getCapabilities(params.sessionId)
+        ?.skills
+        ?.map((name) => name.toLowerCase()) ?? []
+      for (const name of claudeSkills) claudeSlash.add(name)
+
+      if (!claudeSlash.has(cmdName.toLowerCase())) {
+        const dirState = getDirectoryState(requestDirectory)
+        const syncCommands = dirState?.command ?? []
+        const storeCommands = useCommandsStore.getState().commands
+        const isOpenCodeCommand = syncCommands.find((c) => c.name === cmdName)
+          || storeCommands.find((c) => c.name === cmdName)
+          || useSkillsStore.getState().skills.some((s) => s.name === cmdName)
+        if (isOpenCodeCommand) {
+          return Promise.reject(new HarnessClientError(CLAUDE_SLASH_UNSUPPORTED, "CLAUDE_SLASH_UNSUPPORTED", 400))
+        }
+      }
+      // Claude-native /command (or unknown token) continues as a harness prompt.
     }
 
     const claudeCatalog = useHarnessStore.getState().getCatalog("claude-code")

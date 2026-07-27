@@ -397,3 +397,94 @@ describe('abort finalization', () => {
     expect(buildTurnAbortEvents(ctx)).toEqual([]);
   });
 });
+
+describe('from-claude slash / mcp / subagents', () => {
+  beforeEach(() => {
+    resetOpenCodeIdState();
+  });
+
+  it('extracts system/init capabilities without emitting transcript events', () => {
+    const ctx = createClaudeMapperContext({
+      sessionId: 'ses_1',
+      directory: '/proj',
+      userMessageId: 'msg_u',
+      assistantMessageId: 'msg_a',
+    });
+    const { events, capabilities, foreignSessionId } = mapClaudeMessageToEvents(ctx, {
+      type: 'system',
+      subtype: 'init',
+      session_id: 'foreign_1',
+      slash_commands: ['compact', 'usage'],
+      skills: ['pdf'],
+      agents: ['explorer'],
+      tools: ['Read', 'Agent'],
+      mcp_servers: [{ name: 'fs', status: 'connected' }],
+    });
+    expect(events).toEqual([]);
+    expect(foreignSessionId).toBe('foreign_1');
+    expect(capabilities).toMatchObject({
+      slash_commands: ['compact', 'usage'],
+      skills: ['pdf'],
+      agents: ['explorer'],
+      mcp_servers: [{ name: 'fs', status: 'connected' }],
+    });
+  });
+
+  it('creates a child session when Claude Agent tool starts', () => {
+    const ctx = createClaudeMapperContext({
+      sessionId: 'ses_parent',
+      directory: '/proj',
+      userMessageId: 'msg_u',
+      assistantMessageId: 'msg_a',
+    });
+    const { events } = mapClaudeMessageToEvents(ctx, {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'tool_use',
+          id: 'agent_call_1',
+          name: 'Agent',
+          input: { description: 'Review auth', prompt: 'review auth' },
+        }],
+      },
+    });
+    const created = events.find((e) => e.type === 'session.created');
+    expect(created?.properties.info.parentID).toBe('ses_parent');
+    expect(created?.properties.info.title).toBe('Review auth');
+    const tool = events.find((e) => e.properties?.part?.type === 'tool');
+    expect(tool?.properties.part.state.metadata.sessionId).toBe(created?.properties.info.id);
+  });
+
+  it('routes parent_tool_use_id messages into the child session', () => {
+    const ctx = createClaudeMapperContext({
+      sessionId: 'ses_parent',
+      directory: '/proj',
+      userMessageId: 'msg_u',
+      assistantMessageId: 'msg_a',
+    });
+    const start = mapClaudeMessageToEvents(ctx, {
+      type: 'assistant',
+      message: {
+        content: [{
+          type: 'tool_use',
+          id: 'agent_call_1',
+          name: 'Agent',
+          input: { description: 'Explore' },
+        }],
+      },
+    });
+    const childId = start.events.find((e) => e.type === 'session.created')?.properties.info.id;
+    const nested = mapClaudeMessageToEvents(ctx, {
+      type: 'assistant',
+      parent_tool_use_id: 'agent_call_1',
+      message: {
+        content: [{ type: 'text', text: 'looking around' }],
+      },
+    });
+    const textPart = nested.events.find((e) => e.properties?.part?.type === 'text');
+    expect(textPart?.properties.part.sessionID).toBe(childId);
+    const delta = nested.events.find((e) => e.type === 'message.part.delta');
+    expect(delta?.properties.sessionID).toBe(childId);
+    expect(delta?.properties.delta).toBe('looking around');
+  });
+});

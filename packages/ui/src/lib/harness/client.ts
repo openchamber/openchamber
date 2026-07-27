@@ -290,3 +290,98 @@ export async function harnessPermissionReply(
     reply,
   };
 }
+
+export type ClaudeSessionCapabilities = {
+  sessionId: string;
+  foreignSessionId?: string;
+  slashCommands: string[];
+  skills: string[];
+  agents: string[];
+  tools: string[];
+  mcpServers: Array<{ name: string; status: string }>;
+  updatedAt: number;
+};
+
+export type HarnessSessionCapabilitiesResult = {
+  sessionId: string;
+  harnessId: string;
+  capabilities: ClaudeSessionCapabilities;
+};
+
+const sanitizeStringList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+};
+
+const sanitizeMcpServers = (value: unknown): Array<{ name: string; status: string }> => {
+  if (!Array.isArray(value)) return [];
+  const out: Array<{ name: string; status: string }> = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push({
+      name,
+      status: typeof entry.status === 'string' && entry.status.trim() ? entry.status.trim() : 'unknown',
+    });
+  }
+  return out;
+};
+
+export async function harnessSessionCapabilities(
+  sessionId: string,
+): Promise<HarnessSessionCapabilitiesResult> {
+  const id = sessionId.trim();
+  if (!id) {
+    throw new HarnessClientError('sessionId is required', 'PROMPT_INVALID', 400);
+  }
+
+  let response: Response;
+  try {
+    response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(id)}/capabilities`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Harness capabilities request failed';
+    throw new HarnessClientError(message, 'HARNESS_NETWORK', 0);
+  }
+
+  if (!response.ok) {
+    const { message, code, status } = await readErrorPayload(response);
+    throw new HarnessClientError(message, code, response.status, status);
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (!isRecord(payload) || !isRecord(payload.capabilities)) {
+    throw new HarnessClientError('Invalid harness capabilities response', 'HARNESS_INVALID_RESPONSE', response.status);
+  }
+
+  const caps = payload.capabilities;
+  return {
+    sessionId: typeof payload.sessionId === 'string' ? payload.sessionId : id,
+    harnessId: typeof payload.harnessId === 'string' ? payload.harnessId : 'claude-code',
+    capabilities: {
+      sessionId: typeof caps.sessionId === 'string' ? caps.sessionId : id,
+      ...(typeof caps.foreignSessionId === 'string' ? { foreignSessionId: caps.foreignSessionId } : {}),
+      slashCommands: sanitizeStringList(caps.slashCommands),
+      skills: sanitizeStringList(caps.skills),
+      agents: sanitizeStringList(caps.agents),
+      tools: sanitizeStringList(caps.tools),
+      mcpServers: sanitizeMcpServers(caps.mcpServers),
+      updatedAt: typeof caps.updatedAt === 'number' ? caps.updatedAt : 0,
+    },
+  };
+}
+

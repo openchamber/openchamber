@@ -9,6 +9,9 @@ import {
   getSessionBinding,
   initSessionBindings,
 } from './session-bindings.js';
+import {
+  getOrCreateSessionCapabilities,
+} from './session-capabilities.js';
 import { createHarnessRouter } from './router.js';
 import { mergeHarnessBusyIntoSessionStatuses } from './session-status.js';
 import { mergeHarnessMessagesIntoSessionMessages } from './session-messages.js';
@@ -142,6 +145,23 @@ export function registerHarnessRoutes(app, deps = {}) {
       return res.status(404).json({ error: 'Session binding not found', code: 'BINDING_NOT_FOUND' });
     }
     res.json({ binding });
+  });
+
+  app.get('/api/harness/sessions/:sessionId/capabilities', (req, res) => {
+    const sessionId = typeof req.params.sessionId === 'string' ? req.params.sessionId : '';
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId is required', code: 'PROMPT_INVALID' });
+    }
+    // Capabilities are useful before the first Claude turn (built-in slash
+    // defaults). Binding may be absent for brand-new sessions that have only
+    // selected Claude in the picker — still return defaults.
+    const binding = getSessionBinding(sessionId);
+    const capabilities = getOrCreateSessionCapabilities(sessionId);
+    res.json({
+      sessionId,
+      harnessId: binding?.harnessId || 'claude-code',
+      capabilities,
+    });
   });
 
   // Read and re-probe are the same operation: detection is never cached, so GET
