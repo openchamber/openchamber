@@ -87,6 +87,11 @@ export type DesktopSettings = {
     subtask: { title: string; message: string };
   };
 
+  // Notification sounds (audio cues)
+  notificationSoundEnabled?: boolean;
+  notificationSoundVolume?: number; // 0..1
+  notificationSoundPack?: 'bip-bop' | 'alert';
+
   // Summarization settings
   summarizeLastMessage?: boolean;
   summaryThreshold?: number;

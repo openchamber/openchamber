@@ -543,6 +543,9 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     notifyOnError: defaults.notifyOnError,
     notifyOnQuestion: defaults.notifyOnQuestion,
     notificationTemplates: defaults.notificationTemplates,
+    notificationSoundEnabled: defaults.notificationSoundEnabled,
+    notificationSoundVolume: defaults.notificationSoundVolume,
+    notificationSoundPack: defaults.notificationSoundPack,
     summarizeLastMessage: defaults.summarizeLastMessage,
     summaryThreshold: defaults.summaryThreshold,
     summaryLength: defaults.summaryLength,
@@ -688,6 +691,17 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (settings.notificationTemplates && typeof settings.notificationTemplates === 'object') {
     store.setNotificationTemplates(settings.notificationTemplates);
+  }
+  if (typeof settings.notificationSoundEnabled === 'boolean' && settings.notificationSoundEnabled !== store.notificationSoundEnabled) {
+    store.setNotificationSoundEnabled(settings.notificationSoundEnabled);
+  }
+  if (typeof settings.notificationSoundVolume === 'number' && Number.isFinite(settings.notificationSoundVolume) && settings.notificationSoundVolume !== store.notificationSoundVolume) {
+    store.setNotificationSoundVolume(settings.notificationSoundVolume);
+  }
+  if (settings.notificationSoundPack === 'bip-bop' || settings.notificationSoundPack === 'alert') {
+    if (settings.notificationSoundPack !== store.notificationSoundPack) {
+      store.setNotificationSoundPack(settings.notificationSoundPack);
+    }
   }
   if (typeof settings.summarizeLastMessage === 'boolean' && settings.summarizeLastMessage !== store.summarizeLastMessage) {
     store.setSummarizeLastMessage(settings.summarizeLastMessage);

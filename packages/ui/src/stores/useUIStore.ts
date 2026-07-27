@@ -677,6 +677,11 @@ interface UIStore {
     subtask: { title: string; message: string };
   };
 
+  // Notification sounds (audio cues)
+  notificationSoundEnabled: boolean;
+  notificationSoundVolume: number; // 0..1
+  notificationSoundPack: 'bip-bop' | 'alert';
+
   // Summarization settings
   summarizeLastMessage: boolean;
   summaryThreshold: number;   // chars — messages longer than this get summarized
@@ -843,6 +848,9 @@ interface UIStore {
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
   setNotificationTemplates: (templates: UIStore['notificationTemplates']) => void;
+  setNotificationSoundEnabled: (value: boolean) => void;
+  setNotificationSoundVolume: (value: number) => void;
+  setNotificationSoundPack: (pack: 'bip-bop' | 'alert') => void;
   setSummarizeLastMessage: (value: boolean) => void;
   setSummaryThreshold: (value: number) => void;
   setSummaryLength: (value: number) => void;
@@ -991,6 +999,11 @@ export const useUIStore = create<UIStore>()(
           question: { ...EMPTY_NOTIFICATION_TEMPLATES.question },
           subtask: { ...EMPTY_NOTIFICATION_TEMPLATES.subtask },
         },
+
+        // Notification sounds (audio cues) - off by default
+        notificationSoundEnabled: false,
+        notificationSoundVolume: 0.5,
+        notificationSoundPack: 'bip-bop',
 
         // Summarization settings
         summarizeLastMessage: false,
@@ -2137,6 +2150,9 @@ export const useUIStore = create<UIStore>()(
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
         setNotificationTemplates: (templates) => { set({ notificationTemplates: templates }); },
+        setNotificationSoundEnabled: (value) => { set({ notificationSoundEnabled: value }); },
+        setNotificationSoundVolume: (value) => { set({ notificationSoundVolume: value }); },
+        setNotificationSoundPack: (pack) => { set({ notificationSoundPack: pack }); },
         setSummarizeLastMessage: (value) => { set({ summarizeLastMessage: value }); },
         setSummaryThreshold: (value) => { set({ summaryThreshold: value }); },
         setSummaryLength: (value) => { set({ summaryLength: value }); },
@@ -2462,6 +2478,9 @@ export const useUIStore = create<UIStore>()(
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
           notificationTemplates: state.notificationTemplates,
+          notificationSoundEnabled: state.notificationSoundEnabled,
+          notificationSoundVolume: state.notificationSoundVolume,
+          notificationSoundPack: state.notificationSoundPack,
           summarizeLastMessage: state.summarizeLastMessage,
           summaryThreshold: state.summaryThreshold,
           summaryLength: state.summaryLength,
