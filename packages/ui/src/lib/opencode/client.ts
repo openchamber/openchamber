@@ -921,7 +921,7 @@ class OpencodeService {
     files?: Array<FileInputLite>;
     messageId?: string;
     directory?: string | null;
-  }): Promise<string> {
+  }): Promise<{ messageId: string; resolved: { info: Message; parts: Part[] } | null }> {
     const tempMessageId = params.messageId ?? ascendingId("msg");
 
     const parts: FilePartInput[] = [];
@@ -945,8 +945,19 @@ class OpencodeService {
       messageID: tempMessageId,
     });
 
-    unwrapSdkOptional(response, 'session.command');
-    return tempMessageId;
+    const data = unwrapSdkOptional(response, 'session.command');
+    // The OpenCode server returns the resolved user message ({ info, parts })
+    // from session.command, with `!`shell` expressions already substituted.
+    // Previously we discarded it, so the UI had to rely entirely on the SSE
+    // echo — and if the echo arrived with the template token unresolved, the
+    // chat bubble showed a blank where the resolved value should be (#1944).
+    // Surface the resolved payload so the caller can apply it through the
+    // optimistic add path (which handles dedup against the later SSE echo).
+    const resolved =
+      data && typeof data === 'object' && 'info' in data && 'parts' in data
+        ? (data as { info: Message; parts: Part[] })
+        : null;
+    return { messageId: tempMessageId, resolved };
   }
 
   async abortSession(id: string): Promise<boolean> {
