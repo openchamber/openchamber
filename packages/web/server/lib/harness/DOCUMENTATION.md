@@ -28,6 +28,7 @@ Parent specs:
 | Attachment mapping | `translators/claude-code/attachments.js` |
 | Claude permissions bridge | `translators/claude-code/permissions.js` |
 | Claude prompt orchestration | `translators/claude-code/index.js` |
+| Claude local project/chat import | `translators/claude-code/import-from-disk.js` |
 | OpenCode stub (SDK path stays in UI) | `translators/opencode/index.js` |
 | Claude → canonical events | `events/from-claude.js` |
 | Broadcaster wrapper | `events/emit.js` |
@@ -114,6 +115,24 @@ in responses. Never log tokens, OAuth material, or attachment bytes.
 | POST | `/api/harness/permission/reply` | Resolve bridged `canUseTool` prompt |
 | GET | `/api/harness/sessions/:sessionId` | Binding debug/UI |
 | GET | `/api/harness/sessions/:sessionId/capabilities` | Claude slash/MCP/agents snapshot (built-in defaults before init) |
+| GET | `/api/harness/claude-code/import/candidates` | List local Claude Code projects/chats |
+| POST | `/api/harness/claude-code/import` | Import selected chats (OpenCode shell + binding) |
+
+### Claude Code import
+
+Reads transcripts under `$CLAUDE_CONFIG_DIR/projects` (fallback `~/.claude/projects`
+then `~/.config/claude/projects`). Listing never treats a missing config dir as
+an authoritative empty failure of the engine — the response is
+`{ projects: [] }` with null roots.
+
+Import creates an OpenCode session per selected Claude chat, then
+`bindSession` with `foreignSessionId` so the next Claude prompt resumes the
+native transcript. JSONL is **not** replayed into OpenCode message stores
+(format is Anthropic-internal and unstable). One failed chat does not roll
+back others; already-bound `foreignSessionId` values are skipped. Batch limit:
+100 sessions.
+
+Owning module: `translators/claude-code/import-from-disk.js`.
 
 ### Prompt body
 

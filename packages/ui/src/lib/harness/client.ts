@@ -395,3 +395,160 @@ export async function harnessSessionCapabilities(
   };
 }
 
+export type ClaudeImportSessionCandidate = {
+  foreignSessionId: string;
+  title: string | null;
+  directory: string | null;
+  updatedAt: number | null;
+  alreadyImported: boolean;
+  directoryMissing: boolean;
+};
+
+export type ClaudeImportProjectCandidate = {
+  projectKey: string;
+  directory: string | null;
+  directoryMissing: boolean;
+  sessionCount: number;
+  sessions: ClaudeImportSessionCandidate[];
+};
+
+export type ClaudeImportCandidatesResult = {
+  configDir: string | null;
+  projectsRoot: string | null;
+  projects: ClaudeImportProjectCandidate[];
+};
+
+export type ClaudeImportSessionRequest = {
+  foreignSessionId: string;
+  directory: string;
+  title?: string | null;
+};
+
+export type ClaudeImportResultRow = {
+  ok: boolean;
+  foreignSessionId: string | null;
+  sessionId?: string;
+  directory?: string | null;
+  title?: string | null;
+  status?: 'imported' | 'skipped';
+  reason?: string;
+  error?: string;
+  code?: string;
+};
+
+export type ClaudeImportResult = {
+  results: ClaudeImportResultRow[];
+  summary: {
+    imported: number;
+    skipped: number;
+    failed: number;
+  };
+};
+
+const parseImportCandidates = (payload: unknown): ClaudeImportCandidatesResult => {
+  if (!isRecord(payload)) {
+    throw new HarnessClientError('Invalid Claude import candidates response', 'HARNESS_INVALID_RESPONSE', 500);
+  }
+  const projectsRaw = Array.isArray(payload.projects) ? payload.projects : [];
+  const projects: ClaudeImportProjectCandidate[] = [];
+  for (const project of projectsRaw) {
+    if (!isRecord(project)) continue;
+    const sessionsRaw = Array.isArray(project.sessions) ? project.sessions : [];
+    const sessions: ClaudeImportSessionCandidate[] = [];
+    for (const session of sessionsRaw) {
+      if (!isRecord(session)) continue;
+      if (typeof session.foreignSessionId !== 'string' || !session.foreignSessionId.trim()) continue;
+      sessions.push({
+        foreignSessionId: session.foreignSessionId.trim(),
+        title: typeof session.title === 'string' ? session.title : null,
+        directory: typeof session.directory === 'string' ? session.directory : null,
+        updatedAt: typeof session.updatedAt === 'number' && Number.isFinite(session.updatedAt)
+          ? session.updatedAt
+          : null,
+        alreadyImported: session.alreadyImported === true,
+        directoryMissing: session.directoryMissing === true,
+      });
+    }
+    projects.push({
+      projectKey: typeof project.projectKey === 'string' ? project.projectKey : '',
+      directory: typeof project.directory === 'string' ? project.directory : null,
+      directoryMissing: project.directoryMissing === true,
+      sessionCount: typeof project.sessionCount === 'number' ? project.sessionCount : sessions.length,
+      sessions,
+    });
+  }
+  return {
+    configDir: typeof payload.configDir === 'string' ? payload.configDir : null,
+    projectsRoot: typeof payload.projectsRoot === 'string' ? payload.projectsRoot : null,
+    projects,
+  };
+};
+
+export async function listClaudeImportCandidates(): Promise<ClaudeImportCandidatesResult> {
+  let response: Response;
+  try {
+    response = await runtimeFetch('/api/harness/claude-code/import/candidates', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Claude import candidates request failed';
+    throw new HarnessClientError(message, 'HARNESS_NETWORK', 0);
+  }
+
+  if (!response.ok) {
+    const { message, code, status } = await readErrorPayload(response);
+    throw new HarnessClientError(message, code, response.status, status);
+  }
+
+  const payload = await response.json().catch(() => null);
+  return parseImportCandidates(payload);
+}
+
+export async function importClaudeSessions(
+  sessions: ClaudeImportSessionRequest[],
+): Promise<ClaudeImportResult> {
+  let response: Response;
+  try {
+    response = await runtimeFetch('/api/harness/claude-code/import', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sessions }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Claude import request failed';
+    throw new HarnessClientError(message, 'HARNESS_NETWORK', 0);
+  }
+
+  if (!response.ok) {
+    const { message, code, status } = await readErrorPayload(response);
+    throw new HarnessClientError(message, code, response.status, status);
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (!isRecord(payload) || !isRecord(payload.summary) || !Array.isArray(payload.results)) {
+    throw new HarnessClientError('Invalid Claude import response', 'HARNESS_INVALID_RESPONSE', response.status);
+  }
+
+  return {
+    results: payload.results.filter(isRecord).map((row) => ({
+      ok: row.ok !== false,
+      foreignSessionId: typeof row.foreignSessionId === 'string' ? row.foreignSessionId : null,
+      ...(typeof row.sessionId === 'string' ? { sessionId: row.sessionId } : {}),
+      ...(typeof row.directory === 'string' || row.directory === null ? { directory: row.directory as string | null } : {}),
+      ...(typeof row.title === 'string' || row.title === null ? { title: row.title as string | null } : {}),
+      ...(row.status === 'imported' || row.status === 'skipped' ? { status: row.status } : {}),
+      ...(typeof row.reason === 'string' ? { reason: row.reason } : {}),
+      ...(typeof row.error === 'string' ? { error: row.error } : {}),
+      ...(typeof row.code === 'string' ? { code: row.code } : {}),
+    })),
+    summary: {
+      imported: typeof payload.summary.imported === 'number' ? payload.summary.imported : 0,
+      skipped: typeof payload.summary.skipped === 'number' ? payload.summary.skipped : 0,
+      failed: typeof payload.summary.failed === 'number' ? payload.summary.failed : 0,
+    },
+  };
+}

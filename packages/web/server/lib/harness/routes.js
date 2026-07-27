@@ -15,6 +15,11 @@ import {
 import { createHarnessRouter } from './router.js';
 import { mergeHarnessBusyIntoSessionStatuses } from './session-status.js';
 import { mergeHarnessMessagesIntoSessionMessages } from './session-messages.js';
+import {
+  createOpenCodeSessionFactory,
+  importClaudeSessions,
+  listClaudeImportCandidates,
+} from './translators/claude-code/import-from-disk.js';
 
 /**
  * @param {import('express').Express} app
@@ -28,6 +33,9 @@ import { mergeHarnessMessagesIntoSessionMessages } from './session-messages.js';
  * @param {boolean} [deps.initBindings]
  * @param {(path: string, directory?: string) => string} [deps.buildOpenCodeUrl]
  * @param {() => Record<string, string>} [deps.getOpenCodeAuthHeaders]
+ * @param {typeof listClaudeImportCandidates} [deps.listClaudeImportCandidates]
+ * @param {typeof importClaudeSessions} [deps.importClaudeSessions]
+ * @param {(directory: string, title?: string | null) => Promise<string>} [deps.createOpenCodeSession]
  */
 export function registerHarnessRoutes(app, deps = {}) {
   const getBroadcast = typeof deps.getBroadcastGlobalUiEvent === 'function'
@@ -162,6 +170,52 @@ export function registerHarnessRoutes(app, deps = {}) {
       harnessId: binding?.harnessId || 'claude-code',
       capabilities,
     });
+  });
+
+  // Claude Code local import — list candidates and bind OpenCode shells.
+  // Registered before /api/harness/:id so path segments stay unambiguous.
+  app.get('/api/harness/claude-code/import/candidates', async (_req, res) => {
+    try {
+      const listCandidates = typeof deps.listClaudeImportCandidates === 'function'
+        ? deps.listClaudeImportCandidates
+        : listClaudeImportCandidates;
+      const payload = await listCandidates();
+      res.json(payload);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.post('/api/harness/claude-code/import', json, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const sessions = Array.isArray(body.sessions) ? body.sessions : null;
+      if (!sessions) {
+        return res.status(400).json({
+          error: 'sessions array is required',
+          code: 'IMPORT_INVALID',
+        });
+      }
+
+      const createSession = typeof deps.createOpenCodeSession === 'function'
+        ? deps.createOpenCodeSession
+        : createOpenCodeSessionFactory({
+          buildOpenCodeUrl,
+          getOpenCodeAuthHeaders,
+        });
+
+      const importSessions = typeof deps.importClaudeSessions === 'function'
+        ? deps.importClaudeSessions
+        : importClaudeSessions;
+
+      const payload = await importSessions({
+        sessions,
+        createSession,
+      });
+      res.json(payload);
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 
   // Read and re-probe are the same operation: detection is never cached, so GET

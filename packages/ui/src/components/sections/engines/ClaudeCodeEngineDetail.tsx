@@ -24,6 +24,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import type { CapabilityLevel, HarnessCapability, HarnessRuntimeStatus } from '@/types/harness';
 import { HARNESS_CAPABILITIES } from '@/types/harness';
 import { useShallow } from 'zustand/react/shallow';
+import { ClaudeImportDialog } from '@/components/sections/engines/ClaudeImportDialog';
 
 const STATUS_LABEL_KEYS: Record<
   HarnessRuntimeStatus,
@@ -85,6 +86,7 @@ export const ClaudeCodeEngineDetail: React.FC = () => {
   const [warnOnHandoff, setWarnOnHandoff] = React.useState(true);
   const [agentsMode, setAgentsMode] = React.useState<ClaudeAgentsMode>('opencode');
   const [settingsLoaded, setSettingsLoaded] = React.useState(false);
+  const [importOpen, setImportOpen] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -277,6 +279,23 @@ export const ClaudeCodeEngineDetail: React.FC = () => {
       </SettingsSection>
 
       <SettingsSection
+        title={t('settings.engines.claudeCode.section.import')}
+        settingsItem="engines.claude-code.import"
+        contentClassName="space-y-3"
+      >
+        <p className={SETTINGS_HELPER_CLASS}>{t('settings.engines.claudeCode.import.note')}</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setImportOpen(true)}
+          aria-label={t('settings.engines.claudeCode.import.actions.openAria')}
+        >
+          {t('settings.engines.claudeCode.import.actions.open')}
+        </Button>
+      </SettingsSection>
+
+      <SettingsSection
         title={t('settings.engines.claudeCode.section.apiKeys')}
         settingsItem="engines.claude-code.api-keys"
         contentClassName="space-y-3"
@@ -291,6 +310,8 @@ export const ClaudeCodeEngineDetail: React.FC = () => {
           {t('settings.engines.opencode.link.providers')}
         </Button>
       </SettingsSection>
+
+      <ClaudeImportDialog open={importOpen} onOpenChange={setImportOpen} />
     </SettingsPageLayout>
   );
 };

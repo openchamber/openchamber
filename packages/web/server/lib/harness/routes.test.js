@@ -307,3 +307,77 @@ describe('OpenCode overlay proxy', () => {
     });
   });
 });
+
+describe('harness Claude import routes', () => {
+  it('lists candidates and imports selected sessions', async () => {
+    await withServer((app) => {
+      registerHarnessRoutes(app, {
+        initBindings: false,
+        listClaudeImportCandidates: async () => ({
+          configDir: '/tmp/.claude',
+          projectsRoot: '/tmp/.claude/projects',
+          projects: [{
+            projectKey: '-tmp-app',
+            directory: '/tmp/app',
+            directoryMissing: false,
+            sessionCount: 1,
+            sessions: [{
+              foreignSessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              title: 'Hello',
+              directory: '/tmp/app',
+              updatedAt: 1,
+              alreadyImported: false,
+              directoryMissing: false,
+            }],
+          }],
+        }),
+        importClaudeSessions: async ({ sessions }) => ({
+          results: sessions.map((session) => ({
+            ok: true,
+            foreignSessionId: session.foreignSessionId,
+            sessionId: 'ses_imported',
+            directory: session.directory,
+            status: 'imported',
+          })),
+          summary: { imported: sessions.length, skipped: 0, failed: 0 },
+        }),
+      });
+    }, async (base) => {
+      const list = await fetch(`${base}/api/harness/claude-code/import/candidates`);
+      expect(list.status).toBe(200);
+      const listed = await list.json();
+      expect(listed.projects).toHaveLength(1);
+
+      const imported = await fetch(`${base}/api/harness/claude-code/import`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sessions: [{
+            foreignSessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            directory: '/tmp/app',
+            title: 'Hello',
+          }],
+        }),
+      });
+      expect(imported.status).toBe(200);
+      const body = await imported.json();
+      expect(body.summary.imported).toBe(1);
+      expect(body.results[0].sessionId).toBe('ses_imported');
+    });
+  });
+
+  it('rejects import without sessions array', async () => {
+    await withServer((app) => {
+      registerHarnessRoutes(app, { initBindings: false });
+    }, async (base) => {
+      const res = await fetch(`${base}/api/harness/claude-code/import`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.code).toBe('IMPORT_INVALID');
+    });
+  });
+});

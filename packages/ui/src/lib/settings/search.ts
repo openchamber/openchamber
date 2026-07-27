@@ -753,6 +753,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['agents', 'claude', 'opencode', 'openchamber', 'system prompt', 'permissions'],
   },
   {
+    id: 'engines.claude-code.import',
+    page: 'engines',
+    titleKey: 'settings.engines.claudeCode.section.import',
+    descriptionKey: 'settings.engines.claudeCode.import.note',
+    keywords: ['import', 'claude', 'projects', 'chats', 'sessions', 'resume', 'transcript'],
+  },
+  {
     id: 'providers.connect',
     page: 'providers',
     titleKey: 'settings.providers.page.connect.title',

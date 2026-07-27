@@ -11,6 +11,8 @@ const {
   harnessAbort,
   harnessPermissionReply,
   harnessPrompt,
+  listClaudeImportCandidates,
+  importClaudeSessions,
   HarnessClientError,
 } = await import(`./client?cache-test=${Date.now()}`);
 
@@ -161,5 +163,62 @@ describe('harnessPermissionReply', () => {
       reply: 'once',
       directory: '/project',
     });
+  });
+});
+
+describe('claude import client', () => {
+  test('lists candidates via runtimeFetch', async () => {
+    runtimeFetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      configDir: '/tmp/.claude',
+      projectsRoot: '/tmp/.claude/projects',
+      projects: [{
+        projectKey: '-tmp-app',
+        directory: '/tmp/app',
+        directoryMissing: false,
+        sessionCount: 1,
+        sessions: [{
+          foreignSessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          title: 'Hello',
+          directory: '/tmp/app',
+          updatedAt: 1,
+          alreadyImported: false,
+          directoryMissing: false,
+        }],
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    const result = await listClaudeImportCandidates();
+    expect(runtimeFetchMock.mock.calls[0][0]).toBe('/api/harness/claude-code/import/candidates');
+    expect(result.projects).toHaveLength(1);
+    expect(result.projects[0].sessions[0].foreignSessionId).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  });
+
+  test('posts selected sessions for import', async () => {
+    runtimeFetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      results: [{
+        ok: true,
+        foreignSessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        sessionId: 'ses_1',
+        directory: '/tmp/app',
+        status: 'imported',
+      }],
+      summary: { imported: 1, skipped: 0, failed: 0 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    const result = await importClaudeSessions([{
+      foreignSessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      directory: '/tmp/app',
+      title: 'Hello',
+    }]);
+
+    expect(runtimeFetchMock.mock.calls[0][0]).toBe('/api/harness/claude-code/import');
+    expect(result.summary.imported).toBe(1);
+    expect(result.results[0].sessionId).toBe('ses_1');
   });
 });
