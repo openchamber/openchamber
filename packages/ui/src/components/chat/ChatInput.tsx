@@ -1920,6 +1920,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const queuedMessagesToSend = queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages;
+        const capturedSessionId = currentSessionId;
+        const capturedDraft = newSessionDraftOpen ? newSessionDraft : null;
+        const capturedDirectory = capturedSessionId
+            ? currentSessionDirectoryForSync ?? currentDirectory
+            : capturedDraft?.bootstrapPendingDirectory ?? capturedDraft?.directoryOverride ?? currentDirectory;
 
         if (queuedOnly && autoReviewRunning) {
             return;
@@ -1964,7 +1969,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const sendMessageOptions = delivery ? { delivery } : undefined;
+        const sendMessageOptions = {
+            ...(delivery ? { delivery } : {}),
+            ...(capturedSessionId
+                ? { sessionId: capturedSessionId, directory: capturedDirectory }
+                : capturedDraft
+                    ? { draftSnapshot: capturedDraft }
+                    : {}),
+        };
 
         // Build the primary message (first part) and additional parts
         let primaryText = '';
