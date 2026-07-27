@@ -86,6 +86,7 @@ export function spawn(file, args, opts = {}) {
       const sig = signal === 'SIGKILL' ? 'SIGKILL' : 'SIGTERM';
       try { proc.kill(sig); } catch { closeTerminal(); }
     },
+    // Bun.Terminal exposes write/resize/close, but no native pause/resume hook.
     pause() {},
     resume() {},
   };
