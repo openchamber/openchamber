@@ -423,7 +423,17 @@ const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
   return null;
 };
 
-const findFirstMatchingPr = async ({ octokit, target, branch, sourceCandidates }) => {
+// Find the best PR for the given target/branch filtered by state ('open' or
+// 'closed'). Ordering inside a single target is preserved: direct owner match
+// first, then fallback (any head), then source-rank sort. Returning the state
+// explicitly lets the outer loop prefer open PRs across multiple targets — see
+// #1771: an open upstream PR must win over a merged fork PR even when the fork
+// target is queried first.
+//
+// Exported for direct unit testing in pr-status.test.js — keeping the unit
+// tests close to the helper avoids a fully-mocked e2e harness for what is
+// otherwise a pure function over an octokit-like object.
+export const findFirstMatchingPr = async ({ octokit, target, branch, sourceCandidates, state }) => {
   const matcher = buildSourceMatcher(sourceCandidates);
   const sourceOwners = [];
   sourceCandidates.forEach((candidate) => pushUnique(sourceOwners, candidate.repo?.owner));
@@ -433,34 +443,27 @@ const findFirstMatchingPr = async ({ octokit, target, branch, sourceCandidates }
     .filter((pr) => matcher.matches(pr, target.repo.repo))
     .sort((left, right) => matcher.compare(left, right, target.repo.repo))[0] ?? null;
 
-  for (const state of ['open', 'closed']) {
-    for (const owner of sourceOwners) {
-      const directCandidates = await safeListPulls(octokit, {
-        owner: target.repo.owner,
-        repo: target.repo.repo,
-        state,
-        head: `${owner}:${branch}`,
-        per_page: 100,
-      });
-      const direct = pickPreferred(directCandidates);
-      if (direct) {
-        return direct;
-      }
-    }
-
-    const fallbackCandidates = await safeListPulls(octokit, {
+  for (const owner of sourceOwners) {
+    const directCandidates = await safeListPulls(octokit, {
       owner: target.repo.owner,
       repo: target.repo.repo,
       state,
+      head: `${owner}:${branch}`,
       per_page: 100,
     });
-    const fallback = pickPreferred(fallbackCandidates);
-    if (fallback) {
-      return fallback;
+    const direct = pickPreferred(directCandidates);
+    if (direct) {
+      return direct;
     }
   }
 
-  return null;
+  const fallbackCandidates = await safeListPulls(octokit, {
+    owner: target.repo.owner,
+    repo: target.repo.repo,
+    state,
+    per_page: 100,
+  });
+  return pickPreferred(fallbackCandidates);
 };
 
 export async function resolveGitHubPrStatus({ octokit, directory, branch, remoteName }) {
@@ -507,37 +510,60 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
 
   const sourceCandidates = resolvedTargets.slice();
 
+  // Precompute the default branch for every target in parallel. The PR-lookup
+  // loop below runs in two phases (open, then closed — see #1771) and the
+  // default-branch value is invariant across phases. `getRepoDefaultBranch`
+  // already caches via defaultBranchCache / repoMetadataCache, so the only
+  // remaining cost is the network latency of the first hit per repo — which is
+  // why we fan the calls out concurrently instead of awaiting serially.
+  const targetDefaultBranches = new Map(
+    await Promise.all(
+      resolvedTargets.map(async (target) => [target, await getRepoDefaultBranch(octokit, target.repo)]),
+    ),
+  );
+
   let fallbackRepo = resolvedTargets[0].repo;
   let fallbackRemoteName = resolvedTargets[0].remoteName;
-  let fallbackDefaultBranch = await getRepoDefaultBranch(octokit, fallbackRepo);
+  let fallbackDefaultBranch = targetDefaultBranches.get(resolvedTargets[0]) ?? null;
 
-  for (const target of resolvedTargets) {
-    const defaultBranch = await getRepoDefaultBranch(octokit, target.repo);
-    if (!fallbackRepo) {
-      fallbackRepo = target.repo;
-      fallbackRemoteName = target.remoteName;
-      fallbackDefaultBranch = defaultBranch;
-    }
-
-    const hasCrossRepoSource = sourceCandidates.some((candidate) => normalizeRepoKey(candidate.repo?.owner, candidate.repo?.repo) !== normalizeRepoKey(target.repo?.owner, target.repo?.repo));
-    for (const candidateBranch of branchCandidates) {
-      if (defaultBranch && defaultBranch === candidateBranch && !hasCrossRepoSource) {
-        continue;
+  // Run the PR lookup in two phases: prefer any open PR across every target
+  // before falling back to closed/merged. Without this split, a merged PR on
+  // a fork target hides an open PR on the upstream target — see #1771.
+  for (const state of ['open', 'closed']) {
+    for (const target of resolvedTargets) {
+      const targetDefaultBranch = targetDefaultBranches.get(target) ?? null;
+      // Preserved from the pre-#1771 loop: `fallbackRepo` is initialized from
+      // `resolvedTargets[0].repo` above, so this guard never fires in practice.
+      // Kept as-is to keep the diff scoped to the open-over-closed fix; any
+      // fallback-rewrite of dead branches belongs in a separate change.
+      if (!fallbackRepo) {
+        fallbackRepo = target.repo;
+        fallbackRemoteName = target.remoteName;
+        fallbackDefaultBranch = targetDefaultBranch;
       }
 
-      const pr = await findFirstMatchingPr({
-        octokit,
-        target,
-        branch: candidateBranch,
-        sourceCandidates,
-      });
-      if (pr) {
-        return {
-          repo: target.repo,
-          pr,
-          defaultBranch,
-          resolvedRemoteName: target.remoteName,
-        };
+      const hasCrossRepoSource = sourceCandidates.some((candidate) => normalizeRepoKey(candidate.repo?.owner, candidate.repo?.repo) !== normalizeRepoKey(target.repo?.owner, target.repo?.repo));
+
+      for (const candidateBranch of branchCandidates) {
+        if (targetDefaultBranch && targetDefaultBranch === candidateBranch && !hasCrossRepoSource) {
+          continue;
+        }
+
+        const pr = await findFirstMatchingPr({
+          octokit,
+          target,
+          branch: candidateBranch,
+          sourceCandidates,
+          state,
+        });
+        if (pr) {
+          return {
+            repo: target.repo,
+            pr,
+            defaultBranch: targetDefaultBranch,
+            resolvedRemoteName: target.remoteName,
+          };
+        }
       }
     }
   }
