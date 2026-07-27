@@ -103,7 +103,10 @@ export const useProjectSessionSelection = (args: Args): void => {
     if (!section) {
       return;
     }
+    const previousActiveProjectId = previousActiveProjectRef.current;
     previousActiveProjectRef.current = activeProjectId;
+    const switchedProjects = previousActiveProjectId !== null
+      && previousActiveProjectId !== activeProjectId;
     const projectMap = projectSessionMeta.metaByProject.get(activeProjectId);
 
     if (currentSessionId && projectMap && projectMap.has(currentSessionId)) {
@@ -118,12 +121,9 @@ export const useProjectSessionSelection = (args: Args): void => {
       return;
     }
 
-    // Path A' — currentSessionId is set but not in stale projectMap.
-    // Preserve user's explicit selection when the projectMap exists but
-    // is missing the session (worktree data not yet loaded). For
-    // empty projects (projectMap is undefined), fall through to Path B
-    // so a new session draft is opened.
-    if (currentSessionId && projectMap) {
+    // Preserve an explicit selection while this project's worktree data catches
+    // up, but never carry that selection across a confirmed project switch.
+    if (currentSessionId && projectMap && !switchedProjects) {
       return;
     }
 
