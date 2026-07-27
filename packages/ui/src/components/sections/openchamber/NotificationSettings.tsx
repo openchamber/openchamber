@@ -91,6 +91,8 @@ export const NotificationSettings: React.FC = () => {
   const setNotificationSoundVolume = useUIStore(state => state.setNotificationSoundVolume);
   const notificationSoundEventSounds = useUIStore(state => state.notificationSoundEventSounds);
   const setNotificationSoundForEvent = useUIStore(state => state.setNotificationSoundForEvent);
+  const notificationSoundFocusOnly = useUIStore(state => state.notificationSoundFocusOnly);
+  const setNotificationSoundFocusOnly = useUIStore(state => state.setNotificationSoundFocusOnly);
 
   const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission>('default');
   const [pushSupported, setPushSupported] = React.useState(false);
@@ -555,6 +557,13 @@ export const NotificationSettings: React.FC = () => {
             />
             {notificationSoundEnabled && (
               <>
+                <SettingsCheckboxRow
+                  checked={notificationSoundFocusOnly}
+                  onChange={(checked) => setNotificationSoundFocusOnly(checked)}
+                  label={t('settings.notifications.page.sounds.focusOnlyLabel')}
+                  info={t('settings.notifications.page.sounds.focusOnlyHint')}
+                  ariaLabel={t('settings.notifications.page.sounds.focusOnlyAria')}
+                />
                 <div className="flex items-center gap-3 py-1">
                   <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[5rem]">
                     {t('settings.notifications.page.sounds.volumeLabel')}

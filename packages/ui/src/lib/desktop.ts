@@ -93,6 +93,7 @@ export type DesktopSettings = {
   notificationSoundEnabled?: boolean;
   notificationSoundVolume?: number; // 0..1
   notificationSoundEventSounds?: NotificationSoundEventSounds;
+  notificationSoundFocusOnly?: boolean;
 
   // Summarization settings
   summarizeLastMessage?: boolean;

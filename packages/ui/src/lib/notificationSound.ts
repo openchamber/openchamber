@@ -16,8 +16,12 @@
  *   / `notifyOnSubtasks` toggles for per-event gating, plus a new
  *   `notifyOnPermission` toggle, instead of duplicating them as
  *   sound-specific toggles.
- * - Reuses the existing `notificationMode` ('always' | 'hidden-only') for focus
- *   gating; callers pass the current view state to `playSoundForEvent`.
+ * - Focus gating follows opencode's per-event policy by default
+ *   (`EVENT_FOCUS_POLICY`): done/error/subtask always play, question/permission
+ *   play only when the session is not being viewed. A global
+ *   `notificationSoundFocusOnly` toggle (default off) overrides this so every
+ *   event plays only when not viewed. This is independent of the native
+ *   notification `notificationMode`, which only governs OS notifications.
  */
 
 import bipBop01 from '../assets/audio/bip-bop-01.aac';
@@ -230,7 +234,8 @@ export interface NotificationSoundSettings {
   notificationSoundEnabled: boolean;
   notificationSoundVolume: number;
   notificationSoundEventSounds: NotificationSoundEventSounds;
-  notificationMode: 'always' | 'hidden-only';
+  /** When true, all sounds play only when the session is not being viewed. */
+  notificationSoundFocusOnly: boolean;
   notifyOnCompletion: boolean;
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
@@ -247,14 +252,30 @@ const EVENT_TOGGLE_ENABLED: Record<NotificationEventKind, (s: NotificationSoundS
 };
 
 /**
+ * Per-event focus policy mirroring opencode's `packages/tui/src/attention.ts`.
+ * - `always`: play regardless of view state (done/error/subtask).
+ * - `blurred`: play only when the session is not being viewed (question/permission).
+ */
+const EVENT_FOCUS_POLICY: Record<NotificationEventKind, 'always' | 'blurred'> = {
+  completion: 'always',
+  error: 'always',
+  subtask: 'always',
+  question: 'blurred',
+  permission: 'blurred',
+};
+
+/**
  * Decide whether a sound should play for an event.
  *
  * Gating order:
  * 1. Master toggle (`notificationSoundEnabled`)
  * 2. Per-event toggle (`notifyOnCompletion` / `notifyOnError` / etc.)
- * 3. Focus gating via `notificationMode`:
- *    - `'always'`   -> always play
- *    - `'hidden-only'` -> skip when the user is already viewing the session
+ * 3. Focus gating:
+ *    - `notificationSoundFocusOnly` (default off): when enabled, every event
+ *      plays only when the session is not being viewed.
+ *    - Otherwise, follow opencode's per-event policy (`EVENT_FOCUS_POLICY`):
+ *      `always` events play regardless of view state, `blurred` events play
+ *      only when not viewed.
  */
 function shouldPlaySoundForEvent(
   event: NotificationEventKind,
@@ -263,7 +284,11 @@ function shouldPlaySoundForEvent(
 ): boolean {
   if (!settings.notificationSoundEnabled) return false;
   if (!EVENT_TOGGLE_ENABLED[event](settings)) return false;
-  if (settings.notificationMode === 'hidden-only' && isViewed) return false;
+  if (settings.notificationSoundFocusOnly) {
+    if (isViewed) return false;
+  } else if (EVENT_FOCUS_POLICY[event] === 'blurred' && isViewed) {
+    return false;
+  }
   return true;
 }
 

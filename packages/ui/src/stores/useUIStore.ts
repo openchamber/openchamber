@@ -686,6 +686,8 @@ interface UIStore {
   notificationSoundEnabled: boolean;
   notificationSoundVolume: number; // 0..1
   notificationSoundEventSounds: NotificationSoundEventSounds;
+  /** When true, all sounds play only when the session is not being viewed. */
+  notificationSoundFocusOnly: boolean;
 
   // Summarization settings
   summarizeLastMessage: boolean;
@@ -857,6 +859,7 @@ interface UIStore {
   setNotificationSoundEnabled: (value: boolean) => void;
   setNotificationSoundVolume: (value: number) => void;
   setNotificationSoundEventSounds: (sounds: NotificationSoundEventSounds) => void;
+  setNotificationSoundFocusOnly: (value: boolean) => void;
   setNotificationSoundForEvent: (event: keyof NotificationSoundEventSounds, soundId: string) => void;
   setSummarizeLastMessage: (value: boolean) => void;
   setSummaryThreshold: (value: number) => void;
@@ -1012,6 +1015,7 @@ export const useUIStore = create<UIStore>()(
         notificationSoundEnabled: false,
         notificationSoundVolume: 0.5,
         notificationSoundEventSounds: { ...DEFAULT_EVENT_SOUNDS },
+        notificationSoundFocusOnly: false,
 
         // Summarization settings
         summarizeLastMessage: false,
@@ -2162,6 +2166,7 @@ export const useUIStore = create<UIStore>()(
         setNotificationSoundEnabled: (value) => { set({ notificationSoundEnabled: value }); },
         setNotificationSoundVolume: (value) => { set({ notificationSoundVolume: value }); },
         setNotificationSoundEventSounds: (sounds) => { set({ notificationSoundEventSounds: sounds }); },
+        setNotificationSoundFocusOnly: (value) => { set({ notificationSoundFocusOnly: value }); },
         setNotificationSoundForEvent: (event, soundId) => {
           set((state) => ({
             notificationSoundEventSounds: {
@@ -2499,6 +2504,7 @@ export const useUIStore = create<UIStore>()(
           notificationSoundEnabled: state.notificationSoundEnabled,
           notificationSoundVolume: state.notificationSoundVolume,
           notificationSoundEventSounds: state.notificationSoundEventSounds,
+          notificationSoundFocusOnly: state.notificationSoundFocusOnly,
           summarizeLastMessage: state.summarizeLastMessage,
           summaryThreshold: state.summaryThreshold,
           summaryLength: state.summaryLength,
