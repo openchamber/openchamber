@@ -130,17 +130,14 @@ function mapCapabilityModalities(cap) {
 /** Resolved input modality keys for a provider model (ordered, de-duped). */
 export function inputModalityKeys(model) {
   if (!model || typeof model !== 'object') return [];
-  const fromModalities = normalizeModalityList(model?.modalities?.input);
-  if (fromModalities.length > 0) return fromModalities;
-
-  const fromCapabilities = mapCapabilityModalities(model?.capabilities?.input);
-  if (fromCapabilities.length > 0) return fromCapabilities;
-
-  // Legacy top-level attachment, or OpenCode capabilities.attachment.
-  if (model.attachment === true || model?.capabilities?.attachment === true) {
-    return ['image'];
+  let keys = normalizeModalityList(model?.modalities?.input);
+  if (keys.length === 0) {
+    keys = mapCapabilityModalities(model?.capabilities?.input);
   }
-  return [];
+  if (keys.length === 0 && (model.attachment === true || model?.capabilities?.attachment === true)) {
+    keys = ['image'];
+  }
+  return MODALITY_ORDER.filter((key) => keys.includes(key));
 }
 
 /**
@@ -164,9 +161,10 @@ export function primaryModalityEmoji(model) {
 /**
  * Build the Discord select-option description for a model: input modalities
  * (emoji), context window, and (when available) per-million-token input/output
- * price — e.g. `📝🖼️ · 200K ctx · in $3/out $15 /Mtok`. Returns '' when the
- * model exposes no usable metadata. Replaces the old `release_date` formatting
- * that showed a confusing bare date under every model name.
+ * price — e.g. `📝🖼️ · 200K ctx · in $3/out $15 /Mtok`. Modalities come from
+ * OpenCode `capabilities.input` or legacy `modalities.input`. Returns '' when
+ * the model exposes no usable metadata. Replaces the old `release_date`
+ * formatting that showed a confusing bare date under every model name.
  */
 export function formatModelMeta(model) {
   if (!model || typeof model !== 'object') return '';
