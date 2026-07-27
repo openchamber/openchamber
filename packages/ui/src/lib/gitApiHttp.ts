@@ -598,7 +598,11 @@ export async function createGitWorktree(directory: string, payload: CreateGitWor
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || 'Failed to create worktree');
+    const failure = new Error(error.error || 'Failed to create worktree') as Error & { code?: string };
+    if (typeof error.code === 'string') {
+      failure.code = error.code;
+    }
+    throw failure;
   }
 
   return response.json();

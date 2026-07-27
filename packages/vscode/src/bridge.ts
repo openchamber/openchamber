@@ -47,6 +47,7 @@ export interface BridgeResponse {
   success: boolean;
   data?: unknown;
   error?: string;
+  code?: string;
 }
 
 export interface BridgeContext {
@@ -176,6 +177,9 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    return { id, type, success: false, error: errorMessage };
+    const code = typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string'
+      ? err.code
+      : undefined;
+    return { id, type, success: false, error: errorMessage, ...(code ? { code } : {}) };
   }
 }

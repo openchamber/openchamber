@@ -1726,6 +1726,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.error.worktreeDirectoryRequired': '워크트리 디렉터리 필수',
   'session.newWorktree.error.sendGitHubContextFailed': 'GitHub 컨텍스트 전송에 실패했습니다',
   'session.newWorktree.error.createWorktreeFailed': '워크트리 생성에 실패했습니다',
+  'session.newWorktree.error.pullRequestUnavailable': '이 풀 리퀘스트에 액세스할 수 없습니다. 리포지토리 접근 권한과 네트워크 연결을 확인한 후 다시 시도하세요.',
   'session.newWorktree.toast.sessionFromIssue': '이슈에서 세션을 생성했습니다',
   'session.newWorktree.toast.sessionFromPr': 'PR에서 세션을 생성했습니다',
   'session.newWorktree.toast.worktreeCreated': '워크트리를 생성했습니다',
