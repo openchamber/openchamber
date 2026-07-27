@@ -36,7 +36,7 @@ import {
   encodePluginId,
   decodePluginId,
 } from './plugins.js';
-import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from './shared.js';
+import { SKILL_DIR, SKILL_SCOPE, readConfig, readConfigLayers, writeConfig, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from './shared.js';
 import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill } from './skills.js';
 import { getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
 import { getCacheKey, getCachedScan, setCachedScan } from '../skills-catalog/cache.js';
@@ -235,6 +235,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
       getOpenCodePort,
+      readConfig,
+      readConfigLayers,
+      writeConfig,
       getSkillSources,
       discoverSkills,
       mergeDiscoveredSkills,

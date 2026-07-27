@@ -680,6 +680,7 @@
   'settings.skills.sidebar.toast.renameLoadFailed': '載入 skill 詳情失敗',
   'settings.skills.sidebar.toast.removeOldAfterRenameFailed': '重新命名後移除舊 skill 失敗',
   'settings.skills.sidebar.toast.renameFailed': '重新命名 skill 失敗',
+  'settings.skills.sidebar.toast.sourceToggleFailed': '更新 skill 來源失敗',
   'settings.skills.sidebar.deleteDialog.title': '刪除 Skill',
   'settings.skills.sidebar.deleteDialog.description': '確定要刪除 skill「{name}」嗎？',
   'settings.skills.sidebar.renameDialog.title': '重新命名 Skill',

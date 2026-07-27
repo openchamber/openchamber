@@ -1849,6 +1849,7 @@ export const settingsDict = {
   'settings.skills.sidebar.toast.duplicateLoadFailed': 'Nie udało się załadować szczegółów umiejętności do duplikacji',
   'settings.skills.sidebar.toast.removeOldAfterRenameFailed': 'Nie udało się usunąć starej umiejętności po zmianie nazwy',
   'settings.skills.sidebar.toast.renameFailed': 'Nie udało się zmienić nazwy umiejętności',
+  'settings.skills.sidebar.toast.sourceToggleFailed': 'Nie udało się zaktualizować źródeł umiejętności',
   'settings.skills.sidebar.toast.renameLoadFailed': 'Nie udało się załadować szczegółów umiejętności',
   'settings.skills.sidebar.toast.skillDeleted': 'Umiejętność „{name}” została usunięta',
   'settings.skills.sidebar.total': 'Suma: {count}',

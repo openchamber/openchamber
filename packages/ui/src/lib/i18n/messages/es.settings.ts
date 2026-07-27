@@ -683,6 +683,7 @@ export const settingsDict = {
   "settings.skills.sidebar.toast.renameLoadFailed": "No se pudo cargar la información de la habilidad",
   "settings.skills.sidebar.toast.removeOldAfterRenameFailed": "No se pudo eliminar la habilidad antigua después del cambio de nombre",
   "settings.skills.sidebar.toast.renameFailed": "No se pudo cambiar el nombre de la habilidad",
+  "settings.skills.sidebar.toast.sourceToggleFailed": "Error al actualizar las fuentes de skills",
   "settings.skills.sidebar.deleteDialog.title": "Eliminar habilidad",
   "settings.skills.sidebar.deleteDialog.description": "¿Estás seguro de que quieres eliminar la habilidad \"{name}\"?",
   "settings.skills.sidebar.renameDialog.title": "Cambiar nombre habilidad",

@@ -15,6 +15,9 @@ export const registerSkillRoutes = (app, dependencies) => {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     getOpenCodePort,
+    readConfig,
+    readConfigLayers,
+    writeConfig,
     getSkillSources,
     discoverSkills,
     mergeDiscoveredSkills,
@@ -364,6 +367,56 @@ export const registerSkillRoutes = (app, dependencies) => {
         ok: false,
         error: { kind: 'unknown', message: error.message || 'Failed to load catalog source' },
       });
+    }
+  });
+
+  const ALLOWED_EXCLUDE_SOURCES = ['claude', 'agents'];
+  const sanitizeExcludeSources = (raw) => {
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((s) => typeof s === 'string' && ALLOWED_EXCLUDE_SOURCES.includes(s));
+  };
+
+  app.get('/api/config/skills/exclude-sources', async (req, res) => {
+    try {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      const layers = readConfigLayers(directory);
+      const excludeSources = sanitizeExcludeSources(layers.mergedConfig?.skills?.excludeSources);
+      res.json({ excludeSources });
+    } catch (error) {
+      console.error('Failed to get excludeSources:', error);
+      res.status(500).json({ error: 'Failed to get exclude sources' });
+    }
+  });
+
+  app.put('/api/config/skills/exclude-sources', async (req, res) => {
+    try {
+      const { directory, error } = await resolveOptionalProjectDirectory(req);
+      if (error) {
+        return res.status(400).json({ error });
+      }
+      const excludeSources = sanitizeExcludeSources(req.body?.excludeSources);
+      const layers = readConfigLayers(directory);
+      const targetPath = layers.paths.customPath || layers.paths.userPath;
+      if (!targetPath) {
+        return res.status(500).json({ error: 'No writable config path available' });
+      }
+      const baseConfig = layers.paths.customPath ? layers.customConfig : layers.userConfig;
+      const updated = {
+        ...baseConfig,
+        skills: {
+          ...baseConfig.skills,
+          excludeSources,
+        },
+      };
+      writeConfig(updated, targetPath);
+      await refreshOpenCodeAfterConfigChange('skills excludeSources update');
+      res.json({ success: true, excludeSources });
+    } catch (error) {
+      console.error('Failed to update excludeSources:', error);
+      res.status(500).json({ error: 'Failed to update exclude sources' });
     }
   });
 

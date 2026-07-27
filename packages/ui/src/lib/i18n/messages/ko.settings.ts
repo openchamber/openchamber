@@ -683,6 +683,7 @@ export const settingsDict = {
   'settings.skills.sidebar.toast.renameLoadFailed': '스킬 세부 정보를 로드하지 못했습니다',
   'settings.skills.sidebar.toast.removeOldAfterRenameFailed': '이름 변경 후 이전 스킬을 제거하지 못했습니다',
   'settings.skills.sidebar.toast.renameFailed': '스킬 이름을 변경하지 못했습니다',
+  'settings.skills.sidebar.toast.sourceToggleFailed': '스킬 소스 업데이트 실패',
   'settings.skills.sidebar.deleteDialog.title': '스킬 삭제',
   'settings.skills.sidebar.deleteDialog.description': '스킬 "{name}"을 삭제하시겠습니까?',
   'settings.skills.sidebar.renameDialog.title': '스킬 이름 변경',

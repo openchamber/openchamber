@@ -683,6 +683,7 @@ export const settingsDict = {
   'settings.skills.sidebar.toast.renameLoadFailed': '加载技能详情失败',
   'settings.skills.sidebar.toast.removeOldAfterRenameFailed': '重命名后移除旧技能失败',
   'settings.skills.sidebar.toast.renameFailed': '重命名技能失败',
+  'settings.skills.sidebar.toast.sourceToggleFailed': '更新 skill 来源失败',
   'settings.skills.sidebar.deleteDialog.title': '删除技能',
   'settings.skills.sidebar.deleteDialog.description': '确定要删除技能“{name}”吗？',
   'settings.skills.sidebar.renameDialog.title': '重命名技能',

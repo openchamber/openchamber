@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
@@ -47,20 +47,43 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   const {
     selectedSkillName,
     skills,
+    excludeSources,
     setSelectedSkill,
     setSkillDraft,
     createSkill,
     deleteSkill,
     getSkillDetail,
+    loadExcludeSources,
+    setExcludeSources,
   } = useSkillsStore(useShallow((s) => ({
     selectedSkillName: s.selectedSkillName,
     skills: s.skills,
+    excludeSources: s.excludeSources,
     setSelectedSkill: s.setSelectedSkill,
     setSkillDraft: s.setSkillDraft,
     createSkill: s.createSkill,
     deleteSkill: s.deleteSkill,
     getSkillDetail: s.getSkillDetail,
+    loadExcludeSources: s.loadExcludeSources,
+    setExcludeSources: s.setExcludeSources,
   })));
+
+  React.useEffect(() => {
+    loadExcludeSources();
+  }, [loadExcludeSources]);
+
+  const isClaudeExcluded = excludeSources.includes('claude');
+  const isAgentsExcluded = excludeSources.includes('agents');
+
+  const handleToggleSource = useCallback(async (source: 'claude' | 'agents') => {
+    const next = excludeSources.includes(source)
+      ? excludeSources.filter((s) => s !== source)
+      : [...excludeSources, source];
+    const ok = await setExcludeSources(next);
+    if (!ok) {
+      toast.error(t('settings.skills.sidebar.toast.sourceToggleFailed'));
+    }
+  }, [excludeSources, setExcludeSources, t]);
 
   // Skills are loaded by the Settings shell when this page is active.
 
@@ -245,6 +268,31 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
           >
             <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
+        </div>
+        <div className="flex items-center gap-1.5 mt-2">
+          <span className="typography-micro text-muted-foreground">Sources:</span>
+          <button
+            onClick={() => handleToggleSource('claude')}
+            className={cn(
+              'typography-micro px-1.5 py-0.5 rounded border transition-colors',
+              isClaudeExcluded
+                ? 'text-muted-foreground/50 bg-transparent border-[var(--surface-subtle)] line-through'
+                : 'text-foreground bg-[var(--surface-muted)] border-[var(--interactive-border)]/50 hover:bg-[var(--interactive-hover)]'
+            )}
+          >
+            Claude
+          </button>
+          <button
+            onClick={() => handleToggleSource('agents')}
+            className={cn(
+              'typography-micro px-1.5 py-0.5 rounded border transition-colors',
+              isAgentsExcluded
+                ? 'text-muted-foreground/50 bg-transparent border-[var(--surface-subtle)] line-through'
+                : 'text-foreground bg-[var(--surface-muted)] border-[var(--interactive-border)]/50 hover:bg-[var(--interactive-hover)]'
+            )}
+          >
+            Agents
+          </button>
         </div>
       </div>
 
