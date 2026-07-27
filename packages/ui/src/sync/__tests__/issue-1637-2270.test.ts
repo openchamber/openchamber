@@ -115,6 +115,20 @@ describe("issue #1637 — server omits directory, falls back to directoryOverrid
     // registerSessionDirectory is also called with the effective directory
     expect(registerSessionDirectoryCalls).toEqual([{ sessionID: "ses_1637_a", directory: "/projects/alpha" }])
   })
+
+  test("can create and index a session without changing the current selection", async () => {
+    nextCreateSessionResponse = { id: "ses_background", time: { created: 1 } } as Session
+
+    const result = await createSession("test title", "/projects/alpha", null, undefined, {
+      activateSession: false,
+    })
+
+    expect(result?.id).toBe("ses_background")
+    expect(setCurrentSessionCalls).toHaveLength(0)
+    expect(registerSessionDirectoryCalls).toEqual([{ sessionID: "ses_background", directory: "/projects/alpha" }])
+    expect(markSessionAsOpenChamberCreatedCalls).toEqual(["ses_background"])
+    expect(upsertSessionCalls).toEqual([nextCreateSessionResponse])
+  })
 })
 
 describe("issue #1637 — server returns directory, server value wins", () => {

@@ -173,8 +173,9 @@ export function routeMessage(params: {
 
 type SendMessageOptions = {
   sessionId?: string
-  directory?: string
+  directory?: string | null
   delivery?: 'steer'
+  draftSnapshot?: NewSessionDraftState
 }
 
 type AssistantMessageSessionExecution = {
@@ -201,6 +202,7 @@ export type { SessionMemoryState } from "./viewport-store"
 
 export type NewSessionDraftState = {
   open: boolean
+  draftToken?: symbol
   selectedProjectId?: string | null
   directoryOverride: string | null
   permissionAutoAcceptEnabled?: boolean
@@ -389,6 +391,8 @@ const DEFAULT_DRAFT: NewSessionDraftState = {
   parentID: null,
 }
 
+const createDraftToken = (): symbol => Symbol("new-session-draft")
+
 const activeSessionByRuntime = new Map<string, string | null>()
 type RuntimeSessionMemory = {
   sessionId: string | null
@@ -405,6 +409,13 @@ const runtimeMemoryKey = (value?: string | null): string => {
 }
 
 const cloneDraft = (draft: NewSessionDraftState): NewSessionDraftState => ({ ...draft })
+
+const isCurrentLogicalDraft = (draft: NewSessionDraftState): boolean => {
+  const { currentSessionId, newSessionDraft } = useSessionUIStore.getState()
+  if (!draft.open || !newSessionDraft.open || currentSessionId !== null) return false
+  return newSessionDraft === draft
+    || (draft.draftToken !== undefined && newSessionDraft.draftToken === draft.draftToken)
+}
 
 const writeRuntimeSessionMemory = (key: string, patch: Partial<RuntimeSessionMemory>): void => {
   const current = runtimeSessionMemory.get(key)
@@ -443,14 +454,17 @@ const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, pr
   }
 }
 
-export async function materializeOpenDraftSession(selection: {
-  providerID: string
-  modelID: string
-  agent?: string
-  variant?: string
-}): Promise<MaterializedDraftSession | null> {
+export async function materializeOpenDraftSession(
+  selection: {
+    providerID: string
+    modelID: string
+    agent?: string
+    variant?: string
+  },
+  draftOverride?: NewSessionDraftState,
+): Promise<MaterializedDraftSession | null> {
   const store = useSessionUIStore.getState()
-  const draft = store.newSessionDraft
+  const draft = draftOverride ?? store.newSessionDraft
   if (!draft?.open) return null
   const draftPermissionAutoAcceptEnabled = draft.permissionAutoAcceptEnabled === true
 
@@ -467,8 +481,21 @@ export async function materializeOpenDraftSession(selection: {
 
   await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
 
-  const created = await store.createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
+  const created = await createSessionAction(
+    draft.title,
+    draftDirectoryOverride,
+    draft.parentID ?? null,
+    undefined,
+    { activateSession: false },
+  )
   if (!created?.id) throw new Error("Failed to create session")
+
+  if (draft.targetFolderId) {
+    const scopeKey = draftDirectoryOverride || created.directory || store.lastLoadedDirectory
+    if (scopeKey) {
+      useSessionFoldersStore.getState().addSessionToFolder(scopeKey, draft.targetFolderId, created.id)
+    }
+  }
 
   persistDraftTarget({
     projectId: draftProjectId,
@@ -478,9 +505,11 @@ export async function materializeOpenDraftSession(selection: {
   const draftSyntheticParts = draft.syntheticParts
   const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
   const configState = useConfigStore.getState()
-  void activateConfigForDirectory(createdDirectory).catch((error) => {
-    console.warn("Failed to activate directory after creating session:", error)
-  })
+  if (isCurrentLogicalDraft(draft)) {
+    void activateConfigForDirectory(createdDirectory).catch((error) => {
+      console.warn("Failed to activate directory after creating session:", error)
+    })
+  }
 
   const effectiveDraftAgent = trimmedAgent ?? configState.currentAgentName
 
@@ -494,7 +523,10 @@ export async function materializeOpenDraftSession(selection: {
 
   store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
 
-  store.setCurrentSession(created.id, createdDirectory)
+  if (isCurrentLogicalDraft(draft)) {
+    store.closeNewSessionDraft()
+    store.setCurrentSession(created.id, createdDirectory)
+  }
 
   if (draftPermissionAutoAcceptEnabled) {
     void import("@/stores/permissionStore")
@@ -728,6 +760,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const nextDraft: NewSessionDraftState = {
       open: true,
+      draftToken: createDraftToken(),
       selectedProjectId: selectedProject?.id ?? null,
       directoryOverride: directory,
       permissionAutoAcceptEnabled: options?.permissionAutoAcceptEnabled === true,
@@ -1030,7 +1063,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       set({ pendingChangesBarDismissed: map });
     }
 
-    const draft = get().newSessionDraft
+    const draft = options?.draftSnapshot ?? get().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
     const goalArm = inputMode !== "shell" && content.trim().length > 0
@@ -1070,7 +1103,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         modelID,
         agent: trimmedAgent,
         variant,
-      })
+      }, options?.draftSnapshot)
       if (!createdDraftSession) throw new Error("Failed to create session")
 
       const mergedAdditionalParts = createdDraftSession.syntheticParts?.length
