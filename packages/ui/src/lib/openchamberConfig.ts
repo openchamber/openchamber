@@ -34,6 +34,7 @@ interface OpenChamberConfig {
   projectPath?: string;
   'setup-worktree'?: string[];
   'setup-worktree-wait'?: boolean;
+  archivedWorktrees?: string[];
   projectNotes?: string;
   projectTodos?: OpenChamberProjectTodoItem[];
   projectPlanFiles?: OpenChamberProjectPlanFileLink[];
@@ -707,6 +708,28 @@ export async function getWorktreeSetupWaitEnabled(project: ProjectRef): Promise<
 
 export async function saveWorktreeSetupWaitEnabled(project: ProjectRef, enabled: boolean): Promise<boolean> {
   return updateOpenChamberConfig(project, { 'setup-worktree-wait': enabled });
+}
+
+export async function getArchivedWorktrees(project: ProjectRef): Promise<string[]> {
+  const config = await readOpenChamberConfig(project);
+  return config?.archivedWorktrees ?? [];
+}
+
+export async function saveArchivedWorktrees(project: ProjectRef, paths: string[]): Promise<boolean> {
+  return updateOpenChamberConfig(project, { archivedWorktrees: paths });
+}
+
+export async function addArchivedWorktree(project: ProjectRef, path: string): Promise<boolean> {
+  const current = await getArchivedWorktrees(project);
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (current.includes(normalized)) return true;
+  return saveArchivedWorktrees(project, [...current, normalized]);
+}
+
+export async function removeArchivedWorktree(project: ProjectRef, path: string): Promise<boolean> {
+  const current = await getArchivedWorktrees(project);
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  return saveArchivedWorktrees(project, current.filter((p) => p !== normalized));
 }
 
 /**

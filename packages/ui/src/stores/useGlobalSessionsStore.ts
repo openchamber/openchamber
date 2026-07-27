@@ -30,6 +30,7 @@ type GlobalSessionsState = {
   upsertSessions: (sessions: Session[]) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
+  unarchiveSessions: (ids: Iterable<string>) => void;
   /** Drop every session from the previous runtime instance and go back to the
       unloaded state, so a fresh load runs against the new endpoint. */
   resetForRuntimeSwitch: () => void;
@@ -724,6 +725,42 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
         reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
         ...revisionPatch,
+      };
+    });
+  },
+
+  unarchiveSessions: (ids) => {
+    const idSet = ids instanceof Set ? ids : new Set(ids);
+    if (idSet.size === 0) {
+      return;
+    }
+
+    set((state) => {
+      const restoredSessions: Session[] = [];
+      const nextArchivedSessions = state.archivedSessions.filter((session) => {
+        if (!idSet.has(session.id)) {
+          return true;
+        }
+
+        const { archived: _archived, ...restTime } = session.time ?? {};
+        restoredSessions.push({
+          ...session,
+          time: (_archived !== undefined ? restTime : session.time) as Session["time"],
+        });
+        return false;
+      });
+
+      if (restoredSessions.length === 0) {
+        return state;
+      }
+
+      const nextActiveSessions = [...restoredSessions, ...state.activeSessions];
+
+      return {
+        activeSessions: nextActiveSessions,
+        archivedSessions: nextArchivedSessions,
+        sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
+        reviewTransferBySessionId: buildReviewTransferMap(nextActiveSessions),
       };
     });
   },
