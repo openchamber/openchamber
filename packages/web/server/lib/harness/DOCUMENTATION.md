@@ -294,7 +294,8 @@ Dependency: `@anthropic-ai/claude-agent-sdk` in `packages/web/package.json`.
 - Defaults: `skills: 'all'`, `settingSources: ['user','project','local']`,
   `forwardSubagentText: true`, `agentProgressSummaries: true`
 - Bridges OpenChamber MCP configs via `mcp-config.js` into `mcpServers` and
-  `allowedTools` wildcards (`mcp__name__*`) plus `Agent` / `Skill`
+  `allowedTools` MCP wildcards only (`mcp__name__*`; bare Agent/Skill omitted so
+  they do not shadow `canUseTool`)
 - `interrupt()` when available, plus `killProcessTree(pid)` on abort/close
 
 If the SDK import fails:

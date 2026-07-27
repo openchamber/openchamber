@@ -217,11 +217,10 @@ export function createClaudeCodeTranslator(deps = {}) {
     });
 
     const mcpServers = buildClaudeMcpServersFromOpenChamber(directory);
-    const allowedTools = [
-      'Agent',
-      'Skill',
-      ...buildMcpAllowedToolPatterns(mcpServers),
-    ];
+    // Only forward MCP wildcards here. Bare names like Agent/Skill auto-approve in
+    // the SDK and emit CLAUDE_SDK_CAN_USE_TOOL_SHADOWED, defeating canUseTool.
+    // Agent/Task/Skill remain available via Claude defaults + skills:'all'.
+    const allowedTools = buildMcpAllowedToolPatterns(mcpServers);
 
     let handle;
     try {
@@ -235,7 +234,7 @@ export function createClaudeCodeTranslator(deps = {}) {
         canUseTool,
         includePartialMessages: true,
         mcpServers,
-        allowedTools,
+        ...(allowedTools.length > 0 ? { allowedTools } : {}),
         skills: 'all',
         settingSources: ['user', 'project', 'local'],
         forwardSubagentText: true,

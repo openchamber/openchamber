@@ -100,8 +100,8 @@ export function buildClaudeMcpServersFromOpenChamber(directory, deps = {}) {
 /**
  * Build allowedTools wildcards for bridged MCP servers so connected tools are
  * usable. PermissionMode acceptEdits does not auto-approve MCP; wildcards in
- * allowedTools grant exactly those servers (still subject to canUseTool when
- * provided).
+ * allowedTools grant exactly those servers. Note: bare tool names (no `(`)
+ * auto-approve in the Agent SDK and shadow `canUseTool` — keep patterns only.
  *
  * @param {Record<string, unknown>} mcpServers
  * @returns {string[]}
