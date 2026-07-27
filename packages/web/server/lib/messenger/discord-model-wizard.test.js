@@ -42,6 +42,18 @@ describe('formatModelMeta', () => {
     ).toBe('📝🖼️ · 200K ctx · in $3/out $15 /Mtok');
   });
 
+  it('prefixes modality icons from OpenCode capabilities.input', () => {
+    expect(
+      formatModelMeta({
+        capabilities: {
+          input: { text: true, image: true, audio: false, video: false, pdf: false },
+        },
+        limit: { context: 200000 },
+        cost: { input: 3, output: 15 },
+      }),
+    ).toBe('📝🖼️ · 200K ctx · in $3/out $15 /Mtok');
+  });
+
   it('never renders a date and returns empty when no metadata exists', () => {
     expect(formatModelMeta({ release_date: '2024-01-01' })).toBe('');
     expect(formatModelMeta({})).toBe('');
@@ -55,15 +67,41 @@ describe('formatModelModalities / primaryModalityEmoji', () => {
     expect(formatModelModalities({ modalities: { input: ['audio', 'video'] } })).toBe('🎬🔊');
   });
 
+  it('maps OpenCode capabilities.input boolean flags to emoji', () => {
+    expect(
+      formatModelModalities({
+        capabilities: {
+          input: { text: true, image: true, audio: false, video: false, pdf: true },
+          attachment: true,
+        },
+      }),
+    ).toBe('📝🖼️📄');
+    expect(
+      primaryModalityEmoji({
+        capabilities: { input: { text: true, image: true, audio: false, video: false, pdf: false } },
+      }),
+    ).toBe('🖼️');
+  });
+
   it('falls back to image when only the legacy attachment flag is set', () => {
     expect(formatModelModalities({ attachment: true })).toBe('🖼️');
     expect(primaryModalityEmoji({ attachment: true })).toBe('🖼️');
+    expect(formatModelModalities({ capabilities: { attachment: true } })).toBe('🖼️');
   });
 
   it('prefers image/video/audio/pdf over text for the select badge', () => {
     expect(primaryModalityEmoji({ modalities: { input: ['text', 'image'] } })).toBe('🖼️');
     expect(primaryModalityEmoji({ modalities: { input: ['text'] } })).toBe('📝');
     expect(primaryModalityEmoji({})).toBe(null);
+  });
+
+  it('prefers modalities.input arrays over capabilities when both are present', () => {
+    expect(
+      formatModelModalities({
+        modalities: { input: ['text'] },
+        capabilities: { input: { text: true, image: true, audio: false, video: false, pdf: false } },
+      }),
+    ).toBe('📝');
   });
 });
 
@@ -403,7 +441,15 @@ describe('createDiscordModelWizard flow', () => {
           {
             id: 'sonnet',
             name: 'Sonnet',
-            modalities: { input: ['text', 'image'], output: ['text'] },
+            // OpenCode `/provider` shape: boolean capability map, not modalities[].
+            capabilities: {
+              temperature: true,
+              reasoning: true,
+              attachment: true,
+              toolcall: true,
+              input: { text: true, image: true, audio: false, video: false, pdf: false },
+              output: { text: true, image: false, audio: false, video: false, pdf: false },
+            },
             limit: { context: 200000 },
             cost: { input: 3, output: 15 },
           },
@@ -424,6 +470,42 @@ describe('createDiscordModelWizard flow', () => {
     const modelOpts = lastSelectOptions(calls.at(-1));
     // The hidden model is gone; the visible one carries modalities + context + pricing.
     expect(modelOpts.map((o) => o.value)).toEqual(['sonnet']);
+    expect(modelOpts[0].description).toBe('📝🖼️ · 200K ctx · in $3/out $15 /Mtok');
+    expect(modelOpts[0].emoji).toEqual({ name: '🖼️' });
+  });
+
+  it('shows modality badges for favourites sourced from OpenCode capabilities', async () => {
+    const richProviders = [
+      {
+        id: 'anthropic',
+        name: 'Anthropic',
+        models: [
+          {
+            id: 'sonnet',
+            name: 'Sonnet',
+            capabilities: {
+              attachment: true,
+              input: { text: true, image: true, audio: false, video: false, pdf: false },
+              output: { text: true, image: false, audio: false, video: false, pdf: false },
+            },
+            limit: { context: 200000 },
+            cost: { input: 3, output: 15 },
+          },
+        ],
+      },
+    ];
+    const { wizard, calls } = makeHarness(richProviders, {
+      favorites: [{ providerID: 'anthropic', modelID: 'sonnet' }],
+    });
+    await wizard.start(state, { id: 'i1', token: 't1', channel_id: 'chan', application_id: 'app' });
+    const provCustomId = lastCustomId(calls.at(-1));
+    await wizard.handleComponent(
+      state,
+      { id: 'i2', token: 't2', data: { values: ['__openchamber_agent_favorites'] } },
+      provCustomId,
+    );
+    const modelOpts = lastSelectOptions(calls.at(-1));
+    expect(modelOpts).toHaveLength(1);
     expect(modelOpts[0].description).toBe('📝🖼️ · 200K ctx · in $3/out $15 /Mtok');
     expect(modelOpts[0].emoji).toEqual({ name: '🖼️' });
   });

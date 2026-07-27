@@ -113,27 +113,48 @@ function normalizeModalityList(values) {
 }
 
 /**
+ * OpenCode `/provider` models expose input modalities as a boolean map under
+ * `capabilities.input` (`{ text, image, … }`). models.dev / older payloads may
+ * instead use `modalities.input` as a string array. Accept both so Discord
+ * `/model` shows the same modalities the UI does.
+ */
+function mapCapabilityModalities(cap) {
+  if (!cap || typeof cap !== 'object' || Array.isArray(cap)) return [];
+  const out = [];
+  for (const key of MODALITY_ORDER) {
+    if (cap[key] === true) out.push(key);
+  }
+  return out;
+}
+
+/** Resolved input modality keys for a provider model (ordered, de-duped). */
+export function inputModalityKeys(model) {
+  if (!model || typeof model !== 'object') return [];
+  const fromModalities = normalizeModalityList(model?.modalities?.input);
+  if (fromModalities.length > 0) return fromModalities;
+
+  const fromCapabilities = mapCapabilityModalities(model?.capabilities?.input);
+  if (fromCapabilities.length > 0) return fromCapabilities;
+
+  // Legacy top-level attachment, or OpenCode capabilities.attachment.
+  if (model.attachment === true || model?.capabilities?.attachment === true) {
+    return ['image'];
+  }
+  return [];
+}
+
+/**
  * Input modalities the model accepts, as emoji icons (📝🖼️🎬🔊📄).
  * Falls back to image when only the legacy `attachment` flag is set.
  */
 export function formatModelModalities(model) {
-  if (!model || typeof model !== 'object') return '';
-  const keys = normalizeModalityList(model?.modalities?.input);
-  if (keys.length === 0 && model.attachment === true) {
-    keys.push('image');
-  }
-  return MODALITY_ORDER.filter((key) => keys.includes(key))
-    .map((key) => MODALITY_EMOJI[key])
-    .join('');
+  const keys = inputModalityKeys(model);
+  return keys.map((key) => MODALITY_EMOJI[key]).join('');
 }
 
 /** Single emoji for the Discord select-option `emoji` field (left of the label). */
 export function primaryModalityEmoji(model) {
-  if (!model || typeof model !== 'object') return null;
-  const keys = normalizeModalityList(model?.modalities?.input);
-  if (keys.length === 0 && model.attachment === true) {
-    keys.push('image');
-  }
+  const keys = inputModalityKeys(model);
   for (const key of MODALITY_BADGE_PRIORITY) {
     if (keys.includes(key)) return MODALITY_EMOJI[key];
   }
@@ -582,8 +603,10 @@ export function createDiscordModelWizard({ restCall, bridge }) {
           label: modelID,
           // Prefer context/pricing/modalities, fall back to the provider id.
           description: meta || providerID,
-          // Keep modality fields so the select option can show an emoji badge.
+          // Keep modality fields so the select option can show an emoji badge
+          // (OpenCode capabilities map and/or models.dev modalities array).
           modalities: model?.modalities,
+          capabilities: model?.capabilities,
           attachment: model?.attachment,
         };
       });
