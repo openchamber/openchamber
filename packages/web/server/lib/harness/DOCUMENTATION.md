@@ -209,13 +209,16 @@ Capability: `permissions: full`.
 UI: `harnessPermissionReply` → `respondToPermission` / `dismissPermission` branch
 when `getSessionTarget(sessionId)?.harnessId === 'claude-code'`.
 
-`permissionMode` is not a separate Claude composer control. The UI derives it
-from the selected OpenCode agent's edit permission (`allow`→`acceptEdits`,
-`ask`→`default`, `deny`→`plan`) on each send. Session permission auto-accept
-also settles bridged harness asks via `replyHarnessPermission` (never OpenCode
-`/permission/:id/reply` for Claude-bound sessions).
+### Agents mode (`enginesClaudeCodeAgentsMode`)
 
-That inheritance is enforced server-side, not just in the UI: `query.js` only
+Settings → Engines → Claude Code → **Agents to use**:
+
+| Mode | Behavior |
+| --- | --- |
+| `opencode` (default) | OpenChamber/OpenCode agents drive Claude `permissionMode` (edit → acceptEdits/default/plan) and append the selected agent’s system prompt to the Claude Code preset (`systemPrompt: { type: 'preset', preset: 'claude_code', append }`). Composer shows the OpenCode agent picker. |
+| `claude` | Native Claude Code prompts and permission settings. OpenCode agent picker is hidden on Claude sessions; sticky/OpenCode-derived `permissionMode` is not forwarded. |
+
+That inheritance is enforced server-side for `permissionMode` allowlisting: `query.js` only
 forwards `default` / `acceptEdits` / `plan` to the SDK and drops anything else.
 A client-supplied `bypassPermissions` would otherwise disable the `canUseTool`
 bridge outright — and with it auto-accept, which answers through that bridge.
@@ -285,7 +288,7 @@ Dependency: `@anthropic-ai/claude-agent-sdk` in `packages/web/package.json`.
 `query.js`:
 
 - Lazy-imports the SDK; caches load failures.
-- `startClaudeQuery({ prompt, cwd, model, resume, permissionMode, effort, canUseTool, mcpServers, allowedTools, skills, settingSources, forwardSubagentText, agentProgressSummaries, env })`
+- `startClaudeQuery({ prompt, cwd, model, resume, permissionMode, effort, systemPrompt, canUseTool, mcpServers, allowedTools, skills, settingSources, forwardSubagentText, agentProgressSummaries, env })`
 - Resolves `pathToClaudeCodeExecutable` via `executable-path.js` (PATH / env /
   `app.asar.unpacked` native package) so Electron does not spawn a path inside
   `app.asar` (that fails with `ENOTDIR`).

@@ -746,6 +746,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['handoff', 'billing', 'warning', 'subscription', 'switch engine'],
   },
   {
+    id: 'engines.claude-code.agents-mode',
+    page: 'engines',
+    titleKey: 'settings.engines.claudeCode.agentsMode.label',
+    descriptionKey: 'settings.engines.claudeCode.agentsMode.info',
+    keywords: ['agents', 'claude', 'opencode', 'openchamber', 'system prompt', 'permissions'],
+  },
+  {
     id: 'providers.connect',
     page: 'providers',
     titleKey: 'settings.providers.page.connect.title',

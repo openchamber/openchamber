@@ -94,6 +94,35 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ messageStreamTransport: 'websocket' })).toEqual({});
   });
 
+  it('accepts engines Claude Code settings including agents mode', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      enginesDefaultHarnessId: 'claude-code',
+      enginesClaudeCodeWarnOnOpenCodeHandoff: false,
+      enginesClaudeCodeEnabled: true,
+      enginesClaudeCodeAgentsMode: 'claude',
+    })).toEqual({
+      enginesDefaultHarnessId: 'claude-code',
+      enginesClaudeCodeWarnOnOpenCodeHandoff: false,
+      enginesClaudeCodeEnabled: true,
+      enginesClaudeCodeAgentsMode: 'claude',
+    });
+
+    expect(helpers.sanitizeSettingsUpdate({
+      enginesDefaultHarnessId: 'codex-cli',
+      enginesClaudeCodeAgentsMode: 'cursor',
+    })).toEqual({
+      enginesDefaultHarnessId: 'opencode',
+      enginesClaudeCodeAgentsMode: 'opencode',
+    });
+
+    expect(helpers.sanitizeSettingsUpdate({
+      enginesClaudeCodeWarnOnOpenCodeHandoff: 'yes',
+      enginesClaudeCodeAgentsMode: 1,
+    })).toEqual({});
+  });
+
   it('sanitizes the persisted terminal shell', () => {
     const helpers = createTestHelpers();
 

@@ -87,6 +87,29 @@ if (isDev) {
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
 
+const shouldDisableHardwareAcceleration = () => {
+  const flag = String(process.env.OPENCHAMBER_DISABLE_GPU || '').trim().toLowerCase();
+  if (flag === '1' || flag === 'true' || flag === 'yes') return true;
+  if (flag === '0' || flag === 'false' || flag === 'no') return false;
+  // Linux hosts without DRM (common in nested/cloud VMs) frequently lose the
+  // Chromium GPU/renderer process and leave a solid #151313 BrowserWindow.
+  if (process.platform === 'linux') {
+    try {
+      return !fs.existsSync('/dev/dri');
+    } catch {
+      return false;
+    }
+  }
+  return false;
+};
+
+if (shouldDisableHardwareAcceleration()) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('disable-gpu');
+  app.commandLine.appendSwitch('disable-gpu-compositing');
+  globalThis.__OPENCHAMBER_GPU_DISABLED__ = true;
+}
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: UI_PROTOCOL,
@@ -113,6 +136,9 @@ log.initialize();
 log.transports.file.maxSize = 5 * 1024 * 1024;
 log.transports.file.level = 'info';
 log.transports.console.level = isDev ? 'debug' : 'warn';
+if (globalThis.__OPENCHAMBER_GPU_DISABLED__) {
+  log.warn('[electron] hardware acceleration disabled (OPENCHAMBER_DISABLE_GPU or missing /dev/dri)');
+}
 
 // The in-process web server runs in this same Node process and uses plain
 // `console.log/warn/error`. Without piping console through electron-log,
@@ -1718,6 +1744,65 @@ const isBenignNavigationAbort = (error) => {
   return message.includes('ERR_ABORTED') || message.includes(' (-3) loading ');
 };
 
+const attachRendererRecovery = (browserWindow) => {
+  if (!browserWindow || browserWindow.isDestroyed()) return;
+
+  let reloadAttempts = 0;
+  let reloadTimer = null;
+  const maxReloadAttempts = 3;
+
+  const clearReloadTimer = () => {
+    if (!reloadTimer) return;
+    clearTimeout(reloadTimer);
+    reloadTimer = null;
+  };
+
+  const scheduleReload = (reason) => {
+    if (browserWindow.isDestroyed()) return;
+    if (reloadAttempts >= maxReloadAttempts) {
+      log.error(`[electron] renderer recovery exhausted after ${reloadAttempts} attempts (${reason})`);
+      return;
+    }
+    if (reloadTimer) return;
+
+    const attempt = reloadAttempts + 1;
+    const delayMs = 250 * attempt;
+    reloadTimer = setTimeout(() => {
+      reloadTimer = null;
+      if (browserWindow.isDestroyed()) return;
+      reloadAttempts = attempt;
+      log.warn(`[electron] reloading window after renderer loss (${reason}), attempt ${attempt}/${maxReloadAttempts}`);
+      try {
+        browserWindow.webContents.reload();
+      } catch (error) {
+        log.error('[electron] renderer reload failed:', error);
+      }
+    }, delayMs);
+    if (typeof reloadTimer.unref === 'function') reloadTimer.unref();
+  };
+
+  browserWindow.webContents.on('render-process-gone', (_event, details) => {
+    const reason = details?.reason || 'render-process-gone';
+    log.error('[electron] render-process-gone', details);
+    scheduleReload(reason);
+  });
+
+  browserWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || isBenignNavigationAbort({ errno: errorCode, message: errorDescription })) return;
+    log.error(`[electron] did-fail-load code=${errorCode} url=${validatedURL || ''} desc=${errorDescription || ''}`);
+    scheduleReload(`did-fail-load:${errorCode}`);
+  });
+
+  browserWindow.webContents.on('did-finish-load', () => {
+    clearReloadTimer();
+    reloadAttempts = 0;
+  });
+
+  browserWindow.on('closed', () => {
+    clearReloadTimer();
+  });
+};
+
 const navigateWindow = async (browserWindow, url, { allowAbort = false } = {}) => {
   try {
     await browserWindow.loadURL(url);
@@ -2315,6 +2400,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
   browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__ocTitleBarOverlayEnabled = titleBarOverlayEnabled;
+  attachRendererRecovery(browserWindow);
 
   if (useSaved && saved.maximized) {
     browserWindow.maximize();
@@ -2705,6 +2791,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   browserWindow.__ocMiniChat = true;
   browserWindow.__ocMiniChatSessionId = sessionWindowKey;
   browserWindow.__ocPinned = false;
+  attachRendererRecovery(browserWindow);
 
   if (sessionWindowKey) {
     state.miniChatWindowsBySession.set(sessionWindowKey, browserWindow);
@@ -5044,9 +5131,13 @@ app.whenReady().then(async () => {
     packaged: app.isPackaged,
     platform: process.platform,
     arch: process.arch,
+    gpuDisabled: Boolean(globalThis.__OPENCHAMBER_GPU_DISABLED__),
     argv: process.argv,
     isBackgroundStart,
     loginItemSettings,
+  });
+  app.on('child-process-gone', (_event, details) => {
+    log.error('[electron] child-process-gone', details);
   });
   nativeTheme.themeSource = readThemeSource();
   registerPackagedUiProtocol();

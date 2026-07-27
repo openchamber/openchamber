@@ -222,6 +222,31 @@ export function createClaudeCodeTranslator(deps = {}) {
     // Agent/Task/Skill remain available via Claude defaults + skills:'all'.
     const allowedTools = buildMcpAllowedToolPatterns(mcpServers);
 
+    const agentsMode = body?.agentsMode === 'claude' || body?.agentsMode === 'opencode'
+      ? body.agentsMode
+      : 'opencode';
+    const systemPromptAppend = typeof body?.systemPromptAppend === 'string'
+      ? body.systemPromptAppend.trim()
+      : '';
+
+    // OpenCode agents mode: keep Claude Code preset and append the OpenChamber
+    // agent prompt. Claude agents mode: leave systemPrompt unset so the SDK
+    // uses native Claude Code prompts/settings.
+    /** @type {undefined | { type: 'preset', preset: 'claude_code', append?: string }} */
+    let systemPrompt;
+    if (agentsMode === 'opencode' && systemPromptAppend) {
+      systemPrompt = {
+        type: 'preset',
+        preset: 'claude_code',
+        append: systemPromptAppend,
+      };
+    }
+
+    // Claude agents mode must not inherit a sticky OpenCode-derived permissionMode.
+    const permissionMode = agentsMode === 'claude'
+      ? undefined
+      : binding.target?.permissionMode;
+
     let handle;
     try {
       handle = await startQuery({
@@ -229,8 +254,9 @@ export function createClaudeCodeTranslator(deps = {}) {
         cwd: directory,
         model: binding.target?.modelRef,
         resume: binding.foreignSessionId,
-        permissionMode: binding.target?.permissionMode,
+        permissionMode,
         effort: binding.target?.effort,
+        systemPrompt,
         canUseTool,
         includePartialMessages: true,
         mcpServers,

@@ -437,6 +437,27 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.smallModelOverride.trim();
       result.smallModelOverride = trimmed.length > 0 ? trimmed : undefined;
     }
+
+    // Engines / Claude Code (must round-trip through GET+PUT settings)
+    if (typeof candidate.enginesDefaultHarnessId === 'string') {
+      const id = candidate.enginesDefaultHarnessId.trim();
+      result.enginesDefaultHarnessId = (id === 'opencode' || id === 'claude-code')
+        ? id
+        : 'opencode';
+    }
+    if (typeof candidate.enginesClaudeCodeWarnOnOpenCodeHandoff === 'boolean') {
+      result.enginesClaudeCodeWarnOnOpenCodeHandoff = candidate.enginesClaudeCodeWarnOnOpenCodeHandoff;
+    }
+    if (typeof candidate.enginesClaudeCodeEnabled === 'boolean') {
+      result.enginesClaudeCodeEnabled = candidate.enginesClaudeCodeEnabled;
+    }
+    if (typeof candidate.enginesClaudeCodeAgentsMode === 'string') {
+      const mode = candidate.enginesClaudeCodeAgentsMode.trim();
+      result.enginesClaudeCodeAgentsMode = (mode === 'claude' || mode === 'opencode')
+        ? mode
+        : 'opencode';
+    }
+
     if (typeof candidate.defaultGitIdentityId === 'string') {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;

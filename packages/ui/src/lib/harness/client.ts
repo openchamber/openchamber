@@ -22,6 +22,10 @@ export type HarnessPromptParams = {
   messageId?: string;
   assistantMessageId?: string;
   seedFromSessionId?: string;
+  /** Claude agents mode for this turn (`opencode` inherits OpenChamber agent prompt/permissions). */
+  agentsMode?: 'claude' | 'opencode';
+  /** OpenCode agent system prompt to append when agentsMode is `opencode`. */
+  systemPromptAppend?: string;
 };
 
 export type HarnessPromptResult = {
@@ -142,6 +146,12 @@ export function buildHarnessPromptBody(params: HarnessPromptParams): Record<stri
   }
   if (params.seedFromSessionId?.trim()) {
     body.seedFromSessionId = params.seedFromSessionId.trim();
+  }
+  if (params.agentsMode === 'claude' || params.agentsMode === 'opencode') {
+    body.agentsMode = params.agentsMode;
+  }
+  if (typeof params.systemPromptAppend === 'string' && params.systemPromptAppend.trim()) {
+    body.systemPromptAppend = params.systemPromptAppend.trim();
   }
   return body;
 }

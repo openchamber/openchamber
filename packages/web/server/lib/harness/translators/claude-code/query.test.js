@@ -76,6 +76,37 @@ describe('startClaudeQuery effort option', () => {
     });
     await handle.close?.();
   });
+  it('forwards Claude Code preset systemPrompt with OpenCode agent append', async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'oc-claude-sysprompt-'));
+    /** @type {unknown} */
+    let seenOptions;
+    const handle = await startClaudeQuery({
+      prompt: 'hi',
+      cwd: tempDir,
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: 'Use OpenChamber build agent conventions.',
+      },
+      includePartialMessages: false,
+      queryImpl: ({ options }) => {
+        seenOptions = options;
+        return {
+          async *[Symbol.asyncIterator]() {},
+          interrupt: async () => {},
+        };
+      },
+    });
+
+    expect(seenOptions).toMatchObject({
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: 'Use OpenChamber build agent conventions.',
+      },
+    });
+    await handle.close?.();
+  });
 });
 
 describe('startClaudeQuery permissionMode allowlist', () => {

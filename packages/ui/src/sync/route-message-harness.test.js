@@ -45,6 +45,7 @@ const { useSelectionStore } = await import('./selection-store');
 const { useHarnessStore } = await import('@/stores/useHarnessStore');
 const { useCommandsStore } = await import('@/stores/useCommandsStore');
 const { useSkillsStore } = await import('@/stores/useSkillsStore');
+const { setCachedClaudeAgentsMode } = await import('@/lib/harness/settings');
 
 describe('routeMessage Claude harness branch', () => {
   const sendMessageCalls = [];
@@ -57,6 +58,7 @@ describe('routeMessage Claude harness branch', () => {
     sendMessageCalls.length = 0;
     shellSessionCalls.length = 0;
     harnessPromptMock.mockClear();
+    setCachedClaudeAgentsMode('opencode');
 
     const childStore = {
       getState: () => ({
@@ -144,8 +146,36 @@ describe('routeMessage Claude harness branch', () => {
       modelRef: 'sonnet',
       permissionMode: 'default',
     });
+    expect(harnessPromptCalls[0].agentsMode).toBe('opencode');
     expect(harnessPromptCalls[0].text).toBe('hello claude');
     expect(harnessPromptCalls[0].files).toEqual([{ mime: 'image/png', url: 'data:image/png;base64,x', filename: 'a.png' }]);
+    expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('claude agents mode omits OpenCode-derived permissionMode', async () => {
+    setCachedClaudeAgentsMode('claude');
+    useSelectionStore.getState().saveSessionTarget('session-claude-native', {
+      harnessId: 'claude-code',
+      modelRef: 'opus',
+      permissionMode: 'acceptEdits',
+    });
+
+    await routeMessage({
+      sessionId: 'session-claude-native',
+      directory: '/claude/project',
+      content: 'native agents',
+      providerID: 'anthropic',
+      modelID: 'claude-opus',
+      agent: 'build',
+    });
+
+    expect(harnessPromptCalls).toHaveLength(1);
+    expect(harnessPromptCalls[0].agentsMode).toBe('claude');
+    expect(harnessPromptCalls[0].target).toEqual({
+      harnessId: 'claude-code',
+      modelRef: 'opus',
+    });
+    expect(harnessPromptCalls[0].systemPromptAppend).toBeUndefined();
     expect(sendMessageCalls).toHaveLength(0);
   });
 

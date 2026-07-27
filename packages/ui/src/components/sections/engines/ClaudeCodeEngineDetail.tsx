@@ -4,6 +4,7 @@ import {
   SettingsSection,
   SettingsCheckboxRow,
   SettingsFieldRow,
+  SettingsChipGroup,
   SETTINGS_FIELDS_STACK_CLASS,
   SETTINGS_HELPER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -11,11 +12,15 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { setCachedWarnOnOpenCodeHandoff } from '@/lib/harness/settings';
+import {
+  setCachedWarnOnOpenCodeHandoff,
+  setCachedClaudeAgentsMode,
+  withEnginesSettingsDefaults,
+  type ClaudeAgentsMode,
+} from '@/lib/harness/settings';
 import { openExternalUrl } from '@/lib/url';
 import { useHarnessStore } from '@/stores/useHarnessStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { withEnginesSettingsDefaults } from '@/lib/harness/settings';
 import type { CapabilityLevel, HarnessCapability, HarnessRuntimeStatus } from '@/types/harness';
 import { HARNESS_CAPABILITIES } from '@/types/harness';
 import { useShallow } from 'zustand/react/shallow';
@@ -78,6 +83,7 @@ export const ClaudeCodeEngineDetail: React.FC = () => {
   })));
 
   const [warnOnHandoff, setWarnOnHandoff] = React.useState(true);
+  const [agentsMode, setAgentsMode] = React.useState<ClaudeAgentsMode>('opencode');
   const [settingsLoaded, setSettingsLoaded] = React.useState(false);
 
   React.useEffect(() => {
@@ -100,9 +106,15 @@ export const ClaudeCodeEngineDetail: React.FC = () => {
             typeof data.enginesClaudeCodeWarnOnOpenCodeHandoff === 'boolean'
               ? data.enginesClaudeCodeWarnOnOpenCodeHandoff
               : undefined,
+          enginesClaudeCodeAgentsMode:
+            data.enginesClaudeCodeAgentsMode === 'claude' || data.enginesClaudeCodeAgentsMode === 'opencode'
+              ? data.enginesClaudeCodeAgentsMode
+              : undefined,
         });
         setWarnOnHandoff(resolved.enginesClaudeCodeWarnOnOpenCodeHandoff);
         setCachedWarnOnOpenCodeHandoff(resolved.enginesClaudeCodeWarnOnOpenCodeHandoff);
+        setAgentsMode(resolved.enginesClaudeCodeAgentsMode);
+        setCachedClaudeAgentsMode(resolved.enginesClaudeCodeAgentsMode);
       } catch {
         // keep default
       } finally {
@@ -120,6 +132,12 @@ export const ClaudeCodeEngineDetail: React.FC = () => {
     setWarnOnHandoff(enabled);
     setCachedWarnOnOpenCodeHandoff(enabled);
     void updateDesktopSettings({ enginesClaudeCodeWarnOnOpenCodeHandoff: enabled });
+  }, []);
+
+  const handleAgentsModeChange = React.useCallback((mode: ClaudeAgentsMode) => {
+    setAgentsMode(mode);
+    setCachedClaudeAgentsMode(mode);
+    void updateDesktopSettings({ enginesClaudeCodeAgentsMode: mode });
   }, []);
 
   const handleRedetect = React.useCallback(() => {
@@ -212,6 +230,35 @@ export const ClaudeCodeEngineDetail: React.FC = () => {
         ) : (
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.engines.claudeCode.capabilities.empty')}</p>
         )}
+      </SettingsSection>
+
+      <SettingsSection
+        title={t('settings.engines.claudeCode.section.agents')}
+        contentClassName={SETTINGS_FIELDS_STACK_CLASS}
+      >
+        <SettingsFieldRow
+          label={t('settings.engines.claudeCode.agentsMode.label')}
+          info={t('settings.engines.claudeCode.agentsMode.info')}
+          settingsItem="engines.claude-code.agents-mode"
+        >
+          <SettingsChipGroup
+            aria-label={t('settings.engines.claudeCode.agentsMode.aria')}
+            value={agentsMode}
+            onChange={handleAgentsModeChange}
+            options={[
+              {
+                value: 'claude',
+                label: t('settings.engines.claudeCode.agentsMode.claude'),
+                disabled: !settingsLoaded,
+              },
+              {
+                value: 'opencode',
+                label: t('settings.engines.claudeCode.agentsMode.opencode'),
+                disabled: !settingsLoaded,
+              },
+            ]}
+          />
+        </SettingsFieldRow>
       </SettingsSection>
 
       <SettingsSection

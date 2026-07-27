@@ -7,15 +7,17 @@ import {
 } from './settings';
 
 describe('sanitizeEnginesSettings', () => {
-  test('keeps valid harness id and booleans', () => {
+  test('keeps valid harness id, booleans, and agents mode', () => {
     expect(sanitizeEnginesSettings({
       enginesDefaultHarnessId: 'claude-code',
       enginesClaudeCodeWarnOnOpenCodeHandoff: false,
       enginesClaudeCodeEnabled: true,
+      enginesClaudeCodeAgentsMode: 'claude',
     })).toEqual({
       enginesDefaultHarnessId: 'claude-code',
       enginesClaudeCodeWarnOnOpenCodeHandoff: false,
       enginesClaudeCodeEnabled: true,
+      enginesClaudeCodeAgentsMode: 'claude',
     });
   });
 
@@ -24,6 +26,14 @@ describe('sanitizeEnginesSettings', () => {
       enginesDefaultHarnessId: 'codex-cli',
     })).toEqual({
       enginesDefaultHarnessId: 'opencode',
+    });
+  });
+
+  test('invalid agents mode falls back to opencode', () => {
+    expect(sanitizeEnginesSettings({
+      enginesClaudeCodeAgentsMode: 'cursor',
+    })).toEqual({
+      enginesClaudeCodeAgentsMode: 'opencode',
     });
   });
 
@@ -49,10 +59,12 @@ describe('withEnginesSettingsDefaults', () => {
     expect(withEnginesSettingsDefaults({
       enginesDefaultHarnessId: 'claude-code',
       enginesClaudeCodeWarnOnOpenCodeHandoff: false,
+      enginesClaudeCodeAgentsMode: 'claude',
     })).toEqual({
       enginesDefaultHarnessId: 'claude-code',
       enginesClaudeCodeWarnOnOpenCodeHandoff: false,
       enginesClaudeCodeEnabled: true,
+      enginesClaudeCodeAgentsMode: 'claude',
     });
   });
 });

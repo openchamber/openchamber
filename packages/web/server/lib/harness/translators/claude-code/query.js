@@ -149,6 +149,7 @@ export function killProcessTree(pid, options = {}) {
  * @param {string} [params.resume]
  * @param {string} [params.permissionMode]
  * @param {string} [params.effort]
+ * @param {string | { type: 'preset', preset: 'claude_code', append?: string }} [params.systemPrompt]
  * @param {(toolName: string, input: Record<string, unknown>, options: object) => Promise<object | null>} [params.canUseTool]
  * @param {Record<string, string | undefined>} [params.env]
  * @param {boolean} [params.includePartialMessages]
@@ -219,6 +220,20 @@ export async function startClaudeQuery(params) {
   }
   if (typeof params.canUseTool === 'function') {
     options.canUseTool = params.canUseTool;
+  }
+  // System prompt: string custom, or Claude Code preset (+ optional OpenCode agent append).
+  if (typeof params.systemPrompt === 'string' && params.systemPrompt.trim()) {
+    options.systemPrompt = params.systemPrompt.trim();
+  } else if (params.systemPrompt && typeof params.systemPrompt === 'object' && !Array.isArray(params.systemPrompt)) {
+    const preset = params.systemPrompt;
+    if (preset.type === 'preset' && preset.preset === 'claude_code') {
+      /** @type {{ type: 'preset', preset: 'claude_code', append?: string }} */
+      const systemPrompt = { type: 'preset', preset: 'claude_code' };
+      if (typeof preset.append === 'string' && preset.append.trim()) {
+        systemPrompt.append = preset.append.trim();
+      }
+      options.systemPrompt = systemPrompt;
+    }
   }
   if (params.mcpServers && typeof params.mcpServers === 'object' && !Array.isArray(params.mcpServers)) {
     const names = Object.keys(params.mcpServers);

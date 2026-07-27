@@ -11,6 +11,7 @@ type PermissionRule = {
 type ConfigStoreAgent = {
     name: string;
     permission?: PermissionRule[];
+    prompt?: string;
 };
 
 type ConfigStoreState = {
@@ -76,4 +77,14 @@ export const getAgentDefaultEditPermission = (agentName?: string): EditPermissio
 
     const action = resolvePermissionAction(agent.permission, 'edit');
     return action;
+};
+
+/** OpenCode/OpenChamber agent system prompt text, if the agent defines one. */
+export const getAgentPrompt = (agentName?: string): string | undefined => {
+    const agent = getAgentDefinition(agentName);
+    if (!agent || typeof agent.prompt !== 'string') {
+        return undefined;
+    }
+    const trimmed = agent.prompt.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
 };

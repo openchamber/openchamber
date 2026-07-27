@@ -47,7 +47,7 @@ import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { markStartupTrace } from '@/lib/startupTrace';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { withEnginesSettingsDefaults } from '@/lib/harness/settings';
+import { withEnginesSettingsDefaults, setCachedClaudeAgentsMode, getCachedClaudeAgentsMode, type ClaudeAgentsMode } from '@/lib/harness/settings';
 import { buildOpenCodeExecutionTarget, persistSessionExecutionTarget } from '@/lib/harness/resolve-execution-target';
 import { applySessionExecutionTargetSelection } from '@/lib/harness/session-handoff';
 import { CLAUDE_FAVORITE_PROVIDER_ID } from '@/lib/harness/favorite-targets';
@@ -381,6 +381,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     })));
     const claudeCatalog = harnessCatalogsById['claude-code'];
     const [enginesClaudeCodeEnabled, setEnginesClaudeCodeEnabled] = React.useState(true);
+    const [claudeAgentsMode, setClaudeAgentsMode] = React.useState<ClaudeAgentsMode>(getCachedClaudeAgentsMode());
     const [pickerHarnessId, setPickerHarnessId] = React.useState<HarnessId>('opencode');
     const [claudeModelRef, setClaudeModelRef] = React.useState('sonnet');
     const [claudeEffort, setClaudeEffort] = React.useState<ClaudeEffort | undefined>(undefined);
@@ -500,8 +501,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     enginesClaudeCodeEnabled: typeof data.enginesClaudeCodeEnabled === 'boolean'
                         ? data.enginesClaudeCodeEnabled
                         : undefined,
+                    enginesClaudeCodeAgentsMode:
+                        data.enginesClaudeCodeAgentsMode === 'claude'
+                        || data.enginesClaudeCodeAgentsMode === 'opencode'
+                            ? data.enginesClaudeCodeAgentsMode
+                            : undefined,
                 });
                 setEnginesClaudeCodeEnabled(resolved.enginesClaudeCodeEnabled);
+                setClaudeAgentsMode(resolved.enginesClaudeCodeAgentsMode);
+                setCachedClaudeAgentsMode(resolved.enginesClaudeCodeAgentsMode);
             } catch {
                 // keep default
             }
@@ -570,19 +578,28 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         },
     ): ExecutionTarget => {
         const agentName = opts?.agentName ?? uiAgentName;
-        const permissionMode = claudePermissionModeFromEditPermission(
-            getAgentDefaultEditPermission(agentName || undefined),
-        );
         const effort = opts && Object.prototype.hasOwnProperty.call(opts, 'effort')
             ? (opts.effort ?? undefined)
             : claudeEffort;
+        // OpenCode agents mode inherits edit permission → permissionMode.
+        // Claude agents mode leaves permissionMode unset (native Claude settings).
+        if (claudeAgentsMode === 'claude') {
+            return {
+                harnessId: 'claude-code',
+                modelRef,
+                ...(effort ? { effort } : {}),
+            };
+        }
+        const permissionMode = claudePermissionModeFromEditPermission(
+            getAgentDefaultEditPermission(agentName || undefined),
+        );
         return {
             harnessId: 'claude-code',
             modelRef,
             permissionMode,
             ...(effort ? { effort } : {}),
         };
-    }, [claudeEffort, uiAgentName]);
+    }, [claudeAgentsMode, claudeEffort, uiAgentName]);
 
     const handleSelectEngine = React.useCallback((engineId: string) => {
         if (engineId === 'claude-code') {
@@ -2399,7 +2416,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const renderMobileAgentPanel = () => {
         if (!isCompact) return null;
- 
+        if (pickerHarnessId === 'claude-code' && claudeAgentsMode === 'claude') return null;
+
         return (
             <MobileOverlayPanel
                 open={activeMobilePanel === 'agent'}
@@ -3092,6 +3110,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const renderAgentSelector = () => {
+        // Native Claude agents mode: OpenCode agent picker does not apply.
+        if (pickerHarnessId === 'claude-code' && claudeAgentsMode === 'claude') {
+            return null;
+        }
         if (!isCompact) {
             return (
                 <div className="flex items-center gap-2 min-w-0">

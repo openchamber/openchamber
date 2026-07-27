@@ -75,8 +75,8 @@ import { getRuntimeKey } from "@/lib/runtime-switch"
 import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
 import { HarnessClientError, harnessPrompt } from "@/lib/harness/client"
-import { claudePermissionModeFromEditPermission } from "@/lib/harness/claude-models"
-import { getAgentDefaultEditPermission } from "@/stores/utils/permissionUtils"
+import { resolveClaudeAgentsSendOptions } from "@/lib/harness/claude-agents-mode"
+import { getCachedClaudeAgentsMode } from "@/lib/harness/settings"
 import {
   persistSessionExecutionTarget,
   resolveExecutionTarget,
@@ -128,15 +128,19 @@ export function routeMessage(params: {
       variant: params.variant,
     })
 
-  // Claude permissionMode is not a separate UI control — mirror the selected
-  // OpenCode agent's edit permission on every send.
+  // Claude agents mode decides whether OpenCode agents own permissionMode +
+  // system-prompt append, or Claude Code runs with native prompts/permissions.
+  let systemPromptAppend: string | undefined
+  let agentsMode = getCachedClaudeAgentsMode()
   if (target.harnessId === "claude-code") {
-    target = {
-      ...target,
-      permissionMode: claudePermissionModeFromEditPermission(
-        getAgentDefaultEditPermission(params.agent),
-      ),
-    }
+    const resolved = resolveClaudeAgentsSendOptions({
+      target,
+      agentsMode,
+      agentName: params.agent,
+    })
+    target = resolved.target
+    agentsMode = resolved.agentsMode
+    systemPromptAppend = resolved.systemPromptAppend
   }
 
   if (params.sessionId) {
@@ -246,6 +250,8 @@ export function routeMessage(params: {
         })),
         messageId: messageID,
         seedFromSessionId: params.seedFromSessionId,
+        agentsMode,
+        systemPromptAppend,
       }).then(() => {}),
     })
   }
