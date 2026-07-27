@@ -457,7 +457,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const markConnected = () => {
     disconnected = false
     consecutiveFailures = 0
-    setWsEventPipelineActive(true)
+    setWsEventPipelineActive(activeTransport === "ws")
     // Fire onReconnect on every successful connect — including the very
     // first one. Consumer state (isConnected) starts at false and needs
     // to be flipped positively; without this the send button throws

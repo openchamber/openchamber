@@ -59,3 +59,15 @@ export const subscribeOpenChamberBusEvents = (
     listeners.delete(listener);
   };
 };
+
+/**
+ * Resets all bus state to its initial values. Test-only — production code
+ * must never call this. The event bus is a module-level singleton shared
+ * across all consumers; tests need a clean slate to avoid listener leaks
+ * and stale wsActive from prior test files.
+ */
+export const __resetOpenChamberEventBusForTesting = (): void => {
+  listeners.clear();
+  activeChangeListeners.clear();
+  wsActive = false;
+};

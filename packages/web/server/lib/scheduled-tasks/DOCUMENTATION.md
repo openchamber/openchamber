@@ -15,7 +15,7 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
   - Timer scheduling and queueing
   - Concurrency controls
   - Session create + prompt_async execution
-  - Emits OpenChamber task-run events
+  - Emits OpenChamber task-run events via `emitTaskRunEvent`, which fans out to both legacy SSE clients (`uiOpenChamberEventClients`) and `broadcastGlobalUiEvent` (WS + notification SSE clients)
 
 - `packages/web/server/lib/scheduled-tasks/routes.js`
   - Scheduled task CRUD endpoints
