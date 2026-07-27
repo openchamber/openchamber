@@ -214,18 +214,23 @@ export const useSkillsStore = create<SkillsStore>()(
         },
 
         setExcludeSources: async (sources: ExcludableSkillSource[]) => {
+          const prev = get().excludeSources;
+          set({ excludeSources: sources });
           try {
             const response = await runtimeFetch('/api/config/skills/exclude-sources', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ excludeSources: sources }),
             });
-            if (!response.ok) return false;
-            set({ excludeSources: sources });
+            if (!response.ok) {
+              set({ excludeSources: prev });
+              return false;
+            }
             invalidateSkillsLoadCache();
             await get().loadSkills();
             return true;
           } catch {
+            set({ excludeSources: prev });
             return false;
           }
         },

@@ -412,7 +412,6 @@ export const registerSkillRoutes = (app, dependencies) => {
         },
       };
       writeConfig(updated, targetPath);
-      await refreshOpenCodeAfterConfigChange('skills excludeSources update');
       res.json({ success: true, excludeSources });
     } catch (error) {
       console.error('Failed to update excludeSources:', error);
