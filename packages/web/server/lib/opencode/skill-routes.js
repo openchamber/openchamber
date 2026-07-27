@@ -213,13 +213,20 @@ export const registerSkillRoutes = (app, dependencies) => {
       const localSkills = discoverSkills(directory);
       const skills = mergeDiscoveredSkills(openCodeSkills, localSkills);
 
-      const enrichedSkills = skills.map((skill) => {
-        const sources = getSkillSources(skill.name, directory, skill);
-        return {
-          ...skill,
-          sources
-        };
-      });
+      const excludeSources = sanitizeExcludeSources(readConfig(directory)?.skills?.excludeSources);
+
+      const enrichedSkills = skills
+        .map((skill) => {
+          const sources = getSkillSources(skill.name, directory, skill);
+          return {
+            ...skill,
+            sources
+          };
+        })
+        .filter((skill) => {
+          const source = skill.sources?.md?.source || skill.source;
+          return !excludeSources.includes(source);
+        });
 
       res.json({ skills: enrichedSkills });
     } catch (error) {

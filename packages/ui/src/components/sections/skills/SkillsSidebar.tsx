@@ -270,29 +270,23 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
           </Button>
         </div>
         <div className="flex items-center gap-1.5 mt-2">
-          <span className="typography-micro text-muted-foreground">Sources:</span>
-          <button
+          <span className="typography-micro text-muted-foreground">{t('settings.skills.sidebar.sourcesLabel')}</span>
+          <Button
+            variant="chip"
+            size="xs"
+            aria-pressed={!isClaudeExcluded}
             onClick={() => handleToggleSource('claude')}
-            className={cn(
-              'typography-micro px-1.5 py-0.5 rounded border transition-colors',
-              isClaudeExcluded
-                ? 'text-muted-foreground/50 bg-transparent border-[var(--surface-subtle)] line-through'
-                : 'text-foreground bg-[var(--surface-muted)] border-[var(--interactive-border)]/50 hover:bg-[var(--interactive-hover)]'
-            )}
           >
-            Claude
-          </button>
-          <button
+            {t('settings.skills.sidebar.source.claude')}
+          </Button>
+          <Button
+            variant="chip"
+            size="xs"
+            aria-pressed={!isAgentsExcluded}
             onClick={() => handleToggleSource('agents')}
-            className={cn(
-              'typography-micro px-1.5 py-0.5 rounded border transition-colors',
-              isAgentsExcluded
-                ? 'text-muted-foreground/50 bg-transparent border-[var(--surface-subtle)] line-through'
-                : 'text-foreground bg-[var(--surface-muted)] border-[var(--interactive-border)]/50 hover:bg-[var(--interactive-hover)]'
-            )}
           >
-            Agents
-          </button>
+            {t('settings.skills.sidebar.source.agents')}
+          </Button>
         </div>
       </div>
 
