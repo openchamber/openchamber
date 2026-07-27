@@ -1078,44 +1078,48 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   waitForOpenCodeReady,
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   emitTaskRunEvent: (event) => {
+    const payload = {
+      type: 'openchamber:scheduled-task-ran',
+      properties: {
+        projectId: event.projectID,
+        taskId: event.taskID,
+        ranAt: event.ranAt,
+        status: event.status,
+        ...(event.sessionID ? { sessionId: event.sessionID } : {}),
+      },
+    };
     for (const client of uiOpenChamberEventClients) {
       try {
-        writeSseEvent(client, {
-          type: 'openchamber:scheduled-task-ran',
-          properties: {
-            projectId: event.projectID,
-            taskId: event.taskID,
-            ranAt: event.ranAt,
-            status: event.status,
-            ...(event.sessionID ? { sessionId: event.sessionID } : {}),
-          },
-        });
+        writeSseEvent(client, payload);
       } catch {
         uiOpenChamberEventClients.delete(client);
       }
     }
+    broadcastGlobalUiEvent(payload);
   },
   logger: console,
 });
 const emitSessionCreatedEvent = (event) => {
+  const payload = {
+    type: 'openchamber:session-created',
+    properties: {
+      sessionId: event.sessionID,
+      directory: event.directory,
+      createdAt: event.createdAt,
+      promptDispatched: event.promptDispatched === true,
+      dispatchedAsCommand: event.dispatchedAsCommand === true,
+      ...(event.projectID ? { projectId: event.projectID } : {}),
+      ...(event.title ? { title: event.title } : {}),
+    },
+  };
   for (const client of uiOpenChamberEventClients) {
     try {
-      writeSseEvent(client, {
-        type: 'openchamber:session-created',
-        properties: {
-          sessionId: event.sessionID,
-          directory: event.directory,
-          createdAt: event.createdAt,
-          promptDispatched: event.promptDispatched === true,
-          dispatchedAsCommand: event.dispatchedAsCommand === true,
-          ...(event.projectID ? { projectId: event.projectID } : {}),
-          ...(event.title ? { title: event.title } : {}),
-        },
-      });
+      writeSseEvent(client, payload);
     } catch {
       uiOpenChamberEventClients.delete(client);
     }
   }
+  broadcastGlobalUiEvent(payload);
 };
 const scheduledTaskService = createScheduledTaskService({
   readSettingsFromDiskMigrated,

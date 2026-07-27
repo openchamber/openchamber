@@ -1,5 +1,11 @@
 import { getRuntimeUrlResolver } from './runtime-url';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
+import {
+  isWsEventPipelineActive,
+  subscribeOpenChamberBusEvents,
+  subscribeWsActiveChanged,
+  type OpenChamberBusEvent,
+} from './openchamberEventBus';
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
@@ -28,6 +34,8 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let runtimeChangeUnsubscribe: (() => void) | null = null;
+let busUnsubscribe: (() => void) | null = null;
+let wsActiveUnsubscribe: (() => void) | null = null;
 const listeners = new Set<Listener>();
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -43,6 +51,9 @@ const clearHeartbeatTimer = () => {
 
 const scheduleReconnect = () => {
   if (reconnectTimer || listeners.size === 0) {
+    return;
+  }
+  if (isWsEventPipelineActive()) {
     return;
   }
   const delay = Math.min(1_000 * Math.pow(2, Math.min(reconnectAttempt, 5)), MAX_RECONNECT_DELAY_MS);
@@ -70,24 +81,6 @@ const resetHeartbeatTimer = () => {
     cleanupSource();
     scheduleReconnect();
   }, HEARTBEAT_TIMEOUT_MS);
-};
-
-const parseEnvelope = (raw: string): { type: string; properties: unknown } | null => {
-  if (!raw || raw.trim().length === 0) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    const type = typeof parsed?.type === 'string' ? parsed.type : '';
-    const properties = parsed?.properties;
-    if (!type) {
-      return null;
-    }
-    return { type, properties };
-  } catch {
-    return null;
-  }
 };
 
 const getEventProperties = (properties: unknown): Record<string, unknown> | null => {
@@ -161,8 +154,16 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
 };
 
+const onBusEvent = (event: OpenChamberBusEvent) => {
+  resetHeartbeatTimer();
+  dispatchFromEnvelope(event);
+};
+
 const connect = () => {
   if (typeof window === 'undefined' || listeners.size === 0) {
+    return;
+  }
+  if (isWsEventPipelineActive()) {
     return;
   }
   if (typeof EventSource !== 'function') {
@@ -181,7 +182,16 @@ const connect = () => {
   };
   source.onmessage = (event) => {
     resetHeartbeatTimer();
-    const envelope = parseEnvelope(event.data);
+    let envelope: { type: string; properties: unknown } | null = null;
+    try {
+      const parsed = JSON.parse(event.data);
+      const type = typeof parsed?.type === 'string' ? parsed.type : '';
+      if (type) {
+        envelope = { type, properties: parsed?.properties };
+      }
+    } catch {
+      // ignore parse errors
+    }
     if (!envelope) {
       return;
     }
@@ -213,6 +223,18 @@ const cleanupRuntimeChangeSubscription = () => {
 export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => {
   listeners.add(listener);
   ensureRuntimeChangeSubscription();
+  if (!busUnsubscribe) {
+    busUnsubscribe = subscribeOpenChamberBusEvents(onBusEvent);
+  }
+  if (!wsActiveUnsubscribe) {
+    wsActiveUnsubscribe = subscribeWsActiveChanged((active) => {
+      if (active) {
+        cleanupSource();
+      } else {
+        connect();
+      }
+    });
+  }
   connect();
 
   return () => {
@@ -225,6 +247,14 @@ export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => 
       reconnectAttempt = 0;
       cleanupSource();
       cleanupRuntimeChangeSubscription();
+      if (busUnsubscribe) {
+        busUnsubscribe();
+        busUnsubscribe = null;
+      }
+      if (wsActiveUnsubscribe) {
+        wsActiveUnsubscribe();
+        wsActiveUnsubscribe = null;
+      }
     }
   };
 };

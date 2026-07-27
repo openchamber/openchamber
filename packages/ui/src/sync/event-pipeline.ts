@@ -18,6 +18,7 @@ import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
+import { publishOpenChamberBusEvent, setWsEventPipelineActive } from "@/lib/openchamberEventBus"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
 
@@ -449,12 +450,14 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       return
     }
     disconnected = true
+    setWsEventPipelineActive(false)
     onDisconnect?.(reason)
   }
 
   const markConnected = () => {
     disconnected = false
     consecutiveFailures = 0
+    setWsEventPipelineActive(true)
     // Fire onReconnect on every successful connect — including the very
     // first one. Consumer state (isConnected) starts at false and needs
     // to be flipped positively; without this the send button throws
@@ -465,6 +468,17 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
   const enqueueEvent = (directory: string, payload: Event) => {
     countSyncPerformance("pipelineRawEvents")
+
+    // Route OpenChamber-specific events to the bus before normalization so
+    // consumers don't need their own per-tab EventSource connections.
+    const rawType = (payload as { type?: unknown }).type
+    if (typeof rawType === "string" && rawType.startsWith("openchamber:")) {
+      publishOpenChamberBusEvent({
+        type: rawType,
+        properties: (payload as { properties?: unknown }).properties,
+      })
+    }
+
     const normalizedPayload = normalizeEventType(payload)
     const routedDirectory = routeDirectory?.(directory, normalizedPayload) || directory
     const d = getOrCreateDir(routedDirectory)
@@ -950,6 +964,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       globalThis.window.removeEventListener("online", onOnline)
       globalThis.window.removeEventListener("offline", onOffline)
     }
+    setWsEventPipelineActive(false)
     abort.abort()
     flushAll()
   }
