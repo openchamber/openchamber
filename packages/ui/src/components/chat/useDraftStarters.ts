@@ -114,10 +114,15 @@ export function useDraftStarters(): UseDraftStartersResult {
         isHarnessId(draftHarnessId) ? draftHarnessId : 'opencode',
         'goal',
     ) !== 'none';
+    const supportsOpenChamberTool = getHarnessCapabilityLevel(
+        isHarnessId(draftHarnessId) ? draftHarnessId : 'opencode',
+        'openchamber-tool',
+    ) !== 'none';
 
     const resolve = React.useCallback((ref: DraftStarterRef, group: StarterGroup): ResolvedStarter | null => {
         if (isVSCode && ref.type === 'command' && (ref.name === 'craft-goal' || ref.name === 'schedule-task')) return null;
         if (!supportsGoal && ref.type === 'command' && ref.name === 'craft-goal') return null;
+        if (!supportsOpenChamberTool && ref.type === 'command' && ref.name === 'schedule-task') return null;
         if (ref.type === 'command') {
             const builtin = getBuiltInStarter(ref.name);
             if (builtin) {
@@ -128,7 +133,7 @@ export function useDraftStarters(): UseDraftStartersResult {
         }
         if (!skillNames.has(ref.name)) return null;
         return { id: chipId(group, ref), ref, group, label: normalizeStarterLabel(ref.name), icon: SKILL_FALLBACK_ICON, submitText: `/${ref.name}` };
-    }, [t, commandNames, skillNames, isVSCode, supportsGoal]);
+    }, [t, commandNames, skillNames, isVSCode, supportsGoal, supportsOpenChamberTool]);
 
     const globalRefs = React.useMemo<readonly DraftStarterRef[]>(
         () => globalRaw ?? DEFAULT_GLOBAL_STARTERS,

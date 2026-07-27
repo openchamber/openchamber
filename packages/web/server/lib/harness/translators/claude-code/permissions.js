@@ -26,6 +26,24 @@ const pending = new Map();
 export const DEFAULT_PERMISSION_TIMEOUT_MS = 120_000;
 
 /**
+ * Tools injected by OpenChamber itself (Claude SDK MCP openchamber server).
+ * These are already gated by `agentControlToolEnabled` and execute a fixed
+ * allowlist through the control service — they must not also require a second
+ * PermissionCard prompt (OpenCode's managed plugin has no equivalent gate).
+ *
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+export function isOpenChamberInjectedTool(toolName) {
+  const name = typeof toolName === 'string' ? toolName.trim() : '';
+  if (!name) return false;
+  if (name === 'openchamber') return true;
+  // Claude Agent SDK MCP tools are exposed as mcp__<server>__<tool>
+  return name === 'mcp__openchamber__openchamber'
+    || /^mcp__openchamber__/i.test(name);
+}
+
+/**
  * @param {Record<string, unknown>} input
  * @param {{ blockedPath?: string, title?: string }} [options]
  * @returns {string[]}
@@ -184,9 +202,16 @@ export function createCanUseTool(params) {
       };
     }
 
+    const safeInput = input && typeof input === 'object' ? input : {};
+    if (isOpenChamberInjectedTool(toolName)) {
+      return {
+        behavior: 'allow',
+        updatedInput: safeInput,
+      };
+    }
+
     const requestId = createId();
     const tool = typeof toolName === 'string' && toolName.trim() ? toolName.trim() : 'tool';
-    const safeInput = input && typeof input === 'object' ? input : {};
     const patterns = extractPermissionPatterns(safeInput, {
       blockedPath: typeof options.blockedPath === 'string' ? options.blockedPath : undefined,
       title: typeof options.title === 'string' ? options.title : undefined,

@@ -10,7 +10,10 @@ import { createOpenCodeTranslator } from './translators/opencode/index.js';
  */
 export function createHarnessRouter(deps = {}) {
   const getBroadcast = deps.getBroadcast || (() => null);
-  const claude = deps.claudeTranslator || createClaudeCodeTranslator({ getBroadcast });
+  const claude = deps.claudeTranslator || createClaudeCodeTranslator({
+    getBroadcast,
+    createOpenChamberMcpServers: deps.createOpenChamberMcpServers,
+  });
   const opencode = deps.opencodeTranslator || createOpenCodeTranslator();
 
   /**

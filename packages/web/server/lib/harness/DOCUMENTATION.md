@@ -246,11 +246,35 @@ same three values, so no surface can produce a bypass mode.
 
 ## Goal on Claude
 
-Capability `goal: partial`. Session-goal listens to harness events through
+Capability `goal: full`. Session-goal listens to harness events through
 `addHarnessEventObserver` and reads last-turn text from
 `turn-snapshot.js` (OpenCode `/session/:id/message` is empty for harness
 turns). Continuations call `harnessRouter.prompt` / `/api/harness/prompt`.
-Token budget accounting is best-effort until Claude usage tokens are mapped.
+Claude SDK `result.usage` is mapped into OpenCode-shaped
+`assistant.info.tokens` (and `total_cost_usd` → `cost`) so goal token
+budgets use the same counters as OpenCode sessions.
+
+## OpenChamber tool on Claude
+
+Capability `openchamber-tool: full`. When `agentControlToolEnabled` is not
+`false`, each Claude turn injects an in-process SDK MCP server
+(`createSdkMcpServer`) named `openchamber` via
+`packages/web/server/lib/agent-tool/claude-mcp.js`. The adapter calls the
+same control-service action allowlist as the managed OpenCode plugin.
+Claude session status / messages / wait overlay harness turn-snapshots so
+`wait` works for Claude-bound sessions. Session create/send/fork with
+`claude-code/<modelRef>` dispatch through `/api/harness/prompt`.
+
+Injected `mcp__openchamber__*` tool asks are auto-allowed in
+`permissions.js` (no PermissionCard) — the tool is already gated by the
+settings flag and a fixed action allowlist, matching OpenCode's managed
+plugin (which has no equivalent second prompt).
+
+## MultiRun on Claude
+
+Capability `multirun: full`. The MultiRun launcher model picker includes
+Claude Code engines/models. Each run persists an `ExecutionTarget` and
+`routeMessage` sends Claude runs through `/api/harness/prompt`.
 
 ## Slash commands / MCP / subagents
 
@@ -381,8 +405,7 @@ optimistic reconcile.
 
 - Codex CLI / Gemini CLI engines
 - Reverse handoff billing notice (Claude → OpenCode)
-- MultiRun / OpenChamber injected tool on Claude
-- Full Claude token → goal budget accounting
+- MCP settings editor for Claude
 
 ## Testing
 

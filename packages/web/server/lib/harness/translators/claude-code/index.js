@@ -101,6 +101,7 @@ export function buildClaudePrompt(text, files, options = {}) {
  * @param {() => ((payload: object, options?: object) => void) | null | undefined} [deps.getBroadcast]
  * @param {typeof startClaudeQuery} [deps.startQuery]
  * @param {typeof detectClaudeCode} [deps.detect]
+ * @param {(options?: { contextDirectory?: string | null }) => Promise<Record<string, unknown> | null>} [deps.createOpenChamberMcpServers]
  */
 export function createClaudeCodeTranslator(deps = {}) {
   /** @type {Map<string, { handle: object, ctx: object, aborting: boolean, idleEmitted: boolean }>} */
@@ -108,6 +109,7 @@ export function createClaudeCodeTranslator(deps = {}) {
   const getBroadcast = deps.getBroadcast || (() => null);
   const startQuery = deps.startQuery || startClaudeQuery;
   const detect = deps.detect || detectClaudeCode;
+  const createOpenChamberMcpServers = deps.createOpenChamberMcpServers || (async () => null);
 
   /**
    * @param {object} body
@@ -216,7 +218,23 @@ export function createClaudeCodeTranslator(deps = {}) {
       assistantMessageId,
     });
 
-    const mcpServers = buildClaudeMcpServersFromOpenChamber(directory);
+    // Bridge user/project OpenChamber MCP configs, then merge the in-process
+    // OpenChamber control tool (if enabled). Control-tool failure must not block
+    // the turn — Claude can still answer with bridged MCP alone.
+    const bridgedMcpServers = buildClaudeMcpServersFromOpenChamber(directory);
+    let controlMcpServers = null;
+    try {
+      controlMcpServers = await createOpenChamberMcpServers({ contextDirectory: directory });
+    } catch (error) {
+      console.warn(
+        '[harness/claude-code] OpenChamber MCP injection failed:',
+        error instanceof Error ? error.message : error,
+      );
+    }
+    const mcpServers = {
+      ...bridgedMcpServers,
+      ...(controlMcpServers && typeof controlMcpServers === 'object' ? controlMcpServers : {}),
+    };
     // Only forward MCP wildcards here. Bare names like Agent/Skill auto-approve in
     // the SDK and emit CLAUDE_SDK_CAN_USE_TOOL_SHADOWED, defeating canUseTool.
     // Agent/Task/Skill remain available via Claude defaults + skills:'all'.
@@ -259,7 +277,7 @@ export function createClaudeCodeTranslator(deps = {}) {
         systemPrompt,
         canUseTool,
         includePartialMessages: true,
-        mcpServers,
+        ...(Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
         ...(allowedTools.length > 0 ? { allowedTools } : {}),
         skills: 'all',
         settingSources: ['user', 'project', 'local'],

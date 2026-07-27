@@ -35,13 +35,14 @@ describe('sessionSupports', () => {
     expect(sessionSupports(null, 'multirun')).toBe(true);
   });
 
-  test('supports goal on Claude but not multirun', () => {
+  test('supports goal, multirun, and openchamber-tool on Claude', () => {
     useSelectionStore.getState().saveSessionTarget('ses_claude', {
       harnessId: 'claude-code',
       modelRef: 'sonnet',
     });
     expect(sessionSupports('ses_claude', 'goal')).toBe(true);
-    expect(sessionSupports('ses_claude', 'multirun')).toBe(false);
+    expect(sessionSupports('ses_claude', 'multirun')).toBe(true);
+    expect(sessionSupports('ses_claude', 'openchamber-tool')).toBe(true);
     expect(sessionSupports('ses_claude', 'prompt')).toBe(true);
     expect(sessionSupports('ses_claude', 'abort')).toBe(true);
   });
@@ -64,7 +65,7 @@ describe('sessionSupports', () => {
       modelRef: 'haiku',
     });
     expect(sessionSupports('ses_new', 'goal')).toBe(true);
-    expect(sessionSupports('ses_new', 'multirun')).toBe(false);
+    expect(sessionSupports('ses_new', 'multirun')).toBe(true);
   });
 
   test('falls back to last-used target for drafts', () => {
@@ -72,7 +73,7 @@ describe('sessionSupports', () => {
       lastUsedTarget: { harnessId: 'claude-code', modelRef: 'sonnet' },
     });
     expect(sessionSupports(null, 'goal')).toBe(true);
-    expect(sessionSupports(null, 'multirun')).toBe(false);
+    expect(sessionSupports(null, 'multirun')).toBe(true);
   });
 
   test('Claude sessions do not support steer delivery', () => {
@@ -110,6 +111,6 @@ describe('sessionSupports', () => {
       error: null,
     });
     expect(getHarnessCapabilityLevel('claude-code', 'prompt')).toBe('none');
-    expect(getHarnessCapabilityLevel('claude-code', 'goal')).toBe('partial');
+    expect(getHarnessCapabilityLevel('claude-code', 'goal')).toBe('full');
   });
 });

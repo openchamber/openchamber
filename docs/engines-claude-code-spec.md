@@ -24,7 +24,6 @@ Product intent: keep OpenChamber UI/API as the primary surface; expand execution
 - Codex CLI / Gemini CLI engines (structure must allow them later).
 - Using Claude subscription OAuth through direct Anthropic HTTP from OpenChamber.
 - Full TTY parity with interactive `claude` (rewind UI, all interactive-only slash commands).
-- MultiRun / injected `openchamber` tool on Claude sessions.
 - Separate Claude permission-mode chip (Claude `permissionMode` mirrors OpenCode agent edit + auto-accept).
 - Editing Claude MCP/settings from OpenChamber Providers/MCP pages.
 - Lossless binary clone of OpenCode sessions into Claude native session format.
@@ -195,8 +194,9 @@ type HarnessDescriptor = {
 | slash-commands | full | Claude-native `/command` via harness prompt + system/init discovery; OpenCode-only slash blocked |
 | mcp | full | OpenChamber MCP configs bridged into SDK `mcpServers`; project `.mcp.json` via `settingSources`; status from init |
 | subagents | full | Agent tool + `forwardSubagentText`; nested child sessions in sidebar |
-| goal | partial | Server loop via harness turn snapshots + `/api/harness/prompt` continuations; token budget best-effort |
-| multirun / openchamber-tool | none | OpenCode-only (`multirun` UI gated; `openchamber-tool` / schedule-task starters still need tighter UI gating — §24) |
+| goal | full | Server loop via harness turn snapshots + `/api/harness/prompt` continuations; Claude `result.usage` mapped into `assistant.info.tokens` |
+| multirun | full | MultiRun launcher includes Claude models; sticky `ExecutionTarget` + harness prompt per run |
+| openchamber-tool | full | In-process Claude SDK MCP (`createSdkMcpServer`) → shared control service; gated by `agentControlToolEnabled` |
 
 ### 5.4 Session binding
 

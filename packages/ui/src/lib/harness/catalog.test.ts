@@ -22,9 +22,9 @@ describe('parseEngineCatalog model fields', () => {
           'slash-commands': 'partial',
           mcp: 'partial',
           subagents: 'partial',
-          multirun: 'none',
-          goal: 'partial',
-          'openchamber-tool': 'none',
+          multirun: 'full',
+          goal: 'full',
+          'openchamber-tool': 'full',
         },
         install: {
           binaryNames: ['claude'],

@@ -155,6 +155,10 @@ export function createClaudeMapperContext(input) {
       || Boolean(input.accumulatedReasoning),
     subagentByToolUseId: input.subagentByToolUseId || new Map(),
     lastInitCapabilities: input.lastInitCapabilities || null,
+    tokens: input.tokens && typeof input.tokens === 'object'
+      ? input.tokens
+      : { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    cost: Number.isFinite(input.cost) ? input.cost : 0,
   };
 }
 
@@ -373,10 +377,56 @@ export function buildUserMessageEvents(ctx, text, files) {
 }
 
 /**
- * @param {ClaudeMapperContext} ctx
- * @returns {object}
+ * Map Claude Agent SDK usage into OpenCode-shaped token counters.
+ * Goal budgets read `input + cache.read + output` from the latest assistant.
+ *
+ * @param {unknown} usage
+ * @returns {{ input: number, output: number, reasoning: number, cache: { read: number, write: number } }}
  */
+export function mapClaudeUsageToTokens(usage) {
+  const source = usage && typeof usage === 'object' ? usage : {};
+  const num = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  };
+  return {
+    input: num(source.input_tokens ?? source.inputTokens),
+    output: num(source.output_tokens ?? source.outputTokens),
+    reasoning: num(source.reasoning_tokens ?? source.reasoningTokens),
+    cache: {
+      read: num(
+        source.cache_read_input_tokens
+        ?? source.cacheReadInputTokens
+        ?? source.cache_read_tokens,
+      ),
+      write: num(
+        source.cache_creation_input_tokens
+        ?? source.cacheCreationInputTokens
+        ?? source.cache_write_tokens,
+      ),
+    },
+  };
+}
+
+/**
+ * @param {ClaudeMapperContext} ctx
+ * @param {unknown} usage
+ * @param {unknown} [totalCostUsd]
+ */
+function applyUsageToContext(ctx, usage, totalCostUsd) {
+  if (usage && typeof usage === 'object') {
+    ctx.tokens = mapClaudeUsageToTokens(usage);
+  }
+  const cost = Number(totalCostUsd);
+  if (Number.isFinite(cost) && cost >= 0) {
+    ctx.cost = cost;
+  }
+}
+
 function assistantInfo(ctx, completed) {
+  const tokens = ctx.tokens && typeof ctx.tokens === 'object'
+    ? ctx.tokens
+    : { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
   const info = {
     id: ctx.assistantMessageId,
     sessionID: ctx.sessionId,
@@ -394,12 +444,15 @@ function assistantInfo(ctx, completed) {
       cwd: ctx.directory,
       root: ctx.directory,
     },
-    cost: 0,
+    cost: Number.isFinite(ctx.cost) ? ctx.cost : 0,
     tokens: {
-      input: 0,
-      output: 0,
-      reasoning: 0,
-      cache: { read: 0, write: 0 },
+      input: Number.isFinite(tokens.input) ? tokens.input : 0,
+      output: Number.isFinite(tokens.output) ? tokens.output : 0,
+      reasoning: Number.isFinite(tokens.reasoning) ? tokens.reasoning : 0,
+      cache: {
+        read: Number.isFinite(tokens.cache?.read) ? tokens.cache.read : 0,
+        write: Number.isFinite(tokens.cache?.write) ? tokens.cache.write : 0,
+      },
     },
   };
   if (completed) info.finish = 'stop';
@@ -924,6 +977,10 @@ export function mapClaudeMessageToEvents(ctx, message) {
       const resultText = typeof message.result === 'string' ? message.result : '';
       const hasContent = ctx.textPartStarted || ctx.reasoningPartStarted
         || ctx.toolParts.size > 0 || Boolean(resultText);
+
+      // Prefer turn-total usage on the result message so goal budgets see the
+      // same counters OpenCode sessions expose on assistant.info.tokens.
+      applyUsageToContext(ctx, message.usage, message.total_cost_usd);
 
       // Non-streaming turns carry their whole answer on the result message.
       if (!ctx.textPartStarted && resultText) {

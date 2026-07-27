@@ -2427,6 +2427,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 return;
             }
             else if (commandName === 'schedule-task' && (currentSessionId || newSessionDraftOpen)) {
+                if (!sessionSupports(currentSessionId, 'openchamber-tool')) {
+                    toast.error(t('chat.engines.capability.openchamberToolUnsupported'));
+                    return;
+                }
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const idea = normalizedCommand.replace(/^\/schedule-task\b/i, '').trim();

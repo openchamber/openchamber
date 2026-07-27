@@ -84,6 +84,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const isClaudeEngine = activeHarnessId === 'claude-code';
   const canUseGoalCommand = canStartSessionCommand
     && getHarnessCapabilityLevel(activeHarnessId, 'goal') !== 'none';
+  const canUseOpenChamberToolCommand = canStartSessionCommand
+    && getHarnessCapabilityLevel(activeHarnessId, 'openchamber-tool') !== 'none';
   const claudeSlashCommands = useClaudeSessionCapabilitiesStore((s) => (
     selectClaudeSlashCommands(s, currentSessionId)
   ));
@@ -229,7 +231,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [{ id: 'openchamber:craft-goal', name: 'craft-goal', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.craftGoalDescription'), isOpenChamber: true }]
             : []
           ),
-          ...(canStartSessionCommand
+          ...(canUseOpenChamberToolCommand
             ? [{ id: 'openchamber:schedule-task', name: 'schedule-task', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.scheduleTaskDescription'), isOpenChamber: true }]
             : []
           ),
@@ -306,7 +308,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [{ id: 'openchamber:craft-goal', name: 'craft-goal', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.craftGoalDescription'), isOpenChamber: true }]
             : []
           ),
-          ...(canStartSessionCommand
+          ...(canUseOpenChamberToolCommand
             ? [{ id: 'openchamber:schedule-task', name: 'schedule-task', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.scheduleTaskDescription'), isOpenChamber: true }]
             : []
           ),
@@ -347,6 +349,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     canStartSessionCommand,
     canUseReviewHandoffFlow,
     canUseGoalCommand,
+    canUseOpenChamberToolCommand,
     commandsWithMetadata,
     skills,
     t,

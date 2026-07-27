@@ -6,10 +6,19 @@ import {
   replyPermission,
   resetPendingPermissions,
   extractPermissionPatterns,
+  isOpenChamberInjectedTool,
 } from './permissions.js';
 
 afterEach(() => {
   resetPendingPermissions();
+});
+
+describe('isOpenChamberInjectedTool', () => {
+  it('recognizes the Claude SDK MCP openchamber tool name', () => {
+    expect(isOpenChamberInjectedTool('mcp__openchamber__openchamber')).toBe(true);
+    expect(isOpenChamberInjectedTool('openchamber')).toBe(true);
+    expect(isOpenChamberInjectedTool('Bash')).toBe(false);
+  });
 });
 
 describe('extractPermissionPatterns', () => {
@@ -32,6 +41,24 @@ describe('buildAlwaysPatterns', () => {
 });
 
 describe('createCanUseTool / replyPermission', () => {
+  it('auto-allows the injected OpenChamber MCP tool without prompting', async () => {
+    const events = [];
+    const canUseTool = createCanUseTool({
+      sessionId: 'ses_1',
+      directory: '/repo',
+      getBroadcast: () => (event) => events.push(event),
+    });
+    const result = await canUseTool('mcp__openchamber__openchamber', {
+      action: 'projects.list',
+      parameters: {},
+    });
+    expect(result).toEqual({
+      behavior: 'allow',
+      updatedInput: { action: 'projects.list', parameters: {} },
+    });
+    expect(events).toEqual([]);
+  });
+
   it('allows once and emits asked + replied events with always patterns + tool linkage', async () => {
     const events = [];
     const canUseTool = createCanUseTool({

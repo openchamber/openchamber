@@ -297,12 +297,22 @@ export const createOpenChamberSessionService = (dependencies) => {
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     createSessionGoal: createSessionGoalOverride,
+    promptHarness = null,
+    getSessionBinding = null,
   } = dependencies;
 
   // Last user message of an existing session, as a selection to reuse. Returns
   // null when the session has no user message carrying a model.
   const fetchLastUserSelection = async ({ client, sessionID, directory }) => {
     try {
+      const binding = typeof getSessionBinding === 'function' ? getSessionBinding(sessionID) : null;
+      if (binding?.harnessId === 'claude-code' && binding?.target?.modelRef) {
+        return {
+          model: { providerID: 'claude-code', modelID: binding.target.modelRef },
+          agent: null,
+          variant: asNonEmptyString(binding.target.effort),
+        };
+      }
       const response = await client.session.messages({ sessionID, directory, limit: 20 });
       const records = Array.isArray(response?.data) ? response.data : [];
       for (let index = records.length - 1; index >= 0; index -= 1) {
@@ -389,6 +399,33 @@ export const createOpenChamberSessionService = (dependencies) => {
     };
 
     let dispatchedAsCommand = false;
+    const isClaudeTarget = model.providerID === 'claude-code';
+
+    if (isClaudeTarget) {
+      if (typeof promptHarness !== 'function') {
+        const error = new Error('Claude Code harness dispatch is unavailable');
+        error.statusCode = 503;
+        throw markGoalPartial(error);
+      }
+      try {
+        const effortLevels = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+        const effort = typeof variant === 'string' && effortLevels.has(variant) ? variant : undefined;
+        await promptHarness({
+          sessionId: sessionID,
+          directory,
+          text: expandedPrompt,
+          target: {
+            harnessId: 'claude-code',
+            modelRef: model.modelID,
+            ...(effort ? { effort } : {}),
+          },
+        });
+      } catch (error) {
+        throw markGoalPartial(error);
+      }
+      return { model, agent, variant, promptDispatched: true, dispatchedAsCommand: false };
+    }
+
     const parsedCommand = parseScheduledCommandPrompt(prompt);
     if (parsedCommand) {
       let commandExists = false;

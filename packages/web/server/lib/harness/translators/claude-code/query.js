@@ -153,7 +153,7 @@ export function killProcessTree(pid, options = {}) {
  * @param {(toolName: string, input: Record<string, unknown>, options: object) => Promise<object | null>} [params.canUseTool]
  * @param {Record<string, string | undefined>} [params.env]
  * @param {boolean} [params.includePartialMessages]
- * @param {Record<string, object>} [params.mcpServers]
+ * @param {Record<string, unknown>} [params.mcpServers]
  * @param {string[]} [params.allowedTools]
  * @param {Record<string, object>} [params.agents]
  * @param {string[] | 'all'} [params.skills]
@@ -220,6 +220,9 @@ export async function startClaudeQuery(params) {
   }
   if (typeof params.canUseTool === 'function') {
     options.canUseTool = params.canUseTool;
+  }
+  if (params.mcpServers && typeof params.mcpServers === 'object') {
+    options.mcpServers = params.mcpServers;
   }
   // System prompt: string custom, or Claude Code preset (+ optional OpenCode agent append).
   if (typeof params.systemPrompt === 'string' && params.systemPrompt.trim()) {

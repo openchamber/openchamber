@@ -105,6 +105,7 @@ import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
+import { createClaudeOpenChamberMcpAdapter } from './lib/agent-tool/claude-mcp.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
@@ -454,8 +455,13 @@ const broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
   wsClients: uiNotificationWsClients,
   writeSseEvent,
 });
+/** @type {ReturnType<typeof createClaudeOpenChamberMcpAdapter> | null} */
+let claudeOpenChamberMcpAdapter = null;
 const harnessRouter = createHarnessRouter({
   getBroadcast: () => broadcastGlobalUiEvent,
+  createOpenChamberMcpServers: (options) => (
+    claudeOpenChamberMcpAdapter?.createMcpServers(options) ?? Promise.resolve(null)
+  ),
 });
 const broadcastUiNotification = (...args) => notificationEmitterRuntime.broadcastUiNotification(...args);
 
@@ -1166,6 +1172,8 @@ const openChamberSessionService = createOpenChamberSessionService({
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
   emitSessionCreatedEvent,
+  promptHarness: (body) => harnessRouter.prompt(body),
+  getSessionBinding: (sessionId) => getSessionBinding(sessionId),
 });
 const openChamberControlService = createOpenChamberControlService({
   readSettingsFromDiskMigrated,
@@ -1175,6 +1183,9 @@ const openChamberControlService = createOpenChamberControlService({
   waitForOpenCodeReady,
   sessionService: openChamberSessionService,
   scheduledTaskService,
+  getSessionBinding: (sessionId) => getSessionBinding(sessionId),
+  getHarnessRecentMessages,
+  isHarnessSessionWorking,
 });
 
 const ensureGlobalWatcherStarted = async () => {
@@ -1274,6 +1285,13 @@ async function main(options = {}) {
     getActivePort: () => {
       const address = server?.address?.();
       return typeof address === 'object' && address ? address.port : null;
+    },
+  });
+  claudeOpenChamberMcpAdapter = createClaudeOpenChamberMcpAdapter({
+    executeAction: (...args) => openChamberControlService.execute(...args),
+    isEnabled: async () => {
+      const settings = await readSettingsFromDiskMigrated().catch(() => null);
+      return settings?.agentControlToolEnabled !== false;
     },
   });
 

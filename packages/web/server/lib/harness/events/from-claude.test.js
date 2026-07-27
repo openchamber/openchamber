@@ -318,6 +318,42 @@ describe('extended thinking', () => {
       .map((e) => [e.properties.part.type, e.properties.part.text]);
     expect(finals).toEqual([['reasoning', 'hmm'], ['text', 'answer']]);
   });
+
+  it('maps Claude result usage into assistant.info.tokens for goal budgets', () => {
+    const ctx = createClaudeMapperContext({
+      sessionId: 'ses_1',
+      directory: '/proj',
+      userMessageId: 'msg_u',
+      assistantMessageId: 'msg_a',
+      textPartId: 'prt_text',
+      accumulatedText: 'done',
+      textPartStarted: true,
+    });
+
+    const { events } = mapClaudeMessageToEvents(ctx, {
+      type: 'result',
+      subtype: 'success',
+      result: 'done',
+      total_cost_usd: 0.0123,
+      usage: {
+        input_tokens: 120,
+        output_tokens: 40,
+        cache_read_input_tokens: 15,
+        cache_creation_input_tokens: 5,
+      },
+    });
+
+    const completed = events.find((e) => (
+      e.type === 'message.updated' && e.properties?.info?.role === 'assistant' && e.properties.info.finish === 'stop'
+    ));
+    expect(completed.properties.info.tokens).toEqual({
+      input: 120,
+      output: 40,
+      reasoning: 0,
+      cache: { read: 15, write: 5 },
+    });
+    expect(completed.properties.info.cost).toBe(0.0123);
+  });
 });
 
 describe('divergent full text block', () => {

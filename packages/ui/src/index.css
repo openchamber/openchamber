@@ -1324,6 +1324,49 @@ html:not(.dark) .chat-scroll {
   background: transparent !important;
 }
 
+.markdown-content [data-md-code-lines] {
+  display: block;
+  min-width: 100%;
+}
+
+.markdown-content [data-md-code-line] {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  column-gap: 0.75rem;
+  min-width: 100%;
+}
+
+.markdown-content [data-md-code-line-number] {
+  align-self: stretch;
+  padding-right: 0.75rem;
+  border-right: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  color: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+.markdown-content [data-md-code-line-content] {
+  min-width: 0;
+}
+
+.markdown-content [data-md-code-line-break] {
+  display: none;
+}
+
+[data-message-image-export="true"] [data-md-code-body] {
+  overflow: visible !important;
+}
+
+[data-message-image-export="true"] [data-md-code-line-content] {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+}
+
+[data-message-image-export="true"] [data-md-code-actions] {
+  display: none !important;
+}
+
 .markdown-content [data-markdown="code-block-actions"] {
   pointer-events: auto;
   transition: opacity 0.15s ease;

@@ -144,6 +144,9 @@ export const createOpenChamberControlService = (dependencies) => {
     createClient = createOpencodeClient,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
+    getSessionBinding = null,
+    getHarnessRecentMessages = null,
+    isHarnessSessionWorking = null,
   } = dependencies;
 
   const wait = (duration, signal) => {
@@ -194,6 +197,9 @@ export const createOpenChamberControlService = (dependencies) => {
   };
 
   const sessionStatus = async (client, sessionID, directory) => {
+    if (typeof isHarnessSessionWorking === 'function' && isHarnessSessionWorking(sessionID)) {
+      return { type: 'busy' };
+    }
     const response = await client.session.status({ directory });
     const statuses = response?.data;
     if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) {
@@ -203,15 +209,29 @@ export const createOpenChamberControlService = (dependencies) => {
   };
 
   const sessionMessages = async (client, sessionID, directory, role, limit) => {
-    const fetchLimit = limit === undefined ? undefined : Math.max(100, limit * 4);
-    let response = await client.session.messages({ sessionID, directory, ...(fetchLimit ? { limit: fetchLimit } : {}) });
-    let raw = Array.isArray(response?.data) ? response.data : [];
-    let messages = extractTextMessages(raw, role);
-    if (limit !== undefined && messages.length < limit && raw.length >= fetchLimit) {
-      response = await client.session.messages({ sessionID, directory });
+    const binding = typeof getSessionBinding === 'function' ? getSessionBinding(sessionID) : null;
+    const harnessMessages = binding?.harnessId === 'claude-code'
+      && typeof getHarnessRecentMessages === 'function'
+      ? getHarnessRecentMessages(sessionID)
+      : null;
+
+    let raw = [];
+    if (Array.isArray(harnessMessages) && harnessMessages.length > 0) {
+      raw = harnessMessages;
+    } else {
+      const fetchLimit = limit === undefined ? undefined : Math.max(100, limit * 4);
+      let response = await client.session.messages({ sessionID, directory, ...(fetchLimit ? { limit: fetchLimit } : {}) });
       raw = Array.isArray(response?.data) ? response.data : [];
-      messages = extractTextMessages(raw, role);
+      let messages = extractTextMessages(raw, role);
+      if (limit !== undefined && messages.length < limit && raw.length >= fetchLimit) {
+        response = await client.session.messages({ sessionID, directory });
+        raw = Array.isArray(response?.data) ? response.data : [];
+        messages = extractTextMessages(raw, role);
+      }
+      return limit === undefined ? messages : messages.slice(-limit);
     }
+
+    const messages = extractTextMessages(raw, role);
     return limit === undefined ? messages : messages.slice(-limit);
   };
 

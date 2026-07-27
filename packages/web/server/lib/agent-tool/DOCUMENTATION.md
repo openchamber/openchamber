@@ -83,6 +83,8 @@ error state.
 ## Runtime parity
 
 - Web and Desktop managed OpenCode: injected automatically.
+- Claude Code engine turns: injected as an in-process SDK MCP server via
+  `claude-mcp.js` when `agentControlToolEnabled` is not `false`.
 - External OpenCode selected with `OPENCODE_HOST` or skip-start: not injected,
   because OpenChamber does not control that process environment.
 - VS Code: not injected; the extension owns a separate OpenCode lifecycle.

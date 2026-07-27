@@ -245,7 +245,7 @@
   "dependencies": {
     "@openchamber/quota-core": "workspace:*",
     "@openchamber/ui": "workspace:*",
-    "@opencode-ai/sdk": "1.18.4",
+    "@opencode-ai/sdk": "1.18.5",
     "adm-zip": "^0.5.16",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

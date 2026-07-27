@@ -69,12 +69,14 @@ const CLAUDE_CODE_CAPABILITIES = Object.freeze({
   mcp: 'full',
   // Agent tool + forwardSubagentText → nested child sessions in the sidebar.
   subagents: 'full',
-  multirun: 'none',
-  // Goal loop is supported via harness turn snapshots + /api/harness/prompt
-  // continuations. Token budget accounting stays best-effort (Claude token
-  // fields are not fully mapped yet) — treat as partial in the matrix.
-  goal: 'partial',
-  'openchamber-tool': 'none',
+  // MultiRun launches Claude sessions through the shared UI shell + harness
+  // prompt path (ExecutionTarget sticky bindings), same as OpenCode runs.
+  multirun: 'full',
+  // Goal loop uses harness turn snapshots + /api/harness/prompt continuations
+  // with Claude usage mapped into assistant.info.tokens for budget accounting.
+  goal: 'full',
+  // Injected via Claude Agent SDK createSdkMcpServer → shared control service.
+  'openchamber-tool': 'full',
 });
 
 /** Current Anthropic API resolutions for Claude Code aliases (Fable/Opus/Sonnet 5). */

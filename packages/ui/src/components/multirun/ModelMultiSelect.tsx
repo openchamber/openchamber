@@ -2,13 +2,24 @@ import React from 'react';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { EngineLogo } from '@/components/ui/EngineLogo';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useHarnessStore } from '@/stores/useHarnessStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
+import {
+  buildEngineOptions,
+  buildPickerProviders,
+} from '@/components/chat/model-controls/modelPickerData';
+import { CLAUDE_FAVORITE_PROVIDER_ID } from '@/lib/harness/favorite-targets';
+import { withEnginesSettingsDefaults } from '@/lib/harness/settings';
+import type { HarnessId } from '@/types/harness';
+import { CLAUDE_EFFORT_LEVELS } from '@/types/harness';
 
 /** Chip height class - shared between chips and add button */
 const CHIP_HEIGHT_CLASS = 'h-7';
@@ -39,10 +50,13 @@ const ModelChip: React.FC<{
 }> = ({ model, instanceIndex, totalSameModel, onRemove }) => {
   const displayName = model.displayName || `${model.providerID}/${model.modelID}`;
   const label = totalSameModel > 1 ? `${displayName} (${instanceIndex})` : displayName;
+  const isClaude = model.providerID === CLAUDE_FAVORITE_PROVIDER_ID;
 
   return (
     <div className={cn('flex items-center gap-1.5 px-2 rounded-md bg-interactive-selection/20 border border-border/30', CHIP_HEIGHT_CLASS)}>
-      <ProviderLogo providerId={model.providerID} className="h-3.5 w-3.5" />
+      {isClaude
+        ? <EngineLogo harnessId="claude-code" className="h-3.5 w-3.5" />
+        : <ProviderLogo providerId={model.providerID} className="h-3.5 w-3.5" />}
       <span className="typography-meta font-medium truncate max-w-[140px]">
         {label}
       </span>
@@ -108,6 +122,10 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const { favoriteModelsList, recentModelsList } = useModelLists();
   const hiddenModels = useUIStore((state) => state.hiddenModels);
   const providerOrder = useUIStore((state) => state.providerOrder);
+  const claudeCatalog = useHarnessStore((state) => state.catalogsById['claude-code']);
+  const refreshHarnessCatalog = useHarnessStore((state) => state.refresh);
+  const [pickerHarnessId, setPickerHarnessId] = React.useState<HarnessId>('opencode');
+  const [enginesClaudeCodeEnabled, setEnginesClaudeCodeEnabled] = React.useState(true);
   const [isOpen, setIsOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [availableHeight, setAvailableHeight] = React.useState<number | null>(null);
@@ -115,6 +133,62 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const isSingleSelect = maxModels === 1;
   const canAddModel = maxModels === undefined || selectedModels.length < maxModels || isSingleSelect;
+
+  React.useEffect(() => {
+    void refreshHarnessCatalog();
+  }, [refreshHarnessCatalog]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await runtimeFetch('/api/config/settings', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok || cancelled) return;
+        const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+        if (!data || cancelled) return;
+        const resolved = withEnginesSettingsDefaults({
+          enginesClaudeCodeEnabled: typeof data.enginesClaudeCodeEnabled === 'boolean'
+            ? data.enginesClaudeCodeEnabled
+            : undefined,
+        });
+        setEnginesClaudeCodeEnabled(resolved.enginesClaudeCodeEnabled);
+      } catch {
+        // keep default
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const claudeCatalogModels = React.useMemo(
+    () => claudeCatalog?.sections.flatMap((section) => section.models) ?? [],
+    [claudeCatalog],
+  );
+
+  const pickerProviders = React.useMemo(
+    () => buildPickerProviders({
+      t,
+      pickerHarnessId,
+      claudePickerProviderId: CLAUDE_FAVORITE_PROVIDER_ID,
+      claudeCatalogModels,
+      providers,
+    }),
+    [claudeCatalogModels, pickerHarnessId, providers, t],
+  );
+
+  const engineOptions = React.useMemo(
+    () => buildEngineOptions({
+      t,
+      pickerHarnessId,
+      enginesClaudeCodeEnabled,
+      claudeCatalog,
+    }),
+    [claudeCatalog, enginesClaudeCodeEnabled, pickerHarnessId, t],
+  );
 
   // Count occurrences of each model for display purposes
   const modelCounts = React.useMemo(() => {
@@ -190,6 +264,12 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
+  const handleSelectEngine = React.useCallback((engineId: HarnessId) => {
+    if (engineId === 'claude-code' && !enginesClaudeCodeEnabled) return;
+    setPickerHarnessId(engineId);
+    setSearchQuery('');
+  }, [enginesClaudeCodeEnabled]);
+
   const handleSelectModel = React.useCallback((entry: ModelPickerEntry) => {
     const nextModel = {
       providerID: entry.providerID,
@@ -222,7 +302,26 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     input: t('chat.modelControls.input'),
     output: t('chat.modelControls.output'),
     costPerMillion: t('chat.modelControls.costPerMillion'),
+    engines: t('chat.engines.section'),
   }), [t]);
+
+  const filteredFavorites = React.useMemo(
+    () => favoriteModelsList.filter((entry) => (
+      pickerHarnessId === 'claude-code'
+        ? entry.providerID === CLAUDE_FAVORITE_PROVIDER_ID
+        : entry.providerID !== CLAUDE_FAVORITE_PROVIDER_ID
+    )),
+    [favoriteModelsList, pickerHarnessId],
+  );
+
+  const filteredRecents = React.useMemo(
+    () => recentModelsList.filter((entry) => (
+      pickerHarnessId === 'claude-code'
+        ? entry.providerID === CLAUDE_FAVORITE_PROVIDER_ID
+        : entry.providerID !== CLAUDE_FAVORITE_PROVIDER_ID
+    )),
+    [pickerHarnessId, recentModelsList],
+  );
 
   return (
     <div className="space-y-2">
@@ -259,16 +358,22 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
               }}
             >
               <ModelPickerList
-                providers={providers}
+                providers={pickerProviders}
                 providerOrder={providerOrder}
-                favoriteModels={favoriteModelsList}
-                recentModels={recentModelsList}
+                favoriteModels={filteredFavorites}
+                recentModels={filteredRecents}
                 modelsMetadata={modelsMetadata}
                 hiddenModels={hiddenModels}
                 searchQuery={searchQuery}
                 onSearchQueryChange={setSearchQuery}
                 onSelect={handleSelectModel}
                 labels={labels}
+                engines={engineOptions}
+                onSelectEngine={(engineId) => {
+                  if (engineId === 'opencode' || engineId === 'claude-code') {
+                    handleSelectEngine(engineId);
+                  }
+                }}
                 selectionCount={(entry) => modelCounts.get(`${entry.providerID}:${entry.modelID}`) || 0}
                 disabled={!canAddModel}
                 maxHeightClassName="flex-1"
@@ -293,12 +398,16 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
               const key = `${model.providerID}:${model.modelID}`;
               const totalSameModel = modelCounts.get(key) || 1;
               const instanceIndex = getInstanceIndex(model);
+              const isClaude = model.providerID === CLAUDE_FAVORITE_PROVIDER_ID;
 
-              const provider = providers.find((p) => p.id === model.providerID);
+              const provider = pickerProviders.find((p) => p.id === model.providerID)
+                ?? providers.find((p) => p.id === model.providerID);
               const providerModel = provider?.models?.find((m: Record<string, unknown>) => (m as { id?: string }).id === model.modelID) as
                 | { variants?: Record<string, unknown> }
                 | undefined;
-              const variantKeys = providerModel?.variants ? Object.keys(providerModel.variants) : [];
+              const variantKeys = isClaude
+                ? [...CLAUDE_EFFORT_LEVELS]
+                : (providerModel?.variants ? Object.keys(providerModel.variants) : []);
               const hasVariants = variantKeys.length > 0;
 
               const DEFAULT_VARIANT_VALUE = '__default__';
