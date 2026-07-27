@@ -899,16 +899,25 @@ type GitHubPullRequestFile = {
   patch?: string;
 };
 
-type GitHubPullRequestReviewComment = {
+export type GitHubPullRequestReviewComment = {
   id: number;
   url: string;
   body: string;
   author?: GitHubUserSummary | null;
+  inReplyToId?: number | null;
   path?: string;
   line?: number | null;
   position?: number | null;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type GitHubPullRequestCommit = {
+  sha: string;
+  url: string;
+  message: string;
+  author?: GitHubUserSummary | null;
+  authoredAt?: string;
 };
 
 export type GitHubPullRequestsListResult = {
@@ -925,6 +934,7 @@ export type GitHubPullRequestContextResult = {
   pr?: GitHubPullRequestSummary | null;
   issueComments?: GitHubIssueComment[];
   reviewComments?: GitHubPullRequestReviewComment[];
+  commits?: GitHubPullRequestCommit[];
   files?: GitHubPullRequestFile[];
   diff?: string;
   checks?: GitHubChecksSummary | null;
@@ -982,6 +992,21 @@ export type GitHubPullRequestReadyResult = {
 export type GitHubPullRequestMergeResult = {
   merged: boolean;
   message?: string;
+};
+
+export type GitHubPullRequestCommentCreateInput = {
+  directory: string;
+  number: number;
+  body: string;
+  sourceRepo?: GitHubRepoSelector | null;
+};
+
+export type GitHubPullRequestReviewReplyCreateInput = {
+  directory: string;
+  number: number;
+  commentId: number;
+  body: string;
+  sourceRepo?: GitHubRepoSelector | null;
 };
 
 type GitHubIssueLabel = {
@@ -1095,6 +1120,8 @@ export interface GitHubAPI {
   prUpdate(payload: GitHubPullRequestUpdateInput): Promise<GitHubPullRequest>;
   prMerge(payload: GitHubPullRequestMergeInput): Promise<GitHubPullRequestMergeResult>;
   prReady(payload: GitHubPullRequestReadyInput): Promise<GitHubPullRequestReadyResult>;
+  prCommentCreate(payload: GitHubPullRequestCommentCreateInput): Promise<GitHubIssueComment>;
+  prReviewReplyCreate(payload: GitHubPullRequestReviewReplyCreateInput): Promise<GitHubPullRequestReviewComment>;
 
   prsList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubPullRequestsListResult>;
   prContext(

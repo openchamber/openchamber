@@ -12,8 +12,12 @@ import type {
   GitHubPullRequestMergeResult,
   GitHubPullRequestReadyInput,
   GitHubPullRequestReadyResult,
+  GitHubPullRequestCommentCreateInput,
+  GitHubPullRequestReviewReplyCreateInput,
   GitHubPullRequestUpdateInput,
   GitHubPullRequestStatus,
+  GitHubIssueComment,
+  GitHubPullRequestReviewComment,
   GitHubDeviceFlowComplete,
   GitHubDeviceFlowStart,
   GitHubRepoUpstreamResult,
@@ -45,6 +49,10 @@ export const createVSCodeGitHubAPI = (): GitHubAPI => ({
     sendBridgeMessage<GitHubPullRequestMergeResult>('api:github/pr:merge', payload),
   prReady: async (payload: GitHubPullRequestReadyInput) =>
     sendBridgeMessage<GitHubPullRequestReadyResult>('api:github/pr:ready', payload),
+  prCommentCreate: async (payload: GitHubPullRequestCommentCreateInput) =>
+    sendBridgeMessage<GitHubIssueComment>('api:github/pr:comment', payload),
+  prReviewReplyCreate: async (payload: GitHubPullRequestReviewReplyCreateInput) =>
+    sendBridgeMessage<GitHubPullRequestReviewComment>('api:github/pr:review-comment:reply', payload),
 
   issuesList: async (directory: string, options?: { page?: number; query?: string }) =>
     sendBridgeMessage<GitHubIssuesListResult>('api:github/issues:list', { directory, page: options?.page ?? 1, query: options?.query ?? '' }),

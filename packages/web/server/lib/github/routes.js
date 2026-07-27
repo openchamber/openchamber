@@ -993,6 +993,112 @@ export function registerGitHubRoutes(app) {
     }
   });
 
+  app.post('/api/github/pr/comment', async (req, res) => {
+    try {
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!directory || !number || !body) {
+        return res.status(400).json({ error: 'directory, number, and body are required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.status(401).json({ error: 'GitHub not connected' });
+      }
+
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      if (!repo) {
+        return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
+      }
+
+      const result = await octokit.rest.issues.createComment({
+        owner: repo.owner,
+        repo: repo.repo,
+        issue_number: number,
+        body,
+      });
+
+      const created = result?.data;
+      return res.json({
+        comment: {
+          id: created.id,
+          url: created.html_url,
+          body: created.body || '',
+          createdAt: created.created_at,
+          updatedAt: created.updated_at,
+          author: created.user ? { login: created.user.login, id: created.user.id, avatarUrl: created.user.avatar_url } : null,
+        },
+      });
+    } catch (error) {
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.status(401).json({ error: 'GitHub not connected' });
+      }
+      console.error('Failed to create GitHub PR comment:', error);
+      return res.status(500).json({ error: error.message || 'Failed to create GitHub PR comment' });
+    }
+  });
+
+  app.post('/api/github/pr/review-comment/reply', async (req, res) => {
+    try {
+      const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
+      const number = typeof req.body?.number === 'number' ? req.body.number : null;
+      const commentId = typeof req.body?.commentId === 'number' ? req.body.commentId : null;
+      const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+      if (!directory || !number || !commentId || !body) {
+        return res.status(400).json({ error: 'directory, number, commentId, and body are required' });
+      }
+
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = getOctokitOrNull();
+      if (!octokit) {
+        return res.status(401).json({ error: 'GitHub not connected' });
+      }
+
+      const { resolveGitHubRepoFromDirectory } = await import('./index.js');
+      const { repo } = await resolveGitHubRepoFromDirectory(directory);
+      if (!repo) {
+        return res.status(400).json({ error: 'Unable to resolve GitHub repo from git remote' });
+      }
+
+      const result = await octokit.rest.pulls.createReplyForReviewComment({
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: number,
+        comment_id: commentId,
+        body,
+      });
+
+      const created = result?.data;
+      return res.json({
+        comment: {
+          id: created.id,
+          url: created.html_url,
+          body: created.body || '',
+          inReplyToId: typeof created.in_reply_to_id === 'number' ? created.in_reply_to_id : null,
+          path: created.path,
+          line: typeof created.line === 'number' ? created.line : null,
+          position: typeof created.position === 'number' ? created.position : null,
+          createdAt: created.created_at,
+          updatedAt: created.updated_at,
+          author: created.user ? { login: created.user.login, id: created.user.id, avatarUrl: created.user.avatar_url } : null,
+        },
+      });
+    } catch (error) {
+      if (error?.status === 401) {
+        const { clearGitHubAuth } = await getGitHubLibraries();
+        clearGitHubAuth();
+        return res.status(401).json({ error: 'GitHub not connected' });
+      }
+      console.error('Failed to reply to GitHub review comment:', error);
+      return res.status(500).json({ error: error.message || 'Failed to reply to GitHub review comment' });
+    }
+  });
+
   // ================= GitHub Repo APIs =================
 
   app.get('/api/github/repo/upstream', async (req, res) => {
@@ -1534,12 +1640,27 @@ export function registerGitHubRoutes(app) {
         id: comment.id,
         url: comment.html_url,
         body: comment.body || '',
+        inReplyToId: typeof comment.in_reply_to_id === 'number' ? comment.in_reply_to_id : null,
         createdAt: comment.created_at,
         updatedAt: comment.updated_at,
         path: comment.path,
         line: typeof comment.line === 'number' ? comment.line : null,
         position: typeof comment.position === 'number' ? comment.position : null,
         author: comment.user ? { login: comment.user.login, id: comment.user.id, avatarUrl: comment.user.avatar_url } : null,
+      }));
+
+      const commitsResp = await octokit.rest.pulls.listCommits({
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: number,
+        per_page: 100,
+      });
+      const commits = (Array.isArray(commitsResp?.data) ? commitsResp.data : []).map((commit) => ({
+        sha: commit.sha,
+        url: commit.html_url,
+        message: commit.commit?.message || '',
+        authoredAt: commit.commit?.author?.date || commit.commit?.committer?.date || undefined,
+        author: commit.author ? { login: commit.author.login, id: commit.author.id, avatarUrl: commit.author.avatar_url } : null,
       }));
 
       const filesResp = await octokit.rest.pulls.listFiles({
@@ -1779,6 +1900,7 @@ export function registerGitHubRoutes(app) {
         pr,
         issueComments,
         reviewComments,
+        commits,
         files,
         ...(diff ? { diff } : {}),
         checks,

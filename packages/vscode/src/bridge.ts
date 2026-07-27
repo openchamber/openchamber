@@ -161,6 +161,8 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       case 'api:github/pr:update':
       case 'api:github/pr:merge':
       case 'api:github/pr:ready':
+      case 'api:github/pr:comment':
+      case 'api:github/pr:review-comment:reply':
       case 'api:github/issues:list':
       case 'api:github/issues:get':
       case 'api:github/issues:comments':
