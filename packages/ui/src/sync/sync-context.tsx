@@ -49,6 +49,8 @@ import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
+import { playSoundForEvent } from "@/lib/notificationSound"
+import { useUIStore } from "@/stores/useUIStore"
 import { applyGlobalSessionStatusEvent, applyGlobalSessionStatusSnapshot, useGlobalSessionStatusStore } from "./global-session-status"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
@@ -1547,6 +1549,7 @@ function handleEvent(
           onClick: () => openSessionFromToast(sessionID, resolvedDirectory),
         },
       })
+      playSoundForEvent("question", useUIStore.getState(), isViewed)
     }
   }
 
@@ -1560,25 +1563,31 @@ function handleEvent(
   }
 
   // Notification dispatch for session turn-complete and error events.
-  // These are NOT handled by the event reducer — only the notification store.
+  // These are NOT handled by the event reducer - only the notification store.
   if (payload.type === "session.idle" || payload.type === "session.error") {
     const props = payload.properties as { sessionID?: string; error?: { message?: string; code?: string } }
     const sessionID = props.sessionID
-    // Skip subtask sessions — only top-level sessions generate notifications
+    // Skip subtask sessions - only top-level sessions generate notifications
     const storeState = getDirectoryEventState(store, batch)
     const session = storeState.session.find((s) => s.id === sessionID)
     if (session && (session as { parentID?: string }).parentID) {
-      // subtask — skip notification
+      // subtask - skip notification
     } else if (sessionID) {
+      const isViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
       appendNotification({
         directory: resolvedDirectory,
         session: sessionID,
         time: Date.now(),
-        viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
+        viewed: isViewed,
         ...(payload.type === "session.error"
           ? { type: "error" as const, error: props.error }
           : { type: "turn-complete" as const }),
       })
+      playSoundForEvent(
+        payload.type === "session.error" ? "error" : "completion",
+        useUIStore.getState(),
+        isViewed,
+      )
     }
   }
 

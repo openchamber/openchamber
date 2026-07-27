@@ -5,8 +5,10 @@ import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
+import { previewSoundPack } from '@/lib/notificationSound';
 import {
   SettingsSection,
   SettingsTwoColumn,
@@ -68,6 +70,12 @@ export const NotificationSettings: React.FC = () => {
   const setNotifyOnQuestion = useUIStore(state => state.setNotifyOnQuestion);
   const notificationTemplates = useUIStore(state => state.notificationTemplates);
   const setNotificationTemplates = useUIStore(state => state.setNotificationTemplates);
+  const notificationSoundEnabled = useUIStore(state => state.notificationSoundEnabled);
+  const setNotificationSoundEnabled = useUIStore(state => state.setNotificationSoundEnabled);
+  const notificationSoundVolume = useUIStore(state => state.notificationSoundVolume);
+  const setNotificationSoundVolume = useUIStore(state => state.setNotificationSoundVolume);
+  const notificationSoundPack = useUIStore(state => state.notificationSoundPack);
+  const setNotificationSoundPack = useUIStore(state => state.setNotificationSoundPack);
 
   const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission>('default');
   const [pushSupported, setPushSupported] = React.useState(false);
@@ -516,6 +524,65 @@ export const NotificationSettings: React.FC = () => {
               )}
             </div>
           )}
+        </SettingsSection>
+
+        <SettingsSection
+          settingsItem="notifications.sounds"
+          title={t('settings.notifications.page.sounds.title')}
+        >
+          <div className={SETTINGS_OPTION_STACK_CLASS}>
+            <SettingsCheckboxRow
+              checked={notificationSoundEnabled}
+              onChange={(checked) => setNotificationSoundEnabled(checked)}
+              label={t('settings.notifications.page.sounds.enableLabel')}
+              info={t('settings.notifications.page.sounds.hint')}
+              ariaLabel={t('settings.notifications.page.sounds.enableAria')}
+            />
+            {notificationSoundEnabled && (
+              <>
+                <div className="flex items-center gap-3 py-1">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[5rem]">
+                    {t('settings.notifications.page.sounds.volumeLabel')}
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={notificationSoundVolume}
+                    onChange={(e) => setNotificationSoundVolume(Number(e.target.value))}
+                    className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-muted"
+                    aria-label={t('settings.notifications.page.sounds.volumeLabel')}
+                  />
+                </div>
+                <div className="flex items-center gap-3 py-1">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[5rem]">
+                    {t('settings.notifications.page.sounds.packLabel')}
+                  </span>
+                  <Select value={notificationSoundPack} onValueChange={(v) => setNotificationSoundPack(v as 'bip-bop' | 'alert')}>
+                    <SelectTrigger className="h-8 w-auto min-w-[8rem]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bip-bop">{t('settings.notifications.page.sounds.packBipBop')}</SelectItem>
+                      <SelectItem value="alert">{t('settings.notifications.page.sounds.packAlert')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="py-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => previewSoundPack(notificationSoundPack, notificationSoundVolume)}
+                    aria-label={t('settings.notifications.page.sounds.previewAria')}
+                  >
+                    {t('settings.notifications.page.sounds.previewAction')}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
         </SettingsSection>
 
         {nativeNotificationsEnabled && canShowNotifications && (
