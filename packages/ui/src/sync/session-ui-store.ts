@@ -491,7 +491,7 @@ export async function materializeOpenDraftSession(
   if (!created?.id) throw new Error("Failed to create session")
 
   if (draft.targetFolderId) {
-    const scopeKey = draftDirectoryOverride || created.directory || store.lastLoadedDirectory
+    const scopeKey = draftDirectoryOverride || store.lastLoadedDirectory || created.directory
     if (scopeKey) {
       useSessionFoldersStore.getState().addSessionToFolder(scopeKey, draft.targetFolderId, created.id)
     }
