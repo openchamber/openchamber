@@ -37,7 +37,7 @@ The WebSocket path must remain in both `isUrlAuthWebSocketPath` and relay `ALLOW
 
 ## Verification
 
-Run:
+The web server can use Bun's built-in `Bun.Terminal` first when `USE_BUN_TERMINAL_PTY=true`; otherwise it falls back to `bun-pty` or `node-pty` to drive full-duplex PTY sessions.
 
 ```sh
 bun test packages/web/server/lib/terminal/runtime.test.js packages/web/server/lib/terminal/terminal-ws-protocol.test.js

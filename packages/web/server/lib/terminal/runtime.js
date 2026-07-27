@@ -40,9 +40,14 @@ export function createTerminalRuntime({
   let wsServer = new WebSocketServer({ noServer: true, maxPayload: TERMINAL_WS_MAX_PAYLOAD_BYTES });
   const shellResolver = createTerminalShellResolver({ fs, path, searchPathFor, isExecutable, buildAugmentedPath });
 
+  const useBunTerminalPty = String(process.env.USE_BUN_TERMINAL_PTY || '').trim().toLowerCase() === 'true';
+
   const getPtyProvider = async () => {
     if (!ptyProviderPromise) {
       ptyProviderPromise = loadPtyProvider ? loadPtyProvider() : (async () => {
+        if (useBunTerminalPty && typeof Bun.Terminal !== 'undefined') {
+          try { const pty = await import('./bun-terminal-pty.js'); return { spawn: pty.spawn, backend: 'bun-terminal' }; } catch { /* fall through */ }
+        }
         if (typeof globalThis.Bun !== 'undefined') {
           try { const pty = await import('bun-pty'); return { spawn: pty.spawn, backend: 'bun-pty' }; } catch { /* fall through */ }
         }
