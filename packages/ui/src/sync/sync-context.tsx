@@ -1572,10 +1572,18 @@ function handleEvent(
     const storeState = getDirectoryEventState(store, batch)
     const session = storeState.session.find((s) => s.id === sessionID)
     if (session && (session as { parentID?: string }).parentID) {
-      // subtask - skip notification, but still play the subtask sound if enabled
+      // subtask - skip notification, but still play a sound if enabled.
+      // A subtask that errors plays the error cue; otherwise (session.idle)
+      // plays the subtask (subagent_done) cue. Issue #2386 only maps
+      // subagent_done -> subtask; there is no subagent-error mapping, so an
+      // errored subtask surfaces as the error sound rather than a success cue.
       if (sessionID) {
         const subtaskIsViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
-        playSoundForEvent("subtask", useUIStore.getState(), subtaskIsViewed)
+        playSoundForEvent(
+          payload.type === "session.error" ? "error" : "subtask",
+          useUIStore.getState(),
+          subtaskIsViewed,
+        )
       }
     } else if (sessionID) {
       const isViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)

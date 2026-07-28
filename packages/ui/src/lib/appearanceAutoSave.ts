@@ -4,6 +4,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { TerminalShell } from '@/lib/api/types';
+import type { NotificationSoundEventSounds } from '@/lib/notificationSound';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
@@ -21,6 +22,9 @@ type AppearanceSlice = {
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
   notifyOnPermission: boolean;
+  notificationSoundEnabled: boolean;
+  notificationSoundVolume: number;
+  notificationSoundEventSounds: NotificationSoundEventSounds;
   notificationSoundFocusOnly: boolean;
   notificationTemplates: {
     completion: { title: string; message: string };
@@ -76,6 +80,9 @@ export const startAppearanceAutoSave = (): void => {
     notifyOnError: useUIStore.getState().notifyOnError,
     notifyOnQuestion: useUIStore.getState().notifyOnQuestion,
     notifyOnPermission: useUIStore.getState().notifyOnPermission,
+    notificationSoundEnabled: useUIStore.getState().notificationSoundEnabled,
+    notificationSoundVolume: useUIStore.getState().notificationSoundVolume,
+    notificationSoundEventSounds: useUIStore.getState().notificationSoundEventSounds,
     notificationSoundFocusOnly: useUIStore.getState().notificationSoundFocusOnly,
     notificationTemplates: useUIStore.getState().notificationTemplates,
     summarizeLastMessage: useUIStore.getState().summarizeLastMessage,
@@ -118,6 +125,9 @@ export const startAppearanceAutoSave = (): void => {
       notifyOnError: state.notifyOnError,
       notifyOnQuestion: state.notifyOnQuestion,
       notifyOnPermission: state.notifyOnPermission,
+      notificationSoundEnabled: state.notificationSoundEnabled,
+      notificationSoundVolume: state.notificationSoundVolume,
+      notificationSoundEventSounds: state.notificationSoundEventSounds,
       notificationSoundFocusOnly: state.notificationSoundFocusOnly,
       notificationTemplates: state.notificationTemplates,
       summarizeLastMessage: state.summarizeLastMessage,
@@ -189,6 +199,15 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.notifyOnPermission !== previous.notifyOnPermission) {
       diff.notifyOnPermission = current.notifyOnPermission;
+    }
+    if (current.notificationSoundEnabled !== previous.notificationSoundEnabled) {
+      diff.notificationSoundEnabled = current.notificationSoundEnabled;
+    }
+    if (current.notificationSoundVolume !== previous.notificationSoundVolume) {
+      diff.notificationSoundVolume = current.notificationSoundVolume;
+    }
+    if (JSON.stringify(current.notificationSoundEventSounds) !== JSON.stringify(previous.notificationSoundEventSounds)) {
+      diff.notificationSoundEventSounds = current.notificationSoundEventSounds;
     }
     if (current.notificationSoundFocusOnly !== previous.notificationSoundFocusOnly) {
       diff.notificationSoundFocusOnly = current.notificationSoundFocusOnly;

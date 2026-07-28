@@ -276,8 +276,10 @@ const EVENT_FOCUS_POLICY: Record<NotificationEventKind, 'always' | 'blurred'> = 
  *      plays only when the session is not being viewed.
  *    - Otherwise, all events play regardless of view state (matching opencode's
  *      `sound.when: "always"` default).
+ *
+ * Exported for unit testing the gating logic.
  */
-function shouldPlaySoundForEvent(
+export function shouldPlaySoundForEvent(
   event: NotificationEventKind,
   settings: NotificationSoundSettings,
   isViewed: boolean,

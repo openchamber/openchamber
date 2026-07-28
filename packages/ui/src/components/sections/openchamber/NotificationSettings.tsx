@@ -20,7 +20,10 @@ import {
   SettingsCheckboxRow,
   SettingsGroupTitle,
   SETTINGS_OPTION_STACK_CLASS,
+  SETTINGS_SELECT_SIZE,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
+import { Icon } from '@/components/icon/Icon';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: {
@@ -592,7 +595,7 @@ export const NotificationSettings: React.FC = () => {
                         value={notificationSoundEventSounds[event] ?? DEFAULT_EVENT_SOUNDS[event]}
                         onValueChange={(v) => setNotificationSoundForEvent(event, v)}
                       >
-                        <SelectTrigger className="h-8 w-auto min-w-[9rem] flex-1">
+                        <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t(SOUND_EVENT_LABEL_KEYS[event])}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -619,7 +622,7 @@ export const NotificationSettings: React.FC = () => {
                         aria-label={t('settings.notifications.page.sounds.previewAria')}
                         title={t('settings.notifications.page.sounds.previewAction')}
                       >
-                        ▶
+                        <Icon name="play" className="size-4" />
                       </Button>
                     </div>
                   ))}
