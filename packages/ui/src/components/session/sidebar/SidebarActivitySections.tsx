@@ -63,6 +63,11 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
   } = props;
   const { t } = useI18n();
   const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
+  // Pinned state only feeds the macOS vibrancy backing, so no other runtime
+  // needs to observe it. Toggling vibrancy relaunches the app.
+  const hasMacVibrancy = typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
+  const stickySentinelRef = React.useRef<HTMLDivElement | null>(null);
+  const [isBandStuck, setIsBandStuck] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const [visibleCountBySection, setVisibleCountBySection] = React.useState<Map<string, number>>(new Map());
   const flatVariant = variant === 'flat';
@@ -129,6 +134,25 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
   }, [editingId, openSidebarMenuKey]);
 
   const visibleSections = sections.filter((section) => section.items.length > 0);
+  // Only a pinned band paints the opaque vibrancy backing that masks rows
+  // scrolling under it; unpinned bands stay frosted. The zone starts flush with
+  // the scroll edge, so its top sentinel leaving view tracks pinning.
+  const tracksPinnedBand = hasMacVibrancy && !flatVariant && stickyZoneHeaders && visibleSections.length > 0;
+
+  React.useEffect(() => {
+    const sentinel = stickySentinelRef.current;
+    if (!sentinel) {
+      setIsBandStuck(false);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => entries.forEach((entry) => setIsBandStuck(!entry.isIntersecting)),
+      { threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [tracksPinnedBand]);
+
   if (visibleSections.length === 0) {
     return null;
   }
@@ -136,7 +160,10 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
   return (
     // No top padding: the recent header must start flush with the scroll
     // edge, otherwise it visually "bumps" a few pixels before sticking.
-    <div className={cn(flatVariant ? 'space-y-0.5 pb-2' : 'space-y-2 pb-2')}>
+    <div className={cn('relative', flatVariant ? 'space-y-0.5 pb-2' : 'space-y-2 pb-2')}>
+      {tracksPinnedBand ? (
+        <div ref={stickySentinelRef} className="absolute top-0 h-px w-full pointer-events-none" aria-hidden="true" />
+      ) : null}
       {visibleSections.map((section) => {
         const isCollapsed = collapsed.has(section.key);
         const visibleLimit = Math.max(
@@ -178,11 +205,14 @@ export function SidebarActivitySections(props: Props): React.ReactNode {
         return (
           <div key={section.key} className="relative space-y-1">
             {/* Zone header styled like a project header band; sticky with a
-                solid sidebar backing so rows never show through. */}
-            <div className={cn(
-              '-ml-2.5 -mr-2',
-              stickyZoneHeaders && 'oc-zone-header-backing sticky top-0 z-20 bg-sidebar',
-            )}>
+                solid sidebar backing while pinned so rows never show through. */}
+            <div
+              data-oc-stuck={(isBandStuck && !isCollapsed) || undefined}
+              className={cn(
+                '-ml-2.5 -mr-2',
+                stickyZoneHeaders && 'oc-zone-header-backing sticky top-0 z-20 bg-sidebar',
+              )}
+            >
               <button
                 type="button"
                 onClick={() => toggleSection(section.key)}

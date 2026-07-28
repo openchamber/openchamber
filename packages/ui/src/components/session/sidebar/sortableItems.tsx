@@ -187,13 +187,15 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
               render={
                 // Sticky zone header: this trigger div is a direct child of
                 // the project wrapper (which spans header + sessions), so it
-                // can stick for the whole zone. The solid sidebar backing
-                // keeps scrolled session rows from showing through the
-                // translucent band.
+                // can stick for the whole zone. `data-oc-stuck` gates the
+                // opaque backing that keeps scrolled rows from showing through
+                // a pinned band; a collapsed zone has no rows to mask and
+                // never pins, so it never takes the backing.
                 // Full-bleed band: pull past the list container's padding so
                 // the section band spans the entire sidebar width (ref: edge-
                 // to-edge section headers, not rounded pills).
                 <div
+                  data-oc-stuck={(isStuck && !isCollapsed) || undefined}
                   className={cn(
                     '-ml-2.5 -mr-2 text-left group/project select-none',
                     stickyZoneHeaders && 'oc-zone-header-backing sticky top-0 z-20 bg-sidebar',

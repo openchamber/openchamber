@@ -156,8 +156,10 @@
      entirely (electron#20357 — the backdrop snapshot fails against a
      transparent root), so any translucency lets row text bleed through
      un-blurred. Use the opaque sidebar tone instead; the blur declaration
-     stays only as a progressive enhancement if Electron ever fixes it. */
-  :root.desktop-runtime[data-oc-vibrancy] .oc-zone-header-backing {
+     stays only as a progressive enhancement if Electron ever fixes it.
+     Only pinned bands get the fill: an unpinned band has nothing to mask, so
+     painting it opaque would punch a solid slab through the frosted sidebar. */
+  :root.desktop-runtime[data-oc-vibrancy] .oc-zone-header-backing[data-oc-stuck] {
     background: var(--sidebar-stuck-bg) !important;
     background-color: var(--sidebar-stuck-bg) !important;
     -webkit-backdrop-filter: blur(16px) saturate(1.2);
