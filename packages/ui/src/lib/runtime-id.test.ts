@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   ascendingRuntimeId,
+  hasRuntimeClockSample,
   observeRuntimeResponseDate,
   resetRuntimeIdStateForTests,
 } from './runtime-id';
@@ -25,6 +26,7 @@ describe('runtime-aware ascending IDs', () => {
       headers: { Date: new Date(serverTime).toUTCString() },
     }), clientTime, 1_000);
 
+    expect(hasRuntimeClockSample('runtime-a')).toBe(true);
     const id = ascendingRuntimeId('msg', 'runtime-a', clientTime + 250, 1_250);
     expect(decodeTimestamp(id)).toBe(encodedTimestamp(serverTime + 250));
     expect(decodeTimestamp(id)).toBeLessThan(encodedTimestamp(clientTime));
@@ -56,6 +58,7 @@ describe('runtime-aware ascending IDs', () => {
       headers: { Date: '2026-07-25T12:00:00.000Z' },
     }), clientTime, 3_000);
 
+    expect(hasRuntimeClockSample('runtime-a')).toBe(false);
     expect(decodeTimestamp(ascendingRuntimeId('msg', 'runtime-a', clientTime, 3_000))).toBe(encodedTimestamp(clientTime));
   });
 

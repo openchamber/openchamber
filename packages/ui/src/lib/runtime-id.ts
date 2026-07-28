@@ -16,6 +16,8 @@ type IdState = {
 const clockSamples = new Map<string, ClockSample>();
 const idStates = new Map<string, IdState>();
 
+export const hasRuntimeClockSample = (runtimeKey: string): boolean => clockSamples.has(runtimeKey);
+
 const readMonotonicNow = (wallClockFallback: number): number => {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
     return performance.now();

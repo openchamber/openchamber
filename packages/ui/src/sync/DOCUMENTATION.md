@@ -201,7 +201,7 @@ Rules:
 2. If an action targets a session by ID, resolve the **session's own directory**. Do not assume the current directory is correct.
 3. `session-ui-store.ts` should delegate to `session-actions.ts` for these mutations instead of duplicating SDK calls.
 4. Sending after a revert commits the new branch optimistically: remove the reverted tail and marker before inserting the new message, and restore both if the send is rejected.
-5. Client-generated message and part IDs project the active runtime's last valid HTTP `Date` response through a monotonic clock. This keeps optimistic IDs ordered with server IDs when the device wall clock is skewed; runtimes without a clock sample retain the local-clock fallback.
+5. Client-generated message and part IDs project the active runtime's last valid HTTP `Date` response through a monotonic clock. Before a first send without a sample, the client fetches `/health` once to seed it. This keeps optimistic IDs ordered with server IDs when the device wall clock is skewed; a failed health request retains the local-clock fallback.
 
 Examples of global-store updates performed in `session-actions.ts`:
 

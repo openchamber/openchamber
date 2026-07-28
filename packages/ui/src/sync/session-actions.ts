@@ -28,7 +28,8 @@ import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/l
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { getRuntimeKey } from "@/lib/runtime-switch"
-import { ascendingRuntimeId, getRuntimeTimestamp } from "@/lib/runtime-id"
+import { runtimeFetch } from "@/lib/runtime-fetch"
+import { ascendingRuntimeId, getRuntimeTimestamp, hasRuntimeClockSample } from "@/lib/runtime-id"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -907,6 +908,11 @@ export async function optimisticSend(input: {
   }
 
   const runtimeKey = getRuntimeKey()
+  if (!hasRuntimeClockSample(runtimeKey)) {
+    // A first send can race bootstrap. Seed the server clock before assigning the
+    // ID that OpenCode uses to decide whether the user message has been answered.
+    await runtimeFetch('/health', { cache: 'no-store' }).catch(() => undefined)
+  }
   const createdAt = getRuntimeTimestamp(runtimeKey)
   const messageID = ascendingRuntimeId("msg", runtimeKey)
   input.onMessageID?.(messageID)

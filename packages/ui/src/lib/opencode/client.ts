@@ -30,7 +30,7 @@ import { runtimeFetch } from "@/lib/runtime-fetch";
 import { getRuntimeKey } from "@/lib/runtime-switch";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
-import { ascendingRuntimeId } from "@/lib/runtime-id";
+import { ascendingRuntimeId, hasRuntimeClockSample } from "@/lib/runtime-id";
 import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
@@ -731,7 +731,13 @@ class OpencodeService {
   }): Promise<string> {
     // Use the optimistic/client-generated ID as the real user message ID so SSE
     // can reconcile the echoed server message in-place.
-    const messageId = params.messageId ?? ascendingRuntimeId("msg", getRuntimeKey());
+    const runtimeKey = getRuntimeKey();
+    if (!params.messageId && !hasRuntimeClockSample(runtimeKey)) {
+      // A first send can happen before bootstrap responses seed the clock sample.
+      // Sync once so a skewed device clock cannot create a future-dated message ID.
+      await runtimeFetch('/health', { cache: 'no-store' }).catch(() => undefined);
+    }
+    const messageId = params.messageId ?? ascendingRuntimeId("msg", runtimeKey);
 
     // Build parts array using SDK types (TextPartInput | FilePartInput) plus lightweight agent parts
     const parts: Array<TextPartInput | FilePartInput | AgentPartInputLite> = [];
