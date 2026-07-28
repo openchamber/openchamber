@@ -62,7 +62,6 @@ export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> =
         }
 
         store.navigateToDiff(relativePath, false, 'turn');
-        store.setRightSidebarOpen(false);
         setIsExpanded(false);
     };
 

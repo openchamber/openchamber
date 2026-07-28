@@ -25,6 +25,7 @@ type FilesViewTabsActions = {
   setSelectedPath: (root: string, path: string | null, options?: { allowOutsideRoot?: boolean }) => void;
   ensureSelectedPath: (root: string) => void;
   toggleExpandedPath: (root: string, path: string) => void;
+  collapseAllExpandedPaths: (root: string) => void;
   expandPath: (root: string, path: string) => void;
   expandPaths: (root: string, paths: string[]) => void;
   resetForRuntimeSwitch: (runtimeKey: string) => void;
@@ -411,6 +412,29 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               [normalizedRoot]: {
                 ...current,
                 expandedPaths: nextExpandedPaths,
+              },
+            };
+            return { byRoot: clampRoots(byRoot, MAX_ROOTS) };
+          });
+        },
+
+        collapseAllExpandedPaths: (root) => {
+          const normalizedRoot = normalizePath((root || '').trim());
+          if (!normalizedRoot) {
+            return;
+          }
+
+          set((state) => {
+            const prev = state.byRoot[normalizedRoot];
+            if (!prev || prev.expandedPaths.length === 0) {
+              return state;
+            }
+
+            const byRoot = {
+              ...state.byRoot,
+              [normalizedRoot]: {
+                ...touchRoot(prev),
+                expandedPaths: [],
               },
             };
             return { byRoot: clampRoots(byRoot, MAX_ROOTS) };

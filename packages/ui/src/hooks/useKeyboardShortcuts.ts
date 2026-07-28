@@ -3,7 +3,7 @@ import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
@@ -25,11 +25,25 @@ export const useKeyboardShortcuts = () => {
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
-  const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
-  const toggleBottomTerminal = useUIStore((s) => s.toggleBottomTerminal);
-  const setBottomTerminalExpanded = useUIStore((s) => s.setBottomTerminalExpanded);
+  const currentShortcutDirectory = useDirectoryStore((s) => s.currentDirectory);
+
+  // The terminal lives in the context panel; these mirror the rail behavior.
+  const toggleTerminalSurface = React.useCallback(() => {
+    if (!currentShortcutDirectory) return;
+    useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(currentShortcutDirectory), 'terminal');
+  }, [currentShortcutDirectory]);
+
+  const toggleTerminalSurfaceExpanded = React.useCallback(() => {
+    if (!currentShortcutDirectory) return;
+    const key = normalizeContextPanelDirectoryKey(currentShortcutDirectory);
+    const state = useUIStore.getState();
+    const panel = state.contextPanelByDirectory[key];
+    const activeMode = panel?.isOpen ? panel.tabs.find((tab) => tab.id === panel.activeTabId)?.mode : null;
+    if (activeMode !== 'terminal') {
+      state.openContextSurface(key, 'terminal');
+    }
+    state.toggleContextPanelExpanded(key);
+  }, [currentShortcutDirectory]);
   const isMobile = useUIStore((s) => s.isMobile);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
@@ -97,18 +111,18 @@ export const useKeyboardShortcuts = () => {
         }
         e.preventDefault();
         e.stopPropagation();
-        toggleBottomTerminal();
+        toggleTerminalSurface();
         return;
       }
 
       if (eventMatchesShortcut(e, combo('toggle_terminal_expanded'))) {
-        const { isMobile, isBottomTerminalExpanded } = useUIStore.getState();
+        const { isMobile } = useUIStore.getState();
         if (isMobile) {
           return;
         }
         e.preventDefault();
         e.stopPropagation();
-        setBottomTerminalExpanded(!isBottomTerminalExpanded);
+        toggleTerminalSurfaceExpanded();
         return;
       }
     };
@@ -308,51 +322,53 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      // Legacy right-sidebar shortcuts now target the context surfaces that
+      // replaced the sidebar's tabs.
       if (eventMatchesShortcut(e, combo('toggle_right_sidebar'))) {
-        const { isMobile } = useUIStore.getState();
-        if (isMobile) {
+        const state = useUIStore.getState();
+        if (state.isMobile || !currentDirectory) {
           return;
         }
         e.preventDefault();
-        toggleRightSidebar();
+        const directory = normalizeContextPanelDirectoryKey(currentDirectory);
+        const panelState = state.contextPanelByDirectory[directory];
+        if (panelState?.isOpen) {
+          state.closeContextPanel(directory);
+        } else if (panelState?.activeTabId) {
+          state.setActiveContextPanelTab(directory, panelState.activeTabId);
+        } else {
+          state.openContextSurface(directory, 'git');
+        }
         return;
       }
 
       if (eventMatchesShortcut(e, combo('open_right_sidebar_git'))) {
-        const { isMobile } = useUIStore.getState();
-        if (isMobile) {
+        const state = useUIStore.getState();
+        if (state.isMobile || !currentDirectory) {
           return;
         }
         e.preventDefault();
-        setRightSidebarOpen(true);
-        setRightSidebarTab('git');
+        state.openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'git');
         return;
       }
 
       if (eventMatchesShortcut(e, combo('open_right_sidebar_files'))) {
-        const { isMobile } = useUIStore.getState();
-        if (isMobile) {
+        const state = useUIStore.getState();
+        if (state.isMobile || !currentDirectory) {
           return;
         }
         e.preventDefault();
-        setRightSidebarOpen(true);
-        setRightSidebarTab('files');
+        state.openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'file');
         return;
       }
 
-      if (eventMatchesShortcut(e, combo('cycle_right_sidebar_tab'))) {
-        const { isMobile, rightSidebarTab } = useUIStore.getState();
-        if (isMobile) {
+      if (eventMatchesShortcut(e, combo('open_diff_panel'))) {
+        const state = useUIStore.getState();
+        if (state.isMobile || !currentDirectory) {
           return;
         }
-
-        const tabs = ['git', 'files', 'context'] as const;
-        const currentIndex = tabs.indexOf(rightSidebarTab);
-        const nextTab = tabs[(currentIndex + 1) % tabs.length];
-
         e.preventDefault();
-        setRightSidebarOpen(true);
-        setRightSidebarTab(nextTab);
+        state.openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'diff');
         return;
       }
 
@@ -362,17 +378,17 @@ export const useKeyboardShortcuts = () => {
           return;
         }
         e.preventDefault();
-        toggleBottomTerminal();
+        toggleTerminalSurface();
         return;
       }
 
       if (eventMatchesShortcut(e, combo('toggle_terminal_expanded'))) {
-        const { isMobile, isBottomTerminalExpanded } = useUIStore.getState();
+        const { isMobile } = useUIStore.getState();
         if (isMobile) {
           return;
         }
         e.preventDefault();
-        setBottomTerminalExpanded(!isBottomTerminalExpanded);
+        toggleTerminalSurfaceExpanded();
         return;
       }
 
@@ -616,11 +632,8 @@ export const useKeyboardShortcuts = () => {
     toggleCommandPalette,
     toggleHelpDialog,
     toggleSidebar,
-    toggleRightSidebar,
-    setRightSidebarOpen,
-    setRightSidebarTab,
-    toggleBottomTerminal,
-    setBottomTerminalExpanded,
+    toggleTerminalSurface,
+    toggleTerminalSurfaceExpanded,
     isMobile,
     setSessionSwitcherOpen,
     setActiveMainTab,

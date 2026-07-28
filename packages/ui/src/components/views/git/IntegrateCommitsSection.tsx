@@ -50,6 +50,8 @@ export const IntegrateCommitsSection: React.FC<{
   defaultTargetBranch: string;
   refreshKey?: number;
   onRefresh?: () => void;
+  /** Hide the built-in section heading when a dialog already provides one. */
+  showHeader?: boolean;
 }> = ({
   repoRoot,
   sourceBranch,
@@ -58,6 +60,7 @@ export const IntegrateCommitsSection: React.FC<{
   defaultTargetBranch,
   refreshKey,
   onRefresh,
+  showHeader = true,
 }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -332,22 +335,24 @@ export const IntegrateCommitsSection: React.FC<{
 
   return (
     <section className={containerClassName}>
-      <div className={headerClassName}>
-        <div className="flex items-center gap-2 min-w-0">
-          <Icon name="split-cells-horizontal" className="size-4 text-muted-foreground" />
-          <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.integrate.title')}</h3>
-          {ui.kind === 'ready' && ui.plan.commits.length > 0 ? (
-            <span className="typography-meta text-muted-foreground truncate">
-              {t('gitView.integrate.toMoveCount', { count: ui.plan.commits.length })}
-            </span>
-          ) : null}
+      {showHeader ? (
+        <div className={headerClassName}>
+          <div className="flex items-center gap-2 min-w-0">
+            <Icon name="split-cells-horizontal" className="size-4 text-muted-foreground" />
+            <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.integrate.title')}</h3>
+            {ui.kind === 'ready' && ui.plan.commits.length > 0 ? (
+              <span className="typography-meta text-muted-foreground truncate">
+                {t('gitView.integrate.toMoveCount', { count: ui.plan.commits.length })}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            {ui.kind === 'loading' || ui.kind === 'running' ? (
+              <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
+            ) : null}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {ui.kind === 'loading' || ui.kind === 'running' ? (
-            <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
-          ) : null}
-        </div>
-      </div>
+      ) : null}
 
       <div className={bodyClassName}>
         <div className="flex flex-wrap items-center gap-2">

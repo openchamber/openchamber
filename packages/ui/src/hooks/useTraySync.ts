@@ -39,7 +39,7 @@ import type { QuestionRequest } from '@/types/question';
 const TRAY_ACTION_EVENT = 'openchamber:tray-action';
 // Event-driven updates do the real work; this is just a slow safety net.
 const POLL_INTERVAL_MS = 5000;
-const FLUSH_DEBOUNCE_MS = 120;
+const FLUSH_DEBOUNCE_MS = 500;
 // Pull the full cross-project session list periodically. SSE keeps the active
 // directory instant; this catches sessions created in directories this client
 // never opened (other worktrees, other projects, the TUI, …).
@@ -468,8 +468,8 @@ export const useTraySync = (): void => {
     };
 
     // Coalesce bursts (e.g. token-by-token streaming updates a store rapidly)
-    // into a single push, while staying near-instant for discrete events like
-    // a new session appearing.
+    // into at most one push per FLUSH_DEBOUNCE_MS; discrete events surface within
+    // that window. The main app UI stays instant via SSE/stores.
     const scheduleFlush = () => {
       if (disposed || flushTimer !== null) return;
       flushTimer = window.setTimeout(() => {

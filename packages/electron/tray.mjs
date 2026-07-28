@@ -99,6 +99,8 @@ const toTemplateImage = (p) => {
 export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconPaths, statusIconPaths, onAction }) => {
   let tray = null;
   let lastTitle = null;
+  let lastTooltip = null;
+  let lastMenuKey = null;
 
   // macOS auto-picks the @2x file next to each path and tints the alpha.
   // Windows uses the regular app icon and ignores template tinting.
@@ -274,6 +276,22 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     return Menu.buildFromTemplate(template);
   };
 
+  // Lightweight signature of the menu-affecting content — skips nativeImage
+  // and click handlers that can't be serialized. Cheaper than buildMenu itself.
+  const menuKey = (snapshot) => {
+    const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+    const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
+    const usage = snapshot.usage && typeof snapshot.usage === 'object' ? snapshot.usage : {};
+    const groups = Array.isArray(usage.groups) ? usage.groups : [];
+    return JSON.stringify({
+      h: typeof snapshot.instanceName === 'string' ? snapshot.instanceName : '',
+      s: sessions.map((s) => `${s.id}|${s.title}|${s.status}|${s.unseen}|${s.hasError}|${s.subtitle}|${s.directory}`),
+      a: approvals.map((a) => `${a.id}|${a.kind}|${a.sessionId}|${a.sessionTitle}|${a.label}|${a.directory}`),
+      u: usage.mode || '',
+      g: groups.map((g) => `${g.provider}|${g.status}|${(Array.isArray(g.rows) ? g.rows : []).map((r) => `${r.label}|${r.value}`).join(',')}`),
+    });
+  };
+
   const update = (rawSnapshot) => {
     const snapshot = rawSnapshot && typeof rawSnapshot === 'object' ? rawSnapshot : {};
     const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
@@ -293,8 +311,16 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
       lastTitle = title;
     }
     applyIconState(computeIconState(counts));
-    widget.setToolTip(computeTooltip(counts, sessions.length));
-    widget.setContextMenu(buildMenu(snapshot));
+    const tooltip = computeTooltip(counts, sessions.length);
+    if (tooltip !== lastTooltip) {
+      widget.setToolTip(tooltip);
+      lastTooltip = tooltip;
+    }
+    const key = menuKey(snapshot);
+    if (key !== lastMenuKey) {
+      widget.setContextMenu(buildMenu(snapshot));
+      lastMenuKey = key;
+    }
   };
 
   const destroy = () => {
@@ -304,6 +330,8 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     }
     tray = null;
     lastTitle = null;
+    lastTooltip = null;
+    lastMenuKey = null;
     iconState = null;
   };
 

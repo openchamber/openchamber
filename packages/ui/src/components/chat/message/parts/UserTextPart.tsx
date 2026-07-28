@@ -236,7 +236,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                                  "[&_[data-component='markdown-code']>div]:p-0",
                                  "[&_[data-component='markdown-code']_pre]:inline",
                                  "[&_[data-component='markdown-code']_code]:inline",
-                                 "[&_[data-md-code-line-numbers]]:hidden",
+                                 "[&_[data-md-code-line]]:!inline",
+                                 "[&_[data-md-code-line-number]]:hidden",
+                                 "[&_[data-md-code-line-break]]:!inline",
                              ]
                         )}
                         disableLinkSafety

@@ -37,3 +37,27 @@ export async function copyTextToClipboard(text: string): Promise<ClipboardCopyRe
     error: clipboardError ?? 'Clipboard access denied in current context',
   };
 }
+
+export async function copyMarkdownToClipboard(markdown: string, html: string): Promise<ClipboardCopyResult> {
+  if (
+    typeof navigator !== 'undefined'
+    && navigator.clipboard?.write
+    && typeof ClipboardItem !== 'undefined'
+  ) {
+    try {
+      const payload: Record<string, Blob> = {
+        'text/plain': new Blob([markdown], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
+      };
+      if (typeof ClipboardItem.supports === 'function' && ClipboardItem.supports('text/markdown')) {
+        payload['text/markdown'] = new Blob([markdown], { type: 'text/markdown' });
+      }
+      await navigator.clipboard.write([new ClipboardItem(payload)]);
+      return { ok: true, method: 'clipboard' };
+    } catch {
+      // Fall back to plain Markdown when rich clipboard writes are unavailable.
+    }
+  }
+
+  return copyTextToClipboard(markdown);
+}

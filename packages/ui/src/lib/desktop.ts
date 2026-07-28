@@ -38,8 +38,9 @@ export type SkillCatalogConfig = {
   gitIdentityId?: string;
 };
 
-export type DesktopWindowControlsPosition = 'auto' | 'left' | 'right';
+export type DesktopWindowControlsPosition = 'left' | 'right';
 export type DesktopWindowControlsSide = 'left' | 'right';
+export type DesktopWindowControlAction = 'close' | 'minimize' | 'maximize';
 
 export type DesktopSettings = {
   themeId?: string;
@@ -252,6 +253,9 @@ export const getElectronPlatform = (): string | null => {
 /** Width of the three in-app window control buttons when placed on the left (3 × w-8). */
 export const DESKTOP_WINDOW_CONTROLS_WIDTH_PX = 96;
 
+/** Default side for in-app window controls (Windows-style, right). */
+export const DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION: DesktopWindowControlsPosition = 'right';
+
 /** Windows and Linux use frameless windows with in-app minimize/maximize/close controls. */
 export const usesFramelessElectronChrome = (): boolean => {
   if (!isElectronShell()) return false;
@@ -259,21 +263,36 @@ export const usesFramelessElectronChrome = (): boolean => {
   return platform === 'win32' || platform === 'linux';
 };
 
-export const getDefaultDesktopWindowControlsSide = (platform: string | null = getElectronPlatform()): DesktopWindowControlsSide => {
-  if (platform === 'linux') {
-    return 'left';
+/** Normalize a stored preference; legacy `auto` maps to the right-side default. */
+export const normalizeDesktopWindowControlsPosition = (
+  value: unknown,
+): DesktopWindowControlsPosition | undefined => {
+  if (value === 'left' || value === 'right') {
+    return value;
   }
-  return 'right';
+  // Legacy "auto" never read OS chrome config; treat it as the right default.
+  if (value === 'auto') {
+    return DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION;
+  }
+  return undefined;
 };
 
 export const resolveDesktopWindowControlsSide = (
   preference: DesktopWindowControlsPosition | undefined,
-  platform: string | null = getElectronPlatform(),
 ): DesktopWindowControlsSide => {
-  if (preference === 'left' || preference === 'right') {
-    return preference;
-  }
-  return getDefaultDesktopWindowControlsSide(platform);
+  return preference === 'left' ? 'left' : DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION;
+};
+
+/**
+ * Left matches macOS traffic-light order (close, minimize, maximize).
+ * Right keeps Windows order (minimize, maximize, close).
+ */
+export const getDesktopWindowControlsOrder = (
+  side: DesktopWindowControlsSide,
+): DesktopWindowControlAction[] => {
+  return side === 'left'
+    ? ['close', 'minimize', 'maximize']
+    : ['minimize', 'maximize', 'close'];
 };
 
 export const hasDesktopInvoke = (): boolean => {

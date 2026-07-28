@@ -4,6 +4,7 @@
 - Chat: jumping to messages in long conversations now lands on the intended message when earlier rows have not been rendered yet.
 - Settings: added an option to hide starter suggestions on the new-session screen.
 - Shortcuts: fixed a regression where double-Escape could be primed when the current session was not active.
+- Usage: added Crof and NeuralWatt quota tracking, including the missing Crof switch arm that previously fell back to "Unsupported provider" (thanks to @kydorn).
 
 ## [1.16.3] - 2026-07-22
 

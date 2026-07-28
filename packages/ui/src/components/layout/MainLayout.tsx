@@ -1,13 +1,12 @@
 import React, { useRef, useEffect } from 'react';
 import { animate, motion, useMotionValue } from 'motion/react';
 import { Header } from './Header';
-import { BottomTerminalDock } from './BottomTerminalDock';
 import { Sidebar } from './Sidebar';
 import { SidebarTopBar } from './SidebarTopBar';
 import { TitlebarLeftControls } from './TitlebarLeftControls';
-import { RightSidebar } from './RightSidebar';
-import { ProjectContextPanel, RightSidebarTabs } from './RightSidebarTabs';
+import { ProjectContextPanel } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
+import { ContextPanelRail } from './ContextPanelRail';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
@@ -41,15 +40,7 @@ const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/Se
 const MultiRunWindow = lazyWithChunkRecovery(() => import('@/components/views/MultiRunWindow').then(m => ({ default: m.MultiRunWindow })));
 
 export const MainLayout: React.FC = () => {
-    const RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH = 1140;
-    const RIGHT_SIDEBAR_AUTO_OPEN_WIDTH = 1220;
-    const BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT = 640;
-    const BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT = 700;
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-    const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
-    const isBottomTerminalOpen = useUIStore((state) => state.isBottomTerminalOpen);
-    const setRightSidebarOpen = useUIStore((state) => state.setRightSidebarOpen);
-    const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
     const setIsMobile = useUIStore((state) => state.setIsMobile);
     const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
@@ -58,9 +49,7 @@ export const MainLayout: React.FC = () => {
     const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
-    const { isMobile, isTablet } = useDeviceInfo();
-    const rightSidebarAutoClosedRef = React.useRef(false);
-    const bottomTerminalAutoClosedRef = React.useRef(false);
+    const { isMobile } = useDeviceInfo();
     const mobilePanelsResetRef = React.useRef(false);
 
     // Mobile drawer state
@@ -162,10 +151,7 @@ export const MainLayout: React.FC = () => {
         mobilePanelsResetRef.current = true;
         setMobileSessionPanelOpen(false);
         setMobileRightSidebarOpen(false);
-        if (useUIStore.getState().isRightSidebarOpen) {
-            setRightSidebarOpen(false);
-        }
-    }, [isMobile, setMobileSessionPanelOpen, setRightSidebarOpen]);
+    }, [isMobile, setMobileSessionPanelOpen]);
 
     useEffect(() => {
         if (!isMobile || activeMainTab !== 'chat' || mobileLeftDrawerOpen || mobileRightSidebarOpen || isSettingsDialogOpen) {
@@ -214,10 +200,7 @@ export const MainLayout: React.FC = () => {
 
         setMobileSessionPanelOpen(false);
         setMobileRightSidebarOpen(false);
-        if (isRightSidebarOpen) {
-            setRightSidebarOpen(false);
-        }
-    }, [isMobile, isSettingsDialogOpen, isRightSidebarOpen, setMobileSessionPanelOpen, setRightSidebarOpen]);
+    }, [isMobile, isSettingsDialogOpen, setMobileSessionPanelOpen]);
 
     useUpdatePolling();
 
@@ -228,127 +211,6 @@ export const MainLayout: React.FC = () => {
         }
     }, [isMobile, setIsMobile]);
 
-    React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-
-        let frameId: number | undefined;
-
-        const handleResize = () => {
-            if (frameId !== undefined) {
-                return;
-            }
-            frameId = window.requestAnimationFrame(() => {
-                frameId = undefined;
-                useUIStore.getState().updateProportionalSidebarWidths();
-            });
-        };
-
-        window.addEventListener('resize', handleResize);
-
-        return () => {
-            window.removeEventListener('resize', handleResize);
-            if (frameId !== undefined) {
-                window.cancelAnimationFrame(frameId);
-            }
-        };
-    }, []);
-
-    React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-
-        let frameId: number | undefined;
-
-        const handleResponsivePanels = () => {
-            const state = useUIStore.getState();
-            const width = window.innerWidth;
-            const height = window.innerHeight;
-
-            // Touch devices frequently resize when the on-screen keyboard opens.
-            // Treat panel auto-collapse/restore as desktop-only so keyboard
-            // viewport changes do not churn drawer or terminal layout state.
-            if (!isMobile && !isTablet) {
-                const shouldCloseRightSidebar = width < RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH;
-                const canAutoOpenRightSidebar = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
-
-                if (shouldCloseRightSidebar) {
-                    if (state.isRightSidebarOpen) {
-                        setRightSidebarOpen(false);
-                        rightSidebarAutoClosedRef.current = true;
-                    }
-                } else if (canAutoOpenRightSidebar && rightSidebarAutoClosedRef.current) {
-                    setRightSidebarOpen(true);
-                    rightSidebarAutoClosedRef.current = false;
-                }
-
-                const shouldCloseBottomTerminal =
-                    height < BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT;
-                const canAutoOpenBottomTerminal =
-                    height >= BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT;
-
-                if (shouldCloseBottomTerminal) {
-                    if (state.isBottomTerminalOpen) {
-                        setBottomTerminalOpen(false);
-                        bottomTerminalAutoClosedRef.current = true;
-                    }
-                } else if (canAutoOpenBottomTerminal && bottomTerminalAutoClosedRef.current) {
-                    setBottomTerminalOpen(true);
-                    bottomTerminalAutoClosedRef.current = false;
-                }
-            }
-        };
-
-        const handleResize = () => {
-            if (frameId !== undefined) {
-                return;
-            }
-            frameId = window.requestAnimationFrame(() => {
-                frameId = undefined;
-                handleResponsivePanels();
-            });
-        };
-
-        handleResponsivePanels();
-        window.addEventListener('resize', handleResize);
-
-        return () => {
-            window.removeEventListener('resize', handleResize);
-            if (frameId !== undefined) {
-                window.cancelAnimationFrame(frameId);
-            }
-        };
-    }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
-
-    React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-
-        const unsubscribe = useUIStore.subscribe((state, prevState) => {
-            const width = window.innerWidth;
-            const height = window.innerHeight;
-
-            const rightCanAutoOpen = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
-            const bottomCanAutoOpen =
-                height >= BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT;
-
-            if (state.isRightSidebarOpen !== prevState.isRightSidebarOpen && rightCanAutoOpen) {
-                rightSidebarAutoClosedRef.current = false;
-            }
-
-            if (state.isBottomTerminalOpen !== prevState.isBottomTerminalOpen && bottomCanAutoOpen) {
-                bottomTerminalAutoClosedRef.current = false;
-            }
-        });
-
-        return () => {
-            unsubscribe();
-        };
-    }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
-
     const handleToggleMobileRightDrawer = React.useCallback(() => {
         if (mobileLeftDrawerOpen) {
             setMobileSessionPanelOpen(false);
@@ -357,6 +219,12 @@ export const MainLayout: React.FC = () => {
     }, [mobileLeftDrawerOpen, mobileRightSidebarOpen, setMobileSessionPanelOpen]);
 
     const secondaryView = React.useMemo(() => {
+        // Desktop surfaces live in the context panel; the only full-view
+        // overlays left there are the terminal (promoted by project actions)
+        // and the diagram viewer. Mobile keeps the full tab set.
+        if (!isMobile && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
+            return null;
+        }
         switch (activeMainTab) {
             case 'plan':
                 return <React.Suspense fallback={null}><PlanView /></React.Suspense>;
@@ -375,7 +243,7 @@ export const MainLayout: React.FC = () => {
             default:
                 return null;
         }
-    }, [activeMainTab, mobileRightSidebarOpen]);
+    }, [activeMainTab, isMobile, mobileRightSidebarOpen]);
 
     const isChatActive = activeMainTab === 'chat';
 
@@ -539,20 +407,10 @@ export const MainLayout: React.FC = () => {
                                             <ContextPanel />
                                         </div>
                                     </div>
-                                    <BottomTerminalDock isOpen={isBottomTerminalOpen && activeMainTab !== 'terminal'} isMobile={isMobile}>
-                                        {isBottomTerminalOpen && activeMainTab !== 'terminal' ? (
-                                            <ErrorBoundary>
-                                                <TerminalView />
-                                            </ErrorBoundary>
-                                        ) : null}
-                                    </BottomTerminalDock>
                                 </div>
-                                <RightSidebar
-                                    isOpen={isRightSidebarOpen}
-                                    className="bg-background border-t border-border/50"
-                                >
-                                    <ErrorBoundary><RightSidebarTabs /></ErrorBoundary>
-                                </RightSidebar>
+                                <div className="border-t border-border/50" data-page-scroll-lock="true">
+                                    <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+                                </div>
                             </div>
                         </div>
                     </div>
