@@ -150,6 +150,20 @@
     background-color: transparent !important;
   }
 
+  /* Sticky sidebar zone headers must fully mask the rows scrolling under
+     them. A frosted (translucent + backdrop-blur) backing is NOT possible
+     here: Electron's transparent/vibrancy windows break backdrop-filter
+     entirely (electron#20357 — the backdrop snapshot fails against a
+     transparent root), so any translucency lets row text bleed through
+     un-blurred. Use the opaque sidebar tone instead; the blur declaration
+     stays only as a progressive enhancement if Electron ever fixes it. */
+  :root.desktop-runtime[data-oc-vibrancy] .oc-zone-header-backing {
+    background: var(--sidebar-stuck-bg) !important;
+    background-color: var(--sidebar-stuck-bg) !important;
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    backdrop-filter: blur(16px) saturate(1.2);
+  }
+
   .font-sans {
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif) !important;
   }

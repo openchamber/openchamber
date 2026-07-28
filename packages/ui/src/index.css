@@ -680,7 +680,9 @@ html:not(.dark) .chat-scroll {
   inset: 0;
   pointer-events: none;
   transition: opacity 0.2s ease;
-  z-index: 10;
+  /* Above sticky zone headers (z-20) — the thumb must never dive under
+     a stuck sidebar header while scrolling. */
+  z-index: 30;
 }
 
 .overlay-scrollbar--dense,

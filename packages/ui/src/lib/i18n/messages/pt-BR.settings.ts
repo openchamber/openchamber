@@ -1250,7 +1250,7 @@ export const settingsDict = {
   "settings.openchamber.worktrees.setup.waitForCommandsAria": "Aguardar os comandos de configuração do Worktree antes de criar ou enviar uma sessão",
   "settings.openchamber.worktrees.setup.toast.saveFailed": "Falha ao salvar os comandos de configuração do Worktree",
   "settings.openchamber.worktrees.list.title": "Worktrees existentes",
-  "settings.openchamber.worktrees.list.tooltip": "Os worktrees existem fuera do repositório (gerenciados por OpenCode). Excluir um worktree também remove sessões vinculadas.",
+  "settings.openchamber.worktrees.list.tooltip": "Excluir um worktree também remove as sessões vinculadas.",
   "settings.openchamber.worktrees.list.loading": "Carregando worktrees...",
   "settings.openchamber.worktrees.list.empty": "Nenhum worktree encontrado para este projeto",
   "settings.openchamber.worktrees.list.detachedHead": "HEAD desvinculado",

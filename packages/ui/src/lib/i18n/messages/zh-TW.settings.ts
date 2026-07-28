@@ -1156,7 +1156,7 @@
   'settings.openchamber.worktrees.setup.waitForCommandsAria': '建立或傳送工作階段前等待 Worktree 設定命令完成',
   'settings.openchamber.worktrees.setup.toast.saveFailed': '儲存 Worktree 設定命令失敗',
   'settings.openchamber.worktrees.list.title': '現有 worktree',
-  'settings.openchamber.worktrees.list.tooltip': 'Worktree 位於儲存庫外部（由 OpenCode 管理）。刪除 worktree 也會刪除關聯工作階段。',
+  'settings.openchamber.worktrees.list.tooltip': '刪除 worktree 也會刪除其關聯工作階段。',
   'settings.openchamber.worktrees.list.loading': '正在載入 worktree...',
   'settings.openchamber.worktrees.list.empty': '該專案找不到 worktree',
   'settings.openchamber.worktrees.list.detachedHead': '分離 HEAD',

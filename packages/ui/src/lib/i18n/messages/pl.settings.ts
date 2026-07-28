@@ -1187,7 +1187,7 @@ export const settingsDict = {
   'settings.openchamber.worktrees.list.empty': 'Nie znaleziono worktree dla tego projektu',
   'settings.openchamber.worktrees.list.loading': 'Ładowanie worktree...',
   'settings.openchamber.worktrees.list.title': 'Istniejące worktree',
-  'settings.openchamber.worktrees.list.tooltip': 'Worktree znajdują się poza repozytorium i są zarządzane przez OpenCode. Usunięcie worktree usuwa także powiązane sesje.',
+  'settings.openchamber.worktrees.list.tooltip': 'Usunięcie worktree usuwa także powiązane sesje.',
   'settings.openchamber.worktrees.setup.addCommand': 'Dodaj polecenie',
   'settings.openchamber.worktrees.setup.commandPlaceholder': 'np. bun install',
   'settings.openchamber.worktrees.setup.loading': 'Ładowanie...',

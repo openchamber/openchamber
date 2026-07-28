@@ -274,7 +274,10 @@ function TooltipContent({
           <BaseTooltip.Popup
             data-slot="tooltip-content"
             className={cn(
-              "bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] border border-border/60 transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance overflow-hidden",
+              // data-instant is set when moving between grouped tooltips
+              // (shared TooltipProvider): reposition without replaying the
+              // full exit/enter animation.
+              "bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] border border-border/60 transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none data-[instant]:duration-0 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance overflow-hidden",
               className
             )}
             style={{ ...style }}

@@ -31,11 +31,17 @@ import { useI18n } from '@/lib/i18n';
 
 export interface WorktreeSectionContentProps {
   projectRef?: { id: string; path: string } | null;
+  /**
+   * 'all' renders setup commands + the worktree list (settings panel);
+   * 'list-only' renders just the list (the Worktrees page — setup commands
+   * stay a settings concern).
+   */
+  sections?: 'all' | 'list-only';
 }
 
 const SETUP_COMMANDS_SAVE_DELAY_MS = 450;
 
-export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null }) => {
+export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null, sections = 'all' }) => {
   const { t } = useI18n();
   const { isMobile, isTablet } = useDeviceInfo();
   const alwaysShowActions = isMobile || isTablet;
@@ -369,6 +375,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
   return (
     <>
+      {sections === 'all' ? (
       <ProjectSettingsSubsection
         title={t('settings.projects.page.section.worktree')}
         settingsItem="projects.worktree"
@@ -428,6 +435,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
           </div>
         )}
       </ProjectSettingsSubsection>
+      ) : null}
 
       <ProjectSettingsSubsection
         title={t('settings.openchamber.worktrees.list.title')}
@@ -440,7 +448,9 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
             {t('settings.openchamber.worktrees.list.empty')}
           </p>
         ) : (
-          <div className={cn('space-y-1', PROJECT_SETTINGS_CONTROL_WIDTH)}>
+          // The settings panel keeps its narrow control column; the full-page
+          // Worktrees surface lets rows use the whole content width.
+          <div className={cn('space-y-1', sections === 'all' && PROJECT_SETTINGS_CONTROL_WIDTH)}>
             {availableWorktrees.map((worktree) => (
               <div
                 key={worktree.path}
@@ -451,9 +461,6 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                     <p className="typography-meta min-w-0 truncate text-foreground">
                       {worktree.label || worktree.branch || t('settings.openchamber.worktrees.list.detachedHead')}
                     </p>
-                    <span className="typography-micro flex-shrink-0 self-center rounded bg-sidebar-accent/40 px-1.5 py-[1px] leading-none text-muted-foreground/60">
-                      OpenCode
-                    </span>
                   </div>
                   <p className="typography-micro truncate text-muted-foreground/60">
                     {formatPathForDisplay(worktree.path, homeDirectory)}

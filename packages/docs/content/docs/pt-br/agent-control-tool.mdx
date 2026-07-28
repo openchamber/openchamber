@@ -1,0 +1,39 @@
+---
+title: Ferramenta de controle para agentes
+description: Permita que um agente gerencie sessões, worktrees e tarefas agendadas do OpenChamber pelo chat.
+---
+
+# Ferramenta de controle para agentes
+
+Use a ferramenta de agente `openchamber` para gerenciar o trabalho no aplicativo diretamente pelo chat. Ela vem ativada por padrão quando o OpenChamber executa seu próprio servidor OpenCode local; não é preciso instalar outra ferramenta nem executar um comando de shell.
+
+## O que você pode pedir
+
+Peça ao agente em linguagem natural. Por exemplo:
+
+- “Crie uma nova sessão do OpenChamber neste projeto, use o modelo `openai/gpt-5.6-sol` e envie este prompt: revise o fluxo de autenticação.”
+- “Crie uma nova sessão do OpenChamber para esta tarefa em um worktree separado e peça para ela adicionar testes ao fluxo de login.”
+- “Use o OpenChamber para listar minhas 10 sessões mais recentes e inclua o status atual delas.”
+- “Crie no OpenChamber uma tarefa agendada chamada Revisão dos dias úteis que envie este prompt às 09:00 de cada dia útil: revise as alterações desde a última execução.”
+- “Execute agora a tarefa agendada do OpenChamber chamada Revisão dos dias úteis.”
+- “Verifique a sessão do OpenChamber chamada Revisão de autenticação e mostre a resposta mais recente do assistente.”
+
+A ferramenta pode listar projetos e preferências de modelos, criar e continuar sessões, bifurcar uma sessão, criar sessões em worktrees isolados e gerenciar tarefas agendadas. As sessões iniciadas assim aparecem no OpenChamber como qualquer outra, então você pode abri-las e continuar o trabalho por conta própria.
+
+## Lembre-se
+
+- Os prompts de novas sessões retornam imediatamente por padrão. Acompanhe a sessão no OpenChamber ou peça ao agente para verificá-la mais tarde.
+- Um worktree separado só é criado quando você pede. As alterações não commitadas do worktree atual não são copiadas.
+- A ferramenta não pode excluir sessões ou worktrees, registrar caminhos de projetos, executar comandos de shell arbitrários nem acessar URLs arbitrárias.
+
+## Ativar ou desativar a ferramenta
+
+Abra **Configurações → Geral → OpenCode CLI**, altere **Ferramenta de controle para agentes** e selecione **Save + Reload**. A configuração entra em vigor depois que o servidor OpenCode gerenciado reinicia.
+
+A ferramenta não está disponível quando o OpenChamber se conecta a um servidor OpenCode externo por `OPENCODE_HOST` ou skip-start, nem na extensão do VS Code. As instalações desktop e web que usam o servidor OpenCode gerenciado pelo OpenChamber têm suporte automático.
+
+## Relacionado
+
+- [Tarefas agendadas](/pt-br/scheduled-tasks/)
+- [Sessões de worktree](/pt-br/worktrees/)
+- [Objetivos de sessão](/pt-br/session-goals/)

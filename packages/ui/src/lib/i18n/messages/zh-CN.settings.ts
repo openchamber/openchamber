@@ -1250,7 +1250,7 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.waitForCommandsAria': '创建或发送会话前等待 Worktree 初始化命令完成',
   'settings.openchamber.worktrees.setup.toast.saveFailed': '保存 Worktree 初始化命令失败',
   'settings.openchamber.worktrees.list.title': '现有工作树',
-  'settings.openchamber.worktrees.list.tooltip': '工作树位于仓库外部（由 OpenCode 管理）。删除工作树也会删除关联会话。',
+  'settings.openchamber.worktrees.list.tooltip': '删除工作树也会删除其关联会话。',
   'settings.openchamber.worktrees.list.loading': '正在加载工作树...',
   'settings.openchamber.worktrees.list.empty': '该项目未找到工作树',
   'settings.openchamber.worktrees.list.detachedHead': '分离 HEAD',

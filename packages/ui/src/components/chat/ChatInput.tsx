@@ -978,8 +978,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         if (currentSessionId && !queuedOnly) {
-            const dismissedQuestions = await sessionActions.dismissOpenQuestionsForSession(currentSessionId);
-            if (dismissedQuestions) {
+            // Sending is authoritative for blocking prompts: deny pending
+            // permissions and dismiss open questions for the session subtree,
+            // then queue the message once if either was open. The deny/clear
+            // vanishes the card instantly (optimistic); rejecting unblocks the
+            // agent's tool but does NOT end its turn, so a direct send would
+            // race with the still-active run and be silently discarded by the
+            // OpenCode runner. Instead we queue; the queued-message auto-send
+            // hook delivers it as the next turn once the rejected turn winds
+            // down and the session returns to idle (parity with #1740).
+            const [deniedPermissions, dismissedQuestions] = await Promise.all([
+                sessionActions.dismissOpenPermissionsForSession(currentSessionId),
+                sessionActions.dismissOpenQuestionsForSession(currentSessionId),
+            ]);
+            if (deniedPermissions || dismissedQuestions) {
                 handleQueueMessage();
                 return;
             }
