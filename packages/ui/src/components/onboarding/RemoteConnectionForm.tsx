@@ -15,6 +15,30 @@ import { useI18n } from '@/lib/i18n';
 
 type ConnectionState = 'idle' | 'testing' | 'success' | 'error';
 
+type HeaderDraft = {
+  id: string;
+  name: string;
+  value: string;
+};
+
+const createHeaderDraft = (name = '', value = ''): HeaderDraft => ({
+  id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `header-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  name,
+  value,
+});
+
+const buildRequestHeaders = (headers: HeaderDraft[]): Record<string, string> | undefined => {
+  const next: Record<string, string> = {};
+  for (const header of headers) {
+    const name = header.name.trim();
+    const value = header.value.trim();
+    if (name && value && name.toLowerCase() !== 'authorization') next[name] = value;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+};
+
 export interface RemoteConnectionFormProps {
   onBack: () => void;
   /** Optional: show the back button (default: true) */
@@ -76,6 +100,7 @@ export function RemoteConnectionForm({
   const [hosts, setHosts] = useState<DesktopHost[]>([]);
   const [view, setView] = useState<'instances' | 'add' | 'import'>(() => showInstancePicker ? 'instances' : 'add');
   const [connectLink, setConnectLink] = useState('');
+  const [requestHeaders, setRequestHeaders] = useState<HeaderDraft[]>([]);
 
   useEffect(() => {
     if (!showInstancePicker) return;
@@ -106,14 +131,14 @@ export function RemoteConnectionForm({
     setError('');
 
     try {
-      const result = await desktopHostProbe(normalizedUrl);
+      const result = await desktopHostProbe(normalizedUrl, { requestHeaders: buildRequestHeaders(requestHeaders) || null });
       setProbeResult(result);
       setState(result.status === 'ok' || result.status === 'update-recommended' ? 'success' : 'error');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('onboarding.remoteConnection.errors.connectionTestFailed'));
       setState('error');
     }
-  }, [normalizedUrl, t]);
+  }, [normalizedUrl, requestHeaders, t]);
 
   const handleConnect = useCallback(async () => {
     if (!resolvedUrl) return;
@@ -124,7 +149,8 @@ export function RemoteConnectionForm({
     setError('');
 
     try {
-      const probe = await desktopHostProbe(targetUrl);
+      const builtHeaders = buildRequestHeaders(requestHeaders);
+      const probe = await desktopHostProbe(targetUrl, { requestHeaders: builtHeaders || null });
       setProbeResult(probe);
 
       // Block connection on wrong-service or unreachable
@@ -142,11 +168,12 @@ export function RemoteConnectionForm({
 
       const hostId = existingHost ? existingHost.id : `host-${Date.now().toString(16)}`;
 
-      const newHost = {
+      const newHost: DesktopHost = {
         id: hostId,
         label: hostLabel,
         url: targetUrl,
         apiUrl: targetUrl,
+        ...(builtHeaders ? { requestHeaders: builtHeaders } : {}),
       };
 
       const updatedHosts = existingHost
@@ -174,7 +201,7 @@ export function RemoteConnectionForm({
       setError(err instanceof Error ? err.message : t('onboarding.remoteConnection.errors.failedToSaveConnection'));
       setState('error');
     }
-  }, [resolvedUrl, label, onConnect, t]);
+  }, [resolvedUrl, label, requestHeaders, onConnect, t]);
 
   const selectHost = useCallback(async (hostId: string) => {
     const config = await desktopHostsGet();
@@ -336,6 +363,55 @@ export function RemoteConnectionForm({
               placeholder={t('onboarding.remoteConnection.field.namePlaceholder')}
               disabled={isTesting}
             />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm text-foreground">
+                {t('settings.remoteInstances.direct.headers.title')}
+              </label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                onClick={() => setRequestHeaders((prev) => [...prev, createHeaderDraft()])}
+                disabled={isTesting}
+              >
+                + {t('settings.remoteInstances.direct.headers.actions.add')}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t('settings.remoteInstances.direct.headers.description')}
+            </p>
+            {requestHeaders.map((header) => (
+              <div key={header.id} className="flex gap-2">
+                <Input
+                  className="h-8 font-mono text-xs"
+                  value={header.name}
+                  onChange={(e) => setRequestHeaders((prev) => prev.map((h) => h.id === header.id ? { ...h, name: e.target.value } : h))}
+                  placeholder={t('settings.remoteInstances.direct.headers.field.namePlaceholder')}
+                  disabled={isTesting}
+                />
+                <Input
+                  className="h-8 font-mono text-xs"
+                  value={header.value}
+                  onChange={(e) => setRequestHeaders((prev) => prev.map((h) => h.id === header.id ? { ...h, value: e.target.value } : h))}
+                  placeholder={t('settings.remoteInstances.direct.headers.field.valuePlaceholder')}
+                  type="password"
+                  disabled={isTesting}
+                />
+                <button
+                  type="button"
+                  onClick={() => setRequestHeaders((prev) => prev.filter((h) => h.id !== header.id))}
+                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  aria-label={t('settings.remoteInstances.direct.headers.removeAria')}
+                  disabled={isTesting}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
           </div>
         </div>
 
