@@ -1487,6 +1487,7 @@
   'settings.notifications.page.delivery.permissionGrantedButDisabled': '權限已授予，但通知處於關閉狀態。',
   'settings.notifications.page.delivery.vscodeHint': '啟用後，通知將透過 VS Code 原生通知送出。',
   'settings.notifications.page.events.title': '通知事件',
+  'settings.notifications.page.events.hint': '控制哪些代理事件觸發通知和音效。這些設定同時適用於原生通知和音效系統。',
   'settings.notifications.page.events.completionAria': 'Agent 完成',
   'settings.notifications.page.events.completionLabel': 'Agent 完成',
   'settings.notifications.page.events.subtaskAria': 'Subagent 完成',

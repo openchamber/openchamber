@@ -1581,6 +1581,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.permissionGrantedButDisabled': '권한은 부여되었지만 알림이 비활성화되어 있습니다.',
   'settings.notifications.page.delivery.vscodeHint': '활성화하면 알림이 VS Code 기본 알림을 통해 전달됩니다.',
   'settings.notifications.page.events.title': '이벤트',
+  'settings.notifications.page.events.hint': '어떤 에이전트 이벤트가 알림과 소리를 트리거할지 제어합니다. 이 설정은 네이티브 알림과 사운드 시스템 모두에 적용됩니다.',
   'settings.notifications.page.events.completionAria': '에이전트 완료',
   'settings.notifications.page.events.completionLabel': '에이전트 완료',
   'settings.notifications.page.events.subtaskAria': '서브에이전트 완료',

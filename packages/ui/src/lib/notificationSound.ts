@@ -187,7 +187,7 @@ function clampVolume(volume: number): number {
   return Math.min(1, Math.max(0, volume));
 }
 
-/** Resolve the asset URL for a sound id, falling back to the default. */
+/** Resolve the asset URL for a sound id, or undefined if the id is unknown. */
 function resolveSoundUrl(soundId: string): string | undefined {
   const entry = SOUND_BY_ID.get(soundId);
   return entry?.url;
@@ -307,8 +307,14 @@ export function playSoundForEvent(
   isViewed: boolean,
 ): void {
   if (!shouldPlaySoundForEvent(event, settings, isViewed)) return;
-  const soundId = settings.notificationSoundEventSounds[event] ?? DEFAULT_EVENT_SOUNDS[event];
-  const src = resolveSoundUrl(soundId);
-  if (!src) return;
+  const configuredId = settings.notificationSoundEventSounds[event] ?? DEFAULT_EVENT_SOUNDS[event];
+  let src = resolveSoundUrl(configuredId);
+  if (!src) {
+    // The configured sound id is unknown (e.g. a pack was removed in a newer
+    // version). Fall back to the default sound for this event so the user
+    // still hears a cue rather than silence.
+    src = resolveSoundUrl(DEFAULT_EVENT_SOUNDS[event]);
+    if (!src) return;
+  }
   playSound(src, settings.notificationSoundVolume);
 }

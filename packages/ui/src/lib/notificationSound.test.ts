@@ -168,7 +168,7 @@ describe('playSoundForEvent - sound id resolution', () => {
     }
   });
 
-  test('skips playback when the configured sound id is unknown (not in the lookup table)', () => {
+  test('falls back to the default sound when the configured id is unknown (not in the lookup table)', () => {
     const calls: string[] = [];
     const originalAudio = globalThis.Audio;
     try {
@@ -182,14 +182,16 @@ describe('playSoundForEvent - sound id resolution', () => {
         }
       } as unknown as typeof Audio;
 
-      // An unknown-but-present id is NOT replaced by the default; resolveSoundUrl
-      // returns undefined and playback is skipped. This documents the contract.
+      // An unknown-but-present id is not resolvable; playSoundForEvent should
+      // fall back to the default sound for the event rather than skipping.
       const settings = buildSettings({
         notificationSoundEventSounds: { ...DEFAULT_EVENT_SOUNDS, completion: 'does-not-exist-99' },
       });
       playSoundForEvent('completion', settings, false);
 
-      expect(calls.length).toBe(0);
+      expect(calls.length).toBe(1);
+      expect(typeof calls[0]).toBe('string');
+      expect(calls[0].length).toBeGreaterThan(0);
     } finally {
       globalThis.Audio = originalAudio;
     }

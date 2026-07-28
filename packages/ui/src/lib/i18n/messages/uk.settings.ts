@@ -1581,6 +1581,7 @@ export const settingsDict = {
   "settings.notifications.page.delivery.permissionGrantedButDisabled": "Дозвіл надано, але сповіщення вимкнено.",
   "settings.notifications.page.delivery.vscodeHint": "Якщо ввімкнено, сповіщення доставляються через рідні сповіщення VS Code.",
   "settings.notifications.page.events.title": "Події сповіщень",
+  "settings.notifications.page.events.hint": "Керує тим, які події агента викликають сповіщення та звуки. Ці налаштування застосовуються як до системних сповіщень, так і до звукової системи.",
   "settings.notifications.page.events.completionAria": "Завершення агента",
   "settings.notifications.page.events.completionLabel": "Завершення агента",
   "settings.notifications.page.events.subtaskAria": "Завершення субагента",

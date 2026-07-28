@@ -1581,6 +1581,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.permissionGrantedButDisabled': '权限已授予，但通知处于关闭状态。',
   'settings.notifications.page.delivery.vscodeHint': '启用后，通知将通过 VS Code 原生通知投递。',
   'settings.notifications.page.events.title': '通知事件',
+  'settings.notifications.page.events.hint': '控制哪些代理事件触发通知和声音。这些设置同时适用于原生通知和声音系统。',
   'settings.notifications.page.events.completionAria': '智能体完成',
   'settings.notifications.page.events.completionLabel': '智能体完成',
   'settings.notifications.page.events.subtaskAria': '子智能体完成',

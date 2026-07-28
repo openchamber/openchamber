@@ -1234,7 +1234,8 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (candidate.notificationSoundEventSounds && typeof candidate.notificationSoundEventSounds === 'object' && !Array.isArray(candidate.notificationSoundEventSounds)) {
     // Validate as a partial Record<NotificationEventKind, string>; only known
     // event keys with non-empty string values are kept. Unknown sound ids are
-    // preserved as-is (resolution falls back to the default at playback time).
+    // preserved as-is; at playback time, `playSoundForEvent` falls back to the
+    // default sound for the event when the configured id cannot be resolved.
     const raw = candidate.notificationSoundEventSounds as Record<string, unknown>;
     const sanitized: Record<string, string> = {};
     const knownEvents = ['completion', 'error', 'question', 'permission', 'subtask'];

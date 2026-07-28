@@ -1502,6 +1502,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.permissionGrantedButDisabled': 'Autorisation accordée, mais les notifications sont désactivées.',
   'settings.notifications.page.delivery.vscodeHint': 'Lorsqu\'elles sont activées, les notifications sont envoyées via les notifications natives VS Code.',
   'settings.notifications.page.events.title': 'Événements de notification',
+  'settings.notifications.page.events.hint': 'Contrôle les événements de l\'agent qui déclenchent des notifications et des sons. Ces paramètres s\'appliquent aux notifications natives et au système sonore.',
   'settings.notifications.page.events.completionAria': 'Achèvement de l\'agent',
   'settings.notifications.page.events.completionLabel': 'Achèvement de l\'agent',
   'settings.notifications.page.events.subtaskAria': 'Achèvement du sous-agent',

@@ -1614,6 +1614,7 @@ export const settingsDict = {
   'settings.notifications.page.delivery.permissionGrantedButDisabled': '許可は付与されていますが、通知が無効になっています。',
   'settings.notifications.page.delivery.vscodeHint': '有効にすると、通知は VS Code のネイティブ通知を通じて配信されます。',
   'settings.notifications.page.events.title': '通知イベント',
+  'settings.notifications.page.events.hint': 'エージェントイベントが通知とサウンドをトリガーするかを制御します。これらの設定はネイティブ通知とサウンドシステムの両方に適用されます。',
   'settings.notifications.page.events.completionAria': 'Agent 完了',
   'settings.notifications.page.events.completionLabel': 'Agent 完了',
   'settings.notifications.page.events.subtaskAria': 'Subagent 完了',

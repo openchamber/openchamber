@@ -665,6 +665,7 @@ export const settingsDict = {
   'settings.notifications.page.events.subtaskAria': 'Zakończenie pracy podagenta',
   'settings.notifications.page.events.subtaskLabel': 'Zakończenie pracy podagenta',
   'settings.notifications.page.events.title': 'Zdarzenia powiadomień',
+  'settings.notifications.page.events.hint': 'Kontroluje, które zdarzenia agenta wyzwalają powiadomienia i dźwięki. Te ustawienia mają zastosowanie zarówno do powiadomień natywnych, jak i systemu dźwiękowego.',
   'settings.notifications.page.push.enableAria': 'Włącz powiadomienia push',
   'settings.notifications.page.push.enableLabel': 'Włącz powiadomienia push',
   'settings.notifications.page.push.loadingAria': 'Ładowanie',
