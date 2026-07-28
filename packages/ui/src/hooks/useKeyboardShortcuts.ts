@@ -16,6 +16,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import { getRecentParentSessions } from '@/sync/session-recent-order';
+import { requestSwitchInstance } from '@/lib/switchInstanceRequest';
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -615,6 +617,160 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      if (e.key === 'Escape') {
+        const target = e.target as Element | null;
+        const isInsideDialog = Boolean(target?.closest('[role="dialog"]'));
+        const isSettingsMounted = Boolean(document.querySelector('[data-settings-view="true"]'));
+        const isInsideTerminal = isTerminalEventTarget(target);
+        const hasDropdownInteraction = isDropdownEventTarget(target) || hasOpenDropdown();
+
+        const {
+          isSettingsDialogOpen,
+          isCommandPaletteOpen,
+          isHelpDialogOpen,
+          isSessionSwitcherOpen,
+          isAboutDialogOpen,
+          isMultiRunLauncherOpen,
+          isImagePreviewOpen,
+          activeMainTab,
+          isPromptNavigatorPanelOpen,
+        } = useUIStore.getState();
+
+        if (isInsideDialog || isInsideTerminal || hasDropdownInteraction) {
+          resetAbortPriming();
+          return;
+        }
+
+        if (isPromptNavigatorPanelOpen) {
+          e.preventDefault();
+          setPromptNavigatorPanelOpen(false);
+          resetAbortPriming();
+          return;
+        }
+
+        // If settings is open, close it
+        if (isSettingsDialogOpen) {
+          e.preventDefault();
+          setSettingsDialogOpen(false);
+          resetAbortPriming();
+          return;
+        }
+
+        if (isSettingsMounted) {
+          resetAbortPriming();
+          return;
+        }
+
+        // Check if any overlay is open or not on chat tab - don't process abort
+        const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen || isMultiRunLauncherOpen || isImagePreviewOpen;
+        const isChatActive = activeMainTab === 'chat';
+
+        if (hasOverlay || !isChatActive) {
+          resetAbortPriming();
+          return;
+        }
+
+        // Double-ESC abort logic - only when on chat tab with no overlays
+        const sessionId = currentSessionId;
+        const canAbortNow = sessionPhase !== 'idle' && Boolean(sessionId);
+        if (!canAbortNow) {
+          resetAbortPriming();
+          return;
+        }
+
+        const now = Date.now();
+        const primedUntil = abortPrimedUntilRef.current;
+
+        if (primedUntil && now < primedUntil) {
+          e.preventDefault();
+          resetAbortPriming();
+          void abortCurrentOperation(sessionId ?? '');
+          return;
+        }
+
+        e.preventDefault();
+        const expiresAt = armAbortPrompt(3000) ?? now + 3000;
+        abortPrimedUntilRef.current = expiresAt;
+
+        if (abortPrimedTimeoutRef.current) {
+          clearTimeout(abortPrimedTimeoutRef.current);
+        }
+
+        const delay = Math.max(expiresAt - now, 0);
+        abortPrimedTimeoutRef.current = setTimeout(() => {
+          if (abortPrimedUntilRef.current && Date.now() >= abortPrimedUntilRef.current) {
+            resetAbortPriming();
+          }
+        }, delay || 0);
+        return;
+      }
+
+      // Session switching: cycle prev/next and jump to Nth most-recent session.
+      // Uses the shared lifecycle ordering authority so it matches the switcher.
+      {
+        const cyclePrev = eventMatchesShortcut(e, combo('cycle_session_previous'));
+        const cycleNext = eventMatchesShortcut(e, combo('cycle_session_next'));
+        if (cyclePrev || cycleNext) {
+          const { isCommandPaletteOpen, isHelpDialogOpen, isSettingsDialogOpen } = useUIStore.getState();
+          if (isCommandPaletteOpen || isHelpDialogOpen || isSettingsDialogOpen) {
+            return;
+          }
+          e.preventDefault();
+          const sessions = getRecentParentSessions();
+          if (sessions.length === 0) return;
+          const direction: -1 | 1 = cycleNext ? 1 : -1;
+          const activeId = useSessionUIStore.getState().currentSessionId;
+          const currentIndex = sessions.findIndex((session) => session.id === activeId);
+          let nextIndex = direction > 0 ? 0 : sessions.length - 1;
+          if (currentIndex >= 0) {
+            nextIndex = (currentIndex + direction + sessions.length) % sessions.length;
+          }
+          const nextSession = sessions[nextIndex];
+          if (!nextSession) return;
+          setActiveMainTab('chat');
+          setSessionSwitcherOpen(false);
+          useSessionUIStore.getState().setCurrentSession(nextSession.id);
+          return;
+        }
+
+        for (let n = 1; n <= 9; n += 1) {
+          if (eventMatchesShortcut(e, combo(`switch_recent_session_${n}`))) {
+            const { isCommandPaletteOpen, isHelpDialogOpen, isSettingsDialogOpen } = useUIStore.getState();
+            if (isCommandPaletteOpen || isHelpDialogOpen || isSettingsDialogOpen) {
+              return;
+            }
+            e.preventDefault();
+            const sessions = getRecentParentSessions();
+            const target = sessions[n - 1];
+            if (!target) return;
+            setActiveMainTab('chat');
+            setSessionSwitcherOpen(false);
+            useSessionUIStore.getState().setCurrentSession(target.id);
+            return;
+          }
+        }
+      }
+
+      // Instance switching (desktop hosts only). The keyboard handler only
+      // expresses intent; the desktop host switcher performs the actual switch.
+      // On web/mobile nothing listens, so these are safe no-ops.
+      if (eventMatchesShortcut(e, combo('cycle_instance_previous'))) {
+        e.preventDefault();
+        requestSwitchInstance({ kind: 'direction', direction: -1 });
+        return;
+      }
+      if (eventMatchesShortcut(e, combo('cycle_instance_next'))) {
+        e.preventDefault();
+        requestSwitchInstance({ kind: 'direction', direction: 1 });
+        return;
+      }
+      for (let n = 1; n <= 9; n += 1) {
+        if (eventMatchesShortcut(e, combo(`switch_instance_${n}`))) {
+          e.preventDefault();
+          requestSwitchInstance({ kind: 'index', index: n });
+          return;
+        }
+      }
     };
 
     window.addEventListener('keydown', handleTerminalShortcutCapture, true);

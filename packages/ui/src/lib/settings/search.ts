@@ -816,7 +816,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'shortcuts',
     titleKey: 'settings.openchamber.keyboardShortcuts.title',
     descriptionKey: 'settings.openchamber.keyboardShortcuts.tooltip',
-    keywords: ['keyboard', 'hotkeys', 'bindings'],
+    keywords: ['keyboard', 'hotkeys', 'bindings', 'switch session', 'switch instance', 'cycle session', 'cycle instance', 'recent session'],
   },
   {
     id: 'voice.playback',
