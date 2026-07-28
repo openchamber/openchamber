@@ -5,6 +5,18 @@ import os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
+import {
+  PULL_REQUEST_SOURCE_UNAVAILABLE_CODE,
+  clearBranchTracking as clearBranchTrackingShared,
+  checkPullRequestSourceAvailability as checkPullRequestSourceAvailabilityShared,
+  checkRemoteBranchExists as checkRemoteBranchExistsShared,
+  createPullRequestSourceUnavailableError,
+  fetchRemoteBranchRef as fetchRemoteBranchRefShared,
+  hasPullRequestIdentity as hasPullRequestIdentityShared,
+  resolvePullRequestForkRemote as resolvePullRequestForkRemoteShared,
+  resolvePullRequestSource as resolvePullRequestSourceShared,
+  resolvePullRequestSourceInput as resolvePullRequestSourceInputShared,
+} from '@openchamber/git-core';
 
 const fsp = fs.promises;
 const require = createRequire(import.meta.url);
@@ -246,6 +258,16 @@ const resolveGitBinary = () => {
 };
 
 const getGitBinary = () => resolveGitBinary();
+
+/**
+ * Thin GitRunner adapter that delegates to the local `runGitCommand`.
+ * The shared `@openchamber/git-core` module is runner-agnostic; this is
+ * the seam between the web server's existing executor and the shared
+ * PR-resolution functions.
+ */
+const gitRunner = {
+  run: async (cwd, args) => runGitCommand(cwd, args),
+};
 
 /**
  * Escape an SSH key path for use in core.sshCommand.
@@ -1844,276 +1866,36 @@ const ensureRemoteWithUrl = async (primaryWorktree, remoteName, remoteUrl) => {
   await runGitCommandOrThrow(primaryWorktree, ['remote', 'add', name, url], 'Failed to add git remote');
 };
 
-const fetchRemoteBranchRef = async (primaryWorktree, remoteName, branchName) => {
-  const remote = String(remoteName || '').trim();
-  const branch = String(branchName || '').trim();
-  if (!remote || !branch) {
-    return;
+// PR-resolution helpers now live in `@openchamber/git-core` and are imported
+// at the top of this file. The local `gitRunner` adapter bridges the web
+// server's `runGitCommand` executor to the shared module's `GitRunner`
+// contract.
+const fetchRemoteBranchRef = (primaryWorktree, remoteName, branchName) =>
+  fetchRemoteBranchRefShared(gitRunner, primaryWorktree, remoteName, branchName);
+
+const checkRemoteBranchExists = (primaryWorktree, remoteName, branchName, remoteUrl = '') =>
+  checkRemoteBranchExistsShared(gitRunner, primaryWorktree, remoteName, branchName, remoteUrl);
+
+const resolvePullRequestForkRemote = (primaryWorktree, source) =>
+  resolvePullRequestForkRemoteShared(gitRunner, primaryWorktree, source);
+
+const checkPullRequestSourceAvailability = (primaryWorktree, source) =>
+  checkPullRequestSourceAvailabilityShared(gitRunner, primaryWorktree, source);
+
+const resolvePullRequestSource = (primaryWorktree, source) =>
+  resolvePullRequestSourceShared(gitRunner, primaryWorktree, source);
+
+const hasPullRequestIdentity = (input) => hasPullRequestIdentityShared(input);
+
+const resolvePullRequestSourceInput = (input) => resolvePullRequestSourceInputShared(input);
+
+export const clearBranchTracking = (worktreeDirectory, localBranch, executeGitCommand) => {
+  if (executeGitCommand && executeGitCommand !== runGitCommand) {
+    // Tests pass a custom executor; honour it by building a transient runner.
+    const customRunner = { run: executeGitCommand };
+    return clearBranchTrackingShared(customRunner, worktreeDirectory, localBranch);
   }
-
-  const refspec = `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`;
-  await runGitCommandOrThrow(
-    primaryWorktree,
-    ['fetch', remote, refspec],
-    `Failed to fetch ${remote}/${branch}`
-  );
-};
-
-const checkRemoteBranchExists = async (primaryWorktree, remoteName, branchName, remoteUrl = '') => {
-  const remote = String(remoteName || '').trim();
-  const branch = String(branchName || '').trim();
-  const url = String(remoteUrl || '').trim();
-  if (!remote || !branch) {
-    return { success: false, found: false };
-  }
-
-  const target = url || remote;
-  const lsRemote = await runGitCommand(
-    primaryWorktree,
-    ['ls-remote', '--heads', target, `refs/heads/${branch}`]
-  );
-  if (!lsRemote.success) {
-    return { success: false, found: false };
-  }
-
-  return {
-    success: true,
-    found: Boolean(String(lsRemote.stdout || '').trim()),
-  };
-};
-
-const PULL_REQUEST_SOURCE_UNAVAILABLE_CODE = 'pull_request_unavailable';
-const PULL_REQUEST_REMOTE_SUFFIX_LIMIT = 100;
-
-const createPullRequestSourceUnavailableError = () => {
-  const error = new Error(PULL_REQUEST_SOURCE_UNAVAILABLE_CODE);
-  error.code = PULL_REQUEST_SOURCE_UNAVAILABLE_CODE;
-  return error;
-};
-
-const hasPullRequestIdentity = (input) => {
-  const value = input?.prNumber;
-  return value !== undefined && value !== null && String(value).trim() !== '';
-};
-
-const parseGitHubPullRequestHeadRef = (value) => {
-  const number = typeof value === 'number' ? value : Number(String(value || '').trim());
-  if (!Number.isSafeInteger(number) || number <= 0) {
-    return null;
-  }
-
-  return {
-    number,
-    sourceRef: `refs/pull/${number}/head`,
-  };
-};
-
-const resolvePullRequestHeadBranch = (input) => {
-  const upstreamBranch = cleanBranchName(String(input?.upstreamBranch || '').trim());
-  if (upstreamBranch) {
-    return upstreamBranch;
-  }
-
-  const requestedExistingBranch = String(input?.existingBranch || '').trim();
-  const remoteRef = parseRemoteBranchRef(requestedExistingBranch);
-  return cleanBranchName(remoteRef?.branch || requestedExistingBranch);
-};
-
-const resolvePullRequestSourceInput = (input) => {
-  const pullRequest = parseGitHubPullRequestHeadRef(input?.prNumber);
-  if (!pullRequest) {
-    return null;
-  }
-
-  const forkRemote = String(input?.ensureRemoteName || '').trim();
-  const forkUrl = String(input?.ensureRemoteUrl || '').trim();
-  const headBranch = resolvePullRequestHeadBranch(input);
-  const baseRemote = String(input?.baseRemote || '').trim();
-
-  return {
-    pullRequest,
-    headBranch,
-    baseRemote,
-    fork: forkRemote && forkUrl && headBranch
-      ? { remote: forkRemote, url: forkUrl, branch: headBranch }
-      : null,
-  };
-};
-
-const resolvePullRequestForkRemote = async (primaryWorktree, source) => {
-  if (!source?.fork) {
-    return null;
-  }
-
-  const preferredRemote = source.fork.remote;
-  const safeRemoteBase = `${preferredRemote}-pr-${source.pullRequest.number}`;
-
-  for (let suffix = -1; suffix < PULL_REQUEST_REMOTE_SUFFIX_LIMIT; suffix += 1) {
-    const candidate = suffix < 0
-      ? preferredRemote
-      : suffix === 0
-        ? safeRemoteBase
-        : `${safeRemoteBase}-${suffix + 1}`;
-
-    if (!candidate || candidate === source.baseRemote) {
-      continue;
-    }
-
-    const configured = await runGitCommand(primaryWorktree, ['remote', 'get-url', candidate]);
-    if (configured.success) {
-      if (String(configured.stdout || '').trim() === source.fork.url) {
-        return { ...source.fork, remote: candidate };
-      }
-      continue;
-    }
-
-    const added = await runGitCommand(primaryWorktree, ['remote', 'add', candidate, source.fork.url]);
-    if (added.success) {
-      return { ...source.fork, remote: candidate };
-    }
-
-    const rechecked = await runGitCommand(primaryWorktree, ['remote', 'get-url', candidate]);
-    if (rechecked.success && String(rechecked.stdout || '').trim() === source.fork.url) {
-      return { ...source.fork, remote: candidate };
-    }
-  }
-
-  return null;
-};
-
-const checkPullRequestHeadRefExists = async (primaryWorktree, source) => {
-  if (!source?.baseRemote || !source?.pullRequest?.sourceRef) {
-    return { success: false, found: false };
-  }
-
-  const lsRemote = await runGitCommand(
-    primaryWorktree,
-    ['ls-remote', source.baseRemote, source.pullRequest.sourceRef]
-  );
-  if (!lsRemote.success) {
-    return { success: false, found: false };
-  }
-
-  return {
-    success: true,
-    found: Boolean(String(lsRemote.stdout || '').trim()),
-  };
-};
-
-const checkPullRequestSourceAvailability = async (primaryWorktree, source) => {
-  if (!source) {
-    return null;
-  }
-
-  if (source.fork) {
-    const fork = await checkRemoteBranchExists(
-      primaryWorktree,
-      source.fork.remote,
-      source.fork.branch,
-      source.fork.url
-    );
-    if (fork.success && fork.found) {
-      return {
-        headBranch: source.headBranch,
-        upstream: { remote: source.fork.remote, branch: source.fork.branch },
-      };
-    }
-  }
-
-  const base = await checkPullRequestHeadRefExists(primaryWorktree, source);
-  if (!base.success || !base.found) {
-    return null;
-  }
-
-  return {
-    headBranch: source.headBranch,
-    upstream: null,
-  };
-};
-
-const fetchPullRequestHeadRef = async (primaryWorktree, source) => {
-  if (!source?.baseRemote || !source?.pullRequest?.sourceRef) {
-    return null;
-  }
-
-  const destinationRef = `refs/remotes/${source.baseRemote}/pull/${source.pullRequest.number}/head`;
-  const fetched = await runGitCommand(
-    primaryWorktree,
-    ['fetch', source.baseRemote, `+${source.pullRequest.sourceRef}:${destinationRef}`]
-  );
-  if (!fetched.success) {
-    return null;
-  }
-
-  const exists = await runGitCommand(primaryWorktree, ['show-ref', '--verify', '--quiet', destinationRef]);
-  return exists.success ? destinationRef : null;
-};
-
-const fetchPullRequestForkBranch = async (primaryWorktree, source) => {
-  if (!source?.fork) {
-    return null;
-  }
-
-  const fork = await resolvePullRequestForkRemote(primaryWorktree, source);
-  if (!fork) {
-    return null;
-  }
-
-  try {
-    await fetchRemoteBranchRef(primaryWorktree, fork.remote, fork.branch);
-  } catch {
-    return null;
-  }
-
-  const destinationRef = `refs/remotes/${fork.remote}/${fork.branch}`;
-  const exists = await runGitCommand(primaryWorktree, ['show-ref', '--verify', '--quiet', destinationRef]);
-  return exists.success ? { checkoutRef: destinationRef, fork } : null;
-};
-
-const resolvePullRequestSource = async (primaryWorktree, source) => {
-  const forkSource = await fetchPullRequestForkBranch(primaryWorktree, source);
-  if (forkSource) {
-    return {
-      checkoutRef: forkSource.checkoutRef,
-      headBranch: source.headBranch,
-      upstream: { remote: forkSource.fork.remote, branch: forkSource.fork.branch },
-    };
-  }
-
-  const baseRef = await fetchPullRequestHeadRef(primaryWorktree, source);
-  if (baseRef) {
-    return {
-      checkoutRef: baseRef,
-      headBranch: source.headBranch,
-      upstream: null,
-    };
-  }
-
-  throw createPullRequestSourceUnavailableError();
-};
-
-export const isExpectedMissingGitConfigKey = (result) => (
-  !result?.success
-  && result.exitCode === 5
-  && !String(result.stdout || '').trim()
-  && !String(result.stderr || '').trim()
-);
-
-const clearBranchTrackingKey = async (worktreeDirectory, key, executeGitCommand) => {
-  const result = await executeGitCommand(worktreeDirectory, ['config', '--unset-all', key]);
-  if (result.success || isExpectedMissingGitConfigKey(result)) {
-    return;
-  }
-  throw new Error(result.message || 'Failed to clear branch tracking configuration');
-};
-
-export const clearBranchTracking = async (worktreeDirectory, localBranch, executeGitCommand = runGitCommand) => {
-  if (!localBranch) {
-    return;
-  }
-
-  await clearBranchTrackingKey(worktreeDirectory, `branch.${localBranch}.remote`, executeGitCommand);
-  await clearBranchTrackingKey(worktreeDirectory, `branch.${localBranch}.merge`, executeGitCommand);
+  return clearBranchTrackingShared(gitRunner, worktreeDirectory, localBranch);
 };
 
 const applyUpstreamConfiguration = async (args) => {
