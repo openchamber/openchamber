@@ -1,9 +1,11 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import http from 'http';
 
 import { registerTtsRoutes } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+import { ttsService } from './service.js';
 
 const createApp = () => {
   const app = express();
@@ -50,6 +52,74 @@ describe('tts routes', () => {
       summarized: false,
       reason: 'Model summarization provider unavailable',
     });
+  });
+
+  it('aborts the upstream stream when the client disconnects', async () => {
+    let capturedSignal;
+    let streamActive = true;
+    
+    // Spy on isAvailable to bypass key check
+    vi.spyOn(ttsService, 'isAvailable').mockReturnValue(true);
+    // Spy on getContentType
+    vi.spyOn(ttsService, 'getContentType').mockReturnValue('audio/mpeg');
+    // Spy on generateSpeechStreamRaw to capture the signal and simulate a stream
+    vi.spyOn(ttsService, 'generateSpeechStreamRaw').mockImplementation(async function* (options) {
+      capturedSignal = options.signal;
+      capturedSignal.addEventListener('abort', () => {
+        streamActive = false;
+      });
+      yield Buffer.from('chunk1');
+      // Wait until aborted to yield chunk2, to simulate an ongoing stream
+      while (streamActive) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      yield Buffer.from('chunk2');
+    });
+
+    const app = createApp();
+    const server = app.listen(0); // Listen on random port
+    
+    try {
+      const port = server.address().port;
+      
+      await new Promise((resolve, reject) => {
+        const clientReq = http.request({
+          hostname: 'localhost',
+          port: port,
+          path: '/api/tts/speak',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }, (res) => {
+          // As soon as we get headers, we destroy the request
+          clientReq.destroy();
+          resolve();
+        });
+        
+        clientReq.on('error', (err) => {
+          if (err.code !== 'ECONNRESET') {
+             reject(err);
+          }
+        });
+        
+        clientReq.write(JSON.stringify({ text: 'Hello world' }));
+        clientReq.end();
+      });
+      
+      // Wait for the abort event to propagate (up to 1s)
+      for (let i = 0; i < 20; i++) {
+        if (capturedSignal && capturedSignal.aborted) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      
+      // The captured signal should have been aborted
+      expect(capturedSignal).toBeDefined();
+      expect(capturedSignal.aborted).toBe(true);
+    } finally {
+      server.close();
+      vi.restoreAllMocks();
+    }
   });
 });
 
