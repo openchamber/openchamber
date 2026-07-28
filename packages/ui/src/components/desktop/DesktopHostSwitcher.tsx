@@ -36,6 +36,11 @@ import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import {
+  SWITCH_INSTANCE_EVENT,
+  resolveSwitchInstanceTarget,
+  type SwitchInstanceRequest,
+} from '@/lib/switchInstanceRequest';
+import {
   desktopSshConnect,
   desktopSshDisconnect,
   desktopSshInstancesGet,
@@ -51,6 +56,13 @@ const runtimeKeyForHost = (host: DesktopHost): string => {
   if (host.id === LOCAL_HOST_ID) return 'local';
   return `host:${host.id}`;
 };
+
+/**
+ * Shared across every mounted DesktopHostSwitcherDialog so a single keyboard
+ * switch-instance request is acted on exactly once even if the inline switcher
+ * is mounted in more than one place.
+ */
+let lastHandledInstanceRequestId = -1;
 
 type HostStatus = {
   status: HostProbeResult['status'];
@@ -707,6 +719,41 @@ export function DesktopHostSwitcherDialog({
       window.location.href = target;
     }
   }, [localOrigin, onHostSwitched, sshHostIds, sshStatusesById, statusById, t]);
+
+  // Keyboard-driven instance switching (desktop only). The keyboard handler
+  // dispatches intent via SWITCH_INSTANCE_EVENT; the real switch flow lives in
+  // handleSwitch above (probing, relay, SSH), so we reuse it here. Hosts are
+  // resolved freshly per request because the closed dialog does not keep the
+  // remote list loaded.
+  const handleSwitchRef = React.useRef(handleSwitch);
+  React.useEffect(() => {
+    handleSwitchRef.current = handleSwitch;
+  }, [handleSwitch]);
+
+  React.useEffect(() => {
+    if (!isDesktopShell()) return;
+    const onRequest = (event: Event) => {
+      const detail = (event as CustomEvent<SwitchInstanceRequest & { requestId: number }>).detail;
+      if (!detail) return;
+      if (detail.requestId === lastHandledInstanceRequestId) return;
+      lastHandledInstanceRequestId = detail.requestId;
+      void (async () => {
+        const config = await desktopHostsGet().catch(() => null);
+        if (!config) return;
+        const local = buildLocalHost(config.localOrigin || localOrigin);
+        const orderedHosts = [local, ...config.hosts];
+        // Single instance (local only) => nothing to switch to.
+        if (orderedHosts.length <= 1) return;
+        const orderedKeys = orderedHosts.map(runtimeKeyForHost);
+        const targetIndex = resolveSwitchInstanceTarget(orderedKeys, getRuntimeKey(), detail);
+        const targetHost = targetIndex >= 0 ? orderedHosts[targetIndex] : null;
+        if (!targetHost) return;
+        await handleSwitchRef.current(targetHost);
+      })();
+    };
+    window.addEventListener(SWITCH_INSTANCE_EVENT, onRequest);
+    return () => window.removeEventListener(SWITCH_INSTANCE_EVENT, onRequest);
+  }, [localOrigin]);
 
   const cancelEdit = React.useCallback(() => {
     setEditingId(null);
