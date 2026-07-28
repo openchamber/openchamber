@@ -169,10 +169,6 @@ export class GuardianClient {
     return this.#call('prepare-handoff', params);
   }
 
-  async adopt(params) {
-    return this.#call('adopt', params);
-  }
-
   async list() {
     return this.#call('list');
   }

@@ -3,6 +3,30 @@ import path from 'node:path';
 import { GuardianClient } from './guardian-client.js';
 import { resolveManagedOpenCodeHandoffV2Root } from '../opencode/managed-opencode-handoff-v2/filesystem.js';
 
+/**
+ * Guardian detection and bootstrap adoption.
+ *
+ * Intentional list-trust decision (Phase 2B):
+ *   `detectAndAdoptGuardianChild()` calls `GuardianClient.list()` and trusts
+ *   the returned `(pid, port, incarnation)` tuple for an `Active` child.
+ *   This is the canonical bootstrap adoption path: the spawned child has
+ *   already reached `Active`, so no spawn-time `claimCapability` is
+ *   available to authenticate against.
+ *
+ *   The trust boundary is enforced by the IPC permissioning model, not by a
+ *   protocol-level credential:
+ *     - v2 root dir is mode `0700` (UID-scoped)
+ *     - the IPC Unix-domain socket is mode `0600` (umask `0o077` + explicit
+ *       `chmodSync` in `GuardianIpcServer.start()`)
+ *     - the atomic PID-file singleton guarantees one guardian per host
+ *       per UID
+ *     - same-UID local processes are the documented trust boundary
+ *
+ *   Cross-process adoption with a `claimCapability` (i.e. authenticating a
+ *   caller that holds the spawn-time credential) is intentionally out of
+ *   scope here and is tracked separately for a later handoff design.
+ */
+
 const DEFAULT_CONNECT_TIMEOUT_MS = 100;
 
 export function getGuardianSocketPath(rootDir) {

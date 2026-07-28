@@ -1,3 +1,30 @@
+/**
+ * Managed OpenCode handoff v2 record model and state machine.
+ *
+ * Trust boundary for bootstrap adoption (Phase 2B):
+ *   The canonical bootstrap adoption path from the lifecycle startup
+ *   (`detectAndAdoptGuardianChild` -> `GuardianClient.list()`) trusts the
+ *   returned `(pid, port, incarnation)` of an `Active` child without
+ *   requiring a `claimCapability`. This is intentional:
+ *
+ *     - `claimCapability` is only issued during `beginLaunch` (spawn time)
+ *       by the issuing guardian
+ *     - bootstrap adoption happens AFTER the spawned child has already
+ *       reached `Active`, so there is no protocol-level credential in the
+ *       caller's hand
+ *     - there is no protocol-level credential available without changing
+ *       the protocol itself
+ *
+ *   The trust boundary is enforced by the host/UID-scoped permissioning
+ *   model around the v2 root directory (see `filesystem.js`, the atomic
+ *   PID-file singleton, and the `0600` IPC socket), not by an in-protocol
+ *   capability. Same-UID local processes are the documented trust boundary.
+ *
+ *   Cross-process adoption with a `claimCapability` (i.e. requiring the
+ *   caller to present the spawn-time credential before `Active -> Claimed`)
+ *   is intentionally out of scope for this Phase 2B handoff and is tracked
+ *   separately for a later handoff design.
+ */
 export const MANAGED_OPENCODE_HANDOFF_V2_RECORD_VERSION = 2;
 export const MANAGED_OPENCODE_HANDOFF_V2_INCARNATION_BYTES = 32;
 export const MANAGED_OPENCODE_HANDOFF_V2_KEY_BYTES = 32;

@@ -3,6 +3,34 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHmac } from 'node:crypto';
 
+/**
+ * Managed OpenCode Guardian.
+ *
+ * Trust boundary (Phase 2B):
+ *   The guardian is the sole authoritative owner of an `Active` v2 record for
+ *   a given incarnation on this host. Bootstrap adoption from the lifecycle
+ *   startup path uses `client.list()` and trusts the returned
+ *   `(pid, port, incarnation)` tuple. This is intentional — the bootstrap
+ *   scenario finds a child that already reached `Active` (no spawn-time
+ *   `claimCapability` exists), so there is no protocol-level credential to
+ *   hand to a would-be `adopt()` RPC.
+ *
+ *   The IPC permissioning model already enforces the trust boundary:
+ *     - v2 root dir is mode `0700` (UID-scoped)
+ *     - the secret master file is mode `0600`
+ *     - the atomic PID-file singleton guarantees one guardian per host per UID
+ *     - the IPC Unix-domain socket is mode `0600` (umask `0o077` + explicit
+ *       `chmodSync` in `GuardianIpcServer.start()`)
+ *     - same-UID local processes are the documented trust boundary
+ *
+ *   Cross-process adoption with a `claimCapability` is tracked separately
+ *   and intentionally NOT exposed by this module. Earlier revisions shipped
+ *   a `claimCapability`-gated `adopt()` RPC that required the record to be in
+ *   `HandoffPrepared` state; that RPC was removed because no production path
+ *   used it and it conflated the spawn-time credential with the bootstrap
+ *   adoption scenario.
+ */
+
 import {
   ManagedOpenCodeHandoffV2State,
   canonicalizeManagedOpenCodeHandoffV2Record,
@@ -504,49 +532,6 @@ export class ManagedOpenCodeGuardian {
     entry.record = prepared;
     this.#log(`[guardian] prepared handoff for ${incarnation}`);
     return prepared;
-  }
-
-  async adopt({ incarnation, claimCapability }) {
-    if (typeof claimCapability !== 'string' || claimCapability.length === 0) {
-      throw new TypeError('claimCapability is required');
-    }
-
-    const loaded = await this.#protocol.readRecord({ incarnation });
-    if (!loaded.ok) {
-      throw new Error(`Failed to read record: ${loaded.reason}`);
-    }
-    const record = loaded.record;
-    if (record.state !== ManagedOpenCodeHandoffV2State.HandoffPrepared) {
-      throw new Error(`Cannot adopt: record is not in HandoffPrepared state (current: ${record.state})`);
-    }
-
-    // Verify claim capability fingerprint.
-    // The claimCapability is expected to be the raw lifecycle credential bytes,
-    // possibly encoded as base64url. We attempt base64url decoding first.
-    const expectedFingerprint = record.credentialFingerprint;
-    let claimBuffer;
-    try {
-      claimBuffer = Buffer.from(claimCapability, 'base64url');
-    } catch {
-      claimBuffer = Buffer.from(claimCapability, 'utf8');
-    }
-    const derivedFingerprint = createHmac('sha256', claimBuffer)
-      .update(Buffer.from(incarnation, 'base64url'))
-      .digest('base64url');
-
-    if (derivedFingerprint !== expectedFingerprint) {
-      throw new Error('Invalid claim capability');
-    }
-
-    // Transition to Claimed.
-    const claimed = await this.#transitionRecord({
-      incarnation,
-      expectedRevision: record.revision,
-      nextState: ManagedOpenCodeHandoffV2State.Claimed,
-    });
-
-    this.#log(`[guardian] adopted ${incarnation}`);
-    return claimed;
   }
 
   async listChildren() {

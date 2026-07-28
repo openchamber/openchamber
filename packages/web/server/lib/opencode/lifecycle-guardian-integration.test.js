@@ -275,6 +275,91 @@ describe('Guardian integration', () => {
       expect(typeof state.openCodeProcess.close).toBe('function');
     });
 
+    it.skipIf(process.platform === 'win32')('guardian handoff spawn passes managed launch env (password + agent-tool) through IPC', async () => {
+      // F-2: the guardian handoff path must use the same managed-launch
+      // env-construction as startOpenCodeOnce. Otherwise the successor
+      // lacks OPENCODE_SERVER_PASSWORD (so proxied requests carrying
+      // getOpenCodeAuthHeaders() fail to authenticate) and lacks the
+      // agent-tool runtime env.
+      const clientConnect = vi.fn().mockResolvedValue(undefined);
+      const clientSpawn = vi.fn().mockResolvedValue({
+        incarnation: 'successor-f2',
+        pid: 12347,
+        port: 45680,
+      });
+      const clientPrepareHandoff = vi.fn().mockResolvedValue(undefined);
+      const clientStop = vi.fn().mockResolvedValue(undefined);
+      const clientDisconnect = vi.fn();
+
+      GuardianClient.mockImplementation(function () {
+        return {
+          connect: clientConnect,
+          spawn: clientSpawn,
+          stop: clientStop,
+          prepareHandoff: clientPrepareHandoff,
+          list: vi.fn(),
+          disconnect: clientDisconnect,
+        };
+      });
+
+      const applyOpencodeBinaryFromSettings = vi.fn(async () => {
+        process.env.OPENCODE_BINARY = '/usr/local/bin/opencode';
+        return '/usr/local/bin/opencode';
+      });
+      const ensureLocalOpenCodeServerPassword = vi.fn(async () => 'password');
+      const getManagedOpenCodeEnv = vi.fn(async () => ({
+        'agent-tool': 'tool-runtime-1',
+        OPENCHAMBER_AGENT_TOOL_TOKEN: 'ephemeral',
+      }));
+
+      const { runtime, state } = createRuntime({
+        applyOpencodeBinaryFromSettings,
+        ensureLocalOpenCodeServerPassword,
+        getManagedOpenCodeEnv,
+      });
+
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'current-123';
+      state.isOpenCodeReady = true;
+
+      try {
+        await runtime.restartOpenCode();
+      } catch {
+        // Legacy fallback may throw in test env; we only care about the
+        // guardian branch assertions below.
+      }
+
+      // The handoff branch must have been entered: client.spawn was called.
+      expect(clientSpawn).toHaveBeenCalled();
+      const spawnArgs = clientSpawn.mock.calls[0][0];
+
+      // F-2: applyOpencodeBinaryFromSettings must run in strict mode BEFORE
+      // client.spawn so the resolved binary is the one we hand the guardian.
+      const binaryCallIndex = applyOpencodeBinaryFromSettings.mock.calls
+        .findIndex((call) => call[0]?.strict === true);
+      expect(binaryCallIndex).toBeGreaterThanOrEqual(0);
+
+      const spawnCallOrder = clientSpawn.mock.invocationCallOrder[0];
+      const binaryCallOrder = applyOpencodeBinaryFromSettings.mock.invocationCallOrder[binaryCallIndex];
+      expect(binaryCallOrder).toBeLessThan(spawnCallOrder);
+
+      // F-2: the spawn env must include the rotated server password.
+      expect(spawnArgs.env.OPENCODE_SERVER_PASSWORD).toBe('password');
+
+      // F-2: the spawn env must merge the agent-tool env from
+      // getManagedOpenCodeEnv.
+      expect(spawnArgs.env['agent-tool']).toBe('tool-runtime-1');
+      expect(spawnArgs.env.OPENCHAMBER_AGENT_TOOL_TOKEN).toBe('ephemeral');
+
+      // F-2: the binary is whatever applyOpencodeBinaryFromSettings
+      // resolved (the helper passes the launch-spec unwrapped path).
+      expect(spawnArgs.binary).toBe('/usr/local/bin/opencode');
+
+      // F-2: password must have been rotated for the handoff spawn.
+      expect(ensureLocalOpenCodeServerPassword).toHaveBeenCalledWith({ rotateManaged: true });
+    });
+
     it('falls back to legacy restart when guardian unavailable', async () => {
       const { spawn } = await import('node:child_process');
       const child = createMockChild();

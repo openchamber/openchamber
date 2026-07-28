@@ -83,6 +83,53 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     };
   };
 
+  // Shared env-construction for any managed OpenCode spawn path (legacy
+  // startOpenCodeOnce, guardian handoff restart, ...). Centralising this here
+  // is the right-level fix for F-2: the guardian handoff path used to bypass
+  // the managed-launch semantics (binary resolution, password rotation, PATH
+  // augmentation, shell env, agent-tool env), which left a guardian-spawned
+  // successor without OPENCODE_SERVER_PASSWORD and without the agent-tool
+  // runtime env — so the web server's proxied requests (carrying
+  // getOpenCodeAuthHeaders()) would fail to authenticate against it.
+  const buildManagedOpenCodeSpawnEnv = async ({ rotatePassword } = {}) => {
+    await applyOpencodeBinaryFromSettings({ strict: true });
+    ensureOpencodeCliEnv();
+    const openCodePassword = await ensureLocalOpenCodeServerPassword({ rotateManaged: rotatePassword === true });
+
+    let envPath = process.env.PATH;
+    if (typeof buildManagedOpenCodePath === 'function') {
+      envPath = buildManagedOpenCodePath();
+    } else if (typeof buildAugmentedPath === 'function') {
+      envPath = buildAugmentedPath();
+    }
+
+    const shellEnv = typeof getManagedOpenCodeShellEnvSnapshot === 'function'
+      ? getManagedOpenCodeShellEnvSnapshot() || {}
+      : {};
+
+    const managedOpenCodeEnv = await getManagedOpenCodeEnv();
+
+    // Use the same managed-launch spec the legacy spawn path uses, so the
+    // binary we hand to client.spawn matches what the locally-spawned
+    // managed server would have used (Windows shim unwrap, etc.).
+    const resolvedRaw = (process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
+    const launchSpec = typeof resolveManagedOpenCodeLaunchSpec === 'function'
+      ? resolveManagedOpenCodeLaunchSpec(resolvedRaw)
+      : null;
+    const binary = launchSpec?.binary || resolvedRaw;
+
+    return {
+      binary,
+      env: {
+        ...shellEnv,
+        ...process.env,
+        ...managedOpenCodeEnv,
+        PATH: envPath,
+        OPENCODE_SERVER_PASSWORD: openCodePassword,
+      },
+    };
+  };
+
   const killProcessOnPort = (port) => {
     if (!port || process.platform === 'win32') return;
     try {
@@ -513,19 +560,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         : `Starting OpenCode on allocated port ${spawnPort}...`
     );
 
-    await applyOpencodeBinaryFromSettings({ strict: true });
-    ensureOpencodeCliEnv();
-    const openCodePassword = await ensureLocalOpenCodeServerPassword({ rotateManaged: true });
-    let envPath = process.env.PATH;
-    if (typeof buildManagedOpenCodePath === 'function') {
-      envPath = buildManagedOpenCodePath();
-    } else if (typeof buildAugmentedPath === 'function') {
-      envPath = buildAugmentedPath();
-    }
+    const managedLaunch = await buildManagedOpenCodeSpawnEnv({ rotatePassword: true });
     const shellEnv = typeof getManagedOpenCodeShellEnvSnapshot === 'function'
       ? getManagedOpenCodeShellEnvSnapshot() || {}
       : {};
-    const managedOpenCodeEnv = await getManagedOpenCodeEnv();
 
     try {
       const serverInstance = await createManagedOpenCodeServerProcess({
@@ -534,13 +572,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         timeout: 30000,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
-        env: {
-          ...shellEnv,
-          ...process.env,
-          ...managedOpenCodeEnv,
-          PATH: envPath,
-          OPENCODE_SERVER_PASSWORD: openCodePassword,
-        },
+        env: managedLaunch.env,
       });
 
       if (!serverInstance || !serverInstance.url) {
@@ -664,13 +696,17 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
                 await client.prepareHandoff({ incarnation: state.currentIncarnation });
               }
 
-              // Spawn successor through guardian.
+              // Spawn successor through guardian. Build the spawn env the
+              // same way startOpenCodeOnce does so the successor authenticates
+              // (OPENCODE_SERVER_PASSWORD) and inherits the agent-tool env
+              // required by proxied requests carrying getOpenCodeAuthHeaders().
+              const launch = await buildManagedOpenCodeSpawnEnv({ rotatePassword: true });
               const successor = await client.spawn({
                 port: newPort,
                 hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
-                binary: process.env.OPENCODE_BINARY || 'opencode',
+                binary: launch.binary,
                 cwd: state.openCodeWorkingDirectory,
-                env: process.env,
+                env: launch.env,
               });
 
               // Wait for successor health.

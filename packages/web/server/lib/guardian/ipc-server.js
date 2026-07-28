@@ -49,7 +49,6 @@ export class GuardianIpcServer extends EventEmitter {
     this.#methods.set('stop', async (params) => this.#guardian.stopChild(params));
     this.#methods.set('health', async (params) => this.#guardian.healthCheck(params));
     this.#methods.set('prepare-handoff', async (params) => this.#guardian.prepareHandoff(params));
-    this.#methods.set('adopt', async (params) => this.#guardian.adopt(params));
     this.#methods.set('list', async () => this.#guardian.listChildren());
     this.#methods.set('shutdown', async () => {
       const result = await this.#guardian.stop();
