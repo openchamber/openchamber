@@ -684,8 +684,29 @@
    the final one. Hide it during the transition (+ UIKit's reposition lag,
    see oc-kb-caret-hold timing in useNativeMobileChrome) and pop it back in. */
 :root.oc-capacitor-app.oc-kb-caret-hold textarea,
-:root.oc-capacitor-app.oc-kb-caret-hold input {
+:root.oc-capacitor-app.oc-kb-caret-hold input,
+:root.oc-capacitor-app.oc-kb-caret-hold [contenteditable] {
   caret-color: transparent;
+}
+
+/* The composer is a CodeMirror editor, so it is neither a textarea nor an
+   input, and its caret is not the native one either: drawSelection() hides
+   that and paints a .cm-cursor element instead. Hiding caret-color alone
+   would leave that element riding across the screen. */
+:root.oc-capacitor-app.oc-kb-caret-hold .cm-cursor,
+:root.oc-capacitor-app.oc-kb-caret-hold .cm-dropCursor {
+  opacity: 0;
+}
+
+/* On touch devices the composer re-enables the NATIVE caret with `!important`
+   (composerNativeSelectionTheme: iOS colours its selection handles from the
+   caret colour, so the caret cannot stay transparent). That declaration beats
+   the plain [contenteditable] rule above, so the caret-hold needs its own
+   heavier rule for the composer — !important plus more specificity than the
+   theme's `.cm-editor .cm-content` selector. */
+:root.oc-capacitor-app.oc-kb-caret-hold .cm-editor .cm-content,
+:root.oc-capacitor-app.oc-kb-caret-hold .cm-editor .cm-content .cm-line {
+  caret-color: transparent !important;
 }
 
 /* The composer keeps its 1rem bottom padding while the keyboard is down (breathing
@@ -697,11 +718,15 @@
   padding-bottom: 12px;
 }
 
-/* Draft starter chips leave the moment the keyboard starts rising
-   (oc-keyboard-open lands at keyboardWillShow) and return when it's gone —
-   with the keyboard up there is only room for the draft title. Instant
-   show/hide (no squish animation); the title's own keyboard compensation
-   (.oc-draft-center below) carries the smooth motion. */
+/* Draft starter chips leave when the full composer takes over — with the
+   composer expanded (and hence the keyboard up) there is only room for the
+   draft title. oc-composer-expanded is set in the SAME frame as the pill swap
+   (see useMobileComposerShell), so the chips leave together with the morph;
+   the keyboard classes remain as fallbacks for keyboard-up states that do not
+   go through the pill (and for mobile browsers). Instant show/hide (no squish
+   animation); the title's own keyboard compensation (.oc-draft-center below)
+   carries the smooth motion. */
+:root.oc-composer-expanded .oc-draft-starters,
 :root.oc-capacitor-app.oc-keyboard-open .oc-draft-starters,
 :root.oc-browser-keyboard-open .oc-draft-starters {
   display: none;

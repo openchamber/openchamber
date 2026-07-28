@@ -5,7 +5,12 @@ import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { DiffView } from '@/components/views/DiffView';
 import { FilesView } from '@/components/views/FilesView';
+import { GitView } from '@/components/views/GitView';
+import { PullRequestView } from '@/components/views/PullRequestView';
+import { TerminalView } from '@/components/views/TerminalView';
 import { PlanView } from '@/components/views/PlanView';
+import { ProjectContextPanel } from './RightSidebarTabs';
+import { SidebarFilesTree } from './SidebarFilesTree';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { openExternalUrl } from '@/lib/url';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -30,6 +35,7 @@ import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
 import { getOrCreateEmbeddedSessionChatURL, type EmbeddedSessionChatURLCacheEntry } from './contextPanelEmbeddedChat';
+import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import {
   type PreviewElementMetadata,
   isPreviewElementMetadata,
@@ -44,6 +50,7 @@ import {
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
+const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
@@ -125,16 +132,6 @@ const getAvailablePanelWidth = (panel: HTMLElement | null): number | null => {
   return parentWidth;
 };
 
-const clampWidthToAvailableSpace = (width: number, panel: HTMLElement | null): number => {
-  const clampedWidth = clampWidth(width);
-  const availableWidth = getAvailablePanelWidth(panel);
-  if (availableWidth === null) {
-    return clampedWidth;
-  }
-
-  return Math.min(clampedWidth, Math.max(1, availableWidth));
-};
-
 const getRelativePathLabel = (filePath: string | null, directory: string): string => {
   if (!filePath) {
     return '';
@@ -157,6 +154,10 @@ const getModeLabel = (
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'preview') return t('contextPanel.mode.preview');
   if (mode === 'browser') return t('contextPanel.mode.browser');
+  if (mode === 'git') return t('layout.rightSidebar.git');
+  if (mode === 'pr') return t('contextPanel.mode.pr');
+  if (mode === 'notes') return t('contextRail.surface.notes');
+  if (mode === 'terminal') return t('layout.mainTab.terminal');
   return t('contextPanel.mode.context');
 };
 
@@ -239,6 +240,22 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
     return <Icon name="arrow-left-right" className="h-3.5 w-3.5" />;
   }
 
+  if (tab.mode === 'git') {
+    return <Icon name="git-branch" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'pr') {
+    return <Icon name="git-pull-request" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'notes') {
+    return <Icon name="sticky-note" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'terminal') {
+    return <Icon name="terminal-box" className="h-3.5 w-3.5" />;
+  }
+
   if (tab.mode === 'plan') {
     return <Icon name="file-text" className="h-3.5 w-3.5" />;
   }
@@ -260,6 +277,130 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
   }
 
   return undefined;
+};
+
+const EDITOR_TREE_MIN_WIDTH = 200;
+const EDITOR_TREE_MAX_WIDTH = 480;
+
+// The editor surface's file-tree column: docked on the right, resizable from
+// its left edge, and animated open/closed like the app sidebars.
+const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
+  const { t } = useI18n();
+  const width = useUIStore((state) => state.contextEditorTreeWidth);
+  const setWidth = useUIStore((state) => state.setContextEditorTreeWidth);
+  const [isResizing, setIsResizing] = React.useState(false);
+  const startXRef = React.useRef(0);
+  const startWidthRef = React.useRef(width);
+  const liveWidthRef = React.useRef<number | null>(null);
+  const pointerIDRef = React.useRef<number | null>(null);
+  const columnRef = React.useRef<HTMLDivElement | null>(null);
+
+  const clampTreeWidth = React.useCallback((value: number) => {
+    return Math.min(EDITOR_TREE_MAX_WIDTH, Math.max(EDITOR_TREE_MIN_WIDTH, Math.round(value)));
+  }, []);
+
+  const applyLiveTreeWidth = React.useCallback((nextWidth: number) => {
+    const column = columnRef.current;
+    if (!column) {
+      return;
+    }
+    column.style.width = `${nextWidth}px`;
+    column.style.setProperty('--oc-editor-tree-width', `${nextWidth}px`);
+  }, []);
+
+  const handlePointerDown = (event: React.PointerEvent) => {
+    if (!visible) {
+      return;
+    }
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    pointerIDRef.current = event.pointerId;
+    setIsResizing(true);
+    startXRef.current = event.clientX;
+    startWidthRef.current = width;
+    liveWidthRef.current = width;
+    event.preventDefault();
+  };
+
+  const handlePointerMove = (event: React.PointerEvent) => {
+    if (!isResizing || pointerIDRef.current !== event.pointerId) {
+      return;
+    }
+    const delta = startXRef.current - event.clientX;
+    const nextWidth = clampTreeWidth(startWidthRef.current + delta);
+    if (liveWidthRef.current === nextWidth) {
+      return;
+    }
+    liveWidthRef.current = nextWidth;
+    applyLiveTreeWidth(nextWidth);
+  };
+
+  const handlePointerEnd = (event: React.PointerEvent) => {
+    if (pointerIDRef.current !== event.pointerId) {
+      return;
+    }
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    const finalWidth = clampTreeWidth(liveWidthRef.current ?? width);
+    pointerIDRef.current = null;
+    liveWidthRef.current = null;
+    setIsResizing(false);
+    setWidth(finalWidth);
+  };
+
+  const appliedWidth = visible ? width : 0;
+
+  return (
+    <div
+      ref={columnRef}
+      className={cn(
+        'relative h-full flex-shrink-0 overflow-hidden border-l border-border/40 bg-background will-change-[width] motion-reduce:transition-none',
+        !visible && 'border-l-0',
+      )}
+      style={{
+        width: `${isResizing ? (liveWidthRef.current ?? appliedWidth) : appliedWidth}px`,
+        ['--oc-editor-tree-width' as string]: `${isResizing ? (liveWidthRef.current ?? width) : width}px`,
+        overflowX: 'clip',
+        transitionProperty: isResizing ? 'none' : 'width',
+        transitionDuration: '200ms',
+        transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      }}
+      aria-hidden={!visible}
+    >
+      {visible && (
+        <div
+          className={cn(
+            'absolute left-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+            isResizing && 'bg-[var(--interactive-border)]'
+          )}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t('contextPanel.actions.resizePanelAria')}
+        />
+      )}
+      <div
+        className={cn(
+          'relative z-10 h-full shrink-0 transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+          isResizing && 'pointer-events-none',
+          !visible && 'pointer-events-none select-none opacity-0'
+        )}
+        style={{ width: 'var(--oc-editor-tree-width)' }}
+        aria-hidden={!visible}
+      >
+        <SidebarFilesTree />
+      </div>
+    </div>
+  );
 };
 
 const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null => {
@@ -2091,6 +2232,8 @@ export const ContextPanel: React.FC = () => {
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const openContextPreview = useUIStore((state) => state.openContextPreview);
+  const contextEditorTreeVisible = useUIStore((state) => state.contextEditorTreeVisible);
+  const toggleContextEditorTree = useUIStore((state) => state.toggleContextEditorTree);
   const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
   const { themeMode, setThemeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
@@ -2098,7 +2241,13 @@ export const ContextPanel: React.FC = () => {
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
-  const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
+  const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
+  const activeModeForWidth = activeTab?.mode ?? null;
+  const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
+  const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
+  const widthFallbackBase = availablePanelAreaWidth
+    ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
+  const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -2111,7 +2260,6 @@ export const ContextPanel: React.FC = () => {
   const sessionTitleById = useSessionTitleMap(directoryKey || undefined, chatSessionIDs);
 
   const [isResizing, setIsResizing] = React.useState(false);
-  const [suppressWidthTransition, setSuppressWidthTransition] = React.useState(false);
   const startXRef = React.useRef(0);
   const startWidthRef = React.useRef(width);
   const resizingWidthRef = React.useRef<number | null>(null);
@@ -2120,41 +2268,23 @@ export const ContextPanel: React.FC = () => {
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
-  const previousIsOpenRef = React.useRef(isOpen);
-  const suppressWidthTransitionFrameRef = React.useRef<number | null>(null);
 
-  const suppressWidthTransitionForFrame = React.useCallback(() => {
-    setSuppressWidthTransition(true);
-    if (suppressWidthTransitionFrameRef.current !== null) {
-      window.cancelAnimationFrame(suppressWidthTransitionFrameRef.current);
-    }
-    suppressWidthTransitionFrameRef.current = window.requestAnimationFrame(() => {
-      suppressWidthTransitionFrameRef.current = null;
-      setSuppressWidthTransition(false);
-    });
-  }, []);
-
-  React.useEffect(() => () => {
-    if (suppressWidthTransitionFrameRef.current !== null) {
-      window.cancelAnimationFrame(suppressWidthTransitionFrameRef.current);
-    }
-  }, []);
-
+  // Tracks the panel area width so fraction-based surface defaults stay
+  // proportional as the window resizes; manual widths remain fixed px.
   React.useLayoutEffect(() => {
-    const wasOpen = previousIsOpenRef.current;
-    previousIsOpenRef.current = isOpen;
-
-    if (!isOpen) {
-      setSuppressWidthTransition(false);
+    const parent = panelRef.current?.parentElement;
+    if (!parent || typeof ResizeObserver === 'undefined') {
       return;
     }
 
-    if (wasOpen) {
-      return;
-    }
+    const observer = new ResizeObserver(() => {
+      setAvailablePanelAreaWidth(parent.clientWidth || null);
+    });
+    observer.observe(parent);
+    setAvailablePanelAreaWidth(parent.clientWidth || null);
 
-    suppressWidthTransitionForFrame();
-  }, [isOpen, suppressWidthTransitionForFrame]);
+    return () => observer.disconnect();
+  }, []);
 
   React.useEffect(() => {
     if (!isOpen || wasOpenRef.current) {
@@ -2170,13 +2300,36 @@ export const ContextPanel: React.FC = () => {
     return () => window.cancelAnimationFrame(frame);
   }, [isOpen]);
 
-  const applyLiveWidth = React.useCallback((nextWidth: number) => {
+  // Deferred resize: reflowing the chat column and the active surface (xterm,
+  // editor, embedded chat iframes) on every drag frame is unavoidably janky,
+  // so during the drag only a ghost guide line follows the pointer and the
+  // real width is applied once on release (riding the width transition).
+  const resizeAvailableWidthRef = React.useRef<number | null>(null);
+  // The panel content follows the guide line lazily: the real width is
+  // re-applied at most every RESIZE_FOLLOW_INTERVAL_MS and the standing
+  // 200ms width transition smooths each step, VS Code-style.
+  const resizeFollowTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyFollowWidth = React.useCallback(() => {
+    resizeFollowTimerRef.current = null;
     const panel = panelRef.current;
-    if (!panel) {
+    const next = resizingWidthRef.current;
+    if (!panel || next === null) {
       return;
     }
+    panel.style.setProperty('--oc-context-panel-width', `${next}px`);
+  }, []);
 
-    panel.style.setProperty('--oc-context-panel-width', `${clampWidthToAvailableSpace(nextWidth, panel)}px`);
+  React.useEffect(() => () => {
+    if (resizeFollowTimerRef.current !== null) {
+      clearTimeout(resizeFollowTimerRef.current);
+    }
+  }, []);
+
+  const clampWidthForDrag = React.useCallback((nextWidth: number) => {
+    const clamped = clampWidth(nextWidth);
+    const available = resizeAvailableWidthRef.current;
+    return available === null ? clamped : Math.min(clamped, Math.max(1, available));
   }, []);
 
   const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
@@ -2184,59 +2337,86 @@ export const ContextPanel: React.FC = () => {
       return;
     }
 
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // ignore; fallback listeners still handle drag
-    }
-
     activeResizePointerIDRef.current = event.pointerId;
     setIsResizing(true);
     startXRef.current = event.clientX;
     startWidthRef.current = width;
     resizingWidthRef.current = width;
-    applyLiveWidth(width);
+    // Measure once per drag; no layout reads happen during pointermove.
+    resizeAvailableWidthRef.current = getAvailablePanelWidth(panelRef.current);
+    document.documentElement.style.cursor = 'col-resize';
     event.preventDefault();
-  }, [applyLiveWidth, directoryKey, isExpanded, isOpen, width]);
+  }, [directoryKey, isExpanded, isOpen, width]);
 
-  const handleResizeMove = React.useCallback((event: React.PointerEvent) => {
-    if (!isResizing || activeResizePointerIDRef.current !== event.pointerId) {
-      return;
+  const finishResize = React.useCallback(() => {
+    // Apply the final width once, letting the regular 200ms width transition
+    // carry the panel to the release position.
+    const finalWidth = clampWidthForDrag(resizingWidthRef.current ?? width);
+    resizingWidthRef.current = null;
+    resizeAvailableWidthRef.current = null;
+    if (resizeFollowTimerRef.current !== null) {
+      clearTimeout(resizeFollowTimerRef.current);
+      resizeFollowTimerRef.current = null;
     }
-
-    const delta = startXRef.current - event.clientX;
-    const nextWidth = clampWidthToAvailableSpace(startWidthRef.current + delta, panelRef.current);
-    if (resizingWidthRef.current === nextWidth) {
-      return;
+    document.documentElement.style.cursor = '';
+    if (directoryKey && activeModeForWidth) {
+      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
     }
-
-    resizingWidthRef.current = nextWidth;
-    applyLiveWidth(nextWidth);
-  }, [applyLiveWidth, isResizing]);
-
-  const handleResizeEnd = React.useCallback((event: React.PointerEvent) => {
-    if (activeResizePointerIDRef.current !== event.pointerId || !directoryKey) {
-      return;
-    }
-
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // ignore
-    }
-
-    const finalWidth = clampWidthToAvailableSpace(resizingWidthRef.current ?? width, panelRef.current);
-    suppressWidthTransitionForFrame();
-    applyLiveWidth(finalWidth);
-    resizingWidthRef.current = finalWidth;
-    setContextPanelWidth(directoryKey, finalWidth);
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
-  }, [applyLiveWidth, directoryKey, setContextPanelWidth, suppressWidthTransitionForFrame, width]);
+  }, [activeModeForWidth, clampWidthForDrag, directoryKey, setContextPanelWidth, width]);
+
+  // Window-level drag listeners: tracking the pointer via the 3px handle and
+  // pointer capture is unreliable (capture can fail over iframes and a missed
+  // pointerup leaves the drag stuck), so while resizing the whole window
+  // tracks the pointer and any release/cancel/blur ends the drag.
+  React.useEffect(() => {
+    if (!isResizing) {
+      return;
+    }
+
+    const handleMove = (event: PointerEvent) => {
+      if (activeResizePointerIDRef.current !== event.pointerId) {
+        return;
+      }
+      const delta = startXRef.current - event.clientX;
+      const nextWidth = clampWidthForDrag(startWidthRef.current + delta);
+      if (resizingWidthRef.current === nextWidth) {
+        return;
+      }
+      resizingWidthRef.current = nextWidth;
+      if (resizeFollowTimerRef.current === null) {
+        resizeFollowTimerRef.current = setTimeout(applyFollowWidth, RESIZE_FOLLOW_INTERVAL_MS);
+      }
+    };
+
+    const handleUp = (event: PointerEvent) => {
+      if (activeResizePointerIDRef.current !== event.pointerId) {
+        return;
+      }
+      finishResize();
+    };
+
+    const handleWindowBlur = () => {
+      finishResize();
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleUp);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [applyFollowWidth, clampWidthForDrag, finishResize, isResizing]);
 
   React.useEffect(() => {
     if (!isResizing) {
       resizingWidthRef.current = null;
+      document.documentElement.style.cursor = '';
     }
   }, [isResizing]);
 
@@ -2457,6 +2637,10 @@ export const ContextPanel: React.FC = () => {
       }
 
       const data = event.data as { type?: unknown };
+      if (data?.type === 'openchamber:theme-sync-request') {
+        postThemeSyncToEmbeddedChat();
+        return;
+      }
       if (data?.type === 'openchamber:chat-settings-request') {
         postChatSettingsSyncToEmbeddedChat();
         return;
@@ -2473,7 +2657,7 @@ export const ContextPanel: React.FC = () => {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [postChatSettingsSyncToEmbeddedChat, setThemeMode, themeMode]);
+  }, [postChatSettingsSyncToEmbeddedChat, postThemeSyncToEmbeddedChat, setThemeMode, themeMode]);
 
   React.useLayoutEffect(() => {
     const hasAnyChatTab = tabs.some((tab) => tab.mode === 'chat');
@@ -2486,7 +2670,16 @@ export const ContextPanel: React.FC = () => {
     postEmbeddedVisibilityToChats();
   }, [darkThemeId, lightThemeId, postChatSettingsSyncToEmbeddedChat, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
-  const tabItems = React.useMemo(() => tabs.map((tab) => {
+  // The rail switches between surfaces (modes); the in-panel strip only lists
+  // instances of the active multi-instance surface (open files, split chats,
+  // preview targets).
+  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'preview';
+  const activeModeTabs = React.useMemo(
+    () => (activeTab ? tabs.filter((tab) => tab.mode === activeTab.mode) : []),
+    [activeTab, tabs],
+  );
+
+  const tabItems = React.useMemo(() => activeModeTabs.map((tab) => {
     const rawLabel = getTabLabel(tab, sessionTitleById, t);
     const label = truncateTabLabel(rawLabel, CONTEXT_TAB_LABEL_MAX_CHARS);
     const tabPathLabel = getRelativePathLabel(tab.targetPath, effectiveDirectory);
@@ -2497,10 +2690,16 @@ export const ContextPanel: React.FC = () => {
       title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
       closeLabel: t('contextPanel.tab.closeTabAria', { label }),
     };
-  }), [effectiveDirectory, sessionTitleById, t, tabs]);
+  }), [activeModeTabs, effectiveDirectory, sessionTitleById, t]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
+        : activeTab?.mode === 'git'
+            ? <GitView isActive={isOpen} />
+            : activeTab?.mode === 'pr'
+                ? <PullRequestView />
+            : activeTab?.mode === 'notes'
+                ? <ProjectContextPanel />
         : activeTab?.mode === 'plan'
             ? <PlanView targetPath={activeTab.targetPath} />
             : activeTab?.mode === 'preview'
@@ -2525,41 +2724,72 @@ export const ContextPanel: React.FC = () => {
     () => tabs.filter((tab) => tab.mode === 'diff'),
     [tabs],
   );
+  const hasTerminalTab = React.useMemo(
+    () => tabs.some((tab) => tab.mode === 'terminal'),
+    [tabs],
+  );
   const BrowserPane = isElectronBrowserRuntime() ? DesktopBrowserPane : IframeBrowserPane;
   const hasFileTabs = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file'),
+    [tabs],
+  );
+  const hasOpenEditorFile = React.useMemo(
+    () => tabs.some((tab) => tab.mode === 'file' && tab.targetPath),
     [tabs],
   );
 
   const isFileTabActive = activeTab?.mode === 'file';
 
   const header = (
-    <header className="flex h-10 items-stretch border-b border-transparent">
-      <SortableTabsStrip
-        items={tabItems}
-        activeId={activeTab?.id ?? null}
-        onSelect={(tabID) => {
-          if (!directoryKey) {
-            return;
-          }
-          setActiveContextPanelTab(directoryKey, tabID);
-        }}
-        onClose={(tabID) => {
-          if (!directoryKey) {
-            return;
-          }
-          closeContextPanelTab(directoryKey, tabID);
-        }}
-        onReorder={(activeTabID, overTabID) => {
-          if (!directoryKey) {
-            return;
-          }
-          reorderContextPanelTabs(directoryKey, activeTabID, overTabID);
-        }}
-        layoutMode="scrollable"
-        variant="default"
-      />
+    <header className="flex h-10 items-stretch border-b border-border/40">
+      {isMultiInstanceMode ? (
+        <SortableTabsStrip
+          items={tabItems}
+          activeId={activeTab?.id ?? null}
+          onSelect={(tabID) => {
+            if (!directoryKey) {
+              return;
+            }
+            setActiveContextPanelTab(directoryKey, tabID);
+          }}
+          onClose={(tabID) => {
+            if (!directoryKey) {
+              return;
+            }
+            closeContextPanelTab(directoryKey, tabID);
+          }}
+          onReorder={(activeTabID, overTabID) => {
+            if (!directoryKey) {
+              return;
+            }
+            reorderContextPanelTabs(directoryKey, activeTabID, overTabID);
+          }}
+          layoutMode="scrollable"
+          variant="default"
+        />
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
+          {activeTab ? getTabIcon(activeTab) : null}
+          <span className="truncate typography-ui-label text-foreground">
+            {activeTab ? getModeLabel(activeTab.mode, t) : null}
+          </span>
+        </div>
+      )}
       <div className="flex items-center gap-1 px-1.5">
+        {isFileTabActive ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={toggleContextEditorTree}
+            className="h-7 w-7 p-0"
+            title={t('contextRail.editorTree.toggle')}
+            aria-label={t('contextRail.editorTree.toggle')}
+            aria-pressed={contextEditorTreeVisible}
+          >
+            <Icon name="layout-right" className="h-3.5 w-3.5" />
+          </Button>
+        ) : null}
         <Button
           type="button"
           variant="ghost"
@@ -2586,28 +2816,28 @@ export const ContextPanel: React.FC = () => {
     </header>
   );
 
+  // width/min/max stay interpolable across open/close (no instant min/max
+  // jumps) so the 200ms width transition matches the sidebars.
   const panelStyle: React.CSSProperties = !isOpen
     ? {
-        ['--oc-context-panel-width' as string]: `${isResizing ? (resizingWidthRef.current ?? width) : width}px`,
+        ['--oc-context-panel-width' as string]: `${width}px`,
         width: 0,
-        minWidth: 0,
-        maxWidth: 0,
-        opacity: 0,
-        overflow: 'hidden',
-        visibility: 'hidden',
+        maxWidth: '100%',
+        overflowX: 'clip',
       }
     : isExpanded
       ? {
-          ['--oc-context-panel-width' as string]: '100%',
-          width: '100%',
-          minWidth: '100%',
+          // px, not '100%': px↔% width changes do not interpolate, which
+          // would make the expand/collapse width snap instead of animating.
+          ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
+          width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
           maxWidth: '100%',
         }
       : {
           width: 'min(var(--oc-context-panel-width), 100%)',
-          minWidth: `min(${CONTEXT_PANEL_MIN_WIDTH}px, 100%)`,
           maxWidth: '100%',
-          ['--oc-context-panel-width' as string]: `${isResizing ? (resizingWidthRef.current ?? width) : width}px`,
+          overflowX: 'clip',
+          ['--oc-context-panel-width' as string]: `${width}px`,
         };
 
   return (
@@ -2618,16 +2848,29 @@ export const ContextPanel: React.FC = () => {
       inert={!isOpen || undefined}
       className={cn(
         'flex min-h-0 flex-col overflow-hidden bg-background',
-        !isExpanded && 'border-l border-border/40',
+        // Right-anchored while expanded: `inset-0` would teleport the left
+        // edge instantly (position does not transition), so only the width
+        // animates and the panel grows leftwards from its docked position.
         isExpanded
-          ? 'absolute inset-0 z-20 min-w-0'
+          ? 'absolute inset-y-0 right-0 z-20 min-w-0'
           : 'relative h-full flex-shrink-0',
         !isOpen && 'pointer-events-none',
-        isResizing || !isOpen || suppressWidthTransition ? 'transition-none' : 'transition-[width] duration-200 ease-in-out'
+        'will-change-[width] motion-reduce:transition-none',
+        'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
       style={panelStyle}
     >
+      {/* Painted divider instead of border-l: a real border eats 1px of the
+          content box only while collapsed, shifting the header controls by
+          1px between the collapsed and expanded states. */}
+      {isOpen && !isExpanded && (
+        <div aria-hidden="true" className="absolute left-0 top-0 z-40 h-full w-px bg-border/40" />
+      )}
+      {/* Divider between the panel and the icon rail on its right. */}
+      {isOpen && (
+        <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border/40" />
+      )}
       {!isExpanded && (
         <div
           className={cn(
@@ -2635,19 +2878,45 @@ export const ContextPanel: React.FC = () => {
             isResizing && 'bg-[var(--interactive-border)]'
           )}
           onPointerDown={handleResizeStart}
-          onPointerMove={handleResizeMove}
-          onPointerUp={handleResizeEnd}
-          onPointerCancel={handleResizeEnd}
           role="separator"
           aria-orientation="vertical"
           aria-label={t('contextPanel.actions.resizePanelAria')}
         />
       )}
+      <div
+        className={cn(
+          'relative z-10 flex h-full min-h-0 shrink-0 flex-col duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+          // Width animates in sync with the panel (surface switches, resize
+          // release); during the drag itself nothing resizes — only the ghost
+          // guide line moves.
+          'transition-[width,opacity]',
+          !isOpen && 'pointer-events-none select-none opacity-0'
+        )}
+        // px in the expanded state too: px↔% width changes cannot interpolate,
+        // so the header controls would snap instead of riding the animation.
+        style={{
+          width: isExpanded
+            ? (availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%')
+            : 'var(--oc-context-panel-width)',
+        }}
+        aria-hidden={!isOpen}
+      >
       {header}
       <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
         {hasFileTabs ? (
-          <div className={cn('absolute inset-0', isFileTabActive ? 'block' : 'hidden')}>
-            <FilesView mode="editor-only" />
+          <div className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}>
+            <div className="h-full min-w-0 flex-1">
+              {hasOpenEditorFile ? (
+                <FilesView mode="editor-only" />
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+                  <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
+                  <div className="typography-ui-header text-foreground">{t('contextPanel.editorEmpty.title')}</div>
+                  <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.editorEmpty.description')}</div>
+                </div>
+              )}
+            </div>
+            <EditorTreeColumn visible={contextEditorTreeVisible} />
           </div>
         ) : null}
         {chatTabs.map((tab) => {
@@ -2716,7 +2985,13 @@ export const ContextPanel: React.FC = () => {
             />
           </div>
         ))}
-        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' ? activeNonChatContent : null}
+        {hasTerminalTab ? (
+          <div className={cn('absolute inset-0', activeTab?.mode === 'terminal' ? 'block' : 'hidden')}>
+            <TerminalView visible={isOpen && activeTab?.mode === 'terminal'} />
+          </div>
+        ) : null}
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' ? activeNonChatContent : null}
+      </div>
       </div>
     </aside>
   );

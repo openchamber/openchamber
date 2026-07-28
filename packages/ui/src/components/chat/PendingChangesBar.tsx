@@ -90,7 +90,6 @@ export const PendingChangesBar: React.FC = React.memo(() => {
             return;
         }
         store.navigateToDiff(file.relativePath, openStagedDiff);
-        store.setRightSidebarOpen(false);
     };
 
     const fileCount = gitChangedFiles.length;

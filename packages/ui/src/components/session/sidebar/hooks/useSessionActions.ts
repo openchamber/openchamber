@@ -4,6 +4,7 @@ import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import type { MainTab } from '@/stores/useUIStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
@@ -65,6 +66,9 @@ export const useSessionActions = (args: Args) => {
   const handleSessionSelect = React.useCallback(
     (sessionId: string, sessionDirectory?: string | null) => {
       streamPerfMark('navigation.session_select');
+      // Selecting a session always leaves any full-page surface, even when
+      // the session is already the current one (no store transition fires).
+      useUIStore.getState().closeMainSurfaces();
       const resetSessionSearch = () => {
         if (!args.isSessionSearchOpen && args.sessionSearchQuery.length === 0) {
           return;

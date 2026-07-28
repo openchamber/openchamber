@@ -8,6 +8,8 @@ import type React from 'react';
  * some WebKit-based environments where composition
  * events can be ordered unexpectedly.
  */
-export const isIMECompositionEvent = (e: React.KeyboardEvent): boolean => {
-  return e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
+export const isIMECompositionEvent = (e: KeyboardEvent | React.KeyboardEvent): boolean => {
+  // CodeMirror keymaps hand out the native event; React handlers wrap it.
+  const native = 'nativeEvent' in e ? e.nativeEvent : e;
+  return native.isComposing || native.keyCode === 229;
 };

@@ -1615,7 +1615,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             const relativePath = getRelativePath(absolutePath, currentDirectory);
             if (store.isMobile) {
                 store.navigateToDiff(relativePath);
-                store.setRightSidebarOpen(false);
                 return;
             }
             store.openContextDiff(currentDirectory, relativePath);

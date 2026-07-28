@@ -50,7 +50,7 @@ afterAll(() => {
 });
 
 describe('embedded session chat URL', () => {
-  test('includes parent effective system theme bootstrap data', () => {
+  test('includes compact parent theme bootstrap data', () => {
     const currentTheme = makeTheme('custom-dark', 'dark');
 
     const src = buildEmbeddedSessionChatURL('ses_1', '/repo', false, {
@@ -67,7 +67,41 @@ describe('embedded session chat URL', () => {
     expect(url.searchParams.get('themeVariant')).toBe('dark');
     expect(url.searchParams.get('lightThemeId')).toBe('custom-light');
     expect(url.searchParams.get('darkThemeId')).toBe('custom-dark');
-    expect(JSON.parse(url.searchParams.get('currentTheme') || '{}').metadata.id).toBe('custom-dark');
+    expect(url.searchParams.get('currentTheme')).toBeNull();
+  });
+
+  test('does not encode syntax tokens in the URL', () => {
+    const currentTheme = makeTheme('token-rich-dark', 'dark');
+    currentTheme.colors.syntax.tokens = Object.fromEntries(
+      Array.from({ length: 500 }, (_, index) => [`token-${index}`, `#${index.toString(16).padStart(6, '0')}`]),
+    );
+
+    const src = buildEmbeddedSessionChatURL(
+      'ses_abcdefghijklmnopqrstuvwxyz0123456789',
+      '/workspace/projects/openchamber',
+      true,
+      {
+        mode: 'system',
+        lightThemeId: 'token-rich-light',
+        darkThemeId: 'token-rich-dark',
+        currentTheme,
+      },
+    );
+
+    const srcWithoutTokens = buildEmbeddedSessionChatURL(
+      'ses_abcdefghijklmnopqrstuvwxyz0123456789',
+      '/workspace/projects/openchamber',
+      true,
+      {
+        mode: 'system',
+        lightThemeId: 'token-rich-light',
+        darkThemeId: 'token-rich-dark',
+        currentTheme: makeTheme('token-rich-dark', 'dark'),
+      },
+    );
+
+    expect(new URL(src).searchParams.get('currentTheme')).toBeNull();
+    expect(src).toBe(srcWithoutTokens);
   });
 
   test('freezes bootstrap src per tab so live theme changes do not reload iframe', () => {

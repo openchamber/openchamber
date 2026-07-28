@@ -1,9 +1,17 @@
-## [Unreleased]
+## [1.17.0] - 2026-07-28
 
+- **Context panel:** a new surface rail brings Changes, pull requests, files, terminal, notes, plans, previews, and side chats into one resizable panel. The pull-request surface now shows live checks and comments, and can attach failed checks or comments to a chat draft.
+- **Chat composer:** prompts now render Markdown emphasis, attention lines, file and agent mentions, slash commands, snippets, attachment citations, and `~path` references directly while you type. File mentions can be edited in place.
+- Sessions: the sidebar now uses clearer project zones and single-line session rows, with folders shown after ungrouped sessions and archived sessions kept in their existing workspace sections.
 - Sessions: fixed missing activity-based sorting; chats now move in the list when they start or finish instead of repeatedly reordering while a response streams.
+- Chat: selecting text from Markdown code blocks now preserves the code fences, language, and surrounding block structure when adding it to the composer or starting a new session (thanks to @ChangeHow).
+- Chat: code blocks no longer shift line layout or merge adjacent text while rendering, and copied code keeps its original text (thanks to @ChangeHow).
+- Chat/Permissions: sending a message while a permission prompt is open now denies pending requests in the session and its subagents, then queues the message for the next turn (thanks to @tomzx).
+- Chat/Subagents: subagent chats can be prompted when direct subagent prompting is enabled, even if the parent session has not loaded.
 - Chat: jumping to messages in long conversations now lands on the intended message when earlier rows have not been rendered yet.
 - Settings: added an option to hide starter suggestions on the new-session screen.
 - Shortcuts: fixed a regression where double-Escape could be primed when the current session was not active.
+- Usage: added Crof and NeuralWatt quota tracking, including the missing Crof switch arm that previously fell back to "Unsupported provider" (thanks to @kydorn).
 
 ## [1.16.3] - 2026-07-22
 

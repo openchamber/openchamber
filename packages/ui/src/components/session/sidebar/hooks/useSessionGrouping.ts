@@ -12,6 +12,7 @@ import { compareSessionsByLifecycleOrder, getSessionLifecycleOrderValue } from '
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { getWorktreeFirstSeenAt } from '../worktreeFirstSeen';
 
 type Args = {
   homeDirectory: string | null;
@@ -196,7 +197,16 @@ export const useSessionGrouping = (args: Args) => {
           return bInfo.lastUpdatedAt - aInfo.lastUpdatedAt;
         }
 
-        // Third priority: for inactive worktrees, sort by label (asc)
+        // Third priority: for inactive worktrees, most recently discovered
+        // first (a worktree created mid-session surfaces at the top of the
+        // list; startup discovery ties and falls through to labels).
+        const aSeen = getWorktreeFirstSeenAt(a.path);
+        const bSeen = getWorktreeFirstSeenAt(b.path);
+        if (aSeen !== bSeen) {
+          return bSeen - aSeen;
+        }
+
+        // Fourth priority: sort by label (asc)
         const aLabel = (a.label || a.branch || a.name || a.path || '').toLowerCase();
         const bLabel = (b.label || b.branch || b.name || b.path || '').toLowerCase();
         return aLabel.localeCompare(bLabel);

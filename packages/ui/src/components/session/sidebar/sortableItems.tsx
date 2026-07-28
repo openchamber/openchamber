@@ -13,7 +13,13 @@ import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useI18n } from '@/lib/i18n';
+
+export type SortableDragHandleProps = {
+  listeners: ReturnType<typeof useSortable>['listeners'];
+  setActivatorNodeRef: ReturnType<typeof useSortable>['setActivatorNodeRef'];
+};
 
 export interface SortableProjectItemProps {
   id: string;
@@ -35,6 +41,7 @@ export interface SortableProjectItemProps {
   onToggle: () => void;
   onNewSession: () => void;
   onNewWorktreeSession?: () => void;
+  onManageWorktrees?: () => void;
   onRenameStart: () => void;
   onClose: () => void;
   sentinelRef: (el: HTMLDivElement | null) => void;
@@ -43,12 +50,9 @@ export interface SortableProjectItemProps {
   hideHeader?: boolean;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
+  /** Aggregated activity/attention indicator shown while the project is collapsed. */
+  statusIndicator?: React.ReactNode;
 }
-
-export type SortableDragHandleProps = {
-  listeners: ReturnType<typeof useSortable>['listeners'];
-  setActivatorNodeRef: ReturnType<typeof useSortable>['setActivatorNodeRef'];
-};
 
 export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   id,
@@ -69,6 +73,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   onToggle,
   onNewSession,
   onNewWorktreeSession,
+  onManageWorktrees,
   onRenameStart,
   onClose,
   sentinelRef,
@@ -77,9 +82,11 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   hideHeader = false,
   openSidebarMenuKey,
   setOpenSidebarMenuKey,
+  statusIndicator = null,
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
+  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
   const {
     attributes,
     listeners,
@@ -108,6 +115,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         <Item onClick={onNewSession}>
           <Icon name="add" className="mr-1.5 h-4 w-4" />
           {t('sessions.sidebar.project.actions.newSession')}
+        </Item>
+      )}
+      {isRepo && !hideDirectoryControls && onManageWorktrees && (
+        <Item onClick={onManageWorktrees}>
+          <Icon name="node-tree" className="mr-1.5 h-4 w-4" />
+          {t('sessions.sidebar.project.actions.manageWorktrees')}
         </Item>
       )}
       <Item onClick={onRenameStart}>
@@ -139,7 +152,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     }
   }, []);
 
-  const handleToggleClick = React.useCallback(() => {
+  const handleToggleClick = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    // Drop mouse-click focus so hover-revealed chrome (chevron, actions)
+    // hides again on mouse-leave instead of sticking via :focus-within.
+    // Keyboard users keep their focus-visible ring (blur only fires here
+    // for pointer interactions that produced a click).
+    event.currentTarget.blur();
     if (suppressNextToggleRef.current) {
       suppressNextToggleRef.current = false;
       return;
@@ -167,9 +185,19 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
           <ContextMenu open={isContextMenuOpen} onOpenChange={setIsContextMenuOpen}>
             <ContextMenuTrigger
               render={
+                // Sticky zone header: this trigger div is a direct child of
+                // the project wrapper (which spans header + sessions), so it
+                // can stick for the whole zone. The solid sidebar backing
+                // keeps scrolled session rows from showing through the
+                // translucent band.
+                // Full-bleed band: pull past the list container's padding so
+                // the section band spans the entire sidebar width (ref: edge-
+                // to-edge section headers, not rounded pills).
                 <div
-                  className={cn('w-full text-left group/project select-none')}
-                  style={{ backgroundColor: isDesktopShell && isStuck ? 'transparent' : undefined }}
+                  className={cn(
+                    '-ml-2.5 -mr-2 text-left group/project select-none',
+                    stickyZoneHeaders && 'oc-zone-header-backing sticky top-0 z-20 bg-sidebar',
+                  )}
                   onContextMenu={(event) => {
                     // VS Code hides project actions entirely (hideDirectoryControls).
                     if (hideDirectoryControls) return;
@@ -179,7 +207,17 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 />
               }
             >
-            <div className="relative flex items-center gap-1 px-0.5 py-0.5" {...attributes}>
+            <div
+              className={cn(
+                // pl-4 keeps the icon/text aligned with the padded rows below
+                // (container pl-2.5 + band px-1.5 it replaces).
+                'relative flex items-center gap-1 py-1 pl-4 pr-3.5',
+                // Desktop shell reports when the header is actually stuck;
+                // a subtle elevation makes the pinned state readable.
+                isStuck && 'shadow-md',
+              )}
+              {...attributes}
+            >
               <Tooltip>
                 <TooltipTrigger asChild>
                     <button
@@ -230,11 +268,14 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       )}
                     </span>
                     <span className={cn(
-                      'text-[14px] font-normal truncate lowercase',
+                      'text-[14px] font-semibold truncate lowercase',
                       isActiveProject ? 'text-foreground' : 'text-foreground group-hover/project:text-foreground',
                     )}>
                       {projectLabel}
                     </span>
+                    {statusIndicator ? (
+                      <span className="ml-1 inline-flex flex-shrink-0 items-center">{statusIndicator}</span>
+                    ) : null}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
@@ -381,3 +422,4 @@ const SortableGroupItemBase: React.FC<{
 };
 
 export const SortableGroupItem = React.memo(SortableGroupItemBase);
+

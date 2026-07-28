@@ -3,7 +3,7 @@ import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
@@ -15,21 +15,36 @@ import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstr
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const armAbortPrompt = useSessionUIStore((s) => s.armAbortPrompt);
   const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    const abortCurrentOperation = sessionActions.abortCurrentOperation;;
+  const abortCurrentOperation = sessionActions.abortCurrentOperation;
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
-  const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
-  const toggleBottomTerminal = useUIStore((s) => s.toggleBottomTerminal);
-  const setBottomTerminalExpanded = useUIStore((s) => s.setBottomTerminalExpanded);
+  const currentShortcutDirectory = useDirectoryStore((s) => s.currentDirectory);
+
+  // The terminal lives in the context panel; these mirror the rail behavior.
+  const toggleTerminalSurface = React.useCallback(() => {
+    if (!currentShortcutDirectory) return;
+    useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(currentShortcutDirectory), 'terminal');
+  }, [currentShortcutDirectory]);
+
+  const toggleTerminalSurfaceExpanded = React.useCallback(() => {
+    if (!currentShortcutDirectory) return;
+    const key = normalizeContextPanelDirectoryKey(currentShortcutDirectory);
+    const state = useUIStore.getState();
+    const panel = state.contextPanelByDirectory[key];
+    const activeMode = panel?.isOpen ? panel.tabs.find((tab) => tab.id === panel.activeTabId)?.mode : null;
+    if (activeMode !== 'terminal') {
+      state.openContextSurface(key, 'terminal');
+    }
+    state.toggleContextPanelExpanded(key);
+  }, [currentShortcutDirectory]);
   const isMobile = useUIStore((s) => s.isMobile);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
@@ -97,29 +112,114 @@ export const useKeyboardShortcuts = () => {
         }
         e.preventDefault();
         e.stopPropagation();
-        toggleBottomTerminal();
+        toggleTerminalSurface();
         return;
       }
 
       if (eventMatchesShortcut(e, combo('toggle_terminal_expanded'))) {
-        const { isMobile, isBottomTerminalExpanded } = useUIStore.getState();
+        const { isMobile } = useUIStore.getState();
         if (isMobile) {
           return;
         }
         e.preventDefault();
         e.stopPropagation();
-        setBottomTerminalExpanded(!isBottomTerminalExpanded);
+        toggleTerminalSurfaceExpanded();
         return;
       }
     };
 
+    const handleEscapeKeyDownCapture = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+
+      const target = e.target as Element | null;
+      const isInsideDialog = Boolean(target?.closest('[role="dialog"]'));
+      const isSettingsMounted = Boolean(document.querySelector('[data-settings-view="true"]'));
+      const isInsideTerminal = isTerminalEventTarget(target);
+      const hasDropdownInteraction = isDropdownEventTarget(target) || hasOpenDropdown();
+
+      const {
+        isSettingsDialogOpen,
+        isCommandPaletteOpen,
+        isHelpDialogOpen,
+        isSessionSwitcherOpen,
+        isAboutDialogOpen,
+        isMultiRunLauncherOpen,
+        isImagePreviewOpen,
+        activeMainTab,
+        isPromptNavigatorPanelOpen,
+      } = useUIStore.getState();
+
+      if (isInsideDialog || isInsideTerminal || hasDropdownInteraction) {
+        resetAbortPriming();
+        return;
+      }
+
+      if (isPromptNavigatorPanelOpen) {
+        e.preventDefault();
+        setPromptNavigatorPanelOpen(false);
+        resetAbortPriming();
+        return;
+      }
+
+      if (isSettingsDialogOpen) {
+        e.preventDefault();
+        setSettingsDialogOpen(false);
+        resetAbortPriming();
+        return;
+      }
+
+      if (isSettingsMounted) {
+        resetAbortPriming();
+        return;
+      }
+
+      const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen || isMultiRunLauncherOpen || isImagePreviewOpen;
+      const isChatActive = activeMainTab === 'chat';
+
+      if (hasOverlay || !isChatActive) {
+        resetAbortPriming();
+        return;
+      }
+
+      const sessionId = currentSessionId;
+      if (sessionPhase === 'idle' || !sessionId) {
+        resetAbortPriming();
+        return;
+      }
+
+      const now = Date.now();
+      const primedUntil = abortPrimedUntilRef.current;
+
+      if (primedUntil && now < primedUntil) {
+        e.preventDefault();
+        resetAbortPriming();
+        void abortCurrentOperation(sessionId);
+        return;
+      }
+
+      e.preventDefault();
+      const expiresAt = armAbortPrompt(3000) ?? now + 3000;
+      abortPrimedUntilRef.current = expiresAt;
+
+      if (abortPrimedTimeoutRef.current) {
+        clearTimeout(abortPrimedTimeoutRef.current);
+      }
+
+      const delay = Math.max(expiresAt - now, 0);
+      abortPrimedTimeoutRef.current = setTimeout(() => {
+        if (abortPrimedUntilRef.current && Date.now() >= abortPrimedUntilRef.current) {
+          resetAbortPriming();
+        }
+      }, delay || 0);
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isTerminalEventTarget(e.target)) {
+      if (e.key === 'Escape' || isTerminalEventTarget(e.target)) {
         return;
       }
 
       const isChatInputTarget = (target: EventTarget | null) => {
-        return target instanceof HTMLTextAreaElement && target.getAttribute('data-chat-input') === 'true';
+        return target instanceof Element && Boolean(target.closest('[data-chat-input="true"]'));
       };
 
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
@@ -256,8 +356,7 @@ export const useKeyboardShortcuts = () => {
 
       if (eventMatchesShortcut(e, combo('focus_input'))) {
         e.preventDefault();
-        const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
-        textarea?.focus();
+        focusChatInput();
         return;
       }
 
@@ -308,51 +407,53 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      // Legacy right-sidebar shortcuts now target the context surfaces that
+      // replaced the sidebar's tabs.
       if (eventMatchesShortcut(e, combo('toggle_right_sidebar'))) {
-        const { isMobile } = useUIStore.getState();
-        if (isMobile) {
+        const state = useUIStore.getState();
+        if (state.isMobile || !currentDirectory) {
           return;
         }
         e.preventDefault();
-        toggleRightSidebar();
+        const directory = normalizeContextPanelDirectoryKey(currentDirectory);
+        const panelState = state.contextPanelByDirectory[directory];
+        if (panelState?.isOpen) {
+          state.closeContextPanel(directory);
+        } else if (panelState?.activeTabId) {
+          state.setActiveContextPanelTab(directory, panelState.activeTabId);
+        } else {
+          state.openContextSurface(directory, 'git');
+        }
         return;
       }
 
       if (eventMatchesShortcut(e, combo('open_right_sidebar_git'))) {
-        const { isMobile } = useUIStore.getState();
-        if (isMobile) {
+        const state = useUIStore.getState();
+        if (state.isMobile || !currentDirectory) {
           return;
         }
         e.preventDefault();
-        setRightSidebarOpen(true);
-        setRightSidebarTab('git');
+        state.openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'git');
         return;
       }
 
       if (eventMatchesShortcut(e, combo('open_right_sidebar_files'))) {
-        const { isMobile } = useUIStore.getState();
-        if (isMobile) {
+        const state = useUIStore.getState();
+        if (state.isMobile || !currentDirectory) {
           return;
         }
         e.preventDefault();
-        setRightSidebarOpen(true);
-        setRightSidebarTab('files');
+        state.openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'file');
         return;
       }
 
-      if (eventMatchesShortcut(e, combo('cycle_right_sidebar_tab'))) {
-        const { isMobile, rightSidebarTab } = useUIStore.getState();
-        if (isMobile) {
+      if (eventMatchesShortcut(e, combo('open_diff_panel'))) {
+        const state = useUIStore.getState();
+        if (state.isMobile || !currentDirectory) {
           return;
         }
-
-        const tabs = ['git', 'files', 'context'] as const;
-        const currentIndex = tabs.indexOf(rightSidebarTab);
-        const nextTab = tabs[(currentIndex + 1) % tabs.length];
-
         e.preventDefault();
-        setRightSidebarOpen(true);
-        setRightSidebarTab(nextTab);
+        state.openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'diff');
         return;
       }
 
@@ -362,17 +463,17 @@ export const useKeyboardShortcuts = () => {
           return;
         }
         e.preventDefault();
-        toggleBottomTerminal();
+        toggleTerminalSurface();
         return;
       }
 
       if (eventMatchesShortcut(e, combo('toggle_terminal_expanded'))) {
-        const { isMobile, isBottomTerminalExpanded } = useUIStore.getState();
+        const { isMobile } = useUIStore.getState();
         if (isMobile) {
           return;
         }
         e.preventDefault();
-        setBottomTerminalExpanded(!isBottomTerminalExpanded);
+        toggleTerminalSurfaceExpanded();
         return;
       }
 
@@ -514,100 +615,15 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      if (e.key === 'Escape') {
-        const target = e.target as Element | null;
-        const isInsideDialog = Boolean(target?.closest('[role="dialog"]'));
-        const isSettingsMounted = Boolean(document.querySelector('[data-settings-view="true"]'));
-        const isInsideTerminal = isTerminalEventTarget(target);
-        const hasDropdownInteraction = isDropdownEventTarget(target) || hasOpenDropdown();
-
-        const {
-          isSettingsDialogOpen,
-          isCommandPaletteOpen,
-          isHelpDialogOpen,
-          isSessionSwitcherOpen,
-          isAboutDialogOpen,
-          isMultiRunLauncherOpen,
-          isImagePreviewOpen,
-          activeMainTab,
-          isPromptNavigatorPanelOpen,
-        } = useUIStore.getState();
-
-        if (isInsideDialog || isInsideTerminal || hasDropdownInteraction) {
-          resetAbortPriming();
-          return;
-        }
-
-        if (isPromptNavigatorPanelOpen) {
-          e.preventDefault();
-          setPromptNavigatorPanelOpen(false);
-          resetAbortPriming();
-          return;
-        }
-
-        // If settings is open, close it
-        if (isSettingsDialogOpen) {
-          e.preventDefault();
-          setSettingsDialogOpen(false);
-          resetAbortPriming();
-          return;
-        }
-
-        if (isSettingsMounted) {
-          resetAbortPriming();
-          return;
-        }
-
-        // Check if any overlay is open or not on chat tab - don't process abort
-        const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen || isMultiRunLauncherOpen || isImagePreviewOpen;
-        const isChatActive = activeMainTab === 'chat';
-
-        if (hasOverlay || !isChatActive) {
-          resetAbortPriming();
-          return;
-        }
-
-        // Double-ESC abort logic - only when on chat tab with no overlays
-        const sessionId = currentSessionId;
-        const canAbortNow = sessionPhase !== 'idle' && Boolean(sessionId);
-        if (!canAbortNow) {
-          resetAbortPriming();
-          return;
-        }
-
-        const now = Date.now();
-        const primedUntil = abortPrimedUntilRef.current;
-
-        if (primedUntil && now < primedUntil) {
-          e.preventDefault();
-          resetAbortPriming();
-          void abortCurrentOperation(sessionId ?? '');
-          return;
-        }
-
-        e.preventDefault();
-        const expiresAt = armAbortPrompt(3000) ?? now + 3000;
-        abortPrimedUntilRef.current = expiresAt;
-
-        if (abortPrimedTimeoutRef.current) {
-          clearTimeout(abortPrimedTimeoutRef.current);
-        }
-
-        const delay = Math.max(expiresAt - now, 0);
-        abortPrimedTimeoutRef.current = setTimeout(() => {
-          if (abortPrimedUntilRef.current && Date.now() >= abortPrimedUntilRef.current) {
-            resetAbortPriming();
-          }
-        }, delay || 0);
-        return;
-      }
     };
 
     window.addEventListener('keydown', handleTerminalShortcutCapture, true);
+    window.addEventListener('keydown', handleEscapeKeyDownCapture, true);
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
       window.removeEventListener('keydown', handleTerminalShortcutCapture, true);
+      window.removeEventListener('keydown', handleEscapeKeyDownCapture, true);
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [
@@ -616,11 +632,8 @@ export const useKeyboardShortcuts = () => {
     toggleCommandPalette,
     toggleHelpDialog,
     toggleSidebar,
-    toggleRightSidebar,
-    setRightSidebarOpen,
-    setRightSidebarTab,
-    toggleBottomTerminal,
-    setBottomTerminalExpanded,
+    toggleTerminalSurface,
+    toggleTerminalSurfaceExpanded,
     isMobile,
     setSessionSwitcherOpen,
     setActiveMainTab,
