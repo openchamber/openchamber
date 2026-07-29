@@ -5,17 +5,153 @@ import {
   applyPreviewPassthroughResponseHeaders,
   classifyPreviewNavigation,
   classifyPreviewResourceError,
+  createPreviewProxyRuntime,
   normalizeProxyTargetUrl,
+  PREVIEW_TARGET_ERROR_HEADER,
   rewritePreviewBody,
   rewritePreviewCspHeader,
   rewritePreviewRedirectLocation,
 } from './proxy-runtime.js';
+
+const createResponse = () => {
+  const headers = new Map();
+  return {
+    body: null,
+    statusCode: 200,
+    headers,
+    setHeader(name, value) {
+      headers.set(name.toLowerCase(), value);
+    },
+    removeHeader(name) {
+      headers.delete(name.toLowerCase());
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.body = body;
+      return body;
+    },
+  };
+};
+
+const createAttachedPreviewRuntime = () => {
+  let proxyOptions;
+  const postRoutes = new Map();
+  const useRoutes = new Map();
+  let randomByte = 0;
+  const runtime = createPreviewProxyRuntime({
+    crypto: {
+      randomBytes(size) {
+        randomByte += 1;
+        return Buffer.alloc(size, randomByte);
+      },
+    },
+    URL,
+    createProxyMiddleware(options) {
+      proxyOptions = options;
+      const middleware = () => {};
+      middleware.upgrade = () => {};
+      return middleware;
+    },
+    responseInterceptor: (handler) => handler,
+  });
+  const app = {
+    post(path, ...handlers) {
+      postRoutes.set(path, handlers);
+    },
+    use(path, ...handlers) {
+      useRoutes.set(path, handlers);
+    },
+  };
+  runtime.attach(app, {
+    server: { on() {} },
+    express: { json: () => (_req, _res, next) => next() },
+    uiAuthController: null,
+    isRequestOriginAllowed: async () => true,
+    rejectWebSocketUpgrade() {},
+  });
+
+  return { postRoutes, proxyOptions: () => proxyOptions, useRoutes };
+};
 
 const rewrite = (bodyText, kind) => rewritePreviewBody({
   bodyText,
   kind,
   proxyBasePath: '/api/preview/proxy/abc123',
   targetOrigin: 'http://127.0.0.1:3000',
+});
+
+describe('preview target failure signaling', () => {
+  it('marks missing and expired targets instead of relying on the HTTP status alone', () => {
+    const { useRoutes } = createAttachedPreviewRuntime();
+    const [guard] = useRoutes.get('/api/preview/proxy');
+    for (const [originalUrl, code, error] of [
+      ['/api/preview/proxy/', 'missing', 'Preview target not found'],
+      [`/api/preview/proxy/${'a'.repeat(32)}/`, 'expired', 'Preview target expired'],
+    ]) {
+      const response = createResponse();
+      guard({ originalUrl, headers: {} }, response, () => {});
+      expect(response.statusCode).toBe(404);
+      expect(response.headers.get(PREVIEW_TARGET_ERROR_HEADER)).toBe(code);
+      expect(response.body).toEqual({ error });
+    }
+  });
+
+  it('marks invalid target tokens and accepts a registered target token', async () => {
+    const { postRoutes, useRoutes } = createAttachedPreviewRuntime();
+    const [, registerTarget] = postRoutes.get('/api/preview/targets');
+    const [guard] = useRoutes.get('/api/preview/proxy');
+    const registrationResponse = createResponse();
+    await registerTarget({ body: { url: 'http://127.0.0.1:4323/' }, secure: false }, registrationResponse);
+
+    const { id, previewToken } = registrationResponse.body;
+    const invalidResponse = createResponse();
+    guard({ originalUrl: `/api/preview/proxy/${id}/`, headers: {} }, invalidResponse, () => {});
+    expect(invalidResponse.statusCode).toBe(403);
+    expect(invalidResponse.headers.get(PREVIEW_TARGET_ERROR_HEADER)).toBe('invalid-token');
+
+    const validResponse = createResponse();
+    let continued = false;
+    guard({
+      originalUrl: `/api/preview/proxy/${id}/?oc_preview_token=${previewToken}`,
+      headers: {},
+    }, validResponse, () => {
+      continued = true;
+    });
+    expect(continued).toBe(true);
+    expect(validResponse.headers.has(PREVIEW_TARGET_ERROR_HEADER)).toBe(false);
+  });
+
+  it('removes the reserved target-error marker from upstream responses', async () => {
+    const { postRoutes, proxyOptions, useRoutes } = createAttachedPreviewRuntime();
+    const [, registerTarget] = postRoutes.get('/api/preview/targets');
+    const registrationResponse = createResponse();
+    await registerTarget({ body: { url: 'http://127.0.0.1:4323/' }, secure: false }, registrationResponse);
+    const { id, previewToken } = registrationResponse.body;
+    const request = {
+      originalUrl: `/api/preview/proxy/${id}/missing?oc_preview_token=${previewToken}`,
+      headers: {},
+    };
+    const response = createResponse();
+    response.setHeader(PREVIEW_TARGET_ERROR_HEADER, 'expired');
+
+    await proxyOptions().on.proxyRes(
+      Buffer.from('{"error":"upstream missing"}'),
+      { headers: { 'content-type': 'application/json' } },
+      request,
+      response,
+    );
+
+    expect(response.headers.has(PREVIEW_TARGET_ERROR_HEADER)).toBe(false);
+    const [guard] = useRoutes.get('/api/preview/proxy');
+    let continued = false;
+    guard(request, createResponse(), () => {
+      continued = true;
+    });
+    expect(continued).toBe(true);
+  });
 });
 
 describe('preview Inertia header passthrough', () => {

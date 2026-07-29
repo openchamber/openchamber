@@ -8,9 +8,9 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Icon } from "@/components/icon/Icon";
+import { SettingsSection, SettingsGroupTitle } from '@/components/sections/shared/SettingsSection';
 
 type GitHubUser = {
   login: string;
@@ -270,21 +270,13 @@ export const GitHubSettings: React.FC = () => {
     : t('settings.github.page.accountSource.oauth');
 
   return (
-    <div className="mb-8">
-      <div className="mb-3 px-1 flex items-start justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-semibold text-foreground">{t('settings.github.page.oauth.title')}</h3>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8} className="max-w-xs">
-              {t('settings.github.page.tooltip.connectAccount')}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
+    <>
+      <SettingsSection
+        title={t('settings.github.page.oauth.title')}
+        divider={false}
+        settingsItem="git.github-account"
+        info={t('settings.github.page.tooltip.connectAccount')}
+      >
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
         {connected ? (
           <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
@@ -422,7 +414,7 @@ export const GitHubSettings: React.FC = () => {
       {flow && (
         <div className="mt-4 rounded-lg bg-[var(--surface-elevated)]/70 p-4 border border-[var(--interactive-border)]">
           <div className="space-y-1">
-            <h4 className="typography-ui-label text-foreground">{t('settings.github.page.flow.title')}</h4>
+            <SettingsGroupTitle>{t('settings.github.page.flow.title')}</SettingsGroupTitle>
             <p className="typography-meta text-muted-foreground">
               {t('settings.github.page.flow.description')}
             </p>
@@ -453,11 +445,10 @@ export const GitHubSettings: React.FC = () => {
         </div>
       )}
 
+      </SettingsSection>
+
       {ghCli?.available && !ghCli?.active && (!ghCli.user || ghCli.disabled) && (
-        <div className="mt-6">
-          <h3 className="typography-ui-header font-semibold text-foreground mb-3 px-1">
-            {t('settings.github.page.ghCli.title')}
-          </h3>
+        <SettingsSection title={t('settings.github.page.ghCli.title')}>
           <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden">
             <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
               <div className={cn("flex min-w-0 items-center gap-4", isMobile ? "w-full" : undefined)}>
@@ -508,8 +499,8 @@ export const GitHubSettings: React.FC = () => {
               </Button>
             </div>
           </div>
-        </div>
+        </SettingsSection>
       )}
-    </div>
+    </>
   );
 };

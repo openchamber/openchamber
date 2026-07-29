@@ -8,18 +8,23 @@ import {
 } from '@/components/sections/projects/useProjectIdentityForm';
 import { useProjectIdentityAutoSave } from '@/components/sections/projects/useProjectIdentityAutoSave';
 import type { ProjectEntry } from '@/lib/api/types';
-import { useI18n } from '@/lib/i18n';
 
 type ProjectSettingsPanelProps = {
   project: ProjectEntry | null;
   onIdentitySave: (data: ProjectIdentitySaveData) => void | Promise<void>;
+  /**
+   * The project-edit dialog hides the worktree section — worktrees have
+   * their own full-page surface (project menu → Manage worktrees). Settings
+   * keeps the full panel.
+   */
+  showWorktrees?: boolean;
 };
 
 export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   project,
   onIdentitySave,
+  showWorktrees = true,
 }) => {
-  const { t } = useI18n();
   const form = useProjectIdentityForm(project);
 
   const projectRef = React.useMemo(() => {
@@ -39,22 +44,11 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
     return null;
   }
 
-  const headerLabel = project.label ?? t('settings.projects.page.title.default');
-
   return (
     <div className="space-y-0">
-      <div className="mb-5 px-1">
-        <h2 className="typography-ui-header font-semibold text-foreground truncate">
-          {headerLabel}
-        </h2>
-        <p className="typography-meta text-muted-foreground truncate" title={project.path}>
-          {project.path}
-        </p>
-      </div>
-
       <ProjectIdentityFields form={form} />
       <ProjectActionsSection projectRef={projectRef} />
-      <WorktreeSectionContent projectRef={projectRef} />
+      {showWorktrees ? <WorktreeSectionContent projectRef={projectRef} /> : null}
     </div>
   );
 };

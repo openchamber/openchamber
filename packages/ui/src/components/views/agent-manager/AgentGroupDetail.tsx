@@ -3,6 +3,7 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useAgentGroupsStore, type AgentGroup, type AgentGroupSession } from '@/stores/useAgentGroupsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -179,9 +180,9 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
             <div className="flex-1 min-w-0">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="w-full justify-between h-10 px-3"
+                <button
+                  type="button"
+                  className={cn(dropdownTriggerVariants({ size: 'default' }), 'w-full')}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     {selectedSession && (
@@ -203,7 +204,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                     )}
                   </div>
                   <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                </Button>
+                </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-[var(--anchor-width)]">
                 {group.sessions.map((session) => (

@@ -558,15 +558,6 @@ export async function handleSystemBridgeMessage(
       }
     }
 
-    case 'api:notifications/auto-accept': {
-      const request = (payload || {}) as { sessionId?: unknown; enabled?: unknown };
-      const sessionId = typeof request.sessionId === 'string' ? request.sessionId.trim() : '';
-      if (!sessionId) {
-        return { id, type, success: false, error: 'sessionId is required' };
-      }
-      return { id, type, success: true, data: { success: true } };
-    }
-
     default:
       return null;
   }

@@ -16,6 +16,11 @@ type ScrollSpyInput = {
 // stable while scrolling inside a long turn (no visibility-ratio flip-flop).
 const READ_LINE_OFFSET_PX = 100;
 
+// When the container is scrolled to (or almost to) the bottom, the last turn
+// is what the user is reading even if it is too short for its top edge to
+// ever cross the reading line — force-activate it in that case.
+const BOTTOM_ANCHOR_EPSILON_PX = 8;
+
 const pickOffsetTurnId = (list: OffsetTurn[], cutoff: number): string | undefined => {
     if (list.length === 0) {
         return undefined;
@@ -98,7 +103,10 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
             refreshOffsets();
         }
 
-        const next = pickOffsetTurnId(offsets, container.scrollTop + READ_LINE_OFFSET_PX);
+        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        const next = distanceFromBottom <= BOTTOM_ANCHOR_EPSILON_PX
+            ? offsets[offsets.length - 1]?.id
+            : pickOffsetTurnId(offsets, container.scrollTop + READ_LINE_OFFSET_PX);
         if (!next || next === active) {
             return;
         }

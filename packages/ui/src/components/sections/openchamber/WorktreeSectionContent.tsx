@@ -2,8 +2,8 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
+import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Icon } from "@/components/icon/Icon";
 import type { Session } from '@opencode-ai/sdk/v2';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -31,11 +31,17 @@ import { useI18n } from '@/lib/i18n';
 
 export interface WorktreeSectionContentProps {
   projectRef?: { id: string; path: string } | null;
+  /**
+   * 'all' renders setup commands + the worktree list (settings panel);
+   * 'list-only' renders just the list (the Worktrees page — setup commands
+   * stay a settings concern).
+   */
+  sections?: 'all' | 'list-only';
 }
 
 const SETUP_COMMANDS_SAVE_DELAY_MS = 450;
 
-export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null }) => {
+export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null, sections = 'all' }) => {
   const { t } = useI18n();
   const { isMobile, isTablet } = useDeviceInfo();
   const alwaysShowActions = isMobile || isTablet;
@@ -326,29 +332,19 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   }, [sessionsKey, isGitRepoLocal, projectPath, refreshWorktrees]);
 
   const setupTooltip = (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-      </TooltipTrigger>
-      <TooltipContent sideOffset={8} className="max-w-xs">
-        {t('settings.openchamber.worktrees.setup.tooltipPrefix')}
-        {' '}
-        <code className="font-mono text-xs bg-sidebar-accent/50 px-1 rounded">$ROOT_PROJECT_PATH</code>
-        {' '}
-        {t('settings.openchamber.worktrees.setup.tooltipSuffix')}
-      </TooltipContent>
-    </Tooltip>
+    <SettingsInfoHint>
+      {t('settings.openchamber.worktrees.setup.tooltipPrefix')}
+      {' '}
+      <code className="font-mono text-xs bg-sidebar-accent/50 px-1 rounded">$ROOT_PROJECT_PATH</code>
+      {' '}
+      {t('settings.openchamber.worktrees.setup.tooltipSuffix')}
+    </SettingsInfoHint>
   );
 
   const listTooltip = (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-      </TooltipTrigger>
-      <TooltipContent sideOffset={8} className="max-w-xs">
-        {t('settings.openchamber.worktrees.list.tooltip')}
-      </TooltipContent>
-    </Tooltip>
+    <SettingsInfoHint>
+      {t('settings.openchamber.worktrees.list.tooltip')}
+    </SettingsInfoHint>
   );
 
   if (!projectPath) {
@@ -379,6 +375,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
   return (
     <>
+      {sections === 'all' ? (
       <ProjectSettingsSubsection
         title={t('settings.projects.page.section.worktree')}
         settingsItem="projects.worktree"
@@ -397,14 +394,16 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                   placeholder={t('settings.openchamber.worktrees.setup.commandPlaceholder')}
                   className="h-7 min-w-0 flex-1 font-mono text-xs"
                 />
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={() => handleRemoveCommand(index)}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   aria-label={t('settings.openchamber.worktrees.setup.removeCommandAria')}
                 >
                   <Icon name="close" className="h-4 w-4" />
-                </button>
+                </Button>
               </div>
             ))}
             <Button
@@ -436,6 +435,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
           </div>
         )}
       </ProjectSettingsSubsection>
+      ) : null}
 
       <ProjectSettingsSubsection
         title={t('settings.openchamber.worktrees.list.title')}
@@ -448,7 +448,9 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
             {t('settings.openchamber.worktrees.list.empty')}
           </p>
         ) : (
-          <div className={cn('space-y-1', PROJECT_SETTINGS_CONTROL_WIDTH)}>
+          // The settings panel keeps its narrow control column; the full-page
+          // Worktrees surface lets rows use the whole content width.
+          <div className={cn('space-y-1', sections === 'all' && PROJECT_SETTINGS_CONTROL_WIDTH)}>
             {availableWorktrees.map((worktree) => (
               <div
                 key={worktree.path}
@@ -459,9 +461,6 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                     <p className="typography-meta min-w-0 truncate text-foreground">
                       {worktree.label || worktree.branch || t('settings.openchamber.worktrees.list.detachedHead')}
                     </p>
-                    <span className="typography-micro flex-shrink-0 self-center rounded bg-sidebar-accent/40 px-1.5 py-[1px] leading-none text-muted-foreground/60">
-                      OpenCode
-                    </span>
                   </div>
                   <p className="typography-micro truncate text-muted-foreground/60">
                     {formatPathForDisplay(worktree.path, homeDirectory)}

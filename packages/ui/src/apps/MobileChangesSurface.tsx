@@ -21,6 +21,7 @@ import {
   useIsGitRepo,
   useGitLoadingStatus,
 } from '@/stores/useGitStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -202,6 +203,7 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     }
 
     let cancelled = false;
+    const runtimeKey = getRuntimeKey();
     setDiffLoadError(null);
     void git.getGitFileDiff(currentDirectory, { path: route.path, staged: route.staged || undefined })
       .then((response) => {
@@ -210,7 +212,7 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
           original: response.original ?? '',
           modified: response.modified ?? '',
           isBinary: response.isBinary,
-        });
+        }, runtimeKey);
       })
       .catch((error) => {
         if (cancelled) return;

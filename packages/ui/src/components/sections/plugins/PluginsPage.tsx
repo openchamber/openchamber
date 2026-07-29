@@ -7,6 +7,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { RegistryBanner } from './RegistryBanner';
 import {
   usePluginsStore,
@@ -194,29 +195,28 @@ export const PluginsPage: React.FC = () => {
     };
 
     return (
-      <SettingsPageLayout>
-        <div>
-          <div className="flex items-center gap-2 min-w-0">
-            <h2 className="typography-ui-header font-semibold text-foreground truncate">
-              {t('settings.plugins.page.header.entry')}
-            </h2>
-            <ScopeBadge
-              scope={selectedEntry.scope}
-              label={
-                selectedEntry.scope === 'project'
-                  ? t('settings.plugins.sidebar.group.projectEntries')
-                  : t('settings.plugins.sidebar.group.userEntries')
-              }
-            />
-          </div>
-        </div>
+      <SettingsPageLayout
+        title={t('settings.plugins.page.header.entry')}
+        titleAccessory={(
+          <ScopeBadge
+            scope={selectedEntry.scope}
+            label={
+              selectedEntry.scope === 'project'
+                ? t('settings.plugins.sidebar.group.projectEntries')
+                : t('settings.plugins.sidebar.group.userEntries')
+            }
+          />
+        )}
+        showSaveStatus={false}
+      >
+        <SettingsSection divider={false}>
+          <RegistryBanner entryId={selectedEntry.id} spec={selectedEntry.spec} />
+        </SettingsSection>
 
-        <RegistryBanner entryId={selectedEntry.id} spec={selectedEntry.spec} />
-
-        <div data-settings-item="plugins.spec" className="space-y-1.5">
-          <label className="typography-meta text-muted-foreground">
-            {t('settings.plugins.page.field.spec')}
-          </label>
+        <SettingsSection
+          title={t('settings.plugins.page.field.spec')}
+          settingsItem="plugins.spec"
+        >
           <Input
             value={draft.spec}
             onChange={(e) =>
@@ -226,12 +226,12 @@ export const PluginsPage: React.FC = () => {
             className="font-mono typography-meta"
             spellCheck={false}
           />
-        </div>
+        </SettingsSection>
 
-        <div data-settings-item="plugins.options" className="space-y-1.5">
-          <label className="typography-meta text-muted-foreground">
-            {t('settings.plugins.page.field.options')}
-          </label>
+        <SettingsSection
+          title={t('settings.plugins.page.field.options')}
+          settingsItem="plugins.options"
+        >
           <Textarea
             value={draft.optionsJson}
             onChange={(e) =>
@@ -250,26 +250,25 @@ export const PluginsPage: React.FC = () => {
               {t('settings.plugins.page.field.options.invalidJson')}
             </p>
           )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => void handleEntrySave()}
-            disabled={!isDirty || !optionsValid || isSaving}
-          >
-            {t('settings.plugins.page.action.save')}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleEntryDiscard}
-            disabled={!isDirty || isSaving}
-          >
-            {t('settings.plugins.page.action.discard')}
-          </Button>
-        </div>
+          <div className="flex items-center gap-2 pt-3">
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => void handleEntrySave()}
+              disabled={!isDirty || !optionsValid || isSaving}
+            >
+              {t('settings.plugins.page.action.save')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleEntryDiscard}
+              disabled={!isDirty || isSaving}
+            >
+              {t('settings.plugins.page.action.discard')}
+            </Button>
+          </div>
+        </SettingsSection>
       </SettingsPageLayout>
     );
   }
@@ -312,12 +311,10 @@ export const PluginsPage: React.FC = () => {
     };
 
     return (
-      <SettingsPageLayout>
-        <div>
-          <div className="flex items-center gap-2 min-w-0 flex-wrap">
-            <h2 className="typography-ui-header font-semibold text-foreground truncate">
-              {t('settings.plugins.page.header.file')}
-            </h2>
+      <SettingsPageLayout
+        title={t('settings.plugins.page.header.file')}
+        titleAccessory={(
+          <>
             <ScopeBadge
               scope={selectedFile.scope}
               label={
@@ -335,13 +332,15 @@ export const PluginsPage: React.FC = () => {
             >
               {selectedFile.fileName}
             </span>
-          </div>
-        </div>
-
-        <div data-settings-item="plugins.content" className="space-y-1.5">
-          <label className="typography-meta text-muted-foreground">
-            {t('settings.plugins.page.field.content')}
-          </label>
+          </>
+        )}
+        showSaveStatus={false}
+      >
+        <SettingsSection
+          title={t('settings.plugins.page.field.content')}
+          divider={false}
+          settingsItem="plugins.content"
+        >
           <Textarea
             value={draft.content}
             onChange={(e) =>
@@ -352,26 +351,25 @@ export const PluginsPage: React.FC = () => {
             spellCheck={false}
             disabled={isLoadingFile}
           />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => void handleFileSave()}
-            disabled={!isDirty || isSaving || isLoadingFile}
-          >
-            {t('settings.plugins.page.action.save')}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleFileDiscard}
-            disabled={isSaving || isLoadingFile}
-          >
-            {t('settings.plugins.page.action.discard')}
-          </Button>
-        </div>
+          <div className="flex items-center gap-2 pt-3">
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => void handleFileSave()}
+              disabled={!isDirty || isSaving || isLoadingFile}
+            >
+              {t('settings.plugins.page.action.save')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleFileDiscard}
+              disabled={isSaving || isLoadingFile}
+            >
+              {t('settings.plugins.page.action.discard')}
+            </Button>
+          </div>
+        </SettingsSection>
       </SettingsPageLayout>
     );
   }

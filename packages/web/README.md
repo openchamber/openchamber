@@ -49,6 +49,13 @@ openchamber update                   # Update to latest version
 
 `startup enable` snapshots your current environment into the native service so startup behaves like you launched `openchamber` from the same shell. This preserves provider tokens, PATH, SSH agent settings, and other CLI auth/config env vars. Use `--no-env-snapshot` for a minimal service env.
 
+When OpenChamber launches the local OpenCode server, it also registers a native
+`openchamber` agent tool for project, session, and scheduled-task orchestration.
+The tool is not injected when connecting to an external OpenCode server.
+Behavior settings can optionally inject a managed system-prompt optimizer on
+the next OpenCode restart. It is disabled by default and is not available for
+external OpenCode servers.
+
 ### Tunnel behavior notes
 
 - One active tunnel per running OpenChamber instance (port).
@@ -108,6 +115,7 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
 | `OPENCHAMBER_VERBOSE_REQUEST_LOGS` | Set to `true` to log every HTTP request; disabled by default to keep user logs small |
 | `OPENCHAMBER_SKIP_API_COMPRESSION` | Set to `true` to disable gzip compression for `/api/*` responses |
 | `OPENCHAMBER_COMPRESS_API` | Set to `true` to force `/api/*` compression, or `false` to disable it. Desktop runtime disables API compression by default to reduce local sidecar CPU use |
+| `OPENCHAMBER_TERMINAL_SHELL` | Preferred terminal shell executable used by the `Auto` setting before platform defaults |
 
 </details>
 

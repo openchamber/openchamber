@@ -89,6 +89,7 @@
 > **Prerequisite:** Desktop bundles the matching OpenCode CLI. CLI/Web and VS Code use your installed [OpenCode CLI](https://opencode.ai).
 
 ### **Desktop (macOS + Windows + Linux)**
+
 Download the latest Desktop release from [GitHub Releases](https://github.com/openchamber/openchamber/releases).
 
 On Linux, choose the AppImage for your system:
@@ -104,7 +105,7 @@ Linux AppImages need FUSE (`libfuse.so.2`). On Ubuntu/Debian install `libfuse2` 
 APPIMAGE_EXTRACT_AND_RUN=1 ./OpenChamber-*-linux-*.AppImage
 ```
 
-Linux Desktop ships as AppImage and `deb` packages. AppImage supports in-app updates when it is stored in a writable location. System tray and launch-at-login are not available on Linux yet (macOS/Windows only).
+Linux Desktop ships as AppImage and `deb` packages, with in-app window controls, system tray, and launch-at-login support. AppImage auto-update requires the AppImage to be stored in a writable location.
 
 ### **VS Code**
 Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.
@@ -421,7 +422,6 @@ chown -R 1000:1000 data/
 
 Active development. Here's what's being worked on or planned:
 
-- Linux desktop polish and broader distro support
 - Mobile app with remote instance and laptop connectivity
 - More built-in tunneling options
 - Kanban board for multi-agent management - keeping the human in the loop and in control

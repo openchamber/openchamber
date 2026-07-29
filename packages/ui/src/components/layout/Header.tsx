@@ -21,12 +21,12 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
-import { useAllLiveSessions, useSession, useSessionMessagesResolved } from '@/sync/sync-context';
-import { getAllSyncSessions } from '@/sync/sync-refs';
+import { useSessionMessagesResolved } from '@/sync/sync-context';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
@@ -64,7 +64,6 @@ import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
-import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
@@ -75,7 +74,7 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import type { Session } from '@opencode-ai/sdk/v2/client';
+import { useShallow } from 'zustand/react/shallow';
 import type { IconName } from "@/components/icon/icons";
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
@@ -704,24 +703,27 @@ interface HeaderProps {
   rightDrawerOpen?: boolean;
 }
 
+type HeaderSessionSnapshot = {
+  title: string | null;
+  directory: string | null;
+  created: number | null;
+  slug: string | null;
+};
+
 export const Header: React.FC<HeaderProps> = ({
   onToggleLeftDrawer,
   onToggleRightDrawer,
   leftDrawerOpen,
   rightDrawerOpen,
 }) => {
+  streamPerfCount('ui.header.render');
   const { t } = useI18n();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-  const toggleBottomTerminal = useUIStore((state) => state.toggleBottomTerminal);
-  const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
-  const openContextBrowser = useUIStore((state) => state.openContextBrowser);
-  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
-  const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
@@ -735,15 +737,28 @@ export const Header: React.FC<HeaderProps> = ({
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
-  const currentSyncedSession = useSession(currentSessionId ?? null);
-  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const liveSessions = useAllLiveSessions();
-  const activeProject = useProjectsStore((state) => {
+  const currentGlobalSession = useGlobalSessionsStore(useShallow(React.useCallback(
+    (state): HeaderSessionSnapshot | null => {
+      if (!currentSessionId) return null;
+      const session = state.activeSessions.find((candidate) => candidate.id === currentSessionId);
+      if (!session) return null;
+      const record = session as typeof session & { directory?: string | null; slug?: string | null };
+      return {
+        title: session.title ?? null,
+        directory: record.directory ?? null,
+        created: session.time?.created ?? null,
+        slug: record.slug ?? null,
+      };
+    },
+    [currentSessionId],
+  )));
+  const activeProject = useProjectsStore(useShallow((state) => {
     if (!state.activeProjectId) {
       return null;
     }
-    return state.projects.find((project) => project.id === state.activeProjectId) ?? null;
-  });
+    const project = state.projects.find((candidate) => candidate.id === state.activeProjectId);
+    return project ? { id: project.id, path: project.path, label: project.label } : null;
+  }));
   const activeProjectLabel = React.useMemo(() => {
     if (!activeProject) {
       return null;
@@ -1131,18 +1146,13 @@ export const Header: React.FC<HeaderProps> = ({
     });
   }, [fetchAllQuotas, isUsageRefreshSpinning]);
 
-  const currentSessionLive = React.useMemo(() => {
-    if (!currentSessionId) return null;
-    return liveSessions.find((s) => s.id === currentSessionId)
-      ?? globalActiveSessions.find((s) => s.id === currentSessionId)
-      ?? currentSyncedSession
-      ?? getAllSyncSessions().find((s) => s.id === currentSessionId)
-      ?? null;
-  }, [currentSessionId, currentSyncedSession, globalActiveSessions, liveSessions]);
+  const currentSessionSnapshot = currentSessionId
+    ? currentGlobalSession ?? null
+    : null;
 
   const lastResolvedSessionRef = React.useRef<{
     sessionId: string;
-    session: Session;
+    session: HeaderSessionSnapshot;
     expiresAt: number;
   } | null>(null);
   const [sessionFallbackVersion, setSessionFallbackVersion] = React.useState(0);
@@ -1156,10 +1166,10 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    if (currentSessionLive) {
+    if (currentSessionSnapshot) {
       lastResolvedSessionRef.current = {
         sessionId: currentSessionId,
-        session: currentSessionLive,
+        session: currentSessionSnapshot,
         expiresAt: Date.now() + 2000,
       };
       return;
@@ -1187,12 +1197,12 @@ export const Header: React.FC<HeaderProps> = ({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [currentSessionId, currentSessionLive]);
+  }, [currentSessionId, currentSessionSnapshot]);
 
   void sessionFallbackVersion;
   const currentSession = (() => {
-    if (currentSessionLive) {
-      return currentSessionLive;
+    if (currentSessionSnapshot) {
+      return currentSessionSnapshot;
     }
 
     if (!currentSessionId) {
@@ -1257,6 +1267,10 @@ export const Header: React.FC<HeaderProps> = ({
   const openDirectory = React.useMemo(() => {
     return worktreeDirectory || sessionDirectory || draftDirectory;
   }, [draftDirectory, sessionDirectory, worktreeDirectory]);
+  const activeContextMode = useUIStore(React.useCallback((state) => {
+    const directory = normalize(openDirectory || '');
+    return directory ? getActiveContextMode(state.contextPanelByDirectory[directory]) : null;
+  }, [openDirectory]));
 
   const catalogWorktreeBranch = useSessionUIStore((state) => {
     const candidateDirectory = normalize(worktreeDirectory || sessionDirectory || '');
@@ -1285,6 +1299,37 @@ export const Header: React.FC<HeaderProps> = ({
     const trimmedTitle = currentSession?.title?.trim();
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
   }, [activeProjectLabel, currentSession?.title, currentSessionId]);
+
+  // Full-page surfaces (Scheduled, Archive, Worktrees, Multi-run) replace the
+  // chat area; while one is open the header shows the surface identity
+  // instead of the session switcher.
+  const isScheduledSurfaceOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
+  const isArchiveSurfaceOpen = useUIStore((state) => state.isArchivePageOpen);
+  const worktreesSurfaceProjectId = useUIStore((state) => state.worktreesPageProjectId);
+  const isMultiRunSurfaceOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
+  const worktreesSurfaceProjectLabel = useProjectsStore((state) => {
+    if (!worktreesSurfaceProjectId) return null;
+    const project = state.projects.find((entry) => entry.id === worktreesSurfaceProjectId);
+    return project?.label?.trim() || project?.path?.split('/').pop() || null;
+  });
+  const activeSurfaceHeader = React.useMemo<{ title: string; subtitle: string | null } | null>(() => {
+    if (isScheduledSurfaceOpen) {
+      return { title: t('sessions.scheduledTasks.dialog.title'), subtitle: null };
+    }
+    if (isArchiveSurfaceOpen) {
+      return { title: t('sessions.archivePage.title'), subtitle: null };
+    }
+    if (worktreesSurfaceProjectId) {
+      return {
+        title: t('sessions.worktreesPage.title', { project: worktreesSurfaceProjectLabel ?? '' }),
+        subtitle: null,
+      };
+    }
+    if (isMultiRunSurfaceOpen) {
+      return { title: t('sessions.sidebar.header.actions.newMultiRun'), subtitle: null };
+    }
+    return null;
+  }, [isArchiveSurfaceOpen, isMultiRunSurfaceOpen, isScheduledSurfaceOpen, t, worktreesSurfaceProjectId, worktreesSurfaceProjectLabel]);
 
 
   const actionDirectory = React.useMemo(() => {
@@ -1337,7 +1382,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     if (!currentSessionId) return;
 
-    const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.time?.created || 0}:${currentSession?.slug || 'none'}`;
+    const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.created || 0}:${currentSession?.slug || 'none'}`;
     if (lastPlanSessionKeyRef.current !== sessionKey) {
       lastPlanSessionKeyRef.current = sessionKey;
     }
@@ -1350,7 +1395,7 @@ export const Header: React.FC<HeaderProps> = ({
     planModeEnabled,
     planTabAvailable,
     currentSession?.slug,
-    currentSession?.time?.created,
+    currentSession?.created,
     currentSessionId,
     sessionDirectory,
   ]);
@@ -1450,23 +1495,17 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'context') {
       closeContextPanel(directory);
       return;
     }
 
     openContextOverview(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextOverview, openDirectory]);
+  }, [closeContextPanel, openContextOverview, openDirectory]);
 
-  const isContextPanelActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'context';
-  }, [contextPanelByDirectory, openDirectory]);
+  const isContextPanelActive = activeContextMode === 'context';
+
 
   const handleOpenContextPlan = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -1474,71 +1513,15 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
     if (getActiveContextMode(panelState) === 'plan') {
       closeContextPanel(directory);
       return;
     }
 
     openContextPlan(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextPlan, openDirectory]);
+  }, [closeContextPanel, openContextPlan, openDirectory]);
 
-  const handleOpenContextChanges = React.useCallback(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return;
-    }
-
-    const panelState = contextPanelByDirectory[directory];
-    if (getActiveContextMode(panelState) === 'diff') {
-      closeContextPanel(directory);
-      return;
-    }
-
-    openContextPanelTab(directory, { mode: 'diff', stagedDiff: false });
-  }, [closeContextPanel, contextPanelByDirectory, openContextPanelTab, openDirectory]);
-
-  const handleOpenContextBrowser = React.useCallback(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return;
-    }
-
-    const panelState = contextPanelByDirectory[directory];
-    if (getActiveContextMode(panelState) === 'browser') {
-      closeContextPanel(directory);
-      return;
-    }
-
-    openContextBrowser(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextBrowser, openDirectory]);
-
-  const isContextPlanActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'plan';
-  }, [contextPanelByDirectory, openDirectory]);
-
-  const isContextChangesActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'diff';
-  }, [contextPanelByDirectory, openDirectory]);
-
-  const isContextBrowserActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'browser';
-  }, [contextPanelByDirectory, openDirectory]);
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;
@@ -1776,7 +1759,10 @@ export const Header: React.FC<HeaderProps> = ({
   }, [shortcutOverrides]);
 
   useEffect(() => {
-    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'terminal' || activeMainTab === 'diff' || activeMainTab === 'files' || activeMainTab === 'context')) {
+    // Project actions may intentionally promote the terminal to the desktop
+    // main view, and diagram clicks open the diagram viewer; every other
+    // legacy main tab now lives in the context panel on desktop.
+    if (!isMobile && activeMainTab !== 'chat' && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
       setActiveMainTab('chat');
     }
   }, [activeMainTab, isMobile, setActiveMainTab]);
@@ -1831,7 +1817,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       try {
         // Ensure preview/dev terminals don't linger.
-        await forceKillTerminal({});
+        await runtimeApis.terminal.forceKill?.({});
       } catch {
         // ignore
       }
@@ -1856,7 +1842,7 @@ export const Header: React.FC<HeaderProps> = ({
         setIsDevShutdownInFlight(false);
       }
     }
-  }, [isDevShutdownInFlight, setIsDesktopServicesOpen]);
+  }, [isDevShutdownInFlight, runtimeApis.terminal, setIsDesktopServicesOpen]);
 
   const quotaDisplayTabs = React.useMemo(() => {
     return [
@@ -2002,48 +1988,8 @@ export const Header: React.FC<HeaderProps> = ({
     return <React.Fragment key={tab.id}>{tabButton}</React.Fragment>;
   };
 
-  const desktopChangesPanelAction = !isVSCode ? (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={t('header.actions.toggleChangesPanelAria')}
-          aria-pressed={isContextChangesActive}
-          onClick={handleOpenContextChanges}
-          className={desktopHeaderIconButtonClass}
-        >
-          <span className="relative h-5 w-5 overflow-hidden rounded-[2px]">
-            <span className="absolute left-[4px] top-[4px] h-3 w-[5px] bg-[var(--status-error)]/25" />
-            <span className="absolute right-[4px] top-[4px] h-3 w-[5px] bg-[var(--status-success)]/25" />
-            <Icon name="layout-column" className="absolute inset-0 h-5 w-5" />
-          </span>
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>
-        <p>{t('header.actions.toggleChangesPanel')}</p>
-      </TooltipContent>
-    </Tooltip>
-  ) : null;
-
   const desktopSidebarActions = (
     <>
-      {showPlanTab && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label={t('header.actions.openPlanAria')}
-                onClick={handleOpenContextPlan}
-                className={cn(desktopHeaderIconButtonClass, isContextPlanActive && 'bg-[var(--interactive-hover)]')}
-              >
-              <Icon name="file-text" className="h-[18px] w-[18px]" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>{t('header.actions.planWithShortcut', { shortcut: shortcutLabel('toggle_context_plan') })}</p>
-          </TooltipContent>
-          </Tooltip>
-      )}
       <OpenInAppButton directory={actionDirectory} className="mr-1" />
       <DesktopServicesMenu
         isDesktopApp={isDesktopApp}
@@ -2079,27 +2025,6 @@ export const Header: React.FC<HeaderProps> = ({
         remoteUpdateError={remoteUpdateError}
         onOpenRemoteUpdate={openRemoteInstanceUpdate}
         timeFormatPreference={timeFormatPreference}
-      />
-      <HeaderIconActionButton
-        title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
-        ariaLabel={t('header.actions.toggleTerminalPanelAria')}
-        onClick={toggleBottomTerminal}
-        Icon={'terminal-box'}
-      />
-      {!isMobile ? (
-        <HeaderIconActionButton
-          title={t('contextPanel.browser.open')}
-          ariaLabel={t('contextPanel.browser.open')}
-          onClick={handleOpenContextBrowser}
-          pressed={isContextBrowserActive}
-          Icon={'global'}
-        />
-      ) : null}
-      <HeaderIconActionButton
-        title={t('header.actions.rightSidebarWithShortcut', { shortcut: shortcutLabel('toggle_right_sidebar') })}
-        ariaLabel={t('header.actions.toggleRightSidebarAria')}
-        onClick={toggleRightSidebar}
-        Icon={'layout-right'}
       />
       <DesktopGitHubControl
         isMobile={isMobile}
@@ -2145,6 +2070,18 @@ export const Header: React.FC<HeaderProps> = ({
           TitlebarLeftControls overlay; the header reserves matching left space
           via padding (see headerStyle) when the sidebar is collapsed. */}
       <div className="flex min-w-0 flex-1 items-center">
+        {activeSurfaceHeader ? (
+          <div className="mr-3 flex min-w-0 flex-col items-start px-1 py-0.5 -my-0.5 text-left">
+            <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
+              {activeSurfaceHeader.title}
+            </span>
+            {activeSurfaceHeader.subtitle ? (
+              <span className="truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75 max-w-full">
+                {activeSurfaceHeader.subtitle}
+              </span>
+            ) : null}
+          </div>
+        ) : (
         <SessionSwitcherDropdown>
           <button
             type="button"
@@ -2176,6 +2113,7 @@ export const Header: React.FC<HeaderProps> = ({
             ) : null}
           </button>
         </SessionSwitcherDropdown>
+        )}
 
         {tabs.length > 0 && (
           <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-muted)]/50 p-1">
@@ -2203,7 +2141,6 @@ export const Header: React.FC<HeaderProps> = ({
               percentIconClassName="h-4.5 w-4.5"
             />
           ) : null}
-          {desktopChangesPanelAction}
           <HeaderIconActionButton
             visible={showMiniChatHeaderAction}
             title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}

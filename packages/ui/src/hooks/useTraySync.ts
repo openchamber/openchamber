@@ -6,7 +6,9 @@ import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensi
 import { getSyncChildStores, getAllSyncSessions } from '@/sync/sync-refs';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useGlobalSessionStatusStore, applyGlobalSessionStatusSnapshot } from '@/sync/global-session-status';
+import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useNotificationStore } from '@/sync/notification-store';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { respondToPermission } from '@/sync/session-actions';
 import {
   useGlobalSessionsStore,
@@ -37,7 +39,7 @@ import type { QuestionRequest } from '@/types/question';
 const TRAY_ACTION_EVENT = 'openchamber:tray-action';
 // Event-driven updates do the real work; this is just a slow safety net.
 const POLL_INTERVAL_MS = 5000;
-const FLUSH_DEBOUNCE_MS = 120;
+const FLUSH_DEBOUNCE_MS = 500;
 // Pull the full cross-project session list periodically. SSE keeps the active
 // directory instant; this catches sessions created in directories this client
 // never opened (other worktrees, other projects, the TUI, …).
@@ -102,8 +104,11 @@ type DesktopBridgeGlobal = {
 const isTrayPlatform = (): boolean => {
   if (typeof window === 'undefined') return false;
   const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
-  return platform === 'darwin' || platform === 'win32';
+  return platform === 'darwin' || platform === 'win32' || platform === 'linux';
 };
+
+const isTrayEnabled = (): boolean =>
+  typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.trayEnabled !== false;
 
 const permissionLabel = (request: PermissionRequest): string => {
   const head = typeof request.permission === 'string' ? request.permission : 'Permission';
@@ -116,8 +121,14 @@ const questionLabel = (request: QuestionRequest): string => {
   return first?.header || first?.question || 'Question';
 };
 
-const updatedAt = (session: Session): number =>
-  session.time?.updated ?? session.time?.created ?? 0;
+const compareSessionOrder = (left: Session, right: Session): number => (
+  compareSessionsByLifecycleOrder(
+    left,
+    right,
+    useSessionPinnedStore.getState().ids,
+    useSessionOrderingStore.getState().rankById,
+  )
+);
 
 const basenameOf = (p: string): string => {
   const norm = p.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -297,7 +308,7 @@ const collectStatusPollDirectories = (): Map<string, string[]> => {
   allSessions
     .filter((s) => s?.id && !s.parentID)
     .slice()
-    .sort((a, b) => updatedAt(b) - updatedAt(a))
+    .sort(compareSessionOrder)
     .slice(0, MAX_SESSIONS)
     .forEach((session) => {
       const directory = resolveGlobalSessionDirectory(session);
@@ -359,7 +370,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   const resolveStatus = (id: string): TraySessionStatus => {
     const fromStores = live.statusById.get(id);
     if (fromStores && fromStores !== 'idle') return fromStores;
-    return globalStatusById.get(id)?.status ?? fromStores ?? 'idle';
+    return globalStatusById.get(id)?.status.type ?? fromStores ?? 'idle';
   };
 
   const rollupStatus = (family: string[]): TraySessionStatus => {
@@ -375,7 +386,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
   const sessions: TraySession[] = allSessions
     .filter((s) => s?.id && !s.parentID) // root rows; sub-session work rolls up
     .slice()
-    .sort((a, b) => updatedAt(b) - updatedAt(a)) // most recently updated first
+    .sort(compareSessionOrder)
     .slice(0, MAX_SESSIONS)
     .map((session) => {
       const family = [session.id, ...collectDescendants(session.id)];
@@ -418,7 +429,7 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
 
 export const useTraySync = (): void => {
   React.useEffect(() => {
-    if (!isTrayPlatform() || !canUseElectronDesktopIPC()) return;
+    if (!isTrayPlatform() || !isTrayEnabled() || !canUseElectronDesktopIPC()) return;
 
     let disposed = false;
     let lastSerialized = '';
@@ -457,8 +468,8 @@ export const useTraySync = (): void => {
     };
 
     // Coalesce bursts (e.g. token-by-token streaming updates a store rapidly)
-    // into a single push, while staying near-instant for discrete events like
-    // a new session appearing.
+    // into at most one push per FLUSH_DEBOUNCE_MS; discrete events surface within
+    // that window. The main app UI stays instant via SSE/stores.
     const scheduleFlush = () => {
       if (disposed || flushTimer !== null) return;
       flushTimer = window.setTimeout(() => {
@@ -521,6 +532,8 @@ export const useTraySync = (): void => {
     // Cross-project status map: fed live by the sync dispatcher from the global
     // event stream, and seeded/reconciled by the poll below.
     const unsubscribeGlobalStatus = useGlobalSessionStatusStore.subscribe(() => scheduleFlush());
+    const unsubscribeSessionOrder = useSessionOrderingStore.subscribe(() => scheduleFlush());
+    const unsubscribePinnedSessions = useSessionPinnedStore.subscribe(() => scheduleFlush());
 
     // Make the tray self-sufficient: load the full cross-project list now
     // (independent of the sidebar) and refresh it periodically so sessions from
@@ -570,6 +583,8 @@ export const useTraySync = (): void => {
       unsubscribeGit();
       unsubscribeUI();
       unsubscribeGlobalStatus();
+      unsubscribeSessionOrder();
+      unsubscribePinnedSessions();
       unsubscribeQuota();
       unsubscribeRegistry?.();
       for (const unsub of storeUnsubs.values()) unsub();
@@ -578,7 +593,7 @@ export const useTraySync = (): void => {
   }, []);
 
   React.useEffect(() => {
-    if (!isTrayPlatform() || typeof window === 'undefined') return;
+    if (!isTrayPlatform() || !isTrayEnabled() || typeof window === 'undefined') return;
     const bridge = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
     const listen = bridge?.listen;
     if (typeof listen !== 'function') return;

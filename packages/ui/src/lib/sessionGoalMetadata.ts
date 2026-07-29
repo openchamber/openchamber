@@ -23,6 +23,8 @@ export interface SessionGoalPayload {
   blockedStreak: number;
   note: string;
   statusReason: string;
+  evaluationProviderID: string;
+  evaluationModelID: string;
   lastAccountedMessageID: string;
   createdAt: number;
   updatedAt: number;
@@ -64,6 +66,8 @@ export function getSessionGoal(session: Session | null | undefined): SessionGoal
     blockedStreak: asCount(goal.blockedStreak),
     note: typeof goal.note === 'string' ? goal.note : '',
     statusReason: typeof goal.statusReason === 'string' ? goal.statusReason : '',
+    evaluationProviderID: typeof goal.evaluationProviderID === 'string' ? goal.evaluationProviderID : '',
+    evaluationModelID: typeof goal.evaluationModelID === 'string' ? goal.evaluationModelID : '',
     lastAccountedMessageID: typeof goal.lastAccountedMessageID === 'string' ? goal.lastAccountedMessageID : '',
     createdAt: typeof goal.createdAt === 'number' ? goal.createdAt : 0,
     updatedAt: typeof goal.updatedAt === 'number' ? goal.updatedAt : 0,

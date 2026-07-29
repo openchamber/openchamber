@@ -201,13 +201,6 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
-    id: 'cycle_right_sidebar_tab',
-    defaultCombo: 'mod+shift+]',
-    label: 'Cycle right sidebar tab',
-    description: 'Cycle through right sidebar tabs',
-    customizable: true,
-  },
-  {
     id: 'new_chat',
     defaultCombo: 'mod+n',
     label: 'New session',

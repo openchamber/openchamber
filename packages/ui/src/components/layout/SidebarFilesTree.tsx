@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 import { toast } from '@/components/ui';
 import {
@@ -121,20 +122,23 @@ type FileTreeCache = {
 };
 const FILE_TREE_CACHE_MAX_ROOTS = 8;
 const fileTreeCacheByRoot = new Map<string, FileTreeCache>();
+const fileTreeCacheKey = (root: string): string => JSON.stringify([getRuntimeKey(), root]);
 
 const touchCache = (root: string): FileTreeCache | null => {
-  const entry = fileTreeCacheByRoot.get(root);
+  const key = fileTreeCacheKey(root);
+  const entry = fileTreeCacheByRoot.get(key);
   if (!entry) return null;
   entry.touchedAt = Date.now();
   // Touch on read promotes the key to the end of the Map's iteration order,
   // so the oldest (front) entry is the next eviction candidate.
-  fileTreeCacheByRoot.delete(root);
-  fileTreeCacheByRoot.set(root, entry);
+  fileTreeCacheByRoot.delete(key);
+  fileTreeCacheByRoot.set(key, entry);
   return entry;
 };
 
 const getOrCreateCache = (root: string): FileTreeCache => {
-  const existing = fileTreeCacheByRoot.get(root);
+  const key = fileTreeCacheKey(root);
+  const existing = fileTreeCacheByRoot.get(key);
   if (existing) {
     existing.touchedAt = Date.now();
     return existing;
@@ -151,12 +155,12 @@ const getOrCreateCache = (root: string): FileTreeCache => {
     loadedDirs: new Set(),
     touchedAt: Date.now(),
   };
-  fileTreeCacheByRoot.set(root, created);
+  fileTreeCacheByRoot.set(key, created);
   return created;
 };
 
 const dropCacheForRoot = (root: string): void => {
-  fileTreeCacheByRoot.delete(root);
+  fileTreeCacheByRoot.delete(fileTreeCacheKey(root));
 };
 
 const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
@@ -340,9 +344,9 @@ const FileRow: React.FC<FileRowProps> = ({
       >
         {isDir ? (
           isExpanded ? (
-            <Icon name="folder-open-fill" className="h-4 w-4 flex-shrink-0 text-primary/60" />
+            <Icon name="folder-open" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
           ) : (
-            <Icon name="folder-3-fill" className="h-4 w-4 flex-shrink-0 text-primary/60" />
+            <Icon name="folder-3" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
           )
         ) : (
           getFileIcon(node.path, node.extension)
@@ -512,6 +516,7 @@ export const SidebarFilesTree: React.FC = () => {
   const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
+  const collapseAllExpandedPaths = useFilesViewTabsStore((state) => state.collapseAllExpandedPaths);
   const contextTabs = useUIStore((state) => (root ? (state.contextPanelByDirectory[root]?.tabs ?? EMPTY_CONTEXT_TABS) : EMPTY_CONTEXT_TABS));
   const openContextFilePaths = React.useMemo(() => new Set(
     contextTabs
@@ -1073,30 +1078,8 @@ export const SidebarFilesTree: React.FC = () => {
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
-        <div className="relative min-w-0 flex-1">
-          <Icon name="search" className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
-          <Input
-            ref={searchInputRef}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder={t('sidebarFilesTree.search.placeholder')}
-            className="h-8 pl-8 pr-8 typography-meta"
-          />
-          {searchQuery.trim().length > 0 ? (
-            <button
-              type="button"
-              aria-label={t('sidebarFilesTree.search.clearAria')}
-              className="absolute right-2 top-2 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground"
-              onClick={() => {
-                setSearchQuery('');
-                searchInputRef.current?.focus();
-              }}
-            >
-              <Icon name="close" className="h-4 w-4" />
-            </button>
-          ) : null}
-        </div>
+      <div className="flex flex-col gap-2 border-b border-border/40 px-3 py-2">
+        <div className="flex items-center justify-end gap-2">
         {canCreateFile && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1145,6 +1128,49 @@ export const SidebarFilesTree: React.FC = () => {
           </TooltipTrigger>
           <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.refreshTitle')}</TooltipContent>
         </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex flex-shrink-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  if (root) collapseAllExpandedPaths(root);
+                }}
+                className="h-8 w-8 p-0 flex-shrink-0"
+                title={t('sidebarFilesTree.actions.collapseAllTitle')}
+                aria-label={t('sidebarFilesTree.actions.collapseAllTitle')}
+              >
+                <Icon name="collapse-vertical" className="h-4 w-4" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.collapseAllTitle')}</TooltipContent>
+        </Tooltip>
+        </div>
+        <div className="relative min-w-0">
+          <Icon name="search" className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
+          <Input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder={t('sidebarFilesTree.search.placeholder')}
+            className="h-8 pl-8 pr-8 typography-meta"
+          />
+          {searchQuery.trim().length > 0 ? (
+            <button
+              type="button"
+              aria-label={t('sidebarFilesTree.search.clearAria')}
+              className="absolute right-2 top-2 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                setSearchQuery('');
+                searchInputRef.current?.focus();
+              }}
+            >
+              <Icon name="close" className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="p-2">

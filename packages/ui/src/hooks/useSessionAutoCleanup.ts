@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores/useUIStore';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const AUTO_DELETE_KEEP_RECENT = 5;
 const AUTO_DELETE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const EMPTY_SESSIONS: Session[] = [];
 
 const getSessionLastActivity = (session: Session): number => {
   return session.time?.updated ?? session.time?.created ?? 0;
@@ -71,14 +72,17 @@ export const useSessionAutoCleanup = (enabledOrOptions?: boolean | CleanupOption
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isLoading = useSessionUIStore((state) => state.isLoading);
-  const globalSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
-
   const autoDeleteEnabled = useUIStore((state) => state.autoDeleteEnabled);
   const autoDeleteAfterDays = useUIStore((state) => state.autoDeleteAfterDays);
   const sessionRetentionAction = useUIStore((state) => state.sessionRetentionAction);
   const autoDeleteLastRunAt = useUIStore((state) => state.autoDeleteLastRunAt);
   const setAutoDeleteLastRunAt = useUIStore((state) => state.setAutoDeleteLastRunAt);
+  const needsGlobalSessions = enabled && (!autoRun || autoDeleteEnabled);
+  const globalSessions = useGlobalSessionsStore(React.useCallback(
+    (state) => needsGlobalSessions ? state.activeSessions : EMPTY_SESSIONS,
+    [needsGlobalSessions],
+  ));
+  const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
 
   const [isRunning, setIsRunning] = React.useState(false);
   const runningRef = React.useRef(false);

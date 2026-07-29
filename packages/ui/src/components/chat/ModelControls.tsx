@@ -1,4 +1,5 @@
 import React from 'react';
+import { focusChatInput } from './composer/editor/dom';
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
 import {
@@ -29,9 +30,8 @@ import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useDirectorySync, useSessionMessages } from '@/sync/sync-context';
+import { useSessionMessages, useSessionRenderable } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
-import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
@@ -479,10 +479,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
             // Restore focus to chat input when model selector closes
             if (wasOpen && !isCompact) {
-                requestAnimationFrame(() => {
-                    const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
-                    textarea?.focus();
-                });
+                requestAnimationFrame(focusChatInput);
             }
         }
     }, [isModelSelectorOpen, isCompact]);
@@ -493,10 +490,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (!isAgentSelectorOpen) {
             setAgentSearchQuery('');
             if (!isCompact) {
-                requestAnimationFrame(() => {
-                    const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
-                    textarea?.focus();
-                });
+                requestAnimationFrame(focusChatInput);
             }
         }
     }, [isAgentSelectorOpen, isCompact]);
@@ -646,11 +640,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const latestLoadedUserChoiceRestoreRef = React.useRef<string | null>(null);
 
     const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
-    const hasRenderableCurrentSessionSnapshot = useDirectorySync(
-        React.useCallback(
-            (state) => (currentSessionId ? getSessionMaterializationStatus(state, currentSessionId).renderable : false),
-            [currentSessionId],
-        ),
+    const hasRenderableCurrentSessionSnapshot = useSessionRenderable(
+        currentSessionId ?? '',
         currentSessionDirectory ?? undefined,
     );
     const currentSessionMessagesFromSync = useSessionMessages(currentSessionId ?? '', currentSessionDirectory ?? undefined);
@@ -1268,10 +1259,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 closeMobilePanel();
             }
             // Restore focus to chat input after model selection.
-            requestAnimationFrame(() => {
-                const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
-                textarea?.focus();
-            });
+            requestAnimationFrame(focusChatInput);
         } catch (error) {
             console.error('[ModelControls] Handle model change error:', error);
         }
@@ -1609,13 +1597,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
         }
 
-        const focusMobileComposer = () => {
-            requestAnimationFrame(() => {
-                const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
-                textarea?.focus();
-            });
-        };
-
         const handleMobileModelApply = (providerId: string, modelId: string, variant: string | undefined) => {
             const result = applyModelSelectionWithVariant(providerId, modelId, variant);
             if (result !== 'applied') {
@@ -1629,7 +1610,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
             setExpandedMobileModelKey(null);
             closeMobilePanel();
-            focusMobileComposer();
+            requestAnimationFrame(focusChatInput);
         };
 
         const openMobileVariantOverflow = (providerId: string, modelId: string) => {
@@ -1965,10 +1946,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
 
             closeMobilePanel();
-            requestAnimationFrame(() => {
-                const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
-                textarea?.focus();
-            });
+            requestAnimationFrame(focusChatInput);
         };
 
         return (

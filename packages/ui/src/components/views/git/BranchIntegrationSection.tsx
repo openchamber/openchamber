@@ -25,6 +25,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useI18n } from '@/lib/i18n';
 
 type OperationType = 'merge' | 'rebase';
@@ -45,7 +46,12 @@ interface BranchIntegrationSectionProps {
   isOperating?: boolean;
   operationLogs?: OperationLogEntry[];
   onOperationComplete?: () => void;
-  mode?: 'dialog' | 'inline';
+  /**
+   * 'dialog' renders its own trigger button + dialog, 'inline' renders a
+   * titled section, 'bare' renders just the form body for embedding in an
+   * externally-owned dialog.
+   */
+  mode?: 'dialog' | 'inline' | 'bare';
   defaultTargetBranch?: string;
 }
 
@@ -166,7 +172,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   }, [branchDropdownOpen]);
 
   React.useEffect(() => {
-    if (mode !== 'inline' || selectedBranch) return;
+    if (mode === 'dialog' || selectedBranch) return;
     setSelectedBranch(resolveDefaultBranch());
   }, [mode, resolveDefaultBranch, selectedBranch]);
 
@@ -300,12 +306,15 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
         </p>
         <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen} modal={false}>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="lg" className="w-full justify-between">
+            <button
+              type="button"
+              className={cn(dropdownTriggerVariants({ size: 'default' }), 'w-full')}
+            >
               <span className={cn('truncate', !selectedBranch && 'text-muted-foreground')}>
                 {selectedBranch || t('gitView.branch.selectBranch')}
               </span>
               <Icon name="arrow-down-s" className="size-4 opacity-60 shrink-0" />
-            </Button>
+            </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
@@ -407,6 +416,10 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   );
 
   const body = isOperating ? renderOperating() : renderForm();
+
+  if (mode === 'bare') {
+    return body;
+  }
 
   if (mode === 'inline') {
     return (

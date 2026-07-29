@@ -5,6 +5,7 @@ const CLIENT_TOKEN_QUERY_PARAM = 'oc_client_token';
 const URL_AUTH_TOKEN_QUERY_PARAM = 'oc_url_token';
 const PREVIEW_PASSTHROUGH_REQUEST_HEADERS = ['x-inertia', 'x-inertia-version'];
 const PREVIEW_PASSTHROUGH_RESPONSE_HEADERS = ['x-inertia', 'x-inertia-location'];
+export const PREVIEW_TARGET_ERROR_HEADER = 'x-openchamber-preview-target-error';
 
 const LOOPBACK_HOSTS = new Set([
   'localhost',
@@ -1235,19 +1236,19 @@ export const createPreviewProxyRuntime = ({
     const match = pathname.match(/^\/api\/preview\/proxy\/([a-f0-9]{16,64})(?:\/|$)/i);
     const id = match?.[1] || '';
     if (!id) {
-      return { ok: false, status: 404, error: 'Preview target not found' };
+      return { ok: false, status: 404, code: 'missing', error: 'Preview target not found' };
     }
 
     const entry = targets.get(id);
     if (!entry || entry.expiresAt <= now()) {
       targets.delete(id);
-      return { ok: false, status: 404, error: 'Preview target expired' };
+      return { ok: false, status: 404, code: 'expired', error: 'Preview target expired' };
     }
 
     const cookies = parseCookieHeader(req.headers?.cookie);
     const token = parsed.searchParams.get(TOKEN_QUERY_PARAM) || cookies.get(TOKEN_COOKIE_NAME) || '';
     if (!token || token !== entry.token) {
-      return { ok: false, status: 403, error: 'Preview token missing' };
+      return { ok: false, status: 403, code: 'invalid-token', error: 'Preview token missing' };
     }
 
     return { ok: true, id, entry, parsed };
@@ -1451,6 +1452,9 @@ export const createPreviewProxyRuntime = ({
           proxyReq.setHeader('accept-encoding', 'identity');
         },
         proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
+          // This header is reserved for failures produced before proxying. Do
+          // not let an upstream application response impersonate that signal.
+          res.removeHeader?.(PREVIEW_TARGET_ERROR_HEADER);
           applyPreviewPassthroughResponseHeaders(proxyRes, res);
           // Per-response nonce lets the injected bridge run under the dev
           // server's CSP without dropping its script restrictions wholesale.
@@ -1551,6 +1555,7 @@ export const createPreviewProxyRuntime = ({
     app.use('/api/preview/proxy', (req, res, next) => {
       const resolved = resolveTargetFromRequest(req);
       if (!resolved.ok) {
+        res.setHeader(PREVIEW_TARGET_ERROR_HEADER, resolved.code);
         return res.status(resolved.status).json({ error: resolved.error });
       }
       next();

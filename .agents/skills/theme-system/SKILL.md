@@ -10,6 +10,7 @@ description: Use when creating or modifying OpenChamber UI components, styling, 
 - Use semantic OpenChamber theme tokens; never hardcode hex colors or generic Tailwind palette colors.
 - Use shared UI primitives before introducing feature-local controls.
 - Use the shared `Button`; do not create button wrappers such as `ButtonSmall` or `ButtonLarge`.
+- Every dropdown-style value-picker trigger (shows current value, opens a picker) takes its chrome from `dropdownTriggerVariants` in `packages/ui/src/components/ui/dropdown-trigger.ts` (sizes: `sm` dense h-6, `default` forms h-8; native `SelectTrigger` consumes it). Call sites add layout classes only (width/truncation) — never re-declare border/radius/bg/hover. Deliberately chrome-less pickers (chat composer, headers) are the only exception.
 - Use the sprite-based `Icon`; never import icons directly from `@remixicon/react`.
 - Apply hover tokens only to interactive elements.
 - Use status colors only for actual status/feedback.

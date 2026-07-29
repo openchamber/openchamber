@@ -228,7 +228,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
               >
                 <SelectTrigger
                   size="sm"
-                  className="data-[size=sm]:h-auto h-7 min-h-7 w-auto justify-between px-2 py-0"
+                  className="w-auto"
                   disabled={isLogLoading}
                 >
                   <SelectValue placeholder={t('gitView.history.commitsPlaceholder')} />

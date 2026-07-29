@@ -18,6 +18,7 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 describe('permission store server policy', () => {
   beforeEach(() => {
     usePermissionStore.getState().reset();
+    usePermissionStore.setState({ legacyCandidate: null, legacyRuntimeKey: null });
     fetchImpl = async () => json({ sessions: {} });
   });
 
@@ -51,7 +52,7 @@ describe('permission store server policy', () => {
   });
 
   test('migrates a legacy local policy when the server has no policy yet', async () => {
-    usePermissionStore.setState({ autoAccept: { root: true } });
+    usePermissionStore.setState({ legacyCandidate: { root: true }, legacyRuntimeKey: null });
     const requests: string[] = [];
     fetchImpl = async (input) => {
       requests.push(input);
@@ -62,5 +63,56 @@ describe('permission store server policy', () => {
     await usePermissionStore.getState().hydrate();
     expect(requests).toEqual(['/api/permission-auto-accept', '/api/permission-auto-accept/sessions/root']);
     expect(usePermissionStore.getState().autoAccept).toEqual({ root: true });
+    expect(usePermissionStore.getState().legacyCandidate).toBe(null);
+  });
+
+  test('rejects a hydration response from before reset', async () => {
+    let resolveOld!: (response: Response) => void;
+    const oldResponse = new Promise<Response>((resolve) => { resolveOld = resolve; });
+    fetchImpl = async () => oldResponse;
+    const oldHydration = usePermissionStore.getState().hydrate();
+
+    usePermissionStore.getState().reset();
+    fetchImpl = async () => json({ sessions: { current: true }, revision: 2 });
+    await usePermissionStore.getState().hydrate();
+    resolveOld(json({ sessions: { stale: true }, revision: 1 }));
+    await oldHydration;
+
+    expect(usePermissionStore.getState().autoAccept).toEqual({ current: true });
+  });
+
+  test('rejects a mutation response from before reset', async () => {
+    let resolveOld!: (response: Response) => void;
+    fetchImpl = async () => new Promise<Response>((resolve) => { resolveOld = resolve; });
+    const mutation = usePermissionStore.getState().setSessionAutoAccept('stale', true);
+
+    usePermissionStore.getState().reset();
+    resolveOld(json({ sessions: { stale: true }, revision: 1 }));
+    await mutation;
+
+    expect(usePermissionStore.getState().autoAccept).toEqual({});
+    expect(usePermissionStore.getState().saving).toBe(false);
+  });
+
+  test('keeps the highest authoritative revision when mutations resolve out of order', async () => {
+    const resolvers: Array<(response: Response) => void> = [];
+    fetchImpl = async () => new Promise<Response>((resolve) => { resolvers.push(resolve); });
+    const first = usePermissionStore.getState().setSessionAutoAccept('first', true);
+    const second = usePermissionStore.getState().setSessionAutoAccept('second', true);
+
+    resolvers[1](json({ sessions: { first: true, second: true }, revision: 2 }));
+    await second;
+    resolvers[0](json({ sessions: { first: true }, revision: 1 }));
+    await first;
+
+    expect(usePermissionStore.getState().autoAccept).toEqual({ first: true, second: true });
+    expect(usePermissionStore.getState().saving).toBe(false);
+  });
+
+  test('ignores an older broadcast revision', () => {
+    usePermissionStore.getState().applySnapshot({ sessions: { current: true }, revision: 4 });
+    usePermissionStore.getState().applySnapshot({ sessions: { stale: true }, revision: 3 });
+
+    expect(usePermissionStore.getState().autoAccept).toEqual({ current: true });
   });
 });

@@ -117,6 +117,14 @@ export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: 
               {goal.statusReason && (goal.status === 'blocked' || goal.status === 'budgetLimited') ? (
                 <p className="typography-meta text-muted-foreground/70">{goal.statusReason}</p>
               ) : null}
+              {goal.evaluationProviderID || goal.evaluationModelID ? (
+                <div className="flex items-baseline gap-2 typography-meta">
+                  <span className="text-muted-foreground/70">{t('chat.goal.dialog.evaluationModelLabel')}</span>
+                  <span className="min-w-0 break-all text-foreground">
+                    {[goal.evaluationProviderID, goal.evaluationModelID].filter(Boolean).join('/')}
+                  </span>
+                </div>
+              ) : null}
             </div>
           )}
 

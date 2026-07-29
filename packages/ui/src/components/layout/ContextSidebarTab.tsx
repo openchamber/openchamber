@@ -274,8 +274,12 @@ export const ContextPanelContent: React.FC = () => {
   const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<string | null>(null);
   const copyResetTimeoutRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const sessions = useSessions();
-  const sessionMessages = useSessionMessageRecords(currentSessionId ?? '');
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+  const sessions = useSessions(currentSessionDirectory ?? undefined);
+  const sessionMessages = useSessionMessageRecords(
+    currentSessionId ?? '',
+    currentSessionDirectory ?? undefined,
+  );
   const providers = useConfigStore((state) => state.providers);
 
   React.useEffect(() => {
@@ -285,7 +289,7 @@ export const ContextPanelContent: React.FC = () => {
     }
     setExpandedRawMessages((prev) => (Object.keys(prev).length > 0 ? {} : prev));
     setCopiedRawMessageId(null);
-  }, [currentSessionId]);
+  }, [currentSessionDirectory, currentSessionId]);
 
   React.useEffect(() => {
     return () => {

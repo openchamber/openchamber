@@ -23,6 +23,8 @@ the web server and survives UI disconnects.
   auditFailStreak,         // consecutive failed/unavailable audit calls
   note,                    // latest audit progress note, <= 280 chars
   statusReason,            // why settled; 'resumed' is a kickoff signal from UI
+  evaluationProviderID,    // provider used by the latest successful audit
+  evaluationModelID,       // model used by the latest successful audit
   lastAccountedMessageID,  // incremental accounting cursor
   createdAt, updatedAt
 }
@@ -64,8 +66,9 @@ before touching the filesystem). Rationale: metadata rides every
 - UI display fetches content via the GET route
   (`useGoalObjectiveContent`); in VS Code the route is unavailable, so the
   strip degrades to the audit note (display-only fallback by design).
-- Scheduled goal tasks write the file server-side directly via
-  `objectives.js`.
+- Server-created goals write the file through `create.js`, which also owns
+  objective fitting, inline fallback, metadata creation, and the synthetic
+  first-turn reminder shared by scheduled tasks and CLI-created sessions.
 
 ## Flow
 
@@ -78,6 +81,13 @@ before touching the filesystem). Rationale: metadata rides every
    a goal on an idle session emits no status transition.
 3. On fire (`tick`), gated by the `sessionGoalEnabled` setting:
    - fetch session (skip sub-agent sessions), require an `active` goal;
+   - authoritative live-activity check after the quiet window: re-read the
+     session status map, bail if the parent resumed, then list direct child
+     sessions and bail while any child is `busy`/`retry`. A background
+     subagent leaves its parent idle, then injects its result into the parent
+     when done; that parent `busy` → `idle` cycle re-arms the loop without
+     polling. Status/children fetch failure is unknown, not empty, so it skips
+     the audit and retries after another quiet window;
    - quiescence check via the message tail (trailing user message or
      unfinished assistant reply → bail; the next idle transition re-arms);
    - token accounting as a SNAPSHOT of the latest completed assistant turn:
@@ -150,6 +160,12 @@ sees only that final turn, so the report is its evidence.
   colors/labels shared across surfaces.
 - `stores/useSessionGoalArmStore.ts` — the "next prompt starts a goal" flag,
   consumed by `sendMessage` in `sync/session-ui-store.ts` (works for drafts).
+  Armed slash commands resolve their authoritative command template and apply
+  OpenCode argument expansion (`$ARGUMENTS`, positional placeholders, or the
+  implicit argument suffix) for the audit objective before goal metadata is
+  written and before `session.command` dispatch. If command details cannot be
+  loaded, the raw invocation remains the objective rather than blocking command
+  execution.
 - `hooks/useSessionGoal.ts` — live goal state.
 - `components/chat/SessionGoalButton.tsx` — composer target button
   (arm / status color / cancel confirm); `SessionGoalRow.tsx` — goal strip
@@ -162,8 +178,29 @@ sees only that final turn, so the report is its evidence.
 Scheduled tasks can run as goals: `execution.goalEnabled` (+ optional
 `execution.goalTokenBudget`) on a task makes the scheduled-tasks runtime
 stamp `metadata.openchamber.goal` onto the fresh session (objective = the
-expanded task prompt) and attach the goal-mode intro part to the prompt.
+expanded task prompt, or the argument-expanded command template for a slash
+command) and attach the goal-mode intro part to normal prompts.
 The loop here picks it up from session events like any other goal.
+
+## CLI-created goals
+
+`openchamber session create --prompt <text> --goal` uses the explicit
+`POST /api/openchamber/sessions` orchestration route. The server creates the
+session, fits and stores the expanded prompt as its objective, patches active
+goal metadata, appends the synthetic goal reminder, and only then dispatches
+the prompt. `--goal-token-budget` applies the same optional budget contract as
+scheduled goals. Slash commands retain command dispatch semantics and cannot
+carry the synthetic prompt part. Their command template with OpenCode argument
+expansion becomes the audit objective; goal metadata
+is still installed before the command runs. A missing command template falls
+back to the raw invocation.
+
+`openchamber session send --goal` and `openchamber session fork --goal` use
+the same server-owned prompt orchestration. Send installs a fresh goal on the
+target session; fork first uses the official OpenCode fork operation (at the
+optional message boundary), then installs the goal on the new session. Both
+preserve the objective-file-before-metadata and metadata-before-dispatch
+ordering used by create and scheduled goals.
 
 ## Limitations
 

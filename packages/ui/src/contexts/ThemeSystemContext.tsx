@@ -2,6 +2,7 @@ import React, {
   useEffect,
   useMemo,
   useCallback,
+  useRef,
   useState,
 } from 'react';
 import { flushSync } from 'react-dom';
@@ -21,9 +22,15 @@ import {
 import { ThemeSystemContext, type ThemeContextValue } from './theme-system-context';
 import type { VSCodeThemePayload } from '@/lib/theme/vscode/adapter';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getInitialSystemPreference, readEmbeddedThemeSearchParams } from './theme-embedded-bootstrap';
+import {
+  getInitialSystemPreference,
+  publishEmbeddedThemeBootstrap,
+  readEmbeddedThemeBootstrap,
+  readEmbeddedThemeSearchParams,
+} from './theme-embedded-bootstrap';
 import { isValidTheme } from './theme-validation';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
 type ThemePreferences = {
   themeMode: ThemeMode;
@@ -42,17 +49,7 @@ const DEFAULT_LIGHT_ID = DEFAULT_LIGHT_THEME_ID;
 const DEFAULT_DARK_ID = DEFAULT_DARK_THEME_ID;
 
 const readEmbeddedCurrentTheme = (): Theme | null => {
-  const raw = readEmbeddedThemeSearchParams()?.get('currentTheme');
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    return isValidTheme(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  return readEmbeddedThemeBootstrap();
 };
 
 const fallbackThemeForVariant = (variant: 'light' | 'dark'): Theme =>
@@ -172,8 +169,8 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     return existing || null;
   });
   const isVSCode = useMemo(() => isVSCodeRuntime(), []);
-  const isLocalDesktopOrigin = useMemo(() => isDesktopLocalOriginActive(), []);
   const isDesktopShell = useMemo(() => detectDesktopShell(), []);
+  const customThemesRequestRef = useRef(0);
   const receivesParentThemeSync = useMemo(() => {
     if (typeof window === 'undefined') {
       return false;
@@ -196,6 +193,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       add(vscodeTheme);
     }
 
+    // Live-synced theme wins over bootstrap theme when IDs match (add is first-wins).
     if (embeddedSyncedTheme) {
       add(embeddedSyncedTheme);
     }
@@ -249,11 +247,13 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
+    const runtimeKey = getRuntimeKey();
+    const request = ++customThemesRequestRef.current;
     setCustomThemesLoading(true);
     try {
       const res = await runtimeFetch('/api/config/themes', {
         method: 'GET',
-        credentials: isLocalDesktopOrigin ? 'omit' : 'include',
+        credentials: isDesktopLocalOriginActive() ? 'omit' : 'include',
         headers: {
           Accept: 'application/json',
         },
@@ -269,19 +269,30 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       }
 
       const payload = await res.json();
+      if (request !== customThemesRequestRef.current || runtimeKey !== getRuntimeKey()) return;
       const incoming = Array.isArray(payload?.themes) ? payload.themes : [];
       const normalized = incoming.filter(isValidTheme);
       setCustomThemes(normalized);
     } catch {
       // ignore
     } finally {
-      setCustomThemesLoading(false);
+      if (request === customThemesRequestRef.current && runtimeKey === getRuntimeKey()) {
+        setCustomThemesLoading(false);
+      }
     }
-  }, [isLocalDesktopOrigin, isVSCode]);
+  }, [isVSCode]);
 
   useEffect(() => {
     void reloadCustomThemes();
   }, [reloadCustomThemes]);
+
+  useEffect(() => subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey || isVSCode) return;
+    customThemesRequestRef.current += 1;
+    setCustomThemes([]);
+    setCustomThemesLoading(false);
+    void reloadCustomThemes();
+  }), [isVSCode, reloadCustomThemes]);
 
   useEffect(() => {
     if (!isVSCode) {
@@ -355,6 +366,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     }
     const restoreTransitions = suppressTransitionsForThemeSwitch();
     cssGenerator.apply(currentTheme);
+    if (!receivesParentThemeSync) {
+      publishEmbeddedThemeBootstrap(currentTheme);
+    }
     applyVSCodeRuntimeClass(isVSCode);
     updateBrowserChrome(currentTheme);
 
@@ -513,12 +527,16 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
     scopedWindow.__openchamberApplyThemeSync = applyIncomingThemeSync;
 
+    if (receivesParentThemeSync && window.parent !== window) {
+      window.parent.postMessage({ type: 'openchamber:theme-sync-request' }, window.location.origin);
+    }
+
     return () => {
       if (scopedWindow.__openchamberApplyThemeSync === applyIncomingThemeSync) {
         delete scopedWindow.__openchamberApplyThemeSync;
       }
     };
-  }, [applyIncomingThemeSync]);
+  }, [applyIncomingThemeSync, receivesParentThemeSync]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -578,7 +596,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode, receivesParentThemeSync]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || receivesParentThemeSync) {
       return;
     }
     const handleSettingsSynced = (event: Event) => {
@@ -626,7 +644,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
     window.addEventListener('openchamber:settings-synced', handleSettingsSynced);
     return () => window.removeEventListener('openchamber:settings-synced', handleSettingsSynced);
-  }, []);
+  }, [receivesParentThemeSync]);
 
   const setTheme = useCallback(
     (themeId: string) => {
@@ -662,16 +680,22 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   );
 
   const setThemeModeHandler = useCallback((mode: ThemeMode) => {
-    setPreferences((prev) => {
-      if (prev.themeMode === mode) {
-        return prev;
-      }
-      return {
-        ...prev,
-        themeMode: mode,
-      };
-    });
-  }, []);
+    if (preferences.themeMode === mode) {
+      return;
+    }
+
+    setPreferences((prev) => ({
+      ...prev,
+      themeMode: mode,
+    }));
+
+    if (!receivesParentThemeSync) {
+      void updateDesktopSettings({
+        themeVariant: mode === 'system' ? currentTheme.metadata.variant : mode,
+        useSystemTheme: mode === 'system',
+      });
+    }
+  }, [currentTheme.metadata.variant, preferences.themeMode, receivesParentThemeSync]);
 
   const setSystemPreferenceHandler = useCallback(
     (use: boolean) => {

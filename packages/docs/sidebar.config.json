@@ -155,6 +155,20 @@
           }
         },
         {
+          "label": "Agent Control Tool",
+          "link": "/agent-control-tool/",
+          "translations": {
+            "uk": "Інструмент керування для агентів",
+            "zh-CN": "智能体控制工具",
+            "es": "Herramienta de control para agentes",
+            "pt-BR": "Ferramenta de controle para agentes",
+            "ko": "에이전트 제어 도구",
+            "pl": "Narzędzie sterowania dla agentów",
+            "fr": "Outil de contrôle pour les agents",
+            "ja": "エージェント制御ツール"
+          }
+        },
+        {
           "label": "Session Goals",
           "link": "/session-goals/",
           "translations": {

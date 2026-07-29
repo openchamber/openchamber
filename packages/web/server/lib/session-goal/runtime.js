@@ -213,6 +213,8 @@ const parseGoalMetadata = (session) => {
     auditFailStreak: Number.isFinite(goal.auditFailStreak) && goal.auditFailStreak > 0 ? Math.floor(goal.auditFailStreak) : 0,
     note: typeof goal.note === 'string' ? goal.note.slice(0, NOTE_CHAR_LIMIT) : '',
     statusReason: typeof goal.statusReason === 'string' ? goal.statusReason.slice(0, REASON_CHAR_LIMIT) : '',
+    evaluationProviderID: typeof goal.evaluationProviderID === 'string' ? goal.evaluationProviderID : '',
+    evaluationModelID: typeof goal.evaluationModelID === 'string' ? goal.evaluationModelID : '',
     lastAccountedMessageID: typeof goal.lastAccountedMessageID === 'string' ? goal.lastAccountedMessageID : '',
     createdAt: Number.isFinite(goal.createdAt) ? goal.createdAt : 0,
     updatedAt: Number.isFinite(goal.updatedAt) ? goal.updatedAt : 0,
@@ -293,6 +295,19 @@ export const createSessionGoalRuntime = ({
     return Array.isArray(messages) ? messages : null;
   };
 
+  const fetchSessionStatuses = async (directory) => {
+    const statuses = await openCodeFetch('/session/status', { directory }).catch(() => null);
+    return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : null;
+  };
+
+  const fetchSessionChildren = async (sessionId, directory) => {
+    const children = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/children`, { directory })
+      .catch(() => null);
+    return Array.isArray(children) ? children : null;
+  };
+
+  const isWorkingStatus = (status) => status?.type === 'busy' || status?.type === 'retry';
+
   // Merge-write the goal payload from a FRESH session read so concurrent
   // metadata writes (assist payloads, dismissals, UI goal edits) survive.
   // Returns the written goal, or null when the stored goal no longer matches
@@ -319,7 +334,7 @@ export const createSessionGoalRuntime = ({
     return nextGoal;
   };
 
-  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID }) => {
+  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID }) => {
     const written = await writeGoal(sessionId, directory, goal.id, (current) => ({
       status,
       statusReason: clampText(statusReason, REASON_CHAR_LIMIT),
@@ -330,6 +345,8 @@ export const createSessionGoalRuntime = ({
       ...(tokensBaseline !== undefined ? { tokensBaseline } : {}),
       ...(tokensCommitted !== undefined ? { tokensCommitted } : {}),
       ...(lastAccountedMessageID ? { lastAccountedMessageID } : {}),
+      ...(evaluationProviderID ? { evaluationProviderID } : {}),
+      ...(evaluationModelID ? { evaluationModelID } : {}),
     }));
     if (!written) return;
     console.log(`[session-goal] ${sessionId} settled as ${status}${statusReason ? ` (${statusReason})` : ''}`);
@@ -365,13 +382,35 @@ export const createSessionGoalRuntime = ({
       });
       const structured = extractJsonObject(generated?.text);
       const verdict = typeof structured?.verdict === 'string' ? structured.verdict.trim().toLowerCase() : '';
-      if (!['continue', 'complete', 'blocked'].includes(verdict)) return null;
+      if (!structured || !['continue', 'complete', 'blocked'].includes(verdict)) {
+        console.warn('[session-goal:diagnostic] audit parse failed', {
+          sessionId: lastAssistantInfo?.sessionID ?? null,
+          provider: generated?.providerID ?? null,
+          model: generated?.modelID ?? null,
+          outputChars: typeof generated?.text === 'string' ? generated.text.length : 0,
+          jsonObjectFound: Boolean(structured),
+          verdict: verdict || null,
+        });
+        return null;
+      }
+      console.log('[session-goal:diagnostic] audit verdict', {
+        sessionId: lastAssistantInfo?.sessionID ?? null,
+        provider: generated?.providerID ?? null,
+        model: generated?.modelID ?? null,
+        outputChars: generated.text.length,
+        verdict,
+      });
       let note = clampText(structured?.note, NOTE_CHAR_LIMIT);
       if (note && hasScriptMismatch(note, `${goal.objective}\n${assistantText}`)) {
         console.warn('[session-goal] dropped audit note: language mismatch with objective');
         note = '';
       }
-      return { verdict, note };
+      return {
+        verdict,
+        note,
+        evaluationProviderID: generated.providerID,
+        evaluationModelID: generated.modelID,
+      };
     } catch (error) {
       // No authenticated small model (404) or a transient failure — the loop
       // still terminates via markers, budget, and the turn cap.
@@ -436,6 +475,26 @@ export const createSessionGoalRuntime = ({
         console.warn(`[session-goal] ${sessionId} objective file unreadable, using inline fallback`);
       }
     }
+
+    // Parent idle does not imply the whole task is quiescent: a background
+    // subagent runs in a child session while its parent stays idle. Re-read
+    // authoritative live status after the quiet window. If the parent resumed,
+    // its next idle event will arm a fresh tick. If a child is still working,
+    // OpenCode will inject its result into the parent and produce the same
+    // busy→idle cycle, so do not poll or audit the interim parent reply.
+    const statuses = await fetchSessionStatuses(directory);
+    if (!statuses) {
+      armTimer(sessionId, directory, idleQuietMs);
+      return;
+    }
+    if (isWorkingStatus(statuses[sessionId])) return;
+
+    const children = await fetchSessionChildren(sessionId, directory);
+    if (!children) {
+      armTimer(sessionId, directory, idleQuietMs);
+      return;
+    }
+    if (children.some((child) => typeof child?.id === 'string' && isWorkingStatus(statuses[child.id]))) return;
 
     const messages = await fetchRecentMessages(sessionId, directory);
     if (!messages) return;
@@ -623,15 +682,22 @@ export const createSessionGoalRuntime = ({
       if (audit?.verdict === 'complete') {
         await settleGoal({
           sessionId, directory, goal, status: 'complete', statusReason: 'verified by audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+          evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
         });
         return;
       }
 
       if (audit?.verdict === 'blocked') {
         blockedStreak = goal.blockedStreak + 1;
+        console.warn('[session-goal:diagnostic] blocked audit streak', {
+          sessionId,
+          blockedStreak,
+          blockedStreakLimit: BLOCKED_STREAK_LIMIT,
+        });
         if (blockedStreak >= BLOCKED_STREAK_LIMIT) {
           await settleGoal({
             sessionId, directory, goal, status: 'blocked', statusReason: audit.note || 'blocked per audit', note: audit.note, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
+            evaluationProviderID: audit.evaluationProviderID, evaluationModelID: audit.evaluationModelID,
           });
           return;
         }
@@ -651,6 +717,8 @@ export const createSessionGoalRuntime = ({
       auditFailStreak,
       statusReason: '',
       ...(audit?.note ? { note: audit.note } : {}),
+      ...(audit?.evaluationProviderID ? { evaluationProviderID: audit.evaluationProviderID } : {}),
+      ...(audit?.evaluationModelID ? { evaluationModelID: audit.evaluationModelID } : {}),
     }));
     if (!written) {
       console.log('[session-goal] goal changed during tick, dropping continuation');

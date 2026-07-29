@@ -17,9 +17,60 @@ const timeoutFetch = (url, options = {}) => {
   return fetch(url, { ...options, signal: AbortSignal.timeout(OCTOKIT_REQUEST_TIMEOUT_MS) });
 };
 
-/** Create an Octokit instance with a per-request timeout applied. */
+// Conditional-request cache for GET calls: GitHub serves 304 Not Modified for
+// matching If-None-Match WITHOUT counting the request against the REST rate
+// limit, so polling unchanged PRs/checks becomes rate-limit-free. Keyed by
+// token+URL so different identities never share responses.
+const ETAG_CACHE_MAX_ENTRIES = 300;
+const etagCache = new Map();
+
+const rememberEtag = (key, etag, body, headers) => {
+  etagCache.delete(key);
+  etagCache.set(key, { etag, body, headers });
+  if (etagCache.size > ETAG_CACHE_MAX_ENTRIES) {
+    const oldest = etagCache.keys().next().value;
+    if (oldest !== undefined) {
+      etagCache.delete(oldest);
+    }
+  }
+};
+
+const createConditionalFetch = (token) => async (url, options = {}) => {
+  const method = (options.method || 'GET').toUpperCase();
+  if (method !== 'GET') {
+    return timeoutFetch(url, options);
+  }
+
+  const cacheKey = `${token}\n${url}`;
+  const cached = etagCache.get(cacheKey);
+  const headers = { ...(options.headers || {}) };
+  if (cached?.etag) {
+    headers['if-none-match'] = cached.etag;
+  }
+
+  const response = await timeoutFetch(url, { ...options, headers });
+
+  if (response.status === 304 && cached) {
+    // Touch for LRU and replay the cached success response.
+    rememberEtag(cacheKey, cached.etag, cached.body, cached.headers);
+    return new Response(cached.body, { status: 200, headers: cached.headers });
+  }
+
+  if (response.ok) {
+    const etag = response.headers.get('etag');
+    if (etag) {
+      const body = await response.arrayBuffer();
+      rememberEtag(cacheKey, etag, body, response.headers);
+      return new Response(body, { status: response.status, headers: response.headers });
+    }
+  }
+
+  return response;
+};
+
+/** Create an Octokit instance with per-request timeout + ETag revalidation. */
 export function createOctokit(token) {
-  return new Octokit({ auth: token, request: { fetch: timeoutFetch } });
+  return new Octokit({ auth: token, request: { fetch: createConditionalFetch(token) } });
 }
 
 export function getOctokitOrNull() {

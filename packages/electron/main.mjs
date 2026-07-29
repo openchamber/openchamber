@@ -17,7 +17,18 @@ import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { assertUpdaterCapability, resolveLinuxUpdatePackageType } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
-import { buildLinuxDesktopExecSpec, parseLinuxDesktopExecProgram } from './open-in-app-launcher.mjs';
+import {
+  buildLinuxInstalledApps,
+  buildLinuxOpenSpecs,
+  fetchLinuxAppIcons,
+  filterLinuxInstalledApps,
+  readLinuxDesktopEntries,
+} from './linux-app-discovery.mjs';
+import {
+  readLinuxAutostartEnabled,
+  setLinuxAutostartEnabled,
+} from './linux-autostart.mjs';
+import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
@@ -32,7 +43,6 @@ const PACKAGED_APP_USER_MODEL_ID = 'dev.openchamber.desktop';
 const DEV_APP_USER_MODEL_ID = 'dev.openchamber.desktop.dev';
 const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 const BACKGROUND_START_ARG = '--background';
-const USES_CUSTOM_TITLE_BAR = process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux';
 
 const getLoginItemOptions = () => {
   if (process.platform === 'win32') {
@@ -46,6 +56,9 @@ const getLoginItemOptions = () => {
 };
 
 const readLoginItemSettings = () => {
+  if (process.platform === 'linux') {
+    return null;
+  }
   if (process.platform !== 'darwin' && process.platform !== 'win32') return null;
   try {
     return app.getLoginItemSettings(getLoginItemOptions());
@@ -184,8 +197,8 @@ const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/openchamber/openchamber/i
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
+const LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS = 30_000;
 const OPENCODE_SHUTDOWN_GRACE_MS = 100;
-
 const { autoUpdater } = updaterPkg;
 
 const state = {
@@ -196,6 +209,7 @@ const state = {
   clientToken: null,
   requestHeaders: {},
   bootOutcome: null,
+  startupResolved: false,
   initScript: null,
   mainWindow: null,
   quitRequested: false,
@@ -215,6 +229,7 @@ const state = {
   sshStatuses: new Map(),
   sshLogs: new Map(),
   trayController: null,
+  trayFocusListener: null,
   lastFocusedWindowId: null,
   keepAwakeBlockerId: null,
 };
@@ -245,7 +260,7 @@ const readDesktopKeepAwakeStatus = () => {
 };
 
 const readDesktopMinimizeToTrayStatus = () => {
-  const supported = process.platform === 'win32';
+  const supported = process.platform === 'win32' || process.platform === 'linux';
   return {
     supported,
     enabled: supported && readSettingsRoot().desktopMinimizeToTrayEnabled === true,
@@ -253,7 +268,7 @@ const readDesktopMinimizeToTrayStatus = () => {
 };
 
 const shouldHideMainWindowToTray = (browserWindow) => {
-  if (process.platform !== 'win32') return false;
+  if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (!state.trayController) return false;
   if (!browserWindow || browserWindow.isDestroyed()) return false;
   if (browserWindow.__ocMiniChat === true) return false;
@@ -328,6 +343,10 @@ const prepareForQuit = ({ installingUpdate = false } = {}) => {
     } catch {
     }
     state.trayController = null;
+  }
+  if (state.trayFocusListener) {
+    app.removeListener('browser-window-focus', state.trayFocusListener);
+    state.trayFocusListener = null;
   }
 
   if (state.mainWindow && !state.mainWindow.isDestroyed()) {
@@ -492,12 +511,16 @@ const readJsonFile = (filePath) => {
 };
 
 const writeJsonFile = async (filePath, data) => {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  const directory = path.dirname(filePath);
+  await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') await fsp.chmod(directory, 0o700);
   // Atomic: write to a temp file then rename. Readers never see a partial
   // JSON file that could parse-error and get coerced to {}.
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2));
+  await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+  if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
   await fsp.rename(tmp, filePath);
+  if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
 };
 
 const readSettingsRoot = () => {
@@ -1316,6 +1339,11 @@ const inheritUserShellEnv = () => {
   }
 };
 
+const shouldSkipLocalServer = () => {
+  inheritUserShellEnv();
+  return process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1';
+};
+
 const spawnLocalServer = async () => {
   inheritUserShellEnv();
 
@@ -1528,7 +1556,20 @@ const buildInitScript = (localOrigin, bootOutcome, apiBaseUrl = '', clientToken 
   ].join('');
 };
 
+// Keep per-window init scripts aligned with state. Chooser/onboarding reloads after
+// desktop_hosts_set; if only state.initScript is updated, dom-ready reinjects a stale
+// not-configured outcome and the UI flickers on "Waiting for OpenCode".
+const syncInitScriptToWindows = (initScript = state.initScript) => {
+  if (!initScript) return;
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.__ocInitScript = initScript;
+    }
+  }
+};
+
 const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => {
+  const availability = { localAvailable };
   if (envTargetUrl) {
     const status = probe?.status === 'unreachable'
       ? 'unreachable'
@@ -1537,23 +1578,23 @@ const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => 
         : probe?.status === 'wrong-service'
           ? 'wrong-service'
           : 'ok';
-    return { target: 'remote', status, hostId: ENV_OVERRIDE_HOST_ID, url: envTargetUrl };
+    return { target: 'remote', status, hostId: ENV_OVERRIDE_HOST_ID, url: envTargetUrl, ...availability };
   }
 
   const defaultId = config.defaultHostId || '';
   if (!defaultId) {
-    return { target: null, status: 'not-configured' };
+    return { target: null, status: 'not-configured', ...availability };
   }
 
   if (defaultId === LOCAL_HOST_ID) {
     return localAvailable
-      ? { target: 'local', status: 'ok' }
-      : { target: 'local', status: 'unreachable' };
+      ? { target: 'local', status: 'ok', ...availability }
+      : { target: 'local', status: 'unreachable', ...availability };
   }
 
   const host = config.hosts.find((entry) => entry.id === defaultId);
   if (!host) {
-    return { target: 'remote', status: 'missing', hostId: defaultId };
+    return { target: 'remote', status: 'missing', hostId: defaultId, ...availability };
   }
 
   const status = probe?.status === 'unreachable'
@@ -1563,7 +1604,7 @@ const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => 
       : probe?.status === 'wrong-service'
         ? 'wrong-service'
         : 'ok';
-  return { target: 'remote', status, hostId: host.id, url: host.apiUrl || host.url };
+  return { target: 'remote', status, hostId: host.id, url: host.apiUrl || host.url, ...availability };
 };
 
 const buildStartupSplashHtml = () => {
@@ -2076,10 +2117,6 @@ const dispatchDeepLink = (link) => {
     emitToAllWindows('openchamber:open-session', { sessionId: link.value });
     return;
   }
-  if (link.type === 'project' && link.value) {
-    emitToAllWindows('openchamber:open-project', { projectPath: link.value });
-    return;
-  }
   if (link.type === 'host' && link.value) {
     void switchToHostById(link.value);
     return;
@@ -2220,6 +2257,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome;
   // macOS vibrancy, on by default; users can disable it (Appearance settings).
   const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
+  const trayEnabled = process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false;
   const titleBarOverlayEnabled = false;
   const autoHidesNativeMenuBar = process.platform !== 'darwin';
   const windowIconPath = getWindowIconPath();
@@ -2240,11 +2278,10 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     // cold launch until a window event. No `transparent: true` either — vibrancy
     // alone is enough and composites reliably once applied to a live window.
     frame: usesFramelessChrome ? false : undefined,
-    frame: usesFramelessChrome ? false : undefined,
     autoHideMenuBar: autoHidesNativeMenuBar,
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.
-    titleBarStyle: USES_CUSTOM_TITLE_BAR ? 'hidden' : 'default',
+    titleBarStyle: usesCustomTitleBar ? 'hidden' : 'default',
     titleBarOverlay: titleBarOverlayEnabled,
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
@@ -2256,6 +2293,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
         `--openchamber-home=${desktopHome}`,
         `--openchamber-macos-major=${desktopMacosMajor}`,
         `--openchamber-mac-vibrancy=${useVibrancy ? '1' : '0'}`,
+        `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
         `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
         `--openchamber-relay-host-id=${rendererRuntimeConfig.relayHostId || ''}`,
       ],
@@ -2390,6 +2428,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     try {
       const url = new URL(raw);
       if (url.protocol === 'devtools:') return true;
+      if (url.protocol === `${UI_PROTOCOL}:`) return true;
       if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
       if (state.localOrigin) {
         try {
@@ -2437,8 +2476,11 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   });
 
   browserWindow.webContents.on('dom-ready', () => {
-    const initScript = browserWindow.__ocInitScript || state.initScript;
+    // Prefer authoritative state script so hosts_set updates survive reloads even if a
+    // window still holds a pre-activation / not-configured __ocInitScript.
+    const initScript = state.initScript || browserWindow.__ocInitScript;
     if (initScript) {
+      browserWindow.__ocInitScript = initScript;
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
     }
   });
@@ -2471,6 +2513,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
 };
 
 const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig = {}) => {
+  state.startupResolved = true;
   state.localOrigin = localOrigin;
   state.apiBaseUrl = typeof runtimeConfig.apiBaseUrl === 'string' ? runtimeConfig.apiBaseUrl : state.apiBaseUrl;
   state.clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : '';
@@ -2488,6 +2531,7 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
     rendererRuntimeConfig.clientToken,
     rendererRuntimeConfig.requestHeaders,
   );
+  syncInitScriptToWindows(state.initScript);
 
   const mainWindow = state.mainWindow;
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2509,7 +2553,7 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
 };
 
 const openMainWindow = async () => {
-  if (!state.localOrigin) {
+  if (!state.startupResolved) {
     const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
     return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
   }
@@ -2543,7 +2587,7 @@ const openMainWindow = async () => {
 };
 
 const createAdditionalWindow = async (url, runtimeConfig = {}) => {
-  if (!state.localOrigin) {
+  if (!state.startupResolved || !url) {
     return null;
   }
   const browserWindow = createBrowserWindow({
@@ -2556,12 +2600,14 @@ const createAdditionalWindow = async (url, runtimeConfig = {}) => {
 };
 
 const buildMiniChatUrl = ({ mode, sessionId, directory, projectId }) => {
-  const base = state.localOrigin || state.sidecarUrl;
+  const base = shouldUsePackagedUi()
+    ? buildPackagedUiUrl('/mini-chat.html')
+    : state.localOrigin || state.sidecarUrl;
   if (!base) {
     throw new Error('Local UI is not available');
   }
 
-  const url = new URL(shouldUsePackagedUi() ? buildPackagedUiUrl('/mini-chat.html') : '/mini-chat.html', base);
+  const url = new URL(shouldUsePackagedUi() ? base : '/mini-chat.html', base);
   url.searchParams.set('mode', mode === 'session' ? 'session' : 'draft');
   if (sessionId) url.searchParams.set('sessionId', sessionId);
   if (directory) url.searchParams.set('directory', directory);
@@ -2616,6 +2662,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
   // macOS vibrancy, on by default; users can disable it (Appearance settings).
   const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
+  const trayEnabled = process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false;
   const browserWindow = new BrowserWindow({
     title: 'OpenChamber Mini Chat',
     width: MINI_CHAT_WINDOW_WIDTH,
@@ -2641,6 +2688,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         `--openchamber-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
         `--openchamber-home=${desktopHome}`,
         `--openchamber-macos-major=${desktopMacosMajor}`,
+        `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
       backgroundThrottling: false,
@@ -2707,8 +2755,9 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     void shell.openExternal(url).catch(() => {});
   });
   browserWindow.webContents.on('dom-ready', () => {
-    const initScript = browserWindow.__ocInitScript || state.initScript;
+    const initScript = state.initScript || browserWindow.__ocInitScript;
     if (initScript) {
+      browserWindow.__ocInitScript = initScript;
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
     }
   });
@@ -2757,9 +2806,12 @@ const resolveInitialUrl = async () => {
   const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
   const hmrApiUrl = `http://127.0.0.1:${hmrApiPort}`;
   const hmrUiUrl = `http://127.0.0.1:${hmrUiPort}`;
-  const localUrl = isDev && await waitForHealth(hmrApiUrl, 5_000, 100)
-    ? hmrApiUrl
-    : await spawnLocalServer();
+  const skipLocalServer = shouldSkipLocalServer();
+  const localUrl = skipLocalServer
+    ? null
+    : isDev && await waitForHealth(hmrApiUrl, 5_000, 100)
+      ? hmrApiUrl
+      : await spawnLocalServer();
 
   const localUiUrl = shouldUsePackagedUi()
     ? buildPackagedUiUrl('/index.html')
@@ -2770,10 +2822,10 @@ const resolveInitialUrl = async () => {
   state.sidecarUrl = localUrl;
   const localAvailable = Boolean(localUrl);
 
-  const localOrigin = new URL(localUrl).origin;
+  const localOrigin = localUrl ? new URL(localUrl).origin : null;
   let initialUrl = localUiUrl;
-  let apiBaseUrl = localUrl;
-  let clientToken = readDesktopLocalClientToken();
+  let apiBaseUrl = localUrl || '';
+  let clientToken = localUrl ? readDesktopLocalClientToken() : '';
   let requestHeaders = {};
   let remoteProbe = null;
 
@@ -2801,11 +2853,20 @@ const resolveInitialUrl = async () => {
     }
     if (remoteProbe.status === 'unreachable') {
       state.unreachableHosts.add(apiBaseUrl);
-      apiBaseUrl = localUrl;
-      clientToken = readDesktopLocalClientToken();
+      apiBaseUrl = localUrl || '';
+      clientToken = localUrl ? readDesktopLocalClientToken() : '';
       requestHeaders = {};
       initialUrl = localUiUrl;
     }
+  }
+
+  if (!initialUrl && apiBaseUrl && remoteProbe?.status !== 'unreachable') {
+    initialUrl = apiBaseUrl;
+  }
+  if (!initialUrl) {
+    throw new Error(
+      'OPENCHAMBER_SKIP_LOCAL_SERVER=1 requires bundled UI, a running desktop HMR UI, or a reachable remote instance.',
+    );
   }
 
   const bootOutcome = computeBootOutcome({
@@ -2980,6 +3041,74 @@ const buildInstalledApps = async (apps) => {
   return results;
 };
 
+let linuxDesktopEntriesCache = { expiresAt: 0, entries: null };
+
+const getLinuxDesktopEntries = async () => {
+  const now = Date.now();
+  if (linuxDesktopEntriesCache.entries && linuxDesktopEntriesCache.expiresAt > now) {
+    return linuxDesktopEntriesCache.entries;
+  }
+  const entries = await readLinuxDesktopEntries();
+  linuxDesktopEntriesCache = { entries, expiresAt: now + LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS };
+  return entries;
+};
+
+const buildPlatformInstalledApps = async (apps) => {
+  if (process.platform === 'linux') {
+    return buildLinuxInstalledApps(apps);
+  }
+  if (process.platform === 'win32') {
+    return buildWindowsInstalledApps(apps);
+  }
+  return buildInstalledApps(apps);
+};
+
+const spawnDetachedLinux = (program, args) => new Promise((resolve, reject) => {
+  const child = spawn(program, args, {
+    detached: true,
+    stdio: 'ignore',
+  });
+  let settled = false;
+  const finish = (callback, value) => {
+    if (settled) return;
+    settled = true;
+    callback(value);
+  };
+  child.once('error', (error) => finish(reject, error));
+  child.once('spawn', () => {
+    child.unref();
+    finish(resolve);
+  });
+});
+
+const runLinuxSpecChain = async (specs, appName) => {
+  if (!Array.isArray(specs) || specs.length === 0) {
+    throw new Error(`Failed to open in ${appName}: no launch candidates`);
+  }
+
+  const failures = [];
+  for (const spec of specs) {
+    if (spec.kind === 'default') {
+      if (spec.targetKind === 'file') {
+        shell.showItemInFolder(spec.targetPath);
+        return;
+      }
+      const errorMessage = await shell.openPath(spec.targetPath);
+      if (!errorMessage) return;
+      failures.push(`default opener: ${errorMessage}`);
+      continue;
+    }
+
+    try {
+      await spawnDetachedLinux(spec.program, spec.args);
+      return;
+    } catch (error) {
+      failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
+};
+
 const parseSshConfigImports = () => {
   const sshConfigPath = path.join(os.homedir(), '.ssh', 'config');
   if (!fs.existsSync(sshConfigPath)) return [];
@@ -3041,53 +3170,6 @@ const CLI_BY_APP_ID = {
   zed: 'zed',
 };
 
-const LINUX_APP_COMMANDS = {
-  finder: ['xdg-open'],
-  terminal: ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'],
-  ghostty: ['ghostty'],
-  vscode: ['code'],
-  intellij: ['idea', 'intellij-idea-ultimate', 'intellij-idea-community'],
-  cursor: ['cursor'],
-  'android-studio': ['android-studio', 'studio.sh'],
-  pycharm: ['pycharm', 'pycharm-professional', 'pycharm-community'],
-  'sublime-text': ['subl', 'sublime_text'],
-  webstorm: ['webstorm'],
-  rider: ['rider'],
-  zed: ['zed'],
-  phpstorm: ['phpstorm'],
-  eclipse: ['eclipse'],
-  windsurf: ['windsurf'],
-  vscodium: ['codium'],
-  rustrover: ['rustrover'],
-  kiro: ['kiro'],
-  antigravity: ['antigravity'],
-  trae: ['trae'],
-};
-
-const LINUX_APP_ID_BY_NAME = new Map([
-  ['finder', 'finder'],
-  ['files', 'finder'],
-  ['terminal', 'terminal'],
-  ['ghostty', 'ghostty'],
-  ['visual studio code', 'vscode'],
-  ['intellij idea', 'intellij'],
-  ['cursor', 'cursor'],
-  ['android studio', 'android-studio'],
-  ['pycharm', 'pycharm'],
-  ['sublime text', 'sublime-text'],
-  ['webstorm', 'webstorm'],
-  ['rider', 'rider'],
-  ['zed', 'zed'],
-  ['phpstorm', 'phpstorm'],
-  ['eclipse', 'eclipse'],
-  ['windsurf', 'windsurf'],
-  ['vscodium', 'vscodium'],
-  ['rustrover', 'rustrover'],
-  ['kiro', 'kiro'],
-  ['antigravity', 'antigravity'],
-  ['trae', 'trae'],
-]);
-
 const WINDOWS_CLI_BY_APP_ID = {
   vscode: 'code.cmd',
   cursor: 'cursor.cmd',
@@ -3123,203 +3205,11 @@ const WINDOWS_APP_ID_BY_NAME = new Map([
 
 const getWindowsAppIdForName = (appName) => WINDOWS_APP_ID_BY_NAME.get(String(appName || '').trim().toLowerCase()) || '';
 
-const getLinuxAppIdForName = (appName) => LINUX_APP_ID_BY_NAME.get(String(appName || '').trim().toLowerCase()) || '';
-
-const logLinuxAppDiscoveryDebug = (message, error, context = {}) => {
-  log.debug('[electron] Linux app discovery:', {
-    message,
-    ...context,
-    error: error instanceof Error ? error.message : String(error),
-  });
-};
-
 const runWhere = (program) => {
   const result = spawnSync('where.exe', [program], { encoding: 'utf8', windowsHide: true });
   if (result.error || result.status !== 0) return null;
   const first = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
   return first || null;
-};
-
-const findExecutableInPath = (program) => {
-  const raw = String(program || '').trim();
-  if (!raw) return null;
-  if (path.isAbsolute(raw)) {
-    if (!fs.existsSync(raw)) return null;
-    try {
-      fs.accessSync(raw, fs.constants.X_OK);
-      return raw;
-    } catch (error) {
-      logLinuxAppDiscoveryDebug('absolute executable is not runnable', error, { program: raw });
-      return null;
-    }
-  }
-  const paths = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
-  for (const root of paths) {
-    const candidate = path.join(root, raw);
-    if (!fs.existsSync(candidate)) continue;
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch (error) {
-      logLinuxAppDiscoveryDebug('PATH executable candidate is not runnable', error, { program: raw, candidate });
-    }
-  }
-  return null;
-};
-
-const linuxApplicationDirs = () => {
-  const home = os.homedir() || '';
-  const dataHome = process.env.XDG_DATA_HOME || (home ? path.join(home, '.local', 'share') : '');
-  const dataDirs = String(process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':').filter(Boolean);
-  return [
-    dataHome ? path.join(dataHome, 'applications') : '',
-    ...dataDirs.map((dir) => path.join(dir, 'applications')),
-    '/var/lib/snapd/desktop/applications',
-    '/var/lib/flatpak/exports/share/applications',
-    home ? path.join(home, '.local', 'share', 'flatpak', 'exports', 'share', 'applications') : '',
-  ].filter(Boolean);
-};
-
-const normalizeLinuxDesktopToken = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-
-const parseLinuxDesktopEntry = (filePath) => {
-  let source = '';
-  try {
-    source = fs.readFileSync(filePath, 'utf8');
-  } catch (error) {
-    logLinuxAppDiscoveryDebug('failed to read desktop entry', error, { filePath });
-    return null;
-  }
-  const entry = { filePath, desktopId: path.basename(filePath, '.desktop') };
-  let inDesktopEntry = false;
-  for (const rawLine of source.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    if (line.startsWith('[') && line.endsWith(']')) {
-      inDesktopEntry = line === '[Desktop Entry]';
-      continue;
-    }
-    if (!inDesktopEntry) continue;
-    const separator = line.indexOf('=');
-    if (separator <= 0) continue;
-    const key = line.slice(0, separator);
-    const value = line.slice(separator + 1).trim();
-    if (key === 'Type') entry.type = value;
-    if (key === 'Name') entry.name = value;
-    if (key === 'Exec') entry.exec = value;
-    if (key === 'Icon') entry.icon = value;
-    if (key === 'NoDisplay') entry.noDisplay = value.toLowerCase() === 'true';
-  }
-  return entry.type === 'Application' && entry.name && !entry.noDisplay ? entry : null;
-};
-
-const linuxDesktopEntryMatches = (entry, { appId, appName }) => {
-  const expected = [appId, appName, ...(LINUX_APP_COMMANDS[appId] || [])].map(normalizeLinuxDesktopToken).filter(Boolean);
-  const actual = [entry.desktopId, entry.name, path.basename(parseLinuxDesktopExecProgram(entry.exec)), entry.icon]
-    .map(normalizeLinuxDesktopToken)
-    .filter(Boolean)
-    .join(' ');
-  return expected.some((token) => actual.includes(token));
-};
-
-const findLinuxDesktopEntry = ({ appId, appName }) => {
-  for (const dir of linuxApplicationDirs()) {
-    let entries = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch (error) {
-      if (fs.existsSync(dir)) {
-        logLinuxAppDiscoveryDebug('failed to read application directory', error, { dir });
-      }
-      continue;
-    }
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.desktop')) continue;
-      const desktopEntry = parseLinuxDesktopEntry(path.join(dir, entry.name));
-      if (desktopEntry && linuxDesktopEntryMatches(desktopEntry, { appId, appName })) return desktopEntry;
-    }
-  }
-  return null;
-};
-
-const linuxIconSearchDirs = () => {
-  const home = os.homedir() || '';
-  const dataHome = process.env.XDG_DATA_HOME || (home ? path.join(home, '.local', 'share') : '');
-  const dataDirs = String(process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':').filter(Boolean);
-  return [dataHome, ...dataDirs, '/var/lib/snapd/desktop', '/var/lib/flatpak/exports/share'].filter(Boolean);
-};
-
-const resolveLinuxIconPath = (iconName) => {
-  const raw = String(iconName || '').trim();
-  if (!raw) return null;
-  if (path.isAbsolute(raw) && fs.existsSync(raw)) return raw;
-  const extensions = path.extname(raw) ? [''] : ['.png', '.svg'];
-  const iconDirs = [
-    'icons/hicolor/256x256/apps',
-    'icons/hicolor/128x128/apps',
-    'icons/hicolor/64x64/apps',
-    'icons/hicolor/48x48/apps',
-    'icons/hicolor/32x32/apps',
-    'icons/hicolor/scalable/apps',
-    'pixmaps',
-  ];
-  for (const root of linuxIconSearchDirs()) {
-    for (const dir of iconDirs) {
-      for (const ext of extensions) {
-        const candidate = path.join(root, dir, `${raw}${ext}`);
-        if (fs.existsSync(candidate)) return candidate;
-      }
-    }
-  }
-  return null;
-};
-
-const imageFileToDataUrl = (filePath) => {
-  if (!filePath) return null;
-  try {
-    const ext = path.extname(filePath).toLowerCase();
-    const mime = ext === '.svg' ? 'image/svg+xml' : 'image/png';
-    return `data:${mime};base64,${fs.readFileSync(filePath).toString('base64')}`;
-  } catch (error) {
-    logLinuxAppDiscoveryDebug('failed to read app icon', error, { filePath });
-    return null;
-  }
-};
-
-const linuxIconToDataUrl = (iconName) => imageFileToDataUrl(resolveLinuxIconPath(iconName));
-
-const findLinuxCommandExecutable = ({ appId }) => {
-  for (const program of LINUX_APP_COMMANDS[appId] || []) {
-    const resolved = findExecutableInPath(program);
-    if (resolved) return resolved;
-  }
-  return null;
-};
-
-const findLinuxDesktopEntryExecutable = ({ appId, appName }) => {
-  const desktopEntry = findLinuxDesktopEntry({ appId, appName });
-  return findExecutableInPath(parseLinuxDesktopExecProgram(desktopEntry?.exec));
-};
-
-const findLinuxExecutable = ({ appId, appName }) => {
-  return findLinuxCommandExecutable({ appId }) || findLinuxDesktopEntryExecutable({ appId, appName });
-};
-
-const isLinuxAppInstalled = ({ appId, appName }) => Boolean(
-  findLinuxExecutable({ appId, appName }) || findLinuxDesktopEntry({ appId, appName })
-);
-
-const buildLinuxInstalledApps = async (apps) => {
-  const seen = new Set();
-  const names = (Array.isArray(apps) ? apps : [])
-    .map((appName) => String(appName || '').trim())
-    .filter((appName) => appName && !seen.has(appName) && seen.add(appName))
-    .filter((appName) => isLinuxAppInstalled({ appId: getLinuxAppIdForName(appName), appName }));
-  return names.map((name) => {
-    const appId = getLinuxAppIdForName(name);
-    const desktopEntry = findLinuxDesktopEntry({ appId, appName: name });
-    return { name, iconDataUrl: linuxIconToDataUrl(desktopEntry?.icon) };
-  });
 };
 
 const findWindowsExecutable = (appId) => {
@@ -3421,6 +3311,15 @@ const resolveWindowsTerminalExecutable = () => {
     if (fs.existsSync(executable)) return executable;
   }
   return findWindowsExecutable('terminal');
+};
+
+const imageFileToDataUrl = (filePath) => {
+  if (!filePath) return null;
+  try {
+    return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
+  } catch {
+    return null;
+  }
 };
 
 const resolveWindowsAppIconExecutable = ({ appId, appName }) => {
@@ -3544,48 +3443,6 @@ const buildWindowsOpenFileSpecs = ({ filePath, appId, appName }) => {
   return specs;
 };
 
-const buildLinuxTerminalSpecs = (workingDirectory) => [
-  { program: 'x-terminal-emulator', args: [], cwd: workingDirectory },
-  { program: 'gnome-terminal', args: [`--working-directory=${workingDirectory}`] },
-  { program: 'konsole', args: ['--workdir', workingDirectory] },
-  { program: 'xfce4-terminal', args: ['--working-directory', workingDirectory] },
-  { program: 'xterm', args: [], cwd: workingDirectory },
-];
-
-const buildLinuxDesktopEntrySpec = ({ appId, appName, targetPath }) => {
-  const desktopEntry = findLinuxDesktopEntry({ appId, appName });
-  const spec = buildLinuxDesktopExecSpec(desktopEntry?.exec, targetPath);
-  if (!spec) return null;
-  const program = findExecutableInPath(spec.program);
-  return program ? { ...spec, program } : null;
-};
-
-const buildLinuxOpenProjectSpecs = ({ projectPath, appId, appName }) => {
-  if (appId === 'finder') {
-    return [{ program: 'xdg-open', args: [projectPath] }];
-  }
-  if (appId === 'terminal') {
-    return buildLinuxTerminalSpecs(projectPath);
-  }
-  const executable = findLinuxCommandExecutable({ appId });
-  if (executable) return [{ program: executable, args: [projectPath] }];
-  const desktopSpec = buildLinuxDesktopEntrySpec({ appId, appName, targetPath: projectPath });
-  return desktopSpec ? [desktopSpec] : [];
-};
-
-const buildLinuxOpenFileSpecs = ({ filePath, appId, appName }) => {
-  if (appId === 'finder') {
-    return [{ program: 'xdg-open', args: [path.dirname(filePath)] }];
-  }
-  if (appId === 'terminal') {
-    return buildLinuxTerminalSpecs(path.dirname(filePath));
-  }
-  const executable = findLinuxCommandExecutable({ appId });
-  if (executable) return [{ program: executable, args: [filePath] }];
-  const desktopSpec = buildLinuxDesktopEntrySpec({ appId, appName, targetPath: filePath });
-  return desktopSpec ? [desktopSpec] : [];
-};
-
 const buildOpenProjectSpecs = ({ projectPath, appId, appName }) => {
   if (appId === 'finder') {
     return [{ program: 'open', args: [projectPath] }];
@@ -3702,7 +3559,7 @@ const runSpecChain = (specs, appName) => {
 
   const failures = [];
   for (const spec of specs) {
-    const result = spawnSync(spec.program, spec.args, { cwd: spec.cwd, stdio: 'ignore', windowsHide: true });
+    const result = spawnSync(spec.program, spec.args, { stdio: 'ignore', windowsHide: true });
     if (result.error) {
       failures.push(`${spec.program}: ${result.error.message}`);
       continue;
@@ -3733,12 +3590,23 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return APP_VERSION;
 
     case 'desktop_get_launch_at_login': {
+      if (process.platform === 'linux') {
+        return { supported: true, enabled: await readLinuxAutostartEnabled() };
+      }
       if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
       const settings = app.getLoginItemSettings(getLoginItemOptions());
       return { supported: true, enabled: settings.openAtLogin === true };
     }
 
     case 'desktop_set_launch_at_login': {
+      if (process.platform === 'linux') {
+        const enabled = args.enabled === true;
+        return setLinuxAutostartEnabled({
+          enabled,
+          appName: app.getName(),
+          backgroundArg: BACKGROUND_START_ARG,
+        });
+      }
       if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
       const enabled = args.enabled === true;
       const settingsArgs = {
@@ -3757,7 +3625,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_set_minimize_to_tray': {
-      if (process.platform !== 'win32') return { supported: false, enabled: false };
+      if (process.platform !== 'win32' && process.platform !== 'linux') return { supported: false, enabled: false };
       const enabled = args.enabled === true;
       await mutateSettingsRoot((root) => {
         root.desktopMinimizeToTrayEnabled = enabled;
@@ -3935,13 +3803,19 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_open_path': {
       const targetPath = typeof args.path === 'string' ? args.path.trim() : '';
       const appName = typeof args.app === 'string' ? args.app.trim() : '';
-      if (!targetPath) throw new Error('Path is required');
+      const validated = await validateLocalPath(targetPath);
       if (process.platform === 'darwin') {
-        const openArgs = appName ? ['-a', appName, targetPath] : [targetPath];
+        const openArgs = appName ? ['-a', appName, validated.path] : [validated.path];
         spawn('open', openArgs, { detached: true, stdio: 'ignore' }).unref();
         return null;
       }
-      await shell.openPath(targetPath);
+      if (appName && process.platform !== 'linux' && process.platform !== 'win32') {
+        throw new Error(unsupportedAppSpecificOpenError('paths'));
+      }
+      const errorMessage = await shell.openPath(validated.path);
+      if (errorMessage) {
+        throw new Error(`Failed to open path: ${errorMessage}`);
+      }
       return null;
     }
 
@@ -3959,18 +3833,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_reveal_path': {
-      const targetPath = typeof args.path === 'string' ? args.path.trim() : '';
-      if (!targetPath) {
-        throw new Error('Path is required');
-      }
-
-      const stats = await fsp.stat(targetPath).catch(() => null);
-      if (stats?.isDirectory()) {
-        await shell.openPath(targetPath);
+      const validated = await validateLocalPath(typeof args.path === 'string' ? args.path.trim() : '');
+      if (validated.stats.isDirectory()) {
+        const errorMessage = await shell.openPath(validated.path);
+        if (errorMessage) {
+          throw new Error(`Failed to reveal path: ${errorMessage}`);
+        }
         return null;
       }
 
-      shell.showItemInFolder(targetPath);
+      shell.showItemInFolder(validated.path);
       return null;
     }
 
@@ -3981,23 +3853,31 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!projectPath || !appId || !appName) {
         throw new Error('Project path, app id, and app name are required');
       }
+      const validated = await validateLocalPath(projectPath, 'Project path');
       if (process.platform === 'win32') {
         if (appId === 'finder') {
-          const error = await shell.openPath(projectPath);
+          const error = await shell.openPath(validated.path);
           if (error) throw new Error(error);
           return null;
         }
-        runSpecChain(buildWindowsOpenProjectSpecs({ projectPath, appId, appName }), appName);
+        runSpecChain(buildWindowsOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
         return null;
       }
       if (process.platform === 'linux') {
-        runSpecChain(buildLinuxOpenProjectSpecs({ projectPath, appId, appName }), appName);
+        const entries = await getLinuxDesktopEntries();
+        await runLinuxSpecChain(buildLinuxOpenSpecs({
+          targetPath: validated.path,
+          appId,
+          appName,
+          targetKind: 'project',
+          entries,
+        }), appName);
         return null;
       }
       if (process.platform !== 'darwin') {
-        throw new Error('desktop_open_in_app is only supported on macOS, Windows, Linux');
+        throw new Error(unsupportedAppSpecificOpenError('projects'));
       }
-      runSpecChain(buildOpenProjectSpecs({ projectPath, appId, appName }), appName);
+      runSpecChain(buildOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
       return null;
     }
 
@@ -4008,18 +3888,26 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!filePath || !appId || !appName) {
         throw new Error('File path, app id, and app name are required');
       }
+      const validated = await validateLocalPath(filePath, 'File path');
       if (process.platform === 'win32') {
-        runSpecChain(buildWindowsOpenFileSpecs({ filePath, appId, appName }), appName);
+        runSpecChain(buildWindowsOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
         return null;
       }
       if (process.platform === 'linux') {
-        runSpecChain(buildLinuxOpenFileSpecs({ filePath, appId, appName }), appName);
+        const entries = await getLinuxDesktopEntries();
+        await runLinuxSpecChain(buildLinuxOpenSpecs({
+          targetPath: validated.path,
+          appId,
+          appName,
+          targetKind: 'file',
+          entries,
+        }), appName);
         return null;
       }
       if (process.platform !== 'darwin') {
-        throw new Error('desktop_open_file_in_app is only supported on macOS, Windows, Linux');
+        throw new Error(unsupportedAppSpecificOpenError('files'));
       }
-      runSpecChain(buildOpenFileSpecs({ filePath, appId, appName }), appName);
+      runSpecChain(buildOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
       return null;
     }
 
@@ -4028,10 +3916,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         return (await buildWindowsInstalledApps(args.apps)).map((app) => app.name);
       }
       if (process.platform === 'linux') {
-        return (await buildLinuxInstalledApps(args.apps)).map((app) => app.name);
+        return filterLinuxInstalledApps(args.apps);
       }
       if (process.platform !== 'darwin') {
-        throw new Error('desktop_filter_installed_apps is only supported on macOS, Windows, Linux');
+        throw new Error('desktop_filter_installed_apps is only supported on macOS, Windows, and Linux');
       }
       if (!Array.isArray(args.apps)) return [];
       const results = await Promise.all(
@@ -4056,19 +3944,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         return results;
       }
       if (process.platform === 'linux') {
-        const names = Array.isArray(args.apps) ? args.apps : [];
-        const results = [];
-        for (const name of names) {
-          const appName = String(name || '').trim();
-          if (!appName) continue;
-          const appId = getLinuxAppIdForName(appName);
-          const dataUrl = linuxIconToDataUrl(findLinuxDesktopEntry({ appId, appName })?.icon);
-          if (dataUrl) results.push({ app: appName, dataUrl });
-        }
-        return results;
+        return fetchLinuxAppIcons(Array.isArray(args.apps) ? args.apps : []);
       }
       if (process.platform !== 'darwin') {
-        throw new Error('desktop_fetch_app_icons is only supported on macOS, Windows, Linux');
+        throw new Error('desktop_fetch_app_icons is only supported on macOS, Windows, and Linux');
       }
       const names = Array.isArray(args.apps) ? args.apps : [];
       const results = [];
@@ -4087,30 +3966,22 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       let cache = null;
       try {
         cache = JSON.parse(await fsp.readFile(cachePath, 'utf8'));
-      } catch (error) {
-        log.debug('[electron] installed apps cache read failed', { cachePath, error: error instanceof Error ? error.message : String(error) });
+      } catch {
       }
       const cachedApps = Array.isArray(cache?.apps) ? cache.apps : [];
       const hasCache = Boolean(cache);
       const isCacheStale = !cache || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
       const refresh = async () => {
-        const builders = {
-          win32: buildWindowsInstalledApps,
-          linux: buildLinuxInstalledApps,
-        };
-        const builder = builders[process.platform] || ((candidate) => buildInstalledApps(Array.isArray(candidate) ? candidate : []));
-        const apps = await builder(args.apps);
+        const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
         await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
         emitToAllWindows('openchamber:installed-apps-updated', apps);
       };
-      if (!['darwin', 'win32', 'linux'].includes(process.platform)) {
+      if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
         return { apps: [], hasCache: false, isCacheStale: false, supported: false };
       }
       if (!hasCache || isCacheStale || args.force === true) {
-        void refresh().catch((error) => {
-          log.warn('[electron] installed apps refresh failed', error);
-        });
+        void refresh();
       }
       return { apps: cachedApps, hasCache, isCacheStale };
     }
@@ -4136,6 +4007,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         localAvailable: Boolean(state.sidecarUrl || state.localOrigin),
       });
       state.initScript = buildInitScript(state.localOrigin, state.bootOutcome, state.apiBaseUrl, state.clientToken, state.requestHeaders || {});
+      syncInitScriptToWindows(state.initScript);
       log.info('[electron] hosts config updated, recomputed bootOutcome', state.bootOutcome);
       return null;
     }
@@ -4210,6 +4082,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_check_for_updates': {
+      // Linux release manifests can contain both AppImage and deb artifacts. Resolve the
+      // installed package type first so an update is offered only when it can be applied.
       const linuxPackageType = resolveLinuxUpdatePackageType({ packaged: app.isPackaged });
       assertUpdaterCapability({ packaged: app.isPackaged, packageType: linuxPackageType });
       const currentVersion = APP_VERSION;
@@ -4931,15 +4805,6 @@ ipcMain.handle('openchamber:file:grant-existing', async (event, filePath) => {
 // Icon assets: a calm outline (idle), a statically filled cube (a finished
 // session left unread), and an eased sequence the busy state breathes through.
 const TRAY_BREATH_FRAME_COUNT = 16;
-// Track the most recently focused window (main or mini-chat) so tray actions
-// can target the surface the user was last using, even when the tray menu is
-// open and nothing is focused right now.
-app.on('browser-window-focus', (_event, browserWindow) => {
-  if (browserWindow && !browserWindow.isDestroyed()) {
-    state.lastFocusedWindowId = browserWindow.id;
-  }
-});
-
 // The window the user is "on" for tray routing: the focused one, else the last
 // focused that is still alive.
 const resolveTraySurface = () => {
@@ -4955,8 +4820,10 @@ const resolveTraySurface = () => {
 const trayIconAssets = () => {
   const dir = path.join(resourceRoot(), 'icons', 'tray');
   const statusDir = path.join(dir, 'status');
-  if (process.platform === 'win32') {
-    const iconPath = getWindowIconPath() || path.join(resourceRoot(), 'icons', 'icon.ico');
+  if (process.platform === 'win32' || process.platform === 'linux') {
+    const iconPath = process.platform === 'linux'
+      ? (getWindowIconPath() || path.join(resourceRoot(), 'icons', 'icon.png'))
+      : (getWindowIconPath() || path.join(resourceRoot(), 'icons', 'icon.ico'));
     return {
       idleIconPath: iconPath,
       unseenIconPath: iconPath,
@@ -4988,7 +4855,8 @@ const trayIconAssets = () => {
 };
 
 const setupTray = () => {
-  if (!['darwin', 'win32'].includes(process.platform) || state.trayController) return;
+  if (!['darwin', 'win32', 'linux'].includes(process.platform) || state.trayController) return;
+  if (process.platform === 'darwin' && readSettingsRoot().desktopMacMenuBarEnabled === false) return;
   const assets = trayIconAssets();
   if (!fs.existsSync(assets.idleIconPath)) {
     log.warn('[electron] tray icon missing, skipping tray setup', { iconPath: assets.idleIconPath });
@@ -5002,6 +4870,14 @@ const setupTray = () => {
     // Seed an empty snapshot so the icon appears immediately; the renderer
     // pushes the real state once the sync stores are mounted.
     state.trayController.update({ sessions: [], approvals: [] });
+    if (!state.trayFocusListener) {
+      state.trayFocusListener = (_event, browserWindow) => {
+        if (browserWindow && !browserWindow.isDestroyed()) {
+          state.lastFocusedWindowId = browserWindow.id;
+        }
+      };
+      app.on('browser-window-focus', state.trayFocusListener);
+    }
   } catch (error) {
     log.warn('[electron] failed to set up tray', error);
     state.trayController = null;
@@ -5204,12 +5080,32 @@ app.whenReady().then(async () => {
     });
   }
 
+  if (process.platform === 'linux' && app.isPackaged) {
+    try {
+      const enabled = await readLinuxAutostartEnabled();
+      if (enabled) {
+        await setLinuxAutostartEnabled({
+          enabled: true,
+          appName: app.getName(),
+          backgroundArg: BACKGROUND_START_ARG,
+        });
+      }
+    } catch (error) {
+      log.warn('[electron] failed to reconcile Linux autostart entry', error);
+    }
+  }
+
   if (isBackgroundStart) {
-    const { localOrigin, bootOutcome, requestHeaders } = await resolveInitialUrl();
+    const { localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
     state.localOrigin = localOrigin;
+    state.apiBaseUrl = apiBaseUrl;
+    state.clientToken = clientToken;
     state.bootOutcome = bootOutcome ?? null;
     state.requestHeaders = sanitizeRuntimeRequestHeaders(requestHeaders || {});
-    state.initScript = buildInitScript(localOrigin, state.bootOutcome, '', '', state.requestHeaders);
+    // Serverless background startup re-probes the remote when a window is
+    // eventually opened instead of trusting reachability from login time.
+    state.startupResolved = !shouldSkipLocalServer();
+    state.initScript = buildInitScript(localOrigin, state.bootOutcome, apiBaseUrl, clientToken, state.requestHeaders);
     log.info('[electron] started in background without window');
     return;
   }

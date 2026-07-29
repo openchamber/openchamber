@@ -18,6 +18,12 @@ import {
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import {
+  EMPTY_SESSION_ORDER_RANKS,
+  orderSessionsByLifecycleScopes,
+  useSessionOrderingStore,
+} from '@/sync/session-ordering';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
@@ -33,6 +39,8 @@ import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, type SettingsRuntimeContext } from '@/lib/settings/metadata';
+
+const EMPTY_PINNED_SESSION_IDS = new Set<string>();
 import { getSettingsNavIcon } from '@/components/views/SettingsView';
 import { Icon } from "@/components/icon/Icon";
 import { McpIcon } from '@/components/icons/McpIcon';
@@ -53,6 +61,7 @@ type CommandEntry = {
 };
 
 type FileHit = { path: string; name: string; relativePath: string };
+const EMPTY_SESSIONS: Session[] = [];
 
 const normalizePath = (value: string): string => {
   if (!value) return '';
@@ -76,16 +85,26 @@ export const CommandPalette: React.FC = () => {
   const setSettingsPage = useUIStore((s) => s.setSettingsPage);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const toggleBottomTerminal = useUIStore((s) => s.toggleBottomTerminal);
   const openContextOverview = useUIStore((s) => s.openContextOverview);
+  const openContextSurface = useUIStore((s) => s.openContextSurface);
   const openContextFile = useUIStore((s) => s.openContextFile);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
 
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
 
-  const activeSessions = useGlobalSessionsStore((s) => s.activeSessions);
+  const activeSessions = useGlobalSessionsStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.activeSessions : EMPTY_SESSIONS,
+    [isCommandPaletteOpen],
+  ));
+  const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.ids : EMPTY_PINNED_SESSION_IDS,
+    [isCommandPaletteOpen],
+  ));
+  const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
+    [isCommandPaletteOpen],
+  ));
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const projects = useProjectsStore((s) => s.projects);
@@ -194,20 +213,14 @@ export const CommandPalette: React.FC = () => {
         }),
       },
       {
-        id: 'toggle-right-sidebar',
-        title: t('commandPalette.item.toggleRightSidebar'),
-        icon: <Icon name="layout-right" className="mr-2 h-4 w-4" />,
-        shortcutId: 'toggle_right_sidebar',
-        searchText: t('commandPalette.item.toggleRightSidebar'),
-        onSelect: run(() => toggleRightSidebar()),
-      },
-      {
         id: 'toggle-terminal',
         title: t('commandPalette.item.toggleTerminal'),
         icon: <Icon name="terminal-box" className="mr-2 h-4 w-4" />,
         shortcutId: 'toggle_terminal',
         searchText: t('commandPalette.item.toggleTerminal'),
-        onSelect: run(() => toggleBottomTerminal()),
+        onSelect: run(() => {
+          if (currentDirectory) openContextSurface(currentDirectory, 'terminal');
+        }),
       },
       {
         id: 'context-usage',
@@ -253,8 +266,7 @@ export const CommandPalette: React.FC = () => {
     setSessionSwitcherOpen,
     openNewSessionDraft,
     toggleSidebar,
-    toggleRightSidebar,
-    toggleBottomTerminal,
+    openContextSurface,
     currentDirectory,
     openContextOverview,
     setSettingsDialogOpen,
@@ -295,12 +307,9 @@ export const CommandPalette: React.FC = () => {
   // ---------------------------------------------------------------------------
   // Sessions
   // ---------------------------------------------------------------------------
-  const sortedActiveSessions = React.useMemo(() => {
-    const getUpdated = (s: Session) =>
-      (typeof s.time?.updated === 'number' ? s.time.updated : 0) ||
-      (typeof s.time?.created === 'number' ? s.time.created : 0);
-    return [...activeSessions].sort((a, b) => getUpdated(b) - getUpdated(a));
-  }, [activeSessions]);
+  const orderedActiveSessions = React.useMemo(() => {
+    return orderSessionsByLifecycleScopes(activeSessions, pinnedSessionIds, sessionOrderRanks);
+  }, [activeSessions, pinnedSessionIds, sessionOrderRanks]);
 
   const allBranches = useGitAllBranches();
   const worktreeMetadata = useSessionUIStore((s) => s.worktreeMetadata);
@@ -385,12 +394,12 @@ export const CommandPalette: React.FC = () => {
   }, [settingsEntries, liveTrimmed, hasQuery]);
 
   const scoredSessions = React.useMemo(() => {
-    if (!hasQuery) return sortedActiveSessions.slice(0, 5).map((item) => ({ item, score: 0 }));
-    return scoreByFuzzyQuery(sortedActiveSessions, liveTrimmed, (s) => s.title || '', {
+    if (!hasQuery) return orderedActiveSessions.slice(0, 5).map((item) => ({ item, score: 0 }));
+    return scoreByFuzzyQuery(orderedActiveSessions, liveTrimmed, (s) => s.title || '', {
       limit: 7,
       threshold: 0.2,
     });
-  }, [sortedActiveSessions, liveTrimmed, hasQuery]);
+  }, [orderedActiveSessions, liveTrimmed, hasQuery]);
 
   const scoredFiles = React.useMemo(() => {
     if (!isCommandPaletteOpen) return [];

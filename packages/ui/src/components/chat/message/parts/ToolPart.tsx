@@ -4,8 +4,9 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
+import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
-import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
+import type { ToolPart as ToolPartType, ToolState as ToolStateUnion, FilePart } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
@@ -59,7 +60,7 @@ const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!lead
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
-type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
+type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number }; attachments?: Array<FilePart> };
 
 interface ToolPartProps {
     part: ToolPartType;
@@ -970,7 +971,6 @@ const ToolScrollableTextOutput: React.FC<{
 
 ToolScrollableTextOutput.displayName = 'ToolScrollableTextOutput';
 
-
 const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
     const title = entry.state?.title;
     if (typeof title === 'string' && title.trim().length > 0) {
@@ -1512,7 +1512,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const rawOutput = stateWithData.output;
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
-
+    const attachments = stateWithData.attachments;
     const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
     const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
         ?? getPatchText(metadata?.diff)
@@ -1524,7 +1524,8 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         [currentDirectory, diffContent, metadata]
     );
     const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
-    const hideToolInputPreview = part.tool === 'apply_patch'
+    const hideToolInputPreview = part.tool === 'openchamber'
+        || part.tool === 'apply_patch'
         || part.tool === 'edit'
         || part.tool === 'multiedit';
     const diagnosticSection = React.useMemo(
@@ -1614,7 +1615,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             const relativePath = getRelativePath(absolutePath, currentDirectory);
             if (store.isMobile) {
                 store.navigateToDiff(relativePath);
-                store.setRightSidebarOpen(false);
                 return;
             }
             store.openContextDiff(currentDirectory, relativePath);
@@ -1926,6 +1926,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     )}
                 </>
             )}
+
+            {Array.isArray(attachments) && attachments.length > 0 && state.status === 'completed' ? (
+                <MessageFilesDisplay files={attachments} onShowPopup={onShowPopup} compact />
+            ) : null}
         </div>
     );
 });

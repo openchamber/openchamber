@@ -19,6 +19,7 @@ Use `serve-sim` to stream and control a booted Apple Simulator from the terminal
   - `bun run mobile:sim:serve`
   - `bun run mobile:sim:list`
   - `bun run mobile:sim:kill`
+  - `bun run mobile:sim:dev` — foreground build + run + stream in one command (`--no-build` to skip the build); intended for the user, agents should prefer the discrete scripts above
 
 ## Workflow
 
@@ -36,7 +37,7 @@ Use `serve-sim` to stream and control a booted Apple Simulator from the terminal
    ```sh
    bun run mobile:sim:serve
    ```
-   Surface the returned `url` to the user. It normally starts at `http://localhost:3200`.
+   Surface the returned `url` to the user. It normally starts at `http://127.0.0.1:3100`; always use the `url` from the JSON output rather than assuming the port.
 
 4. Stop helpers when finished unless the user asks to keep them running:
    ```sh
@@ -51,6 +52,8 @@ Use `serve-sim` to stream and control a booted Apple Simulator from the terminal
 - Rotate: `bunx serve-sim rotate portrait`
 - List streams: `bunx serve-sim --list -q`
 - Accessibility tree: `curl http://localhost:3100/ax`
+
+Run direct CLI commands from `packages/mobile` (the binary lives in that package; plain `serve-sim` inside `with-mobile-env.mjs` from elsewhere fails with command not found).
 
 Coordinates are normalized `0..1`, not pixels. Prefer `tap` for simple taps; do not emulate taps using separate `gesture` begin/end commands because that can register as long press.
 

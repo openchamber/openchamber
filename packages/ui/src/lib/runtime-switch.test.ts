@@ -1,8 +1,57 @@
 import { describe, expect, test } from 'bun:test';
-import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from './runtime-switch';
+import {
+  getRuntimeApiBaseUrl,
+  getRuntimeKey,
+  subscribeRuntimeEndpointChanged,
+  subscribeRuntimeEndpointWillChange,
+  switchRuntimeEndpoint,
+} from './runtime-switch';
 import { clearRuntimeUrlAuthToken, setRuntimeExtraHeaders } from './runtime-auth';
 
 describe('runtime endpoint switching', () => {
+  test('notifies listeners before and after mutating the active endpoint', () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const previousFetch = globalThis.fetch;
+    const events = new EventTarget();
+    const runtimeWindow = {
+      addEventListener: events.addEventListener.bind(events),
+      removeEventListener: events.removeEventListener.bind(events),
+      dispatchEvent: events.dispatchEvent.bind(events),
+    };
+
+    try {
+      globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: runtimeWindow,
+      });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-a.example', runtimeKey: 'runtime-a' });
+      const observed: Array<[string, string, string]> = [];
+      const unsubscribeWillChange = subscribeRuntimeEndpointWillChange((detail) => {
+        observed.push(['will-change', getRuntimeKey(), detail.previousRuntimeKey]);
+      });
+      const unsubscribeChanged = subscribeRuntimeEndpointChanged((detail) => {
+        observed.push(['changed', getRuntimeKey(), detail.runtimeKey]);
+      });
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-b.example', runtimeKey: 'runtime-b' });
+
+      expect(observed).toEqual([
+        ['will-change', 'runtime-a', 'runtime-a'],
+        ['changed', 'runtime-b', 'runtime-b'],
+      ]);
+      unsubscribeWillChange();
+      unsubscribeChanged();
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousWindow) {
+        Object.defineProperty(globalThis, 'window', previousWindow);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
   test('does not throw when Electron preload globals are read-only', () => {
     const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
     const previousFetch = globalThis.fetch;

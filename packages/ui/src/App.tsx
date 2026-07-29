@@ -670,26 +670,6 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ projectPath?: string }>).detail;
-      const projectPath = typeof detail?.projectPath === 'string' ? detail.projectPath.trim() : '';
-      if (!projectPath) return;
-      const projectsStore = useProjectsStore.getState();
-      const existing = projectsStore.projects.find((project) => project.path === projectPath);
-      if (existing) {
-        projectsStore.setActiveProject(existing.id);
-      } else {
-        projectsStore.addProject(projectPath);
-      }
-    };
-
-    window.addEventListener('openchamber:open-project', handler as EventListener);
-    return () => window.removeEventListener('openchamber:open-project', handler as EventListener);
-  }, []);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
     if (!isInitialized || isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
@@ -853,10 +833,11 @@ function App({ apis }: AppProps) {
     if (bootView.screen === 'chooser') {
       return (
         <ErrorBoundary>
-          <div className="h-full text-foreground bg-transparent">
+          <div className="h-full text-foreground bg-background">
             <React.Suspense fallback={<div className="h-full" />}>
               <OnboardingScreen
                 mode="first-launch"
+                localAvailable={bootView.localAvailable !== false}
                 onCliAvailable={handleDesktopBootDismiss}
                 onChooseRemote={() => {
                   // Switch to remote tab - handled internally by OnboardingScreen
@@ -874,13 +855,14 @@ function App({ apis }: AppProps) {
 
     return (
       <ErrorBoundary>
-        <div className="h-full text-foreground bg-transparent">
+        <div className="h-full text-foreground bg-background">
           <React.Suspense fallback={<div className="h-full" />}>
             <OnboardingScreen
               mode="recovery"
               recoveryVariant={recoveryVariant}
               recoveryHostUrl={hostUrl}
               recoveryHostLabel={undefined}
+              localAvailable={bootView.localAvailable !== false}
               onCliAvailable={handleDesktopBootDismiss}
             />
           </React.Suspense>

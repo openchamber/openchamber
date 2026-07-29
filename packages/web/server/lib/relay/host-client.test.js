@@ -111,8 +111,19 @@ const startLoopbackOrigin = () =>
   new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       if (req.url === '/health') {
+        const expectedOrigin = `http://127.0.0.1:${server.address().port}`;
+        if (req.headers.origin !== expectedOrigin) {
+          res.writeHead(403, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid origin' }));
+          return;
+        }
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, service: 'stub', relayConn: req.headers['x-openchamber-relay-connection'] || null }));
+        res.end(JSON.stringify({
+          ok: true,
+          service: 'stub',
+          relayConn: req.headers['x-openchamber-relay-connection'] || null,
+          origin: req.headers.origin,
+        }));
         return;
       }
       res.writeHead(404);
@@ -269,6 +280,7 @@ describe('relay host-client integration', () => {
     expect(result.status).toBe(200);
     expect(result.body.ok).toBe(true);
     expect(result.body.relayConn).toBe('conn-test-1');
+    expect(result.body.origin).toBe(`http://127.0.0.1:${origin.port}`);
 
     // Every forwarded frame after the two plaintext handshake frames (client
     // hello, host ready) must be binary.

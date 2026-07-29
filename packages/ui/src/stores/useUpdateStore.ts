@@ -39,6 +39,23 @@ interface UpdateStore extends UpdateState {
 
 type ClientRuntime = 'desktop' | 'web' | 'vscode' | 'mobile';
 
+const CLIENT_INSTALL_ID_KEY = 'openchamber.update-install-id';
+
+function getClientInstallId(): string | undefined {
+  if (typeof window === 'undefined' || typeof crypto.randomUUID !== 'function') return undefined;
+
+  try {
+    const existing = window.localStorage.getItem(CLIENT_INSTALL_ID_KEY)?.trim();
+    if (existing) return existing;
+
+    const installId = crypto.randomUUID();
+    window.localStorage.setItem(CLIENT_INSTALL_ID_KEY, installId);
+    return installId;
+  } catch {
+    return undefined;
+  }
+}
+
 function detectDeviceClass(): 'mobile' | 'tablet' | 'desktop' | 'unknown' {
   if (typeof window === 'undefined') return 'unknown';
   try {
@@ -50,6 +67,12 @@ function detectDeviceClass(): 'mobile' | 'tablet' | 'desktop' | 'unknown' {
 }
 
 function detectArch(): 'arm64' | 'x64' | 'unknown' {
+  const electronArch = typeof window !== 'undefined'
+    ? window.__OPENCHAMBER_ELECTRON__?.arch?.toLowerCase?.()
+    : undefined;
+  if (electronArch === 'arm64' || electronArch === 'aarch64') return 'arm64';
+  if (electronArch === 'x64' || electronArch === 'amd64' || electronArch === 'x86_64') return 'x64';
+
   const vscodeArch = typeof window !== 'undefined'
     ? (window as { __VSCODE_CONFIG__?: { arch?: string } }).__VSCODE_CONFIG__?.arch?.toLowerCase?.()
     : undefined;
@@ -86,6 +109,10 @@ function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
   params.set('deviceClass', detectDeviceClass());
   params.set('arch', detectArch());
   params.set('platform', detectPlatform());
+  if (shouldReportUsage && (runtime === 'desktop' || runtime === 'mobile')) {
+    const installId = getClientInstallId();
+    if (installId) params.set('installId', installId);
+  }
   if (runtime === 'desktop') {
     params.set('appType', 'desktop-electron');
     params.set('instanceMode', isDesktopLocalOriginActive() ? 'local' : 'remote');
@@ -186,13 +213,21 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       let suggestedSec: number | null = null;
 
       if (runtime === 'desktop') {
-        const desktopInfo = await checkForDesktopUpdates();
+        const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined;
+        const [desktopResult, apiResult] = await Promise.allSettled([
+          checkForDesktopUpdates(),
+          checkForWebUpdates('desktop', appVersion),
+        ]);
+        const desktopInfo = desktopResult.status === 'fulfilled' ? desktopResult.value : null;
+        suggestedSec = apiResult.status === 'fulfilled'
+          ? (apiResult.value?.nextSuggestedCheckInSec ?? null)
+          : null;
         set({
           checking: false,
           available: desktopInfo?.available ?? false,
           info: desktopInfo,
           lastChecked: Date.now(),
-          nextCheckInSec: null,
+          nextCheckInSec: suggestedSec,
         });
 
         return suggestedSec;

@@ -2,6 +2,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { DateTime } from 'luxon';
 import parser from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
+import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -91,6 +92,32 @@ export const parseScheduledCommandPrompt = (prompt) => {
     command: commandName,
     arguments: tail.join(' ').trim(),
   };
+};
+
+export const expandCommandGoalObjective = (template, argumentsText) => {
+  if (typeof template !== 'string' || !template.trim()) {
+    return null;
+  }
+
+  const rawArguments = String(argumentsText ?? '');
+  if (template.includes('$ARGUMENTS')) {
+    return template.replaceAll('$ARGUMENTS', rawArguments);
+  }
+
+  const positions = [...template.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]));
+  if (positions.length > 0) {
+    const parsedArguments = [...rawArguments.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)]
+      .map((match) => match[1] ?? match[2] ?? match[3] ?? '');
+    const lastPosition = Math.max(...positions);
+    return template.replace(/\$(\d+)/g, (_match, value) => {
+      const position = Number(value);
+      return position === lastPosition
+        ? parsedArguments.slice(position - 1).join(' ')
+        : (parsedArguments[position - 1] ?? '');
+    });
+  }
+
+  return rawArguments ? `${template}\n\n${rawArguments}` : template;
 };
 
 export const computeNextRunAt = (task, nowMs = Date.now()) => {
@@ -225,6 +252,7 @@ export const createScheduledTasksRuntime = (deps) => {
     getOpenCodeAuthHeaders,
     waitForOpenCodeReady,
     emitTaskRunEvent,
+    setSessionAutoAccept,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -406,21 +434,6 @@ export const createScheduledTasksRuntime = (deps) => {
     return projectRunning < maxProjectConcurrency;
   };
 
-  // Same instruction the composer attaches on an armed goal send: the agent
-  // must know goal mode is on from turn one, and each turn has to end with a
-  // factual report for the independent audit.
-  const buildGoalIntroText = (tokenBudget) => {
-    const budgetLine = tokenBudget
-      ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
-      : '';
-    return '<system-reminder>\n'
-      + 'Goal mode is active for this session. The user message above defines the goal objective. '
-      + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
-      + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'
-      + budgetLine
-      + '\n</system-reminder>';
-  };
-
   const buildPromptAsyncPayload = (task, projectPath) => ({
     model: {
       providerID: task.execution.providerID,
@@ -438,88 +451,6 @@ export const createScheduledTasksRuntime = (deps) => {
         : []),
     ],
   });
-
-  // Scheduled goal runs: stamp the goal onto the fresh session's metadata
-  // before the prompt goes out; the session-goal runtime picks the loop up
-  // from session events like any other goal.
-  const createTaskGoal = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
-    const now = Date.now();
-    // File-backed objective keyed by session id: metadata stays light, the
-    // full expanded prompt lives under the OpenChamber data dir. If the file
-    // write fails, fall back to an inline (clamped) objective.
-    // Oversized prompts are distilled into audit criteria by the small model
-    // (the working agent gets the full prompt in chat anyway); on distill
-    // failure a head+tail excerpt keeps intent and acceptance criteria.
-    let objectiveText = expandSnippets(task.execution.prompt, projectPath);
-    if (objectiveText.length > 5000) {
-      let distilled = null;
-      try {
-        const { generateSmallModelText } = await import('../small-model/index.js');
-        const generated = await generateSmallModelText({
-          restrictToPreferredProvider: true,
-          prompt: objectiveText,
-          system: [
-            'You distill a large task description into the COMPLETION CRITERIA a progress auditor will judge against.',
-            'Return ONLY the criteria text — no preamble, no headers, no markdown fences.',
-            'Capture: the end goals, what must exist and work when the task is fully done, and how each major part is verified. Omit implementation steps.',
-            'Preserve verbatim any file paths, commands, and identifiers that define the task.',
-            'Stay under 4000 characters.',
-            'Write in the same language as the task text.',
-          ].join('\n'),
-          directory: projectPath,
-          preferredProviderID: task.execution.providerID,
-          preferredModelID: task.execution.modelID,
-        });
-        distilled = typeof generated?.text === 'string' ? generated.text.trim() : null;
-      } catch (error) {
-        console.warn('[scheduled-tasks] goal objective distillation failed:', error?.message || error);
-      }
-      if (distilled) {
-        objectiveText = distilled;
-      } else {
-        const marker = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
-        const half = Math.max(0, Math.floor((5000 - marker.length) / 2));
-        objectiveText = `${objectiveText.slice(0, half)}${marker}${objectiveText.slice(-half)}`;
-      }
-    }
-    let objectiveFile = false;
-    try {
-      const { writeObjective } = await import('../session-goal/objectives.js');
-      await writeObjective(sessionID, objectiveText);
-      objectiveFile = true;
-    } catch (error) {
-      console.warn('[scheduled-tasks] goal objective file write failed, falling back to inline:', error?.message || error);
-    }
-    const goal = {
-      id: `${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      objective: objectiveFile ? '' : objectiveText.slice(0, 5000),
-      objectiveFile,
-      status: 'active',
-      tokenBudget: task.execution.goalTokenBudget || null,
-      tokensUsed: 0,
-      turnsUsed: 0,
-      blockedStreak: 0,
-      note: '',
-      statusReason: '',
-      lastAccountedMessageID: '',
-      createdAt: now,
-      updatedAt: now,
-    };
-    const url = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}`);
-    url.searchParams.set('directory', projectPath);
-    const response = await fetch(url.toString(), {
-      method: 'PATCH',
-      headers: {
-        ...authHeaders,
-        'content-type': 'application/json',
-        accept: 'application/json',
-      },
-      body: JSON.stringify({ metadata: { openchamber: { goal } } }),
-    });
-    if (!response.ok) {
-      throw new Error(`goal metadata patch failed (${response.status})`);
-    }
-  };
 
   const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
     const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
@@ -540,10 +471,10 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const runScheduledCommandIfApplicable = async ({ client, projectPath, sessionID, task }) => {
+  const resolveScheduledCommand = async ({ client, projectPath, task }) => {
     const parsed = parseScheduledCommandPrompt(task?.execution?.prompt);
     if (!parsed) {
-      return false;
+      return null;
     }
 
     let commands = [];
@@ -551,25 +482,24 @@ export const createScheduledTasksRuntime = (deps) => {
       const response = await client.command.list({ directory: projectPath });
       commands = Array.isArray(response?.data) ? response.data : [];
     } catch {
-      return false;
+      return null;
     }
 
-    const hasMatchingCommand = commands.some((command) => command?.name === parsed.command);
-    if (!hasMatchingCommand) {
-      return false;
-    }
+    const command = commands.find((candidate) => candidate?.name === parsed.command);
+    return command ? { ...parsed, template: command.template } : null;
+  };
 
+  const runScheduledCommand = async ({ client, projectPath, sessionID, task, command }) => {
     await client.session.command({
       sessionID,
       directory: projectPath,
-      command: parsed.command,
-      arguments: parsed.arguments,
+      command: command.command,
+      arguments: command.arguments,
       ...(task.execution.agent ? { agent: task.execution.agent } : {}),
       model: `${task.execution.providerID}/${task.execution.modelID}`,
       ...(task.execution.variant ? { variant: task.execution.variant } : {}),
     });
 
-    return true;
   };
 
   const runTaskWithWatchdog = async (projectID, task, reason) => {
@@ -611,17 +541,39 @@ export const createScheduledTasksRuntime = (deps) => {
     } catch {
     }
 
-    if (task.execution.goalEnabled) {
-      await createTaskGoal({ baseUrl, authHeaders, sessionID, projectPath, task });
+    if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
+      // Enroll before the prompt goes out so the very first permission request
+      // is already auto-approved. Enrollment failure must not kill the run —
+      // the task still executes, permissions just wait for the user.
+      try {
+        await setSessionAutoAccept(sessionID, true, projectPath);
+      } catch (error) {
+        logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
+      }
     }
 
-    const executedAsCommand = await runScheduledCommandIfApplicable({
-      client,
-      projectPath,
-      sessionID,
-      task,
-    });
-    if (!executedAsCommand) {
+    const scheduledCommand = await resolveScheduledCommand({ client, projectPath, task });
+
+    if (task.execution.goalEnabled) {
+      const commandObjective = scheduledCommand
+        ? expandCommandGoalObjective(scheduledCommand.template, scheduledCommand.arguments)
+        : null;
+      await createSessionGoal({
+        baseUrl,
+        authHeaders,
+        sessionID,
+        directory: projectPath,
+        objective: commandObjective ?? expandSnippets(task.execution.prompt, projectPath),
+        tokenBudget: task.execution.goalTokenBudget,
+        providerID: task.execution.providerID,
+        modelID: task.execution.modelID,
+        onWarning: (message, error) => console.warn(`[scheduled-tasks] ${message}:`, error?.message || error),
+      });
+    }
+
+    if (scheduledCommand) {
+      await runScheduledCommand({ client, projectPath, sessionID, task, command: scheduledCommand });
+    } else {
       await runPromptAsync({
         baseUrl,
         authHeaders,

@@ -3,7 +3,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
-import { routeMessage, useSessionUIStore } from './session-ui-store';
+import { expandSlashCommandGoalObjective, routeMessage, useSessionUIStore } from './session-ui-store';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
@@ -228,6 +228,49 @@ describe('routeMessage directory scoping', () => {
   });
 });
 
+describe('slash-command goal objectives', () => {
+  test('expands every $ARGUMENTS reference from the authoritative command template', () => {
+    expect(expandSlashCommandGoalObjective('/issue--to-pr LIN-123 --draft', [{
+      name: 'issue--to-pr',
+      template: 'Run the issue pipeline for $ARGUMENTS. Verify $ARGUMENTS is represented by the PR.',
+    }])).toBe('Run the issue pipeline for LIN-123 --draft. Verify LIN-123 --draft is represented by the PR.');
+  });
+
+  test('keeps the invocation when the command template is unavailable', () => {
+    expect(expandSlashCommandGoalObjective('/issue--to-pr LIN-123', [{ name: 'issue--to-pr' }]))
+      .toBe('/issue--to-pr LIN-123');
+  });
+
+  test('matches OpenCode positional and implicit argument expansion', () => {
+    expect(expandSlashCommandGoalObjective('/move "src old" dist extra', [{
+      name: 'move',
+      template: 'Move $1 to $2',
+    }])).toBe('Move src old to dist extra');
+    expect(expandSlashCommandGoalObjective('/review auth module', [{
+      name: 'review',
+      template: 'Review the requested scope.',
+    }])).toBe('Review the requested scope.\n\nauth module');
+  });
+});
+
+describe('runtime worktree topology', () => {
+  test('restores independent in-memory maps across A -> B -> A', () => {
+    const topologyA = new Map([['/repo', [{ path: '/repo/a', branch: 'a' }]]]);
+    const topologyB = new Map([['/repo', [{ path: '/repo/b', branch: 'b' }]]]);
+
+    useSessionUIStore.setState({ availableWorktreesByProject: topologyA, availableWorktrees: topologyA.get('/repo') });
+    useSessionUIStore.getState().prepareForRuntimeSwitch('runtime-a');
+    useSessionUIStore.setState({ availableWorktreesByProject: topologyB, availableWorktrees: topologyB.get('/repo') });
+    useSessionUIStore.getState().prepareForRuntimeSwitch('runtime-b');
+
+    useSessionUIStore.getState().restoreForRuntimeSwitch('runtime-a');
+    expect(useSessionUIStore.getState().availableWorktreesByProject.get('/repo')?.[0]?.path).toBe('/repo/a');
+
+    useSessionUIStore.getState().restoreForRuntimeSwitch('runtime-b');
+    expect(useSessionUIStore.getState().availableWorktreesByProject.get('/repo')?.[0]?.path).toBe('/repo/b');
+  });
+});
+
 describe('openNewSessionDraft project binding', () => {
   const projectA = { id: 'proj-a', path: '/projects/alpha', label: 'Alpha' };
   const projectB = { id: 'proj-b', path: '/projects/beta', label: 'Beta' };
@@ -280,6 +323,35 @@ describe('openNewSessionDraft project binding', () => {
 
     expect(draft.open).toBe(true);
     expect(draft.selectedProjectId).toBe(projectB.id);
+  });
+});
+
+describe('createSession draft lifecycle', () => {
+  let originalCreateSession;
+
+  beforeEach(() => {
+    originalCreateSession = opencodeClient.createSession;
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: { open: true, directoryOverride: '/projects/alpha', parentID: null, title: 'Draft title' },
+    });
+  });
+
+  afterEach(() => {
+    opencodeClient.createSession = originalCreateSession;
+  });
+
+  test('keeps the draft open when session creation fails', async () => {
+    opencodeClient.createSession = async () => {
+      throw new Error('offline');
+    };
+
+    const session = await useSessionUIStore.getState().createSession('Draft title', '/projects/alpha');
+
+    expect(session).toBeNull();
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true);
+    expect(useSessionUIStore.getState().newSessionDraft.title).toBe('Draft title');
   });
 });
 

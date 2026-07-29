@@ -13,6 +13,9 @@ import {
 } from '@openchamber/ui/lib/theme/vscode/adapter';
 import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
+import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
+import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
+import type { PermissionRequest } from '@opencode-ai/sdk/v2/client';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 type PanelType = 'chat' | 'agentManager';
@@ -408,15 +411,24 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     });
   }
 
-  if (normalizedPathname === '/api/notifications/auto-accept' && method === 'POST') {
+  if (normalizedPathname === '/api/permission-auto-accept' && method === 'GET') {
+    const snapshot = await sendBridgeMessage('api:permission-auto-accept:get');
+    return new Response(JSON.stringify(snapshot), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const permissionPolicyMatch = normalizedPathname.match(/^\/api\/permission-auto-accept\/sessions\/([^/]+)$/);
+  if (permissionPolicyMatch && method === 'PUT') {
     const bodyText = await extractBodyText(url, init, method);
-    const body = bodyText
-      ? JSON.parse(bodyText) as { sessionId?: unknown; enabled?: unknown }
-      : {};
-    const result = await sendBridgeMessage<{ success?: boolean }>('api:notifications/auto-accept', body)
-      .catch(() => ({ success: false }));
-    return new Response(JSON.stringify(result), {
-      status: result?.success === false ? 400 : 200,
+    const body = bodyText ? JSON.parse(bodyText) as { enabled?: unknown } : {};
+    const snapshot = await sendBridgeMessage('api:permission-auto-accept:set', {
+      sessionId: decodeURIComponent(permissionPolicyMatch[1]),
+      enabled: body.enabled,
+    });
+    return new Response(JSON.stringify(snapshot), {
+      status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -1657,7 +1669,7 @@ const getNotificationDirectory = (payload: Record<string, unknown>): string | nu
 };
 
 window.addEventListener('openchamber:vscode-notification-event', (event) => {
-  const detail = (event as CustomEvent<{ payload?: unknown }>).detail;
+  const detail = (event as CustomEvent<{ directory?: string; payload?: unknown }>).detail;
   const payload = detail?.payload;
   if (!payload || typeof payload !== 'object') {
     return;
@@ -1674,8 +1686,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
 
   Promise.all([
     import('@/stores/useUIStore'),
-    import('@/stores/permissionStore'),
-  ]).then(async ([{ useUIStore }, { usePermissionStore }]) => {
+  ]).then(async ([{ useUIStore }]) => {
     await ensureNotificationSettingsSynced();
     const settings = useUIStore.getState();
     if (!settings.nativeNotificationsEnabled) {
@@ -1763,7 +1774,14 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
 
     if (type === 'permission.asked') {
       if (!settings.notifyOnQuestion) return;
-      if (usePermissionStore.getState().isSessionAutoAccepting(sessionId)) return;
+      const requestId = getPayloadString(properties.id);
+      if (requestId) {
+        const accepted = await processVSCodePermissionAutoAccept(
+          properties as unknown as PermissionRequest,
+          detail?.directory,
+        );
+        if (accepted) return;
+      }
       const permission = getPayloadString(properties.permission);
       const sessionTitle = getPayloadString(properties.sessionTitle);
       const fallbackMessage = sessionTitle || permission || 'Agent is waiting for your approval';
@@ -1785,6 +1803,17 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
 onCommand('settingsSynced', () => {
   import('@openchamber/ui/lib/persistence').then(({ syncDesktopSettings }) => {
     void syncDesktopSettings();
+  });
+});
+
+onCommand('permissionAutoAcceptSynced', (payload) => {
+  if (!payload || typeof payload !== 'object') return;
+  const snapshot = payload as { sessions?: unknown; revision?: unknown };
+  const sessions = snapshot.sessions;
+  if (!sessions || typeof sessions !== 'object') return;
+  usePermissionStore.getState().applySnapshot({
+    sessions: sessions as Record<string, boolean>,
+    revision: typeof snapshot.revision === 'number' ? snapshot.revision : undefined,
   });
 });
 

@@ -7,6 +7,8 @@ const gitService = {
   cherryPick: mock(),
   revertCommit: mock(),
   resetToCommit: mock(),
+  createWorktree: mock(),
+  getWorktreeBootstrapStatus: mock(),
 };
 
 mock.module('./gitService', () => gitService);
@@ -21,6 +23,8 @@ describe('bridge git runtime index mutations', () => {
     gitService.cherryPick.mockReset();
     gitService.revertCommit.mockReset();
     gitService.resetToCommit.mockReset();
+    gitService.createWorktree.mockReset();
+    gitService.getWorktreeBootstrapStatus.mockReset();
   });
 
   it('accepts legacy stage path payloads', async () => {
@@ -108,5 +112,67 @@ describe('bridge git runtime index mutations', () => {
     expect(gitService.cherryPick).not.toHaveBeenCalled();
     expect(gitService.revertCommit).not.toHaveBeenCalled();
     expect(gitService.resetToCommit).not.toHaveBeenCalled();
+  });
+
+  it('preserves bootstrap phases in status responses', async () => {
+    const bootstrapStatus = {
+      status: 'pending',
+      phase: 'git-ready',
+      error: null,
+      updatedAt: 123,
+    };
+    gitService.getWorktreeBootstrapStatus.mockResolvedValue(bootstrapStatus);
+
+    const response = await handleStandardGitBridgeMessage({
+      id: 'bootstrap-status',
+      type: 'api:git/worktrees/bootstrap-status',
+      payload: { directory: '/repo-worktree' },
+    });
+
+    expect(response).toEqual({
+      id: 'bootstrap-status',
+      type: 'api:git/worktrees/bootstrap-status',
+      success: true,
+      data: bootstrapStatus,
+    });
+    expect(gitService.getWorktreeBootstrapStatus).toHaveBeenCalledWith('/repo-worktree');
+  });
+
+  it('preserves the directory-created phase in fast create responses', async () => {
+    const created = {
+      head: '',
+      name: 'feature',
+      branch: 'openchamber/feature',
+      path: '/repo-worktree',
+      directoryCreated: true,
+      bootstrapStatus: {
+        status: 'pending',
+        phase: 'directory-created',
+        error: null,
+        updatedAt: 123,
+      },
+    };
+    gitService.createWorktree.mockResolvedValue(created);
+
+    const response = await handleStandardGitBridgeMessage({
+      id: 'create-worktree',
+      type: 'api:git/worktrees',
+      payload: {
+        directory: '/repo',
+        method: 'POST',
+        worktreeName: 'feature',
+        returnAfterDirectoryCreated: true,
+      },
+    });
+
+    expect(response).toEqual({
+      id: 'create-worktree',
+      type: 'api:git/worktrees',
+      success: true,
+      data: created,
+    });
+    expect(gitService.createWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
+      returnAfterDirectoryCreated: true,
+    }));
   });
 });

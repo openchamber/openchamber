@@ -17,6 +17,7 @@ export type RuntimeEndpointChangedDetail = {
 };
 
 const RUNTIME_ENDPOINT_CHANGED_EVENT = 'openchamber:runtime-endpoint-changed';
+const RUNTIME_ENDPOINT_WILL_CHANGE_EVENT = 'openchamber:runtime-endpoint-will-change';
 
 let activeApiBaseUrl = '';
 let activeRuntimeKey = '';
@@ -43,7 +44,10 @@ const normalizeRuntimeUrlKey = (value: string): string => {
     const url = new URL(value);
     url.hash = '';
     url.search = '';
+    // Normalise pathname so root `/` becomes empty and no path ends with `/`.
     url.pathname = url.pathname.replace(/\/+$/, '') || '/';
+    // url.toString() still appends `/` when pathname is `/`; strip it
+    // so every key uses the bare-origin form: `url:https://example.com`.
     return `url:${url.toString().replace(/\/+$/, '')}`;
   } catch {
     return `url:${value.trim().replace(/\/+$/, '') || 'default'}`;
@@ -98,6 +102,10 @@ export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken
   const previousApiBaseUrl = getRuntimeApiBaseUrl();
   const previousRuntimeKey = getRuntimeKey();
   const runtimeKey = options.runtimeKey?.trim() || normalizeRuntimeUrlKey(apiBaseUrl);
+  const detail = { apiBaseUrl, previousApiBaseUrl, runtimeKey, previousRuntimeKey };
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<RuntimeEndpointChangedDetail>(RUNTIME_ENDPOINT_WILL_CHANGE_EVENT, { detail }));
+  }
   activeApiBaseUrl = apiBaseUrl;
   activeRuntimeKey = runtimeKey;
   if (typeof window !== 'undefined') {
@@ -124,9 +132,18 @@ export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken
   void refreshRuntimeUrlAuthToken(apiBaseUrl).catch(() => {});
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent<RuntimeEndpointChangedDetail>(RUNTIME_ENDPOINT_CHANGED_EVENT, {
-      detail: { apiBaseUrl, previousApiBaseUrl, runtimeKey, previousRuntimeKey },
+      detail,
     }));
   }
+};
+
+export const subscribeRuntimeEndpointWillChange = (callback: (detail: RuntimeEndpointChangedDetail) => void): (() => void) => {
+  if (typeof window === 'undefined') return () => {};
+  const listener = (event: Event) => {
+    callback((event as CustomEvent<RuntimeEndpointChangedDetail>).detail);
+  };
+  window.addEventListener(RUNTIME_ENDPOINT_WILL_CHANGE_EVENT, listener);
+  return () => window.removeEventListener(RUNTIME_ENDPOINT_WILL_CHANGE_EVENT, listener);
 };
 
 export const subscribeRuntimeEndpointChanged = (callback: (detail: RuntimeEndpointChangedDetail) => void): (() => void) => {

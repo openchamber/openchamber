@@ -103,7 +103,7 @@ describe('createRuntimeUrlResolver', () => {
   test('adds local URL auth token to desktop realtime proxy URL', () => {
     setRuntimeExtraHeaders({ 'CF-Access-Client-Id': 'client-id' });
     setRuntimeUrlAuthToken('remote-url-token', Date.now() + 60_000);
-    setLocalRuntimeUrlAuthToken('local-url-token', Date.now() + 60_000);
+    setLocalRuntimeUrlAuthToken('local-url-token', Date.now() + 60_000, 'http://127.0.0.1:57123');
     try {
       withWindow({
         location: { origin: 'openchamber-ui://app', href: 'openchamber-ui://app/index.html' },

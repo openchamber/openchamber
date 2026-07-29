@@ -25,13 +25,13 @@ import {
   attachMarkdownInteractions,
   applyMarkdownCodeBlockWrapState,
   decorateMarkdown,
-  scheduleMarkdownCodeLineNumberSync,
-  syncMarkdownCodeLineNumbers,
+  getMarkdownCodeText,
   type DecorateContext,
   type DecorateLabels,
   type MermaidControlOptions,
   type MermaidRender,
 } from './markdown/decorate';
+import { findTextPosition } from './markdown/textPosition';
 import { createMermaidViewerRegistry, MERMAID_BLOCK_SELECTOR, shouldRefreshMermaidViewers } from './markdown/mermaidViewer';
 import {
   BLOCK_PATH_TOKEN_RE,
@@ -40,6 +40,7 @@ import {
   parseFileReference,
   type ParsedFileReference,
 } from './fileReferenceParser';
+import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -227,21 +228,6 @@ const isLikelyFilePath = (value: string): boolean => {
   return isLikelyFilePathValue(parsed.path);
 };
 
-const findTextPosition = (textNodes: Text[], targetOffset: number): { node: Text; offset: number } | null => {
-  let currentOffset = 0;
-
-  for (const node of textNodes) {
-    const nextOffset = currentOffset + node.data.length;
-    if (targetOffset <= nextOffset) {
-      return { node, offset: Math.max(0, targetOffset - currentOffset) };
-    }
-    currentOffset = nextOffset;
-  }
-
-  const lastNode = textNodes.at(-1);
-  return lastNode ? { node: lastNode, offset: lastNode.data.length } : null;
-};
-
 const unwrapBlockCodePathTokens = (container: HTMLElement): void => {
   const tokenSpans = container.querySelectorAll<HTMLElement>(BLOCK_PATH_TOKEN_SELECTOR);
   for (const span of Array.from(tokenSpans)) {
@@ -303,11 +289,14 @@ const wrapBlockCodePathTokens = (container: HTMLElement): void => {
     const textNodes: Text[] = [];
     let currentNode = walker.nextNode();
     while (currentNode) {
-      textNodes.push(currentNode as Text);
+      const textNode = currentNode as Text;
+      if (!textNode.parentElement?.closest('[data-md-code-line-number]')) {
+        textNodes.push(textNode);
+      }
       currentNode = walker.nextNode();
     }
 
-    const fullText = codeBlock.textContent ?? '';
+    const fullText = getMarkdownCodeText(codeBlock);
     if (!fullText.includes('.')) {
       codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
       continue;
@@ -325,8 +314,8 @@ const wrapBlockCodePathTokens = (container: HTMLElement): void => {
     }
 
     for (const { start, end, raw } of matches.reverse()) {
-      const startPosition = findTextPosition(textNodes, start);
-      const endPosition = findTextPosition(textNodes, end);
+      const startPosition = findTextPosition(textNodes, start, 'right');
+      const endPosition = findTextPosition(textNodes, end, 'left');
       if (!startPosition || !endPosition) {
         continue;
       }
@@ -754,69 +743,6 @@ const useMermaidInlineInteractions = ({
 // Rendering core: marked -> math -> shiki -> sanitize -> decorate -> morphdom
 // ---------------------------------------------------------------------------
 
-// Single tuning knob: the streaming reveal cadence. Lower = smoother but more
-// CPU (more re-parse steps/sec); higher = cheaper but chunkier. Step sizes are
-// auto-scaled from this so reveal throughput (chars/sec) stays constant no
-// matter the cadence — text always keeps up with the incoming stream.
-const TEXT_PACE_MS = 64;
-const PACE_BASELINE_MS = 24;
-const PACE_RATIO = TEXT_PACE_MS / PACE_BASELINE_MS;
-const TEXT_SNAP = /[\s.,!?;:)\]]/;
-
-const paceStep = (remaining: number): number => {
-  const base = remaining <= 12 ? 2 : remaining <= 48 ? 4 : remaining <= 96 ? 8 : Math.min(24, Math.ceil(remaining / 8));
-  return Math.max(1, Math.round(base * PACE_RATIO));
-};
-
-const nextRevealIndex = (text: string, start: number): number => {
-  const end = Math.min(text.length, start + paceStep(text.length - start));
-  for (let i = end; i < Math.min(text.length, end + 8); i += 1) {
-    if (TEXT_SNAP.test(text[i] ?? '')) return i + 1;
-  }
-  return end;
-};
-
-// Granular streaming reveal. Cheap because each step only re-runs the
-// marked->morphdom pipeline (patching changed DOM nodes), with no React tree
-// reconciliation of the markdown body.
-const usePacedText = (content: string, streaming: boolean): string => {
-  const [shown, setShown] = React.useState<number>(() => (streaming ? 0 : content.length));
-  const shownRef = React.useRef(shown);
-  shownRef.current = shown;
-
-  React.useEffect(() => {
-    if (!streaming || typeof window === 'undefined') {
-      setShown(content.length);
-      return;
-    }
-    if (shownRef.current > content.length) {
-      setShown(content.length);
-    }
-
-    let timer: number | null = null;
-    const tick = () => {
-      const current = Math.min(shownRef.current, content.length);
-      if (current >= content.length) {
-        timer = null;
-        return;
-      }
-      setShown(nextRevealIndex(content, current));
-      timer = window.setTimeout(tick, TEXT_PACE_MS);
-    };
-
-    if (shownRef.current < content.length) {
-      timer = window.setTimeout(tick, TEXT_PACE_MS);
-    }
-
-    return () => {
-      if (timer !== null) window.clearTimeout(timer);
-    };
-  }, [content, streaming]);
-
-  if (!streaming) return content;
-  return content.slice(0, Math.min(shown, content.length));
-};
-
 // Mermaid layout is expensive; `decorate` would otherwise re-render every
 // diagram on every paced-stream step (~40/sec). Memoize by theme+mode+source
 // so a stable diagram is laid out once and served from cache thereafter.
@@ -1020,9 +946,6 @@ const useMorphdomMarkdown = ({
         refreshMermaidViewers();
       }
 
-      if (!ctx.deferCodeLineNumberSync) {
-        scheduleMarkdownCodeLineNumberSync(target);
-      }
     });
 
     return () => {
@@ -1054,24 +977,6 @@ const useMorphdomMarkdown = ({
     applyMarkdownCodeBlockWrapState(target, ctx.codeBlockLineWrap, ctx.labels);
   }, [containerRef, ctx.codeBlockLineWrap, ctx.deferCodeLineNumberSync, ctx.labels]);
 
-  React.useEffect(() => {
-    const container = containerRef.current;
-    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
-    if (!target || typeof ResizeObserver === 'undefined') return;
-    let frame: number | null = null;
-    const observer = new ResizeObserver(() => {
-      if (frame !== null) window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        frame = null;
-        syncMarkdownCodeLineNumbers(target);
-      });
-    });
-    observer.observe(target);
-    return () => {
-      observer.disconnect();
-      if (frame !== null) window.cancelAnimationFrame(frame);
-    };
-  }, [containerRef]);
 };
 
 const markdownContentClassName = (variant: MarkdownVariant): string =>
@@ -1094,6 +999,9 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   onShowPopup,
   enableFileReferences = true,
 }) => {
+  streamPerfCount('ui.markdown_renderer.render');
+  if (isStreaming) streamPerfCount('ui.markdown_renderer.render.streaming');
+  streamPerfObserve('ui.markdown_renderer.content_len', content.length);
   const currentTheme = useCurrentMermaidTheme();
   const { editor, runtime } = useRuntimeAPIs();
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -1106,7 +1014,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   }, [effectiveDirectory, openContextPreview]);
 
   const live = isStreaming && !disableStreamAnimation;
-  const pacedText = usePacedText(content, live);
 
   useMermaidInlineInteractions({
     containerRef,
@@ -1127,7 +1034,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
   const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
-  useMorphdomMarkdown({ containerRef, text: pacedText, streaming: live, cacheKey, syntaxVars, ctx });
+  useMorphdomMarkdown({ containerRef, text: content, streaming: live, cacheKey, syntaxVars, ctx });
 
   const markdownContent = (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>

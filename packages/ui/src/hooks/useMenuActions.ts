@@ -4,7 +4,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncSessions } from '@/sync/sync-refs';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -103,11 +103,6 @@ export const useMenuActions = (
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
-  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
-  const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
-  const toggleBottomTerminal = useUIStore((s) => s.toggleBottomTerminal);
-  const setBottomTerminalExpanded = useUIStore((s) => s.setBottomTerminalExpanded);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const { setThemeMode } = useThemeSystem();
   const checkUpdatesInFlightRef = React.useRef(false);
@@ -209,27 +204,58 @@ export const useMenuActions = (
           handleChangeWorkspace();
           break;
 
-        case 'toggle-right-sidebar':
-          toggleRightSidebar();
+        // Legacy right-sidebar menu items now target the context surfaces
+        // that replaced the sidebar's tabs.
+        case 'toggle-right-sidebar': {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (!directory) break;
+          const uiState = useUIStore.getState();
+          const directoryKey = normalizeContextPanelDirectoryKey(directory);
+          const panelState = uiState.contextPanelByDirectory[directoryKey];
+          if (panelState?.isOpen) {
+            uiState.closeContextPanel(directoryKey);
+          } else if (panelState?.activeTabId) {
+            uiState.setActiveContextPanelTab(directoryKey, panelState.activeTabId);
+          } else {
+            uiState.openContextSurface(directoryKey, 'git');
+          }
           break;
+        }
 
-        case 'open-right-sidebar-git':
-          setRightSidebarOpen(true);
-          setRightSidebarTab('git');
+        case 'open-right-sidebar-git': {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (!directory) break;
+          useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(directory), 'git');
           break;
+        }
 
-        case 'open-right-sidebar-files':
-          setRightSidebarOpen(true);
-          setRightSidebarTab('files');
+        case 'open-right-sidebar-files': {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (!directory) break;
+          useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(directory), 'file');
           break;
+        }
 
-        case 'toggle-terminal':
-          toggleBottomTerminal();
+        case 'toggle-terminal': {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (!directory) break;
+          useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(directory), 'terminal');
           break;
+        }
 
-        case 'toggle-terminal-expanded':
-          setBottomTerminalExpanded(!useUIStore.getState().isBottomTerminalExpanded);
+        case 'toggle-terminal-expanded': {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (!directory) break;
+          const key = normalizeContextPanelDirectoryKey(directory);
+          const uiState = useUIStore.getState();
+          const panel = uiState.contextPanelByDirectory[key];
+          const activeMode = panel?.isOpen ? panel.tabs.find((tab) => tab.id === panel.activeTabId)?.mode : null;
+          if (activeMode !== 'terminal') {
+            uiState.openContextSurface(key, 'terminal');
+          }
+          uiState.toggleContextPanelExpanded(key);
           break;
+        }
 
         case 'copy': {
           const copyEvent = new Event('openchamber:copy', { cancelable: true });
@@ -307,14 +333,9 @@ export const useMenuActions = (
       setSessionSwitcherOpen,
       setCommandPaletteOpen,
       setSettingsDialogOpen,
-      setBottomTerminalExpanded,
-      setRightSidebarOpen,
-      setRightSidebarTab,
       setThemeMode,
-      toggleBottomTerminal,
       toggleCommandPalette,
       toggleHelpDialog,
-      toggleRightSidebar,
       toggleSidebar,
     ]
   );
