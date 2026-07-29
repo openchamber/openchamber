@@ -68,7 +68,7 @@ That runs, in order:
 
 Build output goes to `packages/electron/dist`.
 
-macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce AppImage and `deb` packages for the native x64 or arm64 host.
+macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce AppImage and `deb` packages for the native x64 or arm64 host. Artifact architecture labels follow each target's packaging convention: x64 builds produce `linux-x86_64.AppImage` and `linux-amd64.deb`, while arm64 builds use `linux-arm64` for both formats. Release manifests contain both package types so the updater can select the artifact matching the installed package.
 
 ## Platform Notes
 
