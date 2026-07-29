@@ -33,7 +33,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { validateWorktreeCreate, createWorktree } from '@/lib/worktrees/worktreeManager';
-import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
+import { resolveRootTrackingRemote, withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -49,6 +49,7 @@ import {
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
+import { getWorktreeErrorPresentationKey } from './worktreeErrorPresentation';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
@@ -121,53 +122,28 @@ const sanitizeRemoteName = (value: string): string => {
   return normalized || 'pr-head';
 };
 
-const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: string[], remoteBranches: string[]) => {
+const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary) => {
   const headBranch = normalizeBranchName(pr.head || '');
   if (!headBranch) {
     throw new Error('PR head branch is missing');
-  }
-
-  if (localBranches.includes(headBranch)) {
-    return {
-      existingBranch: headBranch,
-      setUpstream: undefined,
-      upstreamRemote: undefined,
-      upstreamBranch: undefined,
-      ensureRemoteName: undefined,
-      ensureRemoteUrl: undefined,
-      sourceLabel: headBranch,
-    };
-  }
-
-  const availableRemoteBranch = remoteBranches.find((remoteBranch) => {
-    const slashIndex = remoteBranch.indexOf('/');
-    if (slashIndex <= 0 || slashIndex >= remoteBranch.length - 1) {
-      return false;
-    }
-    return remoteBranch.slice(slashIndex + 1) === headBranch;
-  });
-
-  if (availableRemoteBranch) {
-    const slashIndex = availableRemoteBranch.indexOf('/');
-    const remoteName = availableRemoteBranch.slice(0, slashIndex);
-    return {
-      existingBranch: `remotes/${availableRemoteBranch}`,
-      setUpstream: true as const,
-      upstreamRemote: remoteName,
-      upstreamBranch: headBranch,
-      ensureRemoteName: undefined,
-      ensureRemoteUrl: undefined,
-      sourceLabel: `${remoteName}/${headBranch}`,
-    };
   }
 
   const ownerFromLabel = String(pr.headLabel || '').split(':')[0]?.trim();
   const remoteSeed = pr.headRepo?.owner || ownerFromLabel || 'pr-head';
   const remoteName = `pr-${sanitizeRemoteName(remoteSeed)}`;
   const remoteUrl = pr.headRepo?.sshUrl || pr.headRepo?.cloneUrl || '';
+  const sourceLabel = String(pr.headLabel || '').trim().replace(':', '/') || headBranch;
 
   if (!remoteUrl) {
-    throw new Error('PR head repository URL is unavailable');
+    return {
+      existingBranch: headBranch,
+      setUpstream: false as const,
+      upstreamRemote: undefined,
+      upstreamBranch: headBranch,
+      ensureRemoteName: undefined,
+      ensureRemoteUrl: undefined,
+      sourceLabel,
+    };
   }
 
   return {
@@ -177,7 +153,7 @@ const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: st
     upstreamBranch: headBranch,
     ensureRemoteName: remoteName,
     ensureRemoteUrl: remoteUrl,
-    sourceLabel: `${remoteName}/${headBranch}`,
+    sourceLabel,
   };
 };
 
@@ -714,12 +690,20 @@ export function NewWorktreeDialog({
       // Only run server validation if we have values
       if (normalizedBranch && normalizedWorktree) {
         const linkedPr = mode === 'new-branch' ? newBranchState.linkedPr : null;
-        const prConfig = linkedPr ? resolvePrWorktreeConfig(linkedPr, localBranches, remoteBranches) : null;
+        const prConfig = linkedPr ? resolvePrWorktreeConfig(linkedPr) : null;
+        const baseRemote = linkedPr
+          ? await resolveRootTrackingRemote(projectRef.path).catch(() => null)
+          : null;
         const result = await validateWorktreeCreate(projectRef, {
           mode: mode === 'existing-branch' || prConfig ? 'existing' : 'new',
           branchName: normalizedBranch,
           worktreeName: normalizedWorktree,
           existingBranch: prConfig?.existingBranch ?? (mode === 'existing-branch' ? normalizedBranch : undefined),
+          ...(linkedPr ? { prNumber: linkedPr.number } : {}),
+          ...(baseRemote ? { baseRemote } : {}),
+          ...(prConfig?.setUpstream !== undefined ? { setUpstream: prConfig.setUpstream } : {}),
+          ...(prConfig?.upstreamRemote ? { upstreamRemote: prConfig.upstreamRemote } : {}),
+          ...(prConfig?.upstreamBranch ? { upstreamBranch: prConfig.upstreamBranch } : {}),
           ...(prConfig?.ensureRemoteName ? { ensureRemoteName: prConfig.ensureRemoteName } : {}),
           ...(prConfig?.ensureRemoteUrl ? { ensureRemoteUrl: prConfig.ensureRemoteUrl } : {}),
         });
@@ -733,8 +717,9 @@ export function NewWorktreeDialog({
               return;
             }
 
-            if (error.code.startsWith('branch_')) {
-              branchError = branchError ?? error.message;
+            const presentationKey = getWorktreeErrorPresentationKey(error);
+            if (error.code.startsWith('branch_') || presentationKey) {
+              branchError = branchError ?? (presentationKey ? t(presentationKey) : error.message);
             }
           });
         }
@@ -763,8 +748,6 @@ export function NewWorktreeDialog({
     newBranchState.linkedPr,
     existingBranchState.selectedBranch,
     currentState.worktreeName,
-    localBranches,
-    remoteBranches,
     validation.touched,
     validationAbortController,
     isCreating,
@@ -833,11 +816,14 @@ export function NewWorktreeDialog({
 
       const setupCommands = await getWorktreeSetupCommands(projectRef);
       const sourceBranch = newBranchState.sourceBranch;
+      const baseRemote = linkedPr
+        ? await resolveRootTrackingRemote(projectDirectory).catch(() => null)
+        : null;
 
       let sourceLabel = '';
       const args = (() => {
         if (linkedPr) {
-          const prConfig = resolvePrWorktreeConfig(linkedPr, localBranches, remoteBranches);
+          const prConfig = resolvePrWorktreeConfig(linkedPr);
           sourceLabel = prConfig.sourceLabel;
           return {
             preferredName: normalizedBranch || normalizedWorktree,
@@ -849,6 +835,8 @@ export function NewWorktreeDialog({
             setUpstream: prConfig.setUpstream,
             upstreamRemote: prConfig.upstreamRemote,
             upstreamBranch: prConfig.upstreamBranch,
+            prNumber: linkedPr.number,
+            ...(baseRemote ? { baseRemote } : {}),
             returnAfterDirectoryCreated: true,
             ...(prConfig.ensureRemoteName ? { ensureRemoteName: prConfig.ensureRemoteName } : {}),
             ...(prConfig.ensureRemoteUrl ? { ensureRemoteUrl: prConfig.ensureRemoteUrl } : {}),
@@ -868,14 +856,21 @@ export function NewWorktreeDialog({
         };
       })();
       
-      const resolvedArgs = await withWorktreeUpstreamDefaults(projectDirectory, args);
+      const resolvedArgs = await withWorktreeUpstreamDefaults(
+        projectDirectory,
+        args,
+        linkedPr ? { resolvedRootTrackingRemote: baseRemote } : undefined,
+      );
 
       const metadata = await createWorktree(projectRef, resolvedArgs);
 
       let createdSessionId: string | null = null;
 
       if (shouldCreateSession) {
-        if (await getWorktreeSetupWaitEnabled(projectRef)) {
+        // Linked PR sources are attached during fast bootstrap. Always wait for
+        // that bootstrap before creating the linked session, even when ordinary
+        // worktrees are configured to continue without waiting for setup.
+        if (linkedPrState || await getWorktreeSetupWaitEnabled(projectRef)) {
           await waitForWorktreeBootstrap(metadata.path);
         }
 
@@ -940,7 +935,12 @@ export function NewWorktreeDialog({
         onWorktreeCreated?.(metadata.path);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : t('session.newWorktree.error.createWorktreeFailed');
+      const presentationKey = getWorktreeErrorPresentationKey(error);
+      const message = presentationKey
+        ? t(presentationKey)
+        : error instanceof Error
+          ? error.message
+          : t('session.newWorktree.error.createWorktreeFailed');
       toast.error(t('session.newWorktree.error.createWorktreeFailed'), { description: message });
     } finally {
       setIsCreating(false);

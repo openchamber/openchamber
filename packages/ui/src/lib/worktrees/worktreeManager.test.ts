@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { GitWorktreeCreateResult } from '@/lib/api/types';
+import type { CreateGitWorktreePayload, GitWorktreeCreateResult } from '@/lib/api/types';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 type WorktreeListEntry = {
@@ -20,8 +20,12 @@ const createdWorktree = {
   bootstrapStatus: { status: 'pending' as const, error: null, updatedAt: 1 },
 };
 let createdWorktreeResult: GitWorktreeCreateResult = createdWorktree;
+const createPayloads: CreateGitWorktreePayload[] = [];
+const validatePayloads: CreateGitWorktreePayload[] = [];
 const bootstrapWatcherCalls: string[] = [];
 const bootstrapWatcherOptions: Array<{ onReady?: () => void }> = [];
+const bootstrapWaitCalls: string[] = [];
+let waitForBootstrap = (): Promise<void> => Promise.resolve();
 
 const sessionState = {
   availableWorktreesByProject: new Map<string, WorktreeMetadata[]>(),
@@ -43,6 +47,10 @@ mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
   startWorktreeBootstrapWatcher: (directory: string, options?: { onReady?: () => void }) => {
     bootstrapWatcherCalls.push(directory);
     bootstrapWatcherOptions.push(options ?? {});
+  },
+  waitForWorktreeBootstrap: (directory: string) => {
+    bootstrapWaitCalls.push(directory);
+    return waitForBootstrap();
   },
 }));
 
@@ -80,13 +88,20 @@ mock.module('@/lib/gitApi', () => ({
           listResolvers.push(resolve);
         });
       },
-      create: mock(() => Promise.resolve(createdWorktreeResult)),
+      create: mock((_directory: string, payload: CreateGitWorktreePayload) => {
+        createPayloads.push(payload);
+        return Promise.resolve(createdWorktreeResult);
+      }),
+      validate: mock((_directory: string, payload: CreateGitWorktreePayload) => {
+        validatePayloads.push(payload);
+        return Promise.resolve({ ok: true, errors: [] });
+      }),
       remove: mock(() => Promise.resolve({ success: true })),
     },
   },
 }));
 
-const { createWorktree, getLatestWorktreeMetadata, listProjectWorktrees, worktreeMapsEqual } = await import('./worktreeManager');
+const { createWorktree, getLatestWorktreeMetadata, listProjectWorktrees, validateWorktreeCreate, worktreeMapsEqual } = await import('./worktreeManager');
 
 const waitForListCallCount = async (count: number): Promise<void> => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -104,6 +119,10 @@ describe('worktreeManager list invalidation', () => {
     listResolvers.length = 0;
     bootstrapWatcherCalls.length = 0;
     bootstrapWatcherOptions.length = 0;
+    bootstrapWaitCalls.length = 0;
+    waitForBootstrap = () => Promise.resolve();
+    createPayloads.length = 0;
+    validatePayloads.length = 0;
     createdWorktreeResult = createdWorktree;
     sessionState.availableWorktreesByProject = new Map();
     sessionState.availableWorktrees = [];
@@ -146,6 +165,58 @@ describe('worktreeManager list invalidation', () => {
     expect(metadata.worktreeStatus).toBe('pending');
     expect(sessionState.availableWorktrees[0]?.worktreeStatus).toBe('pending');
     expect(bootstrapWatcherCalls).toEqual(['/repo-feature']);
+  });
+
+  test('preserves linked PR identity and an explicit no-upstream choice for validation and creation', async () => {
+    const project = { id: 'project-1', path: '/repo' };
+    const args = {
+      mode: 'existing' as const,
+      branchName: 'pr/fallback',
+      existingBranch: 'feature/fallback',
+      worktreeName: 'pr-fallback',
+      prNumber: 2422,
+      baseRemote: 'upstream',
+      setUpstream: false,
+    };
+
+    await validateWorktreeCreate(project, args);
+    await createWorktree(project, args);
+
+    expect(validatePayloads).toHaveLength(1);
+    expect(validatePayloads[0]?.prNumber).toBe(2422);
+    expect(validatePayloads[0]?.baseRemote).toBe('upstream');
+    expect(validatePayloads[0]?.setUpstream).toBe(false);
+    expect(createPayloads).toHaveLength(1);
+    expect(createPayloads[0]?.prNumber).toBe(2422);
+    expect(createPayloads[0]?.baseRemote).toBe('upstream');
+    expect(createPayloads[0]?.setUpstream).toBe(false);
+  });
+
+  test('does not publish a linked PR worktree when bootstrap fails', async () => {
+    const failure = Object.assign(new Error('pull_request_unavailable'), {
+      code: 'pull_request_unavailable',
+    });
+    waitForBootstrap = () => Promise.reject(failure);
+
+    const error = await createWorktree({ id: 'project-1', path: '/repo' }, {
+      preferredName: 'pr-race',
+      mode: 'existing',
+      branchName: 'pr/race',
+      existingBranch: 'feature/race',
+      worktreeName: 'pr-race',
+      prNumber: 2422,
+      returnAfterDirectoryCreated: true,
+    }).then(
+      () => null,
+      (reason: unknown) => reason,
+    ) as Error & { code?: string };
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.code).toBe('pull_request_unavailable');
+
+    expect(bootstrapWaitCalls).toEqual(['/repo-feature']);
+    expect(sessionState.availableWorktrees).toEqual([]);
+    expect(sessionState.availableWorktreesByProject.size).toBe(0);
   });
 
   test('treats legacy create responses without bootstrap state as fully ready', async () => {

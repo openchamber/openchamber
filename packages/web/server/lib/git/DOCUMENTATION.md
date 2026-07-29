@@ -47,6 +47,7 @@ The following functions are exported and used by the web server:
 - `getWorktrees(directory)`: List all git worktrees for a repository.
 - `validateWorktreeCreate(directory, input)`: Validate worktree creation parameters (mode, branchName, startRef, upstream config).
 - `createWorktree(directory, input)`: Create a new worktree (supports 'new' and 'existing' modes, upstream setup).
+- Linked pull request creates may include `prNumber` and `baseRemote`. Validation checks fork/base availability without provisioning remotes; creation prefers a freshly fetched fork and falls back to the base pull request source, allocating a collision-safe fork remote without rewriting existing remotes and never configuring tracking for a source that was not freshly fetched. When neither source is usable, validation and creation return the stable `pull_request_unavailable` code for runtime-specific UI presentation.
 - `removeWorktree(directory, input)`: Remove a worktree (optionally delete local branch).
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
 
@@ -120,7 +121,7 @@ The following functions are internal helpers used by exported functions:
 - `branch`: Local branch name.
 - `path`: Absolute path to worktree directory.
 - `directoryCreated`: Present when create returned after the target directory exists while background Git/bootstrap work continues.
-- `bootstrapStatus`: Background setup state. The legacy `status` remains `pending`, `ready`, or `failed`, while `phase` reports `directory-created`, `git-ready`, or `setup-ready`. Fast create starts at `pending`/`directory-created`; population and upstream Git completion advances to `pending`/`git-ready` before setup/start scripts; completed setup is `ready`/`setup-ready`. A missing in-memory state falls back to `ready`/`setup-ready`; clients continue to accept legacy status responses that omit `phase`.
+- `bootstrapStatus`: Background setup state. The legacy `status` remains `pending`, `ready`, or `failed`, while `phase` reports `directory-created`, `git-ready`, or `setup-ready`. Failed states may also carry a stable machine-readable `code` for localized runtime presentation. Fast create starts at `pending`/`directory-created`; population and upstream Git completion advances to `pending`/`git-ready` before setup/start scripts; completed setup is `ready`/`setup-ready`. A missing in-memory state falls back to `ready`/`setup-ready`; clients continue to accept legacy status responses that omit `phase`.
 - Fast-create background failures remove OpenCode sandbox metadata for directories that never became Git worktrees, and remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
 - Worktree removal waits for any active create/bootstrap task for that directory before deleting it, preventing a background Git or setup task from restoring removed state or racing filesystem cleanup.
 - Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains byte-for-byte and metadata-identical across the retry window, it is treated as stale, removed, and population continues automatically; changing locks are left untouched and reported as failures.

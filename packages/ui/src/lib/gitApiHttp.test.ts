@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { getGitStatus, gitFetch, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from './gitApiHttp';
+import {
+  createGitWorktree,
+  getGitStatus,
+  getGitWorktreeBootstrapStatus,
+  gitFetch,
+  stageGitFile,
+  stageGitFiles,
+  unstageGitFile,
+  unstageGitFiles,
+} from './gitApiHttp';
 
 type FetchCall = {
   input: RequestInfo | URL;
@@ -155,6 +164,53 @@ describe('gitApiHttp status cache', () => {
         '/api/git/fetch?directory=%2Frepo-cache-fetch',
         '/api/git/status?directory=%2Frepo-cache-fetch',
       ]);
+    } finally {
+      restoreMocks();
+    }
+  });
+});
+
+describe('gitApiHttp worktree failures', () => {
+  test('preserves the structured pull-request source code from create errors', async () => {
+    installWindowMock();
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      error: 'pull_request_unavailable',
+      code: 'pull_request_unavailable',
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    try {
+      const error = await captureError(async () => {
+        await createGitWorktree('/repo', { worktreeName: 'pr-race' });
+      }) as Error & { code?: string };
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toBe('pull_request_unavailable');
+      expect(error.code).toBe('pull_request_unavailable');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('preserves the structured pull-request source code from bootstrap status', async () => {
+    installWindowMock();
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      status: 'failed',
+      phase: 'directory-created',
+      error: 'pull_request_unavailable',
+      code: 'pull_request_unavailable',
+      updatedAt: 1,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    try {
+      const status = await getGitWorktreeBootstrapStatus('/repo-pr-race');
+      expect(status.status).toBe('failed');
+      expect(status.code).toBe('pull_request_unavailable');
     } finally {
       restoreMocks();
     }
