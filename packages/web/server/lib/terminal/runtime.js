@@ -62,10 +62,9 @@ export function createTerminalRuntime({
       if (!args) throw new Error(`Terminal shell "${resolvedShell.id}" does not support login mode`);
       try {
         const env = { ...process.env, PATH: buildAugmentedPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
-        // IPC targets belong to the host process and must not be inherited by PTYs.
-        delete env.NODE_CHANNEL_FD;
-        delete env.BUN_WATCH_PID;
-        delete env.BUN_HOT;
+        // IPC targets belong to the host process and must be disabled for PTYs.
+        env.NODE_CHANNEL_FD = '';
+        env.BUN_WATCH_PID = '';
         delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
         const options = { name: 'xterm-256color', cwd, cols, rows, env, ...(process.platform === 'win32' ? { useConpty: true } : {}) };
         return { process: provider.spawn(executable, args, options), backend: provider.backend, shell: resolvedShell.id, loginShell };

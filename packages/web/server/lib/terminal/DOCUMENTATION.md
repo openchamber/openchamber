@@ -23,7 +23,7 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - IDs are client-provided or generated with `randomUUID()`.
 - Concurrent creates for one ID are single-flight only when working directory and shell preference match. Existing IDs cannot be reused for another working directory.
 - Dimensions are bounded to 1-1000 columns and 1-500 rows; input is capped at 64 KiB.
-- PTY children remove `NODE_CHANNEL_FD`, `BUN_WATCH_PID`, and `BUN_HOT`; host IPC targets are private and invalid after PTY descriptor cleanup.
+- PTY children set `NODE_CHANNEL_FD` and `BUN_WATCH_PID` to empty strings; host IPC targets are private and invalid after PTY descriptor cleanup.
 - `GET /api/terminal/shells` reports shell IDs available on the active server using the same augmented PATH provided to spawned PTYs, plus whether each executable has a supported login-mode argument. `auto` preserves environment/platform fallback order; an explicit unavailable shell fails creation instead of silently running a different shell. Login mode is opt-in and uses only built-in arguments for known shells. Preference changes affect new sessions and explicit restarts, not running PTYs.
 - PTY data and exit callbacks enter one FIFO queue. Stale callbacks from replaced processes are ignored.
 - Scrollback is retained on the server and capped at 512 KiB with UTF-8-safe trimming. Device-status, device-attribute, cursor-position reply, and color-query exchanges are removed from replay history with incomplete control sequences carried across PTY chunks; live output remains byte-for-byte unchanged.

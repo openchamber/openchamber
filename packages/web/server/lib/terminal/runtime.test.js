@@ -147,19 +147,17 @@ describe('terminal runtime', () => {
 
   it('creates client-identified sessions and forwards bounded resize operations', async () => {
     const harness = createHarness();
-    const ipcEnv = Object.fromEntries(['NODE_CHANNEL_FD', 'BUN_WATCH_PID', 'BUN_HOT'].map((key) => [key, process.env[key]]));
+    const ipcEnv = Object.fromEntries(['NODE_CHANNEL_FD', 'BUN_WATCH_PID'].map((key) => [key, process.env[key]]));
     process.env.NODE_CHANNEL_FD = '3';
     process.env.BUN_WATCH_PID = '123';
-    process.env.BUN_HOT = '1';
     try {
       const response = createResponse();
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-1', cwd: '/repo', cols: 120, rows: 40, themeMode: 'light', terminalBackground: '#faf8f0', terminalForeground: '#1b1b1b' } }, response);
       expect(response.body).toEqual({ sessionId: 'term-1', cols: 120, rows: 40, status: 'running' });
       expect(harness.processes[0].options.cwd).toBe('/repo');
       expect(harness.processes[0].options.env.COLORFGBG).toBe('0;15');
-      expect(harness.processes[0].options.env.NODE_CHANNEL_FD).toBeUndefined();
-      expect(harness.processes[0].options.env.BUN_WATCH_PID).toBeUndefined();
-      expect(harness.processes[0].options.env.BUN_HOT).toBeUndefined();
+      expect(harness.processes[0].options.env.NODE_CHANNEL_FD).toBe('');
+      expect(harness.processes[0].options.env.BUN_WATCH_PID).toBe('');
       harness.processes[0].emitData('\u001b[?2031h\u001b]10;?\u0007\u001b]11;?\u0007');
       expect(harness.processes[0].writes).toEqual(['\u001b]10;rgb:1b1b/1b1b/1b1b\u001b\\', '\u001b]11;rgb:fafa/f8f8/f0f0\u001b\\']);
 
