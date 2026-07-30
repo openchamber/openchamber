@@ -2,7 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
-import { computeNodeStructureKey, nodeHasPinnedMembershipChange, selectFolderRootNodes } from './sessionNodeItemUtils';
+import {
+  computeNodeStructureKey,
+  isSessionTreeRoot,
+  nodeHasPinnedMembershipChange,
+  selectFolderRootNodes,
+  shouldHardDeleteSession,
+} from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 
 const session = (id: string, title: string): Session => ({
@@ -15,6 +21,34 @@ const rootWithChild = (childSession: Session): SessionNode => ({
   session: session('root', 'Root'),
   children: [{ session: childSession, children: [], worktree: null }],
   worktree: null,
+});
+
+describe('shouldHardDeleteSession', () => {
+  test('preserves explicit hard-delete intent for an active session', () => {
+    const active = session('active', 'Active');
+    const archived = { ...session('archived', 'Archived'), time: { created: 1, updated: 1, archived: 2 } };
+
+    expect(shouldHardDeleteSession(active)).toBe(false);
+    expect(shouldHardDeleteSession(archived)).toBe(true);
+    expect(shouldHardDeleteSession(active, true)).toBe(true);
+  });
+});
+
+describe('isSessionTreeRoot', () => {
+  test('keeps new active children under archived parents but detaches independently archived children', () => {
+    const activeParent = session('active-parent', 'Active parent');
+    const archivedParent = { ...session('archived-parent', 'Archived parent'), time: { created: 1, updated: 1, archived: 2 } };
+    const activeChild = { ...session('active-child', 'Active child'), parentID: archivedParent.id };
+    const archivedChild = {
+      ...session('archived-child', 'Archived child'),
+      parentID: activeParent.id,
+      time: { created: 1, updated: 1, archived: 2 },
+    };
+    const sessionsById = new Map([activeParent, archivedParent, activeChild, archivedChild].map((value) => [value.id, value]));
+
+    expect(isSessionTreeRoot(activeChild, sessionsById)).toBe(false);
+    expect(isSessionTreeRoot(archivedChild, sessionsById)).toBe(true);
+  });
 });
 
 describe('computeNodeStructureKey', () => {
