@@ -77,6 +77,15 @@ describe('createWebFilesAPI', () => {
       cache: 'default',
       headers: { 'x-opencode-directory': '/worktree-a' },
     });
+
+    runtimeFetchMock.mockResolvedValueOnce(new Response('fresh content'));
+    await api.readFile?.('/worktree-b/file.txt', { directory: '/worktree-a', fresh: true });
+
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
+      query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
+      cache: 'no-store',
+      headers: { 'x-opencode-directory': '/worktree-a' },
+    });
   });
 
   it('sends the workspace directory header for downloads', async () => {

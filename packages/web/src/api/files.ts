@@ -197,7 +197,7 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
     const response = await runtimeFetch('/api/fs/read', {
       query: params,
-      cache: options?.optional ? 'no-store' : 'default',
+      cache: options?.optional || options?.fresh ? 'no-store' : 'default',
       headers: directoryHeaders(getDirectory, options?.directory),
     });
 
