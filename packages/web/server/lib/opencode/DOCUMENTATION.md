@@ -329,6 +329,9 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
 - `registerOpenChamberRoutes(app, dependencies)`: registers OpenChamber endpoints:
   - `GET /api/openchamber/update-check`
   - `POST /api/openchamber/update-install`
+    - Foreground servers running under a systemd user unit queue installation in
+      a separate transient unit and restart the configured service afterwards.
+      `OPENCHAMBER_SYSTEMD_UNIT` overrides the default `openchamber.service`.
   - `GET /api/openchamber/models-metadata`
   - `GET /api/zen/models`
 
