@@ -79,6 +79,34 @@ Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sess
 
 Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
 
+### Context panel state in `useUIStore.ts`
+
+`contextPanelByDirectory` holds per-directory panel state (open/expanded, tabs,
+active tab, manual sizes). Two independent size maps live there:
+
+- `widthByMode` — manual per-surface widths in px, clamped 380-1400.
+- `heightByMode` — manual per-surface heights in px, clamped 120-1200, used
+  while the panel is bottom-docked.
+
+The maps are deliberately separate and never seed each other. Reusing a
+persisted width as a height would give every existing user an absurd panel
+height the first time they switch docks, so `heightByMode` simply defaults to
+`{}` and unset surfaces fall back to their registry `defaultHeightFraction`.
+Both maps are sanitized independently against the same `isContextPanelMode`
+whitelist on hydration; malformed or unknown-mode entries are dropped.
+
+Which edge the panel docks to is a global preference, not per-directory:
+`contextPanelDock` (`'right' | 'bottom'`, default `'right'`). It is a user layout
+preference and must be settable from Settings where no directory is in scope.
+`sanitizeContextPanelDock` resolves anything that is not exactly `'bottom'` to
+`'right'`, and runs on persist hydration and when applying remote desktop
+settings. No migration exists or is needed: the change is purely additive, older
+builds ignore both new keys, and newer builds reading older state get `{}` and
+`'right'`.
+
+Runtime scope is desktop/web `MainLayout` only. VS Code and the mobile shell do
+not render `ContextPanel`, so the dock setting is hidden there.
+
 ### `useTerminalStore.ts`
 
 `useTerminalStore` owns terminal tab arrangement per directory plus PTY scrollback.

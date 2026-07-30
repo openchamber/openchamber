@@ -61,8 +61,19 @@ type ContextPanelDirectoryState = {
   // Manual per-surface widths (px), populated only by user resize; surfaces
   // without an entry fall back to their registry defaultWidthFraction.
   widthByMode: Partial<Record<ContextPanelMode, number>>;
+  // Manual per-surface heights (px) used while the panel is bottom-docked.
+  // Deliberately separate from widthByMode: persisted widths are 380-1400px and
+  // reusing them as heights would give every existing user an absurd height the
+  // first time they switch docks. Surfaces without an entry fall back to their
+  // registry defaultHeightFraction.
+  heightByMode: Partial<Record<ContextPanelMode, number>>;
   touchedAt: number;
 };
+
+// Which edge of the chat column the context panel docks to. Global rather than
+// per-directory: it is a user layout preference, and Settings must be able to
+// change it with no directory in scope.
+export type ContextPanelDock = 'right' | 'bottom';
 
 type PendingFileNavigation = {
   path: string;
@@ -118,6 +129,11 @@ const isLegacyDefaultTemplates = (value: unknown): boolean => {
 const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
+// Heights are their own numbers, not the width clamps: a 380px minimum would
+// forbid the short bottom-docked terminal that the dock preference exists for.
+const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
+const CONTEXT_PANEL_MIN_HEIGHT = 120;
+const CONTEXT_PANEL_MAX_HEIGHT = 1200;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
 const LEFT_SIDEBAR_MIN_WIDTH = 280;
@@ -157,6 +173,37 @@ const clampContextPanelWidth = (width: number): number => {
 
   return Math.min(CONTEXT_PANEL_MAX_WIDTH, Math.max(CONTEXT_PANEL_MIN_WIDTH, Math.round(width)));
 };
+
+const clampContextPanelHeight = (height: number): number => {
+  if (!Number.isFinite(height)) {
+    return CONTEXT_PANEL_DEFAULT_HEIGHT;
+  }
+
+  return Math.min(CONTEXT_PANEL_MAX_HEIGHT, Math.max(CONTEXT_PANEL_MIN_HEIGHT, Math.round(height)));
+};
+
+// Shared by the persisted widthByMode/heightByMode sanitizers so the two size
+// maps cannot drift apart on which modes they accept.
+const isContextPanelMode = (value: unknown): value is ContextPanelMode => (
+  value === 'diff'
+  || value === 'file'
+  || value === 'context'
+  || value === 'plan'
+  || value === 'chat'
+  || value === 'preview'
+  || value === 'browser'
+  || value === 'git'
+  || value === 'pr'
+  || value === 'notes'
+  || value === 'terminal'
+);
+
+// Anything that is not exactly 'bottom' resolves to the 'right' default, so a
+// corrupt persisted snapshot or an out-of-contract caller can never produce a
+// broken layout. Applied on persist hydration and in setContextPanelDock.
+const sanitizeContextPanelDock = (value: unknown): ContextPanelDock => (
+  value === 'bottom' ? 'bottom' : 'right'
+);
 
 const normalizeContextTargetPath = (value: string | null | undefined): string | null => {
   if (typeof value !== 'string') {
@@ -352,6 +399,7 @@ const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanel
     tabs: [],
     activeTabId: null,
     widthByMode: {},
+    heightByMode: {},
     touchedAt: Date.now(),
   };
 };
@@ -471,7 +519,10 @@ const setContextPanelTabTargetPath = (
   ),
 });
 
-const sanitizeContextPanelByDirectory = (
+// Exported so the persisted context-panel contract (size-map round-trips,
+// malformed entries, unknown modes) can be tested directly; the app itself only
+// calls it from persist migration.
+export const sanitizeContextPanelByDirectory = (
   value: unknown,
 ): Record<string, ContextPanelDirectoryState> => {
   if (!value || typeof value !== 'object') {
@@ -493,6 +544,7 @@ const sanitizeContextPanelByDirectory = (
       tabs?: unknown;
       activeTabId?: unknown;
       widthByMode?: unknown;
+      heightByMode?: unknown;
       touchedAt?: unknown;
       mode?: unknown;
       targetPath?: unknown;
@@ -521,12 +573,18 @@ const sanitizeContextPanelByDirectory = (
     const widthByMode: Partial<Record<ContextPanelMode, number>> = {};
     if (candidate.widthByMode && typeof candidate.widthByMode === 'object') {
       for (const [mode, value] of Object.entries(candidate.widthByMode as Record<string, unknown>)) {
-        if (
-          (mode === 'diff' || mode === 'file' || mode === 'context' || mode === 'plan' || mode === 'chat' || mode === 'preview' || mode === 'browser' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'terminal')
-          && typeof value === 'number'
-          && Number.isFinite(value)
-        ) {
+        if (isContextPanelMode(mode) && typeof value === 'number' && Number.isFinite(value)) {
           widthByMode[mode] = clampContextPanelWidth(value);
+        }
+      }
+    }
+
+    // Clamped independently of widthByMode; the two maps never seed each other.
+    const heightByMode: Partial<Record<ContextPanelMode, number>> = {};
+    if (candidate.heightByMode && typeof candidate.heightByMode === 'object') {
+      for (const [mode, value] of Object.entries(candidate.heightByMode as Record<string, unknown>)) {
+        if (isContextPanelMode(mode) && typeof value === 'number' && Number.isFinite(value)) {
+          heightByMode[mode] = clampContextPanelHeight(value);
         }
       }
     }
@@ -537,6 +595,7 @@ const sanitizeContextPanelByDirectory = (
       tabs: clampedTabs,
       activeTabId: resolveActiveContextPanelTabID(clampedTabs, resolvedActiveTabId),
       widthByMode,
+      heightByMode,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -701,6 +760,7 @@ interface UIStore {
   stickyUserHeader: boolean;
   promptNavigatorEnabled: boolean;
   expandedEditorToolbar: boolean;
+  contextPanelDock: ContextPanelDock;
   showSplitAssistantMessageActions: boolean;
   allowPromptingSubagentSessions: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
@@ -734,6 +794,8 @@ interface UIStore {
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
   setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number) => void;
+  setContextPanelHeight: (directory: string, mode: ContextPanelMode, height: number) => void;
+  setContextPanelDock: (value: ContextPanelDock) => void;
   setNotesPanelHeight: (height: number) => void;
   setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
@@ -1014,6 +1076,7 @@ export const useUIStore = create<UIStore>()(
         stickyUserHeader: false,
         promptNavigatorEnabled: true,
         expandedEditorToolbar: false,
+        contextPanelDock: 'right',
         showSplitAssistantMessageActions: false,
         allowPromptingSubagentSessions: false,
         draftStartersVisible: true,
@@ -1420,6 +1483,30 @@ export const useUIStore = create<UIStore>()(
                 widthByMode: {
                   ...current.widthByMode,
                   [mode]: clampContextPanelWidth(width),
+                },
+              },
+            };
+
+            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        setContextPanelHeight: (directory, mode, height) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) {
+            return;
+          }
+
+          set((state) => {
+            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const current = touchContextPanelState(prev);
+            const byDirectory = {
+              ...state.contextPanelByDirectory,
+              [normalizedDirectory]: {
+                ...current,
+                heightByMode: {
+                  ...current.heightByMode,
+                  [mode]: clampContextPanelHeight(height),
                 },
               },
             };
@@ -2194,6 +2281,11 @@ export const useUIStore = create<UIStore>()(
         setExpandedEditorToolbar: (value: boolean) => {
           set({ expandedEditorToolbar: value });
         },
+        setContextPanelDock: (value) => {
+          // Sanitized here too, not just on hydration: the store is the boundary
+          // that guarantees the layout only ever sees a valid dock.
+          set({ contextPanelDock: sanitizeContextPanelDock(value) });
+        },
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
         },
@@ -2360,6 +2452,10 @@ export const useUIStore = create<UIStore>()(
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
 
+          // No migration: heightByMode defaults to {} and an unknown persisted
+          // dock resolves to 'right', so older snapshots need no conversion.
+          state.contextPanelDock = sanitizeContextPanelDock(state.contextPanelDock);
+
           state.contextRailOrder = Array.isArray(state.contextRailOrder)
             ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
             : [];
@@ -2453,6 +2549,7 @@ export const useUIStore = create<UIStore>()(
           stickyUserHeader: state.stickyUserHeader,
           promptNavigatorEnabled: state.promptNavigatorEnabled,
           expandedEditorToolbar: state.expandedEditorToolbar,
+          contextPanelDock: state.contextPanelDock,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           draftStartersVisible: state.draftStartersVisible,

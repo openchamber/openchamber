@@ -147,6 +147,7 @@ const GeneralSectionContent: React.FC = () => {
             <OpenChamberVisualSettings visibleSettings={[
                 'fileEditorKeymap',
                 'expandedEditorToolbar',
+                'contextPanelDock',
                 ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
                 ...(!isVSCode ? ['terminalShell' as const] : []),
                 ...(!isVSCode ? ['terminalLoginShell' as const] : []),

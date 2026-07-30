@@ -17,6 +17,15 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
 - `defaultWidthFraction` is the panel width as a fraction of the content area,
   used until the user manually resizes that surface (manual widths are stored
   per mode in `useUIStore.contextPanelByDirectory[dir].widthByMode`).
+- `defaultHeightFraction` is the same idea for the bottom dock, resolved against
+  the content area height and stored per mode in the separate
+  `heightByMode` map. It is required on every descriptor, and the two maps never
+  seed each other: persisted widths are 380-1400px and would be absurd heights.
+- Dock edge is a global user preference, `useUIStore.contextPanelDock`
+  (`'right' | 'bottom'`, default `'right'`). It moves the whole panel as one
+  unit; there are no per-surface dock positions. The rail stays a vertical strip
+  on the right in both docks, so a bottom-docked panel spans the chat column
+  only — not the sessions sidebar or the rail.
 - Rail order is user-reorderable and persisted globally in
   `useUIStore.contextRailOrder`; `sortContextSurfaces` applies it on top of the
   registry's default order and appends any missing surfaces.
@@ -24,8 +33,9 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
 ## Adding a surface
 
 1. Add a `ContextPanelMode` value in `useUIStore` (type union plus the
-   sanitizer whitelist in `sanitizeContextPanelTabs`).
-2. Register a descriptor here (icon, label key, availability, width fraction).
+   sanitizer whitelist in `sanitizeContextPanelTabs` and `isContextPanelMode`).
+2. Register a descriptor here (icon, label key, availability, width fraction,
+   height fraction).
 3. Render the mode in `ContextPanel.tsx` (content dispatch, label, icon).
 4. Add label/hint i18n keys to every locale dictionary.
 

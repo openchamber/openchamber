@@ -155,6 +155,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'appearance.context-panel-dock',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.contextPanelDock',
+    descriptionKey: 'settings.openchamber.visual.field.contextPanelDockHint',
+    keywords: ['panel', 'dock', 'bottom', 'right', 'terminal', 'layout', 'position'],
+    // Only the desktop/web MainLayout renders ContextPanel.
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+  },
+  {
     id: 'appearance.file-editor-keymap',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',

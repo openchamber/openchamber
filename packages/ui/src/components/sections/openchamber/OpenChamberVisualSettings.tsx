@@ -4,6 +4,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
+import type { ContextPanelDock } from '@/stores/useUIStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -279,7 +280,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'expandedEditorToolbar' | 'contextPanelDock';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -330,6 +331,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const expandedEditorToolbar = useUIStore(state => state.expandedEditorToolbar);
     const setExpandedEditorToolbar = useUIStore(state => state.setExpandedEditorToolbar);
+    const contextPanelDock = useUIStore(state => state.contextPanelDock);
+    const setContextPanelDock = useUIStore(state => state.setContextPanelDock);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
     const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
     const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
@@ -524,6 +527,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ expandedEditorToolbar: enabled });
     }, [setExpandedEditorToolbar]);
 
+    const handleContextPanelDockChange = React.useCallback((value: ContextPanelDock) => {
+        setContextPanelDock(value);
+        void updateDesktopSettings({ contextPanelDock: value });
+    }, [setContextPanelDock]);
+
     const handleCollapsibleUserMessagesChange = React.useCallback((enabled: boolean) => {
         setCollapsibleUserMessages(enabled);
         void updateDesktopSettings({ collapsibleUserMessages: enabled });
@@ -643,7 +651,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         ? hasLocalizationSettings
         : (shouldShow('theme') || showWindowControlsPositionSetting || showMobileLayoutSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || (shouldShow('expandedEditorToolbar') && !isVSCode);
+    const showContextPanelDockSetting = shouldShow('contextPanelDock') && !isVSCode && !isMobile;
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || (shouldShow('expandedEditorToolbar') && !isVSCode) || showContextPanelDockSetting;
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
@@ -1523,6 +1532,23 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     ariaLabel={t('settings.openchamber.visual.field.expandedEditorToolbarAria')}
                                     settingsItem="appearance.expanded-editor-toolbar"
                                 />
+                            )}
+                            {showContextPanelDockSetting && (
+                                <SettingsFieldRow
+                                    label={t('settings.openchamber.visual.field.contextPanelDock')}
+                                    info={t('settings.openchamber.visual.field.contextPanelDockHint')}
+                                    settingsItem="appearance.context-panel-dock"
+                                >
+                                    <SettingsChipGroup
+                                        value={contextPanelDock}
+                                        options={(['right', 'bottom'] as const).map((dock) => ({
+                                            value: dock,
+                                            label: t(`settings.openchamber.visual.option.contextPanelDock.${dock}`),
+                                        }))}
+                                        onChange={handleContextPanelDockChange}
+                                        aria-label={t('settings.openchamber.visual.field.contextPanelDockAria')}
+                                    />
+                                </SettingsFieldRow>
                             )}
                             {shouldShow('terminalQuickKeys') && !isMobile && (
                                 <SettingsCheckboxRow

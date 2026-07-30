@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry';
-import { useUIStore } from './useUIStore';
+import { sanitizeContextPanelByDirectory, useUIStore } from './useUIStore';
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
+  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [], contextPanelDock: 'right' });
 });
 
 describe('useUIStore context panel tabs', () => {
@@ -155,6 +155,145 @@ describe('useUIStore per-surface panel widths', () => {
     expect(state?.widthByMode.diff).toBe(700);
     expect(state?.widthByMode.git).toBe(380);
     expect(state?.widthByMode.browser).toBe(undefined);
+  });
+});
+
+describe('useUIStore per-surface panel heights', () => {
+  const directory = '/repo';
+
+  test('setContextPanelHeight stores a clamped manual height for one mode only', () => {
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal' });
+    useUIStore.getState().setContextPanelHeight(directory, 'terminal', 300);
+    // Below CONTEXT_PANEL_MIN_HEIGHT (120) and above CONTEXT_PANEL_MAX_HEIGHT (1200).
+    useUIStore.getState().setContextPanelHeight(directory, 'git', 10);
+    useUIStore.getState().setContextPanelHeight(directory, 'diff', 5000);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.heightByMode.terminal).toBe(300);
+    expect(state?.heightByMode.git).toBe(120);
+    expect(state?.heightByMode.diff).toBe(1200);
+    expect(state?.heightByMode.browser).toBe(undefined);
+  });
+
+  test('heights use the height clamp, not the 380px width minimum', () => {
+    useUIStore.getState().setContextPanelHeight(directory, 'terminal', 200);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    // 200 would have been raised to 380 by clampContextPanelWidth.
+    expect(state?.heightByMode.terminal).toBe(200);
+  });
+
+  test('width and height maps do not bleed into each other', () => {
+    useUIStore.getState().setContextPanelWidth(directory, 'terminal', 900);
+    useUIStore.getState().setContextPanelHeight(directory, 'terminal', 240);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.widthByMode.terminal).toBe(900);
+    expect(state?.heightByMode.terminal).toBe(240);
+  });
+});
+
+describe('sanitizeContextPanelByDirectory size maps', () => {
+  const directory = '/repo';
+
+  test('round-trips both size maps independently', () => {
+    const sanitized = sanitizeContextPanelByDirectory({
+      [directory]: {
+        isOpen: true,
+        tabs: [{ mode: 'terminal' }],
+        activeTabId: 'terminal',
+        widthByMode: { terminal: 900 },
+        heightByMode: { terminal: 240 },
+      },
+    });
+
+    expect(sanitized[directory]?.widthByMode).toEqual({ terminal: 900 });
+    expect(sanitized[directory]?.heightByMode).toEqual({ terminal: 240 });
+  });
+
+  test('defaults heightByMode to empty for snapshots written before the dock setting', () => {
+    const sanitized = sanitizeContextPanelByDirectory({
+      [directory]: {
+        isOpen: true,
+        tabs: [{ mode: 'terminal' }],
+        widthByMode: { terminal: 900 },
+      },
+    });
+
+    // No migration: an older snapshot keeps its widths and simply starts with no
+    // manual heights, rather than reinterpreting widths as heights.
+    expect(sanitized[directory]?.widthByMode).toEqual({ terminal: 900 });
+    expect(sanitized[directory]?.heightByMode).toEqual({});
+  });
+
+  test('drops malformed and unknown-mode height entries instead of storing them', () => {
+    const sanitized = sanitizeContextPanelByDirectory({
+      [directory]: {
+        isOpen: true,
+        tabs: [{ mode: 'terminal' }],
+        heightByMode: {
+          terminal: 240,
+          git: '300',
+          pr: Number.NaN,
+          diff: null,
+          notARealMode: 400,
+        },
+      },
+    });
+
+    expect(sanitized[directory]?.heightByMode).toEqual({ terminal: 240 });
+  });
+
+  test('clamps persisted heights on read', () => {
+    const sanitized = sanitizeContextPanelByDirectory({
+      [directory]: {
+        isOpen: true,
+        tabs: [{ mode: 'terminal' }],
+        heightByMode: { terminal: 5, diff: 9000 },
+      },
+    });
+
+    expect(sanitized[directory]?.heightByMode).toEqual({ terminal: 120, diff: 1200 });
+  });
+});
+
+describe('useUIStore contextPanelDock', () => {
+  const directory = '/repo';
+
+  test('defaults to right', () => {
+    expect(useUIStore.getState().contextPanelDock).toBe('right');
+  });
+
+  test('accepts bottom', () => {
+    useUIStore.getState().setContextPanelDock('bottom');
+    expect(useUIStore.getState().contextPanelDock).toBe('bottom');
+  });
+
+  test('resolves anything that is not bottom to right', () => {
+    useUIStore.getState().setContextPanelDock('bottom');
+    // Out-of-contract values can reach the store from persisted snapshots and
+    // remote desktop settings.
+    useUIStore.getState().setContextPanelDock('sideways' as 'right');
+    expect(useUIStore.getState().contextPanelDock).toBe('right');
+
+    useUIStore.getState().setContextPanelDock('bottom');
+    useUIStore.getState().setContextPanelDock(undefined as unknown as 'right');
+    expect(useUIStore.getState().contextPanelDock).toBe('right');
+  });
+
+  test('switching dock does not mutate either size map', () => {
+    useUIStore.getState().setContextPanelWidth(directory, 'terminal', 900);
+    useUIStore.getState().setContextPanelHeight(directory, 'terminal', 240);
+
+    const before = useUIStore.getState().contextPanelByDirectory[directory];
+    useUIStore.getState().setContextPanelDock('bottom');
+    useUIStore.getState().setContextPanelDock('right');
+    const after = useUIStore.getState().contextPanelByDirectory[directory];
+
+    expect(after?.widthByMode).toEqual({ terminal: 900 });
+    expect(after?.heightByMode).toEqual({ terminal: 240 });
+    // The dock is global state; per-directory panel state keeps its reference.
+    expect(after).toBe(before);
   });
 });
 

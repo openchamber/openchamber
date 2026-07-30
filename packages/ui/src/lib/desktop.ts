@@ -166,6 +166,7 @@ export type DesktopSettings = {
   stickyUserHeader?: boolean;
   promptNavigatorEnabled?: boolean;
   expandedEditorToolbar?: boolean;
+  contextPanelDock?: 'right' | 'bottom';
   wideChatLayoutEnabled?: boolean;
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
