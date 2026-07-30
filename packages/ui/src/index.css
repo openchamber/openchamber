@@ -316,14 +316,16 @@ div[data-chat-input-footer="true"] {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 calc(100% - var(--scroll-shadow-size)),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 calc(100% - var(--scroll-shadow-size)),
     transparent 100%
   );
@@ -333,15 +335,32 @@ div[data-chat-input-footer="true"] {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 100%
   );
+}
+
+/* Sticky-fade overlay (desktop sidebar): the crisp duplicate identity stays
+   mounted and its visibility is driven synchronously by the scroller's own
+   top-scroll data attribute — the same signal that engages the mask — so the
+   overlay appears in the exact frame the mask hides the real header (no blink).
+   ScrollShadow sets data-top-scroll when nothing is below the viewport and
+   data-top-bottom-scroll when content is both above and below. */
+.oc-sticky-fade-overlay {
+  opacity: 0;
+}
+
+.oc-sticky-fade-root:has(.oc-sidebar-scroller[data-top-scroll="true"]) .oc-sticky-fade-overlay,
+.oc-sticky-fade-root:has(.oc-sidebar-scroller[data-top-bottom-scroll="true"]) .oc-sticky-fade-overlay {
+  opacity: 1;
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"] {

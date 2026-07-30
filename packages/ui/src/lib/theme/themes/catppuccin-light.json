@@ -22,15 +22,15 @@
     "surface": {
       "background": "#fff6f4",
       "foreground": "#2e314a",
-      "muted": "#f8ebe9",
+      "muted": "#f8edeb",
       "mutedForeground": "#888992",
       "elevated": "#fbefea",
       "elevatedForeground": "#4C4F69",
       "overlay": "#1F1F2A20",
-      "subtle": "#FDEEEE"
+      "subtle": "#fdeeee"
     },
     "interactive": {
-      "border": "#E0CFD3",
+      "border": "#e4d9dc",
       "borderHover": "#D6C4C8",
       "borderFocus": "#AB97A1",
       "selection": "#ffffff",

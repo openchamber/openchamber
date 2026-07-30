@@ -1075,6 +1075,8 @@ export const dict = {
   'filesView.editor.showControlsAria': 'Afficher les contrôles de l\'éditeur',
   'filesView.editor.controlsTitle': 'Contrôles de l\'éditeur',
   'filesView.editor.pickFileFromTree': 'Choisissez un fichier dans l\'arborescence.',
+  'filesView.editor.cannotPreviewBinary': 'Impossible de prévisualiser le fichier binaire',
+  'filesView.editor.binaryFileDescription': 'Ce fichier est binaire et ne peut pas être modifié dans OpenChamber. Téléchargez-le pour l’ouvrir avec une autre application.',
   'filesView.state.loading': 'Chargement...',
   'filesView.state.openingFileAtChange': 'Ouverture du fichier lors du changement...',
   'filesView.tree.search.placeholder': 'Rechercher des fichiers...',

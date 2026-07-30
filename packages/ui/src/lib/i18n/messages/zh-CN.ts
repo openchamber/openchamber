@@ -1213,6 +1213,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.showControlsAria': '显示编辑器控制项',
   'filesView.editor.controlsTitle': '编辑器控制项',
   'filesView.editor.pickFileFromTree': '请从文件树中选择一个文件。',
+  'filesView.editor.cannotPreviewBinary': '无法预览二进制文件',
+  'filesView.editor.binaryFileDescription': '此文件为二进制文件，无法在 OpenChamber 中编辑。请下载后使用其他应用打开。',
   'filesView.state.loading': '加载中...',
   'filesView.state.openingFileAtChange': '正在打开变更处的文件...',
   'filesView.tree.search.placeholder': '搜索文件...',

@@ -1250,6 +1250,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.showControlsAria': '편집기 컨트롤 표시',
   'filesView.editor.controlsTitle': '편집기 컨트롤',
   'filesView.editor.pickFileFromTree': '트리에서 파일을 선택하세요.',
+  'filesView.editor.cannotPreviewBinary': '바이너리 파일을 미리볼 수 없음',
+  'filesView.editor.binaryFileDescription': '이 파일은 바이너리이므로 OpenChamber에서 편집할 수 없습니다. 다른 앱으로 열려면 다운로드하세요.',
   'filesView.state.loading': '로드 중…',
   'filesView.state.openingFileAtChange': '변경 위치에서 파일 여는 중…',
   'filesView.tree.search.placeholder': '파일 검색…',

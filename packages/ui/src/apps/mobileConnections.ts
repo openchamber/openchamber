@@ -72,6 +72,20 @@ const MOBILE_SECURE_TIMEOUT_MS = 3000;
 // feels instant instead of hanging for seconds.
 const MOBILE_FAST_PROBE_TIMEOUT_MS = 2500;
 
+export const createMobilePasswordOperationTracker = () => {
+  let current = 0;
+  return {
+    begin: (): number => {
+      current += 1;
+      return current;
+    },
+    cancel: (): void => {
+      current += 1;
+    },
+    isCurrent: (operation: number): boolean => operation === current,
+  };
+};
+
 export type MobileConnectionMode = 'direct' | 'relay';
 
 // Persisted relay transport config. This is connection metadata, not a secret
@@ -1313,6 +1327,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
   const [pendingConnection, setPendingConnection] = React.useState<MobilePendingConnection | null>(null);
   const connectionsRef = React.useRef(connections);
   const busyRef = React.useRef<'connect' | 'password' | 'pairing' | null>(null);
+  const passwordOperationRef = React.useRef(createMobilePasswordOperationTracker());
 
   const applyConnections = React.useCallback((next: MobileSavedConnection[]) => {
     connectionsRef.current = next;
@@ -1496,6 +1511,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     if (!pendingConnection || !password.trim() || busyRef.current === 'password') return;
     setError(null);
     beginBusy('password');
+    const operation = passwordOperationRef.current.begin();
+    const isCurrentOperation = () => passwordOperationRef.current.isCurrent(operation);
     const { id, label, candidates } = pendingConnection;
     // A chosen relay transport owns an open tunnel; close it unless the switch
     // adopted it as the runtime tunnel.
@@ -1506,6 +1523,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       // tunnel; cookies never cross it, so an issued bearer token is mandatory
       // there. `issueClientToken` mints the device's token in one round-trip.
       chosen = await establishLiveTransport(candidates);
+      if (!isCurrentOperation()) return;
       if (!chosen) {
         setError(t('mobile.connect.error.unreachable'));
         return;
@@ -1522,12 +1540,14 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       const response = chosen.kind === 'relay'
         ? await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, chosen.tunnel.fetch('/auth/session', loginInit).catch(() => null))
         : await requestWithTimeout(`${chosen.url}/auth/session`, loginInit);
+      if (!isCurrentOperation()) return;
       logConnect('password:done', { ok: response?.ok === true, status: response?.status ?? null });
       if (!response?.ok) {
         setError(t('mobile.connect.error.passwordFailed'));
         return;
       }
       const body = await response.json().catch(() => null) as { clientToken?: unknown } | null;
+      if (!isCurrentOperation()) return;
       const issuedToken = typeof body?.clientToken === 'string' ? body.clientToken.trim() : '';
       logConnect('password:token', { issued: Boolean(issuedToken) });
 
@@ -1548,8 +1568,11 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
 
       // Persist the token BEFORE switching (no fire-and-forget).
       if (isCapacitorApp()) {
+        if (!isCurrentOperation()) return;
         await writeSecureToken(secureTokenKeyOf({ candidates }), issuedToken);
+        if (!isCurrentOperation()) return;
       }
+      if (!isCurrentOperation()) return;
       persistMetadata({ id, label, candidates, clientToken: issuedToken });
       setPendingConnection(null);
       // A relay transport hands its live login tunnel to the runtime (adopted
@@ -1560,20 +1583,24 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         { runtimeKey: secureTokenKeyOf({ candidates }) },
       );
       adopted = chosen.kind === 'relay';
+      if (!isCurrentOperation()) return;
       onConnected();
     } catch (error) {
+      if (!isCurrentOperation()) return;
       console.warn('[mobile-connect] password threw', error);
       setError(t('mobile.connect.error.passwordFailed'));
     } finally {
       if (!adopted && chosen?.kind === 'relay') chosen.tunnel.close();
-      endBusy('password');
+      if (isCurrentOperation()) endBusy('password');
     }
   }, [beginBusy, endBusy, onConnected, pendingConnection, persistMetadata, t]);
 
   const cancelPassword = React.useCallback(() => {
+    passwordOperationRef.current.cancel();
+    endBusy('password');
     setPendingConnection(null);
     setError(null);
-  }, []);
+  }, [endBusy]);
 
   const saveConnection = React.useCallback(async (input: MobileConnectInput): Promise<MobileSavedConnection | null> => {
     setError(null);

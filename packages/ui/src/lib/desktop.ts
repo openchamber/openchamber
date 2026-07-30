@@ -107,6 +107,7 @@ export type DesktopSettings = {
     renamedGroups?: Record<string, string>;  // groupId -> custom label
   }>;  // Per-provider custom model groups configuration
   autoDeleteEnabled?: boolean;
+  autoSaveEnabled?: boolean;
   autoDeleteAfterDays?: number;
   sessionRetentionAction?: 'archive' | 'delete';
   tunnelProvider?: string;

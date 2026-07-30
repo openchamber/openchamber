@@ -30,10 +30,10 @@
       "elevated": "#FFFFFF",
       "elevatedForeground": "#000000",
       "overlay": "#00000025",
-      "subtle": "#ecf0f8"
+      "subtle": "#f5f8fd"
     },
     "interactive": {
-      "border": "#cfd3de",
+      "border": "#dde0ea",
       "borderHover": "#AEB3C2",
       "borderFocus": "#0055FF",
       "selection": "#DFE1E5",
@@ -145,7 +145,7 @@
     },
     "chat": {
       "userMessage": "#000000",
-      "userMessageBackground": "#E8F1FF",
+      "userMessageBackground": "#eff4fd",
       "assistantMessage": "#000000",
       "assistantMessageBackground": "#F7F8FA",
       "timestamp": "#767A8A",

@@ -680,6 +680,8 @@ interface UIStore {
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
+  /** Global file-editor autosave. Default true for backward compatibility. */
+  autoSaveEnabled: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   autoDeleteLastRunAt: number | null;
@@ -846,6 +848,7 @@ interface UIStore {
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
+  setAutoSaveEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
@@ -1003,6 +1006,7 @@ export const useUIStore = create<UIStore>()(
         activityRenderMode: 'summary',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
+        autoSaveEnabled: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         autoDeleteLastRunAt: null,
@@ -1769,6 +1773,10 @@ export const useUIStore = create<UIStore>()(
           set({ autoDeleteEnabled: value });
         },
 
+        setAutoSaveEnabled: (value) => {
+          set({ autoSaveEnabled: value });
+        },
+
         setAutoDeleteAfterDays: (days) => {
           const clampedDays = Math.max(1, Math.min(365, days));
           set({ autoDeleteAfterDays: clampedDays });
@@ -2346,12 +2354,31 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 12,
+        version: 13,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v12 -> v13: promote FilesView localStorage autosave toggle into the store.
+          if (version < 13) {
+            if (typeof state.autoSaveEnabled !== 'boolean') {
+              let legacyEnabled = true;
+              try {
+                if (typeof localStorage !== 'undefined') {
+                  const legacy = localStorage.getItem('openchamber:files:auto-save-enabled');
+                  if (legacy !== null) {
+                    legacyEnabled = legacy !== 'false';
+                    localStorage.removeItem('openchamber:files:auto-save-enabled');
+                  }
+                }
+              } catch {
+                legacyEnabled = true;
+              }
+              state.autoSaveEnabled = legacyEnabled;
+            }
+          }
 
           // v11 -> v12: drop legacy window-controls "auto" (always meant right).
           if (version < 12) {
@@ -2456,6 +2483,10 @@ export const useUIStore = create<UIStore>()(
           // dock resolves to 'right', so older snapshots need no conversion.
           state.contextPanelDock = sanitizeContextPanelDock(state.contextPanelDock);
 
+          if (typeof state.autoSaveEnabled !== 'boolean') {
+            state.autoSaveEnabled = true;
+          }
+
           state.contextRailOrder = Array.isArray(state.contextRailOrder)
             ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
             : [];
@@ -2492,6 +2523,7 @@ export const useUIStore = create<UIStore>()(
           activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
+          autoSaveEnabled: state.autoSaveEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,

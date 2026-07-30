@@ -27,14 +27,21 @@ import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-conte
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync, refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { getPreviewTargetRecoveryAction } from '@/lib/preview/proxy-response';
 import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
-import { getOrCreateEmbeddedSessionChatURL, type EmbeddedSessionChatURLCacheEntry } from './contextPanelEmbeddedChat';
+import {
+  EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
+  EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
+  getOrCreateEmbeddedSessionChatURL,
+  type EmbeddedSessionChatURLCacheEntry,
+  type EmbeddedSessionRuntimeBootstrap,
+} from './contextPanelEmbeddedChat';
 import { getContextSurfaceHeightFraction, getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import {
   type PreviewElementMetadata,
@@ -377,7 +384,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
     <div
       ref={columnRef}
       className={cn(
-        'relative h-full flex-shrink-0 overflow-hidden border-l border-border/40 bg-background will-change-[width] motion-reduce:transition-none',
+        'relative h-full flex-shrink-0 overflow-hidden border-l border-border bg-background will-change-[width] motion-reduce:transition-none',
         !visible && 'border-l-0',
       )}
       style={{
@@ -1258,7 +1265,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
 
   return (
     <div className="absolute inset-0 flex flex-col">
-      <div className="flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1">
+      <div className="flex items-center gap-1 border-b border-border bg-[var(--surface-background)] px-2 py-1">
         <div className="min-w-0 flex-1 truncate typography-micro text-muted-foreground" title={headerSrc || rawUrl}>
           {headerSrc || rawUrl || t('contextPanel.preview.empty')}
         </div>
@@ -1887,7 +1894,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
-      <div className="flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1">
+      <div className="flex items-center gap-1 border-b border-border bg-[var(--surface-background)] px-2 py-1">
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={historyIndex <= 0} onClick={() => goToHistory(historyIndex - 1)}>
           <Icon name="arrow-left" className="h-3.5 w-3.5" />
         </Button>
@@ -2177,7 +2184,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
-      <div className="flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1">
+      <div className="flex items-center gap-1 border-b border-border bg-[var(--surface-background)] px-2 py-1">
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goBack?.(); } catch { /* webview not ready */ } }}>
           <Icon name="arrow-left" className="h-3.5 w-3.5" />
         </Button>
@@ -2602,19 +2609,6 @@ export const ContextPanel: React.FC = () => {
         continue;
       }
 
-      const directThemeSync = (frameWindow as unknown as {
-        __openchamberApplyThemeSync?: (themePayload: typeof payload) => void;
-      }).__openchamberApplyThemeSync;
-
-      if (typeof directThemeSync === 'function') {
-        try {
-          directThemeSync(payload);
-          continue;
-        } catch {
-          // fallback to postMessage below
-        }
-      }
-
       frameWindow.postMessage(
         {
           type: 'openchamber:theme-sync',
@@ -2633,18 +2627,6 @@ export const ContextPanel: React.FC = () => {
       const frameWindow = frame.contentWindow;
       if (!frameWindow) continue;
 
-      const directSync = (frameWindow as unknown as {
-        __openchamberApplyChatSettingsSync?: (settings: typeof payload) => void;
-      }).__openchamberApplyChatSettingsSync;
-      if (typeof directSync === 'function') {
-        try {
-          directSync(payload);
-          continue;
-        } catch {
-          // fallback to postMessage below
-        }
-      }
-
       frameWindow.postMessage({ type: 'openchamber:chat-settings-sync', payload }, window.location.origin);
     }
   }, [allowPromptingSubagentSessions]);
@@ -2661,19 +2643,6 @@ export const ContextPanel: React.FC = () => {
       }
 
       const payload = { visible: activeChatTabID === tabID };
-      const directVisibilitySync = (frameWindow as unknown as {
-        __openchamberSetEmbeddedVisibility?: (visibilityPayload: typeof payload) => void;
-      }).__openchamberSetEmbeddedVisibility;
-
-      if (typeof directVisibilitySync === 'function') {
-        try {
-          directVisibilitySync(payload);
-          continue;
-        } catch {
-          // fallback to postMessage below
-        }
-      }
-
       frameWindow.postMessage(
         {
           type: 'openchamber:embedded-visibility',
@@ -2700,7 +2669,27 @@ export const ContextPanel: React.FC = () => {
         return;
       }
 
-      const data = event.data as { type?: unknown };
+      const data = event.data as { type?: unknown; requestId?: unknown };
+      if (data?.type === EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST) {
+        if (typeof data.requestId !== 'string' || !data.requestId) return;
+        const runtimeKey = getRuntimeKey();
+        const payload: EmbeddedSessionRuntimeBootstrap = {
+          apiBaseUrl: getRuntimeApiBaseUrl(),
+          clientToken: getRuntimeBearerTokenSync(),
+          localOrigin: typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string'
+            ? window.__OPENCHAMBER_LOCAL_ORIGIN__
+            : '',
+          runtimeHeaders: getRuntimeExtraHeadersSync(),
+          relayHostId: runtimeKey.startsWith('host:') ? runtimeKey.slice('host:'.length) : '',
+          relay: getActiveRelayDescriptor() ?? undefined,
+        };
+        (event.source as WindowProxy | null)?.postMessage({
+          type: EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
+          requestId: data.requestId,
+          payload,
+        }, event.origin);
+        return;
+      }
       if (data?.type === 'openchamber:theme-sync-request') {
         postThemeSyncToEmbeddedChat();
         return;
@@ -2805,7 +2794,7 @@ export const ContextPanel: React.FC = () => {
   const isFileTabActive = activeTab?.mode === 'file';
 
   const header = (
-    <header className="flex h-10 items-stretch border-b border-border/40">
+    <header className="flex h-10 items-stretch border-b border-border">
       {isMultiInstanceMode ? (
         <SortableTabsStrip
           items={tabItems}
@@ -2976,7 +2965,7 @@ export const ContextPanel: React.FC = () => {
         <div
           aria-hidden="true"
           className={cn(
-            'absolute left-0 top-0 z-40 bg-border/40',
+            'absolute left-0 top-0 z-40 bg-border',
             isBottomDock ? 'h-px w-full' : 'h-full w-px'
           )}
         />
@@ -2985,7 +2974,7 @@ export const ContextPanel: React.FC = () => {
           paints no border of its own, and it sits beside the whole content
           column, so the panel's right edge is adjacent to it in both docks. */}
       {isOpen && (
-        <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border/40" />
+        <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border" />
       )}
       {!isExpanded && (
         <div

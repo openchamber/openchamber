@@ -1781,6 +1781,7 @@ export function SyncProvider(props: {
     })
   }
   const messageLoader = messageLoaderRef.current
+  const messageLoaderDisposalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   messageLoader.configure({ sdk: props.sdk, runtimeKey })
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
@@ -2242,9 +2243,22 @@ export function SyncProvider(props: {
     }
   }, [props.sdk, props.directory, childStores, messageLoader, routingIndex])
 
-  useEffect(() => () => {
-    messageLoader.dispose()
-    childStores.disposeAll()
+  useEffect(() => {
+    if (messageLoaderDisposalTimerRef.current) {
+      clearTimeout(messageLoaderDisposalTimerRef.current)
+      messageLoaderDisposalTimerRef.current = null
+    }
+    messageLoader.activate()
+    return () => {
+      // Strict Mode probes effects with setup → cleanup → setup in one task.
+      // Deferring destruction lets child effects issue their second setup load
+      // before this provider is installed again and cancels the cleanup.
+      messageLoaderDisposalTimerRef.current = setTimeout(() => {
+        messageLoaderDisposalTimerRef.current = null
+        messageLoader.dispose()
+        childStores.disposeAll()
+      }, 0)
+    }
   }, [childStores, messageLoader])
 
   // Subscribe to child store for streaming state derivation

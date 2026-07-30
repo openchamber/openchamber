@@ -1728,6 +1728,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.openFilesAria': 'Otwarte pliki',
   'filesView.editor.openInDesktopApp': 'Otwórz w aplikacji desktopowej',
   'filesView.editor.pickFileFromTree': 'Wybierz plik z drzewa.',
+  'filesView.editor.cannotPreviewBinary': 'Nie można podglądać pliku binarnego',
+  'filesView.editor.binaryFileDescription': 'Ten plik jest binarny i nie można go edytować w OpenChamber. Pobierz go, aby otworzyć w innej aplikacji.',
   'filesView.editor.refreshApps': 'Odśwież aplikacje',
   'filesView.editor.saveAria': 'Zapisz ({shortcut})',
   'filesView.editor.saveFile': 'Zapisz plik',

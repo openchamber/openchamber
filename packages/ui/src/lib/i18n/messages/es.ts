@@ -1213,6 +1213,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.editor.showControlsAria": "Mostrar controles del editor",
   "filesView.editor.controlsTitle": "Controles del editor",
   "filesView.editor.pickFileFromTree": "Selecciona un archivo del árbol.",
+  "filesView.editor.cannotPreviewBinary": "No se puede previsualizar el archivo binario",
+  "filesView.editor.binaryFileDescription": "Este archivo es binario y no se puede editar en OpenChamber. Descárgalo para abrirlo con otra aplicación.",
   "filesView.state.loading": "Cargando...",
   "filesView.state.openingFileAtChange": "Abriendo archivo en cambio...",
   "filesView.tree.search.placeholder": "Buscar archivos...",

@@ -148,6 +148,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isMobile,
   },
   {
+    id: 'appearance.auto-save-enabled',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.autoSaveEnabled',
+    descriptionKey: 'settings.openchamber.visual.field.autoSaveEnabledInfo',
+    keywords: ['editor', 'autosave', 'auto-save', 'files', 'save'],
+  },
+  {
     id: 'appearance.expanded-editor-toolbar',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.expandedEditorToolbar',
