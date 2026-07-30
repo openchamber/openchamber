@@ -74,6 +74,7 @@ import { openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
+import { handleFilesViewFind, reduceFilesViewFindState, renderFilesViewSurface } from './filesViewFind';
 
 type FileNode = {
   name: string;
@@ -656,6 +657,7 @@ const Dialogs: React.FC<DialogsProps> = ({
 
 interface FilesViewProps {
   mode?: 'full' | 'editor-only';
+  active?: boolean;
 }
 
 /**
@@ -714,7 +716,7 @@ const useAssetAuthRefresh = (
   return { readyKey, nonce };
 };
 
-export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
+export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = true }) => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
   const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
@@ -736,8 +738,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const [showMobilePageContent, setShowMobilePageContent] = React.useState(false);
   const [wrapLines, setWrapLines] = React.useState(true);
-  const [isFullscreen, setIsFullscreen] = React.useState(false);
-  const [isSearchOpen, setIsSearchOpen] = React.useState(false);
+  const [findState, dispatchFind] = React.useReducer(
+    reduceFilesViewFindState,
+    { fullscreen: false, searchOpen: false },
+  );
+  const { fullscreen: isFullscreen, searchOpen: isSearchOpen } = findState;
   const [isFloatingToolbarOpen, setIsFloatingToolbarOpen] = React.useState(false);
   const floatingToolbarRef = React.useRef<HTMLDivElement | null>(null);
   const toolbarDropdownOpenCountRef = React.useRef(0);
@@ -1759,6 +1764,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       }
 
       if (e.key.toLowerCase() === 's') {
+        if (!active) {
+          return;
+        }
         e.preventDefault();
         // Cancel pending auto-save; user wants immediate save
         if (autoSaveTimerRef.current) {
@@ -1773,14 +1781,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           });
         }
       } else if (e.key.toLowerCase() === 'f') {
-        e.preventDefault();
-        setIsSearchOpen(true);
+        handleFilesViewFind(active, editorViewRef.current !== null, e, () => {
+          dispatchFind({ type: 'set-search-open', open: true });
+        });
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSaving, saveDraft]);
+  }, [active, isSaving, saveDraft]);
 
   const loadSelectedFile = React.useCallback(async (node: FileNode) => {
     const loadId = activeFileLoadIdRef.current + 1;
@@ -3170,6 +3179,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     );
   }, [currentTheme.metadata.variant, pierreTheme, wrapLines]);
 
+  const isSearchEditorMounted = active && editorViewRef.current !== null;
+
+  React.useEffect(() => {
+    if (!isSearchEditorMounted && isSearchOpen) {
+      dispatchFind({ type: 'set-search-open', open: false });
+    }
+  }, [isSearchEditorMounted, isSearchOpen]);
+
   const renderFloatingFileControls = ({
     exitFullscreenOnly = false,
     layout = 'floating',
@@ -3296,14 +3313,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <Icon name="text-wrap" className="size-4" />
               </Button>
             )}
-            {textViewMode === 'edit' && (
+            {isSearchEditorMounted && (
               <>
                 {withTooltip(t('filesView.editor.findInFile'),
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={(event) => {
-                      setIsSearchOpen(!isSearchOpen);
+                      dispatchFind({ type: 'set-search-open', open: !isSearchOpen });
                       event.currentTarget.blur();
                     }}
                     className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
@@ -3549,7 +3566,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setIsFullscreen(false)}
+              onClick={() => dispatchFind({ type: 'exit-fullscreen' })}
               className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
               title={t('filesView.editor.exitFullscreen')}
               aria-label={t('filesView.editor.exitFullscreen')}
@@ -3562,7 +3579,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setIsFullscreen(!isFullscreen)}
+              onClick={() => dispatchFind({ type: 'toggle-fullscreen' })}
               className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
               title={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
               aria-label={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
@@ -3773,10 +3790,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       </div>
 
       <div className="flex-1 min-h-0 min-w-0 relative">
-        {selectedFile && !isSearchOpen && !(settingsExpandedEditorToolbar && !isMobile) && (
+        {selectedFile && !(settingsExpandedEditorToolbar && !isMobile) && (
           <div
             ref={floatingToolbarRef}
-            className="absolute right-3 top-3 z-30"
+            className={cn('absolute right-3 z-30', isSearchOpen ? 'top-20' : 'top-3')}
             onMouseLeave={() => {
               if (toolbarDropdownOpenCountRef.current > 0) return;
               setIsFloatingToolbarOpen(false);
@@ -3985,14 +4002,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                     });
                   }}
                   onViewDestroy={() => {
-                    if (editorViewRef.current) {
-                      editorViewRef.current = null;
-                    }
+                    editorViewRef.current = null;
                     setEditorViewReadyNonce((value) => value + 1);
                   }}
                   enableSearch
                   searchOpen={isSearchOpen}
-                  onSearchOpenChange={setIsSearchOpen}
+                  onSearchOpenChange={(open) => dispatchFind({ type: 'set-search-open', open })}
                   highlightLines={lineSelection
                     ? {
                       start: Math.min(lineSelection.start, lineSelection.end),
@@ -4229,7 +4244,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     <div className="absolute inset-0 z-50 flex flex-col bg-background">
       {/* Fullscreen content */}
       <div className="flex-1 min-h-0 min-w-0 relative">
-        <div className="absolute right-4 top-4 z-30">
+        <div className={cn('absolute right-4 z-30', isSearchOpen ? 'top-20' : 'top-4')}>
           {renderFloatingFileControls({ exitFullscreenOnly: true })}
         </div>
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
@@ -4317,15 +4332,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 className="h-full"
                 onViewReady={(view) => {
                   editorViewRef.current = view;
+                  setEditorViewReadyNonce((value) => value + 1);
                   window.requestAnimationFrame(() => {
                     nudgeEditorSelectionAboveKeyboard(view);
                   });
                 }}
                 onViewDestroy={() => {
-                  if (editorViewRef.current) {
-                    editorViewRef.current = null;
-                  }
+                  editorViewRef.current = null;
+                  setEditorViewReadyNonce((value) => value + 1);
                 }}
+                enableSearch
+                searchOpen={isSearchOpen}
+                onSearchOpenChange={(open) => dispatchFind({ type: 'set-search-open', open })}
               />
               </div>
               {shouldMaskEditorForPendingNavigation && (
@@ -4355,8 +4373,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         onClose={handleCloseDialog}
         inputRef={dialogInputRef}
       />
-      {fullscreenViewer}
-      {isMobile ? (
+      {renderFilesViewSurface(findState, () => isMobile ? (
         showMobilePageContent ? (
           fileViewer
         ) : (
@@ -4379,7 +4396,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
              {fileViewer}
            </div>
          </div>
-       )}
+       ), () => fullscreenViewer)}
     </div>
   );
 };

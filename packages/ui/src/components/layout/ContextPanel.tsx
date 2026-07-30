@@ -2237,6 +2237,7 @@ export const ContextPanel: React.FC = () => {
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
+  const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const openContextPreview = useUIStore((state) => state.openContextPreview);
   const contextEditorTreeVisible = useUIStore((state) => state.contextEditorTreeVisible);
@@ -2896,7 +2897,7 @@ export const ContextPanel: React.FC = () => {
           <div className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}>
             <div className="h-full min-w-0 flex-1">
               {hasOpenEditorFile ? (
-                <FilesView mode="editor-only" />
+                <FilesView mode="editor-only" active={isOpen && isFileTabActive && !isSettingsDialogOpen} />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                   <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
