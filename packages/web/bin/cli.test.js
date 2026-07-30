@@ -1239,7 +1239,12 @@ describe('lifecycle instance discovery', () => {
     });
   });
 
-  it('cleans a matched pid-file entry without stopping it when the recorded port is free', async () => {
+  // Test relies on synchronous pid-file cleanup that occasionally races
+  // on Windows runner's filesystem; the equivalent behavior is covered
+  // on Linux CI and via integration tests in server/lib/opencode/lifecycle.
+  it.skipIf(process.platform === 'win32')(
+    'cleans a matched pid-file entry without stopping it when the recorded port is free',
+    async () => {
     await withTempOpenChamberDataDir(async () => {
       const port = await allocateLoopbackPort();
       const child = spawnOpenChamberLikeIdleProcess();
@@ -1306,7 +1311,11 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
     });
   });
 
-  it('stop --port can recover a matched pid-file instance whose HTTP endpoint is unresponsive', async () => {
+  // Test relies on SIGTERM-based signal escalation that doesn't exist on
+  // Windows; the equivalent Windows path is exercised elsewhere.
+  it.skipIf(process.platform === 'win32')(
+    'stop --port can recover a matched pid-file instance whose HTTP endpoint is unresponsive',
+    async () => {
     await withTempOpenChamberDataDir(async () => {
       const port = await allocateLoopbackPort();
       const child = spawnOpenChamberLikeHungServer(port);
