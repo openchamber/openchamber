@@ -288,7 +288,11 @@ describe('createIpcServer (Windows / W-B)', () => {
 });
 
 describe('createIpcDialer (POSIX)', () => {
-  it('linux: returns a function that dials the Unix socket', async () => {
+  // Unix-domain sockets are not supported on Windows; the equivalent
+  // Windows tests are in their own describe block above. Without
+  // this gate, `server.listen(socketPath)` never resolves on Windows
+  // and the test times out at the vitest default.
+  it.skipIf(process.platform === 'win32')('linux: returns a function that dials the Unix socket', async () => {
     const root = mkTmp();
     const { socketPath } = defaultIpcPaths({ platform: 'linux', rootDir: root });
     // Pre-create a dummy socket so `net.createConnection` succeeds.

@@ -76,8 +76,13 @@ describe('readDiscoveryFile', () => {
     expect(parsed).toBeNull();
   });
 
-  it('throws on non-Windows (Windows-only boundary)', () => {
+  it.runIf(process.platform !== 'win32')('throws on non-Windows (Windows-only boundary)', () => {
     // Default platform override; on a Linux CI runtime this throws.
+    // Gated to non-Windows runners: on Windows CI the function works
+    // (process.platform === 'win32' makes the default-arg branch succeed)
+    // and the assertion would fail. The other `throws on non-Windows`
+    // tests below pass `platform: 'linux'`/`'darwin'` explicitly and
+    // are not gated.
     const file = mkTmpFile();
     fs.writeFileSync(file, '127.0.0.1:4096\n');
     expect(() => readDiscoveryFile(file)).toThrow(/Windows-only/);
@@ -113,7 +118,11 @@ describe('removeDiscoveryFile', () => {
     expect(() => removeDiscoveryFile(missing, { platform: 'win32' })).not.toThrow();
   });
 
-  it('throws on non-Windows', () => {
+  it.runIf(process.platform !== 'win32')('throws on non-Windows', () => {
+    // Default platform override; on a Linux CI runtime this throws.
+    // Gated to non-Windows runners for the same reason as the matching
+    // `readDiscoveryFile` test above: on Windows CI the default-arg
+    // platform is 'win32' so the function would not throw.
     const file = mkTmpFile();
     fs.writeFileSync(file, '127.0.0.1:4096\n');
     expect(() => removeDiscoveryFile(file)).toThrow(/Windows-only/);
@@ -200,7 +209,11 @@ describe('writeDiscoveryFileAtomic (W-B)', () => {
     expect(() => writeDiscoveryFileAtomic(file, 4096.5, { platform: 'win32', username: 'alice' })).toThrow();
   });
 
-  it('throws on non-Windows platforms (the W-A boundary is preserved)', () => {
+  it.runIf(process.platform !== 'win32')('throws on non-Windows platforms (the W-A boundary is preserved)', () => {
+    // Default platform override; on a Linux CI runtime this throws.
+    // Gated to non-Windows runners for the same reason as the
+    // read/remove tests: on Windows CI process.platform === 'win32'
+    // makes the default-arg branch succeed and the assertion would fail.
     const file = mkTmpFile();
     expect(() => writeDiscoveryFileAtomic(file, 4096)).toThrow(/Windows-only/);
   });

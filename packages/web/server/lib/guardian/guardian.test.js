@@ -500,7 +500,16 @@ describe('W-D: #terminateChild platform branch', () => {
     }
   };
 
-  it('routes termination through terminateChildWindows on win32 (mocked platform)', async () => {
+  // This test mocks `process.platform` AFTER `start()` resolves, so
+  // it only works on a Linux/POSIX runner. On real Windows CI,
+  // `start()` itself is called with `process.platform === 'win32'`
+  // from the start (no mocking yet), and the POSIX backend would
+  // bind a Unix-domain socket that Windows cannot create. The
+  // equivalent Windows branch is exercised by `guardian.test.js`'s
+  // `requires portPath on Windows when starting` (line ~146), which
+  // mocks `process.platform = 'win32'` BEFORE `start()` runs and
+  // asserts the expected `Windows portPath is required` error.
+  it.skipIf(process.platform === 'win32')('routes termination through terminateChildWindows on win32 (mocked platform)', async () => {
     // Construct everything under the real (Linux) platform so the
     // secret provider, store, and IPC server initialize normally.
     // Then flip `process.platform` to 'win32' immediately before
@@ -546,7 +555,12 @@ describe('W-D: #terminateChild platform branch', () => {
     await guardian.stop();
   });
 
-  it('uses the Unix SIGTERM/SIGKILL escalation when platform is non-win32', async () => {
+  // Real Unix-socket listener — Windows cannot use Unix-domain
+  // sockets, so `start()` would never resolve / would throw EACCES
+  // when called with `process.platform === 'win32'`. Gated to
+  // POSIX/Linux CI; the platform-flip-to-'win32' branch above is
+  // the matching Windows coverage.
+  it.skipIf(process.platform === 'win32')('uses the Unix SIGTERM/SIGKILL escalation when platform is non-win32', async () => {
     // Sanity: on the real (Linux) platform, the Unix branch is
     // what runs. The spec for W-D is that the Unix path is
     // byte-for-byte identical to the pre-W-D version. We exercise

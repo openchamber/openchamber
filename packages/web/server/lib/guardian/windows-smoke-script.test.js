@@ -148,9 +148,22 @@ describe('scripts/guardian-smoke-test.ps1 well-formedness', () => {
 });
 
 function whichPwsh() {
-  // Cheap probe: try `which pwsh` synchronously. The shell is
-  // shell-agnostic enough that `which` exists on every platform
-  // that ships a `node` (i.e. everywhere we run vitest).
+  // Cheap probe: try `which pwsh` synchronously on POSIX. On
+  // Windows we return `null` so the optional `parses cleanly under
+  // pwsh` test below is skipped via `it.runIf(null)`. The reason:
+  // on the GitHub Actions `windows-latest` runner, `where pwsh`
+  // (Windows) or `which pwsh` (Git Bash) often returns a msys-style
+  // path like `/c/Program Files/PowerShell/7/pwsh`. Node's
+  // `spawnSync` on that path resolves as if on Linux and yields
+  // ENOENT, even when the binary exists. The real Windows smoke
+  // run is exercised separately by the CI job via
+  // `pwsh -File scripts/guardian-smoke-test.ps1`; this test file
+  // is the well-formedness backstop for non-Windows CI, and the
+  // static assertions above (ErrorActionPreference, curly-brace
+  // balance, .NET TcpClient presence, etc.) still run on Windows.
+  if (process.platform === 'win32') {
+    return null;
+  }
   try {
     const out = execFileSync('which', ['pwsh'], { stdio: ['ignore', 'pipe', 'ignore'] })
       .toString()
