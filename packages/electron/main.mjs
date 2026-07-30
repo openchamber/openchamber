@@ -16,6 +16,7 @@ import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
+import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import {
   buildLinuxInstalledApps,
@@ -2904,10 +2905,17 @@ const setupAutoUpdater = () => {
   const testBuild = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
     && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
   const feed = resolveUpdaterFeed({ testBuild });
+  const updaterChannel = feed.provider === 'github'
+    ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
+    : null;
+  if (updaterChannel) {
+    autoUpdater.channel = updaterChannel;
+  }
   autoUpdater.setFeedURL(feed);
   log.info('[electron] updater feed configured', {
     provider: feed.provider,
     target: feed.provider === 'github' ? `${feed.owner}/${feed.repo}` : feed.url,
+    channel: updaterChannel || 'latest',
   });
 
   autoUpdater.on('download-progress', (progress) => {
