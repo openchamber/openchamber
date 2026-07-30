@@ -664,8 +664,15 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const getWindowsNativeOpencodePackageNames = () => {
+    // TEMPORARY WORKAROUND — Windows ARM64: native opencode.exe fails with a Bun
+    // FFI/TinyCC dlopen error (https://github.com/anomalyco/opencode/issues/19130).
+    // prepare-opencode-cli.mjs bundles x64-baseline instead; match that here so
+    // the runtime resolver looks for the same x64-baseline package. Restore the
+    // arm64 branch below when the upstream issue is resolved.
     if (process.arch === 'arm64') {
-      return ['opencode-windows-arm64'];
+      // --- ORIGINAL (restore when ARM64 is fixed) ---
+      // return ['opencode-windows-arm64'];
+      return ['opencode-windows-x64-baseline', 'opencode-windows-x64'];
     }
     if (process.arch === 'x64') {
       // Prefer the baseline build when bypassing package-manager wrappers so the

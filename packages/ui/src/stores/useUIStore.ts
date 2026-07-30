@@ -10,6 +10,7 @@ import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobi
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
+import { isWindowsArm64 } from '@/lib/platform';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
@@ -995,7 +996,7 @@ export const useUIStore = create<UIStore>()(
 
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
-        showOpenCodeUpdateNotifications: true,
+        showOpenCodeUpdateNotifications: !isWindowsArm64(),
         agentControlToolEnabled: true,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
