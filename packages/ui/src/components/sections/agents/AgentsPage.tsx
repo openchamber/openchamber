@@ -227,6 +227,7 @@ export const AgentsPage: React.FC = () => {
         temperature: temperature ?? null,
         top_p: topP ?? null,
         prompt: trimmedPrompt || (isNewAgent ? undefined : null),
+        ...(isNewAgent && agentDraft?.hidden ? { hidden: true } : {}),
         ...(isNewAgent && draftScope ? { scope: draftScope } : {}),
       };
 
