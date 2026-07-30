@@ -46,7 +46,12 @@ interface BranchIntegrationSectionProps {
   isOperating?: boolean;
   operationLogs?: OperationLogEntry[];
   onOperationComplete?: () => void;
-  mode?: 'dialog' | 'inline';
+  /**
+   * 'dialog' renders its own trigger button + dialog, 'inline' renders a
+   * titled section, 'bare' renders just the form body for embedding in an
+   * externally-owned dialog.
+   */
+  mode?: 'dialog' | 'inline' | 'bare';
   defaultTargetBranch?: string;
 }
 
@@ -167,7 +172,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   }, [branchDropdownOpen]);
 
   React.useEffect(() => {
-    if (mode !== 'inline' || selectedBranch) return;
+    if (mode === 'dialog' || selectedBranch) return;
     setSelectedBranch(resolveDefaultBranch());
   }, [mode, resolveDefaultBranch, selectedBranch]);
 
@@ -411,6 +416,10 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   );
 
   const body = isOperating ? renderOperating() : renderForm();
+
+  if (mode === 'bare') {
+    return body;
+  }
 
   if (mode === 'inline') {
     return (

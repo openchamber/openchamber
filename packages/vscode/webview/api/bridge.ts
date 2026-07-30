@@ -189,6 +189,7 @@ export type ProxiedSseStartResponse = {
 export async function startSseProxy(options: {
   path: string;
   headers?: Record<string, string>;
+  streamId?: string;
 }): Promise<ProxiedSseStartResponse> {
   return sendBridgeMessage<ProxiedSseStartResponse>('api:sse:start', options);
 }

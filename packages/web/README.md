@@ -52,6 +52,9 @@ openchamber update                   # Update to latest version
 When OpenChamber launches the local OpenCode server, it also registers a native
 `openchamber` agent tool for project, session, and scheduled-task orchestration.
 The tool is not injected when connecting to an external OpenCode server.
+Behavior settings can optionally inject a managed system-prompt optimizer on
+the next OpenCode restart. It is disabled by default and is not available for
+external OpenCode servers.
 
 ### Tunnel behavior notes
 

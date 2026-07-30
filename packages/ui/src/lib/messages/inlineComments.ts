@@ -20,6 +20,14 @@ function formatInlineCommentDraft(draft: InlineCommentDraft): string {
   if (draft.source === 'preview-annotation') {
     return text ? `${code}\n\n${text}` : code;
   }
+
+  if (draft.source === 'pr-comment') {
+    return `Attached GitHub PR comment (${fileLabel}):\n\n${code}${text ? `\n\n${text}` : ''}`;
+  }
+
+  if (draft.source === 'pr-check') {
+    return `Attached failed GitHub PR check (${fileLabel}):\n\`\`\`\n${code}\n\`\`\`${text ? `\n\n${text}` : ''}`;
+  }
   
   // Plan and file format (no side)
   return `Comment on \`${fileLabel}\` lines ${startLine}-${endLine}:\n\`\`\`${language}\n${code}\n\`\`\`\n\n${text}`;

@@ -3,7 +3,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
-import { routeMessage, useSessionUIStore } from './session-ui-store';
+import { expandSlashCommandGoalObjective, routeMessage, useSessionUIStore } from './session-ui-store';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
@@ -225,6 +225,31 @@ describe('routeMessage directory scoping', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].sessionId).toBe('session-a');
     expect(calls[0].directory).toBe('/session/project');
+  });
+});
+
+describe('slash-command goal objectives', () => {
+  test('expands every $ARGUMENTS reference from the authoritative command template', () => {
+    expect(expandSlashCommandGoalObjective('/issue--to-pr LIN-123 --draft', [{
+      name: 'issue--to-pr',
+      template: 'Run the issue pipeline for $ARGUMENTS. Verify $ARGUMENTS is represented by the PR.',
+    }])).toBe('Run the issue pipeline for LIN-123 --draft. Verify LIN-123 --draft is represented by the PR.');
+  });
+
+  test('keeps the invocation when the command template is unavailable', () => {
+    expect(expandSlashCommandGoalObjective('/issue--to-pr LIN-123', [{ name: 'issue--to-pr' }]))
+      .toBe('/issue--to-pr LIN-123');
+  });
+
+  test('matches OpenCode positional and implicit argument expansion', () => {
+    expect(expandSlashCommandGoalObjective('/move "src old" dist extra', [{
+      name: 'move',
+      template: 'Move $1 to $2',
+    }])).toBe('Move src old to dist extra');
+    expect(expandSlashCommandGoalObjective('/review auth module', [{
+      name: 'review',
+      template: 'Review the requested scope.',
+    }])).toBe('Review the requested scope.\n\nauth module');
   });
 });
 

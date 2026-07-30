@@ -40,6 +40,13 @@ type OpenAiUsagePayload = {
     balance?: number | string;
     unlimited?: boolean;
   };
+  spend_control?: {
+    individual_limit?: {
+      limit?: number | string;
+      used?: number | string;
+      used_percent?: number | string;
+    };
+  };
 };
 
 type GoogleModelsPayload = {
@@ -110,6 +117,37 @@ type WaferPayload = {
   window_start?: number | string;
   window_end?: number | string;
   plan_tier?: string;
+};
+
+type CrofPayload = {
+  usable_requests?: number | null;
+  credits?: number | string;
+};
+
+type NeuralwattPayload = {
+  balance?: {
+    credits_remaining_usd?: number | string;
+  };
+  subscription?: {
+    plan?: string;
+    billing_interval?: string;
+    current_period_start?: string;
+    current_period_end?: string;
+    kwh_included?: number | string;
+    kwh_used?: number | string;
+    in_overage?: boolean;
+    kwh_reset_date?: string;
+  } | null;
+  key?: {
+    name?: string;
+    allowance?: {
+      limit_usd?: number | string;
+      period?: string;
+      spent_usd?: number | string;
+      blocked?: boolean;
+      reset_at?: string;
+    } | null;
+  };
 };
 
 export type ProviderResult = {
@@ -184,7 +222,10 @@ const resolveGoogleWindow = (sourceId: GoogleAuthSource['sourceId'], resetAt: nu
   return { label: 'daily', seconds: GOOGLE_DAILY_WINDOW_SECONDS } as const;
 };
 
-const ZAI_TOKEN_WINDOW_SECONDS: Record<number, number> = { 3: 3600 };
+const ZAI_TOKEN_WINDOW_SECONDS: Record<number, number> = {
+  3: 60 * 60,
+  6: 7 * 24 * 60 * 60,
+};
 
 const readAuthFile = (): AuthFile => {
   if (!fs.existsSync(AUTH_FILE)) {
@@ -441,6 +482,16 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('wafer');
   }
 
+  const crofAuth = normalizeAuthEntry(getAuthEntry(auth, ['crof']));
+  if (crofAuth && ((crofAuth as Record<string, unknown>).key || (crofAuth as Record<string, unknown>).token)) {
+    configured.add('crof');
+  }
+
+  const neuralwattAuth = normalizeAuthEntry(getAuthEntry(auth, ['neuralwatt']));
+  if (neuralwattAuth && ((neuralwattAuth as Record<string, unknown>).key || (neuralwattAuth as Record<string, unknown>).token)) {
+    configured.add('neuralwatt');
+  }
+
   return Array.from(configured);
 };
 
@@ -512,6 +563,20 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
           : null;
       windows.credits_balance = toUsageWindow({
         usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel,
+      });
+    }
+    if (payload?.spend_control?.individual_limit) {
+      const spendLimit = payload.spend_control.individual_limit;
+      const used = toNumber(spendLimit.used);
+      const limit = toNumber(spendLimit.limit);
+      const valueLabel = used !== null && limit !== null
+        ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
+        : null;
+      windows.credits = toUsageWindow({
+        usedPercent: toNumber(spendLimit.used_percent),
         windowSeconds: null,
         resetAt: null,
         valueLabel,
@@ -1530,18 +1595,26 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
 
     const payload = await response.json() as ZaiPayload;
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
-    const tokensLimit = limits.find((limit: Record<string, unknown>) => limit?.type === 'TOKENS_LIMIT');
-    const windowSeconds = resolveWindowSeconds(tokensLimit as Record<string, unknown> | undefined);
-    const windowLabel = resolveWindowLabel(windowSeconds);
-    const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-    const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
-
     const windows: Record<string, UsageWindow> = {};
-    if (tokensLimit) {
+    for (const tokensLimit of limits.filter((limit) => limit?.type === 'TOKENS_LIMIT')) {
+      const windowSeconds = resolveWindowSeconds(tokensLimit as Record<string, unknown>);
+      const windowLabel = resolveWindowLabel(windowSeconds);
+      const resetAt = tokensLimit.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
+      const usedPercent = typeof tokensLimit.percentage === 'number' ? tokensLimit.percentage : null;
+
       windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,
         resetAt,
+      });
+    }
+
+    const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
+    if (mcpToolsTimeLimit) {
+      windows['MCP Tools'] = toUsageWindow({
+        usedPercent: typeof mcpToolsTimeLimit.percentage === 'number' ? mcpToolsTimeLimit.percentage : null,
+        windowSeconds: 30 * 24 * 60 * 60,
+        resetAt: mcpToolsTimeLimit.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null,
       });
     }
 
@@ -1865,6 +1938,243 @@ const fetchWaferQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const NEURALWATT_QUOTA_URL = 'https://api.neuralwatt.com/v1/quota';
+
+// 30d month / 365d year are fixed approximations; real calendars vary but the
+// window is for the UI's progress bar label, not billing decisions.
+// Accepts both subscription (month/year) and allowance (monthly/weekly/daily) shapes.
+const neuralwattWindowSeconds = (period: string | null | undefined): number | null => {
+  if (period === 'daily') return 86400;
+  if (period === 'weekly') return 604800;
+  if (period === 'monthly' || period === 'month') return 30 * 86400;
+  if (period === 'yearly' || period === 'year') return 365 * 86400;
+  return null;
+};
+
+const fetchNeuralwattQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['neuralwatt'])) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'neuralwatt',
+      providerName: 'NeuralWatt',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch(NEURALWATT_QUOTA_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'neuralwatt',
+        providerName: 'NeuralWatt',
+        ok: false,
+        configured: true,
+        error: response.status === 401
+          ? 'Session expired — please re-authenticate with NeuralWatt'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as NeuralwattPayload;
+    const subscription = payload?.subscription ?? null;
+    const inOverage = Boolean(subscription?.in_overage);
+    const allowance = payload?.key?.allowance ?? null;
+    const keyName = payload?.key?.name ?? null;
+    const creditsRemaining = toNumber(payload?.balance?.credits_remaining_usd);
+
+    const windows: Record<string, UsageWindow> = {};
+
+    if (subscription) {
+      const kwhIncluded = toNumber(subscription.kwh_included);
+      const kwhUsed = toNumber(subscription.kwh_used);
+      const plan = typeof subscription.plan === 'string' && subscription.plan.trim()
+        ? subscription.plan.trim()
+        : null;
+      // Subscription window title is the plan name; subscription limits reset
+      // monthly even on annual billing plans, but the API exposes no kWh window
+      // start to derive windowSeconds — pass null rather than fabricating a guess.
+      const subKey = plan ?? 'plan_limit';
+      const usedPercent = inOverage
+        ? 100
+        : (kwhIncluded !== null && kwhIncluded > 0 && kwhUsed !== null
+            ? Math.max(0, Math.min(100, (kwhUsed / kwhIncluded) * 100))
+            : null);
+      const subResetAt = toTimestamp(subscription.kwh_reset_date) ?? toTimestamp(subscription.current_period_end);
+      windows[subKey] = toUsageWindow({
+        usedPercent,
+        windowSeconds: null,
+        resetAt: subResetAt,
+      });
+    }
+
+    if (allowance) {
+      const spent = toNumber(allowance.spent_usd);
+      const limit = toNumber(allowance.limit_usd);
+      // Credits wallet is reduced by each period's spend before the allowance cap
+      // bites, so the real ceiling is min(limit, creditsRemaining + spent).
+      const effectiveSpent = spent ?? 0;
+      const effectiveLimit = limit !== null && creditsRemaining !== null
+        ? Math.min(limit, creditsRemaining + effectiveSpent)
+        : (limit ?? creditsRemaining);
+      const period = typeof allowance.period === 'string' && allowance.period.trim()
+        ? allowance.period.trim()
+        : null;
+      const blocked = Boolean(allowance.blocked);
+      const usedPercent = blocked
+        ? 100
+        : (spent !== null && effectiveLimit !== null && effectiveLimit > 0
+            ? Math.max(0, Math.min(100, (spent / effectiveLimit) * 100))
+            : null);
+      // Window title is the localized period label (daily/weekly/monthly); key
+      // name is attached via valueLabel for identification (wafer precedent).
+      const periodKey = (period === 'daily' || period === 'weekly' || period === 'monthly' || period === 'month')
+        ? (period === 'month' ? 'monthly' : period)
+        : 'billing_cycle';
+      const labelName = typeof keyName === 'string' && keyName.trim() ? keyName.trim() : null;
+      const resetAt = toTimestamp(allowance.reset_at);
+      const windowSeconds = period ? neuralwattWindowSeconds(period) : null;
+      windows[periodKey] = toUsageWindow({
+        usedPercent,
+        windowSeconds,
+        resetAt,
+        ...(labelName ? { valueLabel: labelName } : {}),
+      });
+    } else if (creditsRemaining !== null) {
+      windows.credits_balance = toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(creditsRemaining)}`,
+      });
+    }
+
+    if (Object.keys(windows).length === 0) {
+      return buildResult({
+        providerId: 'neuralwatt',
+        providerName: 'NeuralWatt',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    return buildResult({
+      providerId: 'neuralwatt',
+      providerName: 'NeuralWatt',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && error.name === 'AbortError' && timeoutSignal.aborted;
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'neuralwatt',
+      providerName: 'NeuralWatt',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
+const CROF_USAGE_URL = 'https://crof.ai/usage_api/';
+
+const fetchCrofQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['crof'])) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'crof',
+      providerName: 'CrofAI',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch(CROF_USAGE_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'crof',
+        providerName: 'CrofAI',
+        ok: false,
+        configured: true,
+        error: response.status === 401
+          ? 'Session expired — please re-authenticate with CrofAI'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as CrofPayload;
+    const credits = toNumber(payload?.credits);
+    const valueLabel = credits !== null ? `$${formatMoney(credits)}` : null;
+
+    const windows: Record<string, UsageWindow> = {
+      credits: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel,
+      }),
+    };
+
+    return buildResult({
+      providerId: 'crof',
+      providerName: 'CrofAI',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && error.name === 'AbortError' && timeoutSignal.aborted;
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'crof',
+      providerName: 'CrofAI',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
@@ -1906,6 +2216,10 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
     }
     case 'cursor':
       return fetchCursorQuota();
+    case 'crof':
+      return fetchCrofQuota();
+    case 'neuralwatt':
+      return fetchNeuralwattQuota();
     default:
       return buildResult({
         providerId,

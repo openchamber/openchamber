@@ -3,24 +3,25 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { Icon } from "@/components/icon/Icon";
+import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
 type Props = {
   hideDirectoryControls: boolean;
   showRecentControls: boolean;
   handleOpenDirectoryDialog: () => void;
-  openNewSessionDraft: () => void;
+  onOpenScheduled: () => void;
+  onOpenMultiRun: () => void;
   canOpenMultiRun: boolean;
-  openMultiRunLauncher: () => void;
+  onOpenArchive: () => void;
   headerActionIconClass: string;
   headerActionButtonClass: string;
   isSessionSearchOpen: boolean;
@@ -32,7 +33,6 @@ type Props = {
   searchMatchCount: number;
   collapseAllProjects: () => void;
   expandAllProjects: () => void;
-  openScheduledTasksDialog: () => void;
   selectionModeEnabled: boolean;
   onToggleSelectionMode: () => void;
 };
@@ -43,9 +43,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
     hideDirectoryControls,
     showRecentControls,
     handleOpenDirectoryDialog,
-    openNewSessionDraft,
+    onOpenScheduled,
+    onOpenMultiRun,
     canOpenMultiRun,
-    openMultiRunLauncher,
+    onOpenArchive,
     headerActionIconClass,
     headerActionButtonClass,
     isSessionSearchOpen,
@@ -57,21 +58,18 @@ export function SidebarHeader(props: Props): React.ReactNode {
     searchMatchCount,
     collapseAllProjects,
     expandAllProjects,
-    openScheduledTasksDialog,
     selectionModeEnabled,
     onToggleSelectionMode,
   } = props;
 
-  const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
-  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
-  const setDisplayMode = useSessionDisplayStore((state) => state.setDisplayMode);
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
-  const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
-  // VS Code forces the expanded layout, so the mode toggle is meaningless there.
-  const showDisplayModeToggle = !isVSCodeRuntime();
+  const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
+  const setSessionGroupingMode = useSessionDisplayStore((state) => state.setSessionGroupingMode);
+  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
+  const toggleStickyZoneHeaders = useSessionDisplayStore((state) => state.toggleStickyZoneHeaders);
 
   if (hideDirectoryControls) {
     return null;
@@ -81,13 +79,17 @@ export function SidebarHeader(props: Props): React.ReactNode {
     <div className="select-none flex-shrink-0 px-2.5 py-1">
       <div className="flex h-auto min-h-8 flex-col gap-1">
         <div className="flex h-8 items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
+          {/* Quiet toolbar under the New-session CTA: project/surface entry
+              points at left, list controls at right. ml-[3px] compensates the
+              icon inset inside the 24px buttons so the first glyph lines up
+              with the New-session icon above (16px from the sidebar edge). */}
+          <div className="ml-[3px] flex items-center gap-1.5">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={handleOpenDirectoryDialog}
-                  className={headerActionButtonClass}
+                  className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
                   aria-label={t('sessions.sidebar.header.actions.addProject')}
                 >
                   <Icon name="folder-add" className={headerActionIconClass} />
@@ -100,22 +102,22 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={openNewSessionDraft}
-                  className={headerActionButtonClass}
-                  aria-label={t('sessions.sidebar.header.actions.newSession')}
+                  onClick={onOpenScheduled}
+                  className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
+                  aria-label={t('sessions.sidebar.header.actions.scheduledTasks')}
                 >
-                  <Icon name="chat-new" className={headerActionIconClass} />
+                  <Icon name="calendar-schedule" className={headerActionIconClass} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newSession')}</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.scheduledTasks')}</p></TooltipContent>
             </Tooltip>
 
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={openMultiRunLauncher}
-                  className={headerActionButtonClass}
+                  onClick={onOpenMultiRun}
+                  className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
                   aria-label={t('sessions.sidebar.header.actions.newMultiRun')}
                   disabled={!canOpenMultiRun}
                 >
@@ -129,14 +131,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={openScheduledTasksDialog}
-                  className={headerActionButtonClass}
-                  aria-label={t('sessions.sidebar.header.actions.scheduledTasks')}
+                  onClick={onOpenArchive}
+                  className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
+                  aria-label={t('sessions.sidebar.nav.archive')}
                 >
-                  <Icon name="calendar-schedule" className={headerActionIconClass} />
+                  <Icon name="archive" className={headerActionIconClass} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.scheduledTasks')}</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.nav.archive')}</p></TooltipContent>
             </Tooltip>
           </div>
 
@@ -146,7 +148,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <button
                   type="button"
                   onClick={() => setIsSessionSearchOpen((prev) => !prev)}
-                  className={headerActionButtonClass}
+                  className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
                   aria-label={t('sessions.sidebar.header.actions.searchSessions')}
                   aria-expanded={isSessionSearchOpen}
                 >
@@ -161,7 +163,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <button
                   type="button"
                   onClick={onToggleSelectionMode}
-                  className={cn(headerActionButtonClass, selectionModeEnabled && 'bg-interactive-hover text-primary')}
+                  className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent', selectionModeEnabled && 'bg-interactive-hover text-primary')}
                   aria-label={selectionModeEnabled
                     ? t('sessions.sidebar.header.actions.exitSelection')
                     : t('sessions.sidebar.header.actions.selectSessions')}
@@ -183,62 +185,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className={headerActionButtonClass}
-                      aria-label={t('sessions.sidebar.header.actions.sortProjects')}
-                    >
-                      <Icon name="sort-desc" className={headerActionIconClass} />
-                    </button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.sortProjects')}</p></TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="min-w-[160px]">
-                <DropdownMenuItem
-                  onClick={() => setProjectSortOrder('manual')}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.projectSort.manual')}</span>
-                  {projectSortOrder === 'manual' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setProjectSortOrder('a-z')}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.projectSort.aToZ')}</span>
-                  {projectSortOrder === 'a-z' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setProjectSortOrder('z-a')}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.projectSort.zToA')}</span>
-                  {projectSortOrder === 'z-a' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setProjectSortOrder('date-added')}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.projectSort.dateAdded')}</span>
-                  {projectSortOrder === 'date-added' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setProjectSortOrder('recent')}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.projectSort.recent')}</span>
-                  {projectSortOrder === 'recent' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className={headerActionButtonClass}
-                      aria-label={t('sessions.sidebar.header.actions.sessionDisplayMode')}
+                      className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
+                      aria-label={t('sessions.sidebar.header.displayMode.label')}
                     >
                       <Icon name="equalizer-2" className={headerActionIconClass} />
                     </button>
@@ -246,44 +194,56 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
               </Tooltip>
-              <DropdownMenuContent align="end" className="min-w-[160px]">
-                {showDisplayModeToggle ? (
-                  <>
-                    <DropdownMenuItem
-                      onClick={() => setDisplayMode('default')}
-                      className="flex items-center justify-between"
-                    >
-                      <span>{t('sessions.sidebar.header.displayMode.default')}</span>
-                      {displayMode === 'default' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => setDisplayMode('minimal')}
-                      className="flex items-center justify-between"
-                    >
-                      <span>{t('sessions.sidebar.header.displayMode.minimal')}</span>
-                      {displayMode === 'minimal' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                    </DropdownMenuItem>
-                  </>
-                ) : null}
+              <DropdownMenuContent align="end" className="min-w-[180px]">
+                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.sortProjects')}</DropdownMenuLabel>
+                {([
+                  ['manual', 'sessions.sidebar.header.projectSort.manual'],
+                  ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
+                  ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
+                  ['date-added', 'sessions.sidebar.header.projectSort.dateAdded'],
+                  ['recent', 'sessions.sidebar.header.projectSort.recent'],
+                ] as const).map(([order, labelKey]) => (
+                  <DropdownMenuItem
+                    key={order}
+                    onClick={() => setProjectSortOrder(order)}
+                    className="flex items-center justify-between"
+                  >
+                    <span>{t(labelKey)}</span>
+                    {projectSortOrder === order ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>{t('sessions.sidebar.header.grouping.label')}</DropdownMenuLabel>
+                {([
+                  ['by-worktree', 'sessions.sidebar.header.grouping.byWorktree'],
+                  ['flat', 'sessions.sidebar.header.grouping.flat'],
+                ] as const).map(([mode, labelKey]) => (
+                  <DropdownMenuItem
+                    key={mode}
+                    onClick={() => setSessionGroupingMode(mode)}
+                    className="flex items-center justify-between"
+                  >
+                    <span>{t(labelKey)}</span>
+                    {sessionGroupingMode === mode ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
                 {showRecentControls ? (
-                  <>
-                    {showDisplayModeToggle ? <DropdownMenuSeparator /> : null}
-                    <DropdownMenuItem
-                      onClick={toggleRecentSection}
-                      className="flex items-center justify-between"
-                    >
-                      <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
-                      {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={toggleArchivedSessions}
-                      className="flex items-center justify-between"
-                    >
-                      <span>{t('sessions.sidebar.header.displayMode.showArchived')}</span>
-                      {showArchivedSessions ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                    </DropdownMenuItem>
-                  </>
+                  <DropdownMenuItem
+                    onClick={toggleRecentSection}
+                    className="flex items-center justify-between"
+                  >
+                    <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
+                    {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                  </DropdownMenuItem>
                 ) : null}
+                <DropdownMenuItem
+                  onClick={toggleStickyZoneHeaders}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.displayMode.stickyHeaders')}</span>
+                  {stickyZoneHeaders ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
                   <Icon name="contract-up-down" className="h-4 w-4" />
@@ -293,7 +253,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   <Icon name="expand-up-down" className="h-4 w-4" />
                   <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
                 </DropdownMenuItem>
-
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

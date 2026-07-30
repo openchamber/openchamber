@@ -136,4 +136,33 @@ describe("GitHub PR status cache ownership", () => {
     expect(staleRequestCount).toBe(0)
     expect(replacementRequestCount).toBe(1)
   })
+
+  test("rejects a server-cached response older than the held status", async () => {
+    const newer: GitHubPullRequestStatus = {
+      connected: true,
+      fetchedAt: 2_000,
+      pr: { number: 7, title: "t", url: "u", state: "open", draft: false, base: "main", head: "f" },
+      checks: { state: "pending", total: 3, success: 2, failure: 0, pending: 1 },
+    }
+    const older: GitHubPullRequestStatus = {
+      ...newer,
+      fetchedAt: 1_000,
+      checks: { state: "success", total: 3, success: 3, failure: 0, pending: 0 },
+    }
+
+    const responses = [newer, older]
+    const github = { prStatus: async () => responses.shift()! } as unknown as RuntimeAPIs["github"]
+    const key = getGitHubPrStatusKey("/repo", "main", "origin")
+    useGitHubPrStatusStore.getState().ensureEntry(key)
+    useGitHubPrStatusStore.getState().setParams(key, params(github))
+
+    await useGitHubPrStatusStore.getState().refresh(key, { force: true })
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.checks?.pending).toBe(1)
+
+    await useGitHubPrStatusStore.getState().refresh(key, { force: true })
+    const held = useGitHubPrStatusStore.getState().entries[key]?.status
+    expect(held?.fetchedAt).toBe(2_000)
+    expect(held?.checks?.pending).toBe(1)
+    expect(useGitHubPrStatusStore.getState().entries[key]?.isLoading).toBe(false)
+  })
 })

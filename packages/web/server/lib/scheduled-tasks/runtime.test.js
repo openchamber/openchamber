@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeNextRunAt, formatScheduledSessionTitle, parseScheduledCommandPrompt } from './runtime.js';
+import { computeNextRunAt, expandCommandGoalObjective, formatScheduledSessionTitle, parseScheduledCommandPrompt } from './runtime.js';
 
 describe('scheduled-tasks runtime helpers', () => {
   it('computes next daily run in timezone', () => {
@@ -96,5 +96,16 @@ describe('scheduled-tasks runtime helpers', () => {
   it('returns null when prompt is not a slash command', () => {
     expect(parseScheduledCommandPrompt('Summarize open issues')).toBeNull();
     expect(parseScheduledCommandPrompt('/')).toBeNull();
+  });
+
+  it('expands command arguments into the goal objective', () => {
+    expect(expandCommandGoalObjective(
+      'Run the issue pipeline for $ARGUMENTS. Verify $ARGUMENTS is represented by the PR.',
+      'LIN-123 --draft',
+    )).toBe('Run the issue pipeline for LIN-123 --draft. Verify LIN-123 --draft is represented by the PR.');
+    expect(expandCommandGoalObjective(undefined, 'LIN-123')).toBeNull();
+    expect(expandCommandGoalObjective('Move $1 to $2', '"src old" dist extra')).toBe('Move src old to dist extra');
+    expect(expandCommandGoalObjective('Review the requested scope.', 'auth module'))
+      .toBe('Review the requested scope.\n\nauth module');
   });
 });

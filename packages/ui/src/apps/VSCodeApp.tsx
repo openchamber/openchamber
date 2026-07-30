@@ -7,6 +7,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useRouter } from '@/hooks/useRouter';
@@ -107,6 +108,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
               <div className="h-full text-foreground bg-background">
                 <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
                 <AgentManagerView />
+                <OpenCodeUpdateToast />
                 <Toaster position="top-center" />
               </div>
             </TooltipProvider>
@@ -125,6 +127,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
               <div className="h-full text-foreground bg-background">
                 <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
                 <VSCodeLayout />
+                <OpenCodeUpdateToast />
                 <Toaster position="top-center" />
                 <ConfigUpdateOverlay />
               </div>

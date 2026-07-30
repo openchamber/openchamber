@@ -9,11 +9,11 @@ import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOpt
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
+import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
-export type RightSidebarTab = 'git' | 'files' | 'context';
-export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser';
+export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -21,7 +21,7 @@ export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
-export type DesktopWindowControlsPosition = 'auto' | 'left' | 'right';
+export type DesktopWindowControlsPosition = 'left' | 'right';
 export type FileEditorKeymap = 'default' | 'vim';
 export type MessageTimestampFormatPreference = 'hidden' | 'relative' | 'absolute' | 'hybrid';
 
@@ -66,7 +66,9 @@ type ContextPanelDirectoryState = {
   expanded: boolean;
   tabs: ContextPanelTab[];
   activeTabId: string | null;
-  width: number;
+  // Manual per-surface widths (px), populated only by user resize; surfaces
+  // without an entry fall back to their registry defaultWidthFraction.
+  widthByMode: Partial<Record<ContextPanelMode, number>>;
   touchedAt: number;
 };
 
@@ -127,14 +129,15 @@ const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
 const LEFT_SIDEBAR_MIN_WIDTH = 280;
-export const RIGHT_SIDEBAR_MIN_WIDTH = 360;
-export const RIGHT_SIDEBAR_MAX_WIDTH = 860;
 const activeMainTabByRuntime = new Map<string, MainTab>();
 
 const runtimeMemoryKey = (value?: string | null): string => {
   const key = (value ?? getRuntimeKey()).trim();
   return key || 'default';
 };
+
+// Shared with rail/panel consumers so contextPanelByDirectory lookups agree on keys.
+export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
 
 const normalizeDirectoryPath = (value: string): string => {
   if (!value) return '';
@@ -292,7 +295,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview' && candidate.mode !== 'browser') {
+    if (candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal') {
       continue;
     }
 
@@ -356,7 +359,7 @@ const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanel
     expanded: false,
     tabs: [],
     activeTabId: null,
-    width: CONTEXT_PANEL_DEFAULT_WIDTH,
+    widthByMode: {},
     touchedAt: Date.now(),
   };
 };
@@ -366,10 +369,15 @@ const upsertContextPanelTab = (
   descriptor: ContextPanelTabDescriptor,
 ): ContextPanelDirectoryState => {
   const nextTab = createContextPanelTab(descriptor);
-  const existingIndex = current.tabs.findIndex((tab) => tab.id === nextTab.id);
+  // A real file tab replaces the empty editor placeholder ('file' with no
+  // target) that the rail can open before any file is picked.
+  const baseTabs = nextTab.mode === 'file' && nextTab.targetPath
+    ? current.tabs.filter((tab) => !(tab.mode === 'file' && !tab.targetPath))
+    : current.tabs;
+  const existingIndex = baseTabs.findIndex((tab) => tab.id === nextTab.id);
   const tabs = existingIndex === -1
-    ? [...current.tabs, nextTab]
-    : current.tabs.map((tab, index) => (index === existingIndex
+    ? [...baseTabs, nextTab]
+    : baseTabs.map((tab, index) => (index === existingIndex
       ? {
           ...tab,
           mode: nextTab.mode,
@@ -400,16 +408,32 @@ const closeContextPanelTab = (
   current: ContextPanelDirectoryState,
   tabID: string,
 ): ContextPanelDirectoryState => {
+  const closedTab = current.tabs.find((tab) => tab.id === tabID) ?? null;
   const nextTabs = current.tabs.filter((tab) => tab.id !== tabID);
-  const nextActiveTabId = current.activeTabId === tabID
-    ? (nextTabs[nextTabs.length - 1]?.id ?? null)
-    : resolveActiveContextPanelTabID(nextTabs, current.activeTabId);
+
+  if (current.activeTabId !== tabID) {
+    return {
+      ...current,
+      tabs: nextTabs,
+      activeTabId: resolveActiveContextPanelTabID(nextTabs, current.activeTabId),
+      isOpen: nextTabs.length > 0 ? current.isOpen : false,
+      touchedAt: Date.now(),
+    };
+  }
+
+  // Closing the active tab stays inside the active surface: activate the most
+  // recent remaining tab of the same mode, and when it was the last one just
+  // close the panel instead of jumping to another surface.
+  const sameModeTabs = closedTab ? nextTabs.filter((tab) => tab.mode === closedTab.mode) : [];
+  const nextSameModeTab = sameModeTabs.length > 0
+    ? sameModeTabs.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best))
+    : null;
 
   return {
     ...current,
     tabs: nextTabs,
-    activeTabId: nextActiveTabId,
-    isOpen: nextTabs.length > 0 ? current.isOpen : false,
+    activeTabId: nextSameModeTab?.id ?? resolveActiveContextPanelTabID(nextTabs, null),
+    isOpen: nextSameModeTab ? current.isOpen : false,
     touchedAt: Date.now(),
   };
 };
@@ -476,7 +500,7 @@ const sanitizeContextPanelByDirectory = (
       expanded?: unknown;
       tabs?: unknown;
       activeTabId?: unknown;
-      width?: unknown;
+      widthByMode?: unknown;
       touchedAt?: unknown;
       mode?: unknown;
       targetPath?: unknown;
@@ -500,12 +524,27 @@ const sanitizeContextPanelByDirectory = (
     const resolvedActiveTabId = resolveActiveContextPanelTabID(tabs, activeTabId);
     const clampedTabs = clampContextPanelTabs(tabs, CONTEXT_PANEL_MAX_TABS, resolvedActiveTabId);
 
+    // Legacy single `width` values are intentionally dropped: widths are now
+    // per-surface, seeded from registry defaults until the user resizes.
+    const widthByMode: Partial<Record<ContextPanelMode, number>> = {};
+    if (candidate.widthByMode && typeof candidate.widthByMode === 'object') {
+      for (const [mode, value] of Object.entries(candidate.widthByMode as Record<string, unknown>)) {
+        if (
+          (mode === 'diff' || mode === 'file' || mode === 'context' || mode === 'plan' || mode === 'chat' || mode === 'preview' || mode === 'browser' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'terminal')
+          && typeof value === 'number'
+          && Number.isFinite(value)
+        ) {
+          widthByMode[mode] = clampContextPanelWidth(value);
+        }
+      }
+    }
+
     next[directory] = {
       isOpen: candidate.isOpen === true,
       expanded: candidate.expanded === true,
       tabs: clampedTabs,
       activeTabId: resolveActiveContextPanelTabID(clampedTabs, resolvedActiveTabId),
-      width: clampContextPanelWidth(typeof candidate.width === 'number' ? candidate.width : CONTEXT_PANEL_DEFAULT_WIDTH),
+      widthByMode,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -540,15 +579,10 @@ interface UIStore {
   isSidebarOpen: boolean;
   sidebarWidth: number;
   hasManuallyResizedLeftSidebar: boolean;
-  isRightSidebarOpen: boolean;
-  rightSidebarWidth: number;
-  hasManuallyResizedRightSidebar: boolean;
-  rightSidebarTab: RightSidebarTab;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
-  isBottomTerminalOpen: boolean;
-  isBottomTerminalExpanded: boolean;
-  bottomTerminalHeight: number;
-  hasManuallyResizedBottomTerminal: boolean;
+  contextRailOrder: string[];
+  contextEditorTreeVisible: boolean;
+  contextEditorTreeWidth: number;
   notesPanelHeight: number;
   todoPanelHeight: number;
   isSessionSwitcherOpen: boolean;
@@ -570,6 +604,8 @@ interface UIStore {
   openCodeStatusText: string;
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
+  isArchivePageOpen: boolean;
+  worktreesPageProjectId: string | null;
   isSettingsDialogOpen: boolean;
   isNewWorktreeDialogOpen: boolean;
   isModelSelectorOpen: boolean;
@@ -688,10 +724,10 @@ interface UIStore {
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number) => void;
-  toggleRightSidebar: () => void;
-  setRightSidebarOpen: (open: boolean) => void;
-  setRightSidebarWidth: (width: number) => void;
-  setRightSidebarTab: (tab: RightSidebarTab) => void;
+  setContextRailOrder: (order: string[]) => void;
+  toggleContextEditorTree: () => void;
+  setContextEditorTreeWidth: (width: number) => void;
+  openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
   openContextFile: (directory: string, filePath: string) => void;
@@ -706,11 +742,7 @@ interface UIStore {
   closeContextPanelTab: (directory: string, tabID: string) => void;
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
-  setContextPanelWidth: (directory: string, width: number) => void;
-  toggleBottomTerminal: () => void;
-  setBottomTerminalOpen: (open: boolean) => void;
-  setBottomTerminalExpanded: (expanded: boolean) => void;
-  setBottomTerminalHeight: (height: number) => void;
+  setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number) => void;
   setNotesPanelHeight: (height: number) => void;
   setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
@@ -737,6 +769,10 @@ interface UIStore {
   setOpenCodeStatusText: (text: string) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
+  setArchivePageOpen: (open: boolean) => void;
+  setWorktreesPageProjectId: (projectId: string | null) => void;
+  /** Close every full-page surface (Scheduled, Archive, Worktrees, Multi-run). */
+  closeMainSurfaces: () => void;
   setSettingsDialogOpen: (open: boolean) => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
@@ -776,7 +812,6 @@ interface UIStore {
   setMobileKeyboardMode: (mode: MobileKeyboardMode) => void;
   applyTypography: () => void;
   applyPadding: () => void;
-  updateProportionalSidebarWidths: () => void;
   toggleFavoriteModel: (providerID: string, modelID: string) => void;
   reorderFavoriteModel: (
     activeProviderID: string,
@@ -868,15 +903,10 @@ export const useUIStore = create<UIStore>()(
         isSidebarOpen: true,
         sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
         hasManuallyResizedLeftSidebar: false,
-        isRightSidebarOpen: false,
-        rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-        hasManuallyResizedRightSidebar: false,
-        rightSidebarTab: 'git',
         contextPanelByDirectory: {},
-        isBottomTerminalOpen: false,
-        isBottomTerminalExpanded: false,
-        bottomTerminalHeight: 300,
-        hasManuallyResizedBottomTerminal: false,
+        contextRailOrder: [],
+        contextEditorTreeVisible: true,
+        contextEditorTreeWidth: 240,
         notesPanelHeight: 112,
         todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
@@ -898,6 +928,8 @@ export const useUIStore = create<UIStore>()(
         openCodeStatusText: '',
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
+        isArchivePageOpen: false,
+        worktreesPageProjectId: null,
         isSettingsDialogOpen: false,
         isNewWorktreeDialogOpen: false,
         isModelSelectorOpen: false,
@@ -984,7 +1016,7 @@ export const useUIStore = create<UIStore>()(
         showExpandedEditTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
-        desktopWindowControlsPosition: 'auto',
+        desktopWindowControlsPosition: 'right',
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
@@ -1051,45 +1083,60 @@ export const useUIStore = create<UIStore>()(
           set({ sidebarWidth: width, hasManuallyResizedLeftSidebar: true });
         },
 
-        toggleRightSidebar: () => {
-          set((state) => {
-            const newOpen = !state.isRightSidebarOpen;
-
-            if (newOpen && !state.hasManuallyResizedRightSidebar) {
-              return {
-                isRightSidebarOpen: newOpen,
-                rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-              };
-            }
-            return { isRightSidebarOpen: newOpen };
-          });
+        setContextRailOrder: (order) => {
+          const sanitized = Array.isArray(order)
+            ? order.filter((id, index) => typeof id === 'string' && id.trim() !== '' && order.indexOf(id) === index)
+            : [];
+          set({ contextRailOrder: sanitized });
         },
 
-        setRightSidebarOpen: (open) => {
-          set((state) => {
-            if (state.isRightSidebarOpen === open) {
-              return state;
-            }
-            const shouldResetWidth = open
-              && !state.hasManuallyResizedRightSidebar
-              && state.rightSidebarWidth !== RIGHT_SIDEBAR_MIN_WIDTH;
-            return {
-              isRightSidebarOpen: open,
-              rightSidebarWidth: shouldResetWidth ? RIGHT_SIDEBAR_MIN_WIDTH : state.rightSidebarWidth,
-            };
-          });
+        toggleContextEditorTree: () => {
+          set((state) => ({ contextEditorTreeVisible: !state.contextEditorTreeVisible }));
         },
 
-        setRightSidebarWidth: (width) => {
-          const clamped = Math.min(
-            RIGHT_SIDEBAR_MAX_WIDTH,
-            Math.max(RIGHT_SIDEBAR_MIN_WIDTH, width)
-          );
-          set({ rightSidebarWidth: clamped, hasManuallyResizedRightSidebar: true });
+        setContextEditorTreeWidth: (width) => {
+          if (!Number.isFinite(width)) {
+            return;
+          }
+          set({ contextEditorTreeWidth: Math.min(480, Math.max(200, Math.round(width))) });
         },
 
-        setRightSidebarTab: (tab) => {
-          set({ rightSidebarTab: tab });
+        // Rail entry point: activates the most recent tab of the requested
+        // mode, opens a fresh singleton tab when none exists, and toggles the
+        // panel closed when the requested mode is already active and visible.
+        openContextSurface: (directory, mode) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) {
+            return;
+          }
+
+          const state = get();
+          const panelState = state.contextPanelByDirectory[normalizedDirectory];
+          const tabs = panelState?.tabs ?? [];
+          const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
+
+          if (panelState?.isOpen && activeTab?.mode === mode) {
+            state.closeContextPanel(normalizedDirectory);
+            return;
+          }
+
+          const tabsOfMode = tabs.filter((tab) => tab.mode === mode);
+          if (tabsOfMode.length > 0) {
+            // `>=` so equal timestamps (same-millisecond opens) resolve to the
+            // later tab in insertion order.
+            const mostRecent = tabsOfMode.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best));
+            state.setActiveContextPanelTab(normalizedDirectory, mostRecent.id);
+            return;
+          }
+
+          // Content-driven modes need a payload (a preview URL or session);
+          // the rail renders them disabled until content exists. 'file' opens
+          // an empty editor whose embedded tree picks the first file.
+          if (mode === 'preview' || mode === 'chat') {
+            return;
+          }
+
+          state.openContextPanelTab(normalizedDirectory, { mode });
         },
 
         openContextPanelTab: (directory, tab) => {
@@ -1298,6 +1345,9 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
+          const closingTab = get().contextPanelByDirectory[normalizedDirectory]?.tabs
+            .find((tab) => tab.id === normalizedTabID);
+
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
             const current = touchContextPanelState(prev);
@@ -1312,6 +1362,12 @@ export const useUIStore = create<UIStore>()(
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
           });
+
+          // Keep the editor's own open-file state in sync so a reopened
+          // editor surface does not resurrect the closed file.
+          if (closingTab?.mode === 'file' && closingTab.targetPath) {
+            useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, closingTab.targetPath);
+          }
         },
 
         closeContextPanel: (directory) => {
@@ -1359,7 +1415,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setContextPanelWidth: (directory, width) => {
+        setContextPanelWidth: (directory, mode, width) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory) {
             return;
@@ -1372,70 +1428,15 @@ export const useUIStore = create<UIStore>()(
               ...state.contextPanelByDirectory,
               [normalizedDirectory]: {
                 ...current,
-                width: clampContextPanelWidth(width),
+                widthByMode: {
+                  ...current.widthByMode,
+                  [mode]: clampContextPanelWidth(width),
+                },
               },
             };
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
           });
-        },
-
-        toggleBottomTerminal: () => {
-          set((state) => {
-            const newOpen = !state.isBottomTerminalOpen;
-
-            if (newOpen && typeof window !== 'undefined') {
-              const proportionalHeight = Math.floor(window.innerHeight * 0.32);
-              return {
-                isBottomTerminalOpen: newOpen,
-                bottomTerminalHeight: proportionalHeight,
-                hasManuallyResizedBottomTerminal: false,
-              };
-            }
-
-            return { isBottomTerminalOpen: newOpen };
-          });
-        },
-
-        setBottomTerminalOpen: (open) => {
-          set((state) => {
-            if (state.isBottomTerminalOpen === open) {
-              if (!open) {
-                return state;
-              }
-              if (!state.hasManuallyResizedBottomTerminal && typeof window !== 'undefined') {
-                const proportionalHeight = Math.floor(window.innerHeight * 0.32);
-                if (state.bottomTerminalHeight === proportionalHeight && state.hasManuallyResizedBottomTerminal === false) {
-                  return state;
-                }
-                return {
-                  isBottomTerminalOpen: open,
-                  bottomTerminalHeight: proportionalHeight,
-                  hasManuallyResizedBottomTerminal: false,
-                };
-              }
-              return state;
-            }
-
-            if (open && typeof window !== 'undefined') {
-              const proportionalHeight = Math.floor(window.innerHeight * 0.32);
-              return {
-                isBottomTerminalOpen: open,
-                bottomTerminalHeight: proportionalHeight,
-                hasManuallyResizedBottomTerminal: false,
-              };
-            }
-
-            return { isBottomTerminalOpen: open };
-          });
-        },
-
-        setBottomTerminalExpanded: (expanded) => {
-          set({ isBottomTerminalExpanded: expanded });
-        },
-
-        setBottomTerminalHeight: (height) => {
-          set({ bottomTerminalHeight: height, hasManuallyResizedBottomTerminal: true });
         },
 
         setNotesPanelHeight: (height) => {
@@ -1574,7 +1575,35 @@ export const useUIStore = create<UIStore>()(
         },
 
         setScheduledTasksDialogOpen: (open) => {
-          set({ isScheduledTasksDialogOpen: open });
+          set(open
+            ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
+            : { isScheduledTasksDialogOpen: false });
+        },
+
+        setArchivePageOpen: (open) => {
+          set(open
+            ? { isArchivePageOpen: true, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
+            : { isArchivePageOpen: false });
+        },
+
+        setWorktreesPageProjectId: (projectId) => {
+          set(projectId
+            ? { worktreesPageProjectId: projectId, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isMultiRunLauncherOpen: false }
+            : { worktreesPageProjectId: null });
+        },
+
+        closeMainSurfaces: () => {
+          const state = get();
+          if (!state.isScheduledTasksDialogOpen && !state.isArchivePageOpen && !state.worktreesPageProjectId && !state.isMultiRunLauncherOpen) {
+            return;
+          }
+          set({
+            isScheduledTasksDialogOpen: false,
+            isArchivePageOpen: false,
+            worktreesPageProjectId: null,
+            isMultiRunLauncherOpen: false,
+            multiRunLauncherPrefillPrompt: '',
+          });
         },
 
         setSettingsDialogOpen: (open) => {
@@ -2024,25 +2053,6 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        updateProportionalSidebarWidths: () => {
-          if (typeof window === 'undefined') {
-            return;
-          }
-
-          set((state) => {
-            const updates: Partial<UIStore> = {};
-
-            if (state.isBottomTerminalOpen && !state.hasManuallyResizedBottomTerminal) {
-              const nextHeight = Math.floor(window.innerHeight * 0.32);
-              if (state.bottomTerminalHeight !== nextHeight) {
-                updates.bottomTerminalHeight = nextHeight;
-              }
-            }
-
-            return Object.keys(updates).length > 0 ? updates : state;
-          });
-        },
-
         applyTheme: () => {
           const { theme } = get();
           const root = document.documentElement;
@@ -2057,10 +2067,13 @@ export const useUIStore = create<UIStore>()(
           }
         },
 
+        // Multi-run is one of the mutually exclusive full-page surfaces:
+        // opening it closes the other surfaces and vice versa.
         setMultiRunLauncherOpen: (open) => {
           set((state) => ({
             isMultiRunLauncherOpen: open,
             multiRunLauncherPrefillPrompt: open ? state.multiRunLauncherPrefillPrompt : '',
+            ...(open ? { isScheduledTasksDialogOpen: false, isArchivePageOpen: false, worktreesPageProjectId: null } : {}),
           }));
         },
 
@@ -2069,6 +2082,9 @@ export const useUIStore = create<UIStore>()(
             isMultiRunLauncherOpen: true,
             multiRunLauncherPrefillPrompt: '',
             isSessionSwitcherOpen: false,
+            isScheduledTasksDialogOpen: false,
+            isArchivePageOpen: false,
+            worktreesPageProjectId: null,
           });
         },
 
@@ -2077,6 +2093,9 @@ export const useUIStore = create<UIStore>()(
             isMultiRunLauncherOpen: true,
             multiRunLauncherPrefillPrompt: prompt,
             isSessionSwitcherOpen: false,
+            isScheduledTasksDialogOpen: false,
+            isArchivePageOpen: false,
+            worktreesPageProjectId: null,
           });
         },
 
@@ -2163,7 +2182,7 @@ export const useUIStore = create<UIStore>()(
           set({ weekStartPreference: value });
         },
         setDesktopWindowControlsPosition: (value) => {
-          set({ desktopWindowControlsPosition: value });
+          set({ desktopWindowControlsPosition: value === 'left' ? 'left' : 'right' });
         },
         setMermaidRenderingMode: (value) => {
           set({ mermaidRenderingMode: value });
@@ -2204,13 +2223,7 @@ export const useUIStore = create<UIStore>()(
         viewPagerPage: 'center',
         setViewPagerPage: (page: 'left' | 'center' | 'right') => {
           set({ viewPagerPage: page });
-          if (page === 'left') {
-            set({ isSessionSwitcherOpen: true, isRightSidebarOpen: false });
-          } else if (page === 'right') {
-            set({ isRightSidebarOpen: true, isSessionSwitcherOpen: false });
-          } else {
-            set({ isSessionSwitcherOpen: false, isRightSidebarOpen: false });
-          }
+          set({ isSessionSwitcherOpen: page === 'left' });
         },
 
         setShortcutOverride: (actionId, combo) => {
@@ -2257,12 +2270,19 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 11,
+        version: 12,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v11 -> v12: drop legacy window-controls "auto" (always meant right).
+          if (version < 12) {
+            if (state.desktopWindowControlsPosition === 'auto' || state.desktopWindowControlsPosition == null) {
+              state.desktopWindowControlsPosition = 'right';
+            }
+          }
 
           // v10 -> v11: move the previous terminal font default forward.
           if (version < 11 && state.terminalFontSize === 13) {
@@ -2317,12 +2337,11 @@ export const useUIStore = create<UIStore>()(
             delete state.memoryLimitActiveSession;
           }
 
-          if (
-            typeof state.rightSidebarTab !== 'string'
-            || (state.rightSidebarTab !== 'git' && state.rightSidebarTab !== 'files' && state.rightSidebarTab !== 'context')
-          ) {
-            state.rightSidebarTab = 'git';
-          }
+          // Right-sidebar state was removed with the sidebar itself; drop
+          // stale persisted fields.
+          delete state.isRightSidebarOpen;
+          delete state.rightSidebarWidth;
+          delete state.rightSidebarTab;
 
           state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
 
@@ -2357,19 +2376,20 @@ export const useUIStore = create<UIStore>()(
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
 
+          state.contextRailOrder = Array.isArray(state.contextRailOrder)
+            ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+            : [];
+
           return state;
         },
         partialize: (state) => ({
           theme: state.theme,
           isSidebarOpen: state.isSidebarOpen,
           sidebarWidth: state.sidebarWidth,
-          isRightSidebarOpen: state.isRightSidebarOpen,
-          rightSidebarWidth: state.rightSidebarWidth,
-          rightSidebarTab: state.rightSidebarTab,
           contextPanelByDirectory: state.contextPanelByDirectory,
-          isBottomTerminalOpen: state.isBottomTerminalOpen,
-          isBottomTerminalExpanded: state.isBottomTerminalExpanded,
-          bottomTerminalHeight: state.bottomTerminalHeight,
+          contextRailOrder: state.contextRailOrder,
+          contextEditorTreeVisible: state.contextEditorTreeVisible,
+          contextEditorTreeWidth: state.contextEditorTreeWidth,
           notesPanelHeight: state.notesPanelHeight,
           todoPanelHeight: state.todoPanelHeight,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,

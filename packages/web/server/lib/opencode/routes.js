@@ -8,6 +8,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     crypto,
     clientReloadDelayMs,
     getOpenCodeResolutionSnapshot,
+    getOpenCodeUpgradeCapability,
     formatSettingsResponse,
     readSettingsFromDisk,
     readSettingsFromDiskMigrated,
@@ -39,12 +40,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
     const trimmed = value.trim();
     return trimmed || null;
-  };
-
-  const isBundledOpenCodeBinaryActive = async () => {
-    const settings = await readSettingsFromDiskMigrated();
-    const resolution = await getOpenCodeResolutionSnapshot(settings);
-    return resolution?.source === 'bundled' || resolution?.detectedSourceNow === 'bundled';
   };
 
   const readOpenCodeCurrentVersion = async () => {
@@ -153,48 +148,84 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
+  let openCodeUpgradePromise = null;
+
   app.post('/api/opencode/upgrade', async (req, res) => {
     try {
-      if (await isBundledOpenCodeBinaryActive()) {
+      const capability = getOpenCodeUpgradeCapability();
+      if (!capability.supported) {
         return res.status(409).json({
           success: false,
-          error: 'OpenCode is bundled with OpenChamber Desktop and cannot be upgraded separately.',
+          code: capability.reason === 'bundled'
+            ? 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER'
+            : 'OPENCODE_UPGRADE_UNSUPPORTED',
+          error: capability.reason === 'bundled'
+            ? 'OpenCode is bundled with OpenChamber Desktop and updates with the app.'
+            : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
+        });
+      }
+      if (openCodeUpgradePromise) {
+        return res.status(409).json({
+          success: false,
+          code: 'OPENCODE_UPGRADE_IN_PROGRESS',
+          error: 'An OpenCode upgrade is already in progress.',
         });
       }
 
       const target = typeof req.body?.target === 'string' && req.body.target.trim().length > 0
         ? req.body.target.trim()
         : undefined;
-      const response = await fetch(buildOpenCodeUrl('/global/upgrade', ''), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
-        },
-        body: JSON.stringify(target ? { target } : {}),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        return res.status(response.status).json({
-          success: false,
-          error: payload?.error || response.statusText || 'Failed to upgrade OpenCode',
+      const upgradeOperation = (async () => {
+        const response = await fetch(buildOpenCodeUrl('/global/upgrade', ''), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...getOpenCodeAuthHeaders(),
+          },
+          body: JSON.stringify(target ? { target } : {}),
         });
-      }
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          return {
+            status: response.status,
+            body: {
+              success: false,
+              error: payload?.error || response.statusText || 'Failed to upgrade OpenCode',
+            },
+          };
+        }
+
+        try {
+          await refreshOpenCodeAfterConfigChange('OpenCode upgrade');
+        } catch (restartError) {
+          return {
+            status: 500,
+            body: {
+              success: false,
+              upgraded: true,
+              error: restartError instanceof Error
+                ? `OpenCode upgraded, but restart failed: ${restartError.message}`
+                : 'OpenCode upgraded, but restart failed',
+            },
+          };
+        }
+
+        return {
+          status: 200,
+          body: { ...(payload ?? { success: true }), restarted: true },
+        };
+      })();
+      openCodeUpgradePromise = upgradeOperation;
 
       try {
-        await refreshOpenCodeAfterConfigChange('OpenCode upgrade');
-      } catch (restartError) {
-        return res.status(500).json({
-          success: false,
-          upgraded: true,
-          error: restartError instanceof Error
-            ? `OpenCode upgraded, but restart failed: ${restartError.message}`
-            : 'OpenCode upgraded, but restart failed',
-        });
+        const result = await upgradeOperation;
+        return res.status(result.status).json(result.body);
+      } finally {
+        if (openCodeUpgradePromise === upgradeOperation) {
+          openCodeUpgradePromise = null;
+        }
       }
-
-      return res.json({ ...(payload ?? { success: true }), restarted: true });
     } catch (error) {
       console.error('Failed to upgrade OpenCode:', error);
       return res.status(500).json({
@@ -206,13 +237,14 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.get('/api/opencode/upgrade-status', async (_req, res) => {
     try {
-      if (await isBundledOpenCodeBinaryActive()) {
+      const capability = getOpenCodeUpgradeCapability();
+      if (!capability.supported) {
         const current = await readOpenCodeCurrentVersion().catch(() => ({ ok: false, currentVersion: null }));
         return res.json({
           available: false,
           currentVersion: current.ok ? current.currentVersion : null,
           latestVersion: null,
-          source: 'bundled',
+          upgrade: capability,
         });
       }
 
@@ -239,6 +271,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         available,
         currentVersion,
         latestVersion,
+        upgrade: capability,
       });
     } catch (error) {
       return res.status(500).json({

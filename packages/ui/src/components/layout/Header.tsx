@@ -721,12 +721,8 @@ export const Header: React.FC<HeaderProps> = ({
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-  const toggleBottomTerminal = useUIStore((state) => state.toggleBottomTerminal);
-  const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
-  const openContextBrowser = useUIStore((state) => state.openContextBrowser);
-  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
@@ -1304,6 +1300,37 @@ export const Header: React.FC<HeaderProps> = ({
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
   }, [activeProjectLabel, currentSession?.title, currentSessionId]);
 
+  // Full-page surfaces (Scheduled, Archive, Worktrees, Multi-run) replace the
+  // chat area; while one is open the header shows the surface identity
+  // instead of the session switcher.
+  const isScheduledSurfaceOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
+  const isArchiveSurfaceOpen = useUIStore((state) => state.isArchivePageOpen);
+  const worktreesSurfaceProjectId = useUIStore((state) => state.worktreesPageProjectId);
+  const isMultiRunSurfaceOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
+  const worktreesSurfaceProjectLabel = useProjectsStore((state) => {
+    if (!worktreesSurfaceProjectId) return null;
+    const project = state.projects.find((entry) => entry.id === worktreesSurfaceProjectId);
+    return project?.label?.trim() || project?.path?.split('/').pop() || null;
+  });
+  const activeSurfaceHeader = React.useMemo<{ title: string; subtitle: string | null } | null>(() => {
+    if (isScheduledSurfaceOpen) {
+      return { title: t('sessions.scheduledTasks.dialog.title'), subtitle: null };
+    }
+    if (isArchiveSurfaceOpen) {
+      return { title: t('sessions.archivePage.title'), subtitle: null };
+    }
+    if (worktreesSurfaceProjectId) {
+      return {
+        title: t('sessions.worktreesPage.title', { project: worktreesSurfaceProjectLabel ?? '' }),
+        subtitle: null,
+      };
+    }
+    if (isMultiRunSurfaceOpen) {
+      return { title: t('sessions.sidebar.header.actions.newMultiRun'), subtitle: null };
+    }
+    return null;
+  }, [isArchiveSurfaceOpen, isMultiRunSurfaceOpen, isScheduledSurfaceOpen, t, worktreesSurfaceProjectId, worktreesSurfaceProjectLabel]);
+
 
   const actionDirectory = React.useMemo(() => {
     return normalize(openDirectory || activeProject?.path || '');
@@ -1479,6 +1506,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const isContextPanelActive = activeContextMode === 'context';
 
+
   const handleOpenContextPlan = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
     if (!directory) {
@@ -1494,39 +1522,6 @@ export const Header: React.FC<HeaderProps> = ({
     openContextPlan(directory);
   }, [closeContextPanel, openContextPlan, openDirectory]);
 
-  const handleOpenContextChanges = React.useCallback(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return;
-    }
-
-    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
-    if (getActiveContextMode(panelState) === 'diff') {
-      closeContextPanel(directory);
-      return;
-    }
-
-    openContextPanelTab(directory, { mode: 'diff', stagedDiff: false });
-  }, [closeContextPanel, openContextPanelTab, openDirectory]);
-
-  const handleOpenContextBrowser = React.useCallback(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return;
-    }
-
-    const panelState = useUIStore.getState().contextPanelByDirectory[directory];
-    if (getActiveContextMode(panelState) === 'browser') {
-      closeContextPanel(directory);
-      return;
-    }
-
-    openContextBrowser(directory);
-  }, [closeContextPanel, openContextBrowser, openDirectory]);
-
-  const isContextPlanActive = activeContextMode === 'plan';
-  const isContextChangesActive = activeContextMode === 'diff';
-  const isContextBrowserActive = activeContextMode === 'browser';
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;
@@ -1764,8 +1759,10 @@ export const Header: React.FC<HeaderProps> = ({
   }, [shortcutOverrides]);
 
   useEffect(() => {
-    // Project actions may intentionally promote the terminal to the desktop main view.
-    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'diff' || activeMainTab === 'files' || activeMainTab === 'context')) {
+    // Project actions may intentionally promote the terminal to the desktop
+    // main view, and diagram clicks open the diagram viewer; every other
+    // legacy main tab now lives in the context panel on desktop.
+    if (!isMobile && activeMainTab !== 'chat' && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
       setActiveMainTab('chat');
     }
   }, [activeMainTab, isMobile, setActiveMainTab]);
@@ -1991,48 +1988,8 @@ export const Header: React.FC<HeaderProps> = ({
     return <React.Fragment key={tab.id}>{tabButton}</React.Fragment>;
   };
 
-  const desktopChangesPanelAction = !isVSCode ? (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={t('header.actions.toggleChangesPanelAria')}
-          aria-pressed={isContextChangesActive}
-          onClick={handleOpenContextChanges}
-          className={desktopHeaderIconButtonClass}
-        >
-          <span className="relative h-5 w-5 overflow-hidden rounded-[2px]">
-            <span className="absolute left-[4px] top-[4px] h-3 w-[5px] bg-[var(--status-error)]/25" />
-            <span className="absolute right-[4px] top-[4px] h-3 w-[5px] bg-[var(--status-success)]/25" />
-            <Icon name="layout-column" className="absolute inset-0 h-5 w-5" />
-          </span>
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>
-        <p>{t('header.actions.toggleChangesPanel')}</p>
-      </TooltipContent>
-    </Tooltip>
-  ) : null;
-
   const desktopSidebarActions = (
     <>
-      {showPlanTab && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label={t('header.actions.openPlanAria')}
-                onClick={handleOpenContextPlan}
-                className={cn(desktopHeaderIconButtonClass, isContextPlanActive && 'bg-[var(--interactive-hover)]')}
-              >
-              <Icon name="file-text" className="h-[18px] w-[18px]" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>{t('header.actions.planWithShortcut', { shortcut: shortcutLabel('toggle_context_plan') })}</p>
-          </TooltipContent>
-          </Tooltip>
-      )}
       <OpenInAppButton directory={actionDirectory} className="mr-1" />
       <DesktopServicesMenu
         isDesktopApp={isDesktopApp}
@@ -2068,27 +2025,6 @@ export const Header: React.FC<HeaderProps> = ({
         remoteUpdateError={remoteUpdateError}
         onOpenRemoteUpdate={openRemoteInstanceUpdate}
         timeFormatPreference={timeFormatPreference}
-      />
-      <HeaderIconActionButton
-        title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
-        ariaLabel={t('header.actions.toggleTerminalPanelAria')}
-        onClick={toggleBottomTerminal}
-        Icon={'terminal-box'}
-      />
-      {!isMobile ? (
-        <HeaderIconActionButton
-          title={t('contextPanel.browser.open')}
-          ariaLabel={t('contextPanel.browser.open')}
-          onClick={handleOpenContextBrowser}
-          pressed={isContextBrowserActive}
-          Icon={'global'}
-        />
-      ) : null}
-      <HeaderIconActionButton
-        title={t('header.actions.rightSidebarWithShortcut', { shortcut: shortcutLabel('toggle_right_sidebar') })}
-        ariaLabel={t('header.actions.toggleRightSidebarAria')}
-        onClick={toggleRightSidebar}
-        Icon={'layout-right'}
       />
       <DesktopGitHubControl
         isMobile={isMobile}
@@ -2134,6 +2070,18 @@ export const Header: React.FC<HeaderProps> = ({
           TitlebarLeftControls overlay; the header reserves matching left space
           via padding (see headerStyle) when the sidebar is collapsed. */}
       <div className="flex min-w-0 flex-1 items-center">
+        {activeSurfaceHeader ? (
+          <div className="mr-3 flex min-w-0 flex-col items-start px-1 py-0.5 -my-0.5 text-left">
+            <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
+              {activeSurfaceHeader.title}
+            </span>
+            {activeSurfaceHeader.subtitle ? (
+              <span className="truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75 max-w-full">
+                {activeSurfaceHeader.subtitle}
+              </span>
+            ) : null}
+          </div>
+        ) : (
         <SessionSwitcherDropdown>
           <button
             type="button"
@@ -2165,6 +2113,7 @@ export const Header: React.FC<HeaderProps> = ({
             ) : null}
           </button>
         </SessionSwitcherDropdown>
+        )}
 
         {tabs.length > 0 && (
           <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-muted)]/50 p-1">
@@ -2192,7 +2141,6 @@ export const Header: React.FC<HeaderProps> = ({
               percentIconClassName="h-4.5 w-4.5"
             />
           ) : null}
-          {desktopChangesPanelAction}
           <HeaderIconActionButton
             visible={showMiniChatHeaderAction}
             title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}

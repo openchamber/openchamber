@@ -185,7 +185,7 @@ export class AgentManagerPanelProvider {
   private async _startSseProxy(message: BridgeRequest): Promise<BridgeResponse> {
     const { id, type, payload } = message;
 
-    const { path, headers } = (payload || {}) as { path?: string; headers?: Record<string, string> };
+    const { path, headers, streamId: requestedStreamId } = (payload || {}) as { path?: string; headers?: Record<string, string>; streamId?: string };
     const normalizedPath = typeof path === 'string' && path.trim().length > 0 ? path.trim() : '/event';
 
     if (!this._openCodeManager) {
@@ -197,8 +197,11 @@ export class AgentManagerPanelProvider {
       };
     }
 
-    const streamId = `sse_${++this._sseCounter}_${Date.now()}`;
+    const streamId = typeof requestedStreamId === 'string' && /^sse_webview_\d+_\d+$/.test(requestedStreamId)
+      ? requestedStreamId
+      : `sse_${++this._sseCounter}_${Date.now()}`;
     const controller = new AbortController();
+    this._sseStreams.set(streamId, controller);
 
     try {
       const start = await openSseProxy({
@@ -210,8 +213,6 @@ export class AgentManagerPanelProvider {
           this._panel?.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk });
         },
       });
-
-      this._sseStreams.set(streamId, controller);
 
       start.run
         .then(() => {
@@ -238,6 +239,7 @@ export class AgentManagerPanelProvider {
         },
       };
     } catch (error) {
+      this._sseStreams.delete(streamId);
       const message = error instanceof Error ? error.message : String(error);
       return {
         id,

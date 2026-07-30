@@ -46,7 +46,6 @@ export const buildEmbeddedSessionChatURL = (
   url.searchParams.set('lightThemeId', theme.lightThemeId);
   url.searchParams.set('darkThemeId', theme.darkThemeId);
   url.searchParams.set('themeVariant', theme.currentTheme.metadata.variant === 'dark' ? 'dark' : 'light');
-  url.searchParams.set('currentTheme', JSON.stringify(theme.currentTheme));
 
   url.hash = '';
   return url.toString();

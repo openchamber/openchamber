@@ -4785,10 +4785,10 @@ ipcMain.handle('openchamber:file:grant-existing', async (event, filePath) => {
 });
 
 // --- Native tray / menu bar ---------------------------------------------------
-// Tray lives on macOS and Windows; the renderer streams a compact state snapshot via
-// the `desktop_tray_update` IPC command (see the command switch). Tray clicks
-// flow back through dispatchTrayAction → renderer (focus/respond) or native
-// handlers (show window / quit).
+// Tray lives on macOS, Windows, and Linux. The renderer streams a compact state
+// snapshot via the `desktop_tray_update` IPC command (see the command switch).
+// Tray clicks flow back through dispatchTrayAction → renderer (focus/respond) or
+// native handlers (show / hide / toggle / quit).
 
 // Icon assets: a calm outline (idle), a statically filled cube (a finished
 // session left unread), and an eased sequence the busy state breathes through.
@@ -4913,6 +4913,30 @@ const dispatchTrayAction = async (action) => {
 
   if (action.type === 'quit') {
     app.quit();
+    return;
+  }
+
+  if (action.type === 'hide-main-window') {
+    const target = (state.mainWindow && !state.mainWindow.isDestroyed())
+      ? state.mainWindow
+      : BrowserWindow.getFocusedWindow();
+    if (target && !target.isDestroyed() && target.isVisible()) {
+      debounceWindowStatePersist(target, true);
+      target.hide();
+    }
+    return;
+  }
+
+  if (action.type === 'toggle-main-window') {
+    const target = (state.mainWindow && !state.mainWindow.isDestroyed())
+      ? state.mainWindow
+      : null;
+    if (target && target.isVisible() && !target.isMinimized()) {
+      debounceWindowStatePersist(target, true);
+      target.hide();
+      return;
+    }
+    await revealMainWindow();
     return;
   }
 

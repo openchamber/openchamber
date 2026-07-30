@@ -163,6 +163,7 @@ export type SessionMaterializationReason =
   | "stream-reconnect"
   | "transport-switch"
   | "stale-status-resync"
+  | "settled-running-tool"
 
 export type DirectoryEventResult = boolean | {
   changed: boolean

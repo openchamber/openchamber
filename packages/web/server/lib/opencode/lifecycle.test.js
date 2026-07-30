@@ -12,9 +12,11 @@ const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
+const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   spawnMock.mockReset();
+  globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
   } else {
@@ -43,7 +45,7 @@ const createMockChild = () => {
   return child;
 };
 
-const createRuntime = (overrides = {}) => {
+const createRuntime = (overrides = {}, stateOverrides = {}) => {
   const state = {
     openCodeWorkingDirectory: '/tmp/project',
     openCodeProcess: null,
@@ -65,6 +67,7 @@ const createRuntime = (overrides = {}) => {
     resolvedWslBinary: null,
     resolvedWslOpencodePath: null,
     resolvedWslDistro: null,
+    ...stateOverrides,
   };
 
   return createOpenCodeLifecycleRuntime({
@@ -105,6 +108,69 @@ const createRuntime = (overrides = {}) => {
 };
 
 describe('OpenCode lifecycle', () => {
+  it('does not count rapid transport-triggered checks as independent health failures', async () => {
+    const close = vi.fn(async () => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let now = 1;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      json: async () => null,
+    }));
+    const runtime = createRuntime({ now: () => now }, {
+      openCodePort: 45678,
+      openCodeProcess: {
+        pid: null,
+        exitCode: null,
+        signalCode: null,
+        close,
+      },
+      isOpenCodeReady: true,
+    });
+
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      await runtime.triggerHealthCheck();
+    }
+
+    expect(close).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    now += 15_000;
+    await runtime.triggerHealthCheck();
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('(2/20)'));
+    warn.mockRestore();
+  });
+
+  it('restarts an exited managed process without waiting for the failure interval', async () => {
+    const close = vi.fn(async () => {});
+    const replacement = createMockChild();
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      json: async () => null,
+    }));
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        replacement.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return replacement;
+    });
+    const runtime = createRuntime({}, {
+      openCodePort: 45678,
+      openCodeProcess: {
+        pid: null,
+        exitCode: 1,
+        signalCode: null,
+        close,
+      },
+    });
+
+    await runtime.triggerHealthCheck();
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
   it('launches managed OpenCode with the managed PATH', async () => {
     delete process.env.OPENCODE_BINARY;
     const child = createMockChild();

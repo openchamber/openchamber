@@ -108,7 +108,7 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
                 authType: data.sshCommand ? 'ssh' : undefined,
                 sshKey: data.sshCommand ? data.sshCommand.replace('ssh -i ', '') : null,
                 color: 'info',
-                icon: 'house'
+                icon: 'fingerprint'
               };
               set({ globalIdentity: globalProfile });
             } else {

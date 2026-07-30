@@ -25,13 +25,13 @@ import {
   attachMarkdownInteractions,
   applyMarkdownCodeBlockWrapState,
   decorateMarkdown,
-  scheduleMarkdownCodeLineNumberSync,
-  syncMarkdownCodeLineNumbers,
+  getMarkdownCodeText,
   type DecorateContext,
   type DecorateLabels,
   type MermaidControlOptions,
   type MermaidRender,
 } from './markdown/decorate';
+import { findTextPosition } from './markdown/textPosition';
 import { createMermaidViewerRegistry, MERMAID_BLOCK_SELECTOR, shouldRefreshMermaidViewers } from './markdown/mermaidViewer';
 import {
   BLOCK_PATH_TOKEN_RE,
@@ -228,21 +228,6 @@ const isLikelyFilePath = (value: string): boolean => {
   return isLikelyFilePathValue(parsed.path);
 };
 
-const findTextPosition = (textNodes: Text[], targetOffset: number): { node: Text; offset: number } | null => {
-  let currentOffset = 0;
-
-  for (const node of textNodes) {
-    const nextOffset = currentOffset + node.data.length;
-    if (targetOffset <= nextOffset) {
-      return { node, offset: Math.max(0, targetOffset - currentOffset) };
-    }
-    currentOffset = nextOffset;
-  }
-
-  const lastNode = textNodes.at(-1);
-  return lastNode ? { node: lastNode, offset: lastNode.data.length } : null;
-};
-
 const unwrapBlockCodePathTokens = (container: HTMLElement): void => {
   const tokenSpans = container.querySelectorAll<HTMLElement>(BLOCK_PATH_TOKEN_SELECTOR);
   for (const span of Array.from(tokenSpans)) {
@@ -304,11 +289,14 @@ const wrapBlockCodePathTokens = (container: HTMLElement): void => {
     const textNodes: Text[] = [];
     let currentNode = walker.nextNode();
     while (currentNode) {
-      textNodes.push(currentNode as Text);
+      const textNode = currentNode as Text;
+      if (!textNode.parentElement?.closest('[data-md-code-line-number]')) {
+        textNodes.push(textNode);
+      }
       currentNode = walker.nextNode();
     }
 
-    const fullText = codeBlock.textContent ?? '';
+    const fullText = getMarkdownCodeText(codeBlock);
     if (!fullText.includes('.')) {
       codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
       continue;
@@ -326,8 +314,8 @@ const wrapBlockCodePathTokens = (container: HTMLElement): void => {
     }
 
     for (const { start, end, raw } of matches.reverse()) {
-      const startPosition = findTextPosition(textNodes, start);
-      const endPosition = findTextPosition(textNodes, end);
+      const startPosition = findTextPosition(textNodes, start, 'right');
+      const endPosition = findTextPosition(textNodes, end, 'left');
       if (!startPosition || !endPosition) {
         continue;
       }
@@ -958,9 +946,6 @@ const useMorphdomMarkdown = ({
         refreshMermaidViewers();
       }
 
-      if (!ctx.deferCodeLineNumberSync) {
-        scheduleMarkdownCodeLineNumberSync(target);
-      }
     });
 
     return () => {
@@ -992,24 +977,6 @@ const useMorphdomMarkdown = ({
     applyMarkdownCodeBlockWrapState(target, ctx.codeBlockLineWrap, ctx.labels);
   }, [containerRef, ctx.codeBlockLineWrap, ctx.deferCodeLineNumberSync, ctx.labels]);
 
-  React.useEffect(() => {
-    const container = containerRef.current;
-    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
-    if (!target || typeof ResizeObserver === 'undefined') return;
-    let frame: number | null = null;
-    const observer = new ResizeObserver(() => {
-      if (frame !== null) window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        frame = null;
-        syncMarkdownCodeLineNumbers(target);
-      });
-    });
-    observer.observe(target);
-    return () => {
-      observer.disconnect();
-      if (frame !== null) window.cancelAnimationFrame(frame);
-    };
-  }, [containerRef]);
 };
 
 const markdownContentClassName = (variant: MarkdownVariant): string =>

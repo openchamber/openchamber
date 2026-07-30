@@ -8,6 +8,12 @@ type Args = {
   isInlineEditing: boolean;
   showDeletionDialog: boolean;
   foldersMap: Record<string, SessionFolder[]>;
+  /**
+   * Selection scope is the project id (flat per-project session list); this
+   * map resolves it to the project's folder scopes (root + worktrees). When
+   * the scope is missing here it is treated as a plain directory scope.
+   */
+  folderScopesByProject: Map<string, Array<{ scopeKey: string; directory: string | null }>>;
   addSessionsToFolder: (scopeKey: string, folderId: string, sessionIds: string[]) => void;
   removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
@@ -39,6 +45,7 @@ export const useSidebarBulkActions = (args: Args) => {
     isInlineEditing,
     showDeletionDialog,
     foldersMap,
+    folderScopesByProject,
     addSessionsToFolder,
     removeSessionsFromFolders,
     createFolderAndStartRename,
@@ -89,38 +96,74 @@ export const useSidebarBulkActions = (args: Args) => {
     return null;
   }, [hasSelection, selectedIds, selectionScopeKey]);
 
-  const bulkScopeFolders = React.useMemo(() => {
+  // The selection scope is a project id; folders live per directory scope
+  // (project root + each worktree). Resolve all of them, in project order.
+  const selectionFolderScopes = React.useMemo<string[]>(() => {
     if (!derivedSelectionScope) return [];
-    return foldersMap[derivedSelectionScope] ?? [];
-  }, [foldersMap, derivedSelectionScope]);
+    const projectScopes = folderScopesByProject.get(derivedSelectionScope);
+    if (projectScopes && projectScopes.length > 0) {
+      return projectScopes.map((scope) => scope.scopeKey);
+    }
+    // Fallback: the scope is already a directory (e.g. VS Code workspaces).
+    return [derivedSelectionScope];
+  }, [derivedSelectionScope, folderScopesByProject]);
+
+  const bulkScopeFolders = React.useMemo(() => {
+    return selectionFolderScopes.flatMap((scope) => foldersMap[scope] ?? []);
+  }, [foldersMap, selectionFolderScopes]);
+
+  const resolveFolderScope = React.useCallback((folderId: string): string | null => {
+    for (const scope of selectionFolderScopes) {
+      if ((foldersMap[scope] ?? []).some((folder) => folder.id === folderId)) return scope;
+    }
+    return null;
+  }, [foldersMap, selectionFolderScopes]);
 
   const bulkCanRemoveFromFolder = React.useMemo(() => {
-    if (!derivedSelectionScope || !hasSelection) return false;
-    const scopeFolders = foldersMap[derivedSelectionScope] ?? [];
-    for (const folder of scopeFolders) {
-      for (const id of folder.sessionIds) {
-        if (selectedIds.has(id)) return true;
+    if (!hasSelection) return false;
+    for (const scope of selectionFolderScopes) {
+      for (const folder of foldersMap[scope] ?? []) {
+        for (const id of folder.sessionIds) {
+          if (selectedIds.has(id)) return true;
+        }
       }
     }
     return false;
-  }, [foldersMap, derivedSelectionScope, hasSelection, selectedIds]);
+  }, [foldersMap, selectionFolderScopes, hasSelection, selectedIds]);
+
+  const moveSelectionToFolder = React.useCallback((targetScope: string, folderId: string) => {
+    const ids = Array.from(selectedIds);
+    // Clear memberships in every other scope first — the store only dedupes
+    // within one scope, and a session must live in a single folder.
+    for (const scope of selectionFolderScopes) {
+      if (scope === targetScope) continue;
+      removeSessionsFromFolders(scope, ids);
+    }
+    addSessionsToFolder(targetScope, folderId, ids);
+  }, [addSessionsToFolder, removeSessionsFromFolders, selectedIds, selectionFolderScopes]);
 
   const handleBulkMoveToFolder = React.useCallback((folderId: string) => {
-    if (!derivedSelectionScope || !hasSelection) return;
-    addSessionsToFolder(derivedSelectionScope, folderId, Array.from(selectedIds));
-  }, [addSessionsToFolder, selectedIds, derivedSelectionScope, hasSelection]);
+    if (!hasSelection) return;
+    const targetScope = resolveFolderScope(folderId);
+    if (!targetScope) return;
+    moveSelectionToFolder(targetScope, folderId);
+  }, [hasSelection, moveSelectionToFolder, resolveFolderScope]);
 
   const handleBulkCreateFolderAndMove = React.useCallback(() => {
-    if (!derivedSelectionScope || !hasSelection) return;
-    const newFolder = createFolderAndStartRename(derivedSelectionScope);
+    const targetScope = selectionFolderScopes[0];
+    if (!targetScope || !hasSelection) return;
+    const newFolder = createFolderAndStartRename(targetScope);
     if (!newFolder) return;
-    addSessionsToFolder(derivedSelectionScope, newFolder.id, Array.from(selectedIds));
-  }, [addSessionsToFolder, createFolderAndStartRename, selectedIds, derivedSelectionScope, hasSelection]);
+    moveSelectionToFolder(targetScope, newFolder.id);
+  }, [createFolderAndStartRename, hasSelection, moveSelectionToFolder, selectionFolderScopes]);
 
   const handleBulkRemoveFromFolder = React.useCallback(() => {
-    if (!derivedSelectionScope || !hasSelection) return;
-    removeSessionsFromFolders(derivedSelectionScope, Array.from(selectedIds));
-  }, [removeSessionsFromFolders, selectedIds, derivedSelectionScope, hasSelection]);
+    if (!hasSelection) return;
+    const ids = Array.from(selectedIds);
+    for (const scope of selectionFolderScopes) {
+      removeSessionsFromFolders(scope, ids);
+    }
+  }, [removeSessionsFromFolders, selectedIds, selectionFolderScopes, hasSelection]);
 
   const executeBulkDelete = React.useCallback(async () => {
     const ids = Array.from(selectedIds);

@@ -3,18 +3,16 @@
 ## Refactor result
 
 - `SessionSidebar.tsx` now acts mainly as orchestration; core logic moved to focused hooks/components.
-- Sidebar is now a single multi-project tree: `recent` top section, then projects, then worktrees/archived groups, then sessions.
-- `NavRail` is no longer part of sidebar/navigation flow.
-- Project headers now own root sessions directly; there is no separate rendered `project root` subgroup.
-- Active/hover row styling is text-first; selected sessions use primary text instead of background fills.
-- Archived groups are collapsed by default and support bulk deletion at group/folder level.
-- Session rows support compact inline dates in minimal mode and simplified metadata in default mode.
+- Layout (web/desktop): top navigation (`SidebarNav`: New session, Scheduled, Multi-run, Archive), then the `recent` zone, then one zone per project with a **flat** session list. There is no rendered worktree grouping level.
+- **Two grouping display modes** (`useSessionDisplayStore.sessionGroupingMode`, toggled in the view dropdown): `'by-worktree'` (default) renders the worktree-grouped `sectionsForRender` with slim PR-aware branch sub-headers inside each project zone; `'flat'` renders `flatSectionsForRender` — one merged non-archived group per project (`id: 'flat'`, `folderScopes` listing every contributing scope) with per-row branch markers. Both derive from the same `projectSections` data layer, which alone feeds bootstrap demand planning and PR polling.
+- Project headers are sticky background "zone" bands (`SortableProjectItem`); the `recent` section header uses the same band styling. Collapsed projects show an aggregated busy/unseen indicator (`ProjectAggregateStatusIndicator`), derived from the live status index and notification store scoped to the project's directories.
+- Session rows have a single layout (former `minimal`); the `default`/`minimal` display mode was removed (`session-display-mode` store v4 migration drops the key). Rows show an inline branch label (from `node.worktree` or recent's `secondaryMeta`) when the session lives outside the project root, and bold titles while unread.
+- Folders render **flat** after the loose sessions: nested folders keep `parentId` in the data model but display at one level with a "Parent / Child" path label (`SessionFolderItem.displayName`); collapsing a folder hides its whole subtree. Folder actions resolve their owning scope per folder entry (folders from multiple worktree scopes can coexist under one project).
+- Archived sessions are not shown in the web/desktop sidebar; the Archive page (`ArchiveView`, `useUIStore.isArchivePageOpen`) replaces the old toggle. VS Code keeps inline archived buckets behind `showArchivedSessions` (compact webview has no page surfaces). Unarchive is not possible through the upstream OpenCode HTTP API (`session.update` can only set a finite `time.archived`).
+- Scheduled tasks (`ScheduledTasksDialog`, now a full-page surface on web/desktop) and per-project worktree management (`WorktreesView`, opened from the project menu) render as overlays inside `<main>` in `MainLayout`; the sidebar no longer mounts them.
+- Group-level PR-status polling/indicators and worktree-group drag-to-reorder were removed together with the worktree grouping level; `oc.sessions.groupOrder` is no longer read or written. Worktree PR/branch context lives in the Worktrees surface.
 - Root session menus can quickly create a worktree from the session directory's current branch and move the full session subtree there while idle.
 - Directory loading is demand-driven: the sidebar publishes one complete priority plan for all known project/worktree directories, while the sync layer owns bounded execution.
-- New extractions in latest pass reduced local effect/callback bulk further:
-  - project session list builders
-  - authoritative deletion cleanup
-  - sticky project header observer
 
 ## VS Code grouping
 
@@ -26,14 +24,15 @@
 
 ### Components
 
-- `SidebarHeader.tsx`: Top header UI for add-project, session search, and display mode.
-- `SidebarActivitySections.tsx`: Global top section renderer; currently used for the `recent` section only.
+- `SidebarHeader.tsx`: Top header UI for add-project, session search, selection mode, project sort, and the display menu (recent toggle, collapse/expand all).
+- `SidebarNav.tsx`: Text navigation rows above the tree (New session, Scheduled, Multi-run, Archive); hidden in VS Code.
+- `SidebarActivitySections.tsx`: Global top section renderer; currently used for the `recent` section only, styled as a zone header.
 - `SidebarFooter.tsx`: Static footer with icon-only settings, shortcuts, and about actions.
-- `SidebarProjectsList.tsx`: Main scrollable tree renderer for projects, root sessions, worktrees/groups, and empty/search states.
-- `SessionGroupSection.tsx`: Renders a single worktree/archived group, collapse/expand, folder subtree, group-level controls, and explicit loading/error/retry state for empty groups.
-- `SessionNodeItem.tsx`: Renders one session row/tree node with inline metadata, menu actions, minimal/default variants, and nested children. Rows do not initiate directory bootstrap on mount.
+- `SidebarProjectsList.tsx`: Main scrollable renderer for project zones and their flat/archived groups plus empty/search states; owns project drag-to-reorder.
+- `SessionGroupSection.tsx`: Renders one flat (or archived) group: sessions first, then flat folder entries with path labels, show-more batching, and explicit loading/error/retry state for empty groups. Archived buckets (VS Code) virtualize past 50 rows.
+- `SessionNodeItem.tsx`: Renders one session row/tree node with a single-line layout, inline branch label, indicators, menu actions, and nested children. Rows do not initiate directory bootstrap on mount.
 - `ConfirmDialogs.tsx`: Shared confirm dialog wrappers for session delete and folder delete flows.
-- `sortableItems.tsx`: DnD sortable wrappers for project and group ordering plus project-row action affordances.
+- `sortableItems.tsx`: DnD sortable wrapper for project ordering plus the sticky zone-band project header and its action affordances.
 - `sessionFolderDnd.tsx`: Folder/session DnD scope and wrappers for dropping/moving sessions into folders.
 - `sessionOwnership.ts`: Resolves session directories once into shared project/worktree ownership and folder-scope indexes.
 
@@ -45,7 +44,6 @@
 - `hooks/useSessionGrouping.ts`: Builds grouped session structures and search text/filter helpers.
 - `hooks/useSessionSidebarSections.ts`: Composes final per-project sections and group search metadata for rendering.
 - `hooks/useProjectSessionSelection.ts`: Resolves active/current project-session selection logic and session-directory context.
-- `hooks/useGroupOrdering.ts`: Applies persisted/custom group order with stable fallback ordering; archived groups are reorderable.
 - `hooks/useArchivedAutoFolders.ts`: Maintains archived auto-folder structure and assignment behavior.
 - `hooks/useSidebarPersistence.ts`: Persists sidebar UI state (expanded/collapsed/pinned/group order/active session) to storage + desktop settings.
 - `hooks/useProjectRepoStatus.ts`: Tracks per-project git-repo state and root branch metadata.

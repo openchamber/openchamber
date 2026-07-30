@@ -22,7 +22,12 @@ import {
 import { ThemeSystemContext, type ThemeContextValue } from './theme-system-context';
 import type { VSCodeThemePayload } from '@/lib/theme/vscode/adapter';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getInitialSystemPreference, readEmbeddedThemeSearchParams } from './theme-embedded-bootstrap';
+import {
+  getInitialSystemPreference,
+  publishEmbeddedThemeBootstrap,
+  readEmbeddedThemeBootstrap,
+  readEmbeddedThemeSearchParams,
+} from './theme-embedded-bootstrap';
 import { isValidTheme } from './theme-validation';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -44,17 +49,7 @@ const DEFAULT_LIGHT_ID = DEFAULT_LIGHT_THEME_ID;
 const DEFAULT_DARK_ID = DEFAULT_DARK_THEME_ID;
 
 const readEmbeddedCurrentTheme = (): Theme | null => {
-  const raw = readEmbeddedThemeSearchParams()?.get('currentTheme');
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    return isValidTheme(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  return readEmbeddedThemeBootstrap();
 };
 
 const fallbackThemeForVariant = (variant: 'light' | 'dark'): Theme =>
@@ -198,6 +193,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       add(vscodeTheme);
     }
 
+    // Live-synced theme wins over bootstrap theme when IDs match (add is first-wins).
     if (embeddedSyncedTheme) {
       add(embeddedSyncedTheme);
     }
@@ -370,6 +366,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     }
     const restoreTransitions = suppressTransitionsForThemeSwitch();
     cssGenerator.apply(currentTheme);
+    if (!receivesParentThemeSync) {
+      publishEmbeddedThemeBootstrap(currentTheme);
+    }
     applyVSCodeRuntimeClass(isVSCode);
     updateBrowserChrome(currentTheme);
 
@@ -528,12 +527,16 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
     scopedWindow.__openchamberApplyThemeSync = applyIncomingThemeSync;
 
+    if (receivesParentThemeSync && window.parent !== window) {
+      window.parent.postMessage({ type: 'openchamber:theme-sync-request' }, window.location.origin);
+    }
+
     return () => {
       if (scopedWindow.__openchamberApplyThemeSync === applyIncomingThemeSync) {
         delete scopedWindow.__openchamberApplyThemeSync;
       }
     };
-  }, [applyIncomingThemeSync]);
+  }, [applyIncomingThemeSync, receivesParentThemeSync]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -593,7 +596,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode, receivesParentThemeSync]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || receivesParentThemeSync) {
       return;
     }
     const handleSettingsSynced = (event: Event) => {
@@ -641,7 +644,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
     window.addEventListener('openchamber:settings-synced', handleSettingsSynced);
     return () => window.removeEventListener('openchamber:settings-synced', handleSettingsSynced);
-  }, []);
+  }, [receivesParentThemeSync]);
 
   const setTheme = useCallback(
     (themeId: string) => {
