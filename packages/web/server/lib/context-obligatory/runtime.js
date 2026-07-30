@@ -1,3 +1,5 @@
+import { assertPromptResponse } from '../opencode/prompt-response.js';
+
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_FETCH_LIMIT = 20;
 
@@ -51,7 +53,11 @@ export const createContextObligatoryRuntime = ({
       ...(body ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
-    if (!response.ok) throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
+    if (method === 'POST' && fetchPath.endsWith('/prompt_async')) {
+      await assertPromptResponse(response, 'prompt_async');
+    } else if (!response.ok) {
+      throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
+    }
     return response.json().catch(() => null);
   };
 

@@ -74,4 +74,41 @@ describe('context obligatory runtime', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     runtime.stop();
   });
+
+  it('does not record the compaction cursor when prompt_async returns HTML', async () => {
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input.url);
+      requests.push({ path: url.pathname, method: init.method ?? 'GET' });
+      if (url.pathname === '/session/ses_1') {
+        return json({
+          id: 'ses_1',
+          metadata: { openchamber: { context_obligatory_messages: [
+            { id: 'msg_1', createdAt: 10, role: 'user' },
+          ] } },
+        });
+      }
+      if (url.pathname === '/session/ses_1/message') return json([
+        { info: { id: 'msg_agent', role: 'assistant', providerID: 'provider', modelID: 'model' } },
+        { info: { id: 'msg_summary', role: 'assistant', summary: true, time: { completed: 30 } } },
+      ]);
+      if (url.pathname === '/session/ses_1/message/msg_1') return json({ parts: [{ type: 'text', text: 'First' }] });
+      if (url.pathname === '/session/ses_1/prompt_async') {
+        return new Response('<!doctype html><title>OpenChamber</title>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        });
+      }
+      throw new Error(`Unexpected ${url.pathname}`);
+    }));
+    const runtime = createContextObligatoryRuntime({
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+    });
+
+    await runtime.processPayload({ type: 'session.compacted', properties: { sessionID: 'ses_1' } });
+
+    expect(requests.some((request) => request.method === 'PATCH')).toBe(false);
+    runtime.stop();
+  });
 });

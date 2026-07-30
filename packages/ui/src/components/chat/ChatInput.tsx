@@ -7,7 +7,7 @@ import { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, typ
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useInputStore } from '@/sync/input-store';
+import { restoreAttachmentsAfterSendFailure, useInputStore } from '@/sync/input-store';
 import {
     ACCEPTED_ATTACHMENT_EXTENSIONS,
     ATTACHMENT_ACCEPT,
@@ -1209,6 +1209,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
             console.error('Message send failed:', rawMessage || error);
             restoreConsumedDrafts();
+            restoreAttachmentsAfterSendFailure(allAttachments);
 
             const currentInput = composerRef.current?.getValue() ?? messageRef.current;
             if (newSessionDraftOpen && inputSnapshot.message && (!currentInput || currentInput === inputSnapshot.message)) {
@@ -1229,23 +1230,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
-                }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
             }
 
-            if (allAttachments.length > 0) {
-                useInputStore.getState().setAttachedFiles(allAttachments);
+            if (normalized.includes('returned a web page instead of an api response') || normalized.includes('runtime_unavailable')) {
+                toast.error(t('chat.chatInput.toast.messageSendFailed'));
+                return;
             }
+
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
         });
 

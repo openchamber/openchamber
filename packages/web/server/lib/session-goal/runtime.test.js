@@ -176,4 +176,45 @@ describe('session goal live activity gate', () => {
     });
     runtime.stop();
   });
+
+  it('rejects an HTML prompt_async response', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const assistantMessage = {
+      info: {
+        id: 'msg_summary',
+        sessionID: SESSION_ID,
+        role: 'assistant',
+        summary: true,
+        providerID: 'provider',
+        modelID: 'model',
+        time: { completed: 2 },
+        tokens: { input: 0, output: 0, cache: { read: 0 } },
+      },
+      parts: [{ type: 'text', text: 'Summary' }],
+    };
+    const fetchImpl = vi.fn(async (input, init = {}) => {
+      const pathname = requestPath(input);
+      if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(session);
+      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
+      if (pathname === '/session/status') return jsonResponse({});
+      if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([]);
+      if (pathname === `/session/${SESSION_ID}/message`) return jsonResponse([assistantMessage]);
+      if (pathname === `/session/${SESSION_ID}/prompt_async`) {
+        return new Response('<!doctype html><title>OpenChamber</title>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        });
+      }
+      throw new Error(`Unexpected request: ${pathname}`);
+    });
+
+    const { runtime } = await startIdleTick(fetchImpl);
+
+    expect(warning).toHaveBeenCalledWith(
+      '[session-goal] tick failed:',
+      expect.stringContaining('runtime returned HTML instead of an API response'),
+    );
+    runtime.stop();
+    warning.mockRestore();
+  });
 });

@@ -14,6 +14,7 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import { isPackagedUiRuntimeRequest, resolvePackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
@@ -1094,6 +1095,20 @@ const injectRuntimeConfigIntoHtml = (html) => {
 const registerPackagedUiProtocol = () => {
   if (!shouldUsePackagedUi()) return;
   protocol.handle(UI_PROTOCOL, async (request) => {
+    if (isPackagedUiRuntimeRequest(request.url)) {
+      const runtimeTarget = resolvePackagedUiRuntimeRequest(request.url, state.apiBaseUrl || state.sidecarUrl || '');
+      if (!runtimeTarget) {
+        return Response.json({ error: { code: 'runtime_unavailable' } }, { status: 503 });
+      }
+      const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
+      return electronNet.fetch(runtimeTarget, {
+        method: request.method,
+        headers: request.headers,
+        ...(hasBody ? { body: request.body, duplex: 'half' } : {}),
+        signal: request.signal,
+      });
+    }
+
     const distPath = resolveWebDistDir();
     let requestedPath = '/index.html';
     try {

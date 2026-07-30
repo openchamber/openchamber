@@ -63,30 +63,34 @@ function formatSdkError(error: unknown): string {
 type SdkResult<T> = {
   data?: T;
   error?: unknown;
-  response?: { status?: number };
+  response?: { status?: number; headers?: Headers };
 };
 
-function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
-  if (result.error) {
-    const status = result.response?.status;
-    const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
-    if (status !== undefined) error.status = status;
-    throw error;
-  }
-  if (result.data === undefined || result.data === null) {
-    throw new Error(`${operation} failed: empty response`);
-  }
-  return result.data;
-}
+/**
+ * An HTML body is never a valid OpenCode API response: an app shell answered
+ * instead of the API, either the packaged UI protocol fallback or a runtime that
+ * does not implement the route. Treating it as success silently drops the call.
+ */
+const NON_API_RESPONSE = "the runtime returned a web page instead of an API response";
+
+const isWebPageResponse = (response?: { headers?: Headers }): boolean =>
+  (response?.headers?.get("content-type") ?? "").toLowerCase().includes("text/html");
 
 function unwrapSdkOptional<T>(result: SdkResult<T>, operation: string): T | undefined {
-  if (result.error) {
-    const status = result.response?.status;
-    const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`) as Error & { status?: number };
-    if (status !== undefined) error.status = status;
-    throw error;
+  if (!result.error && !isWebPageResponse(result.response)) return result.data;
+  const status = result.response?.status;
+  const detail = result.error ? formatSdkError(result.error) : NON_API_RESPONSE;
+  const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${detail}`) as Error & { status?: number };
+  if (status !== undefined) error.status = status;
+  throw error;
+}
+
+function unwrapSdkData<T>(result: SdkResult<T>, operation: string): T {
+  const data = unwrapSdkOptional(result, operation);
+  if (data === undefined || data === null) {
+    throw new Error(`${operation} failed: empty response`);
   }
-  return result.data;
+  return data;
 }
 
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
@@ -893,6 +897,14 @@ class OpencodeService {
     }
 
     if (response.ok) {
+      // A 2xx web page means the prompt endpoint never saw this POST, so the
+      // message was never queued. The provider is not at fault, so this must not
+      // count against its circuit.
+      if (isWebPageResponse(response)) {
+        const error = new Error(`Failed to send message (${response.status}): ${NON_API_RESPONSE}`) as Error & { status?: number };
+        error.status = response.status;
+        throw error;
+      }
       recordProviderSuccess(params.providerID);
       return messageId;
     }
@@ -1378,16 +1390,16 @@ class OpencodeService {
       const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const scopedClient = effectiveDirectory ? this.getScopedApiClient(effectiveDirectory) : this.client;
       const response = await scopedClient.config.get();
-      if (!response.data) throw new Error('Failed to get config');
+      const config = unwrapSdkData(response, 'config.get');
       const ended = typeof performance !== 'undefined' ? performance.now() : Date.now();
       markStartupTrace('opencodeClient.getConfig:end', {
         directory: effectiveDirectory ?? null,
         durationMs: Math.round(ended - started),
       });
       if (generation === this.configCacheGeneration) {
-        this.configCache.set(key, { config: response.data, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+        this.configCache.set(key, { config, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
       }
-      return response.data;
+      return config;
     })();
 
     this.configInFlight.set(key, request);
