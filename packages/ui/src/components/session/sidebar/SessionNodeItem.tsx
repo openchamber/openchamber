@@ -22,7 +22,7 @@ import { isSessionPinned, type SessionPinnedTarget } from '@/stores/useSessionPi
 import { Icon } from "@/components/icon/Icon";
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionPermissions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useScopedBlockingPermissions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
@@ -440,7 +440,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
-  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined, { bootstrap: false });
   const sessionGoal = getSessionGoal(resolvedSession);
   const sessionGoalGlyph = sessionGoal ? (
     <span
@@ -459,6 +458,16 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   // expand the other. Matches the format of menuInstanceKey.
   const expansionKey = menuInstanceKey;
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
+  const visibleChildSessionIds = React.useMemo(
+    () => isExpanded ? node.children.map((child) => child.session.id) : [],
+    [isExpanded, node.children],
+  );
+  // Visible child rows own their branches; this row rolls up only branches hidden
+  // by collapse or filtering, while retaining its own requests.
+  const rowPermissions = useScopedBlockingPermissions(session.id, sessionDirectory ?? undefined, {
+    bootstrap: false,
+    excludeSubtrees: visibleChildSessionIds,
+  });
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
@@ -660,7 +669,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
-  const pendingPermissionCount = sessionPermissions.length;
+  const pendingPermissionCount = rowPermissions.length;
   const showUnreadStatus = !isMovingToWorktree && !isStreaming && needsAttention && !isActive;
   const showStatusMarker = isStreaming || showUnreadStatus;
   const statusMarkerContent = isStreaming
