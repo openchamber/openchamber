@@ -147,3 +147,22 @@ jobs:
             packages/web/server/lib/opencode/managed-opencode-handoff-v2/filesystem.js
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Upload smoke logs (always)
+        # Captures the runtime stdout/stderr the spawned entrypoint
+        # redirected to `$LogFile` / `$LogErrFile`. The .ps1 writes
+        # those files under `<workspace>/.smoke-logs/` (rather than
+        # the runner's ephemeral temp dir) so they survive the job
+        # and the upload step can pick them up. On a smoke failure,
+        # this is the artifact a reviewer opens to see the actual
+        # entrypoint output instead of guessing from `gh run view`.
+        # `Fail()` in the .ps1 also dumps the same contents to the
+        # script's own stdout, so the run log itself carries the
+        # signal even when the artifact download is skipped.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: guardian-smoke-logs-${{ github.run_id }}
+          path: .smoke-logs/
+          if-no-files-found: ignore
+          retention-days: 7
