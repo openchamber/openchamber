@@ -94,6 +94,13 @@ function collectStartupEnv(options = {}) {
   if (options.apiOnly === true) {
     env.OPENCHAMBER_API_ONLY = 'true';
   }
+  if (process.platform === 'darwin') {
+    env.OPENCHAMBER_SERVICE_MANAGER = 'launchd';
+  } else if (process.platform === 'linux') {
+    env.OPENCHAMBER_SERVICE_MANAGER = 'systemd';
+  } else if (process.platform === 'win32') {
+    env.OPENCHAMBER_SERVICE_MANAGER = 'windows-task';
+  }
   if (typeof process.env.OPENCHAMBER_DATA_DIR === 'string' && process.env.OPENCHAMBER_DATA_DIR.trim().length > 0) {
     env.OPENCHAMBER_DATA_DIR = path.resolve(process.env.OPENCHAMBER_DATA_DIR.trim());
   }

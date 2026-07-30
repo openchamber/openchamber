@@ -5,11 +5,12 @@ import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import { buildLocalUrl, resolveServeHost, assertSafeBrowserPort, hasUiPasswordConfigured, assertAuthenticatedNetworkExposure } from './cli-network.js';
 import { fetchSystemInfoFromPort } from './cli-http.js';
 import { isPortAvailable, resolveAvailablePort } from './cli-ports.js';
-import { ensureLogsDir, getLogFilePath } from './cli-paths.js';
+import { ensureLogsDir, getDataDir, getLogFilePath } from './cli-paths.js';
 import { rotateLogFile } from './cli-log-files.js';
 import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
+import { readActiveUpdateMaintenance, shouldDeferStartForUpdate } from '../../server/lib/openchamber-update/maintenance.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -32,6 +33,18 @@ function createServeCommand({
   setForegroundShutdown,
 }) {
 async function serveCommand(options) {
+    const activeUpdate = readActiveUpdateMaintenance({ openchamberDataDir: getDataDir() });
+    if (shouldDeferStartForUpdate(activeUpdate, {
+      transactionId: process.env.OPENCHAMBER_UPDATE_TRANSACTION_ID,
+      foreground: options.foreground === true,
+    })) {
+      throw new TunnelCliError(
+        activeUpdate.requiresRecovery === true
+          ? `OpenChamber update ${activeUpdate.id} was interrupted; run \`openchamber update\` to repair the installation before startup.`
+          : `OpenChamber update ${activeUpdate.id} is still in progress; startup is deferred.`,
+        EXIT_CODE.GENERAL_ERROR,
+      );
+    }
     const showOutput = shouldRenderHumanOutput(options);
     const jsonMessages = [];
     const emitNotice = (notice) => {
@@ -208,6 +221,7 @@ async function serveCommand(options) {
         port: resolvedPort,
         host: effectiveHost,
         launchMode: 'foreground',
+        serviceManager: process.env.OPENCHAMBER_SERVICE_MANAGER,
         uiPassword: effectiveUiPassword,
         apiOnly: options.apiOnly === true,
       }, emitNotice);
@@ -352,6 +366,7 @@ async function serveCommand(options) {
       port: resolvedPort,
       host: effectiveHost,
       launchMode: 'daemon',
+      serviceManager: undefined,
       uiPassword: effectiveUiPassword,
       apiOnly: options.apiOnly === true,
     }, emitNotice);
