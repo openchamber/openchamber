@@ -67,15 +67,52 @@ describe('OpenCode upgrade routes', () => {
     });
   });
 
+  it('checks authenticated registry metadata without exposing credentials', async () => {
+    const previousLower = process.env.npm_config_registry;
+    const previous = process.env.NPM_CONFIG_REGISTRY;
+    process.env.npm_config_registry = '';
+    process.env.NPM_CONFIG_REGISTRY = 'https://test-user:test-password@mirror.example.com/npm/';
+    globalThis.fetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/global/health')) return new Response(JSON.stringify({ version: '1.18.8' }));
+      if (url.includes('mirror.example.com')) return new Response(JSON.stringify({ version: '1.18.9' }));
+      return new Response(JSON.stringify({ tag_name: 'v1.18.9' }));
+    });
+    const { app } = createApp({
+      getOpenCodeUpgradeCapability: () => ({ supported: true, manager: 'opencode', reason: null }),
+    });
+
+    try {
+      await request(app).get('/api/opencode/upgrade-status').expect(200);
+      const npmCall = globalThis.fetch.mock.calls.find(([input]) => String(input).includes('mirror.example.com'));
+
+      expect(npmCall[0]).toBe('https://mirror.example.com/npm/opencode-ai/latest');
+      expect(npmCall[0]).not.toContain('test-password');
+      expect(npmCall[1].headers.Authorization).toBe(`Basic ${Buffer.from('test-user:test-password').toString('base64')}`);
+    } finally {
+      if (previousLower === undefined) delete process.env.npm_config_registry;
+      else process.env.npm_config_registry = previousLower;
+      if (previous === undefined) delete process.env.NPM_CONFIG_REGISTRY;
+      else process.env.NPM_CONFIG_REGISTRY = previous;
+    }
+  });
+
   it('serializes supported upgrades and preserves the in-flight lock', async () => {
     let releaseUpgrade;
+    let signalUpgradeStarted;
+    const upgradeStarted = new Promise((resolve) => {
+      signalUpgradeStarted = resolve;
+    });
     const upstreamResponse = new Promise((resolve) => {
       releaseUpgrade = () => resolve(new Response(JSON.stringify({ success: true, version: '1.18.9' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }));
     });
-    globalThis.fetch = vi.fn(() => upstreamResponse);
+    globalThis.fetch = vi.fn(() => {
+      signalUpgradeStarted();
+      return upstreamResponse;
+    });
     const { app, dependencies } = createApp({
       getOpenCodeUpgradeCapability: () => ({
         supported: true,
@@ -93,9 +130,8 @@ describe('OpenCode upgrade routes', () => {
         restarted: true,
       })
       .then((response) => response);
-    await vi.waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    });
+    await upgradeStarted;
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 
     await request(app)
       .post('/api/opencode/upgrade')

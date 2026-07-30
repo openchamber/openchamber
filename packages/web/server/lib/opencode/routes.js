@@ -1,4 +1,5 @@
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import { resolveNpmRegistryRequest } from '../npm-registry-config.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -92,8 +93,9 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   };
 
   const fetchLatestOpenCodeVersionFromNpm = async () => {
-    const response = await fetch('https://registry.npmjs.org/opencode-ai/latest', {
-      headers: { Accept: 'application/json' },
+    const request = resolveNpmRegistryRequest('opencode-ai', 'latest');
+    const response = await fetch(request.url, {
+      headers: { Accept: 'application/json', ...request.headers },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {

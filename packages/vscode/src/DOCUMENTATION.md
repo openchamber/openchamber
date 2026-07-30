@@ -65,6 +65,9 @@ The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can r
 - `opencode-upgrade-runtime.ts`
   - Owns managed-versus-external capability decisions, latest-version checks, serialized OpenCode self-upgrades, and restart-after-upgrade behavior.
 
+- `npm-registry.ts`
+  - Builds credential-safe npm metadata requests for configured registries, including scoped packages and registry base paths.
+
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
   - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.
