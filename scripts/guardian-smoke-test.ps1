@@ -84,6 +84,7 @@ New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
 $RunDir = Join-Path $DataDir 'run'
 New-Item -ItemType Directory -Path $RunDir -Force | Out-Null
 $LogFile = Join-Path $RunDir 'guardian.log'
+$LogErrFile = Join-Path $RunDir 'guardian.err.log'
 
 # The Windows startup branch in `bin/openchamber-guardian.js` defaults
 # `--port-path` to `<data-dir>/managed-opencode-handoff-v2/port`. Mirror
@@ -117,7 +118,7 @@ try {
     $proc = Start-Process -FilePath 'node.exe' `
         -ArgumentList $arguments `
         -RedirectStandardOutput $LogFile `
-        -RedirectStandardError $LogFile `
+        -RedirectStandardError $LogErrFile `
         -PassThru -WindowStyle Hidden
 
     # Poll for the discovery file. 10s budget, 0.2s intervals.
@@ -128,7 +129,7 @@ try {
         Start-Sleep -Milliseconds 200
     }
     if (-not $found) {
-        Fail "guardian port file not created at $portFile (see $LogFile)"
+        Fail "guardian port file not created at $portFile (see $LogFile and $LogErrFile)"
     }
 
     # Parse `127.0.0.1:<port>` from the discovery file.
