@@ -1,12 +1,16 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { execFileSync } from 'child_process';
 import yaml from 'yaml';
 import { parse as parseJsonc } from 'jsonc-parser';
 
 // ============== PATH CONSTANTS ==============
 
-const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
+const OPENCODE_CONFIG_DIR = path.join(
+  process.env.XDG_CONFIG_HOME ? path.resolve(process.env.XDG_CONFIG_HOME) : path.join(os.homedir(), '.config'),
+  'opencode',
+);
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const SKILL_DIR = path.join(OPENCODE_CONFIG_DIR, 'skills');
@@ -99,12 +103,26 @@ function getProjectConfigCandidates(workingDirectory) {
   ];
 }
 
+function getExistingConfigPaths(directory, names = ['opencode.json', 'opencode.jsonc']) {
+  if (!directory) return [];
+  return names.map((name) => path.join(directory, name)).filter((filePath) => fs.existsSync(filePath));
+}
+
+function getManagedConfigDir() {
+  if (process.env.OPENCODE_TEST_MANAGED_CONFIG_DIR) {
+    return path.resolve(process.env.OPENCODE_TEST_MANAGED_CONFIG_DIR);
+  }
+  if (process.platform === 'darwin') return '/Library/Application Support/opencode';
+  if (process.platform === 'win32') return path.join(process.env.ProgramData || 'C:\\ProgramData', 'opencode');
+  return '/etc/opencode';
+}
+
 function getProjectConfigPath(workingDirectory) {
   if (!workingDirectory) return null;
 
   const candidates = getProjectConfigCandidates(workingDirectory);
 
-  for (const candidate of candidates) {
+  for (const candidate of candidates.toReversed()) {
     if (fs.existsSync(candidate)) {
       return candidate;
     }
@@ -126,7 +144,7 @@ function getConfigPaths(workingDirectory) {
 }
 
 function getPrimaryUserConfigPath(userPaths) {
-  for (const userPath of userPaths) {
+  for (const userPath of userPaths.toReversed()) {
     if (fs.existsSync(userPath)) {
       return userPath;
     }
@@ -135,21 +153,90 @@ function getPrimaryUserConfigPath(userPaths) {
   return CONFIG_FILE;
 }
 
-function readConfigFile(filePath) {
-  if (!filePath || !fs.existsSync(filePath)) {
-    return {};
-  }
+function resolveConfigString(value, sourceDirectory) {
+  let resolved = value.replace(/\{env:([^}]+)\}/g, (_, name) => {
+    const value = process.env[name];
+    if (value === undefined) throw new Error('unavailable config variable');
+    return value;
+  });
+
+  resolved = resolved.replace(/\{file:([^}]+)\}/g, (_, configuredPath) => {
+    let filePath = configuredPath;
+    if (filePath.startsWith('~/')) filePath = path.join(os.homedir(), filePath.slice(2));
+    if (!path.isAbsolute(filePath)) filePath = path.resolve(sourceDirectory, filePath);
+    return fs.readFileSync(filePath, 'utf8').trim();
+  });
+  return resolved;
+}
+
+function parseConfigContent(content) {
   try {
-    const content = fs.readFileSync(filePath, 'utf8');
     const normalized = content.trim();
     if (!normalized) {
       return {};
     }
-    return parseJsonc(normalized, [], { allowTrailingComma: true });
-  } catch (error) {
-    console.error(`Failed to read config file: ${filePath}`, error);
+    const errors = [];
+    const config = parseJsonc(normalized, errors, { allowTrailingComma: true });
+    if (errors.length > 0 || !isPlainObject(config)) {
+      throw new Error('invalid config');
+    }
+    for (const key of ['disabled_providers', 'enabled_providers']) {
+      if (config[key] !== undefined
+        && (!Array.isArray(config[key]) || config[key].some((value) => typeof value !== 'string'))) {
+        throw new Error('invalid provider policy');
+      }
+    }
+    if (config.provider !== undefined && !isPlainObject(config.provider)) {
+      throw new Error('invalid providers');
+    }
+    for (const provider of Object.values(config.provider || {})) {
+      if (!isPlainObject(provider)
+        || (provider.options !== undefined && !isPlainObject(provider.options))) {
+        throw new Error('invalid provider');
+      }
+    }
+    return config;
+  } catch {
     throw new Error('Failed to read OpenCode configuration');
   }
+}
+
+function readConfigFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return {};
+  try {
+    return parseConfigContent(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    throw new Error('Failed to read OpenCode configuration');
+  }
+}
+
+function readManagedPreferences() {
+  if (process.platform !== 'darwin') return null;
+  let username = 'user';
+  try {
+    username = os.userInfo().username || username;
+  } catch {
+    // Keep OpenCode's fallback username.
+  }
+  const candidates = [
+    path.join('/Library/Managed Preferences', username, 'ai.opencode.managed.plist'),
+    '/Library/Managed Preferences/ai.opencode.managed.plist',
+  ];
+  for (const filePath of candidates) {
+    if (!fs.existsSync(filePath)) continue;
+    try {
+      const config = parseConfigContent(
+        execFileSync('plutil', ['-convert', 'json', '-o', '-', filePath], { encoding: 'utf8' }),
+      );
+      for (const key of ['PayloadDisplayName', 'PayloadIdentifier', 'PayloadType', 'PayloadUUID', 'PayloadVersion', '_manualProfile']) {
+        delete config[key];
+      }
+      return { config, filePath: `mobileconfig:${filePath}`, sourceDirectory: path.dirname(filePath), scope: 'managed', writable: false };
+    } catch {
+      throw new Error('Failed to read OpenCode configuration');
+    }
+  }
+  return null;
 }
 
 function isPlainObject(value) {
@@ -179,17 +266,62 @@ function mergeConfigs(base, override) {
 function readConfigLayers(workingDirectory) {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
-  const userConfig = readConfigFile(userPath);
-  const projectConfig = readConfigFile(projectPath);
-  const customConfig = readConfigFile(customPath);
-  const mergedConfig = mergeConfigs(mergeConfigs(userConfig, projectConfig), customConfig);
+  const worktreeRoot = workingDirectory ? findWorktreeRoot(workingDirectory) : null;
+  const disableProjectConfig = ['true', '1'].includes(
+    process.env.OPENCODE_DISABLE_PROJECT_CONFIG?.toLowerCase(),
+  );
+  const projectDirectories = workingDirectory && !disableProjectConfig
+    ? getAncestors(workingDirectory, worktreeRoot)
+    : [];
+  const customConfigDir = process.env.OPENCODE_CONFIG_DIR
+    ? path.resolve(process.env.OPENCODE_CONFIG_DIR)
+    : null;
+  const managedConfigDir = getManagedConfigDir();
+  const sources = [];
+  const addFile = (filePath, scope, writable = true) => {
+    if (!filePath || !fs.existsSync(filePath)) return;
+    sources.push({ config: readConfigFile(filePath), filePath, sourceDirectory: path.dirname(filePath), scope, writable });
+  };
+
+  userPaths.forEach((filePath) => addFile(filePath, 'user'));
+  addFile(customPath, 'custom');
+  projectDirectories.toReversed().forEach((directory) => {
+    getExistingConfigPaths(directory).forEach((filePath) => addFile(filePath, 'project'));
+  });
+  projectDirectories.forEach((directory) => {
+    getExistingConfigPaths(path.join(directory, '.opencode')).forEach((filePath) => addFile(filePath, 'project'));
+  });
+  getExistingConfigPaths(path.join(os.homedir(), '.opencode')).forEach((filePath) => addFile(filePath, 'user'));
+  getExistingConfigPaths(customConfigDir).forEach((filePath) => addFile(filePath, 'custom-directory'));
+
+  if (process.env.OPENCODE_CONFIG_CONTENT) {
+    sources.push({
+      config: parseConfigContent(process.env.OPENCODE_CONFIG_CONTENT),
+      filePath: null,
+      sourceDirectory: workingDirectory || process.cwd(),
+      scope: 'inline',
+      writable: false,
+    });
+  }
+  getExistingConfigPaths(managedConfigDir).forEach((filePath) => addFile(filePath, 'managed', false));
+  const managedPreferences = readManagedPreferences();
+  if (managedPreferences) sources.push(managedPreferences);
+
+  const mergeScope = (...scopes) => sources
+    .filter((source) => scopes.includes(source.scope))
+    .reduce((config, source) => mergeConfigs(config, source.config), {});
+  const userConfig = mergeScope('user');
+  const customConfig = mergeScope('custom', 'custom-directory');
+  const projectConfig = mergeScope('project');
+  const mergedConfig = sources.reduce((config, source) => mergeConfigs(config, source.config), {});
 
   return {
     userConfig,
     projectConfig,
     customConfig,
     mergedConfig,
-    paths: { userPath, projectPath, customPath }
+    paths: { userPath, projectPath, customPath },
+    sources,
   };
 }
 
@@ -197,10 +329,27 @@ function readConfig(workingDirectory) {
   return readConfigLayers(workingDirectory).mergedConfig;
 }
 
+function resolveConfigValue(layers, key, workingDirectory) {
+  const source = [...(layers.sources || [])].reverse()
+    .find((candidate) => Object.hasOwn(candidate.config || {}, key));
+  const value = source?.config?.[key];
+  if (typeof value !== 'string') return value;
+  try {
+    return resolveConfigString(
+      value,
+      source.sourceDirectory || (source.filePath ? path.dirname(source.filePath) : workingDirectory || process.cwd()),
+    );
+  } catch {
+    throw new Error('Failed to resolve OpenCode configuration');
+  }
+}
+
 function getConfigForPath(layers, targetPath) {
   if (!targetPath) {
     return layers.userConfig;
   }
+  const source = layers.sources?.find((candidate) => candidate.filePath === targetPath);
+  if (source) return source.config;
   if (layers.paths.customPath && targetPath === layers.paths.customPath) {
     return layers.customConfig;
   }
@@ -212,6 +361,10 @@ function getConfigForPath(layers, targetPath) {
 
 function writeConfig(config, filePath = CONFIG_FILE) {
   try {
+    const managedDir = getManagedConfigDir();
+    if (path.resolve(filePath).startsWith(`${managedDir}${path.sep}`)) {
+      throw new Error('managed config is read-only');
+    }
     if (fs.existsSync(filePath)) {
       const backupFile = `${filePath}.openchamber.backup`;
       fs.copyFileSync(filePath, backupFile);
@@ -228,20 +381,23 @@ function writeConfig(config, filePath = CONFIG_FILE) {
 }
 
 function getJsonEntrySource(layers, sectionKey, entryName) {
-  const { userConfig, projectConfig, customConfig, paths } = layers;
-  const customSection = customConfig?.[sectionKey]?.[entryName];
-  if (customSection !== undefined) {
-    return { section: customSection, config: customConfig, path: paths.customPath, exists: true };
-  }
-
-  const projectSection = projectConfig?.[sectionKey]?.[entryName];
-  if (projectSection !== undefined) {
-    return { section: projectSection, config: projectConfig, path: paths.projectPath, exists: true };
-  }
-
-  const userSection = userConfig?.[sectionKey]?.[entryName];
-  if (userSection !== undefined) {
-    return { section: userSection, config: userConfig, path: paths.userPath, exists: true };
+  const sources = layers.sources || [
+    { config: layers.userConfig, filePath: layers.paths.userPath, scope: 'user', writable: true },
+    { config: layers.customConfig, filePath: layers.paths.customPath, scope: 'custom', writable: true },
+    { config: layers.projectConfig, filePath: layers.paths.projectPath, scope: 'project', writable: true },
+  ];
+  for (const source of [...sources].reverse()) {
+    const section = source.config?.[sectionKey]?.[entryName];
+    if (section !== undefined) {
+      return {
+        section,
+        config: source.config,
+        path: source.filePath,
+        scope: source.scope,
+        writable: source.writable !== false,
+        exists: true,
+      };
+    }
   }
 
   return { section: null, config: null, path: null, exists: false };
@@ -249,13 +405,17 @@ function getJsonEntrySource(layers, sectionKey, entryName) {
 
 function getJsonWriteTarget(layers, preferredScope) {
   const { userConfig, projectConfig, customConfig, paths } = layers;
-  if (paths.customPath) {
-    return { config: customConfig, path: paths.customPath };
-  }
+  const configForTarget = (targetPath, fallback) => {
+    if (!layers.sources) return fallback;
+    return layers.sources.find((source) => source.filePath === targetPath)?.config || {};
+  };
   if (preferredScope === AGENT_SCOPE.PROJECT && paths.projectPath) {
-    return { config: projectConfig, path: paths.projectPath };
+    return { config: configForTarget(paths.projectPath, projectConfig), path: paths.projectPath };
   }
-  return { config: userConfig, path: paths.userPath };
+  if (paths.customPath) {
+    return { config: configForTarget(paths.customPath, customConfig), path: paths.customPath };
+  }
+  return { config: configForTarget(paths.userPath, userConfig), path: paths.userPath };
 }
 
 // ============== GIT/WORKTREE HELPERS ==============
@@ -517,6 +677,7 @@ export {
   isPlainObject,
   readConfigLayers,
   readConfig,
+  resolveConfigValue,
   getConfigForPath,
   writeConfig,
   getJsonEntrySource,

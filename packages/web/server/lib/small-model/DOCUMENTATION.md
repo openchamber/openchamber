@@ -16,16 +16,21 @@ other runtime API.
 
 - `index.js` — orchestration: `generateSmallModelText()` / `describeSmallModel()`.
 - `resolve.js` — model selection, mirroring OpenCode's `getSmallModel` chain:
-  0. OpenChamber's own settings override (Settings → Sessions → Small Model):
-     when `smallModelUseDefault` is `false`, `smallModelOverride`
-     (`provider/model`) outranks everything below. Sanitized in
+  0. OpenChamber's own settings preference (Settings → Sessions → Small Model):
+     when `smallModelUseDefault` is `false`, an eligible `smallModelOverride`
+     (`provider/model`) is tried before everything below. Sanitized in
      `settings-helpers.js` (server), `persistence.ts` (client), and
      `bridge-settings-runtime.ts` (VS Code).
-  1. `small_model` from the merged OpenCode config layers (`provider/model`).
+  1. `small_model` from the merged OpenCode config layers (`provider/model`),
+     after OpenCode-style `{env:}` / `{file:}` substitution.
   2. Family-priority scan (`gemini-flash` → `gpt-nano` → `claude-haiku`)
      **within the session's provider first** (`preferredProviderID`, like
      OpenCode resolves within the current provider), then over the other
-     providers with a usable auth entry, newest `release_date` first.
+     providers with a usable credential, newest `release_date` first. A
+     usable credential is an auth.json entry or a config
+     `provider.<id>.options.apiKey` that resolves in this process
+     (`{env:}`/`{file:}` included), and the provider must pass OpenCode's
+     `enabled_providers` / `disabled_providers` policy.
   3. GitHub Copilot hidden utility models (`gpt-*-nano/mini`) — these never
      appear in the catalog, so they participate as the `gpt-nano` family entry
      and as a final utility fallback.
@@ -56,12 +61,16 @@ other runtime API.
     provider's base URL, resolved from (1) `provider.<id>.options.baseURL`
     in the OpenCode config, (2) the hardcoded `https://api.openai.com/v1`
      endpoint, or (3) the provider's `api` field from the models.dev catalog.
-    Configured API keys honor OpenCode's `{env:NAME}` and `{file:path}`
-    substitutions; file contents and resolved credentials remain server-side.
+    Config layers follow OpenCode's local discovery and precedence, and a
+    configured API key outranks auth.json. API keys honor OpenCode's
+    `{env:NAME}` and `{file:path}` substitutions, and base URLs expand both
+    forms inline. Missing variables/files, malformed config, and
+    disabled providers fail before dispatch; file contents and resolved
+    credentials remain server-side.
   - `[small-model:diagnostic]` logs record provider/model, input character
     counts, output budget, thinking toggle, HTTP/finish status, and
-    content/reasoning lengths without logging prompts, response text, or
-    credentials. Goal audit parsing similarly emits
+    content/reasoning lengths without logging prompts, response text, upstream
+    error bodies, or credentials. Goal audit parsing similarly emits
     `[session-goal:diagnostic]` structural verdict metadata.
 - `catalog.js` — models.dev catalog via the shared in-process cache
   (`../opencode/models-metadata.js`, also serving
@@ -80,9 +89,10 @@ module is imported on first request, not at server startup.
 - OpenCode's free models (`opencode/big-pickle`, `*-free`) work without a
   token only through OpenCode's own server — direct calls are rejected, and
   piggybacking on their subsidized infra is out of bounds by design. Every
-  resolution step therefore requires a usable auth entry for the provider:
-  a session on an unauthenticated `opencode` provider falls through to the
-  global scan (or a clean 404 on a vanilla setup with no logins).
+  resolution step therefore requires a usable credential for the provider
+  (an auth.json entry or a resolvable config `options.apiKey`): a session on
+  an unauthenticated `opencode` provider falls through to the global scan
+  (or a clean 404 on a vanilla setup with no logins).
 
 - Anthropic OAuth (Claude Pro/Max) entries are not supported — OpenCode itself
   keeps those outside `auth.json` in this generation; only `type: api` keys

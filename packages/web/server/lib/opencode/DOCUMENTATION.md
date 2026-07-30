@@ -57,11 +57,12 @@ This module provides OpenCode server integration utilities for the web server ru
 - `OPENCODE_DATA_DIR`: OpenCode data directory path constant.
 
 ## Public exports (shared.js)
-- `OPENCODE_CONFIG_DIR`, `AGENT_DIR`, `COMMAND_DIR`, `SKILL_DIR`, `CONFIG_FILE`, `CUSTOM_CONFIG_FILE`: Path constants.
+- `OPENCODE_CONFIG_DIR`, `AGENT_DIR`, `COMMAND_DIR`, `SKILL_DIR`, `CONFIG_FILE`, `CUSTOM_CONFIG_FILE`: Path constants (`OPENCODE_CONFIG_DIR` honors `XDG_CONFIG_HOME`).
 - `AGENT_SCOPE`, `COMMAND_SCOPE`, `SKILL_SCOPE`: Scope constants with USER and PROJECT values.
 - `ensureDirs()`: Creates required OpenCode directories.
 - `parseMdFile(filePath)`, `writeMdFile(filePath, frontmatter, body)`: Markdown file operations with YAML frontmatter.
-- `getConfigPaths(workingDirectory)`, `readConfigLayers(workingDirectory)`, `readConfig(workingDirectory)`: Config file operations with layer merging (user, project, custom).
+- `getConfigPaths(workingDirectory)`, `readConfigLayers(workingDirectory)`, `readConfig(workingDirectory)`: Config file operations with OpenCode-compatible local discovery and precedence.
+- `resolveConfigValue(layers, key, workingDirectory)`: Resolves `{env:}` / `{file:}` for one effective config value without mutating or exposing the raw config layer.
 - `writeConfig(config, filePath)`: Writes config with automatic backup.
 - `getJsonEntrySource(layers, sectionKey, entryName)`: Resolves which config layer provides an entry.
 - `getJsonWriteTarget(layers, preferredScope)`: Determines write target for config updates.
@@ -373,15 +374,19 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
 
 ## Storage and configuration
 - Provider auth: `~/.local/share/opencode/auth.json`.
-- User config: `~/.config/opencode/opencode.json`.
-- Project config: `<workingDirectory>/.opencode/opencode.json` or `opencode.json`.
-- Custom config: `OPENCODE_CONFIG` env var path.
+- Config discovery merges global files, `OPENCODE_CONFIG`, ancestor project files,
+  project `.opencode` directories, `~/.opencode`, `OPENCODE_CONFIG_DIR`,
+  `OPENCODE_CONFIG_CONTENT`, file-based managed config, and macOS managed
+  preferences in OpenCode's order.
 - Rate limit config: `OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS`, `OPENCHAMBER_RATE_LIMIT_NO_IP_MAX_ATTEMPTS` env vars.
 
 ## Notes for contributors
 - This module serves as foundation for OpenCode-related server utilities.
 - Route ownership moved to module-level `routes.js`; `index.js` wires dependencies only.
 - All file writes include automatic backup before modification.
-- Config merging follows priority: custom > project > user.
+- Later discovered config sources override earlier sources; project files
+  therefore override `OPENCODE_CONFIG`, while inline and managed config remain
+  higher priority and read-only. Provider policy arrays replace earlier values,
+  so a project policy can intentionally replace a custom-file policy.
 - UI auth uses scrypt for password hashing with constant-time comparison.
 - Tunnel auth treats `host.docker.internal` as local-only when the socket remote IP is private/loopback.

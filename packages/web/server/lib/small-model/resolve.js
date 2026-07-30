@@ -75,16 +75,31 @@ const pickWithinProvider = (providerID, auth, catalog, family) => {
   return model?.id ? { providerID, modelID: model.id, source: 'family-scan' } : null;
 };
 
-export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSmallModel, preferredProviderID, preferredModelID }) {
-  // OpenChamber's own setting (Settings → Sessions → Small Model override)
-  // outranks everything, including the OpenCode config.
+export function resolveSmallModel({ auth, catalog, config, settingsSmallModel, configSmallModel, preferredProviderID, preferredModelID, configCredentialProviders }) {
+  // Providers with a resolvable config `options.apiKey` are callable without
+  // an auth.json login, so they count as authenticated here.
+  const configProviders = Array.isArray(configCredentialProviders) ? configCredentialProviders : [];
+  const disabled = new Set(config?.disabled_providers || []);
+  const enabled = Array.isArray(config?.enabled_providers) ? new Set(config.enabled_providers) : null;
+  const hasConfiguredApiKey = (providerID) => Object.hasOwn(
+    config?.provider?.[providerID]?.options || {},
+    'apiKey',
+  );
+  const hasUsableCredential = (providerID) => {
+    if (disabled.has(providerID) || (enabled && !enabled.has(providerID))) return false;
+    if (hasConfiguredApiKey(providerID)) return configProviders.includes(providerID);
+    return isUsableAuthEntry(getAuthEntryForProvider(auth, providerID))
+      || configProviders.includes(providerID);
+  };
+
+  // Prefer an eligible OpenChamber settings override before OpenCode config.
   const fromSettings = parseModelRef(settingsSmallModel);
-  if (fromSettings) {
+  if (fromSettings && hasUsableCredential(fromSettings.providerID)) {
     return { ...fromSettings, source: 'settings' };
   }
 
   const explicit = parseModelRef(configSmallModel);
-  if (explicit) {
+  if (explicit && hasUsableCredential(explicit.providerID)) {
     return { ...explicit, source: 'config' };
   }
 
@@ -95,7 +110,7 @@ export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSma
   const preferred = typeof preferredProviderID === 'string' && preferredProviderID
     ? preferredProviderID
     : null;
-  if (preferred && isUsableAuthEntry(getAuthEntryForProvider(auth, preferred))) {
+  if (preferred && hasUsableCredential(preferred)) {
     for (const family of FAMILY_PRIORITY) {
       const match = pickWithinProvider(preferred, auth, catalog, family);
       if (match) return match;
@@ -105,10 +120,12 @@ export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSma
     }
   }
 
-  // No session context (or its provider has no usable login): scan all
+  // No session context (or its provider has no usable credential): scan all
   // authenticated providers by family priority.
-  const authedProviders = Object.keys(auth || {}).filter((providerID) =>
-    providerID !== preferred && isUsableAuthEntry(auth[providerID]));
+  const authedProviders = [...new Set([
+    ...Object.keys(auth || {}).filter((providerID) => hasUsableCredential(providerID)),
+    ...configProviders,
+  ])].filter((providerID) => providerID !== preferred);
 
   for (const family of FAMILY_PRIORITY) {
     for (const providerID of authedProviders) {
@@ -119,7 +136,7 @@ export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSma
 
   // Copilot's utility fallback for legacy auth aliases the loop above missed.
   const copilotEntry = getAuthEntryForProvider(auth, 'github-copilot');
-  if (isUsableAuthEntry(copilotEntry)) {
+  if (isUsableAuthEntry(copilotEntry) && hasUsableCredential('github-copilot')) {
     return {
       providerID: 'github-copilot',
       modelID: COPILOT_UTILITY_MODELS[0],
