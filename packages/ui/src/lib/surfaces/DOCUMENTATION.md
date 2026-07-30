@@ -21,6 +21,9 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
   the content area height and stored per mode in the separate
   `heightByMode` map. It is required on every descriptor, and the two maps never
   seed each other: persisted widths are 380-1400px and would be absurd heights.
+  Unlike widths, the defaults are uniform across all surfaces — bottom-dock
+  surface switches happen in place, so differing defaults make the panel jump
+  vertically under the chat.
 - Dock edge is a global user preference, `useUIStore.contextPanelDock`
   (`'right' | 'bottom'`, default `'right'`). It moves the whole panel as one
   unit; there are no per-surface dock positions. The rail stays a vertical strip

@@ -40,6 +40,12 @@ export type ContextSurfaceDescriptor = {
    * while the panel is bottom-docked and until the user manually resizes this
    * surface. Required rather than optional-with-fallback so a new surface
    * cannot silently inherit its width fraction as a height.
+   *
+   * Deliberately uniform across every surface: unlike the width dock, where
+   * the panel is switched between deliberately, bottom-dock surface switches
+   * happen in place, and differing defaults make the panel jump vertically
+   * under the chat. Keep new surfaces at the same value unless there is a
+   * specific reason to differ.
    */
   defaultHeightFraction: number;
 };
@@ -49,7 +55,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'context',
     descriptionKey: 'contextRail.surface.context.description',
     defaultWidthFraction: 0.45,
-    defaultHeightFraction: 0.45,
+    defaultHeightFraction: 0.4,
     mode: 'context',
     icon: 'donut-chart-fill',
     labelKey: 'contextPanel.mode.context',
@@ -59,7 +65,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'git',
     descriptionKey: 'contextRail.surface.git.description',
     defaultWidthFraction: 2 / 5,
-    defaultHeightFraction: 0.5,
+    defaultHeightFraction: 0.4,
     mode: 'git',
     icon: 'git-branch',
     labelKey: 'layout.rightSidebar.git',
@@ -69,7 +75,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'pr',
     descriptionKey: 'contextRail.surface.pr.description',
     defaultWidthFraction: 0.45,
-    defaultHeightFraction: 0.5,
+    defaultHeightFraction: 0.4,
     mode: 'pr',
     icon: 'git-pull-request',
     labelKey: 'contextPanel.mode.pr',
@@ -79,7 +85,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'diff',
     descriptionKey: 'contextRail.surface.diff.description',
     defaultWidthFraction: 3 / 5,
-    defaultHeightFraction: 0.5,
+    defaultHeightFraction: 0.4,
     mode: 'diff',
     icon: 'arrow-left-right',
     labelKey: 'contextPanel.mode.diff',
@@ -89,7 +95,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'editor',
     descriptionKey: 'contextRail.surface.editor.description',
     defaultWidthFraction: 3 / 5,
-    defaultHeightFraction: 0.5,
+    defaultHeightFraction: 0.4,
     mode: 'file',
     icon: 'file-code',
     labelKey: 'contextPanel.mode.files',
@@ -99,9 +105,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'terminal',
     descriptionKey: 'contextRail.surface.terminal.description',
     defaultWidthFraction: 3 / 5,
-    // Short by design: a bottom terminal strip under the chat is the primary
-    // motivation for the bottom dock.
-    defaultHeightFraction: 0.35,
+    defaultHeightFraction: 0.4,
     mode: 'terminal',
     icon: 'terminal-box',
     labelKey: 'layout.mainTab.terminal',
@@ -121,7 +125,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'plan',
     descriptionKey: 'contextRail.surface.plan.description',
     defaultWidthFraction: 0.45,
-    defaultHeightFraction: 0.45,
+    defaultHeightFraction: 0.4,
     mode: 'plan',
     icon: 'file-text',
     labelKey: 'contextPanel.mode.plan',
@@ -131,7 +135,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'browser',
     descriptionKey: 'contextRail.surface.browser.description',
     defaultWidthFraction: 0.45,
-    defaultHeightFraction: 0.5,
+    defaultHeightFraction: 0.4,
     mode: 'browser',
     icon: 'global',
     labelKey: 'contextPanel.mode.browser',
@@ -141,7 +145,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'preview',
     descriptionKey: 'contextRail.surface.preview.description',
     defaultWidthFraction: 0.45,
-    defaultHeightFraction: 0.5,
+    defaultHeightFraction: 0.4,
     mode: 'preview',
     icon: 'window',
     labelKey: 'contextPanel.mode.preview',
@@ -151,7 +155,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'chat',
     descriptionKey: 'contextRail.surface.chat.description',
     defaultWidthFraction: 0.45,
-    defaultHeightFraction: 0.5,
+    defaultHeightFraction: 0.4,
     mode: 'chat',
     icon: 'chat-4',
     labelKey: 'contextPanel.mode.chat',
@@ -168,7 +172,7 @@ export const getContextSurfaceWidthFraction = (mode: ContextPanelMode): number =
 };
 
 export const getContextSurfaceHeightFraction = (mode: ContextPanelMode): number => {
-  return HEIGHT_FRACTION_BY_MODE.get(mode) ?? 1 / 2;
+  return HEIGHT_FRACTION_BY_MODE.get(mode) ?? 0.4;
 };
 
 const isContextSurfaceId = (value: unknown): value is ContextSurfaceId => {
