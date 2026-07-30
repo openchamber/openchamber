@@ -1881,7 +1881,6 @@ input[aria-label="Terminal input"] {
 
 [data-settings-view="true"][data-settings-platform="windows"] :is(.overflow-y-auto, .overlay-scrollbar-target)::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--foreground) 80%, transparent) !important;
-  border-width: 1px;
 }
 
 /* Desktop app shell (Electron/native window): native apps use the arrow cursor
