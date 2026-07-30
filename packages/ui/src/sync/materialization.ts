@@ -4,6 +4,8 @@ import type { SessionMaterializationReason } from "./event-reducer"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const STREAMING_PART_FIELDS = ["text", "output"] as const
+const ACTIVE_TOOL_STATUSES = new Set(["pending", "running"])
+const FINAL_TOOL_STATUSES = new Set(["completed", "error", "aborted", "failed", "timeout", "cancelled"])
 
 export type MaterializedMessageRecord = {
   info: Message
@@ -65,7 +67,30 @@ export function isSessionMaterializationStillNeeded(
     return !(state.part[request.messageID] ?? []).some((part) => part.id === request.partID)
   }
 
+  if (request.reason === "settled-running-tool") {
+    return getStaleRunningToolMessageID(state, sessionID) === request.messageID
+  }
+
   return true
+}
+
+export function getStaleRunningToolMessageID(
+  state: MaterializedState,
+  sessionID: string,
+): string | undefined {
+  const messages = state.message[sessionID] ?? []
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role === "user") return undefined
+    if (message.role !== "assistant") continue
+    const hasActiveTool = (state.part[message.id] ?? []).some((part) => {
+      if (part.type !== "tool") return false
+      const status = (part as { state?: { status?: unknown } }).state?.status
+      return typeof status === "string" && ACTIVE_TOOL_STATUSES.has(status)
+    })
+    return hasActiveTool ? message.id : undefined
+  }
+  return undefined
 }
 
 function sortParts(parts: Part[], skipPartTypes: ReadonlySet<string>) {
@@ -134,6 +159,19 @@ function getPartStateTime(part: Part): { start?: number; end?: number } | undefi
 
 function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
   if (!existing) return next
+
+  if (existing.type === "tool" && next.type === "tool") {
+    const existingStatus = (existing as { state?: { status?: unknown } }).state?.status
+    const nextStatus = (next as { state?: { status?: unknown } }).state?.status
+    if (
+      typeof existingStatus === "string"
+      && FINAL_TOOL_STATUSES.has(existingStatus)
+      && typeof nextStatus === "string"
+      && ACTIVE_TOOL_STATUSES.has(nextStatus)
+    ) {
+      return existing
+    }
+  }
 
   if (getPartEndTime(next) !== undefined) {
     const existingAttachments = getPartStateAttachments(existing)

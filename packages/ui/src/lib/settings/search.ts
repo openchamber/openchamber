@@ -148,6 +148,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isMobile,
   },
   {
+    id: 'appearance.auto-save-enabled',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.autoSaveEnabled',
+    descriptionKey: 'settings.openchamber.visual.field.autoSaveEnabledInfo',
+    keywords: ['editor', 'autosave', 'auto-save', 'files', 'save'],
+  },
+  {
     id: 'appearance.expanded-editor-toolbar',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.expandedEditorToolbar',
@@ -405,6 +412,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isDesktop && (ctx.isWindows || !ctx.isMac),
   },
   {
+    id: 'sessions.desktop-window-controls-style',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.desktopNetwork.field.windowControlsStyle',
+    keywords: ['desktop', 'window', 'controls', 'style', 'traffic', 'lights', 'classic', 'macos', 'titlebar'],
+    isAvailable: (ctx) => ctx.isDesktop && (ctx.isWindows || !ctx.isMac),
+  },
+  {
     id: 'sessions.desktop-mac-menu-bar',
     page: 'general',
     titleKey: 'settings.openchamber.desktopNetwork.field.macMenuBar',
@@ -555,6 +569,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.remoteInstances.direct.description',
     keywords: ['server url', 'connection token', 'import link', 'host switcher', 'additional headers', 'request headers', 'cloudflare access', 'service token'],
     isAvailable: (ctx) => ctx.isDesktop,
+  },
+  {
+    id: 'behavior.system-prompt-optimization',
+    page: 'behavior',
+    titleKey: 'settings.behavior.page.section.systemPromptOptimization',
+    descriptionKey: 'settings.behavior.page.systemPromptOptimization.info',
+    keywords: ['system prompt', 'tokens', 'context', 'optimize', 'minimal'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'behavior.system-prompt',

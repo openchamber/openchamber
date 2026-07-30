@@ -1300,6 +1300,37 @@ export const Header: React.FC<HeaderProps> = ({
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
   }, [activeProjectLabel, currentSession?.title, currentSessionId]);
 
+  // Full-page surfaces (Scheduled, Archive, Worktrees, Multi-run) replace the
+  // chat area; while one is open the header shows the surface identity
+  // instead of the session switcher.
+  const isScheduledSurfaceOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
+  const isArchiveSurfaceOpen = useUIStore((state) => state.isArchivePageOpen);
+  const worktreesSurfaceProjectId = useUIStore((state) => state.worktreesPageProjectId);
+  const isMultiRunSurfaceOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
+  const worktreesSurfaceProjectLabel = useProjectsStore((state) => {
+    if (!worktreesSurfaceProjectId) return null;
+    const project = state.projects.find((entry) => entry.id === worktreesSurfaceProjectId);
+    return project?.label?.trim() || project?.path?.split('/').pop() || null;
+  });
+  const activeSurfaceHeader = React.useMemo<{ title: string; subtitle: string | null } | null>(() => {
+    if (isScheduledSurfaceOpen) {
+      return { title: t('sessions.scheduledTasks.dialog.title'), subtitle: null };
+    }
+    if (isArchiveSurfaceOpen) {
+      return { title: t('sessions.archivePage.title'), subtitle: null };
+    }
+    if (worktreesSurfaceProjectId) {
+      return {
+        title: t('sessions.worktreesPage.title', { project: worktreesSurfaceProjectLabel ?? '' }),
+        subtitle: null,
+      };
+    }
+    if (isMultiRunSurfaceOpen) {
+      return { title: t('sessions.sidebar.header.actions.newMultiRun'), subtitle: null };
+    }
+    return null;
+  }, [isArchiveSurfaceOpen, isMultiRunSurfaceOpen, isScheduledSurfaceOpen, t, worktreesSurfaceProjectId, worktreesSurfaceProjectLabel]);
+
 
   const actionDirectory = React.useMemo(() => {
     return normalize(openDirectory || activeProject?.path || '');
@@ -2039,6 +2070,18 @@ export const Header: React.FC<HeaderProps> = ({
           TitlebarLeftControls overlay; the header reserves matching left space
           via padding (see headerStyle) when the sidebar is collapsed. */}
       <div className="flex min-w-0 flex-1 items-center">
+        {activeSurfaceHeader ? (
+          <div className="mr-3 flex min-w-0 flex-col items-start px-1 py-0.5 -my-0.5 text-left">
+            <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
+              {activeSurfaceHeader.title}
+            </span>
+            {activeSurfaceHeader.subtitle ? (
+              <span className="truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75 max-w-full">
+                {activeSurfaceHeader.subtitle}
+              </span>
+            ) : null}
+          </div>
+        ) : (
         <SessionSwitcherDropdown>
           <button
             type="button"
@@ -2070,6 +2113,7 @@ export const Header: React.FC<HeaderProps> = ({
             ) : null}
           </button>
         </SessionSwitcherDropdown>
+        )}
 
         {tabs.length > 0 && (
           <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-muted)]/50 p-1">

@@ -19,4 +19,16 @@ describe('useSessionDisplayStore project sorting', () => {
       expect(migrated.projectSortOrder).toBe(projectSortOrder);
     });
   }
+
+  test('v3→v4 drops the removed displayMode key and keeps the rest', () => {
+    const migrated = migrateSessionDisplayState(
+      { displayMode: 'default', projectSortOrder: 'a-z', showRecentSection: false, showArchivedSessions: true },
+      3,
+    );
+
+    expect('displayMode' in migrated).toBe(false);
+    expect(migrated.projectSortOrder).toBe('a-z');
+    expect(migrated.showRecentSection).toBe(false);
+    expect(migrated.showArchivedSessions).toBe(true);
+  });
 });

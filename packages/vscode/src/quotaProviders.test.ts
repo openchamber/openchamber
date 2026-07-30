@@ -7,8 +7,10 @@ import fs from 'node:fs';
 // configured and proceed straight to fetch.
 const ORIGINAL_FS = { ...fs };
 const AUTH = JSON.stringify({
+  openai: { access: 'test-token' },
   crof: { key: 'test-token' },
   neuralwatt: { key: 'test-token' },
+  'zai-coding-plan': { key: 'test-token' },
 });
 ((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
 ((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
@@ -109,6 +111,58 @@ describe('Crof quota provider (VS Code parity)', () => {
 
     assert.equal(result.ok, false);
     assert.equal(result.error, 'Invalid response from provider');
+  });
+});
+
+describe('Codex quota provider (VS Code parity)', () => {
+  test('surfaces spend_control individual limit for business accounts', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      plan_type: 'business',
+      rate_limit: null,
+      credits: { has_credits: true, unlimited: false, balance: null },
+      spend_control: {
+        individual_limit: {
+          limit: '7500',
+          used: '2674.8724080324173',
+          remaining: '4825.127591967583',
+          used_percent: 36,
+          remaining_percent: 64,
+        },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('codex');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits!.usedPercent, 36);
+    assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
+  });
+});
+
+describe('Z.ai quota provider (VS Code parity)', () => {
+  test('surfaces 5-hour, weekly, and MCP quota windows', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 0 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 100, nextResetTime: 1785659659993 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 0, nextResetTime: 1787128459979 },
+        ],
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+    const windows = result.usage!.windows;
+
+    assert.equal(result.ok, true);
+    assert.equal(windows['5h']!.usedPercent, 0);
+    assert.equal(windows['5h']!.windowSeconds, 5 * 60 * 60);
+    assert.equal(windows.weekly!.usedPercent, 100);
+    assert.equal(windows.weekly!.windowSeconds, 7 * 24 * 60 * 60);
+    assert.equal(windows.weekly!.resetAt, 1785659659993);
+    assert.equal(windows['MCP Tools']!.usedPercent, 0);
+    assert.equal(windows['MCP Tools']!.windowSeconds, 30 * 24 * 60 * 60);
+    assert.equal(windows['MCP Tools']!.resetAt, 1787128459979);
   });
 });
 

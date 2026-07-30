@@ -265,18 +265,25 @@ export class SessionMessageLoader {
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
     this.bumpGeneration(entry)
     return this.startLoad(normalized, entry, store, "refresh", async (isCurrent) => {
+      const previousCoverage = entry.snapshot.resolved
+        ? { cursor: entry.snapshot.cursor, complete: entry.snapshot.complete }
+        : null
       const page = await this.fetchPage(normalized, Math.max(1, limit))
       if (!isCurrent()) return
       const committed = this.commitPage(normalized, entry, store, page, "merge", isCurrent)
       if (!committed || !isCurrent()) return
+      const coverage = previousCoverage ?? page
       this.patchEntry(entry, {
         status: "ready",
         loadingKind: null,
         error: null,
         resolved: true,
         limit: Math.max(entry.snapshot.limit, committed.messages.length),
-        cursor: page.cursor,
-        complete: page.complete,
+        // A tail refresh uses a deliberately small window. Its cursor only
+        // describes that window, so it must not replace the established
+        // history coverage and spuriously expose "load older".
+        cursor: coverage.cursor,
+        complete: coverage.complete,
         updatedAt: Date.now(),
       })
       this.persistCoverage(normalized, entry.snapshot)

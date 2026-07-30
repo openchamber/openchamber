@@ -361,6 +361,44 @@ describe('openchamber session routes', () => {
     }
   });
 
+  it('uses the expanded slash-command template as the goal objective before command dispatch', async () => {
+    const originalFetch = globalThis.fetch;
+    const createSessionGoal = vi.fn(async () => undefined);
+    commandListMock.mockResolvedValue({
+      data: [{
+        name: 'issue--to-pr',
+        template: 'Take $ARGUMENTS from issue through a verified pull request. Confirm the PR covers $ARGUMENTS.',
+      }],
+    });
+    globalThis.fetch = vi.fn();
+    try {
+      const { app } = createApp({ createSessionGoal });
+      const response = await request(app)
+        .post('/api/openchamber/sessions/ses_source/send')
+        .send({
+          directory: '/repo/app',
+          prompt: '/issue--to-pr LIN-123',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+          goal: true,
+        })
+        .expect(200);
+
+      expect(createSessionGoal).toHaveBeenCalledWith(expect.objectContaining({
+        objective: 'Take LIN-123 from issue through a verified pull request. Confirm the PR covers LIN-123.',
+      }));
+      expect(sessionCommandMock).toHaveBeenCalledWith(expect.objectContaining({
+        command: 'issue--to-pr',
+        arguments: 'LIN-123',
+      }));
+      expect(createSessionGoal.mock.invocationCallOrder[0]).toBeLessThan(sessionCommandMock.mock.invocationCallOrder[0]);
+      expect(response.body).toMatchObject({ goalEnabled: true, dispatchedAsCommand: true });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('reuses the previous session selection when send omits model, agent, and variant', async () => {
     const originalFetch = globalThis.fetch;
     const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '' }));

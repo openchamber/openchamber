@@ -1537,7 +1537,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 : getFirstChangedModifiedLine(diffForNavigation.original, diffForNavigation.modified));
 
             const absolutePath = toAbsolutePath(effectiveDirectory, filePath);
-            const openValidation = await validateContextFileOpen(files, absolutePath);
+            const openValidation = await validateContextFileOpen(files, absolutePath, { directory: effectiveDirectory });
             if (!openValidation.ok) {
                 toast.error(getContextFileOpenFailureMessage(openValidation.reason));
                 return;

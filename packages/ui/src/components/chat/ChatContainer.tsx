@@ -516,7 +516,7 @@ const DraftWelcome: React.FC = () => {
                 )}
             </h1>
             <DraftPresetChips
-                onSubmit={(text) => useInputStore.getState().requestPresetSubmit(text)}
+                onSubmit={(starter) => useInputStore.getState().requestPresetSubmit(starter.submitText, starter.ref.type)}
                 className="oc-draft-starters mt-8 max-w-md"
             />
         </div>

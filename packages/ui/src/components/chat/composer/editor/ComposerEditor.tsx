@@ -504,6 +504,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             <div
                 ref={hostRef}
                 data-testid={props['data-testid']}
+                data-chat-input="true"
                 onMouseDown={handleHostMouseDown}
                 className={cn(
                     'composer-editor w-full',

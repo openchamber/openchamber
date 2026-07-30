@@ -986,8 +986,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         if (currentSessionId && !queuedOnly) {
-            const dismissedQuestions = await sessionActions.dismissOpenQuestionsForSession(currentSessionId);
-            if (dismissedQuestions) {
+            // Sending is authoritative for blocking prompts: deny pending
+            // permissions and dismiss open questions for the session subtree,
+            // then queue the message once if either was open. The deny/clear
+            // vanishes the card instantly (optimistic); rejecting unblocks the
+            // agent's tool but does NOT end its turn, so a direct send would
+            // race with the still-active run and be silently discarded by the
+            // OpenCode runner. Instead we queue; the queued-message auto-send
+            // hook delivers it as the next turn once the rejected turn winds
+            // down and the session returns to idle (parity with #1740).
+            const [deniedPermissions, dismissedQuestions] = await Promise.all([
+                sessionActions.dismissOpenPermissionsForSession(currentSessionId),
+                sessionActions.dismissOpenQuestionsForSession(currentSessionId),
+            ]);
+            if (deniedPermissions || dismissedQuestions) {
                 handleQueueMessage();
                 return;
             }
@@ -1275,12 +1287,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
 
     // Draft welcome presets: submit immediately.
-    const submitPresetPrompt = React.useCallback((text: string) => {
+    const submitPresetPrompt = React.useCallback((text: string, type: 'command' | 'skill') => {
         // The text goes straight into the submit (see SubmitOptions.presetText)
         // instead of through the composer input — the collapsed mobile pill has
         // no mounted textarea to stage it in.
         const draft = (composerRef.current?.getValue() ?? messageRef.current).trim();
-        const presetText = draft ? `${text}\n${draft}` : text;
+        // OpenCode recognizes slash commands only when their arguments follow
+        // the command on the same line. Skills retain the multiline prompt form.
+        const presetText = draft ? `${text}${type === 'command' ? ' ' : '\n'}${draft}` : text;
         void handleSubmitRef.current({ presetText });
     }, []);
 
@@ -1312,7 +1326,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     React.useEffect(() => {
         if (pendingPresetSubmit == null) return;
         const text = useInputStore.getState().consumePendingPresetSubmit();
-        if (text) submitPresetPrompt(text);
+        if (text) submitPresetPrompt(text.text, text.type);
     }, [pendingPresetSubmit, submitPresetPrompt]);
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -2722,7 +2736,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 ) : null}
             </div>
             {newSessionDraftOpen && !isDesktopExpanded && !isMobile && !isVSCode && !isMiniChatSurface ? (
-                <DraftPresetChips onSubmit={submitPresetPrompt} className="chat-input-column mt-4" />
+                <DraftPresetChips
+                    onSubmit={(starter) => submitPresetPrompt(starter.submitText, starter.ref.type)}
+                    className="chat-input-column mt-4"
+                />
             ) : null}
         </form>
 
