@@ -1,16 +1,21 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2/client';
+import type { Session } from '@opencode-ai/sdk/v2';
 
 import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
+import {
+  deleteCascadeChanged,
+  executeDeleteCascade,
+  resolveAuthoritativeDeleteCascade,
+} from '@/components/session/sessionDeleteCascade';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { archiveSessionInDirectory } from '@/sync/session-actions';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import type { WorktreeMetadata } from '@/types/worktree';
 
@@ -32,7 +37,7 @@ const getSessionDirectory = (session: Session): string => {
 
 /**
  * Mobile worktree-deletion confirmation. Built directly on the shared
- * primitives (getWorktreeStatus / removeProjectWorktree / archiveSessions) so
+ * primitives (getWorktreeStatus / removeProjectWorktree / session cascade) so
  * it mirrors the desktop SessionDialogs worktree flow without mounting it:
  * linked sessions are archived, the worktree is removed, and remote/local
  * branch deletion are optional.
@@ -47,13 +52,13 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   const { t } = useI18n();
   const liveSessions = useAllLiveSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
 
   const [deleteLocalBranch, setDeleteLocalBranch] = React.useState(false);
   const [deleteRemoteBranch, setDeleteRemoteBranch] = React.useState(false);
   const [isDirty, setIsDirty] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
+  const [confirmedSessions, setConfirmedSessions] = React.useState<Session[] | null>(null);
 
   const worktreePath = normalizePath(worktree?.path);
   const hasBranch = typeof worktree?.branch === 'string' && worktree.branch.trim().length > 0;
@@ -68,6 +73,11 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     }
     return Array.from(merged.values());
   }, [globalActiveSessions, liveSessions, worktreePath]);
+  const sessionsForDelete = confirmedSessions ?? linkedSessions;
+
+  React.useEffect(() => {
+    setConfirmedSessions(null);
+  }, [open, worktreePath]);
 
   React.useEffect(() => {
     if (!open) {
@@ -123,8 +133,24 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     if (!worktree || isProcessing) return;
     setIsProcessing(true);
     try {
-      if (linkedSessions.length > 0) {
-        const { archivedIds, failedIds } = await archiveSessions(linkedSessions.map((session) => session.id));
+      const currentCascade = await resolveAuthoritativeDeleteCascade([], undefined, {
+        worktreeDirectory: worktree.path,
+      });
+      if (deleteCascadeChanged(sessionsForDelete, currentCascade)) {
+        setConfirmedSessions(currentCascade);
+        setIsProcessing(false);
+        return;
+      }
+      if (currentCascade.length > 0) {
+        const { deletedIds: archivedIds, failedIds } = await executeDeleteCascade(
+          currentCascade,
+          (session) => {
+            const directory = resolveGlobalSessionDirectory(session);
+            return directory
+              ? archiveSessionInDirectory(session.id, directory)
+              : Promise.resolve(false);
+          },
+        );
         if (failedIds.length > 0) {
           if (archivedIds.length > 0) {
             toast.success(
@@ -224,9 +250,9 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
           </p>
         ) : null}
 
-        {linkedSessions.length > 0 ? (
+        {sessionsForDelete.length > 0 ? (
           <p className="typography-meta text-muted-foreground">
-            {t('mobile.projectEdit.deleteWorktreeArchiveNote', { count: linkedSessions.length })}
+            {t('mobile.projectEdit.deleteWorktreeArchiveNote', { count: sessionsForDelete.length })}
           </p>
         ) : null}
 

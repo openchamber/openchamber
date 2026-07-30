@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { MainTab } from '@/stores/useUIStore';
 import { SessionFolderItem } from '../SessionFolderItem';
+import { createArchivedSessionDeleteRequest } from '../sessionDeleteCascade';
 import type { SortableDragHandleProps } from './sortableItems';
 import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDnd';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
@@ -707,6 +708,16 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     [collectGroupSessions, sourceGroupNodes],
   );
 
+  // Deleting an archived bucket is permanent, so it never trusts group
+  // membership: only sessions the server actually archived are eligible. Other
+  // groups skip the scan entirely.
+  const archivedGroupSessions = React.useMemo(
+    () => (group.isArchivedBucket
+      ? allGroupSessions.filter((session) => Boolean(session.time?.archived))
+      : []),
+    [allGroupSessions, group.isArchivedBucket],
+  );
+
   // Precompute the per-folder "delete all sessions in folder" list once
   // per render. The previous design ran a recursive `collectFolderSessions`
   // walk inside each folder's render, which is O(F × (S + F)) per group
@@ -782,10 +793,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
               if (group.isArchivedBucket) {
                 // Delete sessions in the folder
                 // Empty folders are auto-hidden by useArchivedAutoFolders
-                sessionEvents.requestDelete({
-                  sessions: folderSessionsForDelete,
-                  mode: 'session',
-                });
+                sessionEvents.requestDelete(createArchivedSessionDeleteRequest(folderSessionsForDelete));
                 return;
               }
               if (!showDeletionDialog) {
@@ -1126,7 +1134,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             ) : null}
           </div>
         </div>
-        {group.isArchivedBucket && allGroupSessions.length > 0 ? (
+        {archivedGroupSessions.length > 0 ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1134,10 +1142,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
-                    sessionEvents.requestDelete({
-                      sessions: allGroupSessions,
-                      mode: 'session',
-                    });
+                    sessionEvents.requestDelete(createArchivedSessionDeleteRequest(archivedGroupSessions));
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                   aria-label={t('sessions.sidebar.group.actions.deleteArchivedInGroupAria', { label: group.label })}

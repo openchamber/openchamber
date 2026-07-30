@@ -375,10 +375,10 @@ describe("confirmed session removal", () => {
     const source = createStore({}, {
       session: [{ id: "session-a", directory: "/test/project", time: { created: 1 } } as Session],
     })
-    const { deleteSession, setActionRefs } = await import("./session-actions")
+    const { deleteSessionInDirectory, setActionRefs } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
 
-    expect(await deleteSession("session-a")).toBe(false)
+    expect(await deleteSessionInDirectory("session-a", "/test/project")).toBe(false)
     expect(source.getState().session.map((item) => item.id)).toEqual(["session-a"])
     expect(globalRemovedSessionIds).toEqual([])
     expect(deletedCleanupIdentities).toEqual([])
@@ -388,10 +388,10 @@ describe("confirmed session removal", () => {
     const source = createStore({}, {
       session: [{ id: "session-a", directory: "/test/project", time: { created: 1 } } as Session],
     })
-    const { deleteSession, setActionRefs } = await import("./session-actions")
+    const { deleteSessionInDirectory, setActionRefs } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([["/test/project", source]]), () => "/test/project")
 
-    expect(await deleteSession("session-a")).toBe(true)
+    expect(await deleteSessionInDirectory("session-a", "/test/project")).toBe(true)
     expect(source.getState().session).toEqual([])
     expect(globalRemovedSessionIds).toEqual(["session-a"])
     expect(deletedCleanupIdentities).toHaveLength(1)
@@ -399,6 +399,17 @@ describe("confirmed session removal", () => {
       directory: deletedCleanupIdentities[0]?.directory,
       sessionId: deletedCleanupIdentities[0]?.sessionId,
     }).toEqual({ directory: "/test/project", sessionId: "session-a" })
+  })
+
+  test("deletes a server-discovered session against its authoritative directory", async () => {
+    const { deleteSessionInDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([]), () => "/test/project")
+
+    expect(await deleteSessionInDirectory("server-session", "/server/directory")).toBe(true)
+    expect(replyCalls.find((call) => call.method === "session.delete")?.params).toEqual({
+      sessionID: "server-session",
+      directory: "/server/directory",
+    })
   })
 
   test("does not archive locally until the server returns the archived session", async () => {
@@ -426,6 +437,19 @@ describe("confirmed session removal", () => {
     expect(await archiveSession("session-a")).toBe(true)
     expect(source.getState().session).toEqual([])
     expect((globalUpsertedSessions[0] as Session)?.time?.archived).toBe(2)
+  })
+
+  test("archives a server-discovered session against its authoritative directory", async () => {
+    sessionUpdateResult = {
+      data: { id: "server-session", directory: "/server/directory", time: { created: 1, archived: 2 } } as Session,
+    }
+    const { archiveSessionInDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, createChildStores([]), () => "/test/project")
+
+    expect(await archiveSessionInDirectory("server-session", "/server/directory")).toBe(true)
+    const update = replyCalls.find((call) => call.method === "session.update")
+    expect(update?.params.sessionID).toBe("server-session")
+    expect(update?.params.directory).toBe("/server/directory")
   })
 })
 

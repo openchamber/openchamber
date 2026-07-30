@@ -6,6 +6,8 @@ export type SessionDeleteRequest = {
   dateLabel?: string;
   mode?: 'session' | 'worktree';
   worktree?: WorktreeMetadata | null;
+  requireArchived?: boolean;
+  skipConfirm?: boolean;
 };
 
 export type SessionCreateRequest = {

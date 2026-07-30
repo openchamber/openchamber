@@ -7,12 +7,12 @@ import type { MainTab } from '@/stores/useUIStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { sessionEvents } from '@/lib/sessionEvents';
 
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   session: Session;
   descendantCount: number;
   descendantIds: string[];
-  archivedBucket: boolean;
 } | null>>;
 
 type DeleteSessionSource = {
@@ -36,14 +36,12 @@ type Args = {
   updateSessionTitle: (id: string, title: string) => Promise<void>;
   shareSession: (id: string) => Promise<Session | null>;
   unshareSession: (id: string) => Promise<Session | null>;
-  deleteSession: (id: string) => Promise<boolean>;
-  deleteSessions: (ids: string[]) => Promise<{ deletedIds: string[]; failedIds: string[] }>;
   archiveSession: (id: string) => Promise<boolean>;
   archiveSessions: (ids: string[]) => Promise<{ archivedIds: string[]; failedIds: string[] }>;
   childrenMap: Map<string, Session[]>;
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: DeleteSessionConfirmSetter;
-  deleteSessionConfirm: { session: Session; descendantCount: number; descendantIds: string[]; archivedBucket: boolean } | null;
+  deleteSessionConfirm: { session: Session; descendantCount: number; descendantIds: string[] } | null;
   setEditingId: (id: string | null) => void;
   setEditTitle: (value: string) => void;
   editingId: string | null;
@@ -171,62 +169,30 @@ export const useSessionActions = (args: Args) => {
     return collected;
   }, [args.childrenMap]);
 
-  // Archive cascades to subagents that aren't already archived; hard-delete
-  // cascades to every descendant unconditionally. We collect once and filter
-  // per-action so the dialog count and the executed ID list always agree.
-  const filterDescendantsForAction = React.useCallback(
-    (descendants: Session[], shouldHardDelete: boolean): Session[] => {
-      if (shouldHardDelete) return descendants;
-      return descendants.filter((s) => !s.time?.archived);
-    },
-    [],
-  );
+  const collectDescendantIdsForAction = React.useCallback((session: Session): string[] => (
+    collectDescendants(session.id)
+      .filter((descendant) => !descendant.time?.archived)
+      .map((descendant) => descendant.id)
+  ), [collectDescendants]);
 
   const executeDeleteSession = React.useCallback(
     async (
       session: Session,
-      source?: DeleteSessionSource,
       precomputed?: { descendantIds: string[] },
     ) => {
-      const shouldHardDelete = source?.archivedBucket === true || source?.hardDelete === true;
-      // Use the snapshot taken when the dialog opened (if any) so the
-      // executed list matches what the user was told. Fall back to a fresh
-      // collection for direct-execute (no-dialog) callers.
       const descendantIds = precomputed?.descendantIds
-        ?? filterDescendantsForAction(collectDescendants(session.id), shouldHardDelete).map((s) => s.id);
+        ?? collectDescendantIdsForAction(session);
       if (descendantIds.length === 0) {
-        const success = shouldHardDelete
-          ? await args.deleteSession(session.id)
-          : await args.archiveSession(session.id);
+        const success = await args.archiveSession(session.id);
         if (success) {
-          toast.success(shouldHardDelete
-            ? t('sessions.sidebar.session.delete.success')
-            : t('sessions.sidebar.session.archive.success'));
+          toast.success(t('sessions.sidebar.session.archive.success'));
         } else {
-          toast.error(shouldHardDelete
-            ? t('sessions.sidebar.session.delete.error')
-            : t('sessions.sidebar.session.archive.error'));
+          toast.error(t('sessions.sidebar.session.archive.error'));
         }
         return;
       }
 
       const ids = [session.id, ...descendantIds];
-      if (shouldHardDelete) {
-        // Delete root + all descendants individually. If the server
-        // cascade-deletes some children before we get to them, 404 is
-        // treated as success by deleteSession and no rollback occurs.
-        const { deletedIds, failedIds } = await args.deleteSessions(ids);
-        if (failedIds.length === 0) {
-          const totalDeleted = deletedIds.length;
-          toast.success(totalDeleted === 1
-            ? t('sessions.sidebar.bulkActions.deletedSingle', { count: totalDeleted })
-            : t('sessions.sidebar.bulkActions.deletedPlural', { count: totalDeleted }));
-        } else {
-          toast.error(t('sessions.sidebar.session.delete.error'));
-        }
-        return;
-      }
-
       const { archivedIds, failedIds } = await args.archiveSessions(ids);
       if (archivedIds.length > 0) {
         toast.success(archivedIds.length === 1
@@ -239,35 +205,40 @@ export const useSessionActions = (args: Args) => {
           : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
       }
     },
-    [args, collectDescendants, filterDescendantsForAction, t],
+    [args, collectDescendantIdsForAction, t],
   );
 
   const handleDeleteSession = React.useCallback(
     (session: Session, source?: DeleteSessionSource) => {
       const shouldHardDelete = source?.archivedBucket === true || source?.hardDelete === true;
-      const effectiveDescendantIds = filterDescendantsForAction(
-        collectDescendants(session.id),
-        shouldHardDelete,
-      ).map((s) => s.id);
+      if (shouldHardDelete) {
+        sessionEvents.requestDelete({
+          sessions: [session],
+          mode: 'session',
+          requireArchived: source?.archivedBucket === true,
+          skipConfirm: source?.skipConfirm,
+        });
+        return;
+      }
+      const effectiveDescendantIds = collectDescendantIdsForAction(session);
       if (!args.showDeletionDialog || source?.skipConfirm === true) {
-        void executeDeleteSession(session, source, { descendantIds: effectiveDescendantIds });
+        void executeDeleteSession(session, { descendantIds: effectiveDescendantIds });
         return;
       }
       args.setDeleteSessionConfirm({
         session,
         descendantCount: effectiveDescendantIds.length,
         descendantIds: effectiveDescendantIds,
-        archivedBucket: shouldHardDelete,
       });
     },
-    [args, collectDescendants, executeDeleteSession, filterDescendantsForAction],
+    [args, collectDescendantIdsForAction, executeDeleteSession],
   );
 
   const confirmDeleteSession = React.useCallback(async () => {
     if (!args.deleteSessionConfirm) return;
-    const { session, archivedBucket, descendantIds } = args.deleteSessionConfirm;
+    const { session, descendantIds } = args.deleteSessionConfirm;
     args.setDeleteSessionConfirm(null);
-    await executeDeleteSession(session, { archivedBucket }, { descendantIds });
+    await executeDeleteSession(session, { descendantIds });
   }, [args, executeDeleteSession]);
 
   return {

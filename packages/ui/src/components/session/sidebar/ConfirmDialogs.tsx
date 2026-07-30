@@ -11,7 +11,6 @@ export type DeleteSessionConfirmState = {
   // executed list matches the count shown to the user even if childrenMap
   // changes while the dialog is open.
   descendantIds: string[];
-  archivedBucket: boolean;
 } | null;
 
 export function SessionDeleteConfirmDialog(props: {
@@ -29,37 +28,21 @@ export function SessionDeleteConfirmDialog(props: {
     <Dialog open={Boolean(value)} onOpenChange={(open) => { if (!open) setValue(null); }}>
       <DialogContent showCloseButton={false} className="max-w-sm gap-5">
         <DialogHeader>
-          <DialogTitle>{value?.archivedBucket
-            ? t('sessions.sidebar.dialogs.deleteSession.title')
-            : t('sessions.sidebar.dialogs.archiveSession.title')}</DialogTitle>
+          <DialogTitle>{t('sessions.sidebar.dialogs.archiveSession.title')}</DialogTitle>
           <DialogDescription>
             {value && value.descendantCount > 0
-              ? value.archivedBucket
-                ? value.descendantCount === 1
-                  ? t('sessions.sidebar.dialogs.deleteSession.withOneSubtask', {
-                    sessionTitle: value.session.title || untitledSession,
-                    count: value.descendantCount,
-                  })
-                  : t('sessions.sidebar.dialogs.deleteSession.withManySubtasks', {
-                    sessionTitle: value.session.title || untitledSession,
-                    count: value.descendantCount,
-                  })
-                : value.descendantCount === 1
-                  ? t('sessions.sidebar.dialogs.archiveSession.withOneSubtask', {
-                    sessionTitle: value.session.title || untitledSession,
-                    count: value.descendantCount,
-                  })
-                  : t('sessions.sidebar.dialogs.archiveSession.withManySubtasks', {
+              ? value.descendantCount === 1
+                ? t('sessions.sidebar.dialogs.archiveSession.withOneSubtask', {
                   sessionTitle: value.session.title || untitledSession,
                   count: value.descendantCount,
                 })
-              : value?.archivedBucket
-                ? t('sessions.sidebar.dialogs.deleteSession.single', {
-                  sessionTitle: value?.session.title || untitledSession,
+                : t('sessions.sidebar.dialogs.archiveSession.withManySubtasks', {
+                  sessionTitle: value.session.title || untitledSession,
+                  count: value.descendantCount,
                 })
-                : t('sessions.sidebar.dialogs.archiveSession.single', {
-                  sessionTitle: value?.session.title || untitledSession,
-                })}
+              : t('sessions.sidebar.dialogs.archiveSession.single', {
+                sessionTitle: value?.session.title || untitledSession,
+              })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="w-full sm:items-center sm:justify-between">
@@ -85,7 +68,7 @@ export function SessionDeleteConfirmDialog(props: {
               onClick={() => void onConfirm()}
               className="inline-flex h-8 items-center justify-center rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
             >
-              {value?.archivedBucket ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive')}
+              {t('sessions.sidebar.bulkActions.archive')}
             </button>
           </div>
         </DialogFooter>
@@ -96,7 +79,6 @@ export function SessionDeleteConfirmDialog(props: {
 
 export type BulkDeleteSessionsConfirmState = {
   sessionCount: number;
-  archivedBucket: boolean;
 } | null;
 
 export function BulkSessionDeleteConfirmDialog(props: {
@@ -108,22 +90,13 @@ export function BulkSessionDeleteConfirmDialog(props: {
 }): React.ReactNode {
   const { t } = useI18n();
   const { value, setValue, showDeletionDialog, setShowDeletionDialog, onConfirm } = props;
-  const archived = value?.archivedBucket === true;
   const n = value?.sessionCount ?? 0;
-  const title = archived
-    ? (n === 1
-      ? t('sessions.sidebar.dialogs.deleteSession.title')
-      : t('sessions.sidebar.dialogs.deleteSessions.title'))
-    : (n === 1
-      ? t('sessions.sidebar.dialogs.archiveSession.title')
-      : t('sessions.sidebar.dialogs.archiveSessions.title'));
-  const description = archived
-    ? (n === 1
-      ? t('sessions.sidebar.dialogs.deleteSessions.singleDescription', { count: n })
-      : t('sessions.sidebar.dialogs.deleteSessions.pluralDescription', { count: n }))
-    : (n === 1
-      ? t('sessions.sidebar.dialogs.archiveSessions.singleDescription', { count: n })
-      : t('sessions.sidebar.dialogs.archiveSessions.pluralDescription', { count: n }));
+  const title = n === 1
+    ? t('sessions.sidebar.dialogs.archiveSession.title')
+    : t('sessions.sidebar.dialogs.archiveSessions.title');
+  const description = n === 1
+    ? t('sessions.sidebar.dialogs.archiveSessions.singleDescription', { count: n })
+    : t('sessions.sidebar.dialogs.archiveSessions.pluralDescription', { count: n });
 
   return (
     <Dialog open={Boolean(value)} onOpenChange={(open) => { if (!open) setValue(null); }}>
@@ -155,7 +128,7 @@ export function BulkSessionDeleteConfirmDialog(props: {
               onClick={() => void onConfirm()}
               className="inline-flex h-8 items-center justify-center rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
             >
-              {archived ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive')}
+              {t('sessions.sidebar.bulkActions.archive')}
             </button>
           </div>
         </DialogFooter>

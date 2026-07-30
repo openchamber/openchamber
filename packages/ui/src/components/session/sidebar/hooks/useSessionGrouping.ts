@@ -25,6 +25,36 @@ type Args = {
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
 
+export const ARCHIVED_GROUP_KEY = '__archived__';
+const FALLBACK_PROJECT_ROOT_KEY = '__project_root__';
+
+type SessionGroupKeyContext = {
+  /** Group key of the project root; falls back when the root path is unknown. */
+  rootKey: string;
+  normalizedProjectRoot: string | null;
+  /** Registered worktrees keyed by normalized path; ignored in VS Code. */
+  worktreesByPath: ReadonlyMap<string, unknown>;
+  worktreeMetadataBySessionId: ReadonlyMap<string, WorktreeMetadata>;
+  isVSCode: boolean;
+};
+
+/** Archived membership comes only from the authoritative `time.archived` field.
+    A live session whose directory matches no registered worktree belongs to the
+    project root group: the archived bucket is hidden outside VS Code and is bulk
+    deletable, so routing live sessions there hides and then destroys them. */
+export const resolveSessionGroupKey = (session: Session, context: SessionGroupKeyContext): string => {
+  if (isArchivedSession(session)) return ARCHIVED_GROUP_KEY;
+  // VS Code groups by open workspace, not by worktree: every live session in a
+  // project belongs to that project's single (root) group.
+  if (context.isVSCode) return context.rootKey;
+  const metadataPath = normalizePath(context.worktreeMetadataBySessionId.get(session.id)?.path ?? null);
+  const directory = metadataPath ?? resolveGlobalSessionDirectory(session);
+  if (directory && directory !== context.normalizedProjectRoot && context.worktreesByPath.has(directory)) {
+    return directory;
+  }
+  return context.rootKey;
+};
+
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
   const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
@@ -122,31 +152,22 @@ export const useSessionGrouping = (args: Args) => {
       });
 
       const groupedNodes = new Map<string, SessionNode[]>();
-      const archivedKey = '__archived__';
-
-      const getGroupKey = (session: Session) => {
-        if (session.time?.archived) return archivedKey;
-        // VS Code groups by open workspace, not by worktree: every non-archived
-        // session in a project belongs to that project's single (root) group.
-        // Worktrees aren't registered in VS Code, so the desktop directory-match
-        // below would otherwise dump these sessions into the archived bucket.
-        if (args.isVSCode) return normalizedProjectRoot ?? '__project_root__';
-        const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
-        const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
-        if (!normalizedDir) return archivedKey;
-        if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
-        if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
-        return archivedKey;
+      const rootKey = normalizedProjectRoot ?? FALLBACK_PROJECT_ROOT_KEY;
+      const groupKeyContext: SessionGroupKeyContext = {
+        rootKey,
+        normalizedProjectRoot,
+        worktreesByPath: worktreeByPath,
+        worktreeMetadataBySessionId: args.worktreeMetadata,
+        isVSCode: args.isVSCode,
       };
 
       roots.forEach((session) => {
         const node = buildProjectNode(session);
-        const groupKey = getGroupKey(session);
+        const groupKey = resolveSessionGroupKey(session, groupKeyContext);
         if (!groupedNodes.has(groupKey)) groupedNodes.set(groupKey, []);
         groupedNodes.get(groupKey)?.push(node);
       });
 
-      const rootKey = normalizedProjectRoot ?? '__project_root__';
       const groups: SessionGroup[] = [{
         id: 'root',
         label: (projectIsRepo && projectRootBranch && projectRootBranch !== 'HEAD')
@@ -239,7 +260,7 @@ export const useSessionGrouping = (args: Args) => {
         });
       });
 
-      const archivedSessions = groupedNodes.get(archivedKey) ?? [];
+      const archivedSessions = groupedNodes.get(ARCHIVED_GROUP_KEY) ?? [];
       if (archivedSessions.length > 0) {
         groups.push({
           id: 'archived',

@@ -759,31 +759,7 @@ function finalizeConfirmedSessionDeletion(sessionId: string, sessionDirectory?: 
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
-  const sessionDirectory = getSessionDirectory(sessionId)
-  try {
-    await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory)
-    const deleted = await opencodeClient.deleteSession(sessionId, sessionDirectory)
-    if (deleted !== true) {
-      throw new Error("session.delete failed: server did not confirm deletion")
-    }
-    finalizeConfirmedSessionDeletion(sessionId, sessionDirectory)
-    return true
-  } catch (error) {
-    console.error("[session-actions] deleteSession failed", error)
-    // The server cascade-deletes child sessions when the parent is removed.
-    // Subsequent delete attempts for those children return 404; treat as
-    // success since the session was already deleted by the cascade.
-    if ((error as { status?: number })?.status === 404) {
-      finalizeConfirmedSessionDeletion(sessionId, sessionDirectory)
-      return true
-    }
-    return false
-  }
-}
-
-/** Delete a session specifying which directory it lives in. Used by agent groups for cross-directory deletes. */
+/** Delete a session using its authoritative directory instead of the current UI directory. */
 export async function deleteSessionInDirectory(sessionId: string, directory: string): Promise<boolean> {
   try {
     await cleanupReviewMetadataBeforeDelete(sessionId, directory)
@@ -795,6 +771,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
+    // A parent may have cascade-deleted this session after resolution.
     if ((error as { status?: number })?.status === 404) {
       finalizeConfirmedSessionDeletion(sessionId, directory)
       return true
@@ -803,8 +780,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   }
 }
 
-export async function archiveSession(sessionId: string): Promise<boolean> {
-  const sessionDirectory = getSessionDirectory(sessionId)
+async function archiveSessionAtDirectory(sessionId: string, sessionDirectory?: string): Promise<boolean> {
   const archivedAt = Date.now()
   try {
     await cleanupReviewMetadataBeforeDelete(sessionId, sessionDirectory)
@@ -822,6 +798,14 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
     console.error("[session-actions] archiveSession failed", error)
     return false
   }
+}
+
+export async function archiveSession(sessionId: string): Promise<boolean> {
+  return archiveSessionAtDirectory(sessionId, getSessionDirectory(sessionId))
+}
+
+export async function archiveSessionInDirectory(sessionId: string, directory: string): Promise<boolean> {
+  return archiveSessionAtDirectory(sessionId, directory)
 }
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {

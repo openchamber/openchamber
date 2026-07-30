@@ -816,8 +816,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     updateStore.available &&
     (updateStore.runtimeType === 'desktop' || updateStore.runtimeType === 'web');
 
-  const deleteSession = useSessionUIStore((state) => state.deleteSession);
-  const deleteSessions = useSessionUIStore((state) => state.deleteSessions);
   const archiveSession = useSessionUIStore((state) => state.archiveSession);
   const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
 
@@ -846,8 +844,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     updateSessionTitle,
     shareSession,
     unshareSession,
-    deleteSession,
-    deleteSessions,
     archiveSession,
     archiveSessions,
     childrenMap,
@@ -1752,7 +1748,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     removeSessionsFromFolders,
     createFolderAndStartRename,
     archiveSessions,
-    deleteSessions,
     setBulkDeleteConfirm,
   });
   const handleOpenMultiRunFromHeader = React.useCallback(() => {

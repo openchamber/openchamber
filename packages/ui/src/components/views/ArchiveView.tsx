@@ -10,6 +10,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { formatSessionDateLabel, normalizePath } from '@/components/session/sidebar/utils';
+import { createArchivedSessionDeleteRequest } from '@/components/session/sessionDeleteCascade';
 import { useShallow } from 'zustand/react/shallow';
 
 type DirectoryBucket = {
@@ -119,8 +120,8 @@ export function ArchiveView(): React.ReactNode {
           <TooltipTrigger asChild>
             <button
               type="button"
-              onClick={() => sessionEvents.requestDelete({ sessions: sessionsForDelete, mode: 'session' })}
-              className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/dir:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              onClick={() => sessionEvents.requestDelete(createArchivedSessionDeleteRequest(sessionsForDelete))}
+              className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity pointer-events-none hover:text-destructive group-hover/dir:opacity-100 group-hover/dir:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
               aria-label={t('sessions.archivePage.deleteProjectAria', { label })}
             >
               <Icon name="delete-bin" className="h-3.5 w-3.5" />
@@ -222,7 +223,7 @@ export function ArchiveView(): React.ReactNode {
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
-                        sessionEvents.requestDelete({ sessions: [session], mode: 'session' });
+                        sessionEvents.requestDelete(createArchivedSessionDeleteRequest([session]));
                       }}
                       className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity pointer-events-none hover:text-destructive group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                       aria-label={t('sessions.archivePage.deleteSessionAria', { title: session.title || t('sessions.sidebar.session.untitled') })}

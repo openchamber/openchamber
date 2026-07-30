@@ -45,7 +45,6 @@ import { markSessionViewed } from "./notification-store"
 import { setActiveSession } from "./sync-context"
 import {
   createSession as createSessionAction,
-  deleteSession as deleteSessionAction,
   archiveSession as archiveSessionAction,
   updateSessionTitle as updateSessionTitleAction,
   shareSession as shareSessionAction,
@@ -319,8 +318,6 @@ export type SessionUIState = {
   ) => Promise<void>
 
   createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null, metadata?: Record<string, unknown>) => Promise<Session | null>
-  deleteSession: (id: string, options?: Record<string, unknown>) => Promise<boolean>
-  deleteSessions: (ids: string[], options?: Record<string, unknown>) => Promise<{ deletedIds: string[]; failedIds: string[] }>
   archiveSession: (id: string) => Promise<boolean>
   archiveSessions: (ids: string[], options?: Record<string, unknown>) => Promise<{ archivedIds: string[]; failedIds: string[] }>
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>
@@ -1268,22 +1265,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       console.error("[session-ui-store] createSession failed", e)
       return null
     }
-  },
-
-  // ---------------------------------------------------------------------------
-  // deleteSession — calls SDK, SSE event updates child store
-  // ---------------------------------------------------------------------------
-  deleteSession: (id) => deleteSessionAction(id),
-
-  deleteSessions: async (ids) => {
-    const deletedIds: string[] = []
-    const failedIds: string[] = []
-    for (const id of ids) {
-      const ok = await deleteSessionAction(id)
-      if (ok) deletedIds.push(id)
-      else failedIds.push(id)
-    }
-    return { deletedIds, failedIds }
   },
 
   archiveSession: (id) => archiveSessionAction(id),

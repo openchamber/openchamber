@@ -2,7 +2,10 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
+import { createArchivedSessionDeleteRequest } from '../../sessionDeleteCascade';
+import { sessionEvents } from '@/lib/sessionEvents';
 
 type Args = {
   isInlineEditing: boolean;
@@ -18,10 +21,8 @@ type Args = {
   removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   archiveSessions: (ids: string[]) => Promise<{ archivedIds: string[]; failedIds: string[] }>;
-  deleteSessions: (ids: string[]) => Promise<{ deletedIds: string[]; failedIds: string[] }>;
   setBulkDeleteConfirm: React.Dispatch<React.SetStateAction<{
     sessionCount: number;
-    archivedBucket: boolean;
   } | null>>;
 };
 
@@ -50,7 +51,6 @@ export const useSidebarBulkActions = (args: Args) => {
     removeSessionsFromFolders,
     createFolderAndStartRename,
     archiveSessions,
-    deleteSessions,
     setBulkDeleteConfirm,
   } = args;
 
@@ -165,55 +165,63 @@ export const useSidebarBulkActions = (args: Args) => {
     }
   }, [removeSessionsFromFolders, selectedIds, selectionFolderScopes, hasSelection]);
 
-  const executeBulkDelete = React.useCallback(async () => {
-    const ids = Array.from(selectedIds);
+  const executeBulkArchive = React.useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
-    if (bulkScopeIsArchived) {
-      const { deletedIds, failedIds } = await deleteSessions(ids);
-      if (deletedIds.length > 0) {
-        toast.success(deletedIds.length === 1
-          ? t('sessions.sidebar.bulkActions.deletedSingle', { count: deletedIds.length })
-          : t('sessions.sidebar.bulkActions.deletedPlural', { count: deletedIds.length }));
-      }
-      if (failedIds.length > 0) {
-        toast.error(failedIds.length === 1
-          ? t('sessions.sidebar.bulkActions.failedDeleteSingle', { count: failedIds.length })
-          : t('sessions.sidebar.bulkActions.failedDeletePlural', { count: failedIds.length }));
-      }
-    } else {
-      const { archivedIds, failedIds } = await archiveSessions(ids);
-      if (archivedIds.length > 0) {
-        toast.success(archivedIds.length === 1
-          ? t('sessions.sidebar.bulkActions.archivedSingle', { count: archivedIds.length })
-          : t('sessions.sidebar.bulkActions.archivedPlural', { count: archivedIds.length }));
-      }
-      if (failedIds.length > 0) {
-        toast.error(failedIds.length === 1
-          ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
-          : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
-      }
+    const { archivedIds, failedIds } = await archiveSessions(ids);
+    if (archivedIds.length > 0) {
+      toast.success(archivedIds.length === 1
+        ? t('sessions.sidebar.bulkActions.archivedSingle', { count: archivedIds.length })
+        : t('sessions.sidebar.bulkActions.archivedPlural', { count: archivedIds.length }));
+    }
+    if (failedIds.length > 0) {
+      toast.error(failedIds.length === 1
+        ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
+        : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
     }
     useSessionMultiSelectStore.getState().clear();
-  }, [archiveSessions, bulkScopeIsArchived, deleteSessions, selectedIds, t]);
+  }, [archiveSessions, t]);
+
+  // Keep the active-session archive snapshot stable while its dialog is open.
+  // Archived-session deletion routes through the authoritative shared dialog.
+  const pendingBulkDeleteRef = React.useRef<string[]>([]);
 
   const handleBulkDelete = React.useCallback(() => {
     if (!hasSelection) return;
-    const count = selectedIds.size;
-    if (!showDeletionDialog) {
-      void executeBulkDelete();
+    const ids = Array.from(selectedIds);
+    if (bulkScopeIsArchived) {
+      const { activeSessions, archivedSessions } = useGlobalSessionsStore.getState();
+      const requested = [...activeSessions, ...archivedSessions]
+        .filter((session) => selectedIds.has(session.id));
+      if (requested.length !== selectedIds.size) {
+        toast.error(t('sessions.sidebar.session.delete.error'));
+        return;
+      }
+      const request = createArchivedSessionDeleteRequest(requested);
+      if (request.sessions.length === 0) {
+        toast.error(t('sessions.sidebar.session.delete.error'));
+        return;
+      }
+      sessionEvents.requestDelete(request);
       return;
     }
-    setBulkDeleteConfirm({ sessionCount: count, archivedBucket: bulkScopeIsArchived });
-  }, [bulkScopeIsArchived, executeBulkDelete, selectedIds, showDeletionDialog, setBulkDeleteConfirm, hasSelection]);
+    if (!showDeletionDialog) {
+      void executeBulkArchive(ids);
+      return;
+    }
+    pendingBulkDeleteRef.current = ids;
+    setBulkDeleteConfirm({ sessionCount: ids.length });
+  }, [bulkScopeIsArchived, executeBulkArchive, selectedIds, showDeletionDialog, setBulkDeleteConfirm, hasSelection, t]);
 
   const confirmBulkDelete = React.useCallback(async () => {
+    const ids = pendingBulkDeleteRef.current;
+    pendingBulkDeleteRef.current = [];
     setBulkDeleteConfirm(null);
-    await executeBulkDelete();
+    await executeBulkArchive(ids);
     // setBulkDeleteConfirm is a stable React state setter; intentionally
     // omitted from deps to avoid forcing the keyboard-listener effect
     // below to re-subscribe on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [executeBulkDelete]);
+  }, [executeBulkArchive]);
 
   React.useEffect(() => {
     if (!selectionModeEnabled) return;
