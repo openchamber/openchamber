@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -280,39 +281,259 @@ export const filterLinuxInstalledApps = async (apps, options = {}) => {
     .filter((appName) => appName && entries.some((entry) => desktopEntryMatchesApp(entry, appName)));
 };
 
+const FILE_MANAGER_FALLBACK_IDS = [
+  'org.gnome.Nautilus',
+  'org.xfce.thunar',
+  'thunar',
+  'nemo',
+  'org.kde.dolphin',
+  'dolphin',
+  'pcmanfm',
+  'caja',
+  'nautilus',
+  'xfce4-file-manager',
+];
+
+const FILE_MANAGER_ICON_FALLBACKS = [
+  'system-file-manager',
+  'org.xfce.thunar',
+  'org.gnome.Nautilus',
+  'folder',
+];
+
+const ICON_SIZE_DIRS = [
+  '48x48', '48',
+  '32x32', '32',
+  '64x64', '64',
+  '24x24', '24',
+  '22x22', '22',
+  '16x16', '16',
+  '128x128', '128',
+  '256x256', '256',
+  'scalable',
+];
+
+const ICON_CATEGORIES = ['apps', 'places', 'status', 'devices', 'mimetypes', 'legacy'];
+
+const pathExistsSync = (candidate) => {
+  try {
+    fs.accessSync(candidate, fs.constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const linuxIconThemeDirs = ({ env = process.env, homeDir = os.homedir() } = {}) => {
+  const dataHome = typeof env.XDG_DATA_HOME === 'string' && env.XDG_DATA_HOME.trim()
+    ? env.XDG_DATA_HOME.trim()
+    : path.join(homeDir || os.homedir(), '.local', 'share');
+  const dataDirs = typeof env.XDG_DATA_DIRS === 'string' && env.XDG_DATA_DIRS.trim()
+    ? env.XDG_DATA_DIRS.split(':').filter(Boolean)
+    : DEFAULT_XDG_DATA_DIRS;
+  return uniqueStrings([
+    path.join(dataHome, 'icons'),
+    path.join(homeDir || os.homedir(), '.icons'),
+    ...dataDirs.map((dir) => path.join(dir, 'icons')),
+    '/usr/local/share/icons',
+    '/usr/share/icons',
+  ]).map((entry) => path.resolve(entry));
+};
+
+const listThemeNames = (iconsRoot) => {
+  let entries;
+  try {
+    entries = fs.readdirSync(iconsRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const themes = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  // Prefer the freedesktop fallback theme first, then whatever else is installed.
+  themes.sort((left, right) => {
+    if (left === 'hicolor') return -1;
+    if (right === 'hicolor') return 1;
+    return left.localeCompare(right);
+  });
+  return themes;
+};
+
+const lookForIconInTheme = (themeRoot, iconName) => {
+  let pngMatch = null;
+  let svgMatch = null;
+  for (const size of ICON_SIZE_DIRS) {
+    for (const category of ICON_CATEGORIES) {
+      const pngPath = path.join(themeRoot, size, category, `${iconName}.png`);
+      if (pathExistsSync(pngPath)) {
+        // Prefer mid-size PNGs that UI list icons can display without SVG tooling.
+        if (size !== 'scalable') return pngPath;
+        pngMatch = pngMatch || pngPath;
+      }
+      const svgPath = path.join(themeRoot, size, category, `${iconName}.svg`);
+      if (!svgMatch && pathExistsSync(svgPath)) svgMatch = svgPath;
+    }
+  }
+  return pngMatch || svgMatch;
+};
+
+export const resolveLinuxIconFile = (iconName, options = {}) => {
+  const raw = typeof iconName === 'string' ? iconName.trim() : '';
+  if (!raw) return null;
+  if (path.isAbsolute(raw) && pathExistsSync(raw)) return raw;
+  if (raw.includes(path.sep) && pathExistsSync(raw)) return path.resolve(raw);
+
+  const baseName = raw.replace(/\.(png|svg|xpm|ico)$/i, '');
+  const iconRoots = linuxIconThemeDirs(options);
+  for (const iconsRoot of iconRoots) {
+    for (const theme of listThemeNames(iconsRoot)) {
+      const match = lookForIconInTheme(path.join(iconsRoot, theme), baseName);
+      if (match) return match;
+    }
+  }
+
+  const dataHome = typeof options.env?.XDG_DATA_HOME === 'string' && options.env.XDG_DATA_HOME.trim()
+    ? options.env.XDG_DATA_HOME.trim()
+    : path.join(options.homeDir || os.homedir(), '.local', 'share');
+  const dataDirs = typeof options.env?.XDG_DATA_DIRS === 'string' && options.env.XDG_DATA_DIRS.trim()
+    ? options.env.XDG_DATA_DIRS.split(':').filter(Boolean)
+    : DEFAULT_XDG_DATA_DIRS;
+  for (const pixmapsDir of uniqueStrings([
+    path.join(dataHome, 'pixmaps'),
+    ...dataDirs.map((dir) => path.join(dir, 'pixmaps')),
+    '/usr/share/pixmaps',
+    '/usr/local/share/pixmaps',
+  ])) {
+    for (const ext of ['.png', '.svg', '.xpm']) {
+      const candidate = path.join(pixmapsDir, `${baseName}${ext}`);
+      if (pathExistsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+};
+
+export const resolveDefaultLinuxFileManagerId = ({ env = process.env, execFileSyncImpl = execFileSync } = {}) => {
+  try {
+    const output = String(execFileSyncImpl('xdg-mime', ['query', 'default', 'inode/directory'], {
+      encoding: 'utf8',
+      timeout: 1500,
+      env,
+    }) || '').trim();
+    if (!output) return null;
+    return output.replace(/\.desktop$/i, '');
+  } catch {
+    return null;
+  }
+};
+
+export const findLinuxFileManagerEntry = (entries, options = {}) => {
+  const list = Array.isArray(entries) ? entries : [];
+  const defaultId = resolveDefaultLinuxFileManagerId(options);
+  if (defaultId) {
+    const match = list.find((entry) => (
+      entry.id === defaultId
+      || path.basename(entry.filePath || '', '.desktop') === defaultId
+      || normalizeComparable(entry.id) === normalizeComparable(defaultId)
+    ));
+    if (match) return match;
+  }
+  for (const fallbackId of FILE_MANAGER_FALLBACK_IDS) {
+    const match = list.find((entry) => (
+      entry.id === fallbackId
+      || path.basename(entry.filePath || '', '.desktop') === fallbackId
+      || normalizeComparable(entry.id) === normalizeComparable(fallbackId)
+    ));
+    if (match) return match;
+  }
+  return list.find((entry) => {
+    const categories = Array.isArray(entry.categories) ? entry.categories : [];
+    return categories.includes('FileManager') || categories.includes('FileTools');
+  }) || null;
+};
+
+const iconFileToDataUrl = (filePath) => {
+  if (!filePath || !/\.png$/i.test(filePath)) return null;
+  try {
+    return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
+  } catch {
+    return null;
+  }
+};
+
+const resolveIconDataUrlForName = (iconNames, options = {}) => {
+  for (const iconName of uniqueStrings(iconNames)) {
+    const filePath = resolveLinuxIconFile(iconName, options);
+    const dataUrl = iconFileToDataUrl(filePath);
+    if (dataUrl) return dataUrl;
+  }
+  return null;
+};
+
+const isLinuxFileManagerName = (name) => {
+  const normalized = normalizeComparable(name);
+  return normalized === 'finder'
+    || normalized === 'file manager'
+    || normalized === 'file explorer';
+};
+
+const knownLinuxAppIdForName = (name) => {
+  const normalized = normalizeComparable(name);
+  const knownIdByName = new Map([
+    ['visual studio code', 'vscode'],
+    ['cursor', 'cursor'],
+    ['vscodium', 'vscodium'],
+    ['windsurf', 'windsurf'],
+    ['zed', 'zed'],
+    ['sublime text', 'sublime-text'],
+  ]);
+  if (knownIdByName.has(normalized)) return knownIdByName.get(normalized);
+  return Object.entries(LINUX_CLI_BY_APP_ID).find(([, cli]) => {
+    return normalized.includes(normalizeComparable(cli)) || normalizeCompactComparable(name).includes(cli);
+  })?.[0] || null;
+};
+
 export const buildLinuxInstalledApps = async (apps, options = {}) => {
   const entries = options.entries || await readLinuxDesktopEntries(options);
   const env = options.env || process.env;
   const names = uniqueStrings(Array.isArray(apps) ? apps.map(String) : []);
+  const fileManagerEntry = findLinuxFileManagerEntry(entries, { ...options, env });
   return names
     .filter((name) => {
       const normalized = normalizeComparable(name);
-      if (normalized === 'finder' || normalized === 'file manager' || normalized === 'file explorer') {
-        return true;
-      }
-      if (normalized === 'terminal') {
-        return true;
-      }
-      if (entries.some((entry) => desktopEntryMatchesApp(entry, name))) {
-        return true;
-      }
-      const appId = Object.entries(LINUX_CLI_BY_APP_ID).find(([, cli]) => {
-        return normalizeComparable(name).includes(normalizeComparable(cli)) || normalizeCompactComparable(name).includes(cli);
-      })?.[0];
-      // Prefer direct name→id mapping from known Open In apps.
-      const knownIdByName = new Map([
-        ['visual studio code', 'vscode'],
-        ['cursor', 'cursor'],
-        ['vscodium', 'vscodium'],
-        ['windsurf', 'windsurf'],
-        ['zed', 'zed'],
-        ['sublime text', 'sublime-text'],
-      ]);
-      const mappedId = knownIdByName.get(normalized) || appId;
+      if (isLinuxFileManagerName(name)) return true;
+      if (normalized === 'terminal') return true;
+      if (entries.some((entry) => desktopEntryMatchesApp(entry, name))) return true;
+      const mappedId = knownLinuxAppIdForName(name);
       const cli = mappedId ? LINUX_CLI_BY_APP_ID[mappedId] : '';
       return Boolean(cli && commandExists(cli, env));
     })
-    .map((name) => ({ name, iconDataUrl: null }));
+    .map((name) => {
+      let iconDataUrl = null;
+      if (isLinuxFileManagerName(name)) {
+        iconDataUrl = resolveIconDataUrlForName([
+          fileManagerEntry?.icon,
+          ...FILE_MANAGER_ICON_FALLBACKS,
+        ], { ...options, env });
+      } else if (normalizeComparable(name) === 'terminal') {
+        const terminalEntry = findEntry(entries, 'terminal', name)
+          || findEntry(entries, 'ghostty', 'Ghostty');
+        iconDataUrl = resolveIconDataUrlForName([
+          terminalEntry?.icon,
+          'utilities-terminal',
+          'org.gnome.Terminal',
+          'terminal',
+        ], { ...options, env });
+      } else {
+        const entry = findEntry(entries, knownLinuxAppIdForName(name) || '', name);
+        iconDataUrl = resolveIconDataUrlForName([entry?.icon], { ...options, env });
+      }
+      return { name, iconDataUrl };
+    });
 };
 
-export const fetchLinuxAppIcons = async () => [];
+export const fetchLinuxAppIcons = async (apps = [], options = {}) => {
+  const infos = await buildLinuxInstalledApps(apps, options);
+  return infos
+    .filter((entry) => typeof entry.iconDataUrl === 'string' && entry.iconDataUrl)
+    .map((entry) => ({ app: entry.name, data_url: entry.iconDataUrl }));
+};

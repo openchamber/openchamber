@@ -5,9 +5,19 @@ interface UseStreamingTextThrottleInput {
     isStreaming: boolean;
     throttleMs?: number;
     identityKey?: string;
+    allowTextReplacement?: boolean;
 }
 
 const DEFAULT_STREAMING_TEXT_THROTTLE_MS = 100;
+
+export const getStreamingThrottleText = (
+    current: string,
+    next: string,
+    isStreaming: boolean,
+    allowTextReplacement: boolean,
+): string => {
+    return isStreaming && !allowTextReplacement && current.length > next.length ? current : next;
+};
 
 const computeStreamingThrottleDelay = (lastEmitAt: number, now: number, throttleMs: number): number => {
     const elapsed = now - lastEmitAt;
@@ -33,6 +43,7 @@ export const useStreamingTextThrottle = ({
     isStreaming,
     throttleMs = DEFAULT_STREAMING_TEXT_THROTTLE_MS,
     identityKey,
+    allowTextReplacement = false,
 }: UseStreamingTextThrottleInput): string => {
     const [throttledText, setThrottledText] = React.useState(text);
     const latestTextRef = React.useRef(text);
@@ -64,7 +75,7 @@ export const useStreamingTextThrottle = ({
         const state = stateRef.current;
         state.pendingText = text;
         const currentThrottled = throttledTextRef.current;
-        const stableText = isStreaming && currentThrottled.length > text.length ? currentThrottled : text;
+        const stableText = getStreamingThrottleText(currentThrottled, text, isStreaming, allowTextReplacement);
 
         if (!isStreaming) {
             clearTimer(state);
@@ -88,17 +99,14 @@ export const useStreamingTextThrottle = ({
             state.timer = null;
             state.lastEmitAt = Date.now();
             setThrottledText((prev) => {
-                if (isStreaming && prev.length > state.pendingText.length) {
-                    return prev;
-                }
-                return state.pendingText;
+                return getStreamingThrottleText(prev, state.pendingText, isStreaming, allowTextReplacement);
             });
         }, remaining);
 
         return () => {
             clearTimer(state);
         };
-    }, [isStreaming, text, throttleMs]);
+    }, [allowTextReplacement, isStreaming, text, throttleMs]);
 
     React.useEffect(() => {
         const state = stateRef.current;

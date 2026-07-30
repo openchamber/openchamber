@@ -5,6 +5,8 @@ import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sidebar/sessionNodeItemUtils';
+import { CollapsedActivityIndicator } from './sidebar/collapsedActivityIndicator';
+import type { CollapsedActivityState } from './sidebar/collapsedActivityState';
 
 interface SessionFolderItemProps<TSessionNode> {
   folder: SessionFolder;
@@ -18,6 +20,7 @@ interface SessionFolderItemProps<TSessionNode> {
   /** Sub-folders that belong directly to this folder */
   subFolderItems?: React.ReactNode;
   isCollapsed: boolean;
+  collapsedActivityState?: CollapsedActivityState;
   onToggle: () => void;
   onRename: (name: string) => void;
   onDelete: () => void;
@@ -67,6 +70,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   sessions,
   subFolderItems,
   isCollapsed,
+  collapsedActivityState = null,
   onToggle,
   onRename,
   onDelete,
@@ -262,6 +266,13 @@ const SessionFolderItemBase = <TSessionNode,>({
               <span className="typography-micro text-muted-foreground/70 flex-shrink-0">
                 • {sessions.length}
               </span>
+              {collapsedActivityState ? (
+                <CollapsedActivityIndicator
+                  state={collapsedActivityState}
+                  activeLabel={t('sessions.sidebar.session.status.active')}
+                  unreadLabel={t('sessions.sidebar.session.status.unread')}
+                />
+              ) : null}
               {isCollapsed ? (
                 <Icon name="arrow-right-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
               ) : (

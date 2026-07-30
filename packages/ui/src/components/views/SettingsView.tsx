@@ -1013,13 +1013,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         // No sidebar available; fall back to direct content.
         const fallback = renderPageContent(settingsSlug);
         return (
-          <div className="flex-1 min-h-0 overflow-hidden bg-background">
+          <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
             <ErrorBoundary>{fallback}</ErrorBoundary>
           </div>
         );
       }
       return (
-        <div className="flex-1 min-h-0 overflow-hidden bg-background">
+        <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
           <ErrorBoundary>
             {renderPageSidebar(settingsSlug, { onItemSelect: handleMobilePageSidebarItemSelect })}
           </ErrorBoundary>
@@ -1031,7 +1031,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     const content = renderPageContent(settingsSlug);
 
     return (
-      <div className="flex-1 min-h-0 overflow-hidden bg-background">
+      <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
         <ErrorBoundary>{content}</ErrorBoundary>
       </div>
     );
@@ -1048,7 +1048,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <div className={cn('border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ width: SETTINGS_SPLIT_SIDEBAR_WIDTH, minWidth: SETTINGS_SPLIT_SIDEBAR_WIDTH, borderColor: 'var(--interactive-border)' }}>
             <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
           </div>
-          <div className="flex-1 min-h-0 overflow-hidden bg-background">
+          <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
             <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
           </div>
         </div>
@@ -1056,7 +1056,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
 
     return (
-      <div className="h-full min-h-0 overflow-hidden bg-background">
+      <div className="h-full min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
         <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
       </div>
     );

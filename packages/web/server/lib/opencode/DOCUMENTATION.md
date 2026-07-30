@@ -26,6 +26,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/static-routes-runtime.js`: static asset/SPA fallback route registration and manifest route wiring.
 - `packages/web/server/lib/opencode/feature-routes-runtime.js`: feature route composition runtime for dynamic import-backed config/skill/provider route registration.
 - `packages/web/server/lib/opencode/opencode-resolution-runtime.js`: OpenCode binary resolution snapshot runtime for settings routes and diagnostics.
+- `packages/web/server/lib/opencode/upgrade-capability.js`: authoritative upgrade ownership policy for the active OpenCode runtime. Bundled, external, and unresolved runtimes fail closed; only managed non-bundled runtimes delegate upgrades to OpenCode.
 - `packages/web/server/lib/opencode/tunnel-wiring-runtime.js`: tunnel service/routes composition runtime and active-port wiring for main server startup.
 - `packages/web/server/lib/opencode/startup-pipeline-runtime.js`: server startup tail orchestration runtime for terminal/proxy/static/start-listen flow.
 - `packages/web/server/lib/agent-tool/runtime.js`: managed OpenCode custom-tool materialization, environment injection, loopback authentication, and fixed CLI action dispatch.
@@ -76,8 +77,8 @@ This module provides OpenCode server integration utilities for the web server ru
   - `GET /api/config/settings`
   - `PUT /api/config/settings`
   - `GET /api/config/opencode-resolution`
-  - `POST /api/opencode/upgrade` (proxies OpenCode upgrade, then restarts managed OpenCode so the new binary is active)
-  - `GET /api/opencode/upgrade-status`
+  - `POST /api/opencode/upgrade` (enforces the active runtime's upgrade capability, serializes supported OpenCode upgrades, then restarts managed OpenCode so the new binary is active)
+  - `GET /api/opencode/upgrade-status` (returns version availability plus the authoritative `upgrade.supported`, `upgrade.manager`, and `upgrade.reason` capability)
   - `POST /api/opencode/directory`
   - `GET /api/provider/:providerId/source`
   - `DELETE /api/provider/:providerId/auth`
@@ -119,6 +120,8 @@ Managed OpenCode launch also merges the environment returned by the agent-tool
 runtime. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
 be replaced by injected values. External OpenCode processes receive no
 OpenChamber tool injection.
+
+Transport-triggered health checks share the periodic monitor's failure accounting interval. Rapid WS reconnect callbacks therefore cannot exhaust the managed-process restart threshold using one cached unhealthy result; an exited managed process still restarts immediately.
 
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
@@ -350,6 +353,7 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.
 - Owns:
   - SSE forwarders: `GET /api/global/event`, `GET /api/event`
+    - Downstream heartbeats keep clients and intermediaries alive, while a separate upstream-only stall watchdog closes the downstream response when OpenCode stops producing bytes so clients reconnect instead of trusting synthetic heartbeats indefinitely. Each watchdog reset uses the current load-aware timeout, matching the shared event transport.
   - Session message forwarder: `POST /api/session/:sessionId/message`
   - Generic `/api/*` forwarding with hop-by-hop header filtering
   - Windows `/session` merge fallback path behavior

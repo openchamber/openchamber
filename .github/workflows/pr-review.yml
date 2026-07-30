@@ -205,7 +205,36 @@ jobs:
 
       - name: Install opencode
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true'
-        run: curl -fsSL https://opencode.ai/install | bash
+        run: |
+          set -o pipefail
+          install_log="$(mktemp)"
+
+          for attempt in 1 2 3; do
+            echo "Installing OpenCode (attempt $attempt/3)"
+            set +e
+            curl -fsSL --connect-timeout 15 https://opencode.ai/install | bash 2>&1 | tee "$install_log"
+            statuses=("${PIPESTATUS[@]}")
+            curl_status="${statuses[0]}"
+            install_status="${statuses[1]}"
+            set -e
+
+            if [ "$curl_status" -eq 0 ] && [ "$install_status" -eq 0 ]; then
+              rm -f "$install_log"
+              exit 0
+            fi
+
+            if [ "$curl_status" -eq 0 ] && ! grep -Eqi 'failed to fetch version information|connection|network|timed out|temporary failure' "$install_log"; then
+              rm -f "$install_log"
+              exit "$((curl_status || install_status))"
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              sleep "$((attempt * 5))"
+            fi
+          done
+
+          rm -f "$install_log"
+          exit "$((curl_status || install_status))"
 
       - name: Record review start
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true'
@@ -216,7 +245,8 @@ jobs:
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true'
         id: review-run
         env:
-          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+          REVIEW_TIMEOUT: 30m
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_URL: ${{ steps.pr.outputs.url }}
@@ -228,7 +258,15 @@ jobs:
           PR_HEAD_REPO_OWNER: ${{ steps.pr.outputs.head_repo_owner }}
           COMMAND_FOCUS: ${{ steps.command.outputs.focus }}
         run: |
-          opencode run --agent pr-review "A pull request in the OpenChamber repository needs one unified correctness, repository-guidance, contribution-quality, and evidence review.
+          review_started_epoch="$(date +%s)"
+          review_model="$(awk -F': ' '$1 == "model" { print $2; exit }' .opencode/agent/pr-review.md)"
+          echo "OpenCode version: $(opencode --version)"
+          echo "Review agent: pr-review"
+          echo "Review model: ${review_model:-unknown}"
+          echo "Review timeout: $REVIEW_TIMEOUT"
+
+          set +e
+          timeout --signal=TERM --kill-after=30s "$REVIEW_TIMEOUT" opencode run --agent pr-review "A pull request in the OpenChamber repository needs one unified correctness, repository-guidance, contribution-quality, and evidence review.
 
           This may be a repeated review request. Before writing a new review, inspect prior PR comments, bot comments, reviews, inline comments, and the commit timeline via GitHub. Compare prior findings against commits pushed after those comments, then only repeat findings that still exist in the current diff/current file state.
 
@@ -246,16 +284,33 @@ jobs:
           Base: $PR_BASE_REF
           Head: $PR_HEAD_REPO_OWNER:$PR_HEAD_REF
           Required reviewed HEAD: $REVIEW_HEAD_SHA"
+          review_status="$?"
+          set -e
+
+          review_duration="$(( $(date +%s) - review_started_epoch ))"
+          echo "Review duration: ${review_duration}s"
+          echo "duration_seconds=$review_duration" >> "$GITHUB_OUTPUT"
+
+          if [ "$review_status" -eq 124 ]; then
+            echo "timed_out=true" >> "$GITHUB_OUTPUT"
+            echo "::error::OpenCode review exceeded the $REVIEW_TIMEOUT timeout."
+          else
+            echo "timed_out=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          exit "$review_status"
 
       - name: Verify and enforce review verdict
         id: verdict
         if: always() && steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           REVIEW_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           REVIEW_STARTED_AT: ${{ steps.review-start.outputs.started_at }}
           REVIEW_RUN_OUTCOME: ${{ steps.review-run.outcome }}
+          REVIEW_TIMED_OUT: ${{ steps.review-run.outputs.timed_out }}
+          REVIEW_DURATION_SECONDS: ${{ steps.review-run.outputs.duration_seconds }}
           REACTION_ENDPOINT: ${{ steps.manual-reaction.outputs.endpoint }}
           EYES_REACTION_ID: ${{ steps.manual-reaction.outputs.reaction_id }}
         run: |
@@ -282,6 +337,9 @@ jobs:
           }
 
           if [ "$REVIEW_RUN_OUTCOME" != "success" ]; then
+            if [ "$REVIEW_TIMED_OUT" = "true" ]; then
+              fail_automation "OpenCode review timed out after ${REVIEW_DURATION_SECONDS}s."
+            fi
             fail_automation "OpenCode review did not complete successfully."
           fi
 

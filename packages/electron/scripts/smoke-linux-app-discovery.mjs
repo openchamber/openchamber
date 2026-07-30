@@ -6,10 +6,13 @@ import {
   buildCommandFromDesktopExec,
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
+  fetchLinuxAppIcons,
   filterLinuxInstalledApps,
+  findLinuxFileManagerEntry,
   linuxApplicationDirs,
   parseDesktopEntry,
   readLinuxDesktopEntries,
+  resolveLinuxIconFile,
 } from '../linux-app-discovery.mjs';
 
 const assert = (condition, message) => {
@@ -22,8 +25,17 @@ try {
   const dataDir = path.join(tempRoot, 'system-data');
   const userApps = path.join(dataHome, 'applications');
   const systemApps = path.join(dataDir, 'applications');
+  const iconsRoot = path.join(dataDir, 'icons');
+  const thunarIcon = path.join(iconsRoot, 'hicolor', '48x48', 'apps', 'org.xfce.thunar.png');
+  const codeIcon = path.join(iconsRoot, 'hicolor', '32x32', 'apps', 'code.png');
   await fs.mkdir(userApps, { recursive: true });
   await fs.mkdir(systemApps, { recursive: true });
+  await fs.mkdir(path.dirname(thunarIcon), { recursive: true });
+  await fs.mkdir(path.dirname(codeIcon), { recursive: true });
+  // Minimal valid 1x1 PNG.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await fs.writeFile(thunarIcon, png);
+  await fs.writeFile(codeIcon, png);
 
   const codeDesktopPath = path.join(userApps, 'code.desktop');
   await fs.writeFile(codeDesktopPath, [
@@ -41,6 +53,15 @@ try {
   await fs.writeFile(path.join(userApps, 'missing-exec.desktop'), '[Desktop Entry]\nType=Application\nName=Missing Exec\nIcon=missing\n', 'utf8');
   await fs.writeFile(path.join(systemApps, 'ghostty.desktop'), '[Desktop Entry]\nType=Application\nName=Ghostty\nExec=ghostty --working-directory=%f --open-uri=%u\nIcon=ghostty\n', 'utf8');
   await fs.writeFile(path.join(systemApps, 'plain.desktop'), '[Desktop Entry]\nType=Application\nName=Plain Editor\nExec=plain-editor --flag\nIcon=plain\n', 'utf8');
+  await fs.writeFile(path.join(systemApps, 'thunar.desktop'), [
+    '[Desktop Entry]',
+    'Type=Application',
+    'Name=Thunar File Manager',
+    'Exec=thunar %F',
+    'Icon=org.xfce.thunar',
+    'Categories=System;FileTools;FileManager;',
+    '',
+  ].join('\n'), 'utf8');
 
   const env = { XDG_DATA_HOME: dataHome, XDG_DATA_DIRS: dataDir, PATH: '/no/such/bin' };
   const dirs = linuxApplicationDirs({ env, homeDir: tempRoot });
@@ -48,10 +69,11 @@ try {
   assert(dirs.includes(systemApps), 'XDG_DATA_DIRS applications dir should be included');
 
   const entries = await readLinuxDesktopEntries({ applicationDirs: [userApps, systemApps], env, homeDir: tempRoot });
-  assert(entries.length === 3, `expected 3 visible valid entries, got ${entries.length}`);
+  assert(entries.length === 4, `expected 4 visible valid entries, got ${entries.length}`);
   assert(entries.some((entry) => entry.name === 'Visual Studio Code'), 'valid desktop entry should be parsed');
   assert(entries.some((entry) => entry.name === 'Ghostty'), 'system desktop entry should be parsed');
   assert(entries.some((entry) => entry.name === 'Plain Editor'), 'no-placeholder entry should be parsed');
+  assert(entries.some((entry) => entry.name === 'Thunar File Manager'), 'file manager entry should be parsed');
   assert(!entries.some((entry) => entry.name === 'Hidden App'), 'Hidden=true entry should be skipped');
   assert(!entries.some((entry) => entry.name === 'No Display App'), 'NoDisplay=true entry should be skipped');
   assert(!entries.some((entry) => entry.name === 'Missing Exec'), 'missing Exec entry should be skipped');
@@ -83,9 +105,36 @@ try {
   const installed = await filterLinuxInstalledApps(['Visual Studio Code', 'Hidden App', 'Missing App'], { entries });
   assert(installed.length === 1 && installed[0] === 'Visual Studio Code', 'filter should return only visible installed apps');
 
-  const appInfos = await buildLinuxInstalledApps(['Visual Studio Code', 'Ghostty'], { entries });
-  assert(appInfos.length === 2, 'installed app info should include matching entries');
+  const resolvedCodeIcon = resolveLinuxIconFile('code', { env, homeDir: tempRoot });
+  assert(resolvedCodeIcon === codeIcon, `resolveLinuxIconFile should find themed PNG, got ${resolvedCodeIcon}`);
+
+  const fileManager = findLinuxFileManagerEntry(entries, {
+    env,
+    execFileSyncImpl: () => 'thunar.desktop',
+  });
+  assert(fileManager?.id === 'thunar', `default file manager should resolve via xdg-mime, got ${fileManager?.id}`);
+
+  const appInfos = await buildLinuxInstalledApps(['Finder', 'Visual Studio Code', 'Ghostty'], {
+    entries,
+    env,
+    homeDir: tempRoot,
+    execFileSyncImpl: () => 'thunar.desktop',
+  });
+  assert(appInfos.length === 3, 'installed app info should include matching entries');
   assert(appInfos.every((entry) => Object.hasOwn(entry, 'iconDataUrl')), 'installed app info should include iconDataUrl key');
+  const finderInfo = appInfos.find((entry) => entry.name === 'Finder');
+  assert(typeof finderInfo?.iconDataUrl === 'string' && finderInfo.iconDataUrl.startsWith('data:image/png;base64,'), 'Finder/file manager should use system PNG icon data URL');
+  const codeInfo = appInfos.find((entry) => entry.name === 'Visual Studio Code');
+  assert(typeof codeInfo?.iconDataUrl === 'string' && codeInfo.iconDataUrl.startsWith('data:image/png;base64,'), 'desktop app should resolve Icon= theme PNG to data URL');
+
+  const fetchedIcons = await fetchLinuxAppIcons(['Finder', 'Visual Studio Code'], {
+    entries,
+    env,
+    homeDir: tempRoot,
+    execFileSyncImpl: () => 'thunar.desktop',
+  });
+  assert(fetchedIcons.length === 2, 'fetchLinuxAppIcons should return resolved icons');
+  assert(fetchedIcons.every((entry) => entry.data_url?.startsWith('data:image/png;base64,')), 'fetched icons should be PNG data URLs');
 
   const specs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'vscode', appName: 'Visual Studio Code', targetKind: 'project', entries, env });
   assert(specs.length === 1, 'desktop entry should provide an opener when CLI is absent');
@@ -106,7 +155,22 @@ try {
   const defaultSpecs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'finder', appName: 'Finder', targetKind: 'project', entries, env });
   assert(defaultSpecs[0].kind === 'default', 'finder maps to safe default Linux opener spec');
 
-  console.log(JSON.stringify({ ok: true, dirs, entries: entries.map((entry) => entry.name), command, ghosttyCommand, plainCommand, installed, specs, terminalFileSpecs, fallbackTerminalSpecs, defaultSpecs }, null, 2));
+  console.log(JSON.stringify({
+    ok: true,
+    dirs,
+    entries: entries.map((entry) => entry.name),
+    command,
+    ghosttyCommand,
+    plainCommand,
+    installed,
+    finderIcon: Boolean(finderInfo?.iconDataUrl),
+    codeIcon: Boolean(codeInfo?.iconDataUrl),
+    fetchedIcons: fetchedIcons.map((entry) => entry.app),
+    specs,
+    terminalFileSpecs,
+    fallbackTerminalSpecs,
+    defaultSpecs,
+  }, null, 2));
 } finally {
   await fs.rm(tempRoot, { recursive: true, force: true });
 }

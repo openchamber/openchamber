@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+## [1.17.1] - 2026-07-29
+
+- **Chat tools:** Bash tool cards now show output before a command finishes, keep it in a fixed-height pane, and follow new lines until you scroll away. Long-running commands no longer remain at a 300-second duration, and their timers continue until they finish.
+- System prompt optimization: added an optional Behavior setting that reduces OpenCode's built-in system prompt by about 40% for the build and plan agents; it applies after restarting OpenCode and is unsuitable for custom build or plan definitions.
+- OpenCode: chats now recover when OpenCode stops responding during a response, and managed OpenCode no longer restarts repeatedly during a temporary connectivity failure.
+- Desktop: bundled OpenCode no longer offers a separate update; it updates with OpenChamber (thanks to @yulia-ivashko).
+- Chat: fully loaded histories no longer show "Load older" again after a refresh.
+- Chat: messages removed by reverting no longer reappear after you send another message.
+- Chat: slash-command starters now include text already entered in the draft as command arguments.
+- Session goals: goals started from slash commands, including scheduled tasks, now use the command's expanded instructions.
+- Usage: OpenAI business-account Codex usage now shows the configured spend limit (thanks to @jrandiny).
+- Desktop/Linux: AppImage tray menus now include Show, Hide, and Close, and "Open in" shows system application icons (thanks to @makeittech).
+- Settings: subpanels keep a visible vertical scrollbar and no longer show a horizontal scrollbar (thanks to @sergiofspedro).
+- Mobile: image previews load when connected through the private relay.
+
 ## [1.17.0] - 2026-07-28
 
 - **Context panel:** a new surface rail brings Changes, pull requests, files, terminal, notes, plans, previews, and side chats into one resizable panel. The pull-request surface now shows live checks and comments, and can attach failed checks or comments to a chat draft.

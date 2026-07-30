@@ -196,7 +196,8 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 <div
                   className={cn(
                     '-ml-2.5 -mr-2 text-left group/project select-none',
-                    stickyZoneHeaders && 'oc-zone-header-backing sticky top-0 z-20 bg-sidebar',
+                    stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',
+                    stickyZoneHeaders && isStuck && 'oc-zone-header-backing',
                   )}
                   onContextMenu={(event) => {
                     // VS Code hides project actions entirely (hideDirectoryControls).
@@ -422,4 +423,3 @@ const SortableGroupItemBase: React.FC<{
 };
 
 export const SortableGroupItem = React.memo(SortableGroupItemBase);
-

@@ -1,3 +1,14 @@
+## [1.17.1] - 2026-07-29
+
+- **Chat tools:** Bash tool cards now show output before a command finishes, keep it in a fixed-height pane, and follow new lines until you scroll away. Long-running commands no longer remain at a 300-second duration, and their timers continue until they finish.
+- **OpenCode updates:** the extension can now update a managed OpenCode installation and restart it automatically; externally managed servers are left unchanged (thanks to @yulia-ivashko).
+- Chat: a stalled response now reconnects instead of remaining stuck in the extension.
+- Chat: fully loaded histories no longer show "Load older" again after a refresh.
+- Chat: messages removed by reverting no longer reappear after you send another message.
+- Chat: slash-command starters now include text already entered in the draft as command arguments.
+- Settings: subpanels keep a visible vertical scrollbar and no longer show a horizontal scrollbar (thanks to @sergiofspedro).
+- Usage: OpenAI business-account Codex usage now shows the configured spend limit (thanks to @jrandiny).
+
 ## [1.17.0] - 2026-07-28
 
 - **Context panel:** a new surface rail brings Changes, pull requests, files, terminal, notes, plans, previews, and side chats into one resizable panel. The pull-request surface now shows live checks and comments, and can attach failed checks or comments to a chat draft.

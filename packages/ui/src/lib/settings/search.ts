@@ -562,6 +562,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.behavior.page.section.systemPromptOptimization',
     descriptionKey: 'settings.behavior.page.systemPromptOptimization.info',
     keywords: ['system prompt', 'tokens', 'context', 'optimize', 'minimal'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'behavior.system-prompt',

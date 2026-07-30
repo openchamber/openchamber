@@ -941,11 +941,6 @@ export const fetchDesktopInstalledApps = async (
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 
-  // Linux desktop does not resolve installed GUI apps; skip the IPC round-trip.
-  if (getElectronPlatform() === 'linux') {
-    return { apps: [], success: true, hasCache: false, isCacheStale: false };
-  }
-
   const candidate = Array.isArray(apps) ? apps.filter((value) => typeof value === 'string') : [];
   if (candidate.length === 0) {
     return { apps: [], success: true, hasCache: false, isCacheStale: false };

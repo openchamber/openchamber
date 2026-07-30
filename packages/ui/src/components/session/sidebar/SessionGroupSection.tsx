@@ -32,6 +32,12 @@ import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { useI18n } from '@/lib/i18n';
 import { useChildStoreManager } from '@/sync/sync-context';
+import { CollapsedActivityIndicator } from './collapsedActivityIndicator';
+import {
+  getSessionNodesActivityState,
+  mergeCollapsedActivityStates,
+  type CollapsedActivityState,
+} from './collapsedActivityState';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -89,6 +95,9 @@ type Props = {
   editingId: string | null;
   editTitle: string;
   openSidebarMenuKey: string | null;
+  activeActivitySessionIds: Set<string>;
+  unreadActivitySessionIds: Set<string>;
+  notifyOnSubtasks: boolean;
   onToggleCollapsedGroup: (groupKey: string) => void;
   dragHandleProps?: SortableDragHandleProps | null;
   compactBodyPadding?: boolean;
@@ -129,6 +138,26 @@ const groupHasSessionOrderChange = (
   const visit = (node: SessionNode): boolean => {
     const sessionId = node.session.id;
     if (prevSessionOrderIndex.get(sessionId) !== nextSessionOrderIndex.get(sessionId)) return true;
+    return node.children.some(visit);
+  };
+  return group.sessions.some(visit);
+};
+
+const groupHasActivityMembershipChange = (
+  group: SessionGroup,
+  prevSessionIds: Set<string>,
+  nextSessionIds: Set<string>,
+): boolean => {
+  const visit = (node: SessionNode): boolean => {
+    if (prevSessionIds.has(node.session.id) !== nextSessionIds.has(node.session.id)) return true;
+    return node.children.some(visit);
+  };
+  return group.sessions.some(visit);
+};
+
+const groupHasAnyActivityMembership = (group: SessionGroup, sessionIds: Set<string>): boolean => {
+  const visit = (node: SessionNode): boolean => {
+    if (sessionIds.has(node.session.id)) return true;
     return node.children.some(visit);
   };
   return group.sessions.some(visit);
@@ -194,6 +223,21 @@ const areGroupPropsEqual = (prev: Props, next: Props): boolean => {
     const prevMenuSessionId = resolveMenuOpenSessionId(prev.group.sessions, prev.openSidebarMenuKey, 'project', Boolean(prev.group.isArchivedBucket));
     const nextMenuSessionId = resolveMenuOpenSessionId(next.group.sessions, next.openSidebarMenuKey, 'project', Boolean(next.group.isArchivedBucket));
     if (prevMenuSessionId || nextMenuSessionId) return false;
+  }
+
+  if (prev.activeActivitySessionIds !== next.activeActivitySessionIds
+    && groupHasActivityMembershipChange(next.group, prev.activeActivitySessionIds, next.activeActivitySessionIds)) {
+    return false;
+  }
+
+  if (prev.unreadActivitySessionIds !== next.unreadActivitySessionIds
+    && groupHasActivityMembershipChange(next.group, prev.unreadActivitySessionIds, next.unreadActivitySessionIds)) {
+    return false;
+  }
+
+  if (prev.notifyOnSubtasks !== next.notifyOnSubtasks
+    && groupHasAnyActivityMembership(next.group, next.unreadActivitySessionIds)) {
+    return false;
   }
 
   // Other props are typically stable references from the parent. Default
@@ -271,6 +315,9 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     sessionOrderIndex,
     editingId,
     openSidebarMenuKey,
+    activeActivitySessionIds,
+    unreadActivitySessionIds,
+    notifyOnSubtasks,
     onToggleCollapsedGroup,
     dragHandleProps,
     compactBodyPadding = false,
@@ -409,6 +456,40 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   const sessionIdsInFolders = React.useMemo(() => new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds)), [allFoldersForGroup]);
   const ungroupedSessions = React.useMemo(() => sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)), [sourceGroupNodes, sessionIdsInFolders]);
   const rootFolders = React.useMemo(() => allFoldersForGroup.filter(({ folder }) => !folder.parentId), [allFoldersForGroup]);
+  const childFoldersByParentId = React.useMemo(() => {
+    const map = new Map<string, typeof allFoldersForGroup>();
+    allFoldersForGroup.forEach((entry) => {
+      if (!entry.folder.parentId) return;
+      const children = map.get(entry.folder.parentId) ?? [];
+      children.push(entry);
+      map.set(entry.folder.parentId, children);
+    });
+    return map;
+  }, [allFoldersForGroup]);
+  const folderActivityStateById = React.useMemo(() => {
+    const foldersById = new Map(allFoldersForGroup.map((entry) => [entry.folder.id, entry] as const));
+    const result = new Map<string, CollapsedActivityState>();
+    const visit = (folderId: string, seen: Set<string>): CollapsedActivityState => {
+      const cached = result.get(folderId);
+      if (cached !== undefined) return cached;
+      if (seen.has(folderId)) return null;
+      seen.add(folderId);
+
+      const entry = foldersById.get(folderId);
+      let state = entry
+        ? getSessionNodesActivityState(entry.nodes, activeActivitySessionIds, unreadActivitySessionIds, notifyOnSubtasks)
+        : null;
+      for (const child of childFoldersByParentId.get(folderId) ?? []) {
+        state = mergeCollapsedActivityStates(state, visit(child.folder.id, seen));
+        if (state === 'active') break;
+      }
+      result.set(folderId, state);
+      return state;
+    };
+
+    allFoldersForGroup.forEach(({ folder }) => visit(folder.id, new Set()));
+    return result;
+  }, [activeActivitySessionIds, allFoldersForGroup, childFoldersByParentId, notifyOnSubtasks, unreadActivitySessionIds]);
 
   // Precompute the per-row "subtree contains editing session" lookup once per
   // render. The previous design walked the
@@ -666,6 +747,16 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
   const statusLine = group.branch && isBranchDifferentFromLabel(group.branch, group.label)
     ? { label: group.branch, color: null as string | null }
     : null;
+  const groupActivityState = isCollapsed
+    ? getSessionNodesActivityState(sourceGroupNodes, activeActivitySessionIds, unreadActivitySessionIds, notifyOnSubtasks)
+    : null;
+  const groupActivityIndicator = groupActivityState ? (
+    <CollapsedActivityIndicator
+      state={groupActivityState}
+      activeLabel={t('sessions.sidebar.session.status.active')}
+      unreadLabel={t('sessions.sidebar.session.status.unread')}
+    />
+  ) : null;
 
   type FolderEntry = (typeof allFoldersForGroup)[number];
 
@@ -673,6 +764,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
     const { folder, scopeKey, scopeDirectory, nodes } = entry;
     const folderSessionsForDelete = folderSessionsForDeleteById.get(folder.id) ?? [];
 
+    const isFolderCollapsed = hasSessionSearchQuery ? false : collapsedFolderIds.has(folder.id);
     return (
       <DroppableFolderWrapper key={folder.id} folderId={folder.id}>
         {(droppableRef, isDropTarget) => (
@@ -680,7 +772,8 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
             folder={folder}
             displayName={displayName}
             sessions={nodes}
-            isCollapsed={hasSessionSearchQuery ? false : collapsedFolderIds.has(folder.id)}
+            isCollapsed={isFolderCollapsed}
+            collapsedActivityState={isFolderCollapsed ? (folderActivityStateById.get(folder.id) ?? null) : null}
             onToggle={() => toggleFolderCollapse(folder.id)}
             onRename={(name) => {
               renameFolder(scopeKey, folder.id, name);
@@ -981,6 +1074,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
                     </span>
                   </span>
                   <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  {groupActivityIndicator}
                 </span>
               ) : (!group.isMain || group.worktree) ? (
                 // Worktree sub-header in the flat visual language: slim
@@ -1001,6 +1095,7 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
                   <span className="min-w-0 truncate typography-ui-label font-semibold text-muted-foreground">
                     {renderHighlightedText(group.label, normalizedSessionSearchQuery)}
                   </span>
+                  {groupActivityIndicator}
                   {groupPrSummary ? (
                     <span
                       className="ml-auto flex-shrink-0 text-[0.72rem] font-medium leading-none"
@@ -1011,7 +1106,10 @@ function SessionGroupSectionBase(props: Props): React.ReactNode {
                   ) : null}
                 </span>
               ) : (
-                renderHighlightedText(group.label, normalizedSessionSearchQuery)
+                <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+                  <span className="min-w-0 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  {groupActivityIndicator}
+                </span>
               )}
             </p>
             {showBranchSubtitle && statusLine ? (

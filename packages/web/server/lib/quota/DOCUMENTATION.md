@@ -74,3 +74,4 @@ In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 mo
 - Keep provider IDs stable; clients use them directly.
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.
 - Keep Google behavior changes isolated and review `providers/google/*` together.
+- Z.ai Coding Plan exposes separate 5-hour and weekly `TOKENS_LIMIT` entries plus a monthly `TIME_LIMIT` for MCP tools; web and VS Code must preserve all three windows.

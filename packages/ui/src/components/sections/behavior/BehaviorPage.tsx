@@ -4,6 +4,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { reportSettingsSaveState } from '@/lib/persistence';
+import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import {
   Select,
   SelectContent,
@@ -101,6 +102,7 @@ const saveBehaviorSetting = async (settings: Partial<DesktopSettings>, fallbackE
 
 export const BehaviorPage: React.FC = () => {
   const { t } = useI18n();
+  const isVSCode = useIsVSCodeRuntime();
   const [prompt, setPrompt] = React.useState('');
   const [optimizeSystemPrompt, setOptimizeSystemPrompt] = React.useState(false);
   const [responseStyleEnabled, setResponseStyleEnabled] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleEnabled);
@@ -291,32 +293,34 @@ export const BehaviorPage: React.FC = () => {
       description={t('settings.page.behavior.description')}
       showSaveStatus
     >
-      <SettingsSection
-        title={t('settings.behavior.page.section.systemPromptOptimization')}
-        divider={false}
-        settingsItem="behavior.system-prompt-optimization"
-        contentClassName="space-y-3"
-      >
-        <SettingsCheckboxRow
-          checked={optimizeSystemPrompt}
-          onChange={setOptimizeSystemPrompt}
-          disabled={isLoading || isApplyingPromptOptimization}
-          label={t('settings.behavior.page.systemPromptOptimization.enable')}
-          ariaLabel={t('settings.behavior.page.systemPromptOptimization.enableAria')}
-          info={t('settings.behavior.page.systemPromptOptimization.info')}
-        />
-        <Button
-          type="button"
-          size="xs"
-          onClick={() => void handleSavePromptOptimization()}
-          disabled={isLoading || isApplyingPromptOptimization || !isPromptOptimizationDirty}
-          className="!font-normal"
+      {!isVSCode && (
+        <SettingsSection
+          title={t('settings.behavior.page.section.systemPromptOptimization')}
+          divider={false}
+          settingsItem="behavior.system-prompt-optimization"
+          contentClassName="space-y-3"
         >
-          {isApplyingPromptOptimization
-            ? t('settings.common.actions.saving')
-            : t('settings.openchamber.opencodeCli.actions.saveAndReload')}
-        </Button>
-      </SettingsSection>
+          <SettingsCheckboxRow
+            checked={optimizeSystemPrompt}
+            onChange={setOptimizeSystemPrompt}
+            disabled={isLoading || isApplyingPromptOptimization}
+            label={t('settings.behavior.page.systemPromptOptimization.enable')}
+            ariaLabel={t('settings.behavior.page.systemPromptOptimization.enableAria')}
+            info={t('settings.behavior.page.systemPromptOptimization.info')}
+          />
+          <Button
+            type="button"
+            size="xs"
+            onClick={() => void handleSavePromptOptimization()}
+            disabled={isLoading || isApplyingPromptOptimization || !isPromptOptimizationDirty}
+            className="!font-normal"
+          >
+            {isApplyingPromptOptimization
+              ? t('settings.common.actions.saving')
+              : t('settings.openchamber.opencodeCli.actions.saveAndReload')}
+          </Button>
+        </SettingsSection>
+      )}
 
       <SettingsSection
         title={t('settings.behavior.page.section.systemPrompt')}

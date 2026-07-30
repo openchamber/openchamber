@@ -183,6 +183,18 @@ describe('OpenCode env runtime', () => {
     expect(state.resolvedOpencodeBinarySource).toBe('bundled');
   });
 
+  it('recognizes the bundled CLI by canonical path', () => {
+    const bundledDir = createTempDir('openchamber-bundled-opencode-');
+    const bundledBinary = path.join(bundledDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    fs.writeFileSync(bundledBinary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') fs.chmodSync(bundledBinary, 0o755);
+    process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR = bundledDir;
+    const { runtime } = createRuntime({});
+
+    expect(runtime.isBundledOpenCodeCliPath(bundledBinary)).toBe(true);
+    expect(runtime.isBundledOpenCodeCliPath(path.join(bundledDir, 'other'))).toBe(false);
+  });
+
   it('keeps explicit OpenCode binary ahead of bundled CLI', () => {
     const bundledDir = createTempDir('openchamber-bundled-opencode-');
     const bundledBinary = path.join(bundledDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');

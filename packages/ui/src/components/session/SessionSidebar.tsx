@@ -303,6 +303,15 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     (state) => isVisible ? [...state.statusById.keys()].sort() : EMPTY_STRING_ARRAY,
   ));
   const activeSessionIdSet = React.useMemo(() => new Set(activeSessionIds), [activeSessionIds]);
+  const unreadSessionIds = useNotificationStore(useShallow(
+    (state) => isVisible
+      ? Object.entries(state.index.session.unseenCount)
+        .filter(([, count]) => count > 0)
+        .map(([sessionId]) => sessionId)
+        .sort()
+      : EMPTY_STRING_ARRAY,
+  ));
+  const unreadSessionIdSet = React.useMemo(() => new Set(unreadSessionIds), [unreadSessionIds]);
   const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => {
     try {
@@ -1656,6 +1665,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         editingId={editingId}
         editTitle={editTitle}
         openSidebarMenuKey={openSidebarMenuKey}
+        activeActivitySessionIds={activeSessionIdSet}
+        unreadActivitySessionIds={unreadSessionIdSet}
+        notifyOnSubtasks={notifyOnSubtasks}
         onToggleCollapsedGroup={toggleCollapsedGroup}
         scrollContainerRef={scrollContainerRef}
       />
@@ -1692,6 +1704,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       editingId,
       editTitle,
       openSidebarMenuKey,
+      activeSessionIdSet,
+      unreadSessionIdSet,
+      notifyOnSubtasks,
       toggleCollapsedGroup,
     ],
   );
@@ -1705,9 +1720,10 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         openSidebarMenuKey={openSidebarMenuKey}
         expansionState={recentExpandedParents}
         variant="section"
+        isDesktopShellRuntime={isDesktopShellRuntime}
       />
     ) : null,
-    [activitySections, editingId, hasSessionSearchQuery, isVSCode, openSidebarMenuKey, recentExpandedParents, renderSessionNode, showRecentSection],
+    [activitySections, editingId, hasSessionSearchQuery, isDesktopShellRuntime, isVSCode, openSidebarMenuKey, recentExpandedParents, renderSessionNode, showRecentSection],
   );
   const isInlineEditing = Boolean(renamingFolderId || editingId || editingProjectDialogId);
 
