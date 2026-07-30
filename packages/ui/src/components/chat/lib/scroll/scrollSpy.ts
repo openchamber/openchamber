@@ -16,10 +16,16 @@ type ScrollSpyInput = {
 // stable while scrolling inside a long turn (no visibility-ratio flip-flop).
 const READ_LINE_OFFSET_PX = 100;
 
-// When the container is scrolled to (or almost to) the bottom, the last turn
-// is what the user is reading even if it is too short for its top edge to
-// ever cross the reading line — force-activate it in that case.
-const BOTTOM_ANCHOR_EPSILON_PX = 8;
+// The chat treats its bottom spacer as part of the pinned zone. Match that
+// boundary here so the rail reaches the final prompt even when its top never
+// crosses the reading line before the viewport enters that spacer.
+const BOTTOM_ANCHOR_MIN_PX = 48;
+const BOTTOM_ANCHOR_VIEWPORT_FACTOR = 0.1;
+
+const isInBottomAnchorZone = (container: HTMLDivElement): boolean => {
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return distanceFromBottom <= Math.max(BOTTOM_ANCHOR_MIN_PX, container.clientHeight * BOTTOM_ANCHOR_VIEWPORT_FACTOR);
+};
 
 const pickOffsetTurnId = (list: OffsetTurn[], cutoff: number): string | undefined => {
     if (list.length === 0) {
@@ -103,8 +109,7 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
             refreshOffsets();
         }
 
-        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-        const next = distanceFromBottom <= BOTTOM_ANCHOR_EPSILON_PX
+        const next = isInBottomAnchorZone(container)
             ? offsets[offsets.length - 1]?.id
             : pickOffsetTurnId(offsets, container.scrollTop + READ_LINE_OFFSET_PX);
         if (!next || next === active) {

@@ -674,14 +674,18 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
               <span className="truncate">{t('multirun.launcher.project.gitRequired')}</span>
             </div>
           ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onCancel}
-          >
-            {t('multirun.launcher.actions.cancel')}
-          </Button>
+          {/* On the full-page surface (isWindowed) there is nothing to
+              "cancel" — you leave via the sidebar like any other page. */}
+          {!isWindowed && onCancel ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onCancel}
+            >
+              {t('multirun.launcher.actions.cancel')}
+            </Button>
+          ) : null}
           <Button type="submit" size="sm" disabled={!isValid || isSubmitting}>
             {isSubmitting ? (
               t('multirun.launcher.actions.creating')

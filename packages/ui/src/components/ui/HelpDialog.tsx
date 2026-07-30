@@ -152,12 +152,6 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
-          id: 'cycle_right_sidebar_tab',
-          descriptionKey: 'helpDialog.item.cycleRightSidebarTab',
-          icon: "layout-right",
-          keys: '',
-        },
-        {
           id: 'toggle_terminal',
           descriptionKey: 'helpDialog.item.toggleTerminalDock',
           icon: "window",

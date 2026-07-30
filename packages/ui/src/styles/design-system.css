@@ -150,6 +150,14 @@
     background-color: transparent !important;
   }
 
+  /* Stuck sidebar zone headers must fully mask the rows scrolling under
+     them. Electron's transparent/vibrancy windows break backdrop-filter
+     (electron#20357), so use the opaque sidebar tone instead. */
+  :root.desktop-runtime[data-oc-vibrancy] .oc-zone-header-backing {
+    background: var(--sidebar-stuck-bg) !important;
+    background-color: var(--sidebar-stuck-bg) !important;
+  }
+
   .font-sans {
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif) !important;
   }

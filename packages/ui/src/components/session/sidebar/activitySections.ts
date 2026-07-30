@@ -24,7 +24,8 @@ const getSessionUpdatedAt = (session: Session): number => {
 
 // Recent contains non-archived root sessions that are active now or were
 // updated within the retention window. The caller applies shared lifecycle
-// ordering after this membership filter.
+// ordering after this membership filter; batching ("Show more") handles long
+// windows in the UI.
 export const deriveRecentSessions = (
   sessions: Session[],
   activeSessionIds: ReadonlySet<string>,

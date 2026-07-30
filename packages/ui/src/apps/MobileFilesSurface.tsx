@@ -30,9 +30,7 @@ import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { getImageMimeType, getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
 import type { FileListEntry, FileSearchResult } from '@/lib/api/types';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
 
 type MobileFilesRoute =
@@ -77,13 +75,6 @@ const formatFileSize = (size?: number): string => {
   return '';
 };
 
-const getImageSrc = (path: string): string => {
-  if (path.toLowerCase().endsWith('.svg')) {
-    return '';
-  }
-  return getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path });
-};
-
 const isMarkdownFile = (path: string): boolean => /\.(md|mdx|markdown)$/i.test(path);
 const isJsonFile = (path: string): boolean => /\.(json|jsonc)$/i.test(path);
 
@@ -104,6 +95,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
   const [searchResults, setSearchResults] = React.useState<FileSearchResult[]>([]);
   const [isSearching, setIsSearching] = React.useState(false);
   const [fileContent, setFileContent] = React.useState('');
+  const [imageSrc, setImageSrc] = React.useState('');
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = React.useState(false);
   const directoryLoadRequestIdRef = React.useRef(0);
@@ -180,11 +172,35 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
   React.useEffect(() => {
     if (route.type !== 'file') return;
     setFileContent('');
+    setImageSrc('');
     setFileError(null);
 
     if (isImageFile(route.path) && !route.path.toLowerCase().endsWith('.svg')) {
-      setIsLoadingFile(false);
-      return;
+      let cancelled = false;
+      let objectUrl = '';
+      setIsLoadingFile(true);
+      void runtimeFetch('/api/fs/raw', { query: { path: route.path, directory: root || undefined } })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(t('filesView.error.readFileFailed'));
+          objectUrl = URL.createObjectURL(await response.blob());
+          if (cancelled) {
+            URL.revokeObjectURL(objectUrl);
+            objectUrl = '';
+            return;
+          }
+          setImageSrc(objectUrl);
+        })
+        .catch((error) => {
+          if (!cancelled) setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoadingFile(false);
+        });
+
+      return () => {
+        cancelled = true;
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      };
     }
 
     if (!files.readFile) {
@@ -212,7 +228,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
     return () => {
       cancelled = true;
     };
-  }, [files, route, t]);
+  }, [files, root, route, t]);
 
   const openDirectory = (directory: string) => {
     setQuery('');
@@ -244,6 +260,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
       <MobileFileDetail
         path={route.path}
         content={fileContent}
+        imageSrc={imageSrc}
         error={fileError}
         isLoading={isLoadingFile}
         onBack={() => setRoute({ type: 'browser', directory: route.returnDirectory })}
@@ -393,37 +410,14 @@ const MobileSearchResults: React.FC<{
 const MobileFileDetail: React.FC<{
   path: string;
   content: string;
+  imageSrc: string;
   error: string | null;
   isLoading: boolean;
   onBack: () => void;
   onCopyPath: () => void;
   onCopyContent: () => void;
-}> = ({ path, content, error, isLoading, onBack, onCopyPath, onCopyContent }) => {
+}> = ({ path, content, imageSrc, error, isLoading, onBack, onCopyPath, onCopyContent }) => {
   const { t } = useI18n();
-  const imageAuthKey = isImageFile(path) && !path.toLowerCase().endsWith('.svg') ? path : '';
-  const [imageAuthReadyKey, setImageAuthReadyKey] = React.useState('');
-
-  React.useEffect(() => {
-    if (!imageAuthKey) {
-      setImageAuthReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setImageAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setImageAuthReadyKey(imageAuthKey);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [imageAuthKey]);
-
-  const imageAuthLoading = Boolean(imageAuthKey && imageAuthReadyKey !== imageAuthKey);
-  const imageSrc = imageAuthLoading ? '' : getImageSrc(path);
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
@@ -449,7 +443,7 @@ const MobileFileDetail: React.FC<{
         </Button>
       </header>
       <div className="min-h-0 flex-1 overflow-hidden">
-        {isLoading || imageAuthLoading ? (
+        {isLoading ? (
           <MobileFilesState loading message={t('filesView.state.loading')} />
         ) : error ? (
           <MobileFilesState message={error} />

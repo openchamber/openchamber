@@ -160,6 +160,12 @@ sees only that final turn, so the report is its evidence.
   colors/labels shared across surfaces.
 - `stores/useSessionGoalArmStore.ts` — the "next prompt starts a goal" flag,
   consumed by `sendMessage` in `sync/session-ui-store.ts` (works for drafts).
+  Armed slash commands resolve their authoritative command template and apply
+  OpenCode argument expansion (`$ARGUMENTS`, positional placeholders, or the
+  implicit argument suffix) for the audit objective before goal metadata is
+  written and before `session.command` dispatch. If command details cannot be
+  loaded, the raw invocation remains the objective rather than blocking command
+  execution.
 - `hooks/useSessionGoal.ts` — live goal state.
 - `components/chat/SessionGoalButton.tsx` — composer target button
   (arm / status color / cancel confirm); `SessionGoalRow.tsx` — goal strip
@@ -172,7 +178,8 @@ sees only that final turn, so the report is its evidence.
 Scheduled tasks can run as goals: `execution.goalEnabled` (+ optional
 `execution.goalTokenBudget`) on a task makes the scheduled-tasks runtime
 stamp `metadata.openchamber.goal` onto the fresh session (objective = the
-expanded task prompt) and attach the goal-mode intro part to the prompt.
+expanded task prompt, or the argument-expanded command template for a slash
+command) and attach the goal-mode intro part to normal prompts.
 The loop here picks it up from session events like any other goal.
 
 ## CLI-created goals
@@ -183,8 +190,10 @@ session, fits and stores the expanded prompt as its objective, patches active
 goal metadata, appends the synthetic goal reminder, and only then dispatches
 the prompt. `--goal-token-budget` applies the same optional budget contract as
 scheduled goals. Slash commands retain command dispatch semantics and cannot
-carry the synthetic prompt part; the goal metadata is still installed before
-the command runs.
+carry the synthetic prompt part. Their command template with OpenCode argument
+expansion becomes the audit objective; goal metadata
+is still installed before the command runs. A missing command template falls
+back to the raw invocation.
 
 `openchamber session send --goal` and `openchamber session fork --goal` use
 the same server-owned prompt orchestration. Send installs a fresh goal on the

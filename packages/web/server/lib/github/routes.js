@@ -7,6 +7,100 @@ const PR_STATUS_CACHE_MAX_ENTRIES = 200;
 // status on error, and a later poll fills it in.
 const PR_STATUS_RESOLVE_TIMEOUT_MS = 12_000;
 const prStatusCache = new Map();
+let resolvedAuthLoginPromise = null;
+const PR_CONTEXT_CACHE_TTL_MS = 30_000;
+const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
+const prContextCache = new Map();
+
+function invalidatePrContextCache(directory, number) {
+  for (const key of prContextCache.keys()) {
+    try {
+      const [cachedDirectory, cachedNumber] = JSON.parse(key);
+      if (cachedDirectory === directory && (number == null || cachedNumber === number)) {
+        prContextCache.delete(key);
+      }
+    } catch {
+      prContextCache.delete(key);
+    }
+  }
+}
+
+// Aggregate check runs into the summary shape shared by pr/status and
+// pulls/context. Keeps `pending` as queued+in_progress+unconcluded for
+// existing consumers while exposing the split and the earliest start time so
+// the UI can show live "running for N minutes" state.
+// A re-run leaves the previous completed check run in the listForRef payload
+// alongside the new in-progress one. GitHub's UI shows only the latest run
+// per (app, name); mirror that so counts match what users see on github.com.
+function dedupeCheckRuns(checkRuns) {
+  const byName = new Map();
+  for (const run of checkRuns) {
+    const key = `${run?.app?.id ?? run?.app?.slug ?? ''}::${run?.name ?? ''}`;
+    const previous = byName.get(key);
+    if (!previous) {
+      byName.set(key, run);
+      continue;
+    }
+    const previousStartedAt = Date.parse(previous?.started_at || '') || 0;
+    const startedAt = Date.parse(run?.started_at || '') || 0;
+    if (startedAt > previousStartedAt
+      || (startedAt === previousStartedAt && (run?.id ?? 0) > (previous?.id ?? 0))) {
+      byName.set(key, run);
+    }
+  }
+  return Array.from(byName.values());
+}
+
+function summarizeCheckRuns(checkRuns) {
+  const counts = { success: 0, failure: 0, pending: 0, inProgress: 0, queued: 0 };
+  let startedAt = null;
+  for (const run of checkRuns) {
+    const status = run?.status;
+    const conclusion = run?.conclusion;
+    if (status === 'in_progress') {
+      counts.pending += 1;
+      counts.inProgress += 1;
+      const runStartedAt = typeof run?.started_at === 'string' ? run.started_at : null;
+      if (runStartedAt && (!startedAt || runStartedAt < startedAt)) {
+        startedAt = runStartedAt;
+      }
+      continue;
+    }
+    if (status === 'queued') {
+      counts.pending += 1;
+      counts.queued += 1;
+      continue;
+    }
+    if (!conclusion) {
+      counts.pending += 1;
+      continue;
+    }
+    if (conclusion === 'success' || conclusion === 'neutral' || conclusion === 'skipped') {
+      counts.success += 1;
+    } else {
+      counts.failure += 1;
+    }
+  }
+  const total = counts.success + counts.failure + counts.pending;
+  const state = counts.failure > 0
+    ? 'failure'
+    : (counts.pending > 0 ? 'pending' : (total > 0 ? 'success' : 'unknown'));
+  return { state, total, ...counts, ...(startedAt ? { startedAt } : {}) };
+}
+
+function summarizeCombinedStatuses(statuses) {
+  const counts = { success: 0, failure: 0, pending: 0 };
+  statuses.forEach((s) => {
+    if (s.state === 'success') counts.success += 1;
+    else if (s.state === 'failure' || s.state === 'error') counts.failure += 1;
+    else if (s.state === 'pending') counts.pending += 1;
+  });
+  const total = counts.success + counts.failure + counts.pending;
+  const state = counts.failure > 0
+    ? 'failure'
+    : (counts.pending > 0 ? 'pending' : (total > 0 ? 'success' : 'unknown'));
+  return { state, total, ...counts, inProgress: counts.pending, queued: 0 };
+}
 
 function withTimeout(promise, timeoutMs, label) {
   let timer;
@@ -435,7 +529,13 @@ export function registerGitHubRoutes(app) {
       const originalJson = res.json.bind(res);
       res.json = (data) => {
         if (data && data.connected === true) {
-          setPrStatusCache(cacheKey, data, Date.now());
+          // Freshness stamp travels with the payload (and survives cache
+          // serves) so clients can refuse to overwrite newer data with a
+          // stale cached response.
+          if (typeof data.fetchedAt !== 'number') {
+            data.fetchedAt = Date.now();
+          }
+          setPrStatusCache(cacheKey, data, data.fetchedAt);
         }
         return originalJson(data);
       };
@@ -453,6 +553,7 @@ export function registerGitHubRoutes(app) {
           directory,
           branch,
           remoteName: remote,
+          force,
         }),
         PR_STATUS_RESOLVE_TIMEOUT_MS,
         'resolveGitHubPrStatus',
@@ -484,31 +585,9 @@ export function registerGitHubRoutes(app) {
             ref: sha,
             per_page: 100,
           });
-          const checkRuns = Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : [];
+          const checkRuns = dedupeCheckRuns(Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : []);
           if (checkRuns.length > 0) {
-            const counts = { success: 0, failure: 0, pending: 0 };
-            for (const run of checkRuns) {
-              const status = run?.status;
-              const conclusion = run?.conclusion;
-              if (status === 'queued' || status === 'in_progress') {
-                counts.pending += 1;
-                continue;
-              }
-              if (!conclusion) {
-                counts.pending += 1;
-                continue;
-              }
-              if (conclusion === 'success' || conclusion === 'neutral' || conclusion === 'skipped') {
-                counts.success += 1;
-              } else {
-                counts.failure += 1;
-              }
-            }
-            const total = counts.success + counts.failure + counts.pending;
-            const state = counts.failure > 0
-              ? 'failure'
-              : (counts.pending > 0 ? 'pending' : (total > 0 ? 'success' : 'unknown'));
-            checks = { state, total, ...counts };
+            checks = summarizeCheckRuns(checkRuns);
           }
         } catch {
           // ignore and fall back
@@ -522,17 +601,7 @@ export function registerGitHubRoutes(app) {
               ref: sha,
             });
             const statuses = Array.isArray(combined?.data?.statuses) ? combined.data.statuses : [];
-            const counts = { success: 0, failure: 0, pending: 0 };
-            statuses.forEach((s) => {
-              if (s.state === 'success') counts.success += 1;
-              else if (s.state === 'failure' || s.state === 'error') counts.failure += 1;
-              else if (s.state === 'pending') counts.pending += 1;
-            });
-            const total = counts.success + counts.failure + counts.pending;
-            const state = counts.failure > 0
-              ? 'failure'
-              : (counts.pending > 0 ? 'pending' : (total > 0 ? 'success' : 'unknown'));
-            checks = { state, total, ...counts };
+            checks = summarizeCombinedStatuses(statuses);
           } catch {
             checks = null;
           }
@@ -543,7 +612,20 @@ export function registerGitHubRoutes(app) {
       let canMerge = false;
       try {
         const auth = getGitHubAuth();
-        const username = auth?.user?.login;
+        // gh-CLI tokens have no persisted user record; resolve the login from
+        // the API once (memoized) so permissions still resolve for them.
+        let username = auth?.user?.login;
+        if (!username) {
+          if (!resolvedAuthLoginPromise) {
+            resolvedAuthLoginPromise = octokit.rest.users.getAuthenticated()
+              .then((resp) => resp?.data?.login || null)
+              .catch(() => {
+                resolvedAuthLoginPromise = null;
+                return null;
+              });
+          }
+          username = await resolvedAuthLoginPromise;
+        }
         if (username) {
           const perm = await octokit.rest.repos.getCollaboratorPermissionLevel({
             owner: searchRepo.owner,
@@ -790,6 +872,10 @@ export function registerGitHubRoutes(app) {
       const headBranch = head.includes(':') ? head.split(':')[1] || head : head;
       const createCacheKey = `${directory}::${headBranch}::${remote}`;
       prStatusCache.delete(createCacheKey);
+      if (repo?.owner && repo?.repo) {
+        const { invalidateRepoPullsCache } = await import('./pr-status.js');
+        invalidateRepoPullsCache(repo.owner, repo.repo);
+      }
 
       return res.json({
         number: pr.number,
@@ -881,6 +967,7 @@ export function registerGitHubRoutes(app) {
         return res.status(500).json({ error: 'Failed to update PR' });
       }
 
+      invalidatePrContextCache(directory, number);
       return res.json({
         number: pr.number,
         title: pr.title,
@@ -928,6 +1015,9 @@ export function registerGitHubRoutes(app) {
           pull_number: number,
           merge_method: method,
         });
+        invalidatePrContextCache(directory, number);
+        const { invalidateRepoPullsCache } = await import('./pr-status.js');
+        invalidateRepoPullsCache(repo.owner, repo.repo);
         return res.json({ merged: Boolean(result?.data?.merged), message: result?.data?.message });
       } catch (error) {
         if (error?.status === 403) {
@@ -986,6 +1076,11 @@ export function registerGitHubRoutes(app) {
         throw error;
       }
 
+      invalidatePrContextCache(directory, number);
+      {
+        const { invalidateRepoPullsCache } = await import('./pr-status.js');
+        invalidateRepoPullsCache(repo.owner, repo.repo);
+      }
       return res.json({ ready: true });
     } catch (error) {
       console.error('Failed to mark PR ready:', error);
@@ -1468,6 +1563,41 @@ export function registerGitHubRoutes(app) {
       }
 
       const requestedRepo = getRequestedRepo(req);
+
+      // Short response cache: the checks view, comments view, and the
+      // send-to-chat actions request the same context within seconds of each
+      // other. Detail-inclusive responses satisfy detail-free requests.
+      const contextCacheKey = JSON.stringify([
+        directory,
+        number,
+        includeDiff,
+        requestedRepo ? `${requestedRepo.owner}/${requestedRepo.repo}` : null,
+      ]);
+      const cachedContext = prContextCache.get(contextCacheKey);
+      if (cachedContext
+        && Date.now() - cachedContext.fetchedAt < PR_CONTEXT_CACHE_TTL_MS
+        && (cachedContext.includeCheckDetails || !includeCheckDetails)) {
+        return res.json(cachedContext.data);
+      }
+
+      const originalJson = res.json.bind(res);
+      res.json = (data) => {
+        if (data && data.pr) {
+          if (typeof data.fetchedAt !== 'number') {
+            data.fetchedAt = Date.now();
+          }
+          prContextCache.delete(contextCacheKey);
+          prContextCache.set(contextCacheKey, { data, includeCheckDetails, fetchedAt: data.fetchedAt });
+          if (prContextCache.size > PR_CONTEXT_CACHE_MAX_ENTRIES) {
+            const oldest = prContextCache.keys().next().value;
+            if (oldest !== undefined) {
+              prContextCache.delete(oldest);
+            }
+          }
+        }
+        return originalJson(data);
+      };
+
       const repo = await resolveRepoForRequest(octokit, directory, requestedRepo);
       if (!repo) {
         return res.json({ connected: true, repo: null, pr: null });
@@ -1564,7 +1694,7 @@ export function registerGitHubRoutes(app) {
       if (sha) {
         try {
           const runs = await octokit.rest.checks.listForRef({ owner: repo.owner, repo: repo.repo, ref: sha, per_page: 100 });
-          const checkRuns = Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : [];
+          const checkRuns = dedupeCheckRuns(Array.isArray(runs?.data?.check_runs) ? runs.data.check_runs : []);
           if (checkRuns.length > 0) {
             const parsedJobs = new Map();
             const parsedAnnotations = new Map();
@@ -1665,6 +1795,7 @@ export function registerGitHubRoutes(app) {
                       jobId: picked.id,
                       url: picked.html_url,
                       name: picked.name,
+                      workflowName: picked.workflow_name || undefined,
                       conclusion: picked.conclusion,
                           steps: Array.isArray(picked.steps)
                             ? picked.steps.map((s) => ({
@@ -1686,6 +1817,8 @@ export function registerGitHubRoutes(app) {
               return {
                 id: run.id,
                 name: run.name,
+                startedAt: run.started_at || undefined,
+                completedAt: run.completed_at || undefined,
                 app: run.app
                   ? {
                       name: run.app.name || undefined,
@@ -1718,27 +1851,7 @@ export function registerGitHubRoutes(app) {
                   : {}),
               };
             });
-            const counts = { success: 0, failure: 0, pending: 0 };
-            for (const run of checkRuns) {
-              const status = run?.status;
-              const conclusion = run?.conclusion;
-              if (status === 'queued' || status === 'in_progress') {
-                counts.pending += 1;
-                continue;
-              }
-              if (!conclusion) {
-                counts.pending += 1;
-                continue;
-              }
-              if (conclusion === 'success' || conclusion === 'neutral' || conclusion === 'skipped') {
-                counts.success += 1;
-              } else {
-                counts.failure += 1;
-              }
-            }
-            const total = counts.success + counts.failure + counts.pending;
-            const state = counts.failure > 0 ? 'failure' : (counts.pending > 0 ? 'pending' : (total > 0 ? 'success' : 'unknown'));
-            checks = { state, total, ...counts };
+            checks = summarizeCheckRuns(checkRuns);
           }
         } catch {
           // ignore and fall back
@@ -1747,15 +1860,7 @@ export function registerGitHubRoutes(app) {
           try {
             const combined = await octokit.rest.repos.getCombinedStatusForRef({ owner: repo.owner, repo: repo.repo, ref: sha });
             const statuses = Array.isArray(combined?.data?.statuses) ? combined.data.statuses : [];
-            const counts = { success: 0, failure: 0, pending: 0 };
-            statuses.forEach((s) => {
-              if (s.state === 'success') counts.success += 1;
-              else if (s.state === 'failure' || s.state === 'error') counts.failure += 1;
-              else if (s.state === 'pending') counts.pending += 1;
-            });
-            const total = counts.success + counts.failure + counts.pending;
-            const state = counts.failure > 0 ? 'failure' : (counts.pending > 0 ? 'pending' : (total > 0 ? 'success' : 'unknown'));
-            checks = { state, total, ...counts };
+            checks = summarizeCombinedStatuses(statuses);
           } catch {
             checks = null;
           }

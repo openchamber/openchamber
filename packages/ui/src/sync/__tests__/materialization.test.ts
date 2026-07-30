@@ -3,6 +3,7 @@ import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import {
   getSessionMaterializationRequestKey,
   getSessionMaterializationStatus,
+  getStaleRunningToolMessageID,
   isSessionMaterializationStillNeeded,
   materializeSessionSnapshots,
 } from "../materialization"
@@ -164,6 +165,37 @@ describe("materializeSessionSnapshots", () => {
     const mergedPart = result.part.msg_1[0] as { state?: { time?: { start?: number; end?: number } } }
     expect(mergedPart.state?.time?.start).toBe(1000)
     expect(mergedPart.state?.time?.end).toBe(2000)
+  })
+
+  test("does not regress a completed tool when a stale running snapshot arrives", () => {
+    const completedTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "completed", output: "done", time: { start: 1000, end: 2000 } },
+    } as unknown as Part
+    const staleRunningTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      state: { status: "running", time: { start: 1000 } },
+    } as unknown as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [completedTool] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [staleRunningTool] }],
+    )
+
+    expect(result.part).toBe(state.part)
+    expect(result.part.msg_1[0]).toBe(completedTool)
+    expect(getStaleRunningToolMessageID(result, "ses_1")).toBe(undefined)
   })
 
   test("preserves state.attachments from existing part when completed snapshot lacks them", () => {
@@ -458,5 +490,51 @@ describe("isSessionMaterializationStillNeeded", () => {
       messageID: "msg_1",
       partID: "prt_1",
     })).toBe(true)
+  })
+
+  test("recovers a settled session whose trailing assistant still has a running tool", () => {
+    const runningTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      tool: "read",
+      state: { status: "running" },
+    } as Part
+    const state = { message: { ses_1: [message("msg_1")] }, part: { msg_1: [runningTool] } }
+
+    expect(getStaleRunningToolMessageID(state, "ses_1")).toBe("msg_1")
+    expect(isSessionMaterializationStillNeeded(state, "ses_1", {
+      reason: "settled-running-tool",
+      messageID: "msg_1",
+    })).toBe(true)
+
+    const completedState = {
+      ...state,
+      part: { msg_1: [{ ...runningTool, state: { status: "completed" } } as Part] },
+    }
+    expect(getStaleRunningToolMessageID(completedState, "ses_1")).toBe(undefined)
+    expect(isSessionMaterializationStillNeeded(completedState, "ses_1", {
+      reason: "settled-running-tool",
+      messageID: "msg_1",
+    })).toBe(false)
+  })
+
+  test("does not recover an older running tool after a newer user turn", () => {
+    const state = {
+      message: { ses_1: [message("msg_1"), userMessage("msg_2")] },
+      part: {
+        msg_1: [{
+          id: "prt_1",
+          messageID: "msg_1",
+          sessionID: "ses_1",
+          type: "tool",
+          tool: "read",
+          state: { status: "running" },
+        } as Part],
+      },
+    }
+
+    expect(getStaleRunningToolMessageID(state, "ses_1")).toBe(undefined)
   })
 })

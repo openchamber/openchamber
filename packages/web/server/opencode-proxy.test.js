@@ -82,6 +82,55 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(seenAuthorization).toBe('Bearer test-token');
   });
 
+  it('closes downstream SSE when the OpenCode upstream stalls despite proxy heartbeats', async () => {
+    let stallTimeoutReads = 0;
+    const upstream = express();
+    upstream.get('/global/event', (_req, res) => {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.flushHeaders();
+      setTimeout(() => res.write(':upstream-alive\n\n'), 40);
+      setTimeout(() => res.write('data: still-alive\n\n'), 80);
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      SSE_HEARTBEAT_INTERVAL_MS: 10,
+      getSseUpstreamStallTimeoutMs: () => {
+        stallTimeoutReads += 1;
+        return stallTimeoutReads === 1 ? 50 : 100;
+      },
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/global/event`, {
+      headers: { Accept: 'text/event-stream' },
+      signal: AbortSignal.timeout(2000),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain(':heartbeat\n\n');
+    expect(body).toContain(':upstream-alive\n\n');
+    expect(body).toContain('data: still-alive\n\n');
+    expect(stallTimeoutReads).toBeGreaterThanOrEqual(3);
+  });
+
   it('holds a request through OpenCode warmup and succeeds once ready (no 503/backoff)', async () => {
     const upstream = express();
     upstream.get('/config/providers', (_req, res) => {

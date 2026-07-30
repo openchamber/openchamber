@@ -26,7 +26,7 @@ import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/li
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { TurnGroupingContext } from './lib/turns/types';
-import { copyTextToClipboard } from '@/lib/clipboard';
+import { copyMarkdownToClipboard, copyTextToClipboard } from '@/lib/clipboard';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { areOptionalRenderRelevantMessagesEqual, areRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual } from './message/renderCompare';
@@ -771,7 +771,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const hasTextContent = messageTextContent.length > 0;
 
     const handleCopyMessage = React.useCallback(async () => {
-        const result = await copyTextToClipboard(messageTextContent);
+        let result;
+        if (isUser) {
+            result = await copyTextToClipboard(messageTextContent);
+        } else {
+            const { renderMarkdownSync } = await import('./markdown/markdownCore');
+            result = await copyMarkdownToClipboard(messageTextContent, renderMarkdownSync(messageTextContent));
+        }
         if (!result.ok) {
             return false;
         }

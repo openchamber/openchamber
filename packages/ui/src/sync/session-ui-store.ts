@@ -73,6 +73,34 @@ import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
 
 export type { AttachedFile }
 
+type GoalCommand = { name: string; template?: string }
+
+export function expandSlashCommandGoalObjective(content: string, commands: GoalCommand[]): string {
+  if (!content.startsWith("/")) return content
+  const [head, ...tail] = content.split(" ")
+  const command = commands.find((candidate) => candidate.name === head.slice(1))
+  if (!command?.template?.trim()) return content
+  const argumentsText = tail.join(" ")
+  if (command.template.includes("$ARGUMENTS")) {
+    return command.template.replaceAll("$ARGUMENTS", argumentsText)
+  }
+
+  const positions = [...command.template.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]))
+  if (positions.length > 0) {
+    const parsedArguments = [...argumentsText.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)]
+      .map((match) => match[1] ?? match[2] ?? match[3] ?? "")
+    const lastPosition = Math.max(...positions)
+    return command.template.replace(/\$(\d+)/g, (_match, value: string) => {
+      const position = Number(value)
+      return position === lastPosition
+        ? parsedArguments.slice(position - 1).join(" ")
+        : (parsedArguments[position - 1] ?? "")
+    })
+  }
+
+  return argumentsText ? `${command.template}\n\n${argumentsText}` : command.template
+}
+
 // ---------------------------------------------------------------------------
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
@@ -1052,15 +1080,33 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       )
       additionalParts = [...(additionalParts ?? []), { text: goalIntro, synthetic: true }]
     }
-    const applyArmedGoal = (goalSessionId: string, goalDirectory: string | null | undefined) => {
+    const applyArmedGoal = async (goalSessionId: string, goalDirectory: string | null | undefined) => {
       if (!goalArmed) return
       const uiState = useUIStore.getState()
       const tokenBudget = uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null
-      const objective = goalArm.objectiveOverride?.trim() || content
-      void setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null)
-        .catch((error) => {
-          console.warn("[session-ui-store] failed to set goal from armed send", error)
-        })
+      let objective = goalArm.objectiveOverride?.trim() || content
+      if (!goalArm.objectiveOverride && content.startsWith("/")) {
+        const directoryCommands = getDirectoryState(goalDirectory ?? undefined)?.command ?? []
+        const storedCommands = useCommandsStore.getState().commands
+        const knownCommands = [...directoryCommands, ...storedCommands]
+        objective = expandSlashCommandGoalObjective(content, knownCommands)
+        if (objective === content) {
+          try {
+            objective = expandSlashCommandGoalObjective(
+              content,
+              await opencodeClient.listCommandsWithDetails(goalDirectory),
+            )
+          } catch {
+            // Command dispatch remains authoritative; raw invocation is a safe objective fallback.
+          }
+        }
+      }
+      try {
+        await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null)
+      } catch (error) {
+        useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride)
+        throw error
+      }
     }
 
     // ---- New session from draft ----
@@ -1088,6 +1134,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         filename: a.filename,
       }))
 
+      await applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
       await routeMessage({
         sessionId: createdDraftSession.sessionId,
         directory: createdDraftSession.directory,
@@ -1111,7 +1158,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           })),
         })),
       })
-      applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
       return
     }
 
@@ -1168,6 +1214,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       filename: a.filename,
     }))
 
+    if (targetSessionId) {
+      await applyArmedGoal(targetSessionId, currentSessionDirectory)
+    }
     await routeMessage({
       sessionId: targetSessionId || "",
       directory: currentSessionDirectory,
@@ -1191,9 +1240,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         })),
       })),
     })
-    if (targetSessionId) {
-      applyArmedGoal(targetSessionId, currentSessionDirectory)
-    }
   },
 
   // ---------------------------------------------------------------------------

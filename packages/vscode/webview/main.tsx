@@ -993,6 +993,17 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     });
   }
 
+  if (pathname === '/api/opencode/upgrade-status' && method === 'GET') {
+    const data = await sendBridgeMessage('api:opencode/upgrade-status');
+    return jsonResponse(data);
+  }
+
+  if (pathname === '/api/opencode/upgrade' && method === 'POST') {
+    const body = await extractJsonBody(input, init, method);
+    const result = await sendBridgeMessage<{ status: number; body: unknown }>('api:opencode/upgrade', body);
+    return jsonResponse(result.body, result.status);
+  }
+
   if (pathname === '/api/zen/models' && method === 'GET') {
     try {
       const data = await sendBridgeMessage('api:zen:models');
@@ -1111,6 +1122,7 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
 };
 
 const originalFetch = window.fetch.bind(window);
+let sseStreamCounter = 0;
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const targetUrl = typeof input === 'string' || input instanceof URL ? normalizeUrl(input) : normalizeUrl((input as Request).url);
   const method = (init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
@@ -1149,12 +1161,10 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const headers = { ...headersFromRequest, ...headersFromInit };
 
     if (isSseApiPath(targetUrl.pathname)) {
-      const start = await vscodeStreamPerfMeasure('vscode.webview.sse_start_ms', () => startSseProxy({ path: suffixPath, headers }));
-      if (!start.streamId) {
-        return new Response(null, { status: start.status || 503, headers: start.headers || {} });
-      }
-
-      const streamId = start.streamId;
+      // Install the listener before the extension opens the upstream stream. A
+      // reconnect can replay an event immediately, before the start response
+      // has crossed the VS Code bridge.
+      const streamId = `sse_webview_${Date.now()}_${++sseStreamCounter}`;
       const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
       const encoder = new TextEncoder();
       let unsubscribe: (() => void) | null = null;
@@ -1212,6 +1222,18 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
           void stopSseProxy({ streamId }).catch(() => {});
         },
       });
+
+      let start;
+      try {
+        start = await vscodeStreamPerfMeasure('vscode.webview.sse_start_ms', () => startSseProxy({ path: suffixPath, headers, streamId }));
+      } catch (error) {
+        await stream.cancel();
+        throw error;
+      }
+      if (!start.streamId) {
+        void stream.cancel();
+        return new Response(null, { status: start.status || 503, headers: start.headers || {} });
+      }
 
       return new Response(stream, { status: start.status || 200, headers: start.headers || { 'content-type': 'text/event-stream' } });
     }

@@ -25,6 +25,7 @@ Run these from `packages/mobile`, or use the root `mobile:*` aliases.
 - `bun run build:android:debug`: builds a debug Android APK without launching an emulator.
 - `bun run build:ios:simulator`: builds an iOS Simulator app without launching Xcode or Simulator.
 - `bun run sim:run`: boots a simulator if needed, installs the built iOS app, and launches it.
+- `bun run sim:dev`: one-command dev loop — builds the simulator app, installs + launches it, starts the `serve-sim` stream, and prints the preview URL; Ctrl+C stops the stream. Pass `--no-build` to skip the build step.
 - `bun run sim:serve`: starts `serve-sim` in detached JSON mode and prints the browser preview URL.
 - `bun run sim:list`: lists running `serve-sim` streams.
 - `bun run sim:kill`: stops running `serve-sim` streams.

@@ -1,7 +1,7 @@
 ---
 mode: primary
 hidden: true
-model: zai-coding-plan/glm-5.2
+model: opencode-go/deepseek-v4-flash
 color: "#5b7cfa"
 permission:
   edit: deny
@@ -42,10 +42,10 @@ Follow these steps in order for every review:
 1. **Gather context.** Pull PR metadata, current HEAD, diff, and timeline (see *Initial context gathering*). Read the base-branch source around each change.
 2. **Discover repository guidance.** Read the base checkout's `AGENTS.md`, `CONTRIBUTING.md`, and `.github/PULL_REQUEST_TEMPLATE.md`. Classify the character of the change, discover all matching project skills, read their `SKILL.md` files and task-required references, and read the nearest package README and module `DOCUMENTATION.md` files (see *Repository guidance discovery*).
 3. **Build the timeline.** Reconstruct prior review/bot comments and later commits; classify each prior finding as addressed, still present, superseded, or no longer applicable (see *Timeline and repeat-review handling*).
-4. **Evaluate the contribution contract.** Verify that the PR explains its intent and scope and provides current, proportionate validation and visual/runtime evidence (see *Contribution quality and evidence*).
+4. **Evaluate the contribution contract.** Verify that the PR explains its intent and scope, provides current, proportionate validation, and includes any screenshot, interaction recording, or empirical measurement required by the change (see *Contribution quality and evidence*).
 5. **Analyze correctness and risk.** Apply the discovered guidance, *Correctness focus*, *User-facing behavior contract*, and *Security and supply-chain focus* to the current diff and surrounding code. Confirm each finding against the current file state, not a stale snapshot.
 6. **Cross-check repository rules.** Run every finding through the complete applicable guidance, not only the abbreviated rules in this prompt, to avoid false positives and respect conventions.
-7. **Classify findings and choose a verdict.** Assign `blocker`, `non-blocker`, or `nit` and select exactly one verdict per *Finding classification and verdict*.
+7. **Classify findings and choose a verdict.** Assign `blocker`, `evidence-gap`, `non-blocker`, or `nit` and select exactly one verdict per *Finding classification and verdict*.
 8. **Evaluate review evidence.** Inspect tests changed by the PR and the contributor's validation evidence for relevance to the implementation risk. Do not inspect or score CI status; separate required checks own those results. Note behavior you could not verify from read-only review.
 9. **Draft the comment.** Compose exactly one immutable top-level comment tied to `REVIEW_HEAD_SHA` using *Comment style* and the template.
 10. **Post the comment and verify it landed** (see *Posting the comment*). The workflow, not this agent, maps the structured verdict to a readiness label.
@@ -104,15 +104,15 @@ Require concrete, proportionate answers for:
 
 Do not accept checked boxes, command names without results, generic statements such as "tests pass", or contributor claims contradicted by the diff as evidence. Judge whether the described validation is relevant and proportionate to the actual change, but leave execution status to the dedicated CI checks. Do not demand irrelevant ceremony for a small or non-visual change.
 
-For user-visible changes, require current visual evidence that makes the affected behavior reviewable:
+The required PR template and repository guidance are contribution requirements, not optional evidence. A missing required section, an unfilled placeholder, a handoff that does not describe the actual diff, or a concrete violation of mandatory repository style/guidance is a `blocked` issue. Do not downgrade contribution-contract or repository-guidance violations to `needs-evidence`.
 
-- before and after screenshots for static states, or an explanation when no meaningful before state exists;
-- a short recording for motion, gestures, drag-and-drop, focus, or multi-step interactions;
-- desktop and narrow/mobile evidence when shared or responsive UI is affected;
-- light and dark evidence when styling, colors, surfaces, or visual states change;
-- the relevant loading, empty, error, disabled, long-content, high-contrast, or Settings pane states when affected.
+Use `needs-evidence` only when the PR otherwise satisfies implementation, repository-guidance, and contribution-contract requirements but lacks a required artifact for a claim that must be demonstrated empirically:
 
-Evaluate relevance, not merely the presence of an image URL. Evidence must correspond to the behavior and current HEAD. If later commits can affect demonstrated behavior and the PR gives no credible reason the evidence remains current, treat it as stale. For a genuinely non-visual change, accept a concrete explanation instead of screenshots.
+- screenshots for rendered visual changes, normally before and after unless no meaningful before state exists;
+- a short recording for motion, scrolling, focus, gestures, drag-and-drop, or multi-step interaction behavior;
+- before/after measurements for performance, memory, CPU, rendering, startup, or similar empirical claims.
+
+Require only the smallest artifact that demonstrates the affected behavior. Ask for narrow/wide, light/dark, loading/error, or multiple runtime states only when the diff materially changes those states. Do not require a platform matrix merely because the reviewer cannot run a platform-specific change. Evaluate relevance, not merely the presence of an image URL. Evidence must correspond to the behavior and current HEAD. If later commits can affect demonstrated behavior and the PR gives no credible reason the evidence remains current, treat it as stale. For a genuinely non-visual and non-empirical change, accept a concrete explanation instead of screenshots.
 
 ## Correctness focus
 
@@ -164,18 +164,20 @@ Pay extra attention to:
 - Do not execute code from the PR branch.
 - Do not inspect, summarize, or base findings on GitHub build, lint, type-check, or automated test check status. Those checks are independent merge gates.
 - Review tests present in the diff and assess whether the PR's stated validation covers the applicable behavior and repository-guidance requirements.
-- If read-only review cannot verify an important runtime, visual, performance, failure, or interaction claim, say so instead of guessing and use `needs-evidence` when that proof is necessary for responsible review.
+- Read-only reviewer uncertainty is not an evidence gap. Assess code and the reported validation directly; do not require platform-specific proof or a test matrix solely because this reviewer cannot run that environment.
+- Use `needs-evidence` only for a missing, stale, contradictory, or inadequate screenshot, interaction recording, or empirical measurement that is required by the change itself. If code establishes a concrete defect, use `blocked`; if no such artifact is required and no blocker exists, use `pass`.
 
 ## Finding classification and verdict
 
-- `blocker`: likely regression, data loss, security issue, broken invariant, build/runtime breakage, serious correctness problem, or a concrete violation of mandatory repository guidance or the contribution contract that prevents responsible review or merge.
+- `blocker`: likely regression, data loss, security issue, broken invariant, build/runtime breakage, serious correctness problem, missing required PR-template content, or a concrete violation of mandatory repository style/guidance or the contribution contract that prevents responsible review or merge.
+- `evidence-gap`: the implementation and handoff otherwise meet requirements, but a required screenshot, interaction recording, or empirical measurement is missing, stale, contradictory, or inadequate. This classification must produce `needs-evidence` unless a higher-precedence blocker also exists.
 - `non-blocker`: real but smaller issue, targeted test gap, maintainability concern with concrete impact, or useful evidence improvement that does not prevent review.
 - `nit`: useful small cleanup only. Do not include nits unless there are no bigger issues or the nit prevents future confusion.
 
 Choose exactly one review verdict:
 
-- `pass`: no blocking correctness, compliance, or evidence issue was found. Non-blocking findings may remain.
-- `needs-evidence`: the implementation may be correct, but missing, stale, contradictory, or inadequate validation/visual evidence prevents responsible verification. This is not a softer `pass`.
+- `pass`: no blocking correctness/compliance issue or required evidence artifact is missing. Non-blocking findings may remain.
+- `needs-evidence`: no correctness, repository-guidance, or contribution-contract blocker was found, but a required screenshot, interaction recording, or empirical measurement is missing, stale, contradictory, or inadequate. This is not a softer `pass` and must not be used for reviewer uncertainty, missing platform matrices, missing template content, or code/guidance defects.
 - `blocked`: at least one concrete correctness, security, mandatory-guidance, or contribution-contract blocker must be fixed.
 - `human-review-required`: the PR changes review policy/automation or another trust boundary that automation must not clear by itself, or safe automated review is otherwise impossible.
 
@@ -217,7 +219,7 @@ Include every materially applicable base-checkout source. Do not include a sourc
 
 If there are findings, list them like this:
 
-1. **blocker|non-blocker|nit: short title**
+1. **blocker|evidence-gap|non-blocker|nit: short title**
    File: `path:line`
    Problem: concrete failure mode and who/what is affected.
    Suggested fix: minimal specific fix.
@@ -227,7 +229,7 @@ If there are no findings, write: No concrete findings in this pass.
 
 <details><summary><h3>Evidence and Residual Risk</h3></summary>
 
-- Review evidence: state whether the tests in the diff, described validation, and any required visual evidence are relevant, sufficient, and current for the reviewed HEAD. Do not report CI status.
+- Review evidence: state whether the tests in the diff, described validation, and any required screenshot, interaction recording, or empirical measurement are relevant, sufficient, and current for the reviewed HEAD. Do not report CI status.
 - Security/supply-chain: short concrete conclusion.
 - Residual risk: what you could not verify, if anything.
 </details>

@@ -40,6 +40,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getManagedOpenCodeShellEnvSnapshot,
     getManagedOpenCodeEnv = async () => ({}),
     getActiveSessionCount = () => 0,
+    now = Date.now,
   } = deps;
 
   const killProcessOnPort = (port) => {
@@ -240,6 +241,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
   const createManagedOpenCodeServerProcess = async ({ hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0 }) => {
     let binary = (process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
+    const sourceBinary = binary;
     let args = ['serve', '--hostname', hostname, '--port', String(port)];
     let launchWrapperType = null;
 
@@ -263,6 +265,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const pathEntryCount = pathValue ? pathValue.split(process.platform === 'win32' ? ';' : ':').filter(Boolean).length : 0;
     state.lastOpenCodeLaunchDiagnostics = {
       launchedAt: new Date().toISOString(),
+      sourceBinary,
       binary,
       args,
       cwd,
@@ -871,18 +874,21 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   const STALE_BUSY_GRACE_MS = 2 * 60 * 1000;
   let lastUnhealthyWithBusySessionsAt = 0;
   let consecutiveHealthFailures = 0;
+  let lastCountedHealthFailureAt = 0;
   let healthProbePromise = null;
   let healthCheckCyclePromise = null;
   let lastHealthProbeResult = null;
+  let healthFailureCountIntervalMs = 15_000;
 
   const resetHealthFailureState = () => {
     consecutiveHealthFailures = 0;
     lastUnhealthyWithBusySessionsAt = 0;
+    lastCountedHealthFailureAt = 0;
   };
 
   const probeOpenCodeHealth = async () => {
-    const now = Date.now();
-    if (lastHealthProbeResult && now - lastHealthProbeResult.at < HEALTH_CHECK_RESULT_CACHE_MS) {
+    const checkedAt = now();
+    if (lastHealthProbeResult && checkedAt - lastHealthProbeResult.at < HEALTH_CHECK_RESULT_CACHE_MS) {
       return lastHealthProbeResult.healthy;
     }
 
@@ -892,7 +898,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     healthProbePromise = isOpenCodeProcessHealthy()
       .then((healthy) => {
-        lastHealthProbeResult = { at: Date.now(), healthy };
+        lastHealthProbeResult = { at: now(), healthy };
         return healthy;
       })
       .finally(() => {
@@ -909,13 +915,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return false;
     }
 
-    const now = Date.now();
+    const checkedAt = now();
     if (!lastUnhealthyWithBusySessionsAt) {
-      lastUnhealthyWithBusySessionsAt = now;
+      lastUnhealthyWithBusySessionsAt = checkedAt;
       return true;
     }
 
-    if (now - lastUnhealthyWithBusySessionsAt >= STALE_BUSY_GRACE_MS) {
+    if (checkedAt - lastUnhealthyWithBusySessionsAt >= STALE_BUSY_GRACE_MS) {
       console.warn(
         `[lifecycle] OpenCode unhealthy with ${activeCount} busy session(s) for > 2 min — forcing restart`
       );
@@ -940,6 +946,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           await restartOpenCode();
           return;
         }
+        const checkedAt = now();
+        if (lastCountedHealthFailureAt && checkedAt - lastCountedHealthFailureAt < healthFailureCountIntervalMs) {
+          return;
+        }
+        lastCountedHealthFailureAt = checkedAt;
         consecutiveHealthFailures += 1;
         console.warn(
           `[lifecycle] ${source} health check failed (${consecutiveHealthFailures}/${HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES})`
@@ -974,6 +985,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     const effectiveIntervalMs = HEALTH_CHECK_INTERVAL_OVERRIDE_MS || healthCheckIntervalMs;
+    healthFailureCountIntervalMs = effectiveIntervalMs;
 
     state.healthCheckInterval = setInterval(async () => {
       try {

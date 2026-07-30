@@ -738,10 +738,14 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setWeekStartPreference(settings.weekStartPreference);
     }
   }
-  if (typeof settings.desktopWindowControlsPosition === 'string'
-    && (settings.desktopWindowControlsPosition === 'auto' || settings.desktopWindowControlsPosition === 'left' || settings.desktopWindowControlsPosition === 'right')) {
-    if (settings.desktopWindowControlsPosition !== store.desktopWindowControlsPosition) {
-      store.setDesktopWindowControlsPosition(settings.desktopWindowControlsPosition);
+  if (typeof settings.desktopWindowControlsPosition === 'string') {
+    const nextPosition = settings.desktopWindowControlsPosition === 'left'
+      ? 'left'
+      : (settings.desktopWindowControlsPosition === 'right' || settings.desktopWindowControlsPosition === 'auto')
+        ? 'right'
+        : null;
+    if (nextPosition && nextPosition !== store.desktopWindowControlsPosition) {
+      store.setDesktopWindowControlsPosition(nextPosition);
     }
   }
   if (typeof settings.chatRenderMode === 'string'
@@ -1364,9 +1368,16 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && (candidate.weekStartPreference === 'auto' || candidate.weekStartPreference === 'sunday' || candidate.weekStartPreference === 'monday')) {
     result.weekStartPreference = candidate.weekStartPreference;
   }
-  if (typeof candidate.desktopWindowControlsPosition === 'string'
-    && (candidate.desktopWindowControlsPosition === 'auto' || candidate.desktopWindowControlsPosition === 'left' || candidate.desktopWindowControlsPosition === 'right')) {
-    result.desktopWindowControlsPosition = candidate.desktopWindowControlsPosition;
+  if (typeof candidate.desktopWindowControlsPosition === 'string') {
+    if (candidate.desktopWindowControlsPosition === 'left') {
+      result.desktopWindowControlsPosition = 'left';
+    } else if (
+      candidate.desktopWindowControlsPosition === 'right'
+      || candidate.desktopWindowControlsPosition === 'auto'
+    ) {
+      // Legacy "auto" never read OS chrome config; treat as right.
+      result.desktopWindowControlsPosition = 'right';
+    }
   }
   if (typeof candidate.chatRenderMode === 'string'
     && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {

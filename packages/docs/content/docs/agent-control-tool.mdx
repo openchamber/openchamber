@@ -1,0 +1,39 @@
+---
+title: Agent Control Tool
+description: Let an agent manage OpenChamber sessions, worktrees, and scheduled tasks from chat.
+---
+
+# Agent Control Tool
+
+Use the `openchamber` agent tool to manage work in the app directly from chat. It is enabled by default when OpenChamber runs its own local OpenCode server; there is no separate tool to install or shell command to run.
+
+## What you can ask
+
+Ask the agent in plain language. For example:
+
+- "Create a new OpenChamber session in this project, use the `openai/gpt-5.6-sol` model, and send it this prompt: review the authentication flow."
+- "Create a new OpenChamber session for this task in a separate worktree, and ask it to add tests for the login flow."
+- "Use OpenChamber to list my 10 most recent sessions and include their current status."
+- "Create an OpenChamber scheduled task named Weekday review that sends this prompt at 09:00 every weekday: review changes since the last run."
+- "Run the OpenChamber scheduled task named Weekday review now."
+- "Check the OpenChamber session named Authentication review and show me its latest assistant response."
+
+The tool can list projects and model preferences, create and follow up on sessions, fork a session, create isolated worktree sessions, and manage scheduled tasks. Sessions started this way appear in OpenChamber like any other session, so you can open them and continue the work yourself.
+
+## Keep in mind
+
+- New session prompts return immediately by default. Follow the session in OpenChamber, or ask the agent to check it later.
+- A separate worktree is only created when you ask for one. Uncommitted changes from your current worktree are not copied into it.
+- The tool cannot delete sessions or worktrees, register project paths, run arbitrary shell commands, or call arbitrary URLs.
+
+## Turn the tool on or off
+
+Open **Settings → General → OpenCode CLI**, change **Agent control tool**, then select **Save + Reload**. The setting applies after the managed OpenCode server restarts.
+
+The tool is not available when OpenChamber connects to an external OpenCode server through `OPENCODE_HOST` or skip-start, or inside the VS Code extension. Desktop and web installations that use OpenChamber's managed OpenCode server support it automatically.
+
+## Related
+
+- [Scheduled Tasks](/scheduled-tasks/)
+- [Worktree Sessions](/worktrees/)
+- [Session Goals](/session-goals/)

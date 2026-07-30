@@ -18,6 +18,10 @@
 import { Tray, Menu, nativeImage } from 'electron';
 
 const isMac = process.platform === 'darwin';
+const isLinux = process.platform === 'linux';
+// Linux StatusNotifier hosts often blank or drop oversized tray images; keep
+// the icon at a panel-typical size so AppImage trays stay visible.
+const LINUX_TRAY_ICON_PX = 22;
 
 const MAX_SESSIONS = 8;
 const MAX_APPROVALS = 10;
@@ -88,8 +92,19 @@ const computeTooltip = (counts, sessionCount) => {
 const ANIM_INTERVAL_MS = 75;
 
 const toTemplateImage = (p) => {
-  const image = nativeImage.createFromPath(p);
+  let image = nativeImage.createFromPath(p);
+  if (image.isEmpty()) return image;
   if (isMac) image.setTemplateImage(true);
+  if (isLinux) {
+    const { width, height } = image.getSize();
+    if (width > LINUX_TRAY_ICON_PX || height > LINUX_TRAY_ICON_PX) {
+      image = image.resize({
+        width: LINUX_TRAY_ICON_PX,
+        height: LINUX_TRAY_ICON_PX,
+        quality: 'best',
+      });
+    }
+  }
   return image;
 };
 
@@ -99,6 +114,8 @@ const toTemplateImage = (p) => {
 export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconPaths, statusIconPaths, onAction }) => {
   let tray = null;
   let lastTitle = null;
+  let lastTooltip = null;
+  let lastMenuKey = null;
 
   // macOS auto-picks the @2x file next to each path and tints the alpha.
   // Windows uses the regular app icon and ignores template tinting.
@@ -159,7 +176,11 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     tray = new Tray(idleFrame);
     tray.setIgnoreDoubleClickEvents(true);
     if (!isMac) {
-      tray.on('click', () => onAction({ type: 'show-main-window' }));
+      // Windows: left-click shows. Linux: left-click toggles show/hide so the
+      // panel icon stays useful when the window is already open.
+      tray.on('click', () => onAction({
+        type: isLinux ? 'toggle-main-window' : 'show-main-window',
+      }));
     }
     return tray;
   };
@@ -266,12 +287,43 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
       { type: 'separator' },
       { label: 'New Session', click: () => onAction({ type: 'new-session' }) },
       { label: 'New Mini Chat', click: () => onAction({ type: 'new-mini-chat' }) },
-      { label: 'Show OpenChamber', click: () => onAction({ type: 'show-main-window' }) },
-      { type: 'separator' },
-      { label: 'Quit OpenChamber', click: () => onAction({ type: 'quit' }) },
     );
 
+    if (isLinux || process.platform === 'win32') {
+      // Right-click context menu: show / hide / close (quit). Matches the
+      // expected AppImage / Windows tray controls.
+      template.push(
+        { type: 'separator' },
+        { label: 'Show Window', click: () => onAction({ type: 'show-main-window' }) },
+        { label: 'Hide Window', click: () => onAction({ type: 'hide-main-window' }) },
+        { type: 'separator' },
+        { label: 'Close', click: () => onAction({ type: 'quit' }) },
+      );
+    } else {
+      template.push(
+        { label: 'Show OpenChamber', click: () => onAction({ type: 'show-main-window' }) },
+        { type: 'separator' },
+        { label: 'Quit OpenChamber', click: () => onAction({ type: 'quit' }) },
+      );
+    }
+
     return Menu.buildFromTemplate(template);
+  };
+
+  // Lightweight signature of the menu-affecting content — skips nativeImage
+  // and click handlers that can't be serialized. Cheaper than buildMenu itself.
+  const menuKey = (snapshot) => {
+    const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+    const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : [];
+    const usage = snapshot.usage && typeof snapshot.usage === 'object' ? snapshot.usage : {};
+    const groups = Array.isArray(usage.groups) ? usage.groups : [];
+    return JSON.stringify({
+      h: typeof snapshot.instanceName === 'string' ? snapshot.instanceName : '',
+      s: sessions.map((s) => `${s.id}|${s.title}|${s.status}|${s.unseen}|${s.hasError}|${s.subtitle}|${s.directory}`),
+      a: approvals.map((a) => `${a.id}|${a.kind}|${a.sessionId}|${a.sessionTitle}|${a.label}|${a.directory}`),
+      u: usage.mode || '',
+      g: groups.map((g) => `${g.provider}|${g.status}|${(Array.isArray(g.rows) ? g.rows : []).map((r) => `${r.label}|${r.value}`).join(',')}`),
+    });
   };
 
   const update = (rawSnapshot) => {
@@ -293,8 +345,16 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
       lastTitle = title;
     }
     applyIconState(computeIconState(counts));
-    widget.setToolTip(computeTooltip(counts, sessions.length));
-    widget.setContextMenu(buildMenu(snapshot));
+    const tooltip = computeTooltip(counts, sessions.length);
+    if (tooltip !== lastTooltip) {
+      widget.setToolTip(tooltip);
+      lastTooltip = tooltip;
+    }
+    const key = menuKey(snapshot);
+    if (key !== lastMenuKey) {
+      widget.setContextMenu(buildMenu(snapshot));
+      lastMenuKey = key;
+    }
   };
 
   const destroy = () => {
@@ -304,6 +364,8 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     }
     tray = null;
     lastTitle = null;
+    lastTooltip = null;
+    lastMenuKey = null;
     iconState = null;
   };
 
