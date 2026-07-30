@@ -583,6 +583,7 @@ interface FileReadOptions {
   outsideFileGrant?: string;
   optional?: boolean;
   directory?: string;
+  fresh?: boolean;
 }
 
 export interface FilesAPI {
