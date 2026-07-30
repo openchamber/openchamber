@@ -1,4 +1,4 @@
-import net from 'node:net';
+import { createIpcDialer } from './ipc-transport.js';
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
@@ -12,7 +12,9 @@ export class GuardianClientError extends Error {
 }
 
 export class GuardianClient {
+  #platform;
   #socketPath;
+  #portPath;
   #connectTimeoutMs;
   #requestTimeoutMs;
   #socket = null;
@@ -20,18 +22,45 @@ export class GuardianClient {
   #buffer = '';
   #connectPromise = null;
   #disposed = false;
+  #dial = null;
 
   constructor({
     socketPath,
+    portPath,
     connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
     requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
   } = {}) {
+    // Backward-compatible signature. Legacy callers (lifecycle.js and
+    // existing tests) pass only `socketPath`; a missing/empty
+    // `socketPath` is the canonical error condition preserved here for
+    // every pre-W-A caller. The new `portPath` argument is optional
+    // and only relevant on Windows (sub-phase W-B). On POSIX, the
+    // existing `socketPath`-required contract is unchanged: an empty
+    // `socketPath` always throws even when `portPath` is provided.
     if (typeof socketPath !== 'string' || socketPath.length === 0) {
-      throw new TypeError('Guardian client requires a socket path');
+      if (typeof portPath === 'string' && portPath.length > 0 && process.platform === 'win32') {
+        // Windows opt-in: allow a Windows caller to pass only
+        // `portPath`. POSIX callers must keep using `socketPath`.
+      } else {
+        throw new TypeError('Guardian client requires a socket path');
+      }
     }
+    this.#platform = process.platform;
     this.#socketPath = socketPath;
+    this.#portPath = portPath;
     this.#connectTimeoutMs = connectTimeoutMs;
     this.#requestTimeoutMs = requestTimeoutMs;
+    // The platform-specific dial function is constructed once and
+    // reused. The transport factory is the only place that knows
+    // about `net.createConnection` / discovery-file semantics; W-A
+    // branches here only because the W-A plan keeps the consumer
+    // surface stable — a future refactor can move the branching into
+    // the factory itself.
+    this.#dial = createIpcDialer({
+      platform: this.#platform,
+      socketPath: this.#socketPath,
+      portPath: this.#portPath,
+    });
   }
 
   connect() {
@@ -67,7 +96,19 @@ export class GuardianClient {
         this.#socket?.off('error', onError);
       };
 
-      this.#socket = net.createConnection(this.#socketPath);
+      let rawSocket;
+      try {
+        rawSocket = this.#dial();
+      } catch (error) {
+        clearTimeout(timeout);
+        this.#connectPromise = null;
+        // Sync construction errors (e.g. missing portPath on Windows,
+        // discovery-file ENOENT) become connect-time GuardianClientErrors.
+        reject(new GuardianClientError(error?.message ?? String(error), 'connect_error'));
+        return;
+      }
+
+      this.#socket = rawSocket;
       this.#socket.on('connect', onConnect);
       this.#socket.on('error', onError);
       this.#socket.on('data', (chunk) => this.#onData(chunk));

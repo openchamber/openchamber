@@ -21,6 +21,8 @@ import {
   logStatus,
 } from '../cli-output.js';
 
+import { isGuardianAutoStarted, maybeAutoStartGuardian, stopGuardianViaIpc } from './commands-guardian.js';
+
 const DAEMON_READY_TIMEOUT_MS = 30000;
 
 function createServeCommand({
@@ -194,15 +196,41 @@ async function serveCommand(options) {
         console.log(`Starting OpenChamber on port ${targetPort === 0 ? 'auto' : targetPort} (foreground)`);
       }
 
+      // The log fd is closed in human (non-quiet) mode above. Re-open a fresh
+      // fd against the same path so maybeAutoStartGuardian → startGuardianDetached
+      // can hand the child a real descriptor; in quiet mode the original logFd
+      // is still open and we keep using it.
+      const guardianLogFd = isQuietMode(options) ? logFd : fs.openSync(initialLogPath, 'a');
+      try {
+        await maybeAutoStartGuardian({ logFd: guardianLogFd, options, emitNotice });
+      } finally {
+        if (!isQuietMode(options)) {
+          try { fs.closeSync(guardianLogFd); } catch { /* ignore */ }
+        }
+      }
       const { startWebUiServer } = await import(pathToFileURL(serverPath).href);
-      const controller = await startWebUiServer({
-        port: targetPort,
-        host: effectiveHost,
-        uiPassword: effectiveUiPassword,
-        apiOnly: options.apiOnly === true,
-        attachSignals: false,
-        exitOnShutdown: false,
-      });
+      let controller;
+      try {
+        controller = await startWebUiServer({
+          port: targetPort,
+          host: effectiveHost,
+          uiPassword: effectiveUiPassword,
+          apiOnly: options.apiOnly === true,
+          attachSignals: false,
+          exitOnShutdown: false,
+        });
+      } catch (startError) {
+        // If we auto-started the guardian, take it down before propagating
+        // the error so a failed serve never leaks an orphaned guardian.
+        if (isGuardianAutoStarted()) {
+          try {
+            await stopGuardianViaIpc({ timeoutMs: 3000 });
+          } catch {
+            /* best-effort; never mask the original error */
+          }
+        }
+        throw startError;
+      }
 
       const resolvedPort = controller.getPort();
 
@@ -242,6 +270,12 @@ async function serveCommand(options) {
           await controller.stop({ exitProcess: false });
         } catch {
         }
+        if (isGuardianAutoStarted()) {
+          try {
+            await stopGuardianViaIpc({ timeoutMs: 3000 });
+          } catch {
+          }
+        }
         cleanupFiles();
         setForegroundServerActive(false);
         setForegroundShutdown(null);
@@ -262,6 +296,7 @@ async function serveCommand(options) {
       await new Promise(() => {});
     }
 
+    await maybeAutoStartGuardian({ logFd, options, emitNotice });
     const serverArgs = [serverPath, '--port', String(targetPort)];
     serverArgs.push('--host', effectiveHost);
     if (options.apiOnly === true) {
@@ -325,6 +360,13 @@ async function serveCommand(options) {
       });
     } catch (error) {
       await terminateProcessTree(child.pid, { gracefulTimeoutMs: 1500, forceTimeoutMs: 1500 });
+      if (isGuardianAutoStarted()) {
+        try {
+          await stopGuardianViaIpc({ timeoutMs: 3000 });
+        } catch {
+          /* best-effort; never mask the original error */
+        }
+      }
       throw error;
     }
 

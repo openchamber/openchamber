@@ -16,12 +16,23 @@ import { createHmac } from 'node:crypto';
  *   hand to a would-be `adopt()` RPC.
  *
  *   The IPC permissioning model already enforces the trust boundary:
+ *     Linux/POSIX (sub-phase W-A):
  *     - v2 root dir is mode `0700` (UID-scoped)
  *     - the secret master file is mode `0600`
  *     - the atomic PID-file singleton guarantees one guardian per host per UID
  *     - the IPC Unix-domain socket is mode `0600` (umask `0o077` + explicit
  *       `chmodSync` in `GuardianIpcServer.start()`)
- *     - same-UID local processes are the documented trust boundary
+ *     - same-UID local processes are the documented trust boundary.
+ *     Windows (sub-phase W-B / W-C / T2):
+ *     - v2 root dir lives under `%LOCALAPPDATA%` and is ACL'd to the
+ *       current user via `icacls` (`applyDirectoryAcl`).
+ *     - the discovery file (`<rootDir>/port`) is ACL'd to the current
+ *       user via `applyDiscoveryFileAcl` before it is atomically
+ *       renamed to its final name.
+ *     - the IPC server binds `127.0.0.1` only on an ephemeral port.
+ *     - same-Windows-user local processes are the documented trust
+ *       boundary (weaker than the Linux `0600` socket model because
+ *       any process running as that user can read the discovery file).
  *
  *   Cross-process adoption with a `claimCapability` is tracked separately
  *   and intentionally NOT exposed by this module. Earlier revisions shipped
@@ -41,6 +52,7 @@ import { createManagedOpenCodeHandoffV2Protocol } from '../opencode/managed-open
 import { createManagedOpenCodeHandoffV2SecretProvider } from '../opencode/managed-opencode-handoff-v2/secret-provider.js';
 import { resolveManagedOpenCodeHandoffV2Root } from '../opencode/managed-opencode-handoff-v2/filesystem.js';
 import { GuardianIpcServer } from './ipc-server.js';
+import { terminateChildWindows } from './windows-process.js';
 
 const DEFAULT_HEALTH_CHECK_INTERVAL_MS = 5000;
 const DEFAULT_LEASE_RENEWAL_INTERVAL_MS = 30000;
@@ -92,6 +104,8 @@ export class ManagedOpenCodeGuardian {
   #leaseRenewalIntervalMs;
   #cleanupIntervalMs;
   #socketPath;
+  #portPath;
+  #username;
   #log;
   #ipcServer;
   #timers = [];
@@ -108,6 +122,13 @@ export class ManagedOpenCodeGuardian {
     leaseRenewalIntervalMs = DEFAULT_LEASE_RENEWAL_INTERVAL_MS,
     cleanupIntervalMs = DEFAULT_CLEANUP_INTERVAL_MS,
     socketPath,
+    // W-C: Windows IPC transport options forwarded from the
+    // standalone entrypoint (`bin/openchamber-guardian.js`). On Linux
+    // these are optional and ignored by the transport factory; on
+    // Windows they are required to bind the loopback-TCP listener and
+    // ACL the discovery file to the current user.
+    portPath,
+    username,
     log = defaultLog,
     rootDir,
     spawnFn,
@@ -139,8 +160,18 @@ export class ManagedOpenCodeGuardian {
       : DEFAULT_CLEANUP_INTERVAL_MS;
     this.#rootDir = rootDir;
     this.#socketPath = socketPath ?? defaultSocketPath(rootDir);
+    this.#portPath = typeof portPath === 'string' && portPath.length > 0 ? portPath : undefined;
+    this.#username = typeof username === 'string' && username.length > 0 ? username : undefined;
     this.#log = log;
     this.#spawnFn = spawnFn;
+  }
+
+  get portPath() {
+    return this.#portPath;
+  }
+
+  get username() {
+    return this.#username;
   }
 
   get socketPath() {
@@ -159,15 +190,19 @@ export class ManagedOpenCodeGuardian {
     if (this.#started) {
       throw new Error('ManagedOpenCodeGuardian is already started');
     }
-    if (process.platform === 'win32') {
-      throw new Error('ManagedOpenCodeGuardian is Linux/POSIX only');
-    }
+    // W-C: the `process.platform === 'win32'` rejection is removed.
+    // The transport factory inside `GuardianIpcServer.start()` dispatches
+    // per-platform: Linux uses the Unix-domain socket bound to
+    // `this.#socketPath`; Windows uses loopback TCP + discovery file
+    // bound to `this.#portPath`.
 
     this.#log('[guardian] starting');
     this.#started = true;
 
     this.#ipcServer = new GuardianIpcServer({
       socketPath: this.#socketPath,
+      portPath: this.#portPath,
+      username: this.#username,
       guardian: this,
       log: this.#log,
     });
@@ -403,6 +438,13 @@ export class ManagedOpenCodeGuardian {
   }
 
   async #terminateChild(child) {
+    // W-D: on Windows, route termination through `taskkill.exe`
+    // (no SIGTERM/SIGKILL escalation — those POSIX concepts do
+    // not exist on Windows). The Unix branch below is preserved
+    // byte-for-byte for Linux behavior parity.
+    if (process.platform === 'win32') {
+      return terminateChildWindows(child, { timeoutMs: STOP_SIGNAL_TIMEOUT_MS });
+    }
     const pid = child?.pid;
     if (!pid) return;
 

@@ -6,7 +6,8 @@
   "main": "./server/index.js",
   "types": "./server/index.d.ts",
   "bin": {
-    "openchamber": "./bin/cli.js"
+    "openchamber": "./bin/cli.js",
+    "openchamber-guardian": "./bin/openchamber-guardian.js"
   },
   "publishConfig": {
     "access": "public"

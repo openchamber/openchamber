@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { applyDirectoryAcl, resolveCurrentUsername } from '../../guardian/windows-acl.js';
+
 const MANAGED_OPENCODE_HANDOFF_V2_DEFAULT_ROOT = path.join(
   os.homedir(),
   '.local',
@@ -48,9 +50,36 @@ const assertPrivateDirectory = (directoryPath) => {
   return stat;
 };
 
-export const ensurePrivateDirectory = (directoryPath, { platform = process.platform } = {}) => {
+/**
+ * Windows variant of `ensurePrivateDirectory` (closes F-3).
+ *
+ * POSIX file modes do not apply on NTFS; the trust boundary is the
+ * per-user `icacls` grant. We:
+ *   1. mkdir the parent (idempotent).
+ *   2. mkdir the resolved root (idempotent; Node 10+ swallows EEXIST
+ *      with `recursive: true`).
+ *   3. apply `<username>:(OI)(CI)F` so files and sub-directories
+ *      created later inherit the same per-user restriction.
+ *
+ * The `username` is supplied by the caller (the entrypoint caches the
+ * `whoami` output for the process lifetime). Falling back to
+ * `resolveCurrentUsername` keeps this helper self-contained for tests
+ * and for callers that did not pre-resolve the username.
+ */
+const ensurePrivateDirectoryWindows = (directoryPath, { username, log = () => {} } = {}) => {
+  const resolved = resolveManagedOpenCodeHandoffV2Root(directoryPath);
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  fs.mkdirSync(resolved, { recursive: true });
+  const resolvedUsername = typeof username === 'string' && username.length > 0
+    ? username
+    : resolveCurrentUsername({ log });
+  applyDirectoryAcl({ dirPath: resolved, username: resolvedUsername, log });
+  return resolved;
+};
+
+export const ensurePrivateDirectory = (directoryPath, { platform = process.platform, username, log = () => {} } = {}) => {
   if (platform === 'win32') {
-    throw new Error('Managed OpenCode handoff v2 currently requires a POSIX filesystem');
+    return ensurePrivateDirectoryWindows(directoryPath, { username, log });
   }
 
   const resolved = resolveManagedOpenCodeHandoffV2Root(directoryPath);
@@ -102,3 +131,6 @@ export const fsyncDirectory = (directoryPath) => {
     if (descriptor !== undefined) fs.closeSync(descriptor);
   }
 };
+
+// Exported for unit tests; not part of the public surface.
+export const __test__ = { ensurePrivateDirectoryWindows };

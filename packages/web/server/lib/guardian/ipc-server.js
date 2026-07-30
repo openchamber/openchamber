@@ -1,8 +1,24 @@
-import fs from 'node:fs';
-import net from 'node:net';
 import { EventEmitter } from 'node:events';
 
-const DEFAULT_SOCKET_MODE = 0o600;
+import { createIpcServer } from './ipc-transport.js';
+
+/**
+ * Guardian IPC server (transport-agnostic).
+ *
+ * Owns the JSON-line request/response protocol and method dispatch
+ * (`spawn` / `stop` / `health` / `prepare-handoff` / `list` /
+ * `shutdown`). Delegates the actual transport (Unix-domain socket on
+ * POSIX; localhost-TCP in W-B) to `createIpcServer` from
+ * `ipc-transport.js`. This file must not call `net.createServer`,
+ * `chmodSync`, or `process.umask` — those are transport concerns.
+ *
+ * Trust boundary (Phase 2B):
+ *   The transport is configured with `socketPath` (POSIX) or
+ *   `portPath` (Windows) at construction time. POSIX enforces a
+ *   `0600` mode + `0o077` umask on the Unix-domain socket; Windows
+ *   (W-B) will enforce an icacls grant on the discovery file. Same-UID
+ *   local processes are the documented trust boundary.
+ */
 
 const parseJsonLine = (line) => {
   try {
@@ -23,22 +39,35 @@ const sendError = (socket, id, message, code = 'internal_error') => {
 };
 
 export class GuardianIpcServer extends EventEmitter {
+  #platform;
   #socketPath;
+  #portPath;
   #guardian;
   #log;
-  #server = null;
+  #transport = null;
   #sockets = new Set();
   #methods = new Map();
 
-  constructor({ socketPath, guardian, log = () => {} }) {
+  constructor({
+    platform = process.platform,
+    socketPath,
+    portPath,
+    guardian,
+    log = () => {},
+  } = {}) {
     super();
-    if (typeof socketPath !== 'string' || socketPath.length === 0) {
-      throw new TypeError('Guardian IPC server requires a socket path');
-    }
     if (!guardian || typeof guardian.spawnManagedOpenCode !== 'function') {
       throw new TypeError('Guardian IPC server requires a guardian');
     }
+    if (
+      (typeof socketPath !== 'string' || socketPath.length === 0)
+      && (typeof portPath !== 'string' || portPath.length === 0)
+    ) {
+      throw new TypeError('Guardian IPC server requires a socketPath or portPath');
+    }
+    this.#platform = platform;
     this.#socketPath = socketPath;
+    this.#portPath = portPath;
     this.#guardian = guardian;
     this.#log = log;
     this.#registerMethods();
@@ -50,23 +79,33 @@ export class GuardianIpcServer extends EventEmitter {
     this.#methods.set('health', async (params) => this.#guardian.healthCheck(params));
     this.#methods.set('prepare-handoff', async (params) => this.#guardian.prepareHandoff(params));
     this.#methods.set('list', async () => this.#guardian.listChildren());
-    this.#methods.set('shutdown', async () => {
-      const result = await this.#guardian.stop();
+    this.#methods.set('shutdown', async (params, ctx) => {
+      // Send acknowledgement FIRST so the CLI can observe clean shutdown.
+      // The implicit post-handler response would race with socket destruction
+      // because guardian.stop() destroys all open sockets via ipcServer.stop().
+      sendResponse(ctx.socket, { id: ctx.id, result: { acknowledged: true } });
       this.emit('shutdown');
-      return result;
+      await this.#guardian.stop();
     });
   }
 
   async start() {
-    if (this.#server) {
+    if (this.#transport) {
       throw new Error('Guardian IPC server is already started');
     }
 
-    return new Promise((resolve, reject) => {
-      this.#server = net.createServer((socket) => {
-        this.#sockets.add(socket);
-        let buffer = '';
+    this.#transport = createIpcServer({
+      platform: this.#platform,
+      socketPath: this.#socketPath,
+      portPath: this.#portPath,
+      log: this.#log,
+    });
 
+    await this.#transport.listen({
+      onRequest: (socket) => {
+        this.#sockets.add(socket);
+
+        let buffer = '';
         socket.on('data', (chunk) => {
           buffer += chunk.toString();
           let lineEnd;
@@ -86,29 +125,7 @@ export class GuardianIpcServer extends EventEmitter {
           this.#log(`[guardian-ipc] socket error: ${error.message}`);
           this.#sockets.delete(socket);
         });
-      });
-
-      this.#server.on('error', (error) => {
-        if (error.code === 'EADDRINUSE') {
-          reject(new Error(`Guardian IPC socket already in use: ${this.#socketPath}`));
-          return;
-        }
-        reject(error);
-      });
-
-      const previousUmask = process.umask(0o077);
-      this.#server.listen(this.#socketPath, () => {
-        process.umask(previousUmask);
-        if (process.platform !== 'win32') {
-          try {
-            fs.chmodSync(this.#socketPath, DEFAULT_SOCKET_MODE);
-          } catch (chmodError) {
-            this.#log(`[guardian-ipc] failed to chmod socket: ${chmodError.message}`);
-          }
-        }
-        this.#log(`[guardian-ipc] listening on ${this.#socketPath}`);
-        resolve();
-      });
+      },
     });
   }
 
@@ -136,7 +153,7 @@ export class GuardianIpcServer extends EventEmitter {
     }
 
     try {
-      const result = await handler(params ?? {});
+      const result = await handler(params ?? {}, { socket, id });
       sendResponse(socket, { id, result });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -146,7 +163,7 @@ export class GuardianIpcServer extends EventEmitter {
   }
 
   async stop() {
-    if (!this.#server) {
+    if (!this.#transport) {
       return;
     }
 
@@ -160,19 +177,8 @@ export class GuardianIpcServer extends EventEmitter {
     }
     this.#sockets.clear();
 
-    return new Promise((resolve) => {
-      this.#server.close(() => {
-        this.#server = null;
-        resolve();
-      });
-
-      if (process.platform !== 'win32') {
-        try {
-          fs.unlinkSync(this.#socketPath);
-        } catch {
-          // Ignore.
-        }
-      }
-    });
+    const transport = this.#transport;
+    this.#transport = null;
+    await transport.close();
   }
 }

@@ -53,6 +53,22 @@ const createMockChild = () => {
   return child;
 };
 
+// W-C: helper to flip `process.platform` per-test (mirrors the helper
+// in launch-wiring.test.js). Windows-native test environments must
+// also exercise the new code paths even when the actual `process.platform`
+// is Linux, so the test uses this same pattern.
+const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+function setPlatformForTest(platform) {
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+}
+function restorePlatform() {
+  if (originalPlatformDescriptor) {
+    Object.defineProperty(process, 'platform', originalPlatformDescriptor);
+  } else {
+    delete process.platform;
+  }
+}
+
 const createRuntime = (overrides = {}) => {
   const state = {
     openCodeWorkingDirectory: '/tmp/project',
@@ -697,6 +713,148 @@ describe('Guardian integration', () => {
 
       await expect(state.openCodeProcess.close()).resolves.toBeUndefined();
       expect(clientStop).toHaveBeenCalledWith({ incarnation: 'adopt-incarnation-err' });
+    });
+  });
+
+  // W-C: with `process.platform === 'win32'` mocked, the lifecycle's
+  // handoff + bootstrap paths must execute end-to-end through the new
+  // Windows IPC transport. The test mocks live at the `detection.js`
+  // and `guardian-client.js` seams (already in place from the original
+  // test setup), so this exercises the lifecycle wiring rather than the
+  // transport itself. The transport has its own dedicated tests under
+  // `ipc-transport.test.js` and `discovery-file.test.js`.
+  describe('W-C: Windows handoff + bootstrap adoption', () => {
+    afterEach(() => {
+      restorePlatform();
+    });
+
+    it('bootstrapOpenCodeAtStartup adopts guardian-managed child on Windows', async () => {
+      setPlatformForTest('win32');
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ healthy: true }),
+      });
+
+      detectAndAdoptGuardianChild.mockResolvedValue({
+        incarnation: 'win-incarnation-001',
+        pid: 88001,
+        port: 14096,
+        url: 'http://127.0.0.1:14096',
+      });
+
+      const { runtime, state, deps } = createRuntime();
+      await runtime.bootstrapOpenCodeAtStartup();
+
+      expect(detectAndAdoptGuardianChild).toHaveBeenCalled();
+      // The first argument is the default socketPath (undefined here);
+      // the second argument must be a string-or-undefined value passed
+      // through `getWindowsPortPath()` (which returns undefined on Linux
+      // but a real path on Windows when LOCALAPPDATA is set).
+      const args = detectAndAdoptGuardianChild.mock.calls[0];
+      expect(args.length).toBeGreaterThanOrEqual(2);
+
+      expect(state.openCodeProcess).toMatchObject({ pid: 88001, isGuardianManaged: true });
+      expect(typeof state.openCodeProcess.close).toBe('function');
+      expect(deps.setOpenCodePort).toHaveBeenCalledWith(14096);
+      expect(state.isOpenCodeReady).toBe(true);
+      expect(state.currentIncarnation).toBe('win-incarnation-001');
+    });
+
+    it('restartOpenCode handoff branch runs on Windows and calls GuardianClient', async () => {
+      setPlatformForTest('win32');
+
+      const clientConnect = vi.fn().mockResolvedValue(undefined);
+      const clientSpawn = vi.fn().mockResolvedValue({
+        incarnation: 'win-successor-001',
+        pid: 88002,
+        port: 14097,
+      });
+      const clientPrepareHandoff = vi.fn().mockResolvedValue(undefined);
+      const clientStop = vi.fn().mockResolvedValue(undefined);
+      const clientDisconnect = vi.fn();
+
+      GuardianClient.mockImplementation(function () {
+        return {
+          connect: clientConnect,
+          spawn: clientSpawn,
+          stop: clientStop,
+          prepareHandoff: clientPrepareHandoff,
+          list: vi.fn(),
+          disconnect: clientDisconnect,
+        };
+      });
+
+      const { runtime, state, deps } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'win-current-001';
+      state.isOpenCodeReady = true;
+
+      try {
+        await runtime.restartOpenCode();
+      } catch {
+        // Legacy fallback may throw in the test env; we only care about
+        // the guardian branch assertions below.
+      }
+
+      expect(isGuardianRunning).toHaveBeenCalled();
+      // The handoff branch must have run on Windows: GuardianClient
+      // constructed, connected, prepared handoff, spawned successor,
+      // stopped current.
+      expect(clientConnect).toHaveBeenCalled();
+      expect(clientPrepareHandoff).toHaveBeenCalledWith({ incarnation: 'win-current-001' });
+      expect(clientSpawn).toHaveBeenCalled();
+      expect(clientStop).toHaveBeenCalledWith({ incarnation: 'win-current-001' });
+      // M-3: on successful handoff the client is kept alive in the
+      // proxy.
+      expect(clientDisconnect).not.toHaveBeenCalled();
+      expect(deps.setOpenCodePort).toHaveBeenCalledWith(14097);
+      expect(state.openCodeProcess).toMatchObject({ pid: 88002, isGuardianManaged: true });
+    });
+
+    it('restartOpenCode handoff branch passes both socketPath and portPath through', async () => {
+      setPlatformForTest('win32');
+
+      const clientConnect = vi.fn().mockResolvedValue(undefined);
+      const clientSpawn = vi.fn().mockResolvedValue({
+        incarnation: 'win-successor-002',
+        pid: 88003,
+        port: 14098,
+      });
+
+      GuardianClient.mockImplementation(function () {
+        return {
+          connect: clientConnect,
+          spawn: clientSpawn,
+          stop: vi.fn().mockResolvedValue(undefined),
+          prepareHandoff: vi.fn().mockResolvedValue(undefined),
+          list: vi.fn(),
+          disconnect: vi.fn(),
+        };
+      });
+
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'win-current-002';
+      state.isOpenCodeReady = true;
+
+      try {
+        await runtime.restartOpenCode();
+      } catch {
+        // Best-effort.
+      }
+
+      // GuardianClient must have been constructed with both arguments;
+      // the factory inside `guardian-client.js` dispatches per platform.
+      const ctorCalls = GuardianClient.mock.calls;
+      expect(ctorCalls.length).toBeGreaterThan(0);
+      const ctorArgs = ctorCalls[0][0];
+      expect(ctorArgs).toHaveProperty('socketPath');
+      // On Windows the second arg is the portPath; on the test runner
+      // (Linux) it is undefined unless LOCALAPPDATA is set. Either is
+      // acceptable here as long as the property is present.
+      expect('portPath' in ctorArgs).toBe(true);
     });
   });
 });

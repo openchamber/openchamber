@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -1380,5 +1380,127 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
         await server.close();
       }
     });
+  });
+});
+
+// W-C: openchamber guardian CLI cross-platform contract.
+// Previously the guardian subcommands rejected every action on Windows
+// with `TunnelCliError`. After W-C, they return a structured JSON
+// response on every platform. These tests exercise that contract from
+// the CLI surface (not the unit-test layer in launch-wiring.test.js).
+import { _resetCachedGuardianPathsForTest as _resetGuardianPaths } from './lib/commands-guardian.js';
+
+describe('openchamber guardian CLI cross-platform (W-C)', () => {
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+
+  function setPlatformForTest(platform) {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  }
+
+  function restorePlatform() {
+    if (originalPlatformDescriptor) {
+      Object.defineProperty(process, 'platform', originalPlatformDescriptor);
+    } else {
+      delete process.platform;
+    }
+  }
+
+  beforeEach(() => {
+    _resetGuardianPaths();
+  });
+
+  afterEach(() => {
+    restorePlatform();
+    vi.restoreAllMocks();
+  });
+
+  async function withPlatform(platform, fn) {
+    setPlatformForTest(platform);
+    try {
+      return await fn();
+    } finally {
+      restorePlatform();
+      _resetGuardianPaths();
+    }
+  }
+
+  async function captureStdoutJson(fn) {
+    let output = '';
+    const originalWrite = process.stdout.write;
+    process.stdout.write = (chunk, encoding, callback) => {
+      output += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+      if (typeof encoding === 'function') encoding();
+      if (typeof callback === 'function') callback();
+      return true;
+    };
+    try {
+      await fn();
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+    return JSON.parse(output);
+  }
+
+  it('openchamber guardian status returns a structured JSON response on Windows', async () => {
+    await withPlatform('win32', async () => {
+      const det = await import('../server/lib/guardian/detection.js');
+      const isRunningSpy = vi.spyOn(det, 'isGuardianRunning').mockResolvedValue(false);
+      try {
+        const cmd = await import('./lib/commands-guardian.js');
+        const parsed = await captureStdoutJson(() => cmd.guardianCommand({ json: true }, 'status'));
+        expect(parsed).toMatchObject({
+          status: 'ok',
+          action: 'status',
+          running: false,
+          supported: true,
+          platform: 'win32',
+        });
+        expect(typeof parsed.socketPath).toBe('string');
+      } finally {
+        isRunningSpy.mockRestore();
+      }
+    });
+  });
+
+  it('openchamber guardian start on Windows when already running returns a JSON response (no TunnelCliError)', async () => {
+    await withPlatform('win32', async () => {
+      const det = await import('../server/lib/guardian/detection.js');
+      const isRunningSpy = vi.spyOn(det, 'isGuardianRunning').mockResolvedValue(true);
+      try {
+        const cmd = await import('./lib/commands-guardian.js');
+        const parsed = await captureStdoutJson(() => cmd.guardianCommand({ json: true }, 'start'));
+        expect(parsed).toMatchObject({ action: 'start', started: false, alreadyRunning: true });
+      } finally {
+        isRunningSpy.mockRestore();
+      }
+    });
+  });
+
+  it('openchamber guardian start on Linux (existing baseline) still returns a structured response', async () => {
+    await withPlatform('linux', async () => {
+      const det = await import('../server/lib/guardian/detection.js');
+      const isRunningSpy = vi.spyOn(det, 'isGuardianRunning').mockResolvedValue(true);
+      try {
+        const cmd = await import('./lib/commands-guardian.js');
+        const parsed = await captureStdoutJson(() => cmd.guardianCommand({ json: true }, 'start'));
+        expect(parsed).toMatchObject({ action: 'start', started: false, alreadyRunning: true });
+        expect(parsed.platform).toBe('linux');
+      } finally {
+        isRunningSpy.mockRestore();
+      }
+    });
+  });
+
+  it('startGuardianDetached forwards windowsHide: true on every platform', async () => {
+    for (const platform of ['linux', 'win32']) {
+      await withPlatform(platform, async () => {
+        const cmd = await import('./lib/commands-guardian.js');
+        const mockChild = { pid: 60000, unref: vi.fn() };
+        const spawnFn = vi.fn().mockReturnValue(mockChild);
+        await cmd.startGuardianDetached({ spawnFn, logFd: 1 });
+        const [, , opts] = spawnFn.mock.calls[0];
+        expect(opts.windowsHide).toBe(true);
+      });
+    }
   });
 });

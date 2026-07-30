@@ -1,8 +1,11 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { detectAndAdoptGuardianChild, getGuardianSocketPath, isGuardianRunning } from '../guardian/detection.js';
 import { GuardianClient } from '../guardian/guardian-client.js';
+import { resolveManagedOpenCodeHandoffV2Root } from './managed-opencode-handoff-v2/filesystem.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -17,6 +20,37 @@ const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
 const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
 const OPENCODE_HEALTH_PATH = '/global/health';
+
+/**
+ * Windows IPC port-discovery file path.
+ *
+ * W-C closes F-4: the lifecycle handoff + bootstrap paths now run on
+ * Windows through the new `portPath` channel (loopback TCP + per-user
+ * discovery file under `%LOCALAPPDATA%`). Returns `undefined` on
+ * non-Windows so callers can pass it through unconditionally.
+ *
+ * Resolution rules:
+ *   1. If `OPENCHAMBER_DATA_DIR` is an absolute path, reuse it (the
+ *      POSIX default already lives here; Windows operators who set
+ *      this override use the same root for parity).
+ *   2. Otherwise fall back to
+ *      `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port`,
+ *      or `~/AppData/Local/openchamber/...` if `LOCALAPPDATA` is unset
+ *      (rare, but possible in stripped-down environments).
+ */
+const getWindowsPortPath = () => {
+  if (process.platform !== 'win32') return undefined;
+  const envValue = process.env.OPENCHAMBER_DATA_DIR;
+  let rootDir;
+  if (typeof envValue === 'string' && envValue.trim().length > 0 && path.isAbsolute(envValue)) {
+    rootDir = envValue;
+  } else {
+    const localAppData = process.env.LOCALAPPDATA
+      || path.join(os.homedir(), 'AppData', 'Local');
+    rootDir = path.join(localAppData, 'openchamber', 'managed-opencode-handoff-v2');
+  }
+  return path.join(resolveManagedOpenCodeHandoffV2Root(rootDir), 'port');
+};
 
 export const createOpenCodeLifecycleRuntime = (deps) => {
   const {
@@ -680,13 +714,18 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       // Handoff is enabled by default. CLI flag `--no-handoff` (or env
       // OPENCHAMBER_RESTART_HANDOFF=disabled) forces the legacy restart path
       // so callers can opt out without losing the rest of the lifecycle.
+      // W-C: the `process.platform !== 'win32'` gate is removed. Handoff now
+      // runs on Windows through the new portPath (loopback TCP + per-user
+      // discovery file under %LOCALAPPDATA%); the transport factory
+      // dispatches per-platform inside GuardianClient / isGuardianRunning.
       const handoffEnabled = process.env.OPENCHAMBER_RESTART_HANDOFF !== 'disabled';
-      if (handoffEnabled && process.platform !== 'win32') {
+      if (handoffEnabled) {
         try {
           const socketPath = getGuardianSocketPath();
-          const guardianRunning = await isGuardianRunning(socketPath);
+          const portPath = getWindowsPortPath();
+          const guardianRunning = await isGuardianRunning(socketPath, portPath);
           if (guardianRunning) {
-            const client = new GuardianClient({ socketPath, connectTimeoutMs: 5000 });
+            const client = new GuardianClient({ socketPath, portPath, connectTimeoutMs: 5000 });
             try {
               await client.connect();
               const newPort = env.ENV_CONFIGURED_OPENCODE_PORT ?? await resolveManagedOpenCodePort(0, env.ENV_CONFIGURED_OPENCODE_HOSTNAME);
@@ -957,16 +996,26 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       syncFromHmrState();
       if (await isOpenCodeProcessHealthy()) {
         console.log(`[HMR] Reusing existing OpenCode process on port ${state.openCodePort}`);
-      } else if (process.platform !== 'win32') {
-        // Phase 2B/3: Try to detect and adopt guardian-managed child.
-        const guardianChild = await detectAndAdoptGuardianChild();
+      } else {
+        // W-C: previously this branch was gated `else if (process.platform
+        // !== 'win32')` and the Windows path was duplicated below. The
+        // platform gate is removed; `detectAndAdoptGuardianChild()` now
+        // works on both platforms (loopback TCP via `portPath` on
+        // Windows; Unix-domain socket via `socketPath` on Linux). The
+        // post-adoption cascade (skip-start, external probe, fresh
+        // spawn) is the same on every platform.
+        const portPath = getWindowsPortPath();
+        const guardianChild = await detectAndAdoptGuardianChild(undefined, portPath);
         if (guardianChild) {
           console.log(`[lifecycle] Adopted guardian-managed OpenCode on port ${guardianChild.port}`);
           // Construct a fresh GuardianClient for the adopted child so the
           // proxy can later ask the guardian to stop it. The client lazily
           // connects on first use; if the guardian is unreachable when
           // shutdown runs, the port-kill fallback handles it.
-          const adoptionClient = new GuardianClient({ socketPath: getGuardianSocketPath() });
+          const adoptionClient = new GuardianClient({
+            socketPath: getGuardianSocketPath(),
+            portPath,
+          });
           state.openCodeProcess = createGuardianChildProxy({
             pid: guardianChild.pid,
             incarnation: guardianChild.incarnation,
@@ -1020,46 +1069,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           state.openCodeProcess = await startOpenCode();
           syncToHmrState();
         }
-      } else if (env.ENV_SKIP_OPENCODE_START && env.ENV_EFFECTIVE_PORT) {
-        const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
-        console.log(`Using external OpenCode server at ${label} (skip-start mode)`);
-        state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
-        setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-        state.isOpenCodeReady = true;
-        state.isExternalOpenCode = true;
-        state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
-        syncToHmrState();
-      } else if (env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(env.ENV_EFFECTIVE_PORT, env.ENV_CONFIGURED_OPENCODE_HOST?.origin)) {
-        const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
-        console.log(`Auto-detected existing OpenCode server at ${label}`);
-        state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
-        setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-        state.isOpenCodeReady = true;
-        state.isExternalOpenCode = true;
-        state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
-        syncToHmrState();
-      } else {
-        // We never auto-attach to an arbitrary pre-existing OpenCode instance.
-        // Attaching to an external server requires explicit opt-in via env
-        // (OPENCODE_HOST / OPENCODE_PORT / OPENCODE_SKIP_START), handled by the
-        // branches above. Without that opt-in we always start our OWN managed
-        // instance on a freshly-allocated port. A blind probe of the default
-        // port 4096 used to hijack a user's separately-running OpenCode (e.g.
-        // the OpenCode desktop app), coupling our lifecycle to theirs and
-        // breaking init against an unexpected server version/config.
-        if (env.ENV_EFFECTIVE_PORT) {
-          console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
-          setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-        } else {
-          state.openCodePort = null;
-          syncToHmrState();
-        }
-
-        state.lastOpenCodeError = null;
-        state.openCodeProcess = await startOpenCode();
-        syncToHmrState();
       }
       await waitForOpenCodePort();
       try {

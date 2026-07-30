@@ -10,6 +10,7 @@ import { createManagedOpenCodeHandoffV2Protocol } from '../opencode/managed-open
 import { createManagedOpenCodeHandoffV2SecretProvider } from '../opencode/managed-opencode-handoff-v2/secret-provider.js';
 import { ManagedOpenCodeGuardian, createManagedOpenCodeGuardian } from './guardian.js';
 import { GuardianClient, GuardianClientError } from './guardian-client.js';
+import * as windowsProcess from './windows-process.js';
 
 let roots = [];
 
@@ -135,12 +136,22 @@ describe('ManagedOpenCodeGuardian', () => {
       .toThrow('ManagedOpenCodeGuardian requires a protocol');
   });
 
-  it.skipIf(process.platform === 'win32')('rejects on Windows', async () => {
+  // W-C: the `process.platform === 'win32'` rejection in `start()` is
+  // removed. On Windows, `start()` now requires either a `socketPath`
+  // (with a `portPath` shim) or a `portPath` + `username`. The
+  // fixture's createGuardianFixture() does not pass either, so the
+  // constructor allows the build but `start()` fails with a clear
+  // 'Windows portPath is required' message. The opt-out remains
+  // `OPENCHAMBER_RESTART_HANDOFF=disabled` / `--no-handoff`.
+  it.skipIf(process.platform === 'win32')('requires portPath on Windows when starting', async () => {
     const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
     Object.defineProperty(process, 'platform', { value: 'win32' });
-    const { guardian } = await createGuardianFixture();
-    await expect(guardian.start()).rejects.toThrow('Linux/POSIX only');
-    Object.defineProperty(process, 'platform', originalPlatform ?? { value: process.platform });
+    try {
+      const { guardian } = await createGuardianFixture();
+      await expect(guardian.start()).rejects.toThrow(/Windows portPath is required/);
+    } finally {
+      Object.defineProperty(process, 'platform', originalPlatform ?? { value: process.platform });
+    }
   });
 
   it.skipIf(process.platform === 'win32')('spawns managed OpenCode and tracks child', async () => {
@@ -465,5 +476,113 @@ describe('GuardianClient', () => {
     const client = new GuardianClient({ socketPath: '/tmp/test.sock' });
     client.disconnect();
     expect(() => client.connect()).toThrow('disposed');
+  });
+});
+
+describe('W-D: #terminateChild platform branch', () => {
+  // These tests run on every CI (Linux + Windows). On Linux they
+  // flip `process.platform` to `'win32'` and verify the Windows
+  // branch is taken; the flip is restored in `finally` so the
+  // sibling Unix tests below are unaffected. On real Windows CI the
+  // branch is already active, so the test exercises it without
+  // needing a flip.
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+
+  const setPlatformForTest = (value) => {
+    Object.defineProperty(process, 'platform', { value, configurable: true });
+  };
+
+  const restorePlatform = () => {
+    if (originalPlatformDescriptor) {
+      Object.defineProperty(process, 'platform', originalPlatformDescriptor);
+    } else {
+      delete process.platform;
+    }
+  };
+
+  it('routes termination through terminateChildWindows on win32 (mocked platform)', async () => {
+    // Construct everything under the real (Linux) platform so the
+    // secret provider, store, and IPC server initialize normally.
+    // Then flip `process.platform` to 'win32' immediately before
+    // calling `stopChild` so `#terminateChild` observes the mocked
+    // platform and takes the Windows branch. The platform flip is
+    // restored in `finally` so sibling tests are unaffected.
+    const mockChild = createMockChild();
+    const spawnFn = vi.fn().mockReturnValue(mockChild);
+    const { guardian } = await createGuardianFixture({ spawnFn });
+    await guardian.start();
+    const spawnPromise = guardian.spawnManagedOpenCode({
+      port: 4096,
+      hostname: '127.0.0.1',
+      binary: 'opencode',
+      cwd: '/tmp/project',
+      env: {},
+    });
+    setTimeout(() => {
+      mockChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4096\n');
+    }, 10);
+    const { incarnation } = await spawnPromise;
+
+    const terminateSpy = vi.spyOn(windowsProcess, 'terminateChildWindows').mockResolvedValue({ ok: true });
+    try {
+      setPlatformForTest('win32');
+      await guardian.stopChild({ incarnation });
+
+      // The Windows helper was called exactly once, with the
+      // expected child and the STOP_SIGNAL_TIMEOUT_MS (2500ms)
+      // timeout.
+      expect(terminateSpy).toHaveBeenCalledTimes(1);
+      const [calledChild, calledOptions] = terminateSpy.mock.calls[0];
+      expect(calledChild).toBe(mockChild);
+      expect(calledOptions).toEqual({ timeoutMs: 2500 });
+
+      // The Unix path would have called mockChild.kill('SIGTERM').
+      // It must NOT have been called.
+      expect(mockChild.kill).not.toHaveBeenCalled();
+    } finally {
+      terminateSpy.mockRestore();
+      restorePlatform();
+    }
+    await guardian.stop();
+  });
+
+  it('uses the Unix SIGTERM/SIGKILL escalation when platform is non-win32', async () => {
+    // Sanity: on the real (Linux) platform, the Unix branch is
+    // what runs. The spec for W-D is that the Unix path is
+    // byte-for-byte identical to the pre-W-D version. We exercise
+    // the `child.kill('SIGTERM')` and `child.kill('SIGKILL')` path
+    // by using the existing `createMockChild({ ignoreSigTerm: true })`
+    // helper, and we explicitly assert the platform is linux.
+    setPlatformForTest('linux');
+    const terminateSpy = vi.spyOn(windowsProcess, 'terminateChildWindows').mockResolvedValue({ ok: true });
+    try {
+      const mockChild = createMockChild({ ignoreSigTerm: true });
+      const spawnFn = vi.fn().mockReturnValue(mockChild);
+      const { guardian } = await createGuardianFixture({ spawnFn });
+      await guardian.start();
+      const spawnPromise = guardian.spawnManagedOpenCode({
+        port: 4096,
+        hostname: '127.0.0.1',
+        binary: 'opencode',
+        cwd: '/tmp/project',
+        env: {},
+      });
+      setTimeout(() => {
+        mockChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:4096\n');
+      }, 10);
+      const { incarnation } = await spawnPromise;
+      await guardian.stopChild({ incarnation });
+
+      // The Unix path was taken: child.kill('SIGTERM') and
+      // (after timeout) child.kill('SIGKILL') were called.
+      expect(mockChild.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(mockChild.kill).toHaveBeenCalledWith('SIGKILL');
+      // The Windows helper was NOT called.
+      expect(terminateSpy).not.toHaveBeenCalled();
+      await guardian.stop();
+    } finally {
+      terminateSpy.mockRestore();
+      restorePlatform();
+    }
   });
 });

@@ -150,6 +150,8 @@ OpenChamber tool injection.
 
 ## Phase 2B/3 — Guardian Process Lifecycle Integration
 
+> Phase 2D (`Phase 2D — Cross-platform guardian (Windows support via T2)`) extended the IPC helpers to accept `(socketPath, portPath?)` and dispatched per platform via `createIpcServer` / `createIpcDialer`. This Phase 2C section describes the original cross-cutting helpers; the current per-platform behavior is documented in the Phase 2D section.
+
 ### Architecture
 - A Linux/POSIX-only standalone **guardian process** (`openchamber-guardian.js`) outlives the web server and manages OpenCode child processes via the Phase 2A v2 durable protocol.
 - The guardian communicates via a Unix domain socket at `~/.local/state/openchamber/managed-opencode-handoff-v2/guardian.sock` using a JSON line protocol.
@@ -191,6 +193,185 @@ OpenChamber tool injection.
 ### Platform constraints
 - Guardian detection and handoff are skipped entirely on Windows (`process.platform === 'win32'`).
 - Guardian is Linux/POSIX only by design.
+
+## Phase 2C — Launch wiring
+
+### CLI surface
+- New subcommand: `openchamber guardian {status | start | stop | reload}` (default: `status`).
+  Implemented in `packages/web/bin/lib/commands-guardian.js` and dispatched
+  from `packages/web/bin/cli.js` next to `startup`. The subcommand honors
+  `--json` / `--quiet` / non-TTY parity via the same `cli-output.js` helpers
+  the other subcommands use.
+- Two new serve-time flags next to `--handoff` / `--no-handoff`:
+  - `--guardian` (default) — auto-start the guardian when `serve` boots.
+  - `--no-guardian` — skip the autostart; rely on an out-of-band guardian
+    the operator started themselves.
+- New environment variable: `OPENCHAMBER_GUARDIAN_AUTOSTART=disabled`
+  disables autostart without changing CLI flags (mirrors the
+  `OPENCHAMBER_RESTART_HANDOFF` opt-out).
+- New `bin` entry: `openchamber-guardian -> ./bin/openchamber-guardian.js`
+  in `packages/web/package.json`, so Linux packaging and
+  `openchamber guardian` autostart use the same entrypoint.
+
+### Autostart in `serve` (foreground + daemon)
+- `commands-serve.js` imports `maybeAutoStartGuardian` from
+  `commands-guardian.js` and calls it in both code paths, before the
+  foreground server is imported inline and before the daemon-mode
+  `spawn(runtimeBin, serverArgs, …)`.
+- `maybeAutoStartGuardian` is a no-op when any of these are true:
+  - `process.platform === 'win32'`
+  - `options.guardian === false` (i.e. `--no-guardian`)
+  - `options.handoff === false` (the user has already opted out of the
+    entire guardian branch)
+  - `process.env.OPENCHAMBER_GUARDIAN_AUTOSTART === 'disabled'`
+- When the gate passes, the helper probes the guardian's Unix-domain
+  socket via `isGuardianRunning(getGuardianSocketPath())`. If a guardian
+  is already running, it logs `guardian already running (pid N)` and
+  continues. Otherwise it spawns `bin/openchamber-guardian.js` with
+  `detached: true` + `stdio: ['ignore', logFd, logFd]` and `unref()`s the
+  child, so the CLI can exit cleanly while the guardian outlives it.
+- The new package bin entry, the runtime path
+  `resolveManagedOpenCodeHandoffV2Root(rootDir)/guardian.sock`, and the
+  IPC `GuardianClient` are reused — no protocol or schema change.
+
+### Reload semantics
+- `openchamber guardian reload` sends `SIGHUP` to the running guardian's pid
+  (resolved via the singleton PID file) and reports success once the
+  signal is delivered. The guardian entrypoint handles `SIGHUP` by
+  stopping and restarting its internal timer pair (no config-file
+  parsing yet).
+- Config reload is **not** wired in Phase 2C. The subcommand reports
+  `configReloaded: false` in `--json` and prints an info line in
+  human/quiet mode. Adding config reload is a future task.
+- If the guardian is not running, the subcommand throws a
+  `TunnelCliError` with `EXIT_CODE.GENERAL_ERROR` (the previous
+  `client.health()` probe was removed because it silently reported
+  success without performing any reload).
+
+### Graceful shutdown sequencing
+- In the foreground path, the existing
+  `shutdownForegroundServer(signal)` already calls
+  `controller.stop({ exitProcess: false })` and then `cleanupFiles()`. A
+  new best-effort step runs *between* those two, guarded by a module-level
+  `guardianAutoStarted` flag:
+  - `if (isGuardianAutoStarted()) await stopGuardianViaIpc({ timeoutMs: 3000 })`
+  - `stopGuardianViaIpc` issues a `shutdown` RPC over the existing
+    `GuardianClient` protocol (one-shot, idempotent) and then waits for
+    the PID file to disappear (or up to 3 s) before returning.
+  - Errors are swallowed (matches the precedent set by `cleanupFiles()`).
+- We only stop the guardian when we started it. A pre-existing guardian
+  the operator launched out-of-band is left alone.
+- The daemon path does not stop the guardian on CLI exit: the CLI is
+  already gone by the time the detached server reports ready, and the
+  guardian and the daemon server are independent processes. Operators
+  stop each with `openchamber stop` and `openchamber guardian stop`
+  respectively.
+
+### Windows behavior
+- `commands-guardian.js` calls `assertPlatformSupported(options)` at the
+  top of every action and throws a `TunnelCliError` with
+  `EXIT_CODE.USAGE_ERROR` and a friendly message that points at
+  `--no-handoff`. `maybeAutoStartGuardian` short-circuits on Windows with
+  an `info` notice ("guardian disabled on Windows") so `serve` keeps
+  working on Windows without any code branching at the call site.
+- `bin/openchamber-guardian.js` keeps the same hard exit on Windows but
+  its stderr now points operators at the CLI-layer opt-out.
+
+### Smoke test
+- `scripts/guardian-smoke-test.sh` is a Linux-only end-to-end runtime
+  check. It spawns the real `openchamber-guardian.js` binary against a
+  temp data dir, probes the Unix socket, sends a `list` RPC (expects
+  `[]`), then sends a `shutdown` RPC and waits for the process to exit.
+  The script is short-circuited to a no-op on non-Linux via
+  `case "$(uname -s)" in Linux*) ;; *) echo "skip: not Linux"; exit 0 ;;
+  esac`, so macOS / Windows CI is unaffected.
+
+
+## Phase 2D — Cross-platform guardian (Windows support via T2)
+
+Phase 2C ships a Linux/POSIX-only standalone guardian. Phase 2D lands the same guardian on Windows by swapping the transport while leaving the JSON-line protocol, v2 record layer, secret provider, store, and lifecycle integration untouched. The transport is the only Windows-vs-Unix fork.
+
+### Architecture summary
+- Linux/POSIX path: `net.createServer(path)` over a Unix-domain socket at `mode 0600`. The guardian writes the socket path; clients dial it directly.
+- Windows path: `net.createServer({ host: '127.0.0.1', port: 0 })` over loopback TCP. The guardian picks an ephemeral port, writes `127.0.0.1:<port>\n` to a discovery file at `<data-dir>/port`, and applies an ACL to that file before publishing. Clients read the discovery file and dial `127.0.0.1:<port>`.
+- Default Windows discovery-file path: `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port` (resolved from `OPENCHAMBER_DATA_DIR` when the operator overrides the data dir). The directory itself lives at `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\` and is created with `ensurePrivateDirectoryWindows`.
+- The factory that selects between the two paths is `createIpcServer` / `createIpcDialer` in `packages/web/server/lib/guardian/ipc-transport.js`. It is the single point that knows about platform-specific paths; everything above it is transport-agnostic.
+
+### Trust boundary — Linux vs Windows
+- Linux trust boundary (enforced by the OS): "any local process running under the same UID can connect." Enforced by `0600` mode on the Unix-domain socket, `0700` mode on the v2 root, `0600` mode on the v2 master secret, and the atomic `O_EXCL` PID singleton file.
+- Windows trust boundary (enforced by the ACL we apply): "any local process running as the same Windows user can connect." Enforced by the per-user ACL on the discovery file (`/inheritance:r /grant:r <username>:F`) plus loopback-only TCP (`127.0.0.1`; the server never binds `0.0.0.0` or any operator-supplied hostname).
+- The Windows guarantee is strictly weaker than the Linux one. Windows has no per-process UID; the OS primitive "same Windows user" is the closest analog, and it does not isolate processes within a logon session the way Unix UIDs isolate processes within a host. Any local process owned by the same Windows user — including any future code that account runs — can dial `127.0.0.1:<port>` and speak the JSON-line protocol. The port file is the only attribute gating which user account can find the port; it does not gate which of that account's processes may connect.
+- This is the same trade-off `vscode-test`, Electron, and Playwright make on Windows: they bind loopback and rely on the same-Windows-user attribute as the cross-process isolation primitive. We do the same. There is no portable way to get Unix-socket-grade isolation on Windows without a kernel-mode component.
+
+### Filesystem changes
+- The v2 root on Windows uses `ensurePrivateDirectoryWindows` (in `packages/web/server/lib/opencode/managed-opencode-handoff-v2/filesystem.js`). The dispatcher `ensurePrivateDirectory({ platform })` selects the Windows variant on `win32`; the POSIX variant is unchanged.
+- `ensurePrivateDirectoryWindows` creates the directory via `fs.mkdirSync({ recursive: true })` (no POSIX mode bits — Windows ignores them) and then calls `applyDirectoryAcl` from `packages/web/server/lib/guardian/windows-acl.js` to apply the ACL `/grant:r <username>:(OI)(CI)F`. The `(OI)(CI)` flags make the grant inheritable so any file the guardian later writes inside the directory — `master-secret.bin`, `records.sqlite3`, `port`, `guardian.pid` — inherits the same owner-only grant.
+- The secret provider, store, protocol, and lifecycle code are unchanged. They are platform-agnostic and use the v2 root path through `resolveManagedOpenCodeHandoffV2Root`.
+- The discovery file is created at `<v2-root>/port` by `writeDiscoveryFileAtomic` (in `packages/web/server/lib/guardian/discovery-file.js`). See "Discovery file lifecycle" below.
+
+### Process termination
+- Linux: SIGTERM → SIGKILL escalation via `process.kill(-pid, …)` (process group kill on the spawned child group). Unchanged from Phase 2C.
+- Windows: `taskkill.exe /F /PID <pid>` (no `/T`). We only target the OpenCode child PID we spawned — never the entire tree — because `/T` would risk killing our own guardian process group. See `packages/web/server/lib/guardian/windows-process.js` (`terminateChildWindows` / `runTaskkillForce`). On `EPERM`, `ESRCH`, or `taskkill` exit code 128 ("process not found"), we treat the child as already-gone and return success.
+
+### CLI surface (no new flags)
+- The Windows path reuses the existing CLI surface. No new subcommands, no new flags, no new environment variables.
+- `openchamber serve` — autostarts the guardian on both platforms via `maybeAutoStartGuardian` in `packages/web/bin/lib/commands-guardian.js`. The autostart spawn passes `windowsHide: true` so the detached guardian does not flash a console window.
+- `openchamber guardian {status|start|stop|reload}` — works on both platforms. Help text now reads "Cross-platform (Linux/POSIX + Windows via T2 TCP+ACL)." instead of "Linux/POSIX only."
+- `--guardian` / `--no-guardian` — same semantics on both platforms. `--no-guardian` skips autostart on Windows too.
+- `--handoff` / `--no-handoff` — same semantics. **Important Windows note:** before T2, `--no-handoff` was redundant on Windows because the handoff branch was unconditionally gated on `process.platform === 'win32'`. With T2 that platform gate is gone, so `--no-handoff` is now the only way to opt Windows users out of the guardian branch and fall back to the legacy lifecycle path.
+- `OPENCHAMBER_RESTART_HANDOFF=disabled` — applies to both platforms. Still the recommended opt-out for users who want legacy restart behavior on Windows.
+- `OPENCHAMBER_GUARDIAN_AUTOSTART=disabled` — applies to both platforms. Same semantics as `--no-guardian` but settable without touching CLI args.
+
+### Operator runbook — `icacls` failures
+The guardian fails closed at startup if it cannot guarantee the per-user ACL on the discovery file. The two common failure modes:
+
+- **`icacls` not on PATH.** Rare on Windows desktop SKUs; possible on stripped Server Core / Nano images. The guardian exits 1 with `Could not locate icacls binary; refusing to start guardian to preserve trust boundary` (the actual error string thrown by `windows-acl.js`; the per-user ACL on the discovery file is what would be lost if we proceeded, so the guardian refuses rather than bind loopback without an ACL on the port file). Fix: install the `Server-Media-Foundation` Windows feature (which ships `icacls.exe`), or run on a full Windows desktop SKU.
+- **`icacls` returns non-zero.** The guardian exits 1 with `icacls failed: <stderr>` (the exact `icacls` stderr text is captured). Read the stderr; the common causes are:
+  - the parent directory rejects the inheritance reset (a permissions issue with `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\`);
+  - a file-system reparse point in the parent path blocks the inheritance propagation;
+  - a domain-ACL mismatch (the current user's username is `DOMAIN\user` but the grant target was resolved without the domain prefix).
+- **Hard rule:** when the guardian cannot apply the discovery-file ACL, it refuses to start. This is fail-closed by design — better than exposing the IPC port to all local users. The CLI autostart in `commands-serve.js` treats the guardian-start failure as a warning and continues with the legacy lifecycle path, so a single machine with a broken `icacls` is not a hard outage; it just falls back to non-handoff restarts.
+
+### Discovery file lifecycle
+- Created on `bin/openchamber-guardian.js` startup via `writeDiscoveryFileAtomic(portPath, port, { username })` (in `packages/web/server/lib/guardian/discovery-file.js`). The sequence is:
+  1. `O_EXCL` create `<portPath>.tmp` with restrictive inheritance (the temp filename is not symlink-able);
+  2. `writeFileSync` the `127.0.0.1:<port>\n` body;
+  3. `fsync` the temp file;
+  4. `applyDiscoveryFileAcl(<portPath>.tmp, { username })` — the ACL is applied to the **temp** file, so a half-published file at the final name is never observable;
+  5. `renameSync(<portPath>.tmp, <portPath>)` — atomic on Windows via `MoveFileEx`.
+- Removed on clean shutdown by `removeDiscoveryFile(portPath)` as the last step in `GuardianIpcServer#stop` (close listener → remove file).
+- A stale `port` file after a crash is harmless: clients get a TCP connection refused when they try to dial. The `GuardianClient.connect` error path already treats any TCP failure as "guardian not running", so the next lifecycle call falls through to the legacy restart path without manual cleanup.
+
+### Downgrade story (closes F-10)
+If the operator downgrades from a T2 build to a legacy Linux-only build without uninstalling the Windows guardian state, the orphan files are harmless:
+
+- `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port` — the discovery file. The legacy entrypoint has no factory knowledge and ignores `port`. Nothing in the legacy code path reads it.
+- `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\guardian.pid` — the PID file. The legacy code path on Windows has no `O_EXCL` PID singleton; it just runs.
+- `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\records.sqlite3` — the v2 SQLite store. The legacy code path does not open it.
+
+If the operator wants to fully remove the orphans (idempotent, optional):
+
+```bat
+rmdir /S /Q "%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2"
+```
+
+or per-file:
+
+```bat
+rm "%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port"
+```
+
+No automatic migration is required. Documented in the CHANGELOG entry under `[Unreleased]`.
+
+### Cross-references
+- Transport factory: `packages/web/server/lib/guardian/ipc-transport.js` — `createIpcServer` / `createIpcDialer` / `defaultIpcPaths`.
+- Discovery-file helpers: `packages/web/server/lib/guardian/discovery-file.js` — `writeDiscoveryFileAtomic`, `readDiscoveryFile`, `removeDiscoveryFile`.
+- ACL helpers: `packages/web/server/lib/guardian/windows-acl.js` — `applyDiscoveryFileAcl`, `applyDirectoryAcl`, `resolveCurrentUsername`.
+- v2 root dispatcher: `packages/web/server/lib/opencode/managed-opencode-handoff-v2/filesystem.js` — `ensurePrivateDirectory` (POSIX vs `ensurePrivateDirectoryWindows`).
+- Process termination: `packages/web/server/lib/guardian/windows-process.js` — `terminateChildWindows`, `runTaskkillForce`.
+- Lifecycle integration: `packages/web/server/lib/opencode/lifecycle.js` — `restartOpenCode` (handoff branch) and `bootstrapOpenCodeAtStartup` (adoption branch) both route through the factory.
+- CLI wiring: `packages/web/bin/lib/commands-guardian.js` (`guardianCommand`, `maybeAutoStartGuardian`, `startGuardianDetached`), `packages/web/bin/lib/commands-serve.js` (autostart call site), `packages/web/bin/openchamber-guardian.js` (entrypoint).
+- Smoke tests: `scripts/guardian-smoke-test.sh` (Linux) and `scripts/guardian-smoke-test.ps1` (Windows). Both spawn the real `openchamber-guardian.js` binary against a temp data dir, list children (expect `[]`), send `shutdown`, and assert clean process exit.
 
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.

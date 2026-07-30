@@ -115,6 +115,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     lastAssistant: false,
     withStatus: false,
     handoff: true,
+    guardian: true,
   };
 
   const removedFlagErrors = [];
@@ -434,6 +435,12 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'handoff':
         options.handoff = true;
         break;
+      case 'no-guardian':
+        options.guardian = false;
+        break;
+      case 'guardian':
+        options.guardian = true;
+        break;
       case 'role': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
@@ -543,6 +550,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   const subcommand = command === 'tunnel' ? (positional[1] || 'help') : null;
   const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
   const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
+  const guardianAction = command === 'guardian' ? (positional[1] || 'status') : null;
   const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
   const sessionAction = command === 'session' ? (positional[1] || 'help') : null;
   const controlAction = command === 'control' ? (positional[1] || 'help') : null;
@@ -560,6 +568,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     subcommand,
     tunnelAction,
     startupAction,
+    guardianAction,
     scheduleAction,
     sessionAction,
     controlAction,
@@ -589,6 +598,7 @@ COMMANDS:
   control        Show OpenChamber control-plane commands
   tunnel         Tunnel lifecycle commands
   startup        Manage launch at system startup
+  guardian       Manage the OpenChamber guardian process
   logs           Tail OpenChamber logs
   connect-url    Generate URL/QR for connecting another client
   update         Check for and install updates
@@ -606,6 +616,8 @@ OPTIONS:
   --no-daemon             Alias for --foreground
   --handoff               Allow guardian handoff restart of managed OpenCode (default)
   --no-handoff            Skip guardian handoff; always use legacy restart
+  --guardian              Auto-start the guardian process during 'serve' (default)
+  --no-guardian           Skip guardian autostart; rely on an out-of-band guardian
   -h, --help              Show help
   -v, --version           Show version
 
@@ -619,6 +631,7 @@ ENVIRONMENT:
   OPENCODE_SKIP_START          Skip starting OpenCode, use external server
   OPENCHAMBER_OPENCODE_HOSTNAME  Bind hostname for managed OpenCode server (default: 127.0.0.1)
   OPENCHAMBER_RESTART_HANDOFF   Set to "disabled" to skip guardian handoff restart (default: enabled)
+  OPENCHAMBER_GUARDIAN_AUTOSTART  Set to "disabled" to skip 'serve'-time guardian autostart (default: enabled)
 
 EXAMPLES:
   openchamber                    # Start in daemon mode on default port 3000 (or free port)
@@ -629,6 +642,7 @@ EXAMPLES:
   openchamber connect-url --server https://openchamber.example.com
   openchamber control           # Show control-plane commands for agents/scripts
   openchamber startup enable     # Start OpenChamber at user login
+  openchamber guardian status    # Show guardian running state
   openchamber tunnel help        # Show tunnel lifecycle help
   openchamber logs               # Follow logs for latest running instance
 `);
