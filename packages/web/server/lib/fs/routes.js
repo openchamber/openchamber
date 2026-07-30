@@ -1,6 +1,7 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
@@ -129,6 +130,160 @@ const FILE_MIME_MAP = Object.freeze({
 });
 
 const MAX_SERVE_BYTES = 100 * 1024 * 1024;
+const OFFICE_PREVIEW_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp']);
+const OFFICE_PREVIEW_ENV_KEYS = ['LANG', 'LC_ALL', 'LC_CTYPE', 'SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT'];
+
+const readPositiveEnvNumber = (name, fallback) => {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+};
+
+const createOfficePreviewError = (message, statusCode) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const createOfficePreviewEnvironment = ({ profileDir, tempRoot, buildAugmentedPath }) => {
+  const env = {};
+  for (const key of OFFICE_PREVIEW_ENV_KEYS) {
+    if (process.env[key]) env[key] = process.env[key];
+  }
+  env.PATH = buildAugmentedPath ? buildAugmentedPath(process.env.PATH || '') : process.env.PATH;
+  env.HOME = profileDir;
+  env.USERPROFILE = profileDir;
+  env.TMPDIR = tempRoot;
+  env.TEMP = tempRoot;
+  env.TMP = tempRoot;
+  return env;
+};
+
+const runOfficeConversion = async ({
+  sourcePath,
+  sourceStats,
+  fsPromises,
+  path,
+  os,
+  spawn,
+  buildAugmentedPath,
+  timeoutMs,
+  maxInputBytes,
+  maxOutputBytes,
+}) => {
+  const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'openchamber-office-preview-'));
+  const inputDir = path.join(tempRoot, 'input');
+  const outputDir = path.join(tempRoot, 'output');
+  const profileDir = path.join(tempRoot, 'profile');
+
+  try {
+    await Promise.all([
+      fsPromises.mkdir(inputDir, { recursive: true }),
+      fsPromises.mkdir(outputDir, { recursive: true }),
+      fsPromises.mkdir(profileDir, { recursive: true }),
+    ]);
+
+    const snapshotPath = path.join(inputDir, path.basename(sourcePath));
+    await fsPromises.copyFile(sourcePath, snapshotPath);
+    const snapshotStats = await fsPromises.stat(snapshotPath);
+    if (!snapshotStats.isFile() || snapshotStats.size > maxInputBytes) {
+      throw createOfficePreviewError('Office document is too large to preview', 413);
+    }
+
+    const libreOfficeBinary = process.env.OPENCHAMBER_LIBREOFFICE_BINARY || 'libreoffice';
+    const args = [
+      '--headless',
+      '--nologo',
+      '--nodefault',
+      '--nofirststartwizard',
+      `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+      '--convert-to',
+      'pdf',
+      '--outdir',
+      outputDir,
+      snapshotPath,
+    ];
+
+    await new Promise((resolve, reject) => {
+      let stderr = '';
+      let timedOut = false;
+      let settled = false;
+      let timeout = null;
+      const finish = (callback) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        callback();
+      };
+      const child = spawn(libreOfficeBinary, args, {
+        cwd: tempRoot,
+        env: createOfficePreviewEnvironment({ profileDir, tempRoot, buildAugmentedPath }),
+        shell: false,
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+
+      child.stderr?.on('data', (chunk) => {
+        if (stderr.length < 64 * 1024) stderr += chunk.toString();
+      });
+      child.on('error', (error) => {
+        const statusCode = error?.code === 'ENOENT' ? 503 : 422;
+        finish(() => reject(createOfficePreviewError(
+          error?.code === 'ENOENT' ? 'Office preview converter is unavailable' : 'Office preview conversion failed',
+          statusCode,
+        )));
+      });
+      child.on('close', (code) => {
+        if (timedOut) {
+          finish(() => reject(createOfficePreviewError('Office preview conversion timed out', 504)));
+          return;
+        }
+        if (code !== 0) {
+          const detail = stderr.trim();
+          finish(() => reject(createOfficePreviewError(
+            detail ? `Office preview conversion failed: ${detail}` : 'Office preview conversion failed',
+            422,
+          )));
+          return;
+        }
+        finish(resolve);
+      });
+
+      timeout = setTimeout(() => {
+        timedOut = true;
+        try {
+          child.kill('SIGKILL');
+        } catch {
+        }
+      }, timeoutMs);
+    });
+
+    const outputNames = await fsPromises.readdir(outputDir);
+    const pdfNames = outputNames.filter((name) => path.extname(name).toLowerCase() === '.pdf');
+    if (pdfNames.length !== 1) {
+      throw createOfficePreviewError('Office preview converter did not produce a PDF', 422);
+    }
+
+    const outputPath = path.join(outputDir, pdfNames[0]);
+    const outputStats = await fsPromises.stat(outputPath);
+    if (!outputStats.isFile() || outputStats.size <= 0 || outputStats.size > maxOutputBytes) {
+      throw createOfficePreviewError('Office preview PDF is invalid or too large', 422);
+    }
+
+    const pdf = await fsPromises.readFile(outputPath);
+    if (!Buffer.isBuffer(pdf) || pdf.subarray(0, 5).toString('ascii') !== '%PDF-') {
+      throw createOfficePreviewError('Office preview converter returned an invalid PDF', 422);
+    }
+
+    const finalSourceStats = await fsPromises.stat(sourcePath);
+    if (finalSourceStats.size !== sourceStats.size || finalSourceStats.mtimeMs !== sourceStats.mtimeMs) {
+      throw createOfficePreviewError('Source file changed during preview conversion', 409);
+    }
+
+    return pdf;
+  } finally {
+    await fsPromises.rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+};
 
 // Only deterministic, side-effect-free git plumbing path queries are cacheable.
 // Anything outside this allowlist (including any non-git command) runs normally
@@ -399,6 +554,12 @@ export const registerFsRoutes = (app, dependencies) => {
   const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
   const gitReadCache = new Map();
   const inFlightGitReadCache = new Map();
+  const officePreviewInFlight = new Map();
+  let activeOfficePreviewConversions = 0;
+  const officePreviewTimeoutMs = readPositiveEnvNumber('OPENCHAMBER_OFFICE_PREVIEW_TIMEOUT_MS', 60 * 1000);
+  const officePreviewMaxBytes = readPositiveEnvNumber('OPENCHAMBER_OFFICE_PREVIEW_MAX_BYTES', 50 * 1024 * 1024);
+  const officePreviewMaxOutputBytes = readPositiveEnvNumber('OPENCHAMBER_OFFICE_PREVIEW_MAX_OUTPUT_BYTES', 100 * 1024 * 1024);
+  const officePreviewMaxConcurrency = readPositiveEnvNumber('OPENCHAMBER_OFFICE_PREVIEW_MAX_CONCURRENCY', 1);
 
   const pruneExecJobs = () => {
     const now = Date.now();
@@ -908,6 +1069,98 @@ export const registerFsRoutes = (app, dependencies) => {
       }
       console.error('Failed to read raw file:', error);
       return res.status(500).json({ error: (error && error.message) || 'Failed to read file' });
+    }
+  });
+
+  app.get('/api/fs/office-preview', async (req, res) => {
+    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    if (!filePath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    try {
+      const resolved = await resolveReadPathFromContext({
+        req,
+        targetPath: filePath,
+        scope: 'raw',
+        resolveProjectDirectory,
+        path,
+        os,
+        fsPromises,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+
+      const extension = path.extname(canonicalPath).toLowerCase();
+      if (!OFFICE_PREVIEW_EXTENSIONS.has(extension)) {
+        return res.status(415).json({ error: 'File type is not supported for Office preview' });
+      }
+
+      const sourceStats = await fsPromises.stat(canonicalPath);
+      if (!sourceStats.isFile()) {
+        return res.status(400).json({ error: 'Specified path is not a file' });
+      }
+      if (sourceStats.size > officePreviewMaxBytes) {
+        return res.status(413).json({ error: 'Office document is too large to preview' });
+      }
+
+      const previewKey = `${canonicalPath}\0${sourceStats.size}\0${sourceStats.mtimeMs}`;
+      let previewPromise = officePreviewInFlight.get(previewKey);
+      if (!previewPromise) {
+        if (activeOfficePreviewConversions >= officePreviewMaxConcurrency) {
+          res.setHeader('Retry-After', '1');
+          return res.status(429).json({ error: 'Office preview converter is busy' });
+        }
+        activeOfficePreviewConversions += 1;
+        previewPromise = runOfficeConversion({
+          sourcePath: canonicalPath,
+          sourceStats,
+          fsPromises,
+          path,
+          os,
+          spawn,
+          buildAugmentedPath,
+          timeoutMs: officePreviewTimeoutMs,
+          maxInputBytes: officePreviewMaxBytes,
+          maxOutputBytes: officePreviewMaxOutputBytes,
+        }).finally(() => {
+          activeOfficePreviewConversions -= 1;
+          officePreviewInFlight.delete(previewKey);
+        });
+        officePreviewInFlight.set(previewKey, previewPromise);
+      }
+
+      const pdf = await previewPromise;
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      if (resolved.granted) {
+        res.setHeader('Referrer-Policy', 'no-referrer');
+      }
+      return res.type('application/pdf').send(pdf);
+    } catch (error) {
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      if (err && typeof err === 'object' && err.code === 'EACCES') {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+      const statusCode = Number.isInteger(err?.statusCode) ? err.statusCode : 500;
+      if (statusCode >= 500) {
+        console.error('Failed to generate Office preview:', error);
+      }
+      return res.status(statusCode).json({ error: err?.message || 'Failed to generate Office preview' });
     }
   });
 

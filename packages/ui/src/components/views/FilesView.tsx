@@ -44,7 +44,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/utils';
-import { getLanguageFromExtension, getImageMimeType, isDrawioFile, isImageFile, isPdfFile } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, getImageMimeType, isDrawioFile, isImageFile, isOfficeDocumentFile, isPdfFile } from '@/lib/toolHelpers';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
@@ -304,8 +304,26 @@ const isFileMissingError = (error: unknown): boolean => {
 };
 
 const MAX_VIEW_CHARS = 200_000;
+const OFFICE_PREVIEW_BUSY_RETRY_LIMIT = 120;
+const OFFICE_PREVIEW_BUSY_RETRY_MS = 1_000;
 const FILE_EDITOR_AUTO_SAVE_KEY = 'openchamber:files:auto-save-enabled';
 type FileLineEnding = '\n' | '\r\n';
+
+const waitForAbortableTimeout = (delayMs: number, signal: AbortSignal): Promise<void> => new Promise((resolve, reject) => {
+  const handleAbort = () => {
+    window.clearTimeout(timeout);
+    reject(new DOMException('Aborted', 'AbortError'));
+  };
+  const timeout = window.setTimeout(() => {
+    signal.removeEventListener('abort', handleAbort);
+    resolve();
+  }, delayMs);
+  if (signal.aborted) {
+    handleAbort();
+    return;
+  }
+  signal.addEventListener('abort', handleAbort, { once: true });
+});
 
 const detectFileLineEnding = (content: string): FileLineEnding => {
   let crlf = 0;
@@ -906,6 +924,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
   const desktopImageBlobUrlRef = React.useRef<string>('');
+  const [officePreviewSrc, setOfficePreviewSrc] = React.useState('');
+  const [officePreviewLoading, setOfficePreviewLoading] = React.useState(false);
+  const [officePreviewUnavailable, setOfficePreviewUnavailable] = React.useState(false);
+  const officePreviewBlobUrlRef = React.useRef('');
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
 
@@ -978,6 +1000,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       toast.error(t('sidebarFilesTree.toast.revealFailed'));
     });
   }, [files, t]);
+
+  const handleDownloadFile = React.useCallback((targetPath: string) => {
+    const downloadFile = files.downloadFile;
+    if (!downloadFile) return;
+    void downloadFile(targetPath).catch((error) => {
+      console.error('Download failed:', error);
+      toast.error(t('sidebarFilesTree.toast.operationFailed'));
+    });
+  }, [files.downloadFile, t]);
 
   const handleOpenInApp = React.useCallback(async (app: { id: string; appName: string }) => {
     if (!selectedFile?.path) {
@@ -1792,6 +1823,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     const selectedIsImage = isImageFile(node.path);
     const isSvg = node.path.toLowerCase().endsWith('.svg');
+    const selectedIsOfficeDocument = isOfficeDocumentFile(node.path);
     const selectedIsPdf = isPdfFile(node.path);
 
     if (isMobile) {
@@ -1815,7 +1847,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
-    if (selectedIsPdf) {
+    if (selectedIsPdf || selectedIsOfficeDocument) {
       setFileContent('');
       setDraftContent('');
       setLoadedFilePath(node.path);
@@ -2303,6 +2335,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const isSelectedImage = Boolean(selectedFile?.path && isImageFile(selectedFile.path));
   const isSelectedSvg = Boolean(selectedFile?.path && selectedFile.path.toLowerCase().endsWith('.svg'));
+  const isSelectedOfficeDocument = Boolean(selectedFile?.path && isOfficeDocumentFile(selectedFile.path));
   const isSelectedPdf = Boolean(selectedFile?.path && isPdfFile(selectedFile.path));
   const pendingNavigationTargetPath = React.useMemo(
     () => normalizePath(pendingFileNavigation?.path ?? ''),
@@ -2316,6 +2349,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       && !fileLoading
       && !fileError
       && !isSelectedImage
+      && !isSelectedOfficeDocument
       && !isSelectedPdf,
   );
 
@@ -2323,14 +2357,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return getDisplayPath(root, selectedFilePath);
   }, [selectedFilePath, root]);
 
-  const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && !isSelectedPdf && fileContent.length > 0);
+  const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && !isSelectedOfficeDocument && !isSelectedPdf && fileContent.length > 0);
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
-  const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedImage && !isSelectedPdf && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
+  const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedImage && !isSelectedOfficeDocument && !isSelectedPdf && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
   const isMarkdown = Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
   const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isHtml = Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
   const isDrawio = Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
-  const isTextFile = Boolean(selectedFile && !isSelectedImage && !isSelectedPdf);
+  const isTextFile = Boolean(selectedFile && !isSelectedImage && !isSelectedOfficeDocument && !isSelectedPdf);
   const canUseShikiFileView = isTextFile && !isMarkdown && !isDrawio && !(isHtml && htmlViewMode === 'preview');
   const isEditingFile = (isMarkdown && mdViewMode === 'edit')
     || (isHtml && htmlViewMode === 'edit')
@@ -2674,7 +2708,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
-    if (fileError || isSelectedImage || isSelectedPdf) {
+    if (fileError || isSelectedImage || isSelectedOfficeDocument || isSelectedPdf) {
       setPendingFileNavigation(null);
       pendingNavigationCycleRef.current = { key: '', attempts: 0 };
       return;
@@ -2745,6 +2779,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     fileError,
     fileLoading,
     isSelectedImage,
+    isSelectedOfficeDocument,
     isSelectedPdf,
     loadedFilePath,
     handleSelectFile,
@@ -2780,9 +2815,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     // Best-effort focus: preview renderers (markdown/html preview, drawio,
-    // JSON tree, images, PDFs) never mount a CodeMirror editor, so the request
-    // must clear regardless — otherwise it lingers and replays on every
-    // dependency change.
+    // JSON tree, images, PDFs, and Office documents) never mount a CodeMirror
+    // editor, so the request must clear regardless — otherwise it lingers and
+    // replays on every dependency change.
     if (!fileError && !isSelectedImage && !isSelectedPdf && canEdit && textViewMode === 'edit') {
       editorViewRef.current?.focus();
     }
@@ -3001,6 +3036,122 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       />
     </div>
   ), [pdfSrc, pdfPreviewNonce]);
+
+  const renderOfficeDocumentPlaceholder = React.useCallback((file: FileNode) => (
+    <div className="flex h-full items-center justify-center p-6">
+      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+        <FileTypeIcon filePath={file.path} extension={file.extension} className="size-12" />
+        <div className="max-w-full break-words typography-ui-label font-medium text-foreground">
+          {file.name}
+        </div>
+        <p className="typography-ui text-muted-foreground">
+          {t('filesView.documentPreview.unavailable')}
+        </p>
+        {files.downloadFile ? (
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => handleDownloadFile(file.path)}>
+            <Icon name="download" className="size-4" />
+            {t('filesView.editor.saveOriginal')}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  ), [files.downloadFile, handleDownloadFile, t]);
+
+  const renderOfficeDocumentPreview = React.useCallback((file: FileNode) => {
+    if (!officePreviewSrc || officePreviewUnavailable) {
+      return renderOfficeDocumentPlaceholder(file);
+    }
+    return (
+      <div className="relative h-full overflow-hidden bg-[var(--surface-background)]">
+        <iframe
+          src={officePreviewSrc}
+          className="h-full w-full border-0"
+          title={file.name}
+        />
+        {files.downloadFile ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="absolute bottom-4 right-4 z-10 gap-1.5 bg-background/95 shadow-sm"
+            onClick={() => handleDownloadFile(file.path)}
+          >
+            <Icon name="download" className="size-4" />
+            {t('filesView.editor.saveOriginal')}
+          </Button>
+        ) : null}
+      </div>
+    );
+  }, [files.downloadFile, handleDownloadFile, officePreviewSrc, officePreviewUnavailable, renderOfficeDocumentPlaceholder, t]);
+
+  React.useEffect(() => {
+    const revokePreviewUrl = () => {
+      if (officePreviewBlobUrlRef.current) {
+        URL.revokeObjectURL(officePreviewBlobUrlRef.current);
+        officePreviewBlobUrlRef.current = '';
+      }
+    };
+
+    if (!selectedFile?.path || !isSelectedOfficeDocument) {
+      revokePreviewUrl();
+      setOfficePreviewSrc('');
+      setOfficePreviewLoading(false);
+      setOfficePreviewUnavailable(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+    revokePreviewUrl();
+    setOfficePreviewSrc('');
+    setOfficePreviewLoading(true);
+    setOfficePreviewUnavailable(false);
+
+    const fetchOfficePreview = async (): Promise<Response> => {
+      for (let attempt = 0; ; attempt += 1) {
+        const response = await runtimeFetch('/api/fs/office-preview', {
+          query: {
+            path: selectedFile.path,
+            allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
+            outsideFileGrant: selectedFileReadOptions.outsideFileGrant,
+          },
+          headers: root ? { 'x-opencode-directory': root } : undefined,
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (response.status !== 429 || attempt >= OFFICE_PREVIEW_BUSY_RETRY_LIMIT - 1) {
+          return response;
+        }
+        const retryAfterSeconds = Number(response.headers.get('retry-after'));
+        const retryDelayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+          ? retryAfterSeconds * 1_000
+          : OFFICE_PREVIEW_BUSY_RETRY_MS;
+        await waitForAbortableTimeout(retryDelayMs, controller.signal);
+      }
+    };
+
+    void fetchOfficePreview().then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Office preview failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      if (cancelled) return;
+      const blobUrl = URL.createObjectURL(blob);
+      officePreviewBlobUrlRef.current = blobUrl;
+      setOfficePreviewSrc(blobUrl);
+    }).catch((error) => {
+      if (cancelled || error?.name === 'AbortError') return;
+      console.warn('Office preview unavailable:', error);
+      setOfficePreviewUnavailable(true);
+    }).finally(() => {
+      if (!cancelled) setOfficePreviewLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      revokePreviewUrl();
+    };
+  }, [isSelectedOfficeDocument, root, selectedFile?.path, selectedFileReadOptions.allowOutsideWorkspace, selectedFileReadOptions.outsideFileGrant]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -3245,7 +3396,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {!isSelectedImage && !isSelectedPdf && (
+        {!isSelectedImage && !isSelectedOfficeDocument && !isSelectedPdf && (
           <>
             {withTooltip(wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap'),
               <Button
@@ -3493,13 +3644,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => {
-                const fn = files.downloadFile;
-                if (fn) void fn(selectedFile.path).catch((error) => {
-                  console.error('Download failed:', error);
-                  toast.error(t('sidebarFilesTree.toast.operationFailed'));
-                });
-              }}
+              onClick={() => handleDownloadFile(selectedFile.path)}
               className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
               title={t('filesView.editor.saveFile')}
               aria-label={t('filesView.editor.saveFile')}
@@ -3804,7 +3949,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
           {!selectedFile ? (
             <div className="p-3 typography-ui text-muted-foreground">{t('filesView.editor.pickFileFromTree')}</div>
-          ) : (fileLoading || isImageAssetAuthLoading || isPdfAssetAuthLoading) ? (
+          ) : (fileLoading || officePreviewLoading || isImageAssetAuthLoading || isPdfAssetAuthLoading) ? (
             suppressFileLoadingIndicator
               ? <div className="p-3" />
               : (
@@ -3826,6 +3971,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             </div>
           ) : isSelectedPdf ? (
             renderPdfPreview(selectedFile)
+          ) : isSelectedOfficeDocument ? (
+            renderOfficeDocumentPreview(selectedFile)
           ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
             <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
               <DiagramEditor
@@ -4175,7 +4322,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           {renderFloatingFileControls({ exitFullscreenOnly: true })}
         </div>
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
-          {(fileLoading || isImageAssetAuthLoading || isPdfAssetAuthLoading) ? (
+          {(fileLoading || officePreviewLoading || isImageAssetAuthLoading || isPdfAssetAuthLoading) ? (
             suppressFileLoadingIndicator
               ? <div className="p-4" />
               : (
@@ -4197,6 +4344,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             </div>
           ) : isSelectedPdf ? (
             renderPdfPreview(selectedFile)
+          ) : isSelectedOfficeDocument ? (
+            renderOfficeDocumentPreview(selectedFile)
           ) : isMarkdown && getMdViewMode() === 'preview' ? (
             <div className="h-full overflow-auto p-4">
               {fileContent.length > 500 * 1024 && (

@@ -6,6 +6,7 @@ import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isOfficeDocumentFile } from '@/lib/toolHelpers';
 
 export type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable';
 
@@ -50,6 +51,10 @@ const readFileContent = async (files: FilesAPI, path: string): Promise<string> =
 };
 
 export const validateContextFileOpen = async (files: FilesAPI, path: string): Promise<ContextFileOpenValidationResult> => {
+  if (isOfficeDocumentFile(path)) {
+    return { ok: true };
+  }
+
   try {
     const content = await readFileContent(files, path);
     const lineCount = countLinesWithLimit(content, MAX_OPEN_FILE_LINES);
