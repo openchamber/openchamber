@@ -77,8 +77,17 @@ if (-not (Test-Path -PathType Leaf $GuardianEntry)) {
     Fail "guardian entry not found at $GuardianEntry"
 }
 
-if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
-    Write-Host 'skip: node.exe not available'
+# We spawn the guardian entrypoint via the Bun runtime, not the
+# system node.exe. Reason: `bun install` prebuilds native modules
+# (notably better-sqlite3) against Bun's ABI; the system node.exe on
+# windows-latest cannot load those bindings
+# ("Could not locate the bindings file. Tried: ... build/better_sqlite3.node"),
+# which crashes the guardian immediately. Bun is installed by the CI
+# workflow's setup-bun step and is available here. For developers
+# running the script outside CI (e.g. on a Linux dev machine), Bun is
+# also the natural choice: `bun --version` to confirm.
+if (-not (Get-Command bun.exe -ErrorAction SilentlyContinue)) {
+    Write-Host 'skip: bun.exe not available'
     exit 0
 }
 
@@ -138,7 +147,7 @@ try {
         $arguments += @('--port-path', $ResolvedPortPath)
     }
 
-    $proc = Start-Process -FilePath 'node.exe' `
+    $proc = Start-Process -FilePath 'bun.exe' `
         -ArgumentList $arguments `
         -RedirectStandardOutput $LogFile `
         -RedirectStandardError $LogErrFile `
