@@ -350,7 +350,6 @@
   },
   "trustedDependencies": [
     "electron",
-    "node-pty",
   ],
   "patchedDependencies": {
     "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
