@@ -97,7 +97,7 @@ if (-not $DataDir) {
     # workspace tree keeps them inside the repo so the upload step
     # in `.github/workflows/guardian-windows-baseline.yml` can
     # capture them as an artifact on failure.
-    $tempBase = [System.IO.Path]::GetFullPath(Join-Path $ScriptDir '.smoke-logs')
+    $tempBase = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir '.smoke-logs'))
     $tempLeaf = [System.Guid]::NewGuid().ToString('N')
     $DataDir = Join-Path $tempBase "openchamber-guardian-smoke-$tempLeaf"
 } else {
