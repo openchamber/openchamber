@@ -78,17 +78,12 @@ if (-not (Test-Path -PathType Leaf $GuardianEntry)) {
     Fail "guardian entry not found at $GuardianEntry"
 }
 
-# We spawn the guardian entrypoint via the Bun runtime, not the
-# system node.exe. Reason: `bun install` prebuilds native modules
-# (notably better-sqlite3) against Bun's ABI; the system node.exe on
-# windows-latest cannot load those bindings
-# ("Could not locate the bindings file. Tried: ... build/better_sqlite3.node"),
-# which crashes the guardian immediately. Bun is installed by the CI
-# workflow's setup-bun step and is available here. For developers
-# running the script outside CI (e.g. on a Linux dev machine), Bun is
-# also the natural choice: `bun --version` to confirm.
-if (-not (Get-Command bun.exe -ErrorAction SilentlyContinue)) {
-    Write-Host 'skip: bun.exe not available'
+# The guardian uses better-sqlite3, which is a Node native module and is not
+# supported by Bun. The workflow rebuilds the hoisted package with npm before
+# this script runs, so use the same Node runtime for the guardian and smoke
+# client. This also keeps local execution aligned with the CI ABI.
+if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
+    Write-Host 'skip: node.exe not available'
     exit 0
 }
 
@@ -148,7 +143,7 @@ try {
         $arguments += @('--port-path', $ResolvedPortPath)
     }
 
-    $proc = Start-Process -FilePath 'bun.exe' `
+    $proc = Start-Process -FilePath 'node.exe' `
         -ArgumentList $arguments `
         -RedirectStandardOutput $LogFile `
         -RedirectStandardError $LogErrFile `
@@ -191,9 +186,9 @@ $pidMarker = Join-Path (Join-Path $DataDir 'managed-opencode-handoff-v2') 'guard
 
     # The cross-platform client performs the authenticated `list`, `spawn`,
     # `health`, `stop`, and `shutdown` requests over the real Windows TCP
-    # transport. It deliberately runs under Bun so the child fixture uses the
-    # same runtime/native-module ABI as the guardian on windows-latest.
-    & bun.exe $smokeClient `
+    # transport. It deliberately runs under Node so the fixture uses the same
+    # runtime/native-module ABI as the guardian on windows-latest.
+    & node.exe $smokeClient `
         '--port-path' $ResolvedPortPath `
         '--secret-path' $secretPath `
         '--fixture' $smokeFixture `

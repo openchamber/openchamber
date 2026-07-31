@@ -69,7 +69,7 @@ describe('scripts/guardian-smoke-test.ps1 well-formedness', () => {
   it('delegates the real IPC round-trip to the cross-platform smoke client', () => {
     const src = readScript();
     expect(src).toMatch(/guardian-smoke-client\.js/);
-    expect(src).toMatch(/bun\.exe/);
+    expect(src).toMatch(/node\.exe/);
     expect(existsSync(clientScriptPath)).toBe(true);
   });
 

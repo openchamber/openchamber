@@ -49,28 +49,24 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Rebuild better-sqlite3 native binding for Bun
-        # The existing package install uses the system Node runtime for its
-        # lifecycle script on Windows. Re-run better-sqlite3's own install
-        # script explicitly under Bun so its native binding matches the Bun
-        # runtime used by the guardian smoke. This does not change the lockfile
-        # or package manifests.
+      - name: Rebuild better-sqlite3 native binding for Node
+        # Bun's runtime cannot load better-sqlite3. Resolve the hoisted
+        # workspace package from the web package, then run its install script
+        # under Node/npm so the smoke process and the test runner use the same
+        # supported native-module ABI. This does not change the lockfile or
+        # package manifests.
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $nativePackage = Join-Path $env:GITHUB_WORKSPACE 'node_modules\better-sqlite3'
-          if (-not (Test-Path (Join-Path $nativePackage 'package.json'))) {
-            throw "better-sqlite3 package is missing at $nativePackage after bun install"
+          $packageJson = (node --eval "process.stdout.write(require.resolve('better-sqlite3/package.json'))").Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($packageJson)) {
+            throw 'could not resolve better-sqlite3/package.json from packages/web after bun install'
           }
+          $nativePackage = Split-Path -Parent $packageJson
 
-          bun run --bun --no-install --cwd $nativePackage install
+          npm rebuild --prefix $nativePackage --foreground-scripts
           if ($LASTEXITCODE -ne 0) {
-            throw "better-sqlite3 native binding rebuild failed (bun exit code $LASTEXITCODE)"
-          }
-
-          bun -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close(); console.log('OK: better-sqlite3 native binding loaded under Bun');"
-          if ($LASTEXITCODE -ne 0) {
-            throw 'better-sqlite3 native binding failed to load under Bun; refusing to run the guardian gate'
+            throw "better-sqlite3 native binding rebuild failed (npm exit code $LASTEXITCODE)"
           }
 
           node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close(); console.log('OK: better-sqlite3 native binding loaded under Node');"

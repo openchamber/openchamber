@@ -32,6 +32,15 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Rebuild better-sqlite3 native binding for Node
+        working-directory: packages/web
+        run: |
+          set -euo pipefail
+          package_json="$(node -e "process.stdout.write(require.resolve('better-sqlite3/package.json'))")"
+          native_package="$(dirname "$package_json")"
+          npm rebuild --prefix "$native_package" --foreground-scripts
+          node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close(); console.log('OK: better-sqlite3 native binding loaded under Node');"
+
       - name: Run real guardian lifecycle smoke test
         run: bash scripts/guardian-smoke-test.sh
 
