@@ -10,7 +10,7 @@ import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { pickActivePanelId } from './activePanelRouting';
-import { drainPending, dropPendingById } from './inlineCommentSelection';
+import { broadcastRemoval, drainPending } from './inlineCommentSelection';
 
 const t = vscode.l10n.t;
 
@@ -410,18 +410,18 @@ export class SessionEditorPanelProvider {
    * letting it disappear quietly.
    */
   public removeLineComment(draftId: string): void {
-    for (const state of this._panels.values()) {
-      // Drop it from the hold first. A comment still waiting on a booting
-      // webview is not in any store yet, so the message below would find
-      // nothing to remove and the draft would land after the user dropped it.
-      dropPendingById(state.pendingLineComments, draftId);
+    const targets = [...this._panels.values()].map((state) => ({
+      pendingLineComments: state.pendingLineComments,
+      notify: () => {
+        void state.panel.webview.postMessage({
+          type: 'command',
+          command: 'removeLineComment',
+          payload: { draftId },
+        });
+      },
+    }));
 
-      void state.panel.webview.postMessage({
-        type: 'command',
-        command: 'removeLineComment',
-        payload: { draftId },
-      });
-    }
+    broadcastRemoval(targets, draftId);
   }
 
   public createSessionWithPromptInActivePanel(prompt: string): boolean {

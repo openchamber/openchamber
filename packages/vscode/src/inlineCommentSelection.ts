@@ -105,6 +105,30 @@ export function dropPendingById<T extends { draftId?: string }>(pending: T[], dr
     return true;
 }
 
+/** A chat surface that may be holding, or showing, a comment draft. */
+export interface RemovalTarget {
+    /** Comments still waiting on this surface's webview to boot. */
+    pendingLineComments: Array<{ draftId?: string }>;
+    /** Asks this surface's webview to drop the draft from its store. */
+    notify: () => void;
+}
+
+/**
+ * Tells every surface to drop a comment, wherever it currently lives.
+ *
+ * Each webview owns its own draft store, so the one holding the draft cannot be
+ * known from here; every surface is told and the rest no-op. The hold is cleared
+ * before notifying, because a comment that has not been delivered yet is in no
+ * store for the notification to find, and would otherwise arrive afterwards as a
+ * chip the user had already dropped.
+ */
+export function broadcastRemoval(targets: Iterable<RemovalTarget>, draftId: string): void {
+    for (const target of targets) {
+        dropPendingById(target.pendingLineComments, draftId);
+        target.notify();
+    }
+}
+
 /**
  * Whether a draft snapshot is authoritative for a thread.
  *
