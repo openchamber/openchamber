@@ -516,6 +516,12 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: No active editor'));
         return;
       }
+      // Same rule the gutter `+` follows, so the two entry points cannot
+      // disagree about where a comment is allowed.
+      if (!inlineCommentThreads.canCommentOn(editor.document.uri)) {
+        vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: File is outside the workspace'));
+        return;
+      }
       inlineCommentThreads.openThread(editor.document.uri, editor.selection);
     })
   );
