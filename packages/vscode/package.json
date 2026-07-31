@@ -37,7 +37,8 @@
   "activationEvents": [
     "onCommand:openchamber.openSidebar",
     "onCommand:openchamber.attachExplorerToChat",
-    "onView:openchamber.chatView"
+    "onView:openchamber.chatView",
+    "onStartupFinished"
   ],
   "contributes": {
     "viewsContainers": {
@@ -118,7 +119,18 @@
       {
         "command": "openchamber.addLineComment",
         "category": "OpenChamber",
-        "title": "Add Comment"
+        "title": "%command.addLineComment.title%"
+      },
+      {
+        "command": "openchamber.submitLineComment",
+        "category": "OpenChamber",
+        "title": "%command.submitLineComment.title%"
+      },
+      {
+        "command": "openchamber.removeLineComment",
+        "category": "OpenChamber",
+        "title": "%command.removeLineComment.title%",
+        "icon": "$(close)"
       },
       {
         "command": "openchamber.explain",
@@ -155,6 +167,30 @@
       }
     ],
     "menus": {
+      "comments/commentThread/context": [
+        {
+          "command": "openchamber.submitLineComment",
+          "group": "inline",
+          "when": "commentController == openchamber.inlineComments"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "openchamber.removeLineComment",
+          "group": "navigation",
+          "when": "commentController == openchamber.inlineComments && commentThread == openchamberAttached"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "openchamber.submitLineComment",
+          "when": "false"
+        },
+        {
+          "command": "openchamber.removeLineComment",
+          "when": "false"
+        }
+      ],
       "editor/context": [
         {
           "submenu": "openchamber.submenu",
