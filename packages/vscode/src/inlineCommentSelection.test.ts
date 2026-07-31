@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canCommentOnDocument, drainPending, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
+import { canCommentOnDocument, drainPending, dropPendingById, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
 
 const selection = (startLine: number, startChar: number, endLine: number, endChar: number) => ({
     start: { line: startLine, character: startChar },
@@ -101,6 +101,28 @@ describe('drainPending', () => {
 
     test('an empty hold drains to nothing', () => {
         assert.deepEqual(drainPending([]), []);
+    });
+});
+
+describe('dropPendingById', () => {
+    const held = () => [{ draftId: 'a' }, { draftId: 'b' }, { draftId: 'c' }];
+
+    test('a comment removed before it was ever delivered is dropped from the hold', () => {
+        // Removing the thread while the panel is still booting used to leave the
+        // payload queued, so the draft landed after the user had dropped it.
+        const pending = held();
+        assert.equal(dropPendingById(pending, 'b'), true);
+        assert.deepEqual(pending.map((p) => p.draftId), ['a', 'c']);
+    });
+
+    test('an id that is not held leaves the queue untouched', () => {
+        const pending = held();
+        assert.equal(dropPendingById(pending, 'zzz'), false);
+        assert.deepEqual(pending.map((p) => p.draftId), ['a', 'b', 'c']);
+    });
+
+    test('an empty hold reports nothing dropped', () => {
+        assert.equal(dropPendingById([], 'a'), false);
     });
 });
 
