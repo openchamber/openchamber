@@ -337,6 +337,7 @@ export const useSkillsStore = create<SkillsStore>()(
           try {
             const skillConfig: Record<string, unknown> = {};
 
+            if (config.name !== undefined && config.name !== name) skillConfig.name = config.name;
             if (config.description !== undefined) skillConfig.description = config.description;
             if (config.instructions !== undefined) skillConfig.instructions = config.instructions;
             if (config.supportingFiles !== undefined) skillConfig.supportingFiles = config.supportingFiles;

@@ -51,6 +51,7 @@ The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can r
 
 - `bridge-config-runtime.ts`
   - Config and skills message handlers (`api:config/*`).
+  - Name-only skill updates move the existing directory while preserving its files and markdown formatting.
   - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
 
 - `bridge-settings-runtime.ts`

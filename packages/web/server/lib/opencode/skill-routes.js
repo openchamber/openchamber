@@ -614,7 +614,11 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.log(`[Server] Updating skill: ${skillName}`);
       console.log('[Server] Working directory:', directory);
 
-      updateSkill(skillName, updates, directory, updates?.targetPath);
+      const selectedSkill = mergeDiscoveredSkills(
+        await fetchOpenCodeDiscoveredSkills(directory),
+        discoverSkills(directory),
+      ).find((skill) => skill.name === skillName);
+      updateSkill(skillName, updates, directory, selectedSkill?.path);
       await refreshOpenCodeAfterConfigChange('skill update');
 
       res.json({

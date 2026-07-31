@@ -2690,6 +2690,31 @@ const validateSkillName = (skillName: string): void => {
   }
 };
 
+const replaceSkillNameScalar = (content: string, currentName: string, nextName: string): string => {
+  const frontmatterMatch = content.match(/^---(\r?\n)([\s\S]*?)(\r?\n)---(?:\r?\n|$)/);
+  if (!frontmatterMatch) {
+    throw new Error(`Skill "${currentName}" has invalid frontmatter`);
+  }
+
+  const yamlDocument = yaml.parseDocument(frontmatterMatch[2], { keepSourceTokens: true });
+  const nameNode = yamlDocument.get('name', true);
+  if (yamlDocument.errors.length > 0 || !yaml.isScalar(nameNode) || nameNode.value !== currentName || !nameNode.range) {
+    throw new Error(`Skill "${currentName}" has invalid name frontmatter`);
+  }
+
+  const [start, end] = nameNode.range;
+  const currentToken = frontmatterMatch[2].slice(start, end);
+  let nextToken = nextName;
+  if (currentToken.startsWith('"')) {
+    nextToken = JSON.stringify(nextName);
+  } else if (currentToken.startsWith("'")) {
+    nextToken = `'${nextName}'`;
+  }
+
+  const frontmatterOffset = 3 + frontmatterMatch[1].length;
+  return content.slice(0, frontmatterOffset + start) + nextToken + content.slice(frontmatterOffset + end);
+};
+
 export const createSkill = (skillName: string, config: Record<string, unknown>, workingDirectory?: string, scope?: SkillScope): void => {
   ensureSkillDirs();
   validateSkillName(skillName);
@@ -2749,19 +2774,91 @@ export const createSkill = (skillName: string, config: Record<string, unknown>, 
   }
 };
 
-export const updateSkill = (skillName: string, updates: Record<string, unknown>, workingDirectory?: string): void => {
-  const existing = getSkillScope(skillName, workingDirectory);
+export const updateSkill = (
+  skillName: string,
+  updates: Record<string, unknown>,
+  workingDirectory?: string,
+  selectedPath?: string,
+): void => {
+  const resolvedSelectedPath = typeof selectedPath === 'string' && selectedPath.trim()
+    ? path.resolve(selectedPath.trim())
+    : null;
+  const existing = resolvedSelectedPath
+    ? { scope: null, path: resolvedSelectedPath, source: null }
+    : getSkillScope(skillName, workingDirectory);
   if (!existing.path) {
     throw new Error(`Skill "${skillName}" not found`);
+  }
+  const requestedPath = typeof updates.targetPath === 'string' && updates.targetPath.trim()
+    ? path.resolve(updates.targetPath.trim())
+    : null;
+  if (requestedPath && path.resolve(existing.path) !== requestedPath) {
+    throw new Error(`Skill "${skillName}" target does not match ${requestedPath}`);
+  }
+  if (path.basename(existing.path) !== 'SKILL.md') {
+    throw new Error(`Skill "${skillName}" target must be a SKILL.md file`);
   }
   
   const mdPath = existing.path;
   const mdDir = path.dirname(mdPath);
   const mdData = parseMdFile(mdPath);
+  const frontmatterName = typeof mdData.frontmatter.name === 'string' ? mdData.frontmatter.name : skillName;
+  if (frontmatterName !== skillName) {
+    throw new Error(`Skill "${skillName}" does not match ${mdPath}`);
+  }
+
+  const requestedName = updates.name;
+  if (requestedName !== undefined) {
+    if (typeof requestedName !== 'string') {
+      throw new Error(`Invalid skill name "${String(requestedName)}"`);
+    }
+    validateSkillName(requestedName);
+  }
+
+  if (typeof requestedName === 'string' && requestedName !== skillName) {
+    const additionalUpdates = Object.keys(updates).filter(
+      (field) => !['name', 'scope', 'source', 'targetPath'].includes(field),
+    );
+    if (additionalUpdates.length > 0) {
+      throw new Error('Skill rename cannot be combined with other updates');
+    }
+    if (path.basename(mdDir) !== skillName) {
+      throw new Error(`Skill "${skillName}" must be stored in its own directory to be renamed`);
+    }
+
+    const existingTarget = getSkillScope(requestedName, workingDirectory);
+    if (existingTarget.path) {
+      throw new Error(`Skill ${requestedName} already exists at ${existingTarget.path}`);
+    }
+
+    const renamedDir = path.join(path.dirname(mdDir), requestedName);
+    if (fs.existsSync(renamedDir)) {
+      throw new Error(`Skill directory already exists at ${renamedDir}`);
+    }
+
+    const originalContent = fs.readFileSync(mdPath, 'utf8');
+    const renamedContent = replaceSkillNameScalar(originalContent, skillName, requestedName);
+    try {
+      fs.writeFileSync(mdPath, renamedContent, 'utf8');
+      fs.renameSync(mdDir, renamedDir);
+    } catch (error) {
+      try {
+        fs.writeFileSync(mdPath, originalContent, 'utf8');
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          `Failed to rename skill "${skillName}" and restore its content`,
+        );
+      }
+      throw error;
+    }
+    return;
+  }
+
   let mdModified = false;
   
   for (const [field, value] of Object.entries(updates || {})) {
-    if (field === 'scope') continue;
+    if (field === 'scope' || field === 'source' || field === 'targetPath') continue;
     
     if (field === 'instructions') {
       const normalizedValue = typeof value === 'string' ? value : value == null ? '' : String(value);

@@ -685,8 +685,6 @@ export const settingsDict = {
   "settings.skills.sidebar.toast.skillDeleted": "Навичку \"{name}\" успішно видалено",
   "settings.skills.sidebar.toast.deleteSkillFailed": "Не вдалося видалити навичку",
   "settings.skills.sidebar.toast.duplicateLoadFailed": "Не вдалося завантажити деталі навичок для дублювання",
-  "settings.skills.sidebar.toast.renameLoadFailed": "Не вдалося завантажити деталі навичок",
-  "settings.skills.sidebar.toast.removeOldAfterRenameFailed": "Не вдалося видалити стару навичку після перейменування",
   "settings.skills.sidebar.toast.renameFailed": "Не вдалося перейменувати навичку",
   "settings.skills.sidebar.deleteDialog.title": "Видалити навичку",
   "settings.skills.sidebar.deleteDialog.description": "Ви впевнені, що бажаєте видалити навичку «{name}»?",
