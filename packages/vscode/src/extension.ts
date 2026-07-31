@@ -495,9 +495,10 @@ export async function activate(context: vscode.ExtensionContext) {
       return true;
     },
     removeDraft: (draftId) => {
-      if (sessionEditorProvider?.removeLineCommentFromActivePanel(draftId)) {
-        return;
-      }
+      // Every surface is told, because each webview holds its own draft store
+      // and only the one actually holding the draft can drop it. Removal is
+      // idempotent everywhere else.
+      sessionEditorProvider?.removeLineComment(draftId);
       chatViewProvider?.removeLineComment(draftId);
     },
     avatar: vscode.Uri.joinPath(context.extensionUri, 'assets', 'app-icon.png'),

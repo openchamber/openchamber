@@ -28,11 +28,13 @@ type SessionPanelState = {
   panel: vscode.WebviewPanel;
   sseStreams: Map<string, AbortController>;
   /**
-   * A comment that opened this panel, held until the webview proves it is
-   * listening. Posting into a panel whose script has not booted drops the
-   * message outright, and the user already saw the comment accepted.
+   * A comment held until the webview proves it is listening. Posting into a
+   * panel whose script has not booted drops the message outright, and the user
+   * already saw the comment accepted.
    */
   pendingLineComment?: LineCommentPayload;
+  /** Set by the panel's first inbound message, the only proof its script runs. */
+  webviewReady?: boolean;
 };
 
 type ActiveEditorFilePayload = {
@@ -165,7 +167,8 @@ export class SessionEditorPanelProvider {
 
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
       // Any inbound message proves the webview script is running, which is the
-      // only readiness signal this panel has. Flush the comment that opened it.
+      // only readiness signal this panel has. Flush whatever was held for it.
+      state.webviewReady = true;
       if (state.pendingLineComment) {
         const pending = state.pendingLineComment;
         state.pendingLineComment = undefined;
@@ -333,6 +336,15 @@ export class SessionEditorPanelProvider {
     }
 
     entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, true);
+
+    // An existing panel can still be booting (reopened from a restored window),
+    // and a post into a webview whose script has not run is dropped outright.
+    // Hold it on the same path a freshly opened panel uses.
+    if (!entry.webviewReady) {
+      entry.pendingLineComment = payload;
+      return true;
+    }
+
     void entry.panel.webview.postMessage({
       type: 'command',
       command: 'addLineComment',
@@ -376,22 +388,23 @@ export class SessionEditorPanelProvider {
   /**
    * Drops a draft the user removed from its editor thread.
    *
-   * Unlike adding, this does not reveal the panel: the user is looking at the
+   * Sent to every panel, not just the active one: each webview owns its own
+   * draft store, and the draft may have landed in a tab the user has since
+   * moved away from. Targeting only the active panel made removal a silent
+   * no-op in that case, leaving the chip attached after its thread was gone.
+   *
+   * Unlike adding, this does not reveal a panel: the user is looking at the
    * code, and stealing focus to show a chip disappearing would be worse than
    * letting it disappear quietly.
    */
-  public removeLineCommentFromActivePanel(draftId: string): boolean {
-    const entry = this._getActivePanelEntry();
-    if (!entry) {
-      return false;
+  public removeLineComment(draftId: string): void {
+    for (const state of this._panels.values()) {
+      void state.panel.webview.postMessage({
+        type: 'command',
+        command: 'removeLineComment',
+        payload: { draftId },
+      });
     }
-
-    void entry.panel.webview.postMessage({
-      type: 'command',
-      command: 'removeLineComment',
-      payload: { draftId },
-    });
-    return true;
   }
 
   public createSessionWithPromptInActivePanel(prompt: string): boolean {

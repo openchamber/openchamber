@@ -79,10 +79,15 @@ export class InlineCommentThreads implements vscode.Disposable {
             INLINE_COMMENT_CONTROLLER_ID,
             'OpenChamber',
         );
-        // Any line of any file can take a comment; the gutter `+` follows from this.
+        // Any line of a workspace file can take a comment; the gutter `+`
+        // follows from this. Files outside the workspace are excluded: the
+        // comment is filed against a workspace-relative path, so one written
+        // elsewhere would name a file the composer cannot resolve.
         this.controller.commentingRangeProvider = {
             provideCommentingRanges: (document) => {
                 if (document.uri.scheme === 'comment') return [];
+                const filePath = resolveCommentFilePath(document.uri.fsPath, document.uri.query);
+                if (!vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath))) return [];
                 return [new vscode.Range(0, 0, Math.max(document.lineCount - 1, 0), 0)];
             },
         };
