@@ -1121,6 +1121,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
+  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
   const projectExpandedParentsRef = React.useRef<Set<string>>(new Set());
   const recentExpandedParentsRef = React.useRef<Set<string>>(new Set());
@@ -1516,7 +1517,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const headerActionButtonClass = mobileVariant ? mobileHeaderActionButtonClass : desktopHeaderActionButtonClass;
   const headerActionIconClass = 'h-4.5 w-4.5';
   const stuckProjectHeaders = useStickyProjectHeaders({
-    enabled: isVisible,
+    enabled: isVisible && stickyZoneHeaders,
     isDesktopShellRuntime,
     projectSections,
     projectHeaderSentinelRefs,
@@ -1861,6 +1862,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         hideDirectoryControls={hideDirectoryControls}
         projectRepoStatus={projectRepoStatus}
         isDesktopShellRuntime={isDesktopShellRuntime}
+        stickyZoneHeaders={stickyZoneHeaders}
         stuckProjectHeaders={stuckProjectHeaders}
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}

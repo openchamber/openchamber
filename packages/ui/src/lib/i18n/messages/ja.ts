@@ -1243,6 +1243,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.showControlsAria': 'エディターコントロールを表示',
   'filesView.editor.controlsTitle': 'エディターコントロール',
   'filesView.editor.pickFileFromTree': 'ツリーからファイルを選択してください。',
+  'filesView.editor.cannotPreviewBinary': 'バイナリファイルはプレビューできません',
+  'filesView.editor.binaryFileDescription': 'このファイルはバイナリのため、OpenChamberでは編集できません。別のアプリで開くにはダウンロードしてください。',
   'filesView.state.loading': '読み込み中...',
   'filesView.state.openingFileAtChange': '変更箇所のファイルを開いています...',
   'filesView.tree.search.placeholder': 'ファイルを検索...',

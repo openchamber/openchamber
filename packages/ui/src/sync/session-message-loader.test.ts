@@ -140,11 +140,26 @@ describe("SessionMessageLoader", () => {
 
     await loader.ensure(target, { force: true })
     expect(loader.getSnapshot(target).status).toBe("error")
+    expect((loader.getSnapshot(target).error as Error & { status?: number }).status).toBe(400)
     expect(store.getState().message[target.sessionID]?.[0]?.id).toBe("cached")
 
     fail = false
     await loader.ensure(target, { force: true })
     expect(loader.getSnapshot(target).status).toBe("ready")
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("propagates a zero response status on SDK errors", async () => {
+    const { childStores, loader } = createLoader(async () => ({
+      error: { message: "network rejected" },
+      response: { status: 0 },
+    }))
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    await loader.ensure(target, { force: true })
+
+    expect((loader.getSnapshot(target).error as Error & { status?: number }).status).toBe(0)
     loader.dispose()
     childStores.disposeAll()
   })

@@ -22,6 +22,14 @@ const descriptorsEqual = (a: RelayRuntimeDescriptor, b: RelayRuntimeDescriptor):
   JSON.stringify(a.hostEncPubJwk) === JSON.stringify(b.hostEncPubJwk);
 
 export const getActiveRelayTunnel = (): RelayTunnelClient | null => activeTunnel;
+export const getActiveRelayDescriptor = (): Omit<RelayRuntimeDescriptor, 'grant'> | null => {
+  if (!activeTunnel || !activeDescriptor) return null;
+  return {
+    relayUrl: activeDescriptor.relayUrl,
+    serverId: activeDescriptor.serverId,
+    hostEncPubJwk: { ...activeDescriptor.hostEncPubJwk },
+  };
+};
 
 export const isRelayModeActive = (): boolean => activeTunnel !== null;
 

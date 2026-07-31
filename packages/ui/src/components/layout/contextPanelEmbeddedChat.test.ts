@@ -3,9 +3,12 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
 import {
   buildEmbeddedSessionChatURL,
+  EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
+  EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
   getOrCreateEmbeddedSessionChatURL,
   getEmbeddedSessionChatOriginSessionId,
   isEmbeddedSessionChat,
+  requestEmbeddedSessionRuntimeBootstrap,
   resetEmbeddedSessionChatCache,
   type EmbeddedSessionChatURLCacheEntry,
 } from './contextPanelEmbeddedChat';
@@ -205,5 +208,139 @@ describe('getEmbeddedSessionChatOriginSessionId', () => {
     installWindowLocation('http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=%20%20ses_child%20%20');
     resetEmbeddedSessionChatCache();
     expect(getEmbeddedSessionChatOriginSessionId()).toBe('ses_child');
+  });
+});
+
+describe('embedded runtime bootstrap handshake', () => {
+  test('accepts only the matching response from the same-origin parent', async () => {
+    let messageListener: ((event: MessageEvent) => void) | null = null;
+    let requestCount = 0;
+    let retryCleared = false;
+    const parent = {
+      postMessage(message: { type?: string; requestId?: string }, targetOrigin: string) {
+        requestCount += 1;
+        expect(message.type).toBe(EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST);
+        queueMicrotask(() => {
+          messageListener?.({
+            origin: 'https://wrong.example.com',
+            source: parent,
+            data: {
+              type: EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
+              requestId: message.requestId,
+              payload: null,
+            },
+          } as unknown as MessageEvent);
+          if (requestCount === 1) return;
+          messageListener?.({
+            origin: targetOrigin,
+            source: parent,
+            data: {
+              type: EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
+              requestId: 'different-request',
+              payload: null,
+            },
+          } as unknown as MessageEvent);
+          messageListener?.({
+            origin: targetOrigin,
+            source: parent,
+            data: {
+              type: EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
+              requestId: message.requestId,
+              payload: {
+                apiBaseUrl: 'https://remote.example.com',
+                clientToken: 'client-token',
+                localOrigin: 'openchamber-ui://app',
+                runtimeHeaders: { 'x-runtime': 'value' },
+                relayHostId: 'host-1',
+                relay: {
+                  relayUrl: 'wss://relay.example.com',
+                  serverId: 'server-1',
+                  hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'public-x', y: 'public-y' },
+                },
+              },
+            },
+          } as unknown as MessageEvent);
+        });
+      },
+    };
+    const url = new URL('openchamber-ui://app/index.html?ocPanel=session-chat&sessionId=ses_1');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        location: { origin: url.origin, search: url.search },
+        parent,
+        addEventListener: (type: string, listener: (event: MessageEvent) => void) => {
+          if (type === 'message') messageListener = listener;
+        },
+        removeEventListener: (type: string, listener: (event: MessageEvent) => void) => {
+          if (type === 'message' && messageListener === listener) messageListener = null;
+        },
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        setInterval: globalThis.setInterval.bind(globalThis),
+        clearInterval: (interval: ReturnType<typeof setInterval>) => {
+          retryCleared = true;
+          globalThis.clearInterval(interval);
+        },
+      },
+    });
+    resetEmbeddedSessionChatCache();
+
+    const result = await requestEmbeddedSessionRuntimeBootstrap();
+    expect(result).toEqual({
+      apiBaseUrl: 'https://remote.example.com',
+      clientToken: 'client-token',
+      localOrigin: 'openchamber-ui://app',
+      runtimeHeaders: { 'x-runtime': 'value' },
+      relayHostId: 'host-1',
+      relay: {
+        relayUrl: 'wss://relay.example.com',
+        serverId: 'server-1',
+        hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'public-x', y: 'public-y' },
+      },
+    });
+    expect(requestCount).toBe(2);
+    expect(retryCleared).toBe(true);
+    expect(messageListener).toBeNull();
+  });
+
+  test('cleans up its listener and retry when the bootstrap times out', async () => {
+    let messageListener: ((event: MessageEvent) => void) | null = null;
+    let timeoutCallback: () => void = () => {
+      throw new Error('Timeout was not scheduled');
+    };
+    let timeoutCleared = false;
+    let retryCleared = false;
+    const parent = { postMessage() {} };
+    const url = new URL('openchamber-ui://app/index.html?ocPanel=session-chat&sessionId=ses_1');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        location: { origin: url.origin, search: url.search },
+        parent,
+        addEventListener: (type: string, listener: (event: MessageEvent) => void) => {
+          if (type === 'message') messageListener = listener;
+        },
+        removeEventListener: (type: string, listener: (event: MessageEvent) => void) => {
+          if (type === 'message' && messageListener === listener) messageListener = null;
+        },
+        setTimeout: (callback: () => void) => {
+          timeoutCallback = callback;
+          return 1;
+        },
+        clearTimeout: () => { timeoutCleared = true; },
+        setInterval: () => 2,
+        clearInterval: () => { retryCleared = true; },
+      },
+    });
+    resetEmbeddedSessionChatCache();
+
+    const resultPromise = requestEmbeddedSessionRuntimeBootstrap();
+    timeoutCallback();
+
+    expect(await resultPromise).toBeNull();
+    expect(timeoutCleared).toBe(true);
+    expect(retryCleared).toBe(true);
+    expect(messageListener).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "id": "openchamber-dark",
+    "id": "fields-of-the-shire-dark",
     "name": "Fields of the Shire",
     "description": "Fields of the Shire theme - dark variant",
     "author": "OpenChamber",
@@ -30,10 +30,10 @@
       "elevated": "#2b2622",
       "elevatedForeground": "#ebe0d1",
       "overlay": "#1b1815cc",
-      "subtle": "#332d28"
+      "subtle": "#282320"
     },
     "interactive": {
-      "border": "#413e3a",
+      "border": "#35322f",
       "borderHover": "#f0e6d830",
       "borderFocus": "#373d2c",
       "selection": "#f0e6d81f",

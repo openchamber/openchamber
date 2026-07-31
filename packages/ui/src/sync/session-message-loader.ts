@@ -98,7 +98,10 @@ const assertSdkSuccess = (result: {
 }, operation: string): void => {
   if (!result.error) return
   const status = result.response?.status
-  throw new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`)
+  const message = `${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`
+  const error = new Error(message) as Error & { status?: number }
+  if (status !== undefined) error.status = status
+  throw error
 }
 
 const sortParts = (parts: Part[]): Part[] => parts
@@ -156,6 +159,18 @@ export class SessionMessageLoader {
       this.entries.clear()
       clearRuntimeSessionPrefetch(previousRuntimeKey)
     }
+  }
+
+  /**
+   * Re-enable a loader which was disposed by a transient React effect cleanup.
+   *
+   * React Strict Mode runs effect setup, cleanup, then setup again in
+   * development. The provider owns one ref-stable loader across that sequence,
+   * so the second setup must be able to accept new work after the first cleanup
+   * invalidated its in-flight requests.
+   */
+  activate(): void {
+    this.disposed = false
   }
 
   ensure(

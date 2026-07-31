@@ -60,7 +60,6 @@
     --sidebar-accent-foreground: oklch(0.25 0.02 40); /* Dark warm text */
     --sidebar-border: oklch(0.85 0.02 70); /* Warm border */
     --sidebar-ring: oklch(0.65 0.2 55); /* Focus ring */
-    --sidebar-stuck-bg: var(--sidebar); /* Desktop sidebar sticky header background (match sidebar) */
   }
 
   .dark {
@@ -97,19 +96,10 @@
     --sidebar-accent-foreground: oklch(0.85 0.02 90); /* #cdccc3 */
     --sidebar-border: oklch(0.31 0.01 35); /* #393836 */
     --sidebar-ring: oklch(0.77 0.17 85); /* #edb449 */
-    --sidebar-stuck-bg: var(--sidebar); /* Desktop sidebar sticky header background (match sidebar) */
   }
 
   * {
-    border-color: hsl(var(--border));
-  }
-
-  :root * {
-    border-color: rgba(194, 151, 77, 0.2); /* Warm golden sand borders for light mode */
-  }
-
-  .dark * {
-    border-color: rgba(57, 56, 54, 0.5); /* #393836 at 50% opacity */
+    border-color: var(--border); /* Theme border token (interactive.border) — opaque and theme-aware */
   }
 
   body {
@@ -148,14 +138,6 @@
   :root.desktop-runtime[data-oc-vibrancy] #root {
     background: transparent !important;
     background-color: transparent !important;
-  }
-
-  /* Stuck sidebar zone headers must fully mask the rows scrolling under
-     them. Electron's transparent/vibrancy windows break backdrop-filter
-     (electron#20357), so use the opaque sidebar tone instead. */
-  :root.desktop-runtime[data-oc-vibrancy] .oc-zone-header-backing {
-    background: var(--sidebar-stuck-bg) !important;
-    background-color: var(--sidebar-stuck-bg) !important;
   }
 
   .font-sans {

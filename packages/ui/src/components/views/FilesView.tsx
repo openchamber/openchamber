@@ -44,7 +44,8 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/utils';
-import { getLanguageFromExtension, getImageMimeType, isDrawioFile, isImageFile, isPdfFile } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, getImageMimeType, isBinaryFile, isDrawioFile, isImageFile, isPdfFile, isSvgFile, looksLikeBinaryText } from '@/lib/toolHelpers';
+import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
@@ -304,7 +305,6 @@ const isFileMissingError = (error: unknown): boolean => {
 };
 
 const MAX_VIEW_CHARS = 200_000;
-const FILE_EDITOR_AUTO_SAVE_KEY = 'openchamber:files:auto-save-enabled';
 type FileLineEnding = '\n' | '\r\n';
 
 const detectFileLineEnding = (content: string): FileLineEnding => {
@@ -330,18 +330,6 @@ const normalizeEditorLineEndings = (content: string): string => content.replace(
 const serializeEditorContent = (content: string, lineEnding: FileLineEnding): string => {
   const normalized = normalizeEditorLineEndings(content);
   return lineEnding === '\r\n' ? normalized.replace(/\n/g, '\r\n') : normalized;
-};
-
-const getInitialAutoSaveEnabled = (): boolean => {
-  if (typeof window === 'undefined') {
-    return true;
-  }
-
-  try {
-    return window.localStorage.getItem(FILE_EDITOR_AUTO_SAVE_KEY) !== 'false';
-  } catch {
-    return true;
-  }
 };
 
 const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
@@ -924,7 +912,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const loadingFilePathRef = React.useRef<string | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
   const [diagramSaved, setDiagramSaved] = React.useState(false);
-  const [autoSaveEnabled, setAutoSaveEnabled] = React.useState(getInitialAutoSaveEnabled);
+  const [contentDetectedBinary, setContentDetectedBinary] = React.useState(false);
+  const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
+  const setAutoSaveEnabled = useUIStore((state) => state.setAutoSaveEnabled);
 
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const pendingSelectFileRef = React.useRef<FileNode | null>(null);
@@ -1626,17 +1616,31 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return false;
     }
 
-    if (!isDirty) {
-      return true;
+    const selectedIsBinary = isBinaryFile(selectedFile.path) || contentDetectedBinary;
+    if (!shouldAllowFileDraftSave({
+      selectedFilePath: selectedFile.path,
+      loadedFilePath,
+      fileLoading,
+      isDirty,
+      draftContent,
+      fileContent,
+      isNonEditableBinary: selectedIsBinary,
+    })) {
+      if (selectedIsBinary) {
+        console.warn(`[saveDraft] refusing to save binary file "${selectedFile.path}".`);
+      } else if (draftContent === '' && fileContent !== '' && loadedFilePath !== selectedFile.path) {
+        console.warn(
+          `[saveDraft] refusing to save empty draft for "${selectedFile.path}" (${fileContent.length} bytes were expected). ` +
+          'The file may have been read during a concurrent write (O_TRUNC race). ' +
+          'Try again after content finishes loading if the save was intentional.',
+        );
+      }
+      return false;
     }
 
-    if (draftContent === '' && fileContent !== '' && loadedFilePath !== selectedFile.path) {
-      console.warn(
-        `[saveDraft] refusing to save empty draft for "${selectedFile.path}" (${fileContent.length} bytes were expected). ` +
-        'The file may have been read during a concurrent write (O_TRUNC race). ' +
-        'Try again after content finishes loading if the save was intentional.',
-      );
-      return false;
+    // Clean draft: treat as success so discard/save dialogs and Ctrl+S are not stranded.
+    if (!isDirty) {
+      return true;
     }
 
     setIsSaving(true);
@@ -1668,7 +1672,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     } finally {
       setIsSaving(false);
     }
-  }, [draftContent, fileContent, files, isDirty, loadedFileLineEnding, loadedFilePath, readFileStat, selectedFile, t]);
+  }, [contentDetectedBinary, draftContent, fileContent, fileLoading, files, isDirty, loadedFileLineEnding, loadedFilePath, readFileStat, selectedFile, t]);
 
   React.useEffect(() => {
     if (!isDirty) {
@@ -1697,14 +1701,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }, [isDirty, setMainTabGuard]);
 
   React.useEffect(() => {
-    try {
-      window.localStorage.setItem(FILE_EDITOR_AUTO_SAVE_KEY, autoSaveEnabled ? 'true' : 'false');
-    } catch {
-      // Ignore localStorage errors; the in-memory preference still applies.
-    }
-  }, [autoSaveEnabled]);
-
-  React.useEffect(() => {
     if (autoSaveEnabled) {
       return;
     }
@@ -1721,7 +1717,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   React.useEffect(() => {
     const canWrite = Boolean(selectedFile && files.writeFile);
-    if (!autoSaveEnabled || !isDirty || !canWrite || isSaving) {
+    const selectedIsBinary = Boolean(selectedFile?.path && (isBinaryFile(selectedFile.path) || contentDetectedBinary));
+    if (!shouldScheduleFileAutosave({
+      autoSaveEnabled,
+      isDirty,
+      canWrite,
+      isSaving,
+      fileLoading,
+      selectedFilePath: selectedFile?.path,
+      loadedFilePath,
+      isNonEditableBinary: selectedIsBinary,
+    })) {
       return;
     }
 
@@ -1739,7 +1745,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         autoSaveTimerRef.current = null;
       }
     };
-  }, [autoSaveEnabled, draftContent, isDirty, selectedFile, files.writeFile, isSaving, saveDraft]);
+  }, [autoSaveEnabled, contentDetectedBinary, draftContent, fileLoading, isDirty, loadedFilePath, selectedFile, files.writeFile, isSaving, saveDraft]);
 
   // Reset auto-save status when switching files
   React.useEffect(() => {
@@ -1789,10 +1795,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     setFileError(null);
     setDesktopImageSrc('');
     setLoadedFilePath(null);
+    setContentDetectedBinary(false);
 
     const selectedIsImage = isImageFile(node.path);
-    const isSvg = node.path.toLowerCase().endsWith('.svg');
+    const isSvg = isSvgFile(node.path);
     const selectedIsPdf = isPdfFile(node.path);
+    const selectedIsBinary = isBinaryFile(node.path);
 
     if (isMobile) {
       setShowMobilePageContent(true);
@@ -1823,6 +1831,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
+    // Other known binaries (docx/xlsx/zip/…) must never be opened as text —
+    // a later autosave would corrupt them.
+    if (selectedIsBinary) {
+      setFileContent('');
+      setDraftContent('');
+      setLoadedFilePath(node.path);
+      setFileLoading(false);
+      return;
+    }
+
     setFileLoading(true);
 
     const outsideFileGrant = getOutsideFileGrant(node.path);
@@ -1834,6 +1852,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     await readFile(node.path, readOptions)
       .then((content) => {
         if (!isCurrentLoad()) {
+          return;
+        }
+        if (looksLikeBinaryText(content)) {
+          setContentDetectedBinary(true);
+          setFileContent('');
+          setDraftContent('');
+          setLoadedFilePath(node.path);
           return;
         }
         const editorContent = normalizeEditorLineEndings(content);
@@ -2302,8 +2327,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }
 
   const isSelectedImage = Boolean(selectedFile?.path && isImageFile(selectedFile.path));
-  const isSelectedSvg = Boolean(selectedFile?.path && selectedFile.path.toLowerCase().endsWith('.svg'));
+  const isSelectedSvg = Boolean(selectedFile?.path && isSvgFile(selectedFile.path));
   const isSelectedPdf = Boolean(selectedFile?.path && isPdfFile(selectedFile.path));
+  const isSelectedBinary = Boolean(
+    selectedFile?.path
+    && (isBinaryFile(selectedFile.path) || contentDetectedBinary)
+  );
+  const isUnsupportedBinary = isSelectedBinary && !isSelectedImage && !isSelectedPdf;
   const pendingNavigationTargetPath = React.useMemo(
     () => normalizePath(pendingFileNavigation?.path ?? ''),
     [pendingFileNavigation?.path],
@@ -2316,21 +2346,24 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       && !fileLoading
       && !fileError
       && !isSelectedImage
-      && !isSelectedPdf,
+      && !isSelectedPdf
+      && !isUnsupportedBinary,
   );
 
   const displaySelectedPath = React.useMemo(() => {
     return getDisplayPath(root, selectedFilePath);
   }, [selectedFilePath, root]);
 
-  const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && !isSelectedPdf && fileContent.length > 0);
+  const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && !isSelectedPdf && !isUnsupportedBinary && fileContent.length > 0);
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
-  const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedImage && !isSelectedPdf && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
+  // Keep image/SVG on the preview path: `isBinaryFile` excludes `.svg`, so binary
+  // alone would flip canEdit/isTextFile true and show a dead edit toggle + no-op Save.
+  const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedBinary && !isSelectedImage && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
   const isMarkdown = Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
   const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isHtml = Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
   const isDrawio = Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
-  const isTextFile = Boolean(selectedFile && !isSelectedImage && !isSelectedPdf);
+  const isTextFile = Boolean(selectedFile && !isSelectedBinary && !isSelectedImage);
   const canUseShikiFileView = isTextFile && !isMarkdown && !isDrawio && !(isHtml && htmlViewMode === 'preview');
   const isEditingFile = (isMarkdown && mdViewMode === 'edit')
     || (isHtml && htmlViewMode === 'edit')
@@ -2535,7 +2568,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const handleDiagramChange = React.useCallback((xml: string) => {
     diagramXmlRef.current = xml;
-    if (!selectedFile?.path || drawioViewMode !== 'preview' || !files.writeFile) {
+    if (!autoSaveEnabled || !selectedFile?.path || drawioViewMode !== 'preview' || !files.writeFile) {
       return;
     }
 
@@ -2554,7 +2587,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         toast.error(error instanceof Error ? error.message : t('filesView.toast.saveFailed'));
       });
     }, AUTO_SAVE_DELAY);
-  }, [drawioViewMode, files.writeFile, saveDiagramXml, selectedFile?.path, t]);
+  }, [autoSaveEnabled, drawioViewMode, files.writeFile, saveDiagramXml, selectedFile?.path, t]);
 
   const diagramEditorXml = React.useMemo(() => {
     if (!isDrawio) {
@@ -2674,7 +2707,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
-    if (fileError || isSelectedImage || isSelectedPdf) {
+    if (fileError || isSelectedImage || isSelectedPdf || isUnsupportedBinary) {
       setPendingFileNavigation(null);
       pendingNavigationCycleRef.current = { key: '', attempts: 0 };
       return;
@@ -2746,6 +2779,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     fileLoading,
     isSelectedImage,
     isSelectedPdf,
+    isUnsupportedBinary,
     loadedFilePath,
     handleSelectFile,
     pendingFileNavigation,
@@ -2783,7 +2817,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     // JSON tree, images, PDFs) never mount a CodeMirror editor, so the request
     // must clear regardless — otherwise it lingers and replays on every
     // dependency change.
-    if (!fileError && !isSelectedImage && !isSelectedPdf && canEdit && textViewMode === 'edit') {
+    if (!fileError && !isSelectedImage && !isSelectedPdf && !isUnsupportedBinary && canEdit && textViewMode === 'edit') {
       editorViewRef.current?.focus();
     }
 
@@ -2794,6 +2828,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     fileLoading,
     isSelectedImage,
     isSelectedPdf,
+    isUnsupportedBinary,
     loadedFilePath,
     pendingFileFocusPath,
     root,
@@ -3189,7 +3224,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setAutoSaveEnabled((enabled) => !enabled)}
+                onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
                 className={cn(
                   'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
                   autoSaveEnabled ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
@@ -3245,7 +3280,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {!isSelectedImage && !isSelectedPdf && (
+        {!isSelectedImage && !isSelectedPdf && !isUnsupportedBinary && (
           <>
             {withTooltip(wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap'),
               <Button
@@ -3826,6 +3861,29 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             </div>
           ) : isSelectedPdf ? (
             renderPdfPreview(selectedFile)
+          ) : isUnsupportedBinary ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+              <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
+              <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
+              {files.downloadFile ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const fn = files.downloadFile;
+                    if (!fn || !selectedFile) return;
+                    void fn(selectedFile.path).catch((error) => {
+                      console.error('Download failed:', error);
+                      toast.error(t('sidebarFilesTree.toast.operationFailed'));
+                    });
+                  }}
+                >
+                  <Icon name="download" className="mr-2 size-4" />
+                  {t('filesView.editor.saveFile')}
+                </Button>
+              ) : null}
+            </div>
           ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
             <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
               <DiagramEditor
@@ -4197,6 +4255,29 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             </div>
           ) : isSelectedPdf ? (
             renderPdfPreview(selectedFile)
+          ) : isUnsupportedBinary ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+              <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
+              <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
+              {files.downloadFile ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const fn = files.downloadFile;
+                    if (!fn || !selectedFile) return;
+                    void fn(selectedFile.path).catch((error) => {
+                      console.error('Download failed:', error);
+                      toast.error(t('sidebarFilesTree.toast.operationFailed'));
+                    });
+                  }}
+                >
+                  <Icon name="download" className="mr-2 size-4" />
+                  {t('filesView.editor.saveFile')}
+                </Button>
+              ) : null}
+            </div>
           ) : isMarkdown && getMdViewMode() === 'preview' ? (
             <div className="h-full overflow-auto p-4">
               {fileContent.length > 500 * 1024 && (

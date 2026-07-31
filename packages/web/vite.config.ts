@@ -11,6 +11,31 @@ const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.jso
 const pwaDevEnabled = process.env.OPENCHAMBER_DISABLE_PWA_DEV !== '1';
 const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
+const themeDirectory = path.resolve(__dirname, '../ui/src/lib/theme/themes');
+
+const themeJsonHmrPlugin = () => ({
+  name: 'openchamber-theme-json-hmr',
+  handleHotUpdate({ file, server }: { file: string; server: { ws: { send: (payload: unknown) => void } } }) {
+    if (!file.startsWith(`${themeDirectory}${path.sep}`) || path.extname(file) !== '.json') {
+      return;
+    }
+
+    try {
+      server.ws.send({
+        type: 'custom',
+        event: 'openchamber:theme-updated',
+        data: JSON.parse(readFileSync(file, 'utf-8')),
+      });
+      // Theme JSON is applied by the runtime event listener. Returning no
+      // modules prevents Vite's otherwise unavoidable page-reload fallback.
+      return [];
+    } catch {
+      // Leave the previous valid theme active while an editor writes invalid
+      // or incomplete JSON; the next valid save will replace it.
+      return [];
+    }
+  },
+});
 
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
@@ -39,6 +64,7 @@ export default defineConfig({
       },
     },
     themeStoragePlugin(),
+    themeJsonHmrPlugin(),
     VitePWA({
       strategies: 'injectManifest',
       srcDir: 'src',

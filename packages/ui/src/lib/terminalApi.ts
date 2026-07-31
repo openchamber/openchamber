@@ -21,6 +21,13 @@ const TAG = 1;
 const MAX_PROJECTION_BYTES = 512 * 1024;
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
+/**
+ * Switching terminal tabs detaches the old terminal before attaching the new one,
+ * which momentarily leaves zero subscribers. Closing the socket there forced a
+ * token refresh, a fresh upgrade and a full snapshot replay on every switch, so
+ * hold the idle socket briefly and reuse it instead.
+ */
+const IDLE_SOCKET_GRACE_MS = 15_000;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -69,6 +76,7 @@ export class TerminalTransport {
   private projections = new Map<string, TerminalProjection>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private idleCloseTimer: ReturnType<typeof setTimeout> | null = null;
   private failures = 0;
   private wakeCleanup: (() => void) | null = null;
   private generation = 0;
@@ -80,6 +88,7 @@ export class TerminalTransport {
   }) {}
 
   subscribe(sessionId: string, handlers: TerminalHandlers): () => void {
+    this.cancelIdleClose();
     const subscriber = { handlers, lastSequence: -1 };
     const set = this.subscribers.get(sessionId) ?? new Set<Subscriber>();
     const first = set.size === 0;
@@ -104,8 +113,14 @@ export class TerminalTransport {
         this.send({ t: 'detach', v: 3, s: sessionId });
       }
       if (this.subscribers.size === 0) {
-        this.generation += 1;
         this.cancelReconnect();
+        if (this.socket?.readyState === SOCKET_OPEN) {
+          // Healthy socket: hold it briefly so a tab switch can reattach to it.
+          this.scheduleIdleClose();
+          return;
+        }
+        // Nothing to reuse, so abandon any dial that is still in flight.
+        this.generation += 1;
         this.closeSocket();
       }
     };
@@ -127,6 +142,7 @@ export class TerminalTransport {
     this.projections.clear();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    this.cancelIdleClose();
     this.wakeCleanup?.();
     this.wakeCleanup = null;
     this.closeSocket();
@@ -280,6 +296,22 @@ export class TerminalTransport {
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', wake);
     };
     this.reconnectTimer = setTimeout(wake, delay);
+  }
+
+  private scheduleIdleClose(): void {
+    if (this.idleCloseTimer || this.disposed) return;
+    this.idleCloseTimer = setTimeout(() => {
+      this.idleCloseTimer = null;
+      if (this.disposed || this.subscribers.size > 0) return;
+      this.generation += 1;
+      this.closeSocket();
+    }, IDLE_SOCKET_GRACE_MS);
+  }
+
+  private cancelIdleClose(): void {
+    if (!this.idleCloseTimer) return;
+    clearTimeout(this.idleCloseTimer);
+    this.idleCloseTimer = null;
   }
 
   private startKeepalive(): void { this.stopKeepalive(); this.keepaliveTimer = setInterval(() => this.send({ t: 'ping', v: 3 }), 20_000); }

@@ -32,7 +32,7 @@
       "subtle": "#F0F0F0"
     },
     "interactive": {
-      "border": "#D9D9D9",
+      "border": "#e3e3e3",
       "borderHover": "#B3B3B3",
       "borderFocus": "#000000",
       "selection": "#00000015",

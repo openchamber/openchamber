@@ -1224,6 +1224,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.showControlsAria': '顯示編輯器控制項',
   'filesView.editor.controlsTitle': '編輯器控制項',
   'filesView.editor.pickFileFromTree': '請從檔案樹中選擇一個檔案。',
+  'filesView.editor.cannotPreviewBinary': '無法預覽二進位檔案',
+  'filesView.editor.binaryFileDescription': '此檔案為二進位檔案，無法在 OpenChamber 中編輯。請下載後使用其他應用程式開啟。',
   'filesView.state.loading': '載入中...',
   'filesView.state.openingFileAtChange': '正在開啟變更處的檔案...',
   'filesView.tree.search.placeholder': '搜尋檔案...',

@@ -950,7 +950,8 @@ export const Header: React.FC<HeaderProps> = ({
     setRemoteUpdateChecking(true);
     setRemoteUpdateError(null);
     try {
-      const params = new URLSearchParams({ appType: 'web', instanceMode: 'remote' });
+      // Status-only poll: must not count as usage on the remote server's install id.
+      const params = new URLSearchParams({ appType: 'web', instanceMode: 'remote', reportUsage: 'false' });
       const response = await runtimeFetch(`/api/openchamber/update-check?${params.toString()}`, {
         method: 'GET',
         headers: { Accept: 'application/json' },

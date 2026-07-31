@@ -1247,6 +1247,8 @@ export const dict = {
   'filesView.editor.showControlsAria': 'Show editor controls',
   'filesView.editor.controlsTitle': 'Editor controls',
   'filesView.editor.pickFileFromTree': 'Pick a file from the tree.',
+  'filesView.editor.cannotPreviewBinary': 'Cannot preview binary file',
+  'filesView.editor.binaryFileDescription': 'This file is binary and cannot be edited in OpenChamber. Download it to open with another app.',
   'filesView.state.loading': 'Loading...',
   'filesView.state.openingFileAtChange': 'Opening file at change...',
   'filesView.tree.search.placeholder': 'Search files...',
