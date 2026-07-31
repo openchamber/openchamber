@@ -133,6 +133,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
+      // Editor comment threads mirror the composer's drafts, so the webview
+      // reports every change. Handled before the id check because this is a
+      // one-way notification, not a bridge request awaiting a response.
+      if (message.type === 'inlineComments:sync') {
+        void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', message.payload);
+        return;
+      }
+
       if (!('id' in message) || typeof message.id !== 'string') {
         return;
       }
@@ -225,12 +233,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public addLineComment(payload: { filePath: string; relativePath: string; startLine: number; endLine: number; code: string; language: string; comment: string }) {
+  public addLineComment(payload: { draftId?: string; filePath: string; relativePath: string; startLine: number; endLine: number; code: string; language: string; comment: string }) {
     if (!this._view) return;
+    // Bring the chat into view like the other capture flows do, so the chip the
+    // comment becomes is visible rather than waiting behind a collapsed panel.
+    this._view.show(true);
     this._view.webview.postMessage({
       type: 'command',
       command: 'addLineComment',
       payload,
+    });
+  }
+
+  /** Drops a draft the user removed from its editor thread. */
+  public removeLineComment(draftId: string) {
+    if (!this._view) return;
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'removeLineComment',
+      payload: { draftId },
     });
   }
 
