@@ -80,12 +80,12 @@
 - [x] Treat shared `packages/ui` live-status reconciliation as an affected surface; keep UI client persistence out of this issue.
 - [x] Fix `icacls` parsing for target paths containing spaces and add regression coverage; native Windows output remains pending.
 - [x] Add the negative explicit/non-inherited `CREATOR OWNER` ACL test.
-- [ ] Update the PR handoff with the guardian-owned `openchamber stop` failure/retry behavior.
+- [x] Update the PR handoff with the guardian-owned `openchamber stop` failure/retry behavior.
 - [x] Validation recorded at exact runtime head `7e4d595f3`: local ACL checks passed; Linux baseline, Windows baseline, and `pr checks` passed. Subsequent branch commits are plan-only.
 - [ ] Obtain human maintainer review for both workflow files; automation cannot clear this trust-boundary gate.
 - [ ] Track the oversized-diff fail-closed fix for `.github/workflows/pr-review.yml` separately unless explicitly added to this issue.
 
 ## Issue closure path
 - [x] Provenance audited at current head; no history rewrite or Draft-status change is planned.
-- [ ] Complete the PR review follow-ups above and refresh final-head validation.
-- [ ] Require explicit approval before any additional commit, push, force-push, PR body update, or status change.
+- [x] Complete the PR review follow-ups above and refresh final-head validation.
+- Note: Further commits, pushes, force-pushes, or PR status changes require separate explicit approval.

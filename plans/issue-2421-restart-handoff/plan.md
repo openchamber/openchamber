@@ -60,7 +60,7 @@ User direction (2026-07-29) closes the originally-listed Phase 4 items as follow
 - `parseAclOutput` now strips the validated target path case-insensitively before parsing inline ACEs, including paths with spaces (for example `C:\Users\Jane Doe\...`); focused regression passes. Native Windows `icacls` output remains unverified.
 - The negative test for an explicit, non-inherited `CREATOR OWNER` ACL entry is now present and passing.
 - Document the operator-visible guardian-owned `openchamber stop` behavior: an unresponsive web process is not force-killed when owner metadata must be preserved; retry `openchamber stop` or use the explicit guardian administrative command.
-- Validation is refreshed on exact runtime head `7e4d595f3`: local ACL checks passed, and GitHub Linux baseline, Windows baseline, and `pr checks` all passed. Subsequent branch commits are plan-only. The PR handoff table still needs a separate manual refresh because PR body mutation is intentionally not performed here.
+- Validation is refreshed on exact runtime head `7e4d595f3`: local ACL checks passed, and GitHub Linux baseline, Windows baseline, and `pr checks` all passed. Subsequent branch commits are plan-only. The PR body handoff was completed on 2026-07-31; the PR body was refreshed with the guardian-owned `openchamber stop` failure/retry behavior and current CI evidence.
 - The merge-conflict review finding is resolved by the current merge with `upstream/main`; do not rewrite or force-push this published branch without separate approval.
 
 ## Risks and gates
