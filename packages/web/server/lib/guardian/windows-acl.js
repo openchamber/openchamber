@@ -47,6 +47,9 @@ const SYSTEM_PRINCIPALS = new Set([
   'builtin\\administrators',
   'administrators',
 ]);
+const ANCESTOR_CREATOR_PRINCIPALS = new Set([
+  'creator owner',
+]);
 const ANCESTOR_WRITE_RIGHTS = new Set([
   'F',
   'M',
@@ -248,7 +251,11 @@ export function validateWindowsAncestorAcl({
     }
     const isOwner = principal === ownerPrincipal;
     const isSystem = SYSTEM_PRINCIPALS.has(principal);
-    if (!isOwner && !isSystem && rights.some((right) => ANCESTOR_WRITE_RIGHTS.has(right))) {
+    const isCreatorOwner = ANCESTOR_CREATOR_PRINCIPALS.has(principal);
+    if (isCreatorOwner && !(entry.inherited === true || rights.includes('I'))) {
+      throw unsafeAclError(`windows-acl: ancestor ACL has an unsafe explicit creator-owner entry for ${entry.principal}`);
+    }
+    if (!isOwner && !isSystem && !isCreatorOwner && rights.some((right) => ANCESTOR_WRITE_RIGHTS.has(right))) {
       throw unsafeAclError(`windows-acl: ancestor ACL grants write access to an unapproved principal (${entry.principal})`);
     }
   }

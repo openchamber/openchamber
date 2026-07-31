@@ -159,7 +159,7 @@ describe('scripts/guardian-smoke-test.ps1 well-formedness', () => {
       '-Command',
       parseCommand,
     ], { stdio: 'pipe', timeout: 15000 });
-  });
+  }, 20000);
 });
 
 function whichPwsh() {

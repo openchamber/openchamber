@@ -296,6 +296,17 @@ describe('validateWindowsAncestorAcl', () => {
     })).toEqual({ ok: true, username: 'alice' });
   });
 
+  it('accepts the standard inherited creator-owner entry', () => {
+    expect(validateWindowsAncestorAcl({
+      targetPath: 'C:\\Users\\alice\\AppData',
+      username: 'alice',
+      aclEntries: [
+        { principal: 'alice', rights: ['I', 'F'], inherited: true },
+        { principal: 'CREATOR OWNER', rights: ['I', 'OI', 'CI', 'IO', 'F'], inherited: true },
+      ],
+    })).toEqual({ ok: true, username: 'alice' });
+  });
+
   it('rejects an attacker-writable ancestor even when the current user is safe', () => {
     expect(() => validateWindowsAncestorAcl({
       targetPath: 'C:\\Users\\alice\\AppData',
