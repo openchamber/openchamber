@@ -693,13 +693,14 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'PATCH') {
-        const selectedSkill = (await resolveDiscoveredSkills(deps, ctx, workingDirectory))
-          .find((skill) => skill.name === skillName);
+        const discoveredSkills = await resolveDiscoveredSkills(deps, ctx, workingDirectory);
+        const selectedSkill = discoveredSkills.find((skill) => skill.name === skillName);
         updateSkill(
           skillName,
           (body || {}) as Record<string, unknown>,
           workingDirectory,
           selectedSkill?.path,
+          discoveredSkills.map((skill) => skill.name),
         );
         await ctx?.manager?.restart();
         return {

@@ -509,7 +509,7 @@ function createSkill(skillName, config, workingDirectory, scope) {
   console.log(`Created new skill: ${skillName} (scope: ${targetScope}, path: ${targetPath})`);
 }
 
-function updateSkill(skillName, updates, workingDirectory, selectedPath = null) {
+function updateSkill(skillName, updates, workingDirectory, selectedPath = null, discoveredSkillNames = []) {
   ensureDirs();
 
   const requestedPath = typeof updates.targetPath === 'string' && updates.targetPath.trim()
@@ -557,7 +557,13 @@ function updateSkill(skillName, updates, workingDirectory, selectedPath = null) 
     if (path.basename(mdDir) !== skillName) {
       throw new Error(`Skill "${skillName}" must be stored in its own directory to be renamed`);
     }
+    if (walkSkillMdFiles(mdDir).some((skillPath) => path.resolve(skillPath) !== path.resolve(mdPath))) {
+      throw new Error(`Skill "${skillName}" directory contains nested skills`);
+    }
 
+    if (discoveredSkillNames.includes(requestedName)) {
+      throw new Error(`Skill ${requestedName} already exists`);
+    }
     const existingTarget = getSkillScope(requestedName, workingDirectory);
     if (existingTarget.path) {
       throw new Error(`Skill ${requestedName} already exists at ${existingTarget.path}`);
