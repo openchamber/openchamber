@@ -74,14 +74,14 @@
 
 **Net: #2421 ends with Phase 2C.** No Phase 4 work. See `plan.md` "Phase 4 scope" for the reasoning.
 
-## PR review follow-up — current head `7e4d595f3`
+## PR review follow-up — runtime fix head `7e4d595f3`
 - [x] Read the PR review threads and issue comments through the current bot review; preserve PR #2485 as OPEN/Draft.
 - [x] Align provenance with `upstream/main`; current PR metadata reports `MERGEABLE`.
 - [x] Treat shared `packages/ui` live-status reconciliation as an affected surface; keep UI client persistence out of this issue.
 - [x] Fix `icacls` parsing for target paths containing spaces and add regression coverage; native Windows output remains pending.
 - [x] Add the negative explicit/non-inherited `CREATOR OWNER` ACL test.
 - [ ] Update the PR handoff with the guardian-owned `openchamber stop` failure/retry behavior.
-- [x] Rerun and record validation at exact head `7e4d595f3`: local ACL checks passed; Linux baseline, Windows baseline, and `pr checks` passed.
+- [x] Validation recorded at exact runtime head `7e4d595f3`: local ACL checks passed; Linux baseline, Windows baseline, and `pr checks` passed. Subsequent branch commits are plan-only.
 - [ ] Obtain human maintainer review for both workflow files; automation cannot clear this trust-boundary gate.
 - [ ] Track the oversized-diff fail-closed fix for `.github/workflows/pr-review.yml` separately unless explicitly added to this issue.
 

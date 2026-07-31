@@ -23,7 +23,7 @@
 
 ## Current status
 
-Phases 1, 2A, 2B, 2C, and 3 are implemented on `fix/issue-2421-restart-handoff`. Current provenance is aligned with `upstream/main` at `eafa7ceec`; PR #2485 is OPEN/Draft, head `7e4d595f3`, and GitHub reports `MERGEABLE` with all current checks passing. The PR comparison is 90 task-scoped files covering guardian/lifecycle/IPC, shared live-status reconciliation in `packages/ui`, CI, docs, tests, and plans. UI client persistence remains out of scope. Local ACL follow-up validation passed (34 tests, syntax, web type-check/lint, docs validation, and diff check); GitHub Linux baseline, Windows baseline, and `pr checks` passed for `7e4d595f3`. Human maintainer review of workflow trust-boundary files remains required; PR Draft/status is intentionally unchanged.
+Phases 1, 2A, 2B, 2C, and 3 are implemented on `fix/issue-2421-restart-handoff`. Current provenance is aligned with `upstream/main` at `eafa7ceec`; PR #2485 is OPEN/Draft and GitHub reports `MERGEABLE` with all current checks passing; runtime fix commit is `7e4d595f3`, followed by plan-only updates on the same branch. The PR comparison is 90 task-scoped files covering guardian/lifecycle/IPC, shared live-status reconciliation in `packages/ui`, CI, docs, tests, and plans. UI client persistence remains out of scope. Local ACL follow-up validation passed (34 tests, syntax, web type-check/lint, docs validation, and diff check); GitHub Linux baseline, Windows baseline, and `pr checks` passed for `7e4d595f3`. Human maintainer review of workflow trust-boundary files remains required; PR Draft/status is intentionally unchanged.
 
 ## Phase 2A state machine
 
@@ -60,7 +60,7 @@ User direction (2026-07-29) closes the originally-listed Phase 4 items as follow
 - `parseAclOutput` now strips the validated target path case-insensitively before parsing inline ACEs, including paths with spaces (for example `C:\Users\Jane Doe\...`); focused regression passes. Native Windows `icacls` output remains unverified.
 - The negative test for an explicit, non-inherited `CREATOR OWNER` ACL entry is now present and passing.
 - Document the operator-visible guardian-owned `openchamber stop` behavior: an unresponsive web process is not force-killed when owner metadata must be preserved; retry `openchamber stop` or use the explicit guardian administrative command.
-- Validation is refreshed on exact head `7e4d595f3`: local ACL checks passed, and GitHub Linux baseline, Windows baseline, and `pr checks` all passed. The PR handoff table still needs a separate manual refresh because PR body mutation is intentionally not performed here.
+- Validation is refreshed on exact runtime head `7e4d595f3`: local ACL checks passed, and GitHub Linux baseline, Windows baseline, and `pr checks` all passed. Subsequent branch commits are plan-only. The PR handoff table still needs a separate manual refresh because PR body mutation is intentionally not performed here.
 - The merge-conflict review finding is resolved by the current merge with `upstream/main`; do not rewrite or force-push this published branch without separate approval.
 
 ## Risks and gates
