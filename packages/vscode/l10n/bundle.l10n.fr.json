@@ -14,6 +14,7 @@
   "OpenChamber [Improve Code]: No text selected": "OpenChamber [Améliorer le code] : aucun texte sélectionné",
   "Improve the following Code:": "Améliorez le code suivant :",
   "OpenChamber [Add Comment]: No active editor": "OpenChamber [Ajouter un commentaire] : aucun éditeur actif",
+  "OpenChamber [Add Comment]: File is outside the workspace": "OpenChamber [Ajouter un commentaire] : le fichier est en dehors de l’espace de travail",
   "Comment on line {0}": "Commentaire sur la ligne {0}",
   "Comment on lines {0}-{1}": "Commentaire sur les lignes {0} à {1}",
   "OpenChamber": "OpenChamber",

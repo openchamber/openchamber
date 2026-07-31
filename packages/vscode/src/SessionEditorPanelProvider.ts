@@ -10,6 +10,7 @@ import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { pickActivePanelId } from './activePanelRouting';
+import { drainPending } from './inlineCommentSelection';
 
 const t = vscode.l10n.t;
 
@@ -28,11 +29,14 @@ type SessionPanelState = {
   panel: vscode.WebviewPanel;
   sseStreams: Map<string, AbortController>;
   /**
-   * A comment held until the webview proves it is listening. Posting into a
+   * Comments held until the webview proves it is listening. Posting into a
    * panel whose script has not booted drops the message outright, and the user
    * already saw the comment accepted.
+   *
+   * A list, because a second comment can be written while the panel is still
+   * starting; a single slot silently discarded the first.
    */
-  pendingLineComment?: LineCommentPayload;
+  pendingLineComments: LineCommentPayload[];
   /** Set by the panel's first inbound message, the only proof its script runs. */
   webviewReady?: boolean;
 };
@@ -141,6 +145,7 @@ export class SessionEditorPanelProvider {
     const state: SessionPanelState = {
       panel,
       sseStreams: new Map(),
+      pendingLineComments: [],
     };
 
     this._panels.set(panelId, state);
@@ -169,9 +174,7 @@ export class SessionEditorPanelProvider {
       // Any inbound message proves the webview script is running, which is the
       // only readiness signal this panel has. Flush whatever was held for it.
       state.webviewReady = true;
-      if (state.pendingLineComment) {
-        const pending = state.pendingLineComment;
-        state.pendingLineComment = undefined;
+      for (const pending of drainPending(state.pendingLineComments)) {
         void panel.webview.postMessage({
           type: 'command',
           command: 'addLineComment',
@@ -341,7 +344,7 @@ export class SessionEditorPanelProvider {
     // and a post into a webview whose script has not run is dropped outright.
     // Hold it on the same path a freshly opened panel uses.
     if (!entry.webviewReady) {
-      entry.pendingLineComment = payload;
+      entry.pendingLineComments.push(payload);
       return true;
     }
 
@@ -381,7 +384,7 @@ export class SessionEditorPanelProvider {
       return false;
     }
 
-    entry.pendingLineComment = payload;
+    entry.pendingLineComments.push(payload);
     return true;
   }
 

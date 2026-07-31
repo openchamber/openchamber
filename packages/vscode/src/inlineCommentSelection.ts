@@ -65,6 +65,30 @@ export function resolveCommentFilePath(path: string, query: string): string {
     }
 }
 
+/**
+ * Whether a document can take a comment.
+ *
+ * Both entry points ask this, so the gutter `+` and the right-click command
+ * agree about where commenting is allowed. A comment is filed against a
+ * workspace-relative path, so one written outside the workspace would name a
+ * file the composer cannot resolve.
+ */
+export function canCommentOnDocument(scheme: string, isInWorkspace: boolean): boolean {
+    if (scheme === 'comment') return false;
+    return isInWorkspace;
+}
+
+/**
+ * Empties a hold of comments waiting on a webview that had not booted.
+ *
+ * A hold is a list, not a single slot: a user can write a second comment while
+ * the panel is still starting, and keeping only the newest silently dropped the
+ * first after its thread had already reported success.
+ */
+export function drainPending<T>(pending: T[]): T[] {
+    return pending.splice(0, pending.length);
+}
+
 /** What a draft-list snapshot says should happen to one editor thread. */
 export type ThreadFate = 'wait' | 'dispose' | 'show';
 

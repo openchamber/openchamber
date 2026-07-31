@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody } from './inlineCommentSelection';
+import { canCommentOnDocument, drainPending, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody } from './inlineCommentSelection';
 
 const selection = (startLine: number, startChar: number, endLine: number, endChar: number) => ({
     start: { line: startLine, character: startChar },
@@ -60,6 +60,47 @@ describe('resolveCommentFilePath', () => {
     test('a query without a usable path falls back to the URI path', () => {
         assert.equal(resolveCommentFilePath('/repo/src/app.ts', JSON.stringify({ ref: '~' })), '/repo/src/app.ts');
         assert.equal(resolveCommentFilePath('/repo/src/app.ts', JSON.stringify({ path: '  ' })), '/repo/src/app.ts');
+    });
+});
+
+describe('canCommentOnDocument', () => {
+    test('a workspace file can take a comment', () => {
+        assert.equal(canCommentOnDocument('file', true), true);
+    });
+
+    test("a diff's original side can too, since it resolves to a workspace file", () => {
+        assert.equal(canCommentOnDocument('git', true), true);
+    });
+
+    test('a file outside the workspace cannot', () => {
+        // The comment is filed against a workspace-relative path, so one written
+        // elsewhere would name a file the composer cannot resolve.
+        assert.equal(canCommentOnDocument('file', false), false);
+    });
+
+    test('a comment editor cannot comment on itself', () => {
+        assert.equal(canCommentOnDocument('comment', true), false);
+    });
+});
+
+describe('drainPending', () => {
+    test('every held comment is returned, in order', () => {
+        // A second comment can be written while a panel is still booting.
+        // Keeping only the newest silently dropped the first after its thread
+        // had already reported success.
+        const pending = ['first', 'second', 'third'];
+        assert.deepEqual(drainPending(pending), ['first', 'second', 'third']);
+    });
+
+    test('the hold is emptied, so a later flush delivers nothing twice', () => {
+        const pending = ['only'];
+        drainPending(pending);
+        assert.deepEqual(pending, []);
+        assert.deepEqual(drainPending(pending), []);
+    });
+
+    test('an empty hold drains to nothing', () => {
+        assert.deepEqual(drainPending([]), []);
     });
 });
 
