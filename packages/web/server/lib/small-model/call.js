@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { readAuthFile, writeAuthFile } from '../opencode/auth.js';
-import { readConfig, readConfigLayers } from '../opencode/shared.js';
+import { readConfig, readConfigLayers, isPlainObject } from '../opencode/shared.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
 
@@ -26,6 +26,37 @@ const httpError = async (response, provider) => {
   const body = await response.text().catch(() => '');
   const snippet = body ? `: ${body.slice(0, 300)}` : '';
   return new Error(`${provider} request failed with ${response.status}${snippet}`);
+};
+
+// Variant request patches resolve from the OpenCode config only:
+// `provider.<id>.models.<id>.variants[variant]` in opencode.jsonc — the way
+// custom models and variant overrides are configured. There is deliberately
+// no models.dev layer: the models.dev schema has no `variants` field, so a
+// catalog lookup could never match. (OpenCode itself generates variants at
+// runtime from models.dev's `reasoning_options`, then deep-merges the config
+// over them; this module does not port the generated set.)
+//
+// Consequence for catalog (non-custom) models: without a config entry they
+// have no variants here, so a requested `#variant` resolves to no patch —
+// the diagnostic log reports `applied: false` and the call proceeds with
+// the model-id-derived defaults (e.g. Google's thinking default). Defining
+// `provider.<id>.models.<id>.variants` in opencode.jsonc makes the variant
+// effective and lets it override the catalog default, like OpenCode.
+//
+// A variant entry with `disabled: true` is dropped and the `disabled` key is
+// stripped — same semantics as OpenCode's merge. Entries may be flat body
+// options (e.g. `{ reasoning: { effort: "low" } }`) or the custom
+// `{ headers, body }` patch shape. The variant is stripped from the model id
+// before this point, so an unknown variant degrades to no patch instead of
+// corrupting the wire model id.
+const resolveVariantPatch = (variants, variant) => {
+  if (!variant) return null;
+  const raw = variants?.[variant];
+  if (!isPlainObject(raw) || raw.disabled === true) return null;
+  const { disabled, ...patch } = raw;
+  const headers = patch.headers && isPlainObject(patch.headers) ? patch.headers : null;
+  const body = patch.body && isPlainObject(patch.body) ? patch.body : patch;
+  return { headers, body };
 };
 
 // ---------------------------------------------------------------------------
@@ -106,11 +137,12 @@ const ensureFreshOpenaiOauth = async (entry) => {
 // Wire formats
 // ---------------------------------------------------------------------------
 
-const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, extraBody }) => {
+const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, extraBody, variantPatch }) => {
   const trimmedBase = baseURL.replace(/\/+$/, '');
   console.log('[small-model:diagnostic] request', {
     provider: providerLabel,
     model: modelID,
+    variant: variantPatch ? 'applied' : null,
     maxOutputTokens,
     thinkingDisabled: extraBody?.thinking?.type === 'disabled',
     promptChars: prompt.length,
@@ -122,6 +154,7 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      ...(variantPatch?.headers || {}),
       ...headers,
     },
     body: JSON.stringify({
@@ -131,8 +164,11 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
         { role: 'user', content: prompt },
       ],
       max_tokens: maxOutputTokens,
-      stream: false,
       ...(extraBody || {}),
+      ...(variantPatch?.body || {}),
+      // Required wire format: this endpoint is read as a single JSON
+      // response, so a variant patch can never flip streaming mode.
+      stream: false,
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -184,13 +220,14 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
   return text;
 };
 
-const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel }) => {
+const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, variantPatch }) => {
   const trimmedBase = baseURL.replace(/\/+$/, '');
   const response = await fetch(`${trimmedBase}/responses`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      ...(variantPatch?.headers || {}),
       ...headers,
     },
     body: JSON.stringify({
@@ -201,6 +238,10 @@ const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, 
         content: [{ type: 'input_text', text: prompt }],
       }],
       max_output_tokens: maxOutputTokens,
+      ...(variantPatch?.body || {}),
+      // Required wire format: this endpoint is read as a single JSON
+      // response, so a variant patch can never flip streaming mode or
+      // change store behavior.
       stream: false,
       store: false,
     }),
@@ -224,12 +265,13 @@ const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, 
   return text;
 };
 
-const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTokens, providerLabel }) => {
+const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTokens, providerLabel, variantPatch }) => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      ...(variantPatch?.headers || {}),
       ...headers,
     },
     body: JSON.stringify({
@@ -237,6 +279,7 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
       max_tokens: maxOutputTokens,
       ...(system ? { system } : {}),
       messages: [{ role: 'user', content: prompt }],
+      ...(variantPatch?.body || {}),
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -254,7 +297,7 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
   return text;
 };
 
-const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) => callMessages({
+const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens, variantPatch }) => callMessages({
   url: 'https://api.anthropic.com/v1/messages',
   headers: {
     'x-api-key': apiKey,
@@ -265,6 +308,7 @@ const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens 
   system,
   maxOutputTokens,
   providerLabel: 'Anthropic',
+  variantPatch,
 });
 
 const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
@@ -312,22 +356,31 @@ const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
   throw new Error(`GitHub Copilot model "${modelID}" has no supported text endpoint`);
 };
 
-const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) => {
+const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, variantPatch }) => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelID)}:generateContent`;
-  const thinkingConfig = modelID.toLowerCase().startsWith('gemini-3')
-    ? { thinkingLevel: modelID.toLowerCase().includes('flash') ? 'minimal' : 'low' }
-    : { thinkingBudget: 0 };
+  // Variant patches (e.g. `{ thinkingConfig: {...} }`) live in
+  // generationConfig for Google's wire format; an explicit variant
+  // overrides the model-id derived thinking default.
+  const thinkingConfig = variantPatch?.body?.thinkingConfig
+    ?? (modelID.toLowerCase().startsWith('gemini-3')
+      ? { thinkingLevel: modelID.toLowerCase().includes('flash') ? 'minimal' : 'low' }
+      : { thinkingBudget: 0 });
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      ...(variantPatch?.headers || {}),
       'x-goog-api-key': apiKey,
     },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-      generationConfig: { maxOutputTokens, thinkingConfig },
+      generationConfig: {
+        ...(variantPatch?.body || {}),
+        maxOutputTokens,
+        thinkingConfig,
+      },
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -346,12 +399,13 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) 
 
 // ChatGPT-plan traffic goes to the codex backend, which only speaks the
 // streaming Responses API — collect the output_text deltas from the SSE body.
-const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, system }) => {
+const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, system, variantPatch }) => {
   const response = await fetch(CODEX_RESPONSES_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
+      ...(variantPatch?.headers || {}),
       Authorization: `Bearer ${accessToken}`,
       ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {}),
       originator: 'opencode',
@@ -368,7 +422,9 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
         },
       ],
       // The codex backend rejects max_output_tokens (OpenCode forces it to
-      // undefined for this provider too).
+      // undefined for this provider too) and only speaks the streaming
+      // Responses API, so a variant patch can never flip the response mode.
+      ...(variantPatch?.body || {}),
       stream: true,
       store: false,
     }),
@@ -447,7 +503,10 @@ const resolveConfigApiKey = (value, workingDirectory, providerID) => {
   }
 };
 
-const readProviderConfig = (workingDirectory, providerID) => {
+// Merged OpenCode config (user → project → custom, custom wins) — read once
+// and shaped into everything the dispatch needs: provider auth options and
+// the model's config-defined variants.
+const readProviderConfig = (workingDirectory, providerID, modelID) => {
   try {
     const config = readConfig(workingDirectory);
     const providerCfg = config?.provider?.[providerID];
@@ -455,15 +514,19 @@ const readProviderConfig = (workingDirectory, providerID) => {
     const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
     const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
     const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
+    const modelCfg = providerCfg?.models?.[modelID];
+    const variants = isPlainObject(modelCfg?.variants) ? modelCfg.variants : null;
     return {
       baseURL,
       // Shape the config-supplied key as a regular api-key auth entry so it
       // can win the precedence check below and flow through the dispatch's
       // `entry.type === 'api' ? entry.key : ...` branch unchanged.
       auth: apiKey ? { type: 'api', key: apiKey } : null,
+      // Variants configured under `provider.<id>.models.<id>.variants`.
+      variants,
     };
   } catch {
-    // Provider config is non-essential — continue with catalog-only resolution.
+    // Config is non-essential — continue with auth.json/catalog-only resolution.
     return null;
   }
 }
@@ -472,15 +535,29 @@ const readProviderConfig = (workingDirectory, providerID) => {
 // Dispatch
 // ---------------------------------------------------------------------------
 
-export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens }) {
+export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, variant, prompt, system, maxOutputTokens }) {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
-  const providerConfig = readProviderConfig(workingDirectory, providerID);
+  const providerConfig = readProviderConfig(workingDirectory, providerID, modelID);
   // Match OpenCode's resolveSDK precedence:
   // config provider.<id>.options.apiKey (providerConfig.auth) wins; the
   // auth.json entry is only a fallback.
   const entry = providerConfig?.auth || getAuthEntryForProvider(auth, providerID);
   if (!entry) {
     throw new Error(`No OpenCode login found for provider "${providerID}"`);
+  }
+
+  // The variant is never part of the wire model id; when the config does not
+  // define it for this model the patch degrades to nothing (mirrors OpenCode's
+  // fitVariant, which drops unknown variants) and the call proceeds on the
+  // clean model id.
+  const variantPatch = resolveVariantPatch(providerConfig?.variants, variant);
+  if (variant) {
+    console.log('[small-model:diagnostic] variant', {
+      provider: providerID,
+      model: modelID,
+      variant,
+      applied: Boolean(variantPatch),
+    });
   }
 
   if (providerID === 'github-copilot') {
@@ -516,13 +593,14 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
       system,
       maxOutputTokens: tokens,
       providerLabel: 'GitHub Copilot',
+      variantPatch,
     };
     if (endpoint === 'messages') {
       return callMessages({
         ...request,
         url: `${baseURL.replace(/\/+$/, '')}/v1/messages`,
         headers: {
-          ...headers,
+          ...request.headers,
           'anthropic-version': '2023-06-01',
         },
       });
@@ -541,6 +619,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
       modelID,
       prompt,
       system,
+      variantPatch,
     });
   }
 
@@ -552,10 +631,10 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   }
 
   if (providerID === 'anthropic') {
-    return callAnthropic({ apiKey, modelID, prompt, system, maxOutputTokens: tokens });
+    return callAnthropic({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, variantPatch });
   }
   if (providerID === 'google') {
-    return callGoogle({ apiKey, modelID, prompt, system, maxOutputTokens: tokens });
+    return callGoogle({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, variantPatch });
   }
 
   // Everything else: OpenAI-compatible chat completions against the catalog's
@@ -593,12 +672,15 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
 
   return callOpenaiCompatible({
     baseURL,
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
     modelID,
     prompt,
     system,
     maxOutputTokens: tokens,
     providerLabel: provider?.name || providerID,
     extraBody,
+    variantPatch,
   });
 }

@@ -171,7 +171,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
     }
 };
 
-const parseModelString = (modelString: string): { providerId: string; modelId: string } | null => {
+const parseModelString = (modelString: string): { providerId: string; modelId: string; variant?: string } | null => {
     return parseModelIdentifier(modelString);
 };
 
@@ -254,7 +254,7 @@ const resolveProviderModelSelection = ({
             return {
                 providerId: parsed.providerId,
                 modelId: parsed.modelId,
-                variant: resolveVariant(parsed.providerId, parsed.modelId, settingsDefaultVariant),
+                variant: resolveVariant(parsed.providerId, parsed.modelId, parsed.variant ?? settingsDefaultVariant),
             };
         }
     }
@@ -359,7 +359,7 @@ const resolveDefaultAgentModelSelection = ({
         if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
-            variant = resolveVariant(providerId, modelId, projectDefaultModel ? undefined : settingsDefaultVariant);
+            variant = resolveVariant(providerId, modelId, parsed.variant ?? (projectDefaultModel ? undefined : settingsDefaultVariant));
         }
     }
 
@@ -373,11 +373,13 @@ const resolveDefaultAgentModelSelection = ({
     }
 
     // OpenCode's global default model — used when neither our settings nor the agent pin a model.
+    // A "#variant" suffix in the config string is honored like any other variant.
     if (!providerId && opencodeDefaultModel) {
         const parsed = parseModelString(opencodeDefaultModel);
         if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
+            variant = resolveVariant(providerId, modelId, parsed.variant);
         }
     }
 
@@ -1713,8 +1715,9 @@ export const useConfigStore = create<ConfigStore>()(
                                     const settingsProvider = previousProviders.find((p) => p.id === parsed.providerId);
                                     if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
                                         const model = settingsProvider.models.find((m) => m.id === parsed.modelId);
-                                        const currentVariant = state.settingsDefaultVariant && (model as { variants?: Record<string, unknown> } | undefined)?.variants?.[state.settingsDefaultVariant]
-                                            ? state.settingsDefaultVariant
+                                        const candidateVariant = parsed.variant ?? state.settingsDefaultVariant;
+                                        const currentVariant = candidateVariant && (model as { variants?: Record<string, unknown> } | undefined)?.variants?.[candidateVariant]
+                                            ? candidateVariant
                                             : undefined;
 
                                         nextState.currentProviderId = parsed.providerId;
@@ -2535,7 +2538,7 @@ export const useConfigStore = create<ConfigStore>()(
                             if (parsed) {
                                 const settingsProvider = providers.find((p) => p.id === parsed.providerId);
                                 if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
-                                    applyResolvedModelSelection(parsed.providerId, parsed.modelId, resolveVariantForModel(parsed.providerId, parsed.modelId, agent?.variant));
+                                    applyResolvedModelSelection(parsed.providerId, parsed.modelId, resolveVariantForModel(parsed.providerId, parsed.modelId, parsed.variant ?? agent?.variant));
                                     return;
                                 }
                             }

@@ -4,10 +4,10 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // readConfig reads merged opencode config layers from disk; mock it so each
-// test controls the provider config without touching the filesystem. call.js
-// imports only readConfig from shared.js, so the rest of that module is left
-// untouched for this file.
-vi.mock('../opencode/shared.js', () => ({
+// test controls the provider config without touching the filesystem. The
+// remaining shared.js exports (isPlainObject, mergeConfigs) stay real.
+vi.mock('../opencode/shared.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   readConfig: vi.fn(),
   readConfigLayers: vi.fn(),
 }));
@@ -449,6 +449,213 @@ describe('callSmallModel — Google thinking configuration', () => {
 
     const body = JSON.parse(lastCall(fetchMock).init.body);
     expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+  });
+});
+
+describe('callSmallModel — variants', () => {
+  let fetchMock;
+  let originalFetch;
+
+  // Variants are configured in opencode.jsonc (`provider.<id>.models.<id>.variants`).
+  const configWith = (models) => ({
+    provider: {
+      custom: {
+        options: { apiKey: 'test-key', baseURL: 'https://proxy.example.test/v1' },
+        ...(models ? { models } : {}),
+      },
+    },
+  });
+
+  const deepseekVariants = {
+    'deepseek-v4-flash': {
+      variants: {
+        low: { reasoning: { effort: 'low' } },
+        lowHeaders: {
+          headers: { 'X-Custom-Variant': 'low', Authorization: 'Bearer variant-attempt' },
+          body: { reasoning: { effort: 'low' } },
+        },
+      },
+    },
+  };
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    readConfig.mockReset();
+    readConfig.mockReturnValue(configWith(deepseekVariants));
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('never sends the #variant suffix upstream and applies the config variant options', async () => {
+    fetchMock.mockResolvedValue(ok('answer'));
+
+    await callSmallModel({
+      auth: {},
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'custom',
+      modelID: 'deepseek-v4-flash',
+      variant: 'low',
+      prompt: 'hi',
+    });
+
+    const { init } = lastCall(fetchMock);
+    const body = JSON.parse(init.body);
+    expect(body.model).toBe('deepseek-v4-flash');
+    expect(body.reasoning).toEqual({ effort: 'low' });
+    expect(JSON.stringify(body)).not.toContain('#');
+  });
+
+  it('drops an unknown variant instead of failing or corrupting the model id', async () => {
+    fetchMock.mockResolvedValue(ok('answer'));
+
+    await callSmallModel({
+      auth: {},
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'custom',
+      modelID: 'deepseek-v4-flash',
+      variant: 'high',
+      prompt: 'hi',
+    });
+
+    const { init } = lastCall(fetchMock);
+    const body = JSON.parse(init.body);
+    expect(body.model).toBe('deepseek-v4-flash');
+    expect(body.reasoning).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain('#');
+  });
+
+  it('merges { headers, body } shaped variant patches without letting them override credentials', async () => {
+    fetchMock.mockResolvedValue(ok('answer'));
+
+    await callSmallModel({
+      auth: {},
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'custom',
+      modelID: 'deepseek-v4-flash',
+      variant: 'lowHeaders',
+      prompt: 'hi',
+    });
+
+    const { init } = lastCall(fetchMock);
+    expect(init.headers['X-Custom-Variant']).toBe('low');
+    // The real credential always wins over a variant-supplied one.
+    expect(init.headers.Authorization).toBe('Bearer test-key');
+    const body = JSON.parse(init.body);
+    expect(body.reasoning).toEqual({ effort: 'low' });
+  });
+
+  it('lets a Google variant thinkingConfig override the model-id derived default', async () => {
+    readConfig.mockReturnValue({
+      provider: {
+        google: {
+          models: {
+            'gemini-2.5-flash': {
+              variants: {
+                low: { thinkingConfig: { includeThoughts: true, thinkingLevel: 'low' } },
+              },
+            },
+          },
+        },
+      },
+    });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }),
+    });
+
+    await callSmallModel({
+      auth: { google: { type: 'api', key: 'google-key' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'google',
+      modelID: 'gemini-2.5-flash',
+      variant: 'low',
+      prompt: 'hi',
+    });
+
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.generationConfig.thinkingConfig).toEqual({ includeThoughts: true, thinkingLevel: 'low' });
+  });
+
+  it('applies variants configured on a custom model in opencode.jsonc (no catalog entry)', async () => {
+    readConfig.mockReturnValue(configWith({
+      'my-proxy-model': {
+        variants: { low: { reasoning: { effort: 'low' } } },
+      },
+    }));
+    fetchMock.mockResolvedValue(ok('answer'));
+
+    await callSmallModel({
+      auth: {},
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'custom',
+      modelID: 'my-proxy-model',
+      variant: 'low',
+      prompt: 'hi',
+    });
+
+    const { init } = lastCall(fetchMock);
+    const body = JSON.parse(init.body);
+    expect(body.model).toBe('my-proxy-model');
+    expect(body.reasoning).toEqual({ effort: 'low' });
+    expect(JSON.stringify(body)).not.toContain('#');
+  });
+
+  it('lets config disable a variant', async () => {
+    readConfig.mockReturnValue(configWith({
+      'deepseek-v4-flash': {
+        variants: { low: { disabled: true } },
+      },
+    }));
+    fetchMock.mockResolvedValue(ok('answer'));
+
+    await callSmallModel({
+      auth: {},
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'custom',
+      modelID: 'deepseek-v4-flash',
+      variant: 'low',
+      prompt: 'hi',
+    });
+
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.reasoning).toBeUndefined();
+  });
+
+  it('strips the `disabled` key from an applied variant', async () => {
+    readConfig.mockReturnValue(configWith({
+      'deepseek-v4-flash': {
+        variants: {
+          low: { reasoning: { effort: 'low' }, disabled: false },
+        },
+      },
+    }));
+    fetchMock.mockResolvedValue(ok('answer'));
+
+    await callSmallModel({
+      auth: {},
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'custom',
+      modelID: 'deepseek-v4-flash',
+      variant: 'low',
+      prompt: 'hi',
+    });
+
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.reasoning).toEqual({ effort: 'low' });
+    expect(body).not.toHaveProperty('disabled');
   });
 });
 

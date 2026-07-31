@@ -33,6 +33,23 @@ const getDisplayModel = (
   return { providerId: '', modelId: '' };
 };
 
+// The SDK provider type does not carry the models.dev `variants` field, so
+// the lookup narrows to the catalog shape explicitly instead of casting in
+// the component. Unknown provider/model combinations resolve to no variants.
+type CatalogModel = { id?: string; variants?: Record<string, unknown> };
+type ProviderCatalogShape = { id: string; models: ReadonlyArray<CatalogModel> };
+
+const getAvailableModelVariants = (
+  providers: ReadonlyArray<ProviderCatalogShape>,
+  providerId: string,
+  modelId: string,
+): string[] => {
+  const model = providers
+    .find((provider) => provider.id === providerId)
+    ?.models.find((candidate) => candidate.id === modelId);
+  return model?.variants ? Object.keys(model.variants) : [];
+};
+
 export const DefaultsSettings: React.FC = () => {
   const { t } = useI18n();
   const setProvider = useConfigStore((state) => state.setProvider);
@@ -51,6 +68,7 @@ export const DefaultsSettings: React.FC = () => {
   const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>();
   const [smallModelUseDefault, setSmallModelUseDefault] = React.useState(true);
   const [smallModelOverride, setSmallModelOverride] = React.useState<string | undefined>();
+  const [smallModelVariant, setSmallModelVariant] = React.useState<string | undefined>();
   const [smallModelProviders, setSmallModelProviders] = React.useState<string[] | undefined>();
   const [isLoading, setIsLoading] = React.useState(true);
 
@@ -121,7 +139,9 @@ export const DefaultsSettings: React.FC = () => {
           if (agent !== undefined) setDefaultAgent(agent);
           if (typeof data.smallModelUseDefault === 'boolean') setSmallModelUseDefault(data.smallModelUseDefault);
           if (typeof data.smallModelOverride === 'string' && data.smallModelOverride.trim()) {
-            setSmallModelOverride(data.smallModelOverride.trim());
+            const override = data.smallModelOverride.trim();
+            setSmallModelOverride(override);
+            setSmallModelVariant(parseModelIdentifier(override)?.variant);
           }
         }
       } catch (error) {
@@ -225,8 +245,11 @@ export const DefaultsSettings: React.FC = () => {
 
   const handleSmallModelOverrideChange = React.useCallback(
     async (providerId: string, modelId: string) => {
+      // ModelSelector only reports provider/model; switching models clears
+      // the variant, which may not exist on the newly selected model.
       const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
       setSmallModelOverride(newValue);
+      setSmallModelVariant(undefined);
       try {
         await updateDesktopSettings({ smallModelOverride: newValue ?? '' });
       } catch (error) {
@@ -237,6 +260,31 @@ export const DefaultsSettings: React.FC = () => {
   );
 
   const parsedSmallModel = React.useMemo(() => getDisplayModel(smallModelOverride), [smallModelOverride]);
+  const smallModelProviderId = parsedSmallModel.providerId;
+  const smallModelModelId = parsedSmallModel.modelId;
+
+  const availableSmallModelVariants = React.useMemo(
+    () => getAvailableModelVariants(providers, parsedSmallModel.providerId, parsedSmallModel.modelId),
+    [parsedSmallModel.modelId, parsedSmallModel.providerId, providers]
+  );
+
+  const handleSmallModelVariantChange = React.useCallback(
+    async (variant: string) => {
+      const newValue = variant === DEFAULT_VARIANT_VALUE ? undefined : variant || undefined;
+      setSmallModelVariant(newValue);
+      if (!smallModelProviderId || !smallModelModelId) {
+        return;
+      }
+      const composed = `${smallModelProviderId}/${smallModelModelId}${newValue ? `#${newValue}` : ''}`;
+      setSmallModelOverride(composed);
+      try {
+        await updateDesktopSettings({ smallModelOverride: composed });
+      } catch (error) {
+        console.warn('Failed to save small model override:', error);
+      }
+    },
+    [smallModelProviderId, smallModelModelId]
+  );
 
   React.useEffect(() => {
     if (smallModelUseDefault || smallModelProviders !== undefined) return;
@@ -258,16 +306,10 @@ export const DefaultsSettings: React.FC = () => {
     };
   }, [smallModelUseDefault, smallModelProviders]);
 
-  const availableVariants = React.useMemo(() => {
-    if (!parsedModel.providerId || !parsedModel.modelId) return [];
-    const provider = providers.find((p) => p.id === parsedModel.providerId);
-    const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === parsedModel.modelId) as
-      | { variants?: Record<string, unknown> }
-      | undefined;
-    const variants = model?.variants;
-    if (!variants) return [];
-    return Object.keys(variants);
-  }, [parsedModel.modelId, parsedModel.providerId, providers]);
+  const availableVariants = React.useMemo(
+    () => getAvailableModelVariants(providers, parsedModel.providerId, parsedModel.modelId),
+    [parsedModel.modelId, parsedModel.providerId, providers]
+  );
 
   const supportsVariants = availableVariants.length > 0;
 
@@ -281,6 +323,17 @@ export const DefaultsSettings: React.FC = () => {
       });
     }
   }, [defaultVariant, setCurrentVariant, setSettingsDefaultVariant, supportsVariants]);
+
+  // A saved override may reference a variant the refreshed provider catalog
+  // no longer supports; degrade to the model default (mirrors the
+  // defaultVariant cleanup above). The persisted override keeps its
+  // #variant — the server treats an unknown variant as no patch — so the
+  // selection returns if the catalog restores it.
+  React.useEffect(() => {
+    if (smallModelVariant && !availableSmallModelVariants.includes(smallModelVariant)) {
+      setSmallModelVariant(undefined);
+    }
+  }, [availableSmallModelVariants, smallModelVariant]);
 
   if (isLoading) {
     return null;
@@ -386,15 +439,38 @@ export const DefaultsSettings: React.FC = () => {
             />
 
             {!smallModelUseDefault ? (
-              <SettingsFieldRow label={t('settings.openchamber.defaults.smallModel.overrideModel')}>
-                <ModelSelector
-                  providerId={parsedSmallModel.providerId}
-                  modelId={parsedSmallModel.modelId}
-                  onChange={handleSmallModelOverrideChange}
-                  allowedProviderIds={smallModelProviders}
-                  className={SETTINGS_CUSTOM_TRIGGER_CLASS}
-                />
-              </SettingsFieldRow>
+              <>
+                <SettingsFieldRow label={t('settings.openchamber.defaults.smallModel.overrideModel')}>
+                  <ModelSelector
+                    providerId={parsedSmallModel.providerId}
+                    modelId={parsedSmallModel.modelId}
+                    onChange={handleSmallModelOverrideChange}
+                    allowedProviderIds={smallModelProviders}
+                    className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+                  />
+                </SettingsFieldRow>
+                <SettingsFieldRow label={t('settings.openchamber.defaults.field.defaultThinking')}>
+                  <Select
+                    value={smallModelVariant ?? DEFAULT_VARIANT_VALUE}
+                    onValueChange={handleSmallModelVariantChange}
+                    disabled={availableSmallModelVariants.length === 0}
+                  >
+                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                      <SelectValue placeholder={t('settings.openchamber.defaults.field.thinkingPlaceholder')}>
+                        {formatVariantLabel(smallModelVariant ?? DEFAULT_VARIANT_VALUE)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={DEFAULT_VARIANT_VALUE}>{t('settings.openchamber.defaults.option.default')}</SelectItem>
+                      {availableSmallModelVariants.map((variant) => (
+                        <SelectItem key={variant} value={variant}>
+                          {formatVariantLabel(variant)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </SettingsFieldRow>
+              </>
             ) : null}
           </div>
         </div>

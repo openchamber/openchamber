@@ -34,10 +34,34 @@ describe('parseModelRef', () => {
     });
   });
 
+  it('splits an optional #variant suffix off the model id', () => {
+    expect(parseModelRef('provider/deepseek-v4-flash#low')).toEqual({
+      providerID: 'provider',
+      modelID: 'deepseek-v4-flash',
+      variant: 'low',
+    });
+  });
+
+  it('keeps slashes inside the model id when a variant is present', () => {
+    expect(parseModelRef('openrouter/google/gemini-2.5-flash#high')).toEqual({
+      providerID: 'openrouter',
+      modelID: 'google/gemini-2.5-flash',
+      variant: 'high',
+    });
+  });
+
+  it('treats a bare trailing # as no variant', () => {
+    expect(parseModelRef('provider/model#')).toEqual({
+      providerID: 'provider',
+      modelID: 'model',
+    });
+  });
+
   it('rejects values without a provider or model part', () => {
     expect(parseModelRef('anthropic/')).toBeNull();
     expect(parseModelRef('/model')).toBeNull();
     expect(parseModelRef('plain')).toBeNull();
+    expect(parseModelRef('provider/#low')).toBeNull();
     expect(parseModelRef(undefined)).toBeNull();
   });
 });
@@ -75,6 +99,25 @@ describe('resolveSmallModel', () => {
       configSmallModel: 'openai/gpt-4o-mini',
     });
     expect(result).toEqual({ providerID: 'openai', modelID: 'gpt-4o-mini', source: 'config' });
+  });
+
+  it('carries the #variant suffix from the configured small_model', () => {
+    const result = resolveSmallModel({
+      auth: { anthropic: { type: 'api', key: 'sk-x' } },
+      catalog,
+      configSmallModel: 'openai/gpt-4o-mini#low',
+    });
+    expect(result).toEqual({ providerID: 'openai', modelID: 'gpt-4o-mini', variant: 'low', source: 'config' });
+  });
+
+  it('carries the #variant suffix from the settings override', () => {
+    const result = resolveSmallModel({
+      auth: { anthropic: { type: 'api', key: 'sk-x' } },
+      catalog,
+      settingsSmallModel: 'anthropic/claude-haiku-4-5#high',
+      configSmallModel: 'openai/gpt-4o-mini',
+    });
+    expect(result).toEqual({ providerID: 'anthropic', modelID: 'claude-haiku-4-5', variant: 'high', source: 'settings' });
   });
 
   it('scans authenticated providers by family priority, newest first', () => {

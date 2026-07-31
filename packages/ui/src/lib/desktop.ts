@@ -121,7 +121,7 @@ export type DesktopSettings = {
   managedRemoteTunnelPresets?: ManagedRemoteTunnelPreset[];
   managedRemoteTunnelSelectedPresetId?: string;
   managedRemoteTunnelPresetTokens?: Record<string, string>;
-  defaultModel?: string; // format: "provider/model"
+  defaultModel?: string; // format: "provider/model[#variant]"
   defaultVariant?: string;
   defaultAgent?: string;
   smallModelUseDefault?: boolean;
@@ -130,7 +130,7 @@ export type DesktopSettings = {
   sessionGoalEnabled?: boolean;
   sessionGoalDefaultBudgetEnabled?: boolean;
   sessionGoalDefaultBudget?: number;
-  smallModelOverride?: string; // format: "provider/model"
+  smallModelOverride?: string; // format: "provider/model[#variant]"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;

@@ -18,10 +18,11 @@ other runtime API.
 - `resolve.js` — model selection, mirroring OpenCode's `getSmallModel` chain:
   0. OpenChamber's own settings override (Settings → Sessions → Small Model):
      when `smallModelUseDefault` is `false`, `smallModelOverride`
-     (`provider/model`) outranks everything below. Sanitized in
+     (`provider/model[#variant]`) outranks everything below. Sanitized in
      `settings-helpers.js` (server), `persistence.ts` (client), and
      `bridge-settings-runtime.ts` (VS Code).
-  1. `small_model` from the merged OpenCode config layers (`provider/model`).
+  1. `small_model` from the merged OpenCode config layers
+     (`provider/model[#variant]`).
   2. Family-priority scan (`gemini-flash` → `gpt-nano` → `claude-haiku`)
      **within the session's provider first** (`preferredProviderID`, like
      OpenCode resolves within the current provider), then over the other
@@ -31,6 +32,30 @@ other runtime API.
      and as a final utility fallback.
   4. Last resort: the session's own model (`preferredModelID`) when no small
      model resolves anywhere — costlier, but always valid.
+- Variants: an optional `#variant` suffix (`provider/model#low`) is split off
+  by `parseModelRef` — the variant is **never** part of the wire model id.
+  `call.js` resolves the variant's request patch from the OpenCode config
+  (`provider.<id>.models.<id>.variants[variant]` in opencode.jsonc) — the
+  way custom models and variant overrides are configured. There is
+  deliberately no models.dev layer: the models.dev schema has no `variants`
+  field (OpenCode itself generates variants at runtime from models.dev's
+  `reasoning_options` and deep-merges config overrides on top; this module
+  does not port the generated set). Config entries may be flat body options
+  (e.g. `{ reasoning: { effort: "low" } }`) or the custom
+  `{ headers, body }` patch shape; `disabled: true` drops a variant and the
+  `disabled` key is stripped before the patch is sent, matching OpenCode.
+  Catalog (non-custom) models have no variants unless configured: a
+  `#variant` on a stock model without a config entry resolves to no patch
+  (`applied: false`) and the call uses the model-id-derived defaults.
+  The patch lands per provider: flat options go into the request body; for
+  Google they land in `generationConfig` (e.g. `thinkingConfig`). An unknown
+  variant — or one disabled in config — degrades to no patch with a
+  `[small-model:diagnostic] variant` log (`applied: false`) — the call
+  proceeds on the clean model id instead of failing, matching OpenCode's
+  `fitVariant` behavior. Variant patches can never override credentials:
+  auth headers are applied after variant headers. Required wire-format
+  fields are pinned after the variant patch (`stream`, `store`) so a
+  variant can never flip the response mode the local parser expects.
 - Input clamp: the prompt is truncated to the resolved model's catalog
   `limit.context` (minus an output reserve, ~4 chars/token estimate;
   conservative default when the model is not in the catalog). Truncation is
@@ -58,17 +83,18 @@ other runtime API.
      endpoint, or (3) the provider's `api` field from the models.dev catalog.
     Configured API keys honor OpenCode's `{env:NAME}` and `{file:path}`
     substitutions; file contents and resolved credentials remain server-side.
-  - `[small-model:diagnostic]` logs record provider/model, input character
-    counts, output budget, thinking toggle, HTTP/finish status, and
-    content/reasoning lengths without logging prompts, response text, or
-    credentials. Goal audit parsing similarly emits
-    `[session-goal:diagnostic]` structural verdict metadata.
+  - `[small-model:diagnostic]` logs record provider/model, variant
+    application (`applied: true/false`), input character counts, output
+    budget, thinking toggle, HTTP/finish status, and content/reasoning
+    lengths without logging prompts, response text, or credentials. Goal
+    audit parsing similarly emits `[session-goal:diagnostic]` structural
+    verdict metadata.
 - `catalog.js` — models.dev catalog via the shared in-process cache
   (`../opencode/models-metadata.js`, also serving
   `/api/openchamber/models-metadata`).
 - `routes.js` — `GET /api/small-model` (resolution preview) and
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
-  model?, directory? }` → `{ text, providerID, modelID, source }`).
+  model?, directory? }` → `{ text, providerID, modelID, variant?, source }`).
 
 ## Registration
 

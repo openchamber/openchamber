@@ -41,9 +41,17 @@ export function parseModelRef(value) {
   const trimmed = value.trim();
   const slash = trimmed.indexOf('/');
   if (slash <= 0 || slash === trimmed.length - 1) return null;
+  const rest = trimmed.slice(slash + 1);
+  // Optional "#variant" suffix (e.g. "provider/model#low") — the variant is
+  // honored by the wire call, never part of the model id sent upstream.
+  const hash = rest.indexOf('#');
+  const modelID = hash === -1 ? rest : rest.slice(0, hash);
+  if (!modelID) return null;
+  const variant = hash === -1 || hash === rest.length - 1 ? undefined : rest.slice(hash + 1);
   return {
     providerID: trimmed.slice(0, slash),
-    modelID: trimmed.slice(slash + 1),
+    modelID,
+    ...(variant ? { variant } : {}),
   };
 }
 
