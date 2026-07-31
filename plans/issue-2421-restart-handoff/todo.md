@@ -50,19 +50,19 @@
 - [x] 24 launch-wiring vitest tests pass; 866 server tests pass / 2 skip (matches baseline + new tests).
 - [x] Type-check, lint, docs validate all clean.
 
-## Cross-platform follow-up — implementation complete; real Windows validation pending
+## Cross-platform follow-up — implementation complete; current CI validation passed; maintainer review pending
 - [x] Shared guardian path resolver used by entrypoint, CLI, detection, and lifecycle.
 - [x] Stable owner/runtime/launch identity is persisted in per-port instance metadata, propagated through `OPENCHAMBER_GUARDIAN_OWNER_ID`, filtered during adoption, and enforced on stop/abort calls.
 - [x] Initial managed spawn goes through a running guardian; failed handoffs roll back successor/old-record state before legacy fallback.
 - [x] Authenticated challenge/MAC/replay-protected IPC on POSIX and Windows.
 - [x] Windows smoke script authenticates `list`/`shutdown`; Windows workflow smoke is a hard gate.
-- [x] Final local rerun after the review remediation: 118 web test files passed, 1171 tests passed, 3 skipped; focused five-area guardian/v2/CLI/lifecycle tests, Linux smoke, docs, type-check, lint, and changed-file syntax checks are clean.
+- [x] Current-tree ACL follow-up validation: 34 ACL tests passed; changed-file syntax, web type-check/lint, docs validation, and diff check are clean.
 - [x] High review findings: platform-aware v2 filesystem branches, unquoted `icacls` argv, readiness-gated autostart, recoverable failed guardian stop, and fail-closed recovery-store startup.
 - [x] Same-primitive medium correction: `taskkill` EPERM is now an ambiguous failure (ESRCH remains already-gone), and stale data events from replaced guardian sockets are ignored.
 - [x] Owner-scoped CLI stop now avoids force-killing the web process or removing owner metadata when guardian shutdown is unconfirmed; retry/adoption regression covered in `bin/cli.test.js`.
 - [x] Foreground signal shutdown now preserves the PID marker and owner metadata when `controller.stop()` rejects; regression covered in `bin/lib/commands-serve.test.js`.
 - [x] Launch-failure cleanup now has a stale-CAS regression proving it re-reads and retries with the current revision.
-- [ ] Run the real `windows-latest` workflow and review its final smoke/type/lint results.
+- [x] Run the real `windows-latest` workflow at `7e4d595f3`; Windows baseline passed. Linux baseline and `pr checks` also passed at the same head.
 
 ## Phase 4+ (CLOSED — no work on our roadmap)
 - [x] **Session resume / agent loop restoration** — closed: not ours, OpenCode already provides it.
@@ -74,14 +74,14 @@
 
 **Net: #2421 ends with Phase 2C.** No Phase 4 work. See `plan.md` "Phase 4 scope" for the reasoning.
 
-## PR review follow-up — current head `a2951d4cf`
+## PR review follow-up — current head `7e4d595f3`
 - [x] Read the PR review threads and issue comments through the current bot review; preserve PR #2485 as OPEN/Draft.
 - [x] Align provenance with `upstream/main`; current PR metadata reports `MERGEABLE`.
 - [x] Treat shared `packages/ui` live-status reconciliation as an affected surface; keep UI client persistence out of this issue.
 - [x] Fix `icacls` parsing for target paths containing spaces and add regression coverage; native Windows output remains pending.
 - [x] Add the negative explicit/non-inherited `CREATOR OWNER` ACL test.
 - [ ] Update the PR handoff with the guardian-owned `openchamber stop` failure/retry behavior.
-- [ ] Rerun and record focused/full validation at exact head `a2951d4cf`, including the current Windows workflow result.
+- [x] Rerun and record validation at exact head `7e4d595f3`: local ACL checks passed; Linux baseline, Windows baseline, and `pr checks` passed.
 - [ ] Obtain human maintainer review for both workflow files; automation cannot clear this trust-boundary gate.
 - [ ] Track the oversized-diff fail-closed fix for `.github/workflows/pr-review.yml` separately unless explicitly added to this issue.
 

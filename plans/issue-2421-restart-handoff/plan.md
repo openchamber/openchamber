@@ -16,14 +16,14 @@
 | 1 | Isolated v1 protocol + fake-store tests | complete |
 | 2A | v2 secret provider, SQLite CAS store, reservation/launch/lease protocol | complete |
 | 2B | Linux guardian core + IPC server + GuardianClient | complete |
-| 2C | Guardian launch wiring: `openchamber-guardian` bin entry, `openchamber guardian {status\|start\|stop\|reload}` subcommand, `--guardian`/`--no-guardian` flag, autostart in `serve`, owner-scoped shutdown/restart semantics, and real Linux/Windows smoke tests | complete locally; CI gate pending |
-| 2D | Cross-platform guardian transport, authenticated IPC, stable owner/launch identity, Windows process/ACL path, and hard Windows smoke gate | implementation complete; real Windows gate pending |
+| 2C | Guardian launch wiring: `openchamber-guardian` bin entry, `openchamber guardian {status\|start\|stop\|reload}` subcommand, `--guardian`/`--no-guardian` flag, autostart in `serve`, owner-scoped shutdown/restart semantics, and real Linux/Windows smoke tests | complete; Linux/Windows CI passed at `7e4d595f3`; maintainer review pending |
+| 2D | Cross-platform guardian transport, authenticated IPC, stable owner/launch identity, Windows process/ACL path, and hard Windows smoke gate | implementation complete; Windows baseline passed at `7e4d595f3`; maintainer review pending |
 | 3 | Web lifecycle integration (`bootstrapOpenCodeAtStartup()` adoption + `restartOpenCode()` handoff branch + `--handoff` CLI flag) | complete (landed in same PR as 2B) |
 | 4 | Cross-runtime adoption — see "Phase 4 scope" below | closed by user direction (2026-07-29): no VS Code, no Electron, no mobile, no hosted mobile |
 
 ## Current status
 
-Phases 1, 2A, 2B, 2C, and 3 are implemented on `fix/issue-2421-restart-handoff`. The current provenance is aligned with `upstream/main` at `eafa7ceec`: PR #2485 is OPEN/Draft, head `a2951d4cf`, and GitHub reports the branch mergeable. The PR comparison against the current base is 90 task-scoped files covering guardian/lifecycle/IPC, shared live-status reconciliation in `packages/ui`, CI, docs, tests, and plans. UI client persistence (tabs, drafts, scroll) remains out of scope. Previous local validation reports were collected before this final base alignment and must be refreshed on `a2951d4cf`; real Windows validation remains a required platform gate. No Draft/status change is part of this workflow.
+Phases 1, 2A, 2B, 2C, and 3 are implemented on `fix/issue-2421-restart-handoff`. Current provenance is aligned with `upstream/main` at `eafa7ceec`; PR #2485 is OPEN/Draft, head `7e4d595f3`, and GitHub reports `MERGEABLE` with all current checks passing. The PR comparison is 90 task-scoped files covering guardian/lifecycle/IPC, shared live-status reconciliation in `packages/ui`, CI, docs, tests, and plans. UI client persistence remains out of scope. Local ACL follow-up validation passed (34 tests, syntax, web type-check/lint, docs validation, and diff check); GitHub Linux baseline, Windows baseline, and `pr checks` passed for `7e4d595f3`. Human maintainer review of workflow trust-boundary files remains required; PR Draft/status is intentionally unchanged.
 
 ## Phase 2A state machine
 
@@ -60,7 +60,7 @@ User direction (2026-07-29) closes the originally-listed Phase 4 items as follow
 - `parseAclOutput` now strips the validated target path case-insensitively before parsing inline ACEs, including paths with spaces (for example `C:\Users\Jane Doe\...`); focused regression passes. Native Windows `icacls` output remains unverified.
 - The negative test for an explicit, non-inherited `CREATOR OWNER` ACL entry is now present and passing.
 - Document the operator-visible guardian-owned `openchamber stop` behavior: an unresponsive web process is not force-killed when owner metadata must be preserved; retry `openchamber stop` or use the explicit guardian administrative command.
-- Refresh the validation table on exact head `a2951d4cf`, including the current Windows workflow result; earlier green-run comments are not evidence for this final head.
+- Validation is refreshed on exact head `7e4d595f3`: local ACL checks passed, and GitHub Linux baseline, Windows baseline, and `pr checks` all passed. The PR handoff table still needs a separate manual refresh because PR body mutation is intentionally not performed here.
 - The merge-conflict review finding is resolved by the current merge with `upstream/main`; do not rewrite or force-push this published branch without separate approval.
 
 ## Risks and gates
