@@ -9,13 +9,16 @@
    before `startWebUiServer` if no singleton is detected; reuse the
    `O_EXCL` PID file so we never run two. Add an opt-out
    (`OPENCHAMBER_GUARDIAN_AUTOSTART=disabled` or `--no-guardian`).
-4. On graceful shutdown (`SIGTERM`/`SIGINT`), ask the guardian to stop
-   too so it does not outlive the server.
-5. End-to-end smoke test on Linux: start server, kill web process,
-   restart it, confirm the OpenCode child is adopted and the UI does not
-   show stale-active sessions; add a script under `scripts/` for Linux CI.
-6. `openchamber-guardian` is Linux/POSIX only; Windows must be rejected
-   explicitly with a friendly error.
+4. On graceful shutdown (`SIGTERM`/`SIGINT`), stop only the current
+   owner-scoped OpenCode child. The guardian service outlives the web server;
+   restart/update requests explicitly detach and `openchamber guardian stop`
+   is the administrative service shutdown.
+5. End-to-end smoke tests on Linux and Windows authenticate IPC, launch a
+   real managed child, verify owner-scoped health/stop behavior, and confirm
+   guardian shutdown; scripts under `scripts/` are hard-gated in both CI jobs.
+6. `openchamber-guardian` uses a POSIX Unix socket or Windows loopback TCP
+   discovery file, with the same authenticated JSON-line protocol and owner
+   checks on both platforms.
 
 ## Decisions (with rationale)
 
@@ -71,24 +74,26 @@
     a structured result (`{ running, pid, ... }`) without parsing
     log lines.
 
-### D3. Auto-start inside `serveCommand` (foreground + daemon), gated on Linux + opt-out
+### D3. Auto-start inside `serveCommand` (foreground + daemon), gated by opt-out
 
 - **Decision:** In `commands-serve.js`, **before** `startWebUiServer`
   (or before spawning the daemon child), call
   `maybeAutoStartGuardian({ logFd, options, emitNotice })`:
-  - Skip if `process.platform === 'win32'`.
   - Skip if `options.guardian === false` (i.e. `--no-guardian`).
   - Skip if `options.handoff === false` (the user has already opted
     out of the entire guardian branch; no point starting it).
   - Skip if `process.env.OPENCHAMBER_GUARDIAN_AUTOSTART === 'disabled'`.
-  - Probe via `isGuardianRunning(getGuardianSocketPath())`. If true,
+  - Probe via the platform-specific `isGuardianRunning(socketPath, portPath)`. If true,
     log `guardian already running (pid N)` and continue.
-  - Otherwise, call `startGuardianDetached({ logFd, env: extraEnv })`
-    which `spawn`s `bin/openchamber-guardian.js` with
-    `detached: true, stdio: 'ignore'` (writes to a `guardian.log`
-    next to the server log), `unref()`s it, and returns the spawned
-    `pid` plus the PID file path so the CLI can later call
-    `stopGuardianViaIpc({ timeoutMs })`.
+   - Otherwise, call `startGuardianDetached({ logFd, env: extraEnv })`
+     which `spawn`s `bin/openchamber-guardian.js` with
+     `detached: true, stdio: 'ignore'` (writes to a `guardian.log`
+     next to the server log), `unref()`s it, and waits for the
+     platform-specific IPC readiness probe with a bounded timeout before
+     `serve` continues. A timeout, spawn failure, or ambiguous race fails
+     closed rather than allowing a legacy OpenCode launch beside an unready
+     guardian. The spawned `pid` plus the PID file path remain available for
+     `stopGuardianViaIpc({ timeoutMs })`.
 - **Why:**
   - **Localize all changes to `commands-serve.js`.** The
     foreground and daemon paths already centralize port
@@ -116,54 +121,46 @@
     Breaks the entrypoint's contract (it's a singleton, not a
     parent) and creates a startup loop risk.
 
-### D4. Graceful shutdown → stop guardian via IPC
+### D4. Graceful shutdown → owner-scoped child stop or restart detach
 
-- **Decision:** In `commands-serve.js`, when `foregroundServerActive`
-  is set and `shutdownForegroundServer(signal)` runs, after
-  `controller.stop({ exitProcess: false })` and **before** `cleanupFiles()`,
-  call `stopGuardianViaIpc({ timeoutMs: 3000 })` only if
-  `guardianAutoStarted === true` (so we don't accidentally stop a
-  pre-existing guardian the operator started themselves). On the
-  daemon path, the CLI exits immediately after spawning the detached
-  guardian and detached server, so no shutdown call is needed — the
-  server and guardian are independent; the operator stops each with
-  `openchamber stop` / `openchamber guardian stop` respectively.
-- **Why:**
-  - **`GuardianClient.shutdown()` is a one-shot IPC RPC** that already
-    exists in `guardian-client.js:176-178` and is wired in
-    `ipc-server.js:53-57`. Reusing it is a 30-line helper, not a new
-    protocol. The `detach` is best-effort: on failure we log and
-    continue, matching the precedent set by the server's
-    `cleanupFiles()` swallow-and-continue pattern.
-  - **Scoped to CLI-launched guardians.** Stopping a guardian the
-    operator started out-of-band would silently break their setup.
-    Tracking `guardianAutoStarted` from D3 is the smallest way to
-    gate this.
-  - **Daemon path needs no cleanup.** The CLI process exits as soon
-    as the server reports ready. Asking it to wait for a
-    `shutdown` IPC over an unrelated long-lived guardian would
-    re-couple lifetimes and contradict the daemon design.
+- **Decision:** `commands-serve.js` does not automatically shut down the
+  guardian service. `shutdown-runtime.js` closes the current guardian-managed
+  child with its owner identity for ordinary stop, but never kills an
+  arbitrary listener on that port. Restart/update requests send
+  `{ preserveGuardian: true, restart: true }` to `/api/system/shutdown`; the
+  server detaches from the child and the CLI reuses the persisted owner ID for
+  the successor web server. `openchamber guardian stop` is the explicit
+  administrative operation that stops the guardian service.
+ - **Why:**
+  - Guardian ownership is a durable service boundary, not a child of the
+    web-server process. Keeping it alive is what permits restart adoption.
+  - Owner-scoped child stop prevents one OpenChamber instance from stopping
+    another instance's child; administrative guardian stop remains explicit.
+  - Restart intent is carried through the existing authenticated HTTP route,
+    so CLI and UI-triggered lifecycle requests share the same behavior.
 - **Rejected:**
   - "Track the spawned guardian's pid and SIGTERM it directly."
     Skips the protocol-correct shutdown (no SQL cleanup, no
     child SIGTERM with timeout). The guardian already implements
     graceful shutdown over IPC — bypassing it is a downgrade.
-  - "Don't stop the guardian at all." Leaves an orphaned guardian
-    after every foreground run. On systemd / process-manager
-    hosts this leaks processes.
+  - "Stop the guardian during every web-server shutdown." This breaks restart
+    adoption and can terminate a guardian owned by another OpenChamber
+    instance; administrative service shutdown remains an explicit command.
 
-### D5. End-to-end Linux smoke test as a shell script + a vitest
+### D5. End-to-end Linux and Windows smoke tests
 
-- **Decision:** Add two artifacts:
+- **Decision:** Add the two platform scripts plus a shared client:
   1. `scripts/guardian-smoke-test.sh` — boots a real guardian via
      `node packages/web/bin/openchamber-guardian.js` against a temp
-     `data-dir`, sends a `spawn`/`list`/`stop`/`shutdown` sequence
-     using `socat` (or a tiny inline Node IPC client) over the Unix
-     socket, asserts PID file created/removed, asserts the
-     `--json` CLI surface works, prints "ok" / non-zero exit on
-     failure. Skipped on non-Linux via `case "$(uname -s)" in
-     Linux*) ;; *) exit 0 ;; esac` so CI on macOS / Windows no-ops.
-  2. `packages/web/server/lib/guardian/launch-wiring.test.js` — a
+     `data-dir`, rejects unauthenticated and replayed requests, launches the
+     real managed-child fixture, checks owner-scoped health/stop, sends
+     `shutdown`, and prints "ok".
+   2. `scripts/guardian-smoke-test.ps1` — the same authenticated Windows
+      loopback-TCP/ACL flow, hard-gated by the Windows workflow.
+   3. `scripts/guardian-smoke-client.js` and
+      `scripts/guardian-test-opencode.js` — shared authenticated client and
+      real managed-child fixture used by both platform scripts.
+   4. `packages/web/server/lib/guardian/launch-wiring.test.js` — a
      vitest that imports `commands-guardian.js` and verifies:
      - `guardianCommand(options, 'status')` returns `running: false`
        when no socket exists.
@@ -175,16 +172,17 @@
      - All four subcommand actions produce the expected
        `--json` payload shape.
 - **Why:**
-  - **The shell script proves end-to-end runtime correctness** —
-    a real binary, a real Unix socket, real process groups, real
-    signals. None of the focused vitests can claim that.
+  - **The smoke clients prove end-to-end runtime correctness** — real guardian
+     binaries, real platform transports, a real managed child, process
+     termination, and authenticated negative paths. Focused vitests cannot
+     claim all of that.
   - **The vitest proves the CLI surface parity** in all four
     modes (TTY / `--quiet` / `--json` / non-TTY) without depending
     on `uname` / a real process group, so it runs in CI on every
     platform (the spawn parts skip on non-Linux).
-  - **`socat` would add a runtime dep.** A tiny inline Node IPC
-    client is ~40 lines and uses only `node:net`. Acceptable cost
-    for a script that runs only on Linux CI.
+   - **A shared Node smoke client avoids duplicated protocol code.** It is
+     invoked by both platform scripts under the real runtime and keeps the
+     negative authentication checks identical.
 - **Rejected:**
   - "Pure shell script with no vitest integration." CI would have
     no per-PR signal; the only way to verify would be a manual run.
@@ -192,36 +190,30 @@
     end-to-end runtime check the user asked for explicitly in
     inline step 5.
 
-### D6. Windows rejection: friendly error at CLI layer + entrypoint already exits 1
+### D6. Windows transport and lifecycle support
 
-- **Decision:** `commands-guardian.js` calls `assertPlatformSupported()`
-  (a new helper in `commands-guardian.js`) at the top of every action.
-  On `process.platform === 'win32'`, throws a `TunnelCliError` with
-  exit code `EXIT_CODE.USAGE_ERROR` and a message: "OpenChamber
-  guardian is Linux/POSIX only. On Windows, use `openchamber` without
-  the guardian handoff branch (`--no-handoff`) or the
-  `openchamber guardian` subcommand."  In `commands-serve.js`, the
-  `maybeAutoStartGuardian` helper short-circuits on Windows with a
-  one-line `logStatus('info', 'guardian disabled on Windows')`.
-- **Why:** The user-visible error is friendlier when it comes from
-  the CLI layer (where the operator types the command) than from
-  the entrypoint (where they get a bare `Guardian is Linux/POSIX
-  only`). Both layers must reject — entrypoint as the last line of
-  defense, CLI for UX.
+- **Decision:** Windows uses loopback TCP and an ACL-protected discovery file;
+  the guardian and clients perform a challenge/response handshake and MAC
+  every ordered request with a replay-protected sequence number.
+- **Why:** The durable owner/launch contract must remain identical across the
+  supported web platforms. Only transport, ACL, and process-termination
+  primitives vary.
 
 ## Concrete file-level change list
 
 | File | Change |
 |---|---|
 | `packages/web/package.json` | Add `"openchamber-guardian": "./bin/openchamber-guardian.js"` to `bin` (D1). |
-| `packages/web/bin/lib/commands-guardian.js` (new) | `guardianCommand(options, action)` with `status/start/stop/reload`, plus exported `startGuardianDetached({ logFd, env })`, `stopGuardianViaIpc({ timeoutMs })`, `maybeAutoStartGuardian(...)`, `getGuardianStatus()`. `cli-output.js` parity in all four modes. Windows guard. ~200 lines. |
-| `packages/web/bin/lib/commands-serve.js` | Import the helpers from `commands-guardian.js`. Add `options.guardian = true` to options (`cli-args.js`); foreground + daemon both call `maybeAutoStartGuardian(...)` before `startWebUiServer` / before the server-detached `spawn`. Foreground shutdown calls `stopGuardianViaIpc` if `guardianAutoStarted`. |
+| `packages/web/bin/lib/commands-guardian.js` (new) | `guardianCommand(options, action)` with `status/start/stop/reload`, plus exported `startGuardianDetached({ logFd, env })`, `stopGuardianViaIpc({ timeoutMs })`, `maybeAutoStartGuardian(...)`, `getGuardianStatus()`. `cli-output.js` parity in all four modes and shared platform path resolution. |
+| `packages/web/bin/lib/commands-serve.js` | Import the guardian autostart helper. Foreground + daemon both call `maybeAutoStartGuardian(...)`; shutdown leaves the guardian service running and preserves owner-scoped lifecycle semantics. |
 | `packages/web/bin/lib/cli-args.js` | Add `guardianAction = (positional[1] || 'status')` next to `startupAction`. Add `case 'guardian'` / `case 'no-guardian'`. Add `--guardian` / `--no-guardian` to `showHelp()`. Add `guardian` to `knownCommands` in `cli.js`. Add `openchamber guardian` help section. |
 | `packages/web/bin/cli.js` | Import `guardianCommand`; add `guardian: guardianCommand` to `commands` map; add `if (command === 'guardian') await commands.guardian(options, guardianAction); return;` next to the existing `startup` / `schedule` dispatch blocks; add `'guardian'` to `knownCommands` list. |
-| `packages/web/bin/openchamber-guardian.js` | Already exits 1 on Windows (lines 102-105). Add a friendlier stderr message: "OpenChamber guardian is Linux/POSIX only and does not run on Windows." No behavior change. |
-| `scripts/guardian-smoke-test.sh` (new) | End-to-end smoke test (D5). `chmod +x`. ~80 lines. |
-| `packages/web/server/lib/guardian/launch-wiring.test.js` (new) | Vitest covering CLI parity + spawn/IPC helpers. ~150 lines. Linux-only parts skip on Windows. |
+| `packages/web/bin/openchamber-guardian.js` | Cross-platform standalone entrypoint; initializes the shared private root before the PID singleton, then starts the authenticated POSIX or Windows transport. |
+| `scripts/guardian-smoke-test.sh` / `scripts/guardian-smoke-test.ps1` | Authenticated Linux and Windows end-to-end smoke tests. |
+| `packages/web/server/lib/guardian/launch-wiring.test.js` (new) | Vitest covering CLI parity + spawn/IPC helpers on both platform branches. |
 | `packages/web/server/lib/opencode/DOCUMENTATION.md` | Add a new "Phase 2C — Launch wiring" section documenting CLI surface, `--guardian` / `--no-guardian` / `OPENCHAMBER_GUARDIAN_AUTOSTART`, autostart in `serve`, shutdown sequencing, and Windows behavior. |
+| `scripts/guardian-smoke-client.js` / `scripts/guardian-test-opencode.js` | Shared authenticated smoke client and real managed-child fixture used by Linux and Windows. |
+| `.github/workflows/guardian-linux-baseline.yml` / `.github/workflows/guardian-windows-baseline.yml` | Hard-gated real-platform lifecycle smoke and package checks. |
 | `plans/issue-2421-restart-handoff/phases/phase-2c.md` | This plan. |
 
 ## Validation plan (no commit / push this turn)
@@ -232,25 +224,27 @@ After implementation, run (in order):
 2. `npx vitest run packages/web/server/lib/guardian/launch-wiring.test.js`.
 3. `npx vitest run packages/web/server/lib/guardian/` (regression).
 4. `npx vitest run packages/web/server/lib/opencode/lifecycle-guardian-integration.test.js` (regression).
-5. `npx vitest run packages/web/server` (full regression, expect prior 842 pass / 2 skip baseline).
+5. `npx vitest run packages/web` (full web regression).
 6. `bun run type-check:web` (must be clean).
 7. `bun run lint:web` (must be clean).
 8. `bun run docs:validate` (must be clean).
-9. `bash scripts/guardian-smoke-test.sh` (only on Linux; prints "ok" on success).
-10. `bun run dead-code` (inspect report — non-blocking but must be reviewed).
+9. `bash scripts/guardian-smoke-test.sh` on Linux and the PowerShell smoke script on Windows (both print "ok" on success).
+10. `npx vitest run packages/web/server/lib/guardian/windows-smoke-script.test.js` (PowerShell script contract).
+11. `bun run dead-code` (inspect report — non-blocking but must be reviewed).
 
 ## Out of scope (closed)
 
 - **OpenCode-side session resume** is not in OpenChamber's scope.
-  OpenCode already provides durable session resume via
+  OpenCode already provides durable session history via
   `SessionContextEpoch` + `SessionHistory` + `SessionCompaction`
-  (SQLite event log). Phase 2C's job is to keep the OpenCode child
-  alive across OpenChamber restart so that resume isn't needed in
-  the common case; if the OpenCode child itself dies, OpenCode's own
-  resume flow handles it the next time it starts. See
+  (SQLite event log). OpenChamber does not automatically continue a
+  post-crash generation or reconstruct an in-flight turn. It adopts a live,
+  identity-verified guardian child when present; normal startup may create a
+  fresh child when none remains, but that is not continuation of the lost
+  generation. Dead/ambiguous records remain an attention condition. See
   `plan.md` "Phase 4 scope" for the reasoning.
 - **Cross-runtime adoption** — closed by user direction (2026-07-29):
-  - **VS Code:** out. Windows is out of scope; cross-platform VS Code would need a separate design.
+   - **VS Code:** out. Cross-platform VS Code would need a separate design and runtime bridge.
   - **Electron:** out. Backend starts in-process; no Unix-socket guardian attach point.
   - **Mobile (Capacitor):** nothing to do. Mobile is a client over HTTP/relay; works as long as the server works.
   - **Hosted mobile:** out.
@@ -267,8 +261,8 @@ After implementation, run (in order):
 | Risk | Mitigation |
 |---|---|
 | Autostart races with another `openchamber serve` invocation. | Reuse the entrypoint's existing `enforceSingleton()` (PID-file `O_EXCL`) so a second invocation exits 1 cleanly without affecting the running guardian. |
-| Auto-stop on shutdown hangs. | `stopGuardianViaIpc({ timeoutMs: 3000 })`; on timeout, log a warning and continue (do not block process exit). |
-| Operator has a manually started guardian; we accidentally stop it. | `guardianAutoStarted` flag gates D4 — we only stop what we started. |
-| Windows users hit a confusing crash. | CLI-layer `assertPlatformSupported` (D6) returns a friendly `TunnelCliError` with usage-level exit code, well before the entrypoint's bare stderr. |
+| Restart or stop affects the wrong child. | Persist `OPENCHAMBER_GUARDIAN_OWNER_ID`, require exact owner/runtime matching, and never fall back after uncertain cleanup. |
+| Web shutdown accidentally kills a foreign listener. | Owner-scoped guardian stop; never use the port-kill fallback for guardian-managed children. |
+| Windows transport exposes an unauthenticated or stale endpoint. | ACL the discovery file before publication, bind loopback only, require challenge/MAC authentication, and remove stale discovery files before atomic replacement. |
 | `bun run dead-code` reports a stale ref. | Review each report; delete only confirmed dead, never remove freshly added files. |
-| New script becomes a CI-only flake on macOS. | `uname -s` short-circuit at the top of `scripts/guardian-smoke-test.sh` (D5) — exits 0 on non-Linux. |
+| Smoke script runs on the wrong platform. | The Bash and PowerShell scripts are paired with explicit hard-gated Linux and Windows workflows; Bash remains a no-op outside Linux. |

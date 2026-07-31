@@ -8,12 +8,19 @@ const configResolvers: Array<(response: ConfigResponse) => void> = [];
 let configCalls = 0;
 const promptAsyncCalls: unknown[][] = [];
 const promptAsyncResults: Array<unknown> = [];
+const sessionStatusCalls: unknown[][] = [];
+const sessionStatusResults: Array<unknown> = [];
 
 const promptAsyncMock = mock(async (...args: unknown[]) => {
   promptAsyncCalls.push(args);
   const next = promptAsyncResults.shift();
   if (next instanceof Error) throw next;
   return next ?? { response: new Response(null, { status: 200 }) };
+});
+
+const sessionStatusMock = mock(async (...args: unknown[]) => {
+  sessionStatusCalls.push(args);
+  return sessionStatusResults.shift() ?? { data: {} };
 });
 
 mock.module('@opencode-ai/sdk/v2', () => ({
@@ -28,6 +35,7 @@ mock.module('@opencode-ai/sdk/v2', () => ({
     },
     session: {
       promptAsync: promptAsyncMock,
+      status: sessionStatusMock,
     },
   })),
 }));
@@ -62,6 +70,8 @@ const { opencodeClient } = await import(`./client?cache-test=${Date.now()}`);
 beforeEach(() => {
   promptAsyncCalls.length = 0;
   promptAsyncResults.length = 0;
+  sessionStatusCalls.length = 0;
+  sessionStatusResults.length = 0;
 });
 
 describe('opencodeClient getConfig cache', () => {
@@ -159,5 +169,20 @@ describe('opencodeClient prompt retry behavior', () => {
 
     expect(promptAsyncCalls.length).toBe(1);
     expect(error instanceof Error ? error.message : String(error)).toContain('Failed to send message (503)');
+  });
+});
+
+describe('opencodeClient session status snapshots', () => {
+  test('passes the directory to the official status endpoint and preserves empty success', async () => {
+    sessionStatusResults.push({ data: {} });
+
+    expect(await opencodeClient.getSessionStatusForDirectory('/repo')).toEqual({});
+    expect(sessionStatusCalls).toEqual([[{ directory: '/repo' }]]);
+  });
+
+  test('returns null for an unavailable status fetch instead of fabricating empty success', async () => {
+    sessionStatusResults.push({ error: new Error('OpenCode unavailable'), response: { status: 503 } });
+
+    expect(await opencodeClient.getSessionStatusForDirectory('/repo')).toBeNull();
   });
 });

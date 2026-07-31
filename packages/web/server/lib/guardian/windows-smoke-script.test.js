@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..', '..', '..', '..');
 const scriptPath = join(repoRoot, 'scripts', 'guardian-smoke-test.ps1');
+const clientScriptPath = join(repoRoot, 'scripts', 'guardian-smoke-client.js');
 
 const readScript = () => {
   if (!existsSync(scriptPath)) {
@@ -65,10 +66,11 @@ describe('scripts/guardian-smoke-test.ps1 well-formedness', () => {
     expect(hasSkipMessage).toBe(true);
   });
 
-  it('uses .NET TcpClient for the IPC round-trip', () => {
+  it('delegates the real IPC round-trip to the cross-platform smoke client', () => {
     const src = readScript();
-    expect(src).toMatch(/System\.Net\.Sockets\.TcpClient/);
-    expect(src).toMatch(/System\.IO\.StreamWriter|System\.IO\.StreamReader/);
+    expect(src).toMatch(/guardian-smoke-client\.js/);
+    expect(src).toMatch(/bun\.exe/);
+    expect(existsSync(clientScriptPath)).toBe(true);
   });
 
   it('passes --data-dir and the Windows startup flags to the entrypoint', () => {
@@ -80,14 +82,11 @@ describe('scripts/guardian-smoke-test.ps1 well-formedness', () => {
   });
 
   it('sends `list` and `shutdown` JSON-line requests', () => {
-    const src = readScript();
-    // PowerShell escapes embedded double-quotes with a leading
-    // backtick (`` ` ``), so the literal source contains
-    // `` `method `: ` list `` rather than `"method": "list"`.
-    // Match both forms so a future cleanup that switches to
-    // single-quoted here-strings still passes.
-    expect(src).toMatch(/(`"method`"\s*:\s*`"list`"|"method"\s*:\s*"list")/);
-    expect(src).toMatch(/(`"method`"\s*:\s*`"shutdown`"|"method"\s*:\s*"shutdown")/);
+    const src = readFileSync(clientScriptPath, 'utf8');
+    expect(src).toMatch(/'list'/);
+    expect(src).toMatch(/'shutdown'/);
+    expect(src).toMatch(/'spawn'/);
+    expect(src).toMatch(/'stop'/);
   });
 
   it('has balanced curly braces (sanity check for an unterminated block)', () => {
@@ -126,6 +125,12 @@ describe('scripts/guardian-smoke-test.ps1 well-formedness', () => {
     // node child so a CI failure does not leak processes.
     expect(src).toMatch(/\bfinally\b/);
     expect(src).toMatch(/Stop-Process/);
+  });
+
+  it('keeps early failure diagnostics safe before log paths are initialized', () => {
+    const src = readScript();
+    expect(src).toMatch(/\$LogFile\s+-and\s+\(Test-Path\s+-LiteralPath\s+\$LogFile\)/);
+    expect(src).toMatch(/\$LogErrFile\s+-and\s+\(Test-Path\s+-LiteralPath\s+\$LogErrFile\)/);
   });
 
   // Optional: if `pwsh` is on PATH, run the PowerShell parser against

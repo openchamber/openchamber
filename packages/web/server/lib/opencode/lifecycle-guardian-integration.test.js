@@ -53,6 +53,11 @@ const createMockChild = () => {
   return child;
 };
 
+const createActiveRollbackRecord = (incarnation) => ({
+  state: 'active',
+  incarnation,
+});
+
 // W-C: helper to flip `process.platform` per-test (mirrors the helper
 // in launch-wiring.test.js). Windows-native test environments must
 // also exercise the new code paths even when the actual `process.platform`
@@ -77,6 +82,11 @@ const createRuntime = (overrides = {}) => {
     openCodeBaseUrl: null,
     currentRestartPromise: null,
     currentIncarnation: null,
+    currentOwner: {
+      ownerInstanceId: 'owner-test-instance',
+      runtimeIdentity: 'runtime-test-instance',
+      launchFingerprint: 'current-fingerprint',
+    },
     isRestartingOpenCode: false,
     openCodeApiPrefix: '',
     openCodeApiPrefixDetected: false,
@@ -133,6 +143,9 @@ const createRuntime = (overrides = {}) => {
       SHELL_ONLY: 'yes',
       OPENCODE_SERVER_PASSWORD: 'shell-password',
     })),
+    resetSessionRuntimeForOpenCodeReplacement: vi.fn(),
+    guardianOwnerInstanceId: 'owner-test-instance',
+    guardianRuntimeIdentity: 'runtime-test-instance',
     ...overrides,
   };
 
@@ -169,7 +182,7 @@ describe('Guardian integration', () => {
   });
 
   describe('bootstrapOpenCodeAtStartup', () => {
-    it.skipIf(process.platform === 'win32')('adopts guardian-managed child on startup', async () => {
+    it('adopts guardian-managed child on startup', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({ healthy: true }),
@@ -182,11 +195,22 @@ describe('Guardian integration', () => {
         pid: 12345,
         port: 4096,
         url: 'http://127.0.0.1:4096',
+        owner: {
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+          launchFingerprint: 'adopted-fingerprint',
+        },
       });
 
       await runtime.bootstrapOpenCodeAtStartup();
 
       expect(detectAndAdoptGuardianChild).toHaveBeenCalled();
+      expect(detectAndAdoptGuardianChild.mock.calls[0][2]).toEqual({
+        expectedOwner: {
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+        },
+      });
       // M-3: adoption path stores a closeable proxy, not a bare { pid }.
       expect(state.openCodeProcess).toMatchObject({ pid: 12345, isGuardianManaged: true });
       expect(typeof state.openCodeProcess.close).toBe('function');
@@ -217,6 +241,7 @@ describe('Guardian integration', () => {
       const { runtime, state } = createRuntime();
 
       detectAndAdoptGuardianChild.mockResolvedValue(null);
+      isGuardianRunning.mockResolvedValue(false);
 
       await runtime.bootstrapOpenCodeAtStartup();
 
@@ -236,10 +261,111 @@ describe('Guardian integration', () => {
       // When detection throws, bootstrap logs the error and continues without OpenCode.
       expect(state.lastOpenCodeError).toBe('Connection refused');
     }, 10000);
+
+    it('refuses legacy startup when the guardian status probe throws', async () => {
+      const { spawn } = await import('node:child_process');
+      const { runtime, state } = createRuntime();
+
+      isGuardianRunning.mockRejectedValue(new Error('status probe failed'));
+
+      await runtime.bootstrapOpenCodeAtStartup();
+
+      expect(spawn).not.toHaveBeenCalled();
+      expect(state.openCodeProcess).toBeNull();
+      expect(state.lastOpenCodeError).toMatch(
+        /Guardian status probe failed; refusing legacy lifecycle fallback: status probe failed/,
+      );
+    }, 10000);
+
+    it('starts the initial managed child through a running guardian', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ healthy: true }),
+      });
+
+      const owner = {
+        ownerInstanceId: 'owner-initial',
+        runtimeIdentity: 'runtime-initial',
+        launchFingerprint: 'fingerprint-initial',
+      };
+      const clientConnect = vi.fn().mockResolvedValue(undefined);
+      const clientSpawn = vi.fn().mockResolvedValue({
+        incarnation: 'initial-incarnation',
+        pid: 12346,
+        port: 45679,
+        owner,
+      });
+      const clientStop = vi.fn().mockResolvedValue(undefined);
+      GuardianClient.mockImplementation(function ({ socketPath }) {
+        return {
+          socketPath,
+          connect: clientConnect,
+          spawn: clientSpawn,
+          stop: clientStop,
+          prepareHandoff: vi.fn(),
+          list: vi.fn(),
+          disconnect: vi.fn(),
+        };
+      });
+
+      const { runtime, state } = createRuntime();
+      await runtime.bootstrapOpenCodeAtStartup();
+
+      expect(clientConnect).toHaveBeenCalled();
+      expect(clientSpawn).toHaveBeenCalledWith(expect.objectContaining({
+        hostname: '127.0.0.1',
+        cwd: '/tmp/project',
+        owner: expect.objectContaining({
+          ownerInstanceId: expect.any(String),
+          runtimeIdentity: expect.any(String),
+          launchFingerprint: expect.any(String),
+        }),
+        launchSpec: expect.objectContaining({
+          hostname: '127.0.0.1',
+          port: expect.any(Number),
+          cwd: '/tmp/project',
+        }),
+      }));
+      expect(state.openCodeProcess).toMatchObject({ pid: 12346, isGuardianManaged: true });
+      expect(state.currentIncarnation).toBe('initial-incarnation');
+      expect(state.currentOwner).toEqual(owner);
+
+      await state.openCodeProcess.close();
+      expect(clientStop).toHaveBeenCalledWith({ incarnation: 'initial-incarnation', owner });
+    }, 10000);
+
+    it('does not legacy-spawn when a live guardian initial launch fails', async () => {
+      const clientConnect = vi.fn().mockResolvedValue(undefined);
+      const clientSpawn = vi.fn().mockRejectedValue(new Error('guardian launch rejected'));
+      const clientDisconnect = vi.fn();
+      GuardianClient.mockImplementation(function () {
+        return {
+          connect: clientConnect,
+          spawn: clientSpawn,
+          stop: vi.fn(),
+          disconnect: clientDisconnect,
+        };
+      });
+
+      const { spawn } = await import('node:child_process');
+      const { runtime, state } = createRuntime();
+
+      await runtime.bootstrapOpenCodeAtStartup();
+
+      expect(clientConnect).toHaveBeenCalledOnce();
+      expect(clientSpawn).toHaveBeenCalledOnce();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(clientDisconnect).toHaveBeenCalledOnce();
+      expect(state.openCodeProcess).toBeNull();
+      expect(state.isOpenCodeReady).toBe(false);
+      expect(state.lastOpenCodeError).toMatch(
+        /Guardian is running but initial OpenCode launch failed; refusing legacy fallback/,
+      );
+    }, 10000);
   });
 
   describe('restartOpenCode', () => {
-    it.skipIf(process.platform === 'win32')('performs handoff restart through guardian', async () => {
+    it('performs handoff restart through guardian', async () => {
       const clientConnect = vi.fn().mockResolvedValue(undefined);
       const clientSpawn = vi.fn().mockResolvedValue({
         incarnation: 'successor-123',
@@ -278,20 +404,33 @@ describe('Guardian integration', () => {
       }
 
       expect(clientConnect).toHaveBeenCalled();
-      expect(clientPrepareHandoff).toHaveBeenCalledWith({ incarnation: 'current-123' });
+      expect(clientPrepareHandoff).toHaveBeenCalledWith({
+        incarnation: 'current-123',
+        owner: expect.objectContaining({
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+        }),
+      });
       expect(clientSpawn).toHaveBeenCalled();
-      expect(clientStop).toHaveBeenCalledWith({ incarnation: 'current-123' });
+      expect(clientStop).toHaveBeenCalledWith({
+        incarnation: 'current-123',
+        owner: expect.objectContaining({
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+        }),
+      });
       // M-3: on successful handoff the client is kept alive inside the
       // successor's closeable proxy, so disconnect() is NOT called here.
       expect(clientDisconnect).not.toHaveBeenCalled();
       // M-1: handoff-spawn routes the successor port through setOpenCodePort.
       expect(deps.setOpenCodePort).toHaveBeenCalledWith(45679);
+      expect(deps.resetSessionRuntimeForOpenCodeReplacement).toHaveBeenCalledTimes(1);
       // M-3: the handoff-spawn proxy is a closeable, guardian-managed wrapper.
       expect(state.openCodeProcess).toMatchObject({ pid: 12346, isGuardianManaged: true });
       expect(typeof state.openCodeProcess.close).toBe('function');
     });
 
-    it.skipIf(process.platform === 'win32')('guardian handoff spawn passes managed launch env (password + agent-tool) through IPC', async () => {
+    it('guardian handoff spawn passes managed launch env (password + agent-tool) through IPC', async () => {
       // F-2: the guardian handoff path must use the same managed-launch
       // env-construction as startOpenCodeOnce. Otherwise the successor
       // lacks OPENCODE_SERVER_PASSWORD (so proxied requests carrying
@@ -402,6 +541,371 @@ describe('Guardian integration', () => {
       expect(state.openCodeProcess).not.toBeNull();
     }, 10000);
 
+    it('stops the old child before spawning a fixed-port successor', async () => {
+      const order = [];
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: vi.fn(async () => { order.push('prepare'); }),
+        stop: vi.fn(async ({ incarnation }) => { order.push(`stop:${incarnation}`); }),
+        spawn: vi.fn(async () => {
+          order.push('spawn');
+          return {
+            incarnation: 'fixed-successor',
+            pid: 12346,
+            port: 45678,
+          };
+        }),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime({
+        env: {
+          ENV_CONFIGURED_OPENCODE_PORT: 45678,
+          ENV_CONFIGURED_OPENCODE_HOST: null,
+          ENV_EFFECTIVE_PORT: undefined,
+          ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+          ENV_SKIP_OPENCODE_START: false,
+        },
+        waitForPortRelease: vi.fn(async () => {
+          order.push('release');
+          return true;
+        }),
+        waitForReady: vi.fn(async () => {
+          order.push('health');
+          return true;
+        }),
+      });
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'fixed-current';
+      state.currentOwner = {
+        ownerInstanceId: 'owner-test-instance',
+        runtimeIdentity: 'runtime-test-instance',
+        launchFingerprint: 'old-fingerprint',
+      };
+
+      await runtime.restartOpenCode();
+
+      expect(order).toEqual(['prepare', 'stop:fixed-current', 'release', 'spawn', 'health']);
+      expect(state.currentIncarnation).toBe('fixed-successor');
+      expect(state.openCodePort).toBe(45678);
+    });
+
+    it('refuses legacy fallback after a fixed-port old-child stop succeeds but successor spawn fails', async () => {
+      const oldClose = vi.fn();
+      const clientAbort = vi.fn();
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        abortHandoff: clientAbort,
+        spawn: vi.fn().mockRejectedValue(new Error('fixed successor failed')),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime({
+        env: {
+          ENV_CONFIGURED_OPENCODE_PORT: 45678,
+          ENV_CONFIGURED_OPENCODE_HOST: null,
+          ENV_EFFECTIVE_PORT: undefined,
+          ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+          ENV_SKIP_OPENCODE_START: false,
+        },
+      });
+      state.openCodeProcess = { pid: 12345, close: oldClose };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'fixed-current';
+
+      await expect(runtime.restartOpenCode()).rejects.toThrow(/without a confirmed rollback/);
+      expect(oldClose).not.toHaveBeenCalled();
+      expect(clientAbort).not.toHaveBeenCalled();
+      expect(client.disconnect).toHaveBeenCalled();
+    });
+
+    it('does not spawn a fixed-port successor when the owner-scoped old stop fails', async () => {
+      const oldProcess = { pid: 12345, close: vi.fn() };
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockRejectedValue(new Error('old stop failed')),
+        spawn: vi.fn(),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime({
+        env: {
+          ENV_CONFIGURED_OPENCODE_PORT: 45678,
+          ENV_CONFIGURED_OPENCODE_HOST: null,
+          ENV_EFFECTIVE_PORT: undefined,
+          ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+          ENV_SKIP_OPENCODE_START: false,
+        },
+      });
+      state.openCodeProcess = oldProcess;
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'fixed-current-stop-failure';
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).rejects.toThrow(/without a confirmed rollback/);
+      expect(client.spawn).not.toHaveBeenCalled();
+      expect(state.openCodeProcess).toBe(oldProcess);
+      expect(state.currentIncarnation).toBe('fixed-current-stop-failure');
+      expect(state.isOpenCodeReady).toBe(true);
+    });
+
+    it('does not fall back when guardian disconnect fails after successor cleanup', async () => {
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: vi.fn().mockResolvedValue(undefined),
+        abortHandoff: vi.fn(async ({ incarnation }) => createActiveRollbackRecord(incarnation)),
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        spawn: vi.fn().mockRejectedValue(new Error('successor spawn failed')),
+        stop: vi.fn(),
+        list: vi.fn().mockResolvedValue([]),
+        disconnect: vi.fn(() => { throw new Error('disconnect failed'); }),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { spawn } = await import('node:child_process');
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'dynamic-current-disconnect-failure';
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).rejects.toThrow(/without a confirmed rollback/);
+      expect(spawn).not.toHaveBeenCalled();
+      expect(state.currentIncarnation).toBe('dynamic-current-disconnect-failure');
+      expect(state.openCodeProcess).not.toBeNull();
+    });
+
+    it('does not call guardian handoff operations without a current incarnation', async () => {
+      const client = {
+        connect: vi.fn(),
+        prepareHandoff: vi.fn(),
+        stop: vi.fn(),
+        spawn: vi.fn(),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { runtime, state } = createRuntime();
+      const { spawn } = await import('node:child_process');
+      const replacement = createMockChild();
+      spawn.mockImplementationOnce(() => {
+        queueMicrotask(() => {
+          replacement.stdout.emit('data', 'opencode server listening on http://127.0.0.1:34086\n');
+        });
+        return replacement;
+      });
+      const close = vi.fn();
+      state.openCodeProcess = { pid: 12345, close };
+      state.openCodePort = 45678;
+      state.currentIncarnation = null;
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).resolves.toBeUndefined();
+      expect(client.prepareHandoff).not.toHaveBeenCalled();
+      expect(client.stop).not.toHaveBeenCalledWith(expect.objectContaining({ incarnation: undefined }));
+      expect(close).toHaveBeenCalled();
+    });
+
+    it('rolls a dynamic old-stop failure back to active before legacy fallback', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-dynamic-rollback',
+        runtimeIdentity: 'runtime-dynamic-rollback',
+        launchFingerprint: 'old-dynamic-fingerprint',
+      };
+      const clientStop = vi.fn(async ({ incarnation }) => {
+        if (incarnation === 'dynamic-old-stop-failure' && clientStop.oldStopAttempts++ === 0) {
+          throw new Error('old stop failed');
+        }
+        return undefined;
+      });
+      clientStop.oldStopAttempts = 0;
+      const clientAbortHandoff = vi.fn(async ({ incarnation }) => createActiveRollbackRecord(incarnation));
+      const clientHealth = vi.fn().mockResolvedValue({ healthy: true });
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: vi.fn().mockResolvedValue(undefined),
+        spawn: vi.fn().mockResolvedValue({
+          incarnation: 'dynamic-successor',
+          pid: 12346,
+          port: 45679,
+        }),
+        stop: clientStop,
+        abortHandoff: clientAbortHandoff,
+        health: clientHealth,
+        list: vi.fn().mockResolvedValue([]),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { spawn } = await import('node:child_process');
+      const child = createMockChild();
+      spawn.mockImplementationOnce(() => {
+        queueMicrotask(() => {
+          child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:34087\n');
+        });
+        return child;
+      });
+
+      const restoreOpenCodeAuthState = vi.fn();
+      const captureOpenCodeAuthState = vi.fn(() => restoreOpenCodeAuthState);
+      const { runtime, state } = createRuntime({ captureOpenCodeAuthState });
+      state.openCodeProcess = {
+        pid: 12345,
+        isGuardianManaged: true,
+        owner,
+        stopOwnedOpenCode: vi.fn(),
+        detach: vi.fn(),
+      };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'dynamic-old-stop-failure';
+      state.currentOwner = owner;
+      state.isOpenCodeReady = true;
+
+      await runtime.restartOpenCode();
+
+      expect(clientAbortHandoff).toHaveBeenCalledWith({
+        incarnation: 'dynamic-old-stop-failure',
+        owner,
+      });
+      expect(clientHealth).toHaveBeenCalledWith({ incarnation: 'dynamic-old-stop-failure' });
+      expect(captureOpenCodeAuthState).toHaveBeenCalledOnce();
+      expect(restoreOpenCodeAuthState).toHaveBeenCalledOnce();
+      expect(clientStop.oldStopAttempts).toBe(2);
+      expect(spawn).toHaveBeenCalledOnce();
+      expect(state.currentIncarnation).toBeNull();
+    });
+
+    it('adopts the exact owner child before handoff when the incarnation is missing', async () => {
+      const adoptedOwner = {
+        ownerInstanceId: 'owner-test-instance',
+        runtimeIdentity: 'runtime-test-instance',
+        launchFingerprint: 'adopted-fingerprint',
+      };
+      const clientConnect = vi.fn().mockResolvedValue(undefined);
+      const clientPrepareHandoff = vi.fn().mockResolvedValue(undefined);
+      const clientSpawn = vi.fn().mockResolvedValue({
+        incarnation: 'successor-after-adoption',
+        pid: 12347,
+        port: 45680,
+      });
+      const clientStop = vi.fn().mockResolvedValue(undefined);
+      const clientDisconnect = vi.fn();
+      GuardianClient.mockImplementation(function () {
+        return {
+          connect: clientConnect,
+          prepareHandoff: clientPrepareHandoff,
+          spawn: clientSpawn,
+          stop: clientStop,
+          list: vi.fn().mockResolvedValue([]),
+          disconnect: clientDisconnect,
+        };
+      });
+      detectAndAdoptGuardianChild.mockResolvedValue({
+        incarnation: 'adopted-after-migration',
+        pid: 12345,
+        port: 45678,
+        url: 'http://127.0.0.1:45678',
+        owner: adoptedOwner,
+      });
+
+      const { spawn } = await import('node:child_process');
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = null;
+      state.openCodePort = null;
+      state.currentIncarnation = null;
+      state.currentOwner = null;
+      state.isOpenCodeReady = false;
+
+      await runtime.restartOpenCode();
+
+      expect(detectAndAdoptGuardianChild).toHaveBeenCalled();
+      expect(detectAndAdoptGuardianChild.mock.calls[0][2]).toEqual({
+        expectedOwner: {
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+        },
+      });
+      expect(clientPrepareHandoff).toHaveBeenCalledWith({
+        incarnation: 'adopted-after-migration',
+        owner: adoptedOwner,
+      });
+      expect(clientStop).toHaveBeenCalledWith({
+        incarnation: 'adopted-after-migration',
+        owner: adoptedOwner,
+      });
+      expect(clientSpawn).toHaveBeenCalledOnce();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(state.currentIncarnation).toBe('successor-after-adoption');
+      expect(state.openCodeProcess).toMatchObject({ isGuardianManaged: true, pid: 12347 });
+    });
+
+    it('fails closed when a missing incarnation cannot be inspected for owner adoption', async () => {
+      const { spawn } = await import('node:child_process');
+      detectAndAdoptGuardianChild.mockRejectedValue(
+        Object.assign(new Error('guardian ownership conflict'), { code: 'GUARDIAN_ADOPTION_CONFLICT' }),
+      );
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = null;
+      state.openCodePort = null;
+      state.currentIncarnation = null;
+      state.currentOwner = null;
+
+      await expect(runtime.restartOpenCode()).rejects.toThrow(/guardian ownership conflict/);
+      expect(spawn).not.toHaveBeenCalled();
+      expect(state.currentIncarnation).toBeNull();
+    });
+
+    it('does not use the legacy port fallback when guardian state is unresolved', async () => {
+      const { spawn, spawnSync } = await import('node:child_process');
+      detectAndAdoptGuardianChild.mockRejectedValue(
+        Object.assign(new Error('guardian child is still stopping'), { code: 'GUARDIAN_ADOPTION_ATTENTION' }),
+      );
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = null;
+      state.openCodePort = 45678;
+      state.currentIncarnation = null;
+      state.currentOwner = null;
+      spawnSync.mockClear();
+
+      await expect(runtime.restartOpenCode()).rejects.toThrow(/still stopping/);
+      expect(spawn).not.toHaveBeenCalled();
+      expect(spawnSync).not.toHaveBeenCalled();
+    });
+
+    it('does not port-kill after an authenticated guardian resolves no exact owner child', async () => {
+      const { spawn, spawnSync } = await import('node:child_process');
+      const child = createMockChild();
+      spawn.mockImplementationOnce(() => {
+        queueMicrotask(() => {
+          child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:34085\n');
+        });
+        return child;
+      });
+      detectAndAdoptGuardianChild.mockResolvedValue(null);
+      isGuardianRunning.mockResolvedValue(true);
+      const closeMock = vi.fn();
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: closeMock };
+      state.openCodePort = 45678;
+      state.currentIncarnation = null;
+      state.currentOwner = null;
+      state.isOpenCodeReady = true;
+      spawnSync.mockClear();
+
+      await runtime.restartOpenCode();
+
+      expect(closeMock).toHaveBeenCalledOnce();
+      expect(spawn).toHaveBeenCalledOnce();
+      expect(spawnSync).not.toHaveBeenCalled();
+    });
+
     it('falls back to legacy restart when guardian handoff fails', async () => {
       const { spawn } = await import('node:child_process');
       const child = createMockChild();
@@ -437,7 +941,7 @@ describe('Guardian integration', () => {
       expect(state.openCodeProcess).not.toBeNull();
     }, 10000);
 
-    it.skipIf(process.platform === 'win32')('resets currentIncarnation when prepareHandoff succeeds but spawn fails', async () => {
+    it('resets currentIncarnation when prepareHandoff succeeds but spawn fails', async () => {
       // Phase 3 review M-2/M-4: if prepareHandoff succeeds but spawn fails,
       // the catch block must clear state.currentIncarnation. Otherwise the
       // next restart would call prepareHandoff for a retired incarnation,
@@ -452,6 +956,8 @@ describe('Guardian integration', () => {
         return {
           connect: vi.fn().mockResolvedValue(undefined),
           prepareHandoff: clientPrepareHandoff,
+          abortHandoff: vi.fn(async ({ incarnation }) => createActiveRollbackRecord(incarnation)),
+          health: vi.fn().mockResolvedValue({ healthy: true }),
           spawn: clientSpawn,
           stop: vi.fn(),
           list: vi.fn(),
@@ -480,13 +986,94 @@ describe('Guardian integration', () => {
       // legacy restart.
       await runtime.restartOpenCode();
 
-      expect(clientPrepareHandoff).toHaveBeenCalledWith({ incarnation: 'current-123' });
+      expect(clientPrepareHandoff).toHaveBeenCalledWith({
+        incarnation: 'current-123',
+        owner: expect.objectContaining({
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+        }),
+      });
       expect(clientSpawn).toHaveBeenCalled();
       // M-2/M-4: the catch block must clear the now-departed incarnation
       // so the next restart does not try to handoff a dead child.
       expect(state.currentIncarnation).toBeNull();
       expect(spawn).toHaveBeenCalled();
     }, 10000);
+
+    it('rolls a prepared handoff back before legacy fallback', async () => {
+      const owner = {
+        ownerInstanceId: 'owner-rollback',
+        runtimeIdentity: 'runtime-rollback',
+        launchFingerprint: 'fingerprint-rollback',
+      };
+      const clientPrepareHandoff = vi.fn().mockResolvedValue(undefined);
+      const clientAbortHandoff = vi.fn(async ({ incarnation }) => createActiveRollbackRecord(incarnation));
+      const clientSpawn = vi.fn().mockRejectedValue(new Error('successor failed'));
+      GuardianClient.mockImplementation(function () {
+        return {
+          connect: vi.fn().mockResolvedValue(undefined),
+          prepareHandoff: clientPrepareHandoff,
+          abortHandoff: clientAbortHandoff,
+          spawn: clientSpawn,
+          stop: vi.fn(),
+          list: vi.fn(),
+          disconnect: vi.fn(),
+        };
+      });
+
+      const { spawn } = await import('node:child_process');
+      const child = createMockChild();
+      spawn.mockImplementationOnce(() => {
+        queueMicrotask(() => {
+          child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:34085\n');
+        });
+        return child;
+      });
+
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'current-rollback';
+      state.currentOwner = owner;
+      state.isOpenCodeReady = true;
+
+      await runtime.restartOpenCode();
+
+      expect(clientPrepareHandoff).toHaveBeenCalledWith({ incarnation: 'current-rollback', owner });
+      expect(clientAbortHandoff).toHaveBeenCalledWith({ incarnation: 'current-rollback', owner });
+      expect(state.currentIncarnation).toBeNull();
+      expect(state.currentOwner).toBeNull();
+    }, 10000);
+
+    it('fails closed when abortHandoff does not return the active incarnation', async () => {
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        prepareHandoff: vi.fn().mockResolvedValue(undefined),
+        abortHandoff: vi.fn().mockResolvedValue({
+          state: 'handoff-prepared',
+          incarnation: 'current-invalid-rollback',
+        }),
+        health: vi.fn().mockResolvedValue({ healthy: true }),
+        spawn: vi.fn().mockRejectedValue(new Error('successor failed')),
+        stop: vi.fn(),
+        list: vi.fn().mockResolvedValue([]),
+        disconnect: vi.fn(),
+      };
+      GuardianClient.mockImplementation(function () { return client; });
+
+      const { spawn } = await import('node:child_process');
+      const { runtime, state } = createRuntime();
+      state.openCodeProcess = { pid: 12345, close: vi.fn() };
+      state.openCodePort = 45678;
+      state.currentIncarnation = 'current-invalid-rollback';
+      state.isOpenCodeReady = true;
+
+      await expect(runtime.restartOpenCode()).rejects.toThrow(/without a confirmed rollback/);
+      expect(client.health).not.toHaveBeenCalled();
+      expect(client.disconnect).toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(state.currentIncarnation).toBe('current-invalid-rollback');
+    });
   });
 
   // F-1: --no-handoff (OPENCHAMBER_RESTART_HANDOFF=disabled) must skip the
@@ -578,7 +1165,7 @@ describe('Guardian integration', () => {
   // a working close() that asks the guardian to stop the incarnation, and
   // assert both paths route the port through setOpenCodePort.
   describe('guardian child proxy (Phase 3 review M-3/M-1/M-5)', () => {
-    it.skipIf(process.platform === 'win32')('adopted child proxy has a close() that calls GuardianClient.stop', async () => {
+    it('adopted child proxy has a close() that calls GuardianClient.stop', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({ healthy: true }),
@@ -603,6 +1190,11 @@ describe('Guardian integration', () => {
         pid: 99001,
         port: 4096,
         url: 'http://127.0.0.1:4096',
+        owner: {
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+          launchFingerprint: 'adopted-fingerprint',
+        },
       });
 
       await runtime.bootstrapOpenCodeAtStartup();
@@ -614,14 +1206,20 @@ describe('Guardian integration', () => {
       // Calling close() must invoke GuardianClient.stop with the adopted
       // incarnation so the guardian can shut the child down gracefully.
       await state.openCodeProcess.close();
-      expect(clientStop).toHaveBeenCalledWith({ incarnation: 'adopt-incarnation-xyz' });
+      expect(clientStop).toHaveBeenCalledWith({
+        incarnation: 'adopt-incarnation-xyz',
+        owner: expect.objectContaining({
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+        }),
+      });
 
       // M-1: the adoption path must route the port through setOpenCodePort
       // (not a direct state.openCodePort assignment).
       expect(deps.setOpenCodePort).toHaveBeenCalledWith(4096);
     }, 10000);
 
-    it.skipIf(process.platform === 'win32')('handoff-spawned child proxy has a close() that calls GuardianClient.stop', async () => {
+    it('handoff-spawned child proxy has a close() that calls GuardianClient.stop', async () => {
       const clientConnect = vi.fn().mockResolvedValue(undefined);
       const clientSpawn = vi.fn().mockResolvedValue({
         incarnation: 'successor-incarnation-xyz',
@@ -665,7 +1263,13 @@ describe('Guardian integration', () => {
         expect(proxy.pid).toBe(99002);
 
         await proxy.close();
-        expect(clientStop).toHaveBeenCalledWith({ incarnation: 'successor-incarnation-xyz' });
+        expect(clientStop.mock.calls.at(-1)?.[0]).toMatchObject({
+          incarnation: 'successor-incarnation-xyz',
+          owner: expect.objectContaining({
+            ownerInstanceId: 'owner-test-instance',
+            runtimeIdentity: 'runtime-test-instance',
+          }),
+        });
         // M-1: handoff-spawn must route the successor port through setOpenCodePort.
         expect(deps.setOpenCodePort).toHaveBeenCalledWith(45679);
         // M-3: the client must remain alive in the proxy (not disconnected).
@@ -680,9 +1284,10 @@ describe('Guardian integration', () => {
       }
     });
 
-    it.skipIf(process.platform === 'win32')('close() on a guardian proxy swallows guardian errors so port-kill fallback can run', async () => {
+    it('close() on a guardian proxy swallows guardian errors so owner-scoped shutdown can continue', async () => {
       // If GuardianClient.stop() rejects, the proxy's close() must NOT
-      // re-throw, because shutdown-runtime.js relies on it to be best-effort.
+      // re-throw, because shutdown-runtime.js treats guardian cleanup as
+      // best-effort without killing an arbitrary port listener.
       const clientStop = vi.fn().mockRejectedValue(new Error('Guardian down'));
       GuardianClient.mockImplementation(function () {
         return {
@@ -702,6 +1307,11 @@ describe('Guardian integration', () => {
         pid: 99003,
         port: 4096,
         url: 'http://127.0.0.1:4096',
+        owner: {
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+          launchFingerprint: 'adopted-fingerprint',
+        },
       });
 
       globalThis.fetch = vi.fn().mockResolvedValue({
@@ -712,7 +1322,13 @@ describe('Guardian integration', () => {
       await runtime.bootstrapOpenCodeAtStartup();
 
       await expect(state.openCodeProcess.close()).resolves.toBeUndefined();
-      expect(clientStop).toHaveBeenCalledWith({ incarnation: 'adopt-incarnation-err' });
+      expect(clientStop).toHaveBeenCalledWith({
+        incarnation: 'adopt-incarnation-err',
+        owner: expect.objectContaining({
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+        }),
+      });
     });
   });
 
@@ -802,9 +1418,21 @@ describe('Guardian integration', () => {
       // constructed, connected, prepared handoff, spawned successor,
       // stopped current.
       expect(clientConnect).toHaveBeenCalled();
-      expect(clientPrepareHandoff).toHaveBeenCalledWith({ incarnation: 'win-current-001' });
+      expect(clientPrepareHandoff).toHaveBeenCalledWith({
+        incarnation: 'win-current-001',
+        owner: expect.objectContaining({
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+        }),
+      });
       expect(clientSpawn).toHaveBeenCalled();
-      expect(clientStop).toHaveBeenCalledWith({ incarnation: 'win-current-001' });
+      expect(clientStop).toHaveBeenCalledWith({
+        incarnation: 'win-current-001',
+        owner: expect.objectContaining({
+          ownerInstanceId: 'owner-test-instance',
+          runtimeIdentity: 'runtime-test-instance',
+        }),
+      });
       // M-3: on successful handoff the client is kept alive in the
       // proxy.
       expect(clientDisconnect).not.toHaveBeenCalled();

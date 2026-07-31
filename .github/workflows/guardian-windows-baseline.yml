@@ -1,9 +1,8 @@
 name: Guardian Windows Baseline
 
-# W-A step 5 of the Windows standalone-guardian work (T2 plan, F-12).
-# Establishes a real-Windows CI signal inside week 1 so W-B/W-C/W-D/W-E
-# have somewhere to fail loudly. Future W-E will extend this job with the
-# full Windows test matrix and the standalone-guardian smoke.
+# Real-Windows lifecycle gate for the standalone guardian. The job keeps the
+# cross-platform transport, authenticated IPC, process termination, CLI
+# wiring, and smoke test hard-gated on `windows-latest`.
 #
 # Trigger model:
 #   - push: every `fix/issue-*` branch — so every branch push to a fix
@@ -50,16 +49,44 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Rebuild better-sqlite3 native binding for Bun
+        # The existing package install uses the system Node runtime for its
+        # lifecycle script on Windows. Re-run better-sqlite3's own install
+        # script explicitly under Bun so its native binding matches the Bun
+        # runtime used by the guardian smoke. This does not change the lockfile
+        # or package manifests.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nativePackage = Join-Path $env:GITHUB_WORKSPACE 'node_modules\better-sqlite3'
+          if (-not (Test-Path (Join-Path $nativePackage 'package.json'))) {
+            throw "better-sqlite3 package is missing at $nativePackage after bun install"
+          }
+
+          bun run --bun --no-install --cwd $nativePackage install
+          if ($LASTEXITCODE -ne 0) {
+            throw "better-sqlite3 native binding rebuild failed (bun exit code $LASTEXITCODE)"
+          }
+
+          bun -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close(); console.log('OK: better-sqlite3 native binding loaded under Bun');"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'better-sqlite3 native binding failed to load under Bun; refusing to run the guardian gate'
+          }
+
+          node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('SELECT 1').get(); db.close(); console.log('OK: better-sqlite3 native binding loaded under Node');"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'better-sqlite3 native binding failed to load under Node; refusing to run the Windows test gate'
+          }
+
       - name: Smoke-import the IPC transport namespace on Windows
         # Why this step matters: the W-A refactor moves the v2 namespace
         # behind `createIpcServer` / `createIpcDialer`. If the module
         # accidentally calls `process.getuid`, `chmodSync`, or otherwise
         # references POSIX-only behavior at module top-level, this
         # dynamic import will throw on Windows long before any test
-        # would. The factory is currently Linux-only by design; W-B
-        # replaces the `if (platform === 'win32')` branch with a TCP
-        # backend. This step must remain green at the end of every
-        # W-B/W-C/W-D/W-E commit.
+         # would. The factory must load on Windows before the real TCP/ACL
+         # smoke begins, so accidental POSIX-only module-top-level code fails
+         # visibly.
         #
         # Note: we use a dynamic `import()` rather than `require()`
         # because `packages/web/package.json` is `"type": "module"`
@@ -71,8 +98,9 @@ jobs:
         run: |
           bunx node --input-type=module -e "import('./packages/web/server/lib/guardian/ipc-transport.js').then(m => { if (typeof m.createIpcServer !== 'function') { console.error('FAIL: createIpcServer is not a function'); process.exit(1); } if (typeof m.createIpcDialer !== 'function') { console.error('FAIL: createIpcDialer is not a function'); process.exit(1); } console.log('OK: ipc-transport namespace loaded; createIpcServer and createIpcDialer are both functions'); }).catch(err => { console.error('FAIL: ipc-transport module failed to load on Windows:', err && err.stack ? err.stack : err); process.exit(1); });"
 
-      - name: Run guardian vitest suite on Windows
-        # The 41-test Unix-path suite plus the W-A factory tests. They
+      - name: Run guardian and lifecycle vitest suites on Windows
+        # The guardian transport tests plus the owner-filtered lifecycle
+        # integration suite run on the real Windows runner. They
         # run on Windows because (a) vitest itself is cross-platform
         # and (b) the guardian tests use only in-process mocks for
         # `process.platform` and `net.createServer`. The `npx vitest`
@@ -81,12 +109,17 @@ jobs:
         # integration test (lifecycle-guardian-integration.test.js)
         # comments that `vi.stubGlobal` is not available there.
         working-directory: packages/web
-        run: npx vitest run server/lib/guardian/
+        run: >-
+          npx vitest run
+          server/lib/guardian/
+          server/lib/opencode/lifecycle-guardian-integration.test.js
+          server/lib/opencode/shutdown-runtime.test.js
 
       - name: PowerShell smoke test
         # W-E: real-Windows end-to-end smoke for the standalone
         # guardian. Spawns the entrypoint, reads the discovery file,
-        # sends `list` + `shutdown` over TCP, asserts the process
+         # sends negative-auth, `list`, real managed-child lifecycle, and
+         # `shutdown` requests over TCP, asserts the process
         # exits and the discovery file is removed. The script itself
         # is a no-op on non-Windows (`skip: not Windows`) so this
         # step is safe to add even if the workflow ever runs on
@@ -95,24 +128,9 @@ jobs:
         # `powershell -File` invocation below is the other — see
         # the W-E stale-orphan grep in the plan.
         #
-        # Best-effort on the CI runner: the GitHub Actions
-        # `windows-latest` runner installs Bun via `setup-bun`, but
-        # Bun-on-Windows reports `process.versions.modules=137`
-        # (a different ABI from the system `node.exe`). The
-        # `better-sqlite3` prebuilt in `node_modules` is built for
-        # `node-v127` (Node 22). So `bun ./openchamber-guardian.js`
-        # crashes at startup with "Could not locate the bindings
-        # file. Tried: ... build/better_sqlite3.node". The fix is
-        # to add a rebuild step (e.g. `bun pm trust --all` does NOT
-        # help — better-sqlite3 ships prebuilds, no postinstall
-        # script) OR install MSVC build tools and run a `node-gyp
-        # rebuild` step. Both are deferred: the former requires
-        # MSVC on the runner; the latter requires a new workflow
-        # file. Until then, the rest of the Windows coverage
-        # (smoke-import, vitest run server/lib/guardian/,
-        # bin/cli.test.js, type-check, lint, docs:validate) is
-        # substantive.
-        continue-on-error: true
+        # This is intentionally a hard gate. If native SQLite bindings or
+        # the authenticated runtime smoke fail on Windows, the lifecycle
+        # contract is not validated and the job must fail visibly.
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: powershell -ExecutionPolicy Bypass -File scripts/guardian-smoke-test.ps1
@@ -131,13 +149,8 @@ jobs:
         run: bun run type-check
 
       - name: Lint the web package on Windows
-        # W-A had this gated with `continue-on-error: true` while
-        # Windows-only eslint v9 behavior was unverified. W-C's real
-        # Windows CI runs (the PR that landed the W-C changes) green-
-        # built the lint step, so W-E promotes it to a hard gate.
-        # If a future Windows-only eslint regression appears, the
-        # right answer is to fix the lint rule, not to re-soften the
-        # gate.
+        # Keep lint hard-gated on the real Windows runner; a platform-only
+        # lint regression must be fixed rather than softened.
         working-directory: packages/web
         run: bun run lint
 
@@ -162,6 +175,8 @@ jobs:
           name: guardian-windows-smoke-${{ github.run_id }}
           path: |
             scripts/guardian-smoke-test.ps1
+            scripts/guardian-smoke-client.js
+            scripts/guardian-test-opencode.js
             packages/web/server/lib/guardian/
             packages/web/server/lib/opencode/managed-opencode-handoff-v2/filesystem.js
           if-no-files-found: ignore

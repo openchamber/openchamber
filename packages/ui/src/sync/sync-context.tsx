@@ -29,7 +29,7 @@ import {
 } from "./live-aggregate"
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
-import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
+import { resetStreamingState, touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
 import { countSyncPerformance } from "./performance-diagnostics"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs, getAllSyncSessions } from "./sync-refs"
@@ -45,7 +45,15 @@ import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
-import { applyGlobalSessionStatusEvent, applyGlobalSessionStatusSnapshot, useGlobalSessionStatusStore } from "./global-session-status"
+import {
+  applyGlobalSessionStatusEvent,
+  applyGlobalSessionStatusSnapshot,
+  areGlobalSessionStatusEventsEnabled,
+  clearGlobalSessionStatusForUnavailable,
+  resetGlobalSessionStatus,
+  useGlobalSessionStatusStore,
+} from "./global-session-status"
+import { resetSessionOrdering } from "./session-ordering"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
@@ -533,6 +541,22 @@ function getActiveSessionCandidateIds(directory: string, state: DirectoryStore):
   })
 }
 
+/**
+ * Reconnect/bootstrap status snapshots need every locally known session as a
+ * candidate. A successful empty snapshot can only clear stale busy/retry
+ * state when the candidate set includes sessions that currently look idle in
+ * local history. The periodic poll deliberately keeps its smaller active
+ * candidate set and escalates omissions to this authoritative path.
+ */
+function getAuthoritativeSessionCandidateIds(directory: string, state: DirectoryStore): string[] {
+  return Array.from(new Set([
+    ...getActiveSessionCandidateIds(directory, state),
+    ...state.session.map((session) => session.id),
+    ...Object.keys(state.session_status ?? {}),
+    ...Object.keys(state.message ?? {}),
+  ]))
+}
+
 type DirectorySessionStatusSnapshot = NonNullable<
   Awaited<ReturnType<typeof opencodeClient.getSessionStatusForDirectory>>
 >
@@ -543,10 +567,10 @@ type DirectorySessionStatusSnapshot = NonNullable<
 // absent candidate means "idle per this snapshot".
 //
 // - "monotonic": only confirm/raise active status. Never lowers a busy/retry
-//   session to idle. Used by the periodic watchdog poll — real idle arrives via
-//   SSE (session.status / session.idle) or via an authoritative resync that the
-//   watchdog escalates to when it detects a stale busy entry. This keeps the
-//   blind 5s poll from clobbering live state on a transient/misscoped snapshot.
+//   session to idle from omission alone. Used by the periodic watchdog poll —
+//   real idle arrives via SSE (session.status / session.idle) or via an
+//   authoritative resync that the watchdog escalates to when it detects a
+//   stale busy entry. A failed fetch follows the separate unavailable path.
 // - "authoritative": treat the snapshot as ground truth — absent/idle candidates
 //   are lowered to idle. Used by reconnect/escalated resyncs, a deliberate edge
 //   where the live server snapshot is the source of truth (mirrors the bootstrap
@@ -596,20 +620,69 @@ export function applySessionStatusSnapshot(
   return changed
 }
 
+/** Apply one complete snapshot to both live status owners. */
+export function reconcileDirectorySessionStatusSnapshot(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  snapshot: DirectorySessionStatusSnapshot,
+  candidateSessionIds: string[],
+  mode: StatusSnapshotMode,
+): boolean {
+  const changed = applySessionStatusSnapshot(store, snapshot, candidateSessionIds, mode)
+  if (mode === "authoritative") {
+    applyGlobalSessionStatusSnapshot(directory, snapshot, candidateSessionIds)
+  }
+  return changed
+}
+
+/**
+ * Clear live activity evidence after the current OpenCode runtime becomes
+ * unavailable. This is intentionally separate from an empty snapshot: the
+ * caller still receives a failed/null fetch result and can preserve retry or
+ * error handling, while the UI no longer presents old busy/retry state as
+ * confirmed activity. Messages and durable session history are untouched.
+ */
+export function clearDirectorySessionStatusesForUnavailable(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  candidateSessionIds: string[],
+): boolean {
+  let changed = false
+  store.setState((state: DirectoryStore) => {
+    const current = state.session_status ?? {}
+    let next: Record<string, SessionStatus> | undefined
+    const draft = () => (next ??= { ...current })
+
+    for (const sessionId of candidateSessionIds) {
+      const existing = current[sessionId]
+      if (!existing || existing.type === "idle") continue
+      draft()[sessionId] = { type: "idle" }
+      changed = true
+    }
+
+    return next ? { session_status: next } : state
+  })
+  clearGlobalSessionStatusForUnavailable(directory, candidateSessionIds)
+  return changed
+}
+
 async function resyncDirectorySessionStatuses(
   directory: string,
   store: StoreApi<DirectoryStore>,
   candidateSessionIds: string[],
   mode: StatusSnapshotMode,
 ): Promise<DirectorySessionStatusSnapshot | null> {
+  const expectedRuntimeKey = getRuntimeKey()
   const nextStatuses = await opencodeClient.getSessionStatusForDirectory(directory)
-  // null = fetch failed; preserve existing state. {} or populated = a snapshot
-  // of active sessions — reconciled per `mode` (absence ≠ idle under monotonic).
-  if (nextStatuses === null) return null
-  applySessionStatusSnapshot(store, nextStatuses, candidateSessionIds, mode)
-  if (mode === "authoritative") {
-    applyGlobalSessionStatusSnapshot(directory, nextStatuses, candidateSessionIds)
+  if (expectedRuntimeKey !== getRuntimeKey()) return null
+  // null = fetch failed. It is not an empty snapshot and is returned as such
+  // to the caller, but unavailable OpenCode must not leave stale busy/retry
+  // evidence looking like confirmed activity.
+  if (nextStatuses === null) {
+    clearDirectorySessionStatusesForUnavailable(directory, store, candidateSessionIds)
+    return null
   }
+  reconcileDirectorySessionStatusSnapshot(directory, store, nextStatuses, candidateSessionIds, mode)
   return nextStatuses
 }
 
@@ -1290,14 +1363,22 @@ async function resyncDirectoryAfterReconnect(
   routingIndex: EventRoutingIndex,
   reason: SessionMaterializationReason,
 ) {
+  const expectedRuntimeKey = getRuntimeKey()
   const current = store.getState()
-  const candidateSessionIds = getActiveSessionCandidateIds(directory, current)
-  if (candidateSessionIds.length === 0) return
+  const candidateSessionIds = getAuthoritativeSessionCandidateIds(directory, current)
 
   await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "authoritative")
+  if (expectedRuntimeKey !== getRuntimeKey()) return
+
+  const materializationSessionIds = getActiveSessionCandidateIds(directory, store.getState())
+  if (materializationSessionIds.length === 0) {
+    ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
+    return
+  }
 
   const scopedClient = opencodeClient.getScopedSdkClient(directory)
-  await Promise.all(candidateSessionIds.map(async (sessionId) => {
+  await Promise.all(materializationSessionIds.map(async (sessionId) => {
+    if (expectedRuntimeKey !== getRuntimeKey()) return
     syncDebug.recovery.materializing({ reason, directory, sessionID: sessionId })
     const loader = getImperativeSessionMessageLoader()
     const [sessionResponse] = await Promise.all([
@@ -1308,6 +1389,7 @@ async function resyncDirectoryAfterReconnect(
       }).catch(() => null),
       loader?.refreshTail({ directory, sessionID: sessionId }, RECONNECT_MESSAGE_LIMIT) ?? Promise.resolve(),
     ])
+    if (expectedRuntimeKey !== getRuntimeKey()) return
     const session = sessionResponse?.data
     if (!session) return
 
@@ -1346,7 +1428,7 @@ async function resyncDirectoryAfterReconnect(
     setIndexedSessionMessages(routingIndex, sessionId, directory, store.getState().message[sessionId] ?? [])
   }))
 
-  await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds)
+  await resyncBlockingRequestsForDirectory(directory, store, materializationSessionIds)
 
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
@@ -1361,6 +1443,19 @@ function handleEvent(
   streamingDirectory?: string,
   batch?: DirectoryEventBatch,
 ) {
+  // A stream from a previous runtime can finish a queued flush after the
+  // endpoint switch has already mounted the new provider. It must never
+  // reintroduce old live status or session data into the new runtime.
+  if (expectedRuntimeKey !== getRuntimeKey()) return
+
+  // After a runtime/connection boundary, status-bearing events from the old
+  // stream are not evidence for the new runtime. Wait for its first complete
+  // `/session/status` snapshot before accepting any status lifecycle event.
+  if (
+    (payload.type === "session.status" || payload.type === "session.idle" || payload.type === "session.error")
+    && !areGlobalSessionStatusEventsEnabled()
+  ) return
+
   if ((payload as { type?: unknown }).type === "openchamber:permission-auto-accept.updated") {
     const properties = (payload as unknown as { properties?: unknown }).properties
     if (properties && typeof properties === "object") {
@@ -1843,6 +1938,18 @@ export function SyncProvider(props: {
       })
   }, [childStores, routingIndex])
 
+  const clearLiveSessionStatusesForUnavailableRuntime = useCallback(() => {
+    for (const [directory, store] of childStores.children) {
+      const candidates = getAuthoritativeSessionCandidateIds(directory, store.getState())
+      clearDirectorySessionStatusesForUnavailable(directory, store, candidates)
+    }
+    // Global events can cover directories without child stores. Clear that
+    // volatile index as well; no durable session/message state is involved.
+    resetGlobalSessionStatus({ blockEventUpdates: true })
+    resetSessionOrdering()
+    resetStreamingState()
+  }, [childStores])
+
   // Configure child store manager
   useEffect(() => {
     void usePermissionStore.getState().hydrate().catch(() => undefined)
@@ -1951,7 +2058,30 @@ export function SyncProvider(props: {
         }
 
         const result = await runBootstrap(0)
-        if (result === "failed") throw new Error(`Directory bootstrap failed for ${directory}`)
+        if (result === "failed") {
+          // The session-list request can fail independently of the live status
+          // request. Reconcile the known cached candidates before surfacing the
+          // bootstrap failure so stale busy/retry is not presented as active.
+          if (context.isCurrent()) {
+            const latest = store.getState()
+            await resyncDirectorySessionStatuses(
+              directory,
+              store,
+              getAuthoritativeSessionCandidateIds(directory, latest),
+              "authoritative",
+            )
+          }
+          throw new Error(`Directory bootstrap failed for ${directory}`)
+        }
+        if (result === "complete" && context.isCurrent()) {
+          const latest = store.getState()
+          await resyncDirectorySessionStatuses(
+            directory,
+            store,
+            getAuthoritativeSessionCandidateIds(directory, latest),
+            "authoritative",
+          )
+        }
       },
       onDispose: (directory) => {
         messageLoader.invalidateDirectory(directory)
@@ -2034,10 +2164,11 @@ export function SyncProvider(props: {
         })
         const isFirstConnect = !pipelineHasConnectedRef.current
         pipelineHasConnectedRef.current = true
-        if (isFirstConnect && !pipelineDisconnectedBeforeFirstConnectRef.current) {
+        const needsStatusSnapshot = !areGlobalSessionStatusEventsEnabled()
+        if (isFirstConnect && !pipelineDisconnectedBeforeFirstConnectRef.current && !needsStatusSnapshot) {
           return
         }
-        if (isRecentBoot()) {
+        if (isRecentBoot() && !needsStatusSnapshot) {
           return
         }
         for (const dir of childStores.children.keys()) {
@@ -2045,6 +2176,7 @@ export function SyncProvider(props: {
         }
       },
       onDisconnect: (reason) => {
+        clearLiveSessionStatusesForUnavailableRuntime()
         if (!pipelineHasConnectedRef.current) {
           pipelineDisconnectedBeforeFirstConnectRef.current = true
         }
@@ -2058,6 +2190,7 @@ export function SyncProvider(props: {
       onTransportSwitch: () => {
         // Transport changes are gap-prone in real networks. Treat them like a
         // reconnect and refresh active session snapshots from HTTP.
+        clearLiveSessionStatusesForUnavailableRuntime()
         useConfigStore.setState({
           isConnected: true,
           hasEverConnected: true,
@@ -2075,7 +2208,15 @@ export function SyncProvider(props: {
       }
       pipeline.cleanup()
     }
-  }, [props.sdk, childStores, routingIndex, messageStreamTransport, runtimeKey, triggerDirectoryResync])
+  }, [
+    props.sdk,
+    childStores,
+    routingIndex,
+    messageStreamTransport,
+    runtimeKey,
+    triggerDirectoryResync,
+    clearLiveSessionStatusesForUnavailableRuntime,
+  ])
 
   useEffect(() => {
     let stopped = false

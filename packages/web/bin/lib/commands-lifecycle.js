@@ -22,6 +22,17 @@ import {
   printJson,
   logStatus,
 } from '../cli-output.js';
+import { normalizeOwnerInstanceId } from '../../server/lib/guardian/owner-identity.js';
+
+const isRestartShutdown = (options = {}) => options.mode === 'restart'
+  || options.preserveGuardian === true
+  || options.restart === true;
+
+const hasGuardianOwnerMetadata = (instance) => {
+  if (!instance?.instanceFilePath) return false;
+  const storedOptions = readInstanceOptions(instance.instanceFilePath);
+  return Boolean(normalizeOwnerInstanceId(storedOptions?.guardianOwnerInstanceId));
+};
 
 async function stopCommand(options) {
     const showOutput = shouldRenderHumanOutput(options);
@@ -94,7 +105,9 @@ async function stopCommand(options) {
           logStatus('info', `found unmanaged OpenChamber instance on port ${options.port}`, 'attempting shutdown');
         }
         unmanagedStopSpin?.start(`Stopping unmanaged OpenChamber on port ${options.port}...`);
-        const requested = await requestServerShutdown(options.port, options.host);
+        const requested = await requestServerShutdown(options.port, options.host, {
+          ...(isRestartShutdown(options) ? { mode: 'restart' } : {}),
+        });
 
         if (Number.isFinite(explicitInstance.pid) && isProcessRunning(explicitInstance.pid)) {
           await stopInstanceProcess(explicitInstance.pid, {
@@ -154,6 +167,7 @@ async function stopCommand(options) {
 
       if (explicitInstance.source === 'registry-unconfirmed') {
         const unconfirmedStopSpin = showOutput ? createSpinner(options) : null;
+        const preserveGuardianMetadata = hasGuardianOwnerMetadata(explicitInstance);
         if (showOutput && !unconfirmedStopSpin) {
           logStatus('info', `found unconfirmed OpenChamber pid ${explicitInstance.pid} on port ${options.port}`, 'HTTP shutdown endpoint is unreachable; stopping by PID');
         }
@@ -162,11 +176,13 @@ async function stopCommand(options) {
           shutdownWaitMs: 0,
           gracefulTimeoutMs: 2500,
           forceTimeoutMs: 3000,
+          allowForce: !preserveGuardianMetadata,
         }).catch(() => false);
 
-        if (stopped || !isProcessRunning(explicitInstance.pid)) {
+        const webProcessGone = !isProcessRunning(explicitInstance.pid);
+        if (stopped || webProcessGone) {
           removePidFile(explicitInstance.pidFilePath);
-          removeInstanceFile(explicitInstance.instanceFilePath);
+          if (!preserveGuardianMetadata) removeInstanceFile(explicitInstance.instanceFilePath);
           unconfirmedStopSpin?.stop(`Stopped OpenChamber PID ${explicitInstance.pid}`);
           jsonResults.push({ port: options.port, pid: explicitInstance.pid, runtime: 'unconfirmed', stopped: true });
           if (isJsonMode(options)) {
@@ -211,22 +227,29 @@ async function stopCommand(options) {
 
     for (const instance of runningInstances) {
       const stopSpin = showOutput ? createSpinner(options) : null;
+      const preserveGuardianMetadata = hasGuardianOwnerMetadata(instance);
       if (showOutput && !stopSpin) {
         logStatus('info', `stopping port ${instance.port} (PID: ${instance.pid})`);
       }
       stopSpin?.start(`Stopping OpenChamber on port ${instance.port}...`);
       try {
-        const requested = await requestServerShutdown(instance.port, instance.host || options.host);
+        const requested = await requestServerShutdown(instance.port, instance.host || options.host, {
+          ...(isRestartShutdown(options) ? { mode: 'restart' } : {}),
+        });
         const stopped = await stopInstanceProcess(instance.pid, {
-          shutdownWaitMs: requested ? 5000 : 0,
-          gracefulTimeoutMs: 2500,
-          forceTimeoutMs: 3000,
+           shutdownWaitMs: requested ? 5000 : 0,
+           gracefulTimeoutMs: 2500,
+           forceTimeoutMs: 3000,
+           allowForce: !preserveGuardianMetadata,
         });
         if (!stopped && isProcessRunning(instance.pid)) {
           throw new Error(`Timed out stopping pid ${instance.pid}`);
         }
-        removePidFile(instance.pidFilePath);
-        removeInstanceFile(instance.instanceFilePath);
+         const webProcessGone = !isProcessRunning(instance.pid);
+         removePidFile(instance.pidFilePath);
+         if (!isRestartShutdown(options) && !(preserveGuardianMetadata && webProcessGone)) {
+           removeInstanceFile(instance.instanceFilePath);
+         }
         stopSpin?.stop(`Stopped OpenChamber on port ${instance.port}`);
         jsonResults.push({ port: instance.port, pid: instance.pid, stopped: true });
         if (showOutput && !stopSpin) {
@@ -324,11 +347,12 @@ async function restartCommand(options, serveCommand) {
       restartSpin?.start(`Restarting OpenChamber on port ${instance.port}...`);
       try {
         await runStop({
-          explicitPort: true,
-          port: instance.port,
-          host: instanceHost,
-          quiet: true,
-          suppressQuietOutput: true,
+           explicitPort: true,
+           port: instance.port,
+           host: instanceHost,
+           quiet: true,
+           suppressQuietOutput: true,
+           mode: 'restart',
         });
 
         // Foreground instances are managed by a process manager (systemd,
@@ -351,13 +375,14 @@ async function restartCommand(options, serveCommand) {
           host: instanceHost,
           explicitPort: true,
           uiPassword: options.explicitUiPassword ? options.uiPassword : (storedOptions.uiPassword || options.uiPassword),
-          apiOnly: storedOptions.apiOnly === true || options.apiOnly === true,
-          suppressStartupSummary: true,
-          quiet: true,
-          suppressUiPasswordWarning: true,
-          suppressQuietOutput: true,
-          handoff: options.handoff !== false,
-        });
+           apiOnly: storedOptions.apiOnly === true || options.apiOnly === true,
+           suppressStartupSummary: true,
+           quiet: true,
+           suppressUiPasswordWarning: true,
+           suppressQuietOutput: true,
+           handoff: options.handoff !== false,
+           guardianOwnerInstanceId: storedOptions.guardianOwnerInstanceId,
+         });
         restarted.push({ fromPort: instance.port, toPort: restartedPort, launchMode, ok: true });
         restartSpin?.stop(`Restarted OpenChamber on port ${restartedPort}`);
         if (showOutput && !restartSpin) {

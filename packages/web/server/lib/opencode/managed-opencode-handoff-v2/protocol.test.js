@@ -40,7 +40,7 @@ const createFakeStore = (now) => {
     setBeforeApply: (handler) => { beforeApply = handler; },
     setAfterApply: (handler) => { afterApply = handler; },
     read: async ({ incarnation }) => clone(records.get(incarnation) ?? null),
-    compareAndSwap: async ({ incarnation, expected, next, nextForAuthoritativeTime }) => {
+    compareAndSwap: async ({ incarnation, expected, next, nextForAuthoritativeTime, allowExpired = false }) => {
       const before = beforeApply;
       beforeApply = null;
       await before?.({ incarnation, expected, next, nextForAuthoritativeTime });
@@ -61,13 +61,13 @@ const createFakeStore = (now) => {
         ) {
           return { status: 'conflict' };
         }
-        if (current.leaseExpiresAt <= now()) return { status: 'expired' };
+        if (!allowExpired && current.leaseExpiresAt <= now()) return { status: 'expired' };
       }
 
       const candidate = nextForAuthoritativeTime
         ? nextForAuthoritativeTime(now())
         : next;
-      if (candidate.leaseExpiresAt <= now()) return { status: 'expired' };
+      if (!allowExpired && candidate.leaseExpiresAt <= now()) return { status: 'expired' };
       records.set(incarnation, clone(candidate));
       const after = afterApply;
       afterApply = null;
@@ -398,6 +398,7 @@ describe('managed OpenCode handoff v2 protocol foundation', () => {
     let delivered;
     let deliveredText;
     try {
+      const largeStartTicks = '638912345678901234';
       const reservation = await protocol.reserveLaunch({ leaseMs: 10_000 });
       const launching = await protocol.beginLaunch({
         incarnation: reservation.record.incarnation,
@@ -410,9 +411,11 @@ describe('managed OpenCode handoff v2 protocol foundation', () => {
       const active = await protocol.bindSpawnedProcess({
         incarnation: launching.record.incarnation,
         expectedRevision: launching.record.revision,
-        identity: { pid: 43210, port: 4096, processStartTicks: 321 },
+        identity: { pid: 43210, port: 4096, processStartTicks: largeStartTicks },
       });
       expect(active).toMatchObject({ ok: true, record: { state: ManagedOpenCodeHandoffV2State.Active } });
+      await expect(store.read({ incarnation: active.record.incarnation }))
+        .resolves.toMatchObject({ processStartTicks: largeStartTicks });
       const firstRenewal = await protocol.renewLease({
         incarnation: active.record.incarnation,
         expectedRevision: active.record.revision,

@@ -90,9 +90,17 @@ export function defaultIpcPaths({ platform, rootDir, portDir } = {}) {
  *   port.
  * @param {(message: string) => void} [options.log]
  */
-export function createIpcServer({ platform, socketPath, portPath, username, log = () => {} } = {}) {
+export function createIpcServer({
+  platform,
+  socketPath,
+  portPath,
+  username,
+  aclInspector,
+  reparseChecker,
+  log = () => {},
+} = {}) {
   if (platform === 'win32') {
-    return createWindowsIpcServer({ portPath, username, log });
+    return createWindowsIpcServer({ portPath, username, aclInspector, reparseChecker, log });
   }
 
   // POSIX backend. Preserve the byte-for-byte behavior the previous
@@ -127,7 +135,15 @@ export function createIpcServer({ platform, socketPath, portPath, username, log 
 
     server = net.createServer(onConnection);
 
+    let umaskRestored = false;
+    const restoreUmask = () => {
+      if (umaskRestored) return;
+      umaskRestored = true;
+      process.umask(previousUmask);
+    };
+
     server.on('error', (error) => {
+      restoreUmask();
       if (error.code === 'EADDRINUSE') {
         reject(new Error(`Guardian IPC socket already in use: ${socketPath}`));
         return;
@@ -136,18 +152,23 @@ export function createIpcServer({ platform, socketPath, portPath, username, log 
     });
 
     const previousUmask = process.umask(DEFAULT_UMASK);
-    server.listen(socketPath, () => {
-      process.umask(previousUmask);
-      if (platform !== 'win32') {
-        try {
-          fs.chmodSync(socketPath, DEFAULT_SOCKET_MODE);
-        } catch (chmodError) {
-          log(`[guardian-ipc] failed to chmod socket: ${chmodError.message}`);
+    try {
+      server.listen(socketPath, () => {
+        restoreUmask();
+        if (platform !== 'win32') {
+          try {
+            fs.chmodSync(socketPath, DEFAULT_SOCKET_MODE);
+          } catch (chmodError) {
+            log(`[guardian-ipc] failed to chmod socket: ${chmodError.message}`);
+          }
         }
-      }
-      log(`[guardian-ipc] listening on ${socketPath}`);
-      resolve();
-    });
+        log(`[guardian-ipc] listening on ${socketPath}`);
+        resolve();
+      });
+    } catch (error) {
+      restoreUmask();
+      reject(error);
+    }
   });
 
   const close = () => new Promise((resolve) => {
@@ -203,7 +224,7 @@ export function createIpcServer({ platform, socketPath, portPath, username, log 
  * @param {string} [options.username]
  * @param {(message: string) => void} [options.log]
  */
-function createWindowsIpcServer({ portPath, username, log } = {}) {
+function createWindowsIpcServer({ portPath, username, aclInspector, reparseChecker, log } = {}) {
   if (typeof portPath !== 'string' || portPath.length === 0) {
     throw new TypeError('createIpcServer: Windows portPath is required');
   }
@@ -258,7 +279,13 @@ function createWindowsIpcServer({ portPath, username, log } = {}) {
       // we tear down the listener and reject; the user sees a clear
       // "icacls failed" error instead of a phantom listener.
       try {
-        writeDiscoveryFileAtomic(portPath, port, { platform: 'win32', username, log });
+        writeDiscoveryFileAtomic(portPath, port, {
+          platform: 'win32',
+          username,
+          ...(aclInspector ? { aclInspector } : {}),
+          ...(reparseChecker ? { reparseChecker } : {}),
+          log,
+        });
       } catch (publishError) {
         try { server.close(); } catch { /* ignore */ }
         server = null;
@@ -299,8 +326,13 @@ function createWindowsIpcServer({ portPath, username, log } = {}) {
       // removed before the listener closed, a client could observe
       // the port and dial a dying listener.
       if (hadPublished) {
-        try {
-          removeDiscoveryFile(portPath, { platform: 'win32' });
+          try {
+            removeDiscoveryFile(portPath, {
+              platform: 'win32',
+              username,
+              ...(aclInspector ? { aclInspector } : {}),
+              ...(reparseChecker ? { reparseChecker } : {}),
+            });
         } catch (error) {
           log(`[guardian-ipc] failed to remove discovery file: ${error.message}`);
         }
@@ -329,7 +361,14 @@ function createWindowsIpcServer({ portPath, username, log } = {}) {
  * @param {string} [options.socketPath]
  * @param {string} [options.portPath]
  */
-export function createIpcDialer({ platform, socketPath, portPath } = {}) {
+export function createIpcDialer({
+  platform,
+  socketPath,
+  portPath,
+  username,
+  aclInspector,
+  reparseChecker,
+} = {}) {
   if (platform === 'win32') {
     return async function dial() {
       if (typeof portPath !== 'string' || portPath.length === 0) {
@@ -337,7 +376,12 @@ export function createIpcDialer({ platform, socketPath, portPath } = {}) {
       }
       // Throws on missing/unreadable file. Caller (`GuardianClient`)
       // wraps this in its own error shape.
-      const parsed = readDiscoveryFile(portPath, { platform: 'win32' });
+      const parsed = readDiscoveryFile(portPath, {
+        platform: 'win32',
+        username,
+        ...(aclInspector ? { aclInspector } : {}),
+        ...(reparseChecker ? { reparseChecker } : {}),
+      });
       if (!parsed || typeof parsed.port !== 'number' || !Number.isFinite(parsed.port)) {
         throw new Error(`createIpcDialer: discovery file at ${portPath} is malformed`);
       }

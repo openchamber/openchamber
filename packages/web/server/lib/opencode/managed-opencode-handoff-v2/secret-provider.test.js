@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as windowsAcl from '../../guardian/windows-acl.js';
 import {
   MANAGED_OPENCODE_HANDOFF_V2_INITIALIZATION_EVIDENCE_FILENAME,
   MANAGED_OPENCODE_HANDOFF_V2_MASTER_SECRET_FILENAME,
@@ -22,7 +23,12 @@ const createRoot = () => {
 
 const createIncarnation = () => randomBytes(32).toString('base64url');
 const createProvider = (root, options = {}) =>
-  createManagedOpenCodeHandoffV2SecretProvider({ rootDir: root, ...options });
+  createManagedOpenCodeHandoffV2SecretProvider({
+    rootDir: root,
+    username: 'alice',
+    aclInspector: () => ({ entries: [{ principal: 'alice', rights: ['F'] }] }),
+    ...options,
+  });
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -32,6 +38,107 @@ afterEach(() => {
 });
 
 describe('managed OpenCode handoff v2 secret provider', () => {
+  it('uses the Windows ACL branch without POSIX mode checks or directory fsync', async () => {
+    const root = createRoot();
+    const aclSpy = vi.spyOn(windowsAcl, 'applyDirectoryAcl').mockReturnValue({ ok: true, username: 'alice' });
+    const fsyncSync = fs.fsyncSync.bind(fs);
+    const directoryFsyncs = [];
+    const fsyncSpy = vi.spyOn(fs, 'fsyncSync').mockImplementation((descriptor) => {
+      const isDirectory = fs.fstatSync(descriptor).isDirectory();
+      directoryFsyncs.push(isDirectory);
+      if (isDirectory) {
+        throw new Error('directory fsync is not available on Windows');
+      }
+      return fsyncSync(descriptor);
+    });
+    const provider = createProvider(root, { platform: 'win32' });
+    const incarnation = createIncarnation();
+    const key = await provider.deriveRecordMacKey({ incarnation });
+
+    expect(key).toHaveLength(32);
+    expect(aclSpy).toHaveBeenCalled();
+    expect(fsyncSpy).toHaveBeenCalled();
+    expect(directoryFsyncs).toEqual(expect.arrayContaining([false]));
+    expect(directoryFsyncs).not.toContain(true);
+
+    key.fill(0);
+    provider.dispose();
+  });
+
+  it('does not treat missing initialized Windows state as a fresh initialization', async () => {
+    const root = createRoot();
+    vi.spyOn(windowsAcl, 'applyDirectoryAcl').mockReturnValue({ ok: true, username: 'alice' });
+    const incarnation = createIncarnation();
+    const initialized = createProvider(root, { platform: 'win32' });
+    const key = await initialized.deriveRecordMacKey({ incarnation });
+    key.fill(0);
+    initialized.dispose();
+
+    fs.unlinkSync(path.join(root, MANAGED_OPENCODE_HANDOFF_V2_MASTER_SECRET_FILENAME));
+    const missing = createProvider(root, { platform: 'win32', initializationWaitAttempts: 1 });
+    await expect(missing.deriveRecordMacKey({ incarnation }))
+      .rejects.toThrow(/missing after initialization evidence/);
+    missing.dispose();
+  });
+
+  it('does not treat corrupt initialized Windows state as absent', async () => {
+    const root = createRoot();
+    vi.spyOn(windowsAcl, 'applyDirectoryAcl').mockReturnValue({ ok: true, username: 'alice' });
+    const initialized = createProvider(root, { platform: 'win32' });
+    const key = await initialized.deriveRecordMacKey({ incarnation: createIncarnation() });
+    key.fill(0);
+    initialized.dispose();
+
+    fs.writeFileSync(
+      path.join(root, MANAGED_OPENCODE_HANDOFF_V2_MASTER_SECRET_FILENAME),
+      Buffer.alloc(31, 1),
+    );
+    const corrupt = createProvider(root, { platform: 'win32', initializationWaitAttempts: 1 });
+    await expect(corrupt.deriveRecordMacKey({ incarnation: createIncarnation() }))
+      .rejects.toThrow(/invalid length/);
+    corrupt.dispose();
+  });
+
+  it('uses the Windows ACL trust boundary for existing files instead of POSIX mode bits', async () => {
+    const root = createRoot();
+    vi.spyOn(windowsAcl, 'applyDirectoryAcl').mockReturnValue({ ok: true, username: 'alice' });
+    const incarnation = createIncarnation();
+    const initialized = createProvider(root, { platform: 'win32' });
+    const firstKey = await initialized.deriveRecordMacKey({ incarnation });
+    firstKey.fill(0);
+    initialized.dispose();
+
+    fs.chmodSync(path.join(root, MANAGED_OPENCODE_HANDOFF_V2_MASTER_SECRET_FILENAME), 0o644);
+    fs.chmodSync(path.join(root, MANAGED_OPENCODE_HANDOFF_V2_INITIALIZATION_EVIDENCE_FILENAME), 0o644);
+    const reopened = createProvider(root, { platform: 'win32' });
+    const secondKey = await reopened.deriveRecordMacKey({ incarnation });
+    expect(secondKey).toHaveLength(32);
+    secondKey.fill(0);
+    reopened.dispose();
+  });
+
+  it('rejects an existing master-secret ACL that grants a broader principal', async () => {
+    const root = createRoot();
+    vi.spyOn(windowsAcl, 'applyDirectoryAcl').mockReturnValue({ ok: true, username: 'alice' });
+    const initialized = createProvider(root, { platform: 'win32' });
+    const firstKey = await initialized.deriveRecordMacKey({ incarnation: createIncarnation() });
+    firstKey.fill(0);
+    initialized.dispose();
+
+    const unsafe = createProvider(root, {
+      platform: 'win32',
+      aclInspector: () => ({
+        entries: [
+          { principal: 'alice', rights: ['F'] },
+          { principal: 'Everyone', rights: ['F'] },
+        ],
+      }),
+    });
+    await expect(unsafe.deriveRecordMacKey({ incarnation: createIncarnation() }))
+      .rejects.toThrow(/unapproved principal/);
+    unsafe.dispose();
+  });
+
   it.skipIf(process.platform === 'win32')('converges concurrent first creation on one private 32-byte secret', async () => {
     const root = createRoot();
     const incarnation = createIncarnation();

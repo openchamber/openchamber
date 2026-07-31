@@ -483,6 +483,8 @@ let healthCheckInterval = null;
 let server = null;
 let expressApp = null;
 let currentRestartPromise = null;
+let currentIncarnation = null;
+let currentOwner = null;
 let isRestartingOpenCode = false;
 let openCodeApiPrefix = '';
 let openCodeApiPrefixDetected = true;
@@ -597,6 +599,7 @@ const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
 const getOpenCodeAuthHeaders = (...args) => openCodeAuthStateRuntime.getOpenCodeAuthHeaders(...args);
 const isOpenCodeConnectionSecure = (...args) => openCodeAuthStateRuntime.isOpenCodeConnectionSecure(...args);
 const ensureLocalOpenCodeServerPassword = (...args) => openCodeAuthStateRuntime.ensureLocalOpenCodeServerPassword(...args);
+const captureOpenCodeAuthState = (...args) => openCodeAuthStateRuntime.captureOpenCodeAuthState(...args);
 
 const openCodeNetworkState = {};
 Object.defineProperties(openCodeNetworkState, {
@@ -1008,6 +1011,8 @@ Object.defineProperties(openCodeLifecycleState, {
   openCodeBaseUrl: { get: () => openCodeBaseUrl, set: (value) => { openCodeBaseUrl = value; } },
   openCodeWorkingDirectory: { get: () => openCodeWorkingDirectory, set: (value) => { openCodeWorkingDirectory = value; } },
   currentRestartPromise: { get: () => currentRestartPromise, set: (value) => { currentRestartPromise = value; } },
+  currentIncarnation: { get: () => currentIncarnation, set: (value) => { currentIncarnation = value; } },
+  currentOwner: { get: () => currentOwner, set: (value) => { currentOwner = value; } },
   isRestartingOpenCode: { get: () => isRestartingOpenCode, set: (value) => { isRestartingOpenCode = value; } },
   openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
   openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
@@ -1044,6 +1049,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   applyOpencodeBinaryFromSettings,
   ensureOpencodeCliEnv,
   ensureLocalOpenCodeServerPassword,
+  captureOpenCodeAuthState,
   resolveManagedOpenCodeLaunchSpec,
   setOpenCodePort,
   setDetectedOpenCodeApiPrefix,
@@ -1054,6 +1060,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  resetSessionRuntimeForOpenCodeReplacement: () => sessionRuntime.resetForOpenCodeReplacement(),
+  guardianOwnerInstanceId: process.env.OPENCHAMBER_GUARDIAN_OWNER_ID,
   getManagedOpenCodeEnv: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     if (settings?.agentControlToolEnabled === false) return {};
@@ -1738,7 +1746,10 @@ async function main(options = {}) {
       } catch {
         // best-effort shutdown of the dictation worker
       }
-      return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
+      return gracefulShutdown({
+        ...shutdownOptions,
+        exitProcess: shutdownOptions.exitProcess ?? false,
+      });
     }
   };
 }

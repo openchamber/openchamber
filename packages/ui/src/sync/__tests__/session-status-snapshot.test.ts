@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { beforeEach, describe, expect, test } from "bun:test"
 import { create, type StoreApi } from "zustand"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 
@@ -6,9 +6,17 @@ import { INITIAL_STATE, type State } from "../types"
 import type { DirectoryStore } from "../child-store"
 import {
   applySessionStatusSnapshot,
+  clearDirectorySessionStatusesForUnavailable,
   needsSnapshotAfterStatusPoll,
+  reconcileDirectorySessionStatusSnapshot,
   shouldTriggerStaleResync,
 } from "../sync-context"
+import {
+  applyGlobalSessionStatusEvent,
+  resetGlobalSessionStatus,
+  useGlobalSessionStatusStore,
+} from "../global-session-status"
+import { resetSessionOrdering } from "../session-ordering"
 
 type StatusSnapshot = Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
 
@@ -34,6 +42,11 @@ function completedMessage() {
 const BUSY: SessionStatus = { type: "busy" }
 
 describe("applySessionStatusSnapshot", () => {
+  beforeEach(() => {
+    resetGlobalSessionStatus()
+    resetSessionOrdering()
+  })
+
   describe("monotonic mode (periodic poll)", () => {
     test("does NOT lower a busy session to idle when the snapshot omits it", () => {
       const store = createDirectoryStore({ session_status: { ses_a: BUSY } })
@@ -85,6 +98,59 @@ describe("applySessionStatusSnapshot", () => {
       const changed = applySessionStatusSnapshot(store, {} as StatusSnapshot, ["ses_a"], "authoritative")
       expect(changed).toBe(true)
       expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+    })
+
+    test("reconciles the child store and global live index together", () => {
+      const store = createDirectoryStore({
+        session: [{ id: "ses_a" } as State["session"][number]],
+        session_status: { ses_a: BUSY },
+      })
+      applyGlobalSessionStatusEvent("/repo", {
+        type: "session.status",
+        properties: { sessionID: "ses_a", status: { type: "busy" } },
+      } as never)
+
+      reconcileDirectorySessionStatusSnapshot("/repo", store, {}, ["ses_a"], "authoritative")
+
+      expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+      expect(useGlobalSessionStatusStore.getState().statusById.has("ses_a")).toBe(false)
+    })
+
+    test("does not treat unavailable OpenCode as an empty snapshot, but removes stale live evidence", () => {
+      const messages = streamingMessage()
+      const store = createDirectoryStore({
+        session: [{ id: "ses_a" } as State["session"][number]],
+        session_status: { ses_a: BUSY },
+        message: { ses_a: messages },
+      })
+      applyGlobalSessionStatusEvent("/repo", {
+        type: "session.status",
+        properties: { sessionID: "ses_a", status: { type: "busy" } },
+      } as never)
+
+      const changed = clearDirectorySessionStatusesForUnavailable("/repo", store, ["ses_a"])
+
+      expect(changed).toBe(true)
+      expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+      expect(store.getState().message.ses_a).toBe(messages)
+      expect(useGlobalSessionStatusStore.getState().statusById.has("ses_a")).toBe(false)
+    })
+
+    test("replacement followed by a new runtime's empty snapshot cannot retain old busy state", () => {
+      const store = createDirectoryStore({
+        session: [{ id: "ses_a" } as State["session"][number]],
+        session_status: { ses_a: BUSY },
+      })
+      applyGlobalSessionStatusEvent("/repo", {
+        type: "session.status",
+        properties: { sessionID: "ses_a", status: { type: "busy" } },
+      } as never)
+
+      clearDirectorySessionStatusesForUnavailable("/repo", store, ["ses_a"])
+      reconcileDirectorySessionStatusSnapshot("/repo", store, {}, ["ses_a"], "authoritative")
+
+      expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+      expect(useGlobalSessionStatusStore.getState().statusById.has("ses_a")).toBe(false)
     })
   })
 })

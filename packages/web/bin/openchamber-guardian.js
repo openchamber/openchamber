@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-
 import { createManagedOpenCodeGuardian } from '../server/lib/guardian/guardian.js';
-import { resolveManagedOpenCodeHandoffV2Root } from '../server/lib/opencode/managed-opencode-handoff-v2/filesystem.js';
 import { resolveCurrentUsername } from '../server/lib/guardian/windows-acl.js';
+import { ensurePrivateDirectory } from '../server/lib/opencode/managed-opencode-handoff-v2/filesystem.js';
+import { resolveGuardianPaths } from '../server/lib/guardian/paths.js';
+import { readProcessIdentity } from '../server/lib/guardian/process-identity.js';
+import {
+  acquireGuardianPidMarker,
+  releaseGuardianPidMarker,
+} from '../server/lib/guardian/pid-marker.js';
 
 /**
  * W-C: per-platform runtime paths for the standalone guardian.
@@ -24,43 +26,6 @@ import { resolveCurrentUsername } from '../server/lib/guardian/windows-acl.js';
  * default per-platform root for parity with the existing operator
  * workflow.
  */
-const resolveWindowsDataDir = () => {
-  const envValue = process.env.OPENCHAMBER_DATA_DIR;
-  if (typeof envValue === 'string' && envValue.trim().length > 0 && path.isAbsolute(envValue)) {
-    return envValue;
-  }
-  const localAppData = process.env.LOCALAPPDATA
-    || path.join(os.homedir(), 'AppData', 'Local');
-  return path.join(localAppData, 'openchamber', 'managed-opencode-handoff-v2');
-};
-
-const DEFAULT_POSIX_DATA_DIR = path.join(os.homedir(), '.local', 'state', 'openchamber', 'managed-opencode-handoff-v2');
-
-const RUNTIME_PATHS = (() => {
-  if (process.platform === 'win32') {
-    const rootDir = resolveWindowsDataDir();
-    return {
-      platform: 'win32',
-      rootDir,
-      socketPath: undefined,
-      portPath: path.join(resolveManagedOpenCodeHandoffV2Root(rootDir), 'port'),
-      pidDir: resolveManagedOpenCodeHandoffV2Root(rootDir),
-      pidFile: path.join(resolveManagedOpenCodeHandoffV2Root(rootDir), 'guardian.pid'),
-    };
-  }
-  const rootDir = typeof process.env.OPENCHAMBER_DATA_DIR === 'string' && process.env.OPENCHAMBER_DATA_DIR.length > 0
-    ? process.env.OPENCHAMBER_DATA_DIR
-    : DEFAULT_POSIX_DATA_DIR;
-  return {
-    platform: process.platform,
-    rootDir,
-    socketPath: path.join(resolveManagedOpenCodeHandoffV2Root(rootDir), 'guardian.sock'),
-    portPath: undefined,
-    pidDir: resolveManagedOpenCodeHandoffV2Root(rootDir),
-    pidFile: path.join(resolveManagedOpenCodeHandoffV2Root(rootDir), 'guardian.pid'),
-  };
-})();
-
 const parseArgs = (argv) => {
   const args = {
     socketPath: undefined,
@@ -98,105 +63,49 @@ const parseArgs = (argv) => {
   return args;
 };
 
-const readPidFile = (pidFile) => {
-  try {
-    const pid = Number.parseInt(fs.readFileSync(pidFile, 'utf8').trim(), 10);
-    return Number.isFinite(pid) && pid > 0 ? pid : null;
-  } catch {
-    return null;
-  }
+let markerOwnership = null;
+
+const releaseOwnedMarker = () => {
+  if (!markerOwnership) return;
+  releaseGuardianPidMarker(markerOwnership);
+  markerOwnership = null;
 };
 
-/**
- * W-C: PID file write is now a function of `(pidFile, pidDir, platform)`
- * rather than module-level constants. On Linux we `chmod 0600` (per the
- * Unix trust boundary); on Windows the per-user `icacls` ACL on the
- * v2 root covers the PID file by inheritance, so no explicit chmod is
- * needed (`chmodSync` is a no-op on Windows but skipped for clarity).
- */
-const writePidFile = (pidFile, pidDir) => {
-  fs.mkdirSync(pidDir, { recursive: true });
-  try {
-    const mode = process.platform === 'win32' ? 0o600 : 0o600; // explicit for symmetry; chmod skipped on win32
-    const fd = fs.openSync(pidFile, 'wx', mode);
-    fs.writeFileSync(fd, String(process.pid));
-    fs.closeSync(fd);
-  } catch (error) {
-    if (error?.code === 'EEXIST') {
-      // Another process may have created the file concurrently.
-      const existingPid = readPidFile(pidFile);
-      if (existingPid && isProcessAlive(existingPid)) {
-        console.error(`Guardian is already running (pid ${existingPid})`);
-        process.exit(1);
-      }
-      // Stale PID file; remove and retry once.
-      try {
-        fs.unlinkSync(pidFile);
-      } catch {
-        // Ignore unlink errors.
-      }
-      const fd = fs.openSync(pidFile, 'wx', 0o600);
-      fs.writeFileSync(fd, String(process.pid));
-      fs.closeSync(fd);
-    } else {
-      throw error;
-    }
-  }
-};
-
-const removePidFile = (pidFile) => {
-  try {
-    fs.unlinkSync(pidFile);
-  } catch {
-    // Ignore.
-  }
-};
-
-const isProcessAlive = (pid) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const enforceSingleton = (pidFile) => {
-  const existingPid = readPidFile(pidFile);
-  if (existingPid && isProcessAlive(existingPid)) {
-    console.error(`Guardian is already running (pid ${existingPid})`);
-    process.exit(1);
-  }
-};
+// Startup errors and unexpected exits must only release a marker acquired by
+// this process. The helper compares the persisted ownership token before
+// unlinking, so a later guardian cannot be damaged by cleanup.
+process.once('exit', releaseOwnedMarker);
 
 const main = async () => {
-  // W-C: the Windows early-exit is removed. The same singleton +
-  // writePidFile + createManagedOpenCodeGuardian flow runs on every
+  // W-C: the Windows early-exit is removed. The same singleton marker +
+  // createManagedOpenCodeGuardian flow runs on every
   // platform; the IPC transport factory inside `ManagedOpenCodeGuardian`
   // dispatches to the platform-correct backend.
   const args = parseArgs(process.argv);
-  const paths = {
-    ...RUNTIME_PATHS,
-    socketPath: typeof args.socketPath === 'string' ? args.socketPath : RUNTIME_PATHS.socketPath,
-    portPath: typeof args.portPath === 'string' ? args.portPath : RUNTIME_PATHS.portPath,
-    rootDir: typeof args.dataDir === 'string' && args.dataDir.length > 0 ? args.dataDir : RUNTIME_PATHS.rootDir,
+  const paths = resolveGuardianPaths({
+    dataDir: args.dataDir,
+    socketPath: args.socketPath,
+    portPath: args.portPath,
+  });
+  const effectivePaths = {
+    ...paths,
   };
-  const pidFile = path.join(paths.pidDir, 'guardian.pid');
-  enforceSingleton(pidFile);
-  writePidFile(pidFile, paths.pidDir);
-
   const username = typeof args.username === 'string' && args.username.length > 0
     ? args.username
-    : (paths.platform === 'win32' ? resolveCurrentUsername({ log: console.warn }) : undefined);
-
-  const guardian = createManagedOpenCodeGuardian({
-    rootDir: paths.rootDir,
-    socketPath: paths.socketPath,
-    portPath: paths.portPath,
+    : (effectivePaths.platform === 'win32' ? resolveCurrentUsername({ log: console.warn }) : undefined);
+  ensurePrivateDirectory(effectivePaths.rootDir, {
+    platform: effectivePaths.platform,
     username,
-    healthCheckIntervalMs: args.healthInterval,
-    leaseRenewalIntervalMs: args.leaseInterval,
+    log: console.warn,
   });
+  const pidFile = effectivePaths.pidFile;
+  markerOwnership = await acquireGuardianPidMarker({
+    pidFile,
+    identity: readProcessIdentity(process.pid),
+    requireIdentity: true,
+  });
+
+  let guardian;
 
   const shutdown = async (signal) => {
     console.log(`[guardian-cli] received ${signal}, shutting down...`);
@@ -204,34 +113,48 @@ const main = async () => {
       await guardian.stop();
     } catch (error) {
       console.error('[guardian-cli] shutdown error:', error.message);
-    } finally {
-      removePidFile(pidFile);
+      // A failed child termination leaves the guardian authoritative and
+      // reachable so an operator can retry through authenticated IPC. Do not
+      // remove the singleton marker or report a clean process exit while a
+      // live child record remains.
+      return;
     }
-    process.exit(0);
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
-  // SIGHUP is the legacy reload signal (config-reload-no-op on both
-  // platforms). On Windows `process.on('SIGHUP', ...)` is silently
-  // ignored by Node, so we additionally register `SIGBREAK` for the
-  // Ctrl+Break event in a console-attached Windows run. Both handlers
-  // are safe to install unconditionally: `process.on` for an
-  // unsupported signal is a no-op on POSIX runners.
-  process.on('SIGHUP', () => {
-    console.log('[guardian-cli] received SIGHUP, reloading config...');
-    guardian.stopTimers();
-    guardian.startTimers();
-  });
+  // SIGHUP is the POSIX reload signal. Windows uses SIGBREAK because Node
+  // does not deliver SIGHUP there. Both handlers only restart timers; they
+  // do not terminate the guardian.
+  const reloadTimers = (signal) => {
+    console.log(`[guardian-cli] received ${signal}, reloading config...`);
+    void guardian.reload().catch((error) => {
+      console.error(`[guardian-cli] reload failed: ${error.message}`);
+    });
+  };
+  process.on('SIGHUP', () => reloadTimers('SIGHUP'));
   if (process.platform === 'win32') {
-    process.on('SIGBREAK', () => shutdown('SIGBREAK'));
+    process.on('SIGBREAK', () => reloadTimers('SIGBREAK'));
   }
 
   try {
+    guardian = createManagedOpenCodeGuardian({
+      rootDir: effectivePaths.rootDir,
+      socketPath: effectivePaths.socketPath,
+      portPath: effectivePaths.portPath,
+      authSecretPath: effectivePaths.authSecretPath,
+      username,
+      healthCheckIntervalMs: args.healthInterval,
+      leaseRenewalIntervalMs: args.leaseInterval,
+      onStopped: () => {
+        releaseOwnedMarker();
+        process.exit(0);
+      },
+    });
     await guardian.start();
   } catch (error) {
     console.error('[guardian-cli] failed to start:', error.message);
-    removePidFile(pidFile);
+    releaseOwnedMarker();
     process.exit(1);
   }
 
@@ -241,8 +164,6 @@ const main = async () => {
 
 main().catch((error) => {
   console.error('[guardian-cli] fatal error:', error);
-  // Best-effort: try to remove the default pidFile even if `main`
-  // never reached the writePidFile step.
-  try { removePidFile(RUNTIME_PATHS.pidFile); } catch { /* ignore */ }
+  releaseOwnedMarker();
   process.exit(1);
 });

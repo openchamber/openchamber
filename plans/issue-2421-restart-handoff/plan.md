@@ -3,11 +3,11 @@
 ## Accepted architecture
 
 - Keep phase-1 v1 in `managed-opencode-handoff-protocol.js` unchanged.
-- Add an isolated v2 namespace under `packages/web/server/lib/opencode/managed-opencode-handoff-v2/` for Linux/POSIX Web-daemon foundations.
+- Add an isolated v2 namespace under `packages/web/server/lib/opencode/managed-opencode-handoff-v2/` for Web-daemon foundations shared by POSIX and Windows transports.
 - V2 owns a private local master-secret provider, a separate SQLite record store, and a signed reservation/lease protocol. It does not share the legacy managed-process registry or any auth/HMR/CLI secret source.
 - Default v2 storage is `~/.local/state/openchamber/managed-opencode-handoff-v2/`, containing `master-secret.bin` and `master-secret.initialized` (`0600`) plus `records.sqlite3`; records contain public identity, lease, revision, and MAC fields only.
-- A Linux/POSIX-only standalone **guardian process** (`bin/openchamber-guardian.js`) outlives the web server and manages OpenCode child processes via the v2 durable protocol over a Unix-domain socket at `<rootDir>/guardian.sock` (mode `0600`, same-UID local trust boundary).
-- Web lifecycle adoption (`bootstrapOpenCodeAtStartup()`) and restart handoff (`restartOpenCode()`) are best-effort and fall back to legacy stop/start when the guardian is unavailable.
+- A standalone **guardian process** (`bin/openchamber-guardian.js`) outlives the web server and manages OpenCode child processes via the v2 durable protocol. POSIX uses a `0600` Unix-domain socket; Windows uses loopback TCP and an ACL-protected discovery file.
+- Web lifecycle adoption (`bootstrapOpenCodeAtStartup()`) and restart handoff (`restartOpenCode()`) are owner-checked and transactional, with legacy fallback only after guardian cleanup/rollback is attempted.
 
 ## Phase order
 
@@ -16,13 +16,14 @@
 | 1 | Isolated v1 protocol + fake-store tests | complete |
 | 2A | v2 secret provider, SQLite CAS store, reservation/launch/lease protocol | complete |
 | 2B | Linux guardian core + IPC server + GuardianClient | complete |
-| 2C | Guardian launch wiring: `openchamber-guardian` bin entry, `openchamber guardian {status\|start\|stop\|reload}` subcommand, `--guardian`/`--no-guardian` flag, autostart in `serve`, graceful shutdown sequencing, Linux-only smoke test | complete (local, uncommitted) |
+| 2C | Guardian launch wiring: `openchamber-guardian` bin entry, `openchamber guardian {status\|start\|stop\|reload}` subcommand, `--guardian`/`--no-guardian` flag, autostart in `serve`, owner-scoped shutdown/restart semantics, and real Linux/Windows smoke tests | complete locally; CI gate pending |
+| 2D | Cross-platform guardian transport, authenticated IPC, stable owner/launch identity, Windows process/ACL path, and hard Windows smoke gate | implementation complete; real Windows gate pending |
 | 3 | Web lifecycle integration (`bootstrapOpenCodeAtStartup()` adoption + `restartOpenCode()` handoff branch + `--handoff` CLI flag) | complete (landed in same PR as 2B) |
 | 4 | Cross-runtime adoption — see "Phase 4 scope" below | closed by user direction (2026-07-29): no VS Code, no Electron, no mobile, no hosted mobile |
 
 ## Current status
 
-Phases 1, 2A, 2B, 2C, and 3 are implemented and validated locally on branch `fix/issue-2421-restart-handoff`. PR #2485 in upstream `openchamber/openchamber` references the issue and walks reviewers through the dormant-until-2C framing; a follow-up commit on the same branch carries Phase 2C plus an `ipc-server.js` shutdown-response ordering fix surfaced by the Phase 2C smoke test. Nothing is committed or pushed in this session — all Phase 2C work plus the protocol fix sit as uncommitted changes on the local branch awaiting explicit approval.
+Phases 1, 2A, 2B, 2C, and 3 are implemented in the current worktree on branch `fix/issue-2421-restart-handoff`. The guardian path is cross-platform, uses stable persisted owner identity, preserves guardian-managed children across web-server restart, and fails closed on ambiguous cleanup/adoption. The latest review remediation keeps v2 filesystem durability/mode checks platform-aware, retries launch cleanup against the authoritative CAS revision, preserves failed-stop records and IPC, aborts startup when recovery listing fails, and preserves CLI/foreground owner metadata when an accepted guardian stop is not confirmed. Final local validation passes: the web suite reports 118 files, 1171 passed, and 3 skipped; focused five-area tests pass, Linux smoke prints `ok`, and docs, type-check, lint, and changed-file syntax checks are clean. Real Windows validation remains the required platform gate. Nothing is committed or pushed in this session.
 
 ## Phase 2A state machine
 
@@ -35,14 +36,14 @@ Phases 1, 2A, 2B, 2C, and 3 are implemented and validated locally on branch `fix
 
 ## Phase 4 scope (closed by user direction)
 
-User research on OpenCode's resume machinery (2026-07-29) confirmed that **session durability is an OpenCode-side property, not an OpenChamber-side one**. OpenCode persists `session_message`, `session_input`, `session_context_epoch`, and `session_message(type=compaction)` rows in its own SQLite store; `SessionV2.resume(sessionID)` rebuilds the runner from that durable state. What is **not** durable across an OpenCode child restart is the in-memory `SessionRunCoordinator`, `BackgroundJob` state, and the currently-in-flight LLM turn — by design lost on a hard process boundary, resumed by OpenCode's own resume flow when the child starts again.
+User research on OpenCode's resume machinery (2026-07-29) confirmed that **session durability is an OpenCode-side property, not an OpenChamber-side one**. OpenCode persists `session_message`, `session_input`, `session_context_epoch`, and `session_message(type=compaction)` rows in its own SQLite store; `SessionV2.resume(sessionID)` rebuilds the runner from that durable state. What is **not** durable across an OpenCode child restart is the in-memory `SessionRunCoordinator`, `BackgroundJob` state, and the currently-in-flight LLM turn. OpenChamber does not automatically continue a post-crash generation or reconstruct an in-flight turn. It rehydrates a live, identity-verified guardian child when one exists; if none exists, normal startup may create a fresh child, but it is not treated as continuation of the lost generation. Dead, malformed, or ambiguous records remain an attention condition for an explicit lifecycle action.
 
 User direction (2026-07-29) closes the originally-listed Phase 4 items as follows:
 
 | Originally listed | Decision |
 |---|---|
 | Session resume / agent loop restoration | **Not ours — already provided by OpenCode.** No action. |
-| VS Code integration | **Out — not doing.** Windows is out of scope by project policy; cross-platform VS Code would need a separate design (named-pipes guardian IPC, extension-host lifecycle). Closed. |
+| VS Code integration | **Out — not doing.** Cross-platform VS Code would need a separate design (named-pipes guardian IPC, extension-host lifecycle), even though the web guardian now supports Windows. Closed. |
 | Electron integration | **Out — not doing.** Electron starts the backend in-process (`AGENTS.md` runtime boundary); the Unix-socket guardian has nothing to attach to. Closed. |
 | Mobile (Capacitor iOS/Android) | **Nothing to do.** Mobile is a client that connects to an existing OpenChamber server over HTTP/relay. It already works as long as the server works. Closed. |
 | Hosted mobile | **Out — not doing.** Closed. |
@@ -50,7 +51,7 @@ User direction (2026-07-29) closes the originally-listed Phase 4 items as follow
 
 **Net Phase 4 status: closed.** Phase 2C closes the user-visible bug in #2421; there is no Phase 4 work on our roadmap. If a future request brings VS Code, Electron, mobile, or hosted-mobile guardian support, each becomes a fresh issue with its own design.
 
-**VS Code forward-reference:** a Linux-only "do it" sketch and a hypothetical Windows plan (transport abstraction, named-pipes-or-localhost-TCP decision, Windows process-termination refactor, sub-phase breakdown W-A through W-E) are documented in `plans/vscode-handoff-design-notes.md`. Read that file only if a fresh VS Code issue is opened.
+**VS Code forward-reference:** an out-of-scope VS Code design sketch is documented in `plans/vscode-handoff-design-notes.md`. Its historical POSIX-only assumptions are superseded by the current web guardian's POSIX + Windows implementation. Read that file only if a fresh VS Code issue is opened.
 
 ## Risks and gates
 
@@ -60,5 +61,5 @@ User direction (2026-07-29) closes the originally-listed Phase 4 items as follow
 - Master initialization has durable evidence and exclusive creation semantics; a missing/corrupt secret in a previously initialized root, or a secret-only root without evidence, fails closed. Deleting the whole root remains an unavoidable loss-of-evidence boundary.
 - Concurrent store initialization must converge under SQLite locking/retry across worker threads and OS processes, and reject damaged, under-constrained, metadata-tampered, or SQLite-lookalike schema objects.
 - No raw master, child credential, or lifecycle material may be persisted, logged, returned as public record data, or reused from existing auth/config state.
-- The guardian is a long-lived process subject to the same-UID local trust boundary. Cross-process adoption with a `claimCapability` is intentionally out of scope (Phase 2B deferred it).
-- Validate focused unit/integration tests, source syntax, package checks available in the worktree, and documentation consistency. No real child, ports, signals, lifecycle, registry, route, CLI, Electron, VS Code, UI, or resume wiring belongs to the v2 protocol package; Phase 2C adds launch-time wiring only for the Linux/POSIX web daemon.
+- The guardian is a long-lived process subject to the same-UID local trust boundary. Cross-process adoption with a `claimCapability` is intentionally out of scope (Phase 2B deferred it); bootstrap adoption instead requires exact stable owner/runtime identity.
+- Validate focused unit/integration tests, source syntax, package checks available in the worktree, and documentation consistency. The v2 protocol package remains transport/lifecycle agnostic, while the guardian and web lifecycle own real child, port, signal, registry, route, and CLI behavior for POSIX and Windows.

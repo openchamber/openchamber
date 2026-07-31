@@ -10,9 +10,7 @@ import {
   getDefaultGuardianPortPath,
   getDefaultGuardianSocketPath,
   guardianCommand,
-  isGuardianAutoStarted,
   maybeAutoStartGuardian,
-  resetGuardianAutoStarted,
   runReloadAction,
   shouldAutoStartGuardian,
   startGuardianDetached,
@@ -40,7 +38,6 @@ function restorePlatform() {
 afterEach(() => {
   restorePlatform();
   vi.restoreAllMocks();
-  resetGuardianAutoStarted();
   // W-C: reset the cached per-platform IPC paths so the next test
   // recomputes them under its own (possibly flipped) process.platform.
   _resetCachedGuardianPathsForTest();
@@ -52,17 +49,17 @@ afterEach(() => {
 // `--no-guardian`, `--no-handoff`, and `OPENCHAMBER_GUARDIAN_AUTOSTART=disabled`.
 
 describe('shouldAutoStartGuardian', () => {
-  it.skipIf(process.platform === 'win32')('returns false when options.guardian === false', () => {
+  it('returns false when options.guardian === false', () => {
     setPlatformForTest('linux');
     expect(shouldAutoStartGuardian({ options: { guardian: false, handoff: true } })).toBe(false);
   });
 
-  it.skipIf(process.platform === 'win32')('returns false when options.handoff === false', () => {
+  it('returns false when options.handoff === false', () => {
     setPlatformForTest('linux');
     expect(shouldAutoStartGuardian({ options: { guardian: true, handoff: false } })).toBe(false);
   });
 
-  it.skipIf(process.platform === 'win32')('returns false when env var is disabled', () => {
+  it('returns false when env var is disabled', () => {
     setPlatformForTest('linux');
     const previous = process.env.OPENCHAMBER_GUARDIAN_AUTOSTART;
     process.env.OPENCHAMBER_GUARDIAN_AUTOSTART = 'disabled';
@@ -74,7 +71,7 @@ describe('shouldAutoStartGuardian', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('returns true by default on Linux', () => {
+  it('returns true by default on Linux', () => {
     setPlatformForTest('linux');
     const previous = process.env.OPENCHAMBER_GUARDIAN_AUTOSTART;
     delete process.env.OPENCHAMBER_GUARDIAN_AUTOSTART;
@@ -109,7 +106,7 @@ describe('shouldAutoStartGuardian', () => {
 });
 
 describe('startGuardianDetached', () => {
-  it.skipIf(process.platform === 'win32')('spawns the guardian entry with detached: true', async () => {
+  it('spawns the guardian entry with detached: true', async () => {
     setPlatformForTest('linux');
     const mockChild = { pid: 4242, unref: vi.fn() };
     const spawnFn = vi.fn().mockReturnValue(mockChild);
@@ -203,16 +200,98 @@ describe('stopGuardianViaIpc', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('returns false when GuardianClient.shutdown fails', async () => {
+  it('returns false when GuardianClient.shutdown fails', async () => {
     setPlatformForTest('linux');
     // Use a non-existent socket path so the connect call fails fast.
     const result = await stopGuardianViaIpc({ timeoutMs: 200, socketPath: '/tmp/does-not-exist-guardian.sock' });
     expect(typeof result).toBe('boolean');
   });
+
+  it('does not kill a reachable guardian after an acknowledged stop with live child state', async () => {
+    setPlatformForTest('linux');
+    _resetCachedGuardianPathsForTest();
+    const pidFile = getDefaultGuardianPidFile();
+    const fakePid = 99994;
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    fs.writeFileSync(pidFile, String(fakePid));
+    const detection = await import('./detection.js');
+    const runningSpy = vi.spyOn(detection, 'isGuardianRunning').mockResolvedValue(true);
+    const gc = await import('./guardian-client.js');
+    const connectSpy = vi.spyOn(gc.GuardianClient.prototype, 'connect').mockResolvedValue(undefined);
+    const shutdownSpy = vi.spyOn(gc.GuardianClient.prototype, 'shutdown')
+      .mockResolvedValue({ acknowledged: true });
+    const disconnectSpy = vi.spyOn(gc.GuardianClient.prototype, 'disconnect').mockImplementation(() => {});
+    const killFn = vi.fn();
+    _setProcessAliveOverrideForTest((pid) => pid === fakePid);
+    try {
+      await expect(stopGuardianViaIpc({
+        timeoutMs: 5,
+        killFn,
+        processLivenessFn: () => 'alive',
+      })).resolves.toBe(false);
+      expect(shutdownSpy).toHaveBeenCalledOnce();
+      expect(runningSpy).toHaveBeenCalled();
+      expect(killFn).not.toHaveBeenCalled();
+    } finally {
+      runningSpy.mockRestore();
+      connectSpy.mockRestore();
+      shutdownSpy.mockRestore();
+      disconnectSpy.mockRestore();
+      _setProcessAliveOverrideForTest(null);
+      try { fs.unlinkSync(pidFile); } catch { /* ignore */ }
+      _resetCachedGuardianPathsForTest();
+    }
+  });
+
+  it('does not report success when acknowledged shutdown leaves guardian.pid behind', async () => {
+    setPlatformForTest('linux');
+    _resetCachedGuardianPathsForTest();
+    const pidFile = getDefaultGuardianPidFile();
+    const fakePid = 99995;
+    const markerIdentity = {
+      processStartTicks: '123',
+      launch: { commandLine: 'node openchamber-guardian.js', cwd: path.dirname(pidFile) },
+      owner: '1000',
+    };
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    fs.writeFileSync(pidFile, JSON.stringify({
+      version: 1,
+      pid: fakePid,
+      token: 'stop-marker-retained-token',
+      identity: markerIdentity,
+    }));
+    const detection = await import('./detection.js');
+    const runningSpy = vi.spyOn(detection, 'isGuardianRunning').mockResolvedValue(false);
+    const gc = await import('./guardian-client.js');
+    const connectSpy = vi.spyOn(gc.GuardianClient.prototype, 'connect').mockResolvedValue(undefined);
+    const shutdownSpy = vi.spyOn(gc.GuardianClient.prototype, 'shutdown')
+      .mockResolvedValue({ acknowledged: true });
+    const disconnectSpy = vi.spyOn(gc.GuardianClient.prototype, 'disconnect').mockImplementation(() => {});
+    const killFn = vi.fn();
+
+    try {
+      await expect(stopGuardianViaIpc({
+        timeoutMs: 5,
+        killFn,
+        processIdentityFn: () => markerIdentity,
+        processLivenessFn: () => 'alive',
+      })).resolves.toBe(false);
+      expect(shutdownSpy).toHaveBeenCalledOnce();
+      expect(killFn).not.toHaveBeenCalled();
+      expect(fs.existsSync(pidFile)).toBe(true);
+    } finally {
+      runningSpy.mockRestore();
+      connectSpy.mockRestore();
+      shutdownSpy.mockRestore();
+      disconnectSpy.mockRestore();
+      try { fs.unlinkSync(pidFile); } catch { /* ignore */ }
+      _resetCachedGuardianPathsForTest();
+    }
+  });
 });
 
 describe('maybeAutoStartGuardian', () => {
-  it.skipIf(process.platform === 'win32')('reports opt-out when --no-guardian is passed', async () => {
+  it('reports opt-out when --no-guardian is passed', async () => {
     setPlatformForTest('linux');
     const result = await maybeAutoStartGuardian({
       options: { guardian: false, handoff: true },
@@ -222,17 +301,13 @@ describe('maybeAutoStartGuardian', () => {
     expect(result.reason).toBe('opt-out');
   });
 
-  // W-C: previously `maybeAutoStartGuardian` returned `{ started: false,
-  // reason: 'opt-out' }` on Windows. After the platform short-circuit
-  // is removed, the function takes the normal "already-running or
-  // spawn" path. We stub `isGuardianRunning` to false and verify
-  // the function reaches the spawn branch (started: true after the
-  // synthetic child reports alive).
-  it('does not short-circuit on Windows and reaches the spawn branch', async () => {
+  it('does not short-circuit on Windows and waits for the IPC endpoint', async () => {
     setPlatformForTest('win32');
     _resetCachedGuardianPathsForTest();
     const det = await import('./detection.js');
-    const isRunningSpy = vi.spyOn(det, 'isGuardianRunning').mockResolvedValue(false);
+    const isRunningSpy = vi.spyOn(det, 'isGuardianRunning')
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
     const mockChild = { pid: 10101, unref: vi.fn() };
     const spawnFn = vi.fn().mockReturnValue(mockChild);
     _setProcessAliveOverrideForTest((pid) => pid === 10101);
@@ -246,7 +321,6 @@ describe('maybeAutoStartGuardian', () => {
       expect(result.started).toBe(true);
       expect(result.pid).toBe(10101);
       expect(spawnFn).toHaveBeenCalled();
-      expect(isGuardianAutoStarted()).toBe(true);
     } finally {
       isRunningSpy.mockRestore();
       _setProcessAliveOverrideForTest(null);
@@ -263,16 +337,16 @@ describe('maybeAutoStartGuardian', () => {
     expect(result.reason).toBe('opt-out');
   });
 
-  it.skipIf(process.platform === 'win32')('sets guardianAutoStarted flag after a successful spawn', async () => {
+  it('reports a successful autostart after the spawned guardian is ready', async () => {
     setPlatformForTest('linux');
-    resetGuardianAutoStarted();
-    expect(isGuardianAutoStarted()).toBe(false);
     const mockChild = { pid: 9999, unref: vi.fn() };
     const spawnFn = vi.fn().mockReturnValue(mockChild);
     // Probe isGuardianRunning — we don't want to actually start a real guardian.
     // To force the spawn path, we can stub isGuardianRunning via dynamic import.
     const detection = await import('./detection.js');
-    const isRunningSpy = vi.spyOn(detection, 'isGuardianRunning').mockResolvedValue(false);
+    const isRunningSpy = vi.spyOn(detection, 'isGuardianRunning')
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
     // M4: the new TOCTOU guard checks isProcessAlive on the spawned pid. Stub
     // it so the synthetic pid 9999 reports alive without spawning a real process.
     _setProcessAliveOverrideForTest((pid) => pid === 9999);
@@ -285,7 +359,59 @@ describe('maybeAutoStartGuardian', () => {
       });
       expect(result.started).toBe(true);
       expect(result.pid).toBe(9999);
-      expect(isGuardianAutoStarted()).toBe(true);
+    } finally {
+      isRunningSpy.mockRestore();
+      _setProcessAliveOverrideForTest(null);
+    }
+  });
+
+  it('waits through delayed readiness instead of returning after spawn', async () => {
+    setPlatformForTest('linux');
+    const mockChild = { pid: 10001, unref: vi.fn() };
+    const spawnFn = vi.fn().mockReturnValue(mockChild);
+    const detection = await import('./detection.js');
+    const isRunningSpy = vi.spyOn(detection, 'isGuardianRunning')
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    _setProcessAliveOverrideForTest((pid) => pid === 10001);
+    try {
+      await expect(maybeAutoStartGuardian({
+        options: { guardian: true, handoff: true },
+        emitNotice: () => {},
+        logFd: 1,
+        spawnFn,
+        readyTimeoutMs: 1000,
+        readyPollIntervalMs: 1,
+      })).resolves.toMatchObject({ started: true, pid: 10001 });
+      expect(isRunningSpy.mock.calls.length).toBeGreaterThanOrEqual(3);
+    } finally {
+      isRunningSpy.mockRestore();
+      _setProcessAliveOverrideForTest(null);
+    }
+  });
+
+  it('fails closed when the spawned guardian never becomes ready', async () => {
+    setPlatformForTest('linux');
+    const mockChild = { pid: 10002, unref: vi.fn() };
+    const spawnFn = vi.fn().mockReturnValue(mockChild);
+    const detection = await import('./detection.js');
+    const isRunningSpy = vi.spyOn(detection, 'isGuardianRunning').mockResolvedValue(false);
+    const emitNotice = vi.fn();
+    _setProcessAliveOverrideForTest((pid) => pid === 10002);
+    try {
+      await expect(maybeAutoStartGuardian({
+        options: { guardian: true, handoff: true },
+        emitNotice,
+        logFd: 1,
+        spawnFn,
+        readyTimeoutMs: 5,
+        readyPollIntervalMs: 1,
+      })).rejects.toThrow(/did not become ready/);
+      expect(emitNotice).toHaveBeenCalledWith(expect.objectContaining({
+        code: 'GUARDIAN_AUTOSTART_FAILED',
+        level: 'warning',
+      }));
     } finally {
       isRunningSpy.mockRestore();
       _setProcessAliveOverrideForTest(null);
@@ -294,7 +420,7 @@ describe('maybeAutoStartGuardian', () => {
 });
 
 describe('guardianCommand JSON surface', () => {
-  it.skipIf(process.platform === 'win32')('status action returns a JSON object with running/pid/socketPath', async () => {
+  it('status action returns a JSON object with running/pid/socketPath', async () => {
     setPlatformForTest('linux');
     const detection = await import('./detection.js');
     const isRunningSpy = vi.spyOn(detection, 'isGuardianRunning').mockResolvedValue(false);
@@ -321,7 +447,7 @@ describe('guardianCommand JSON surface', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('start action surfaces a JSON object with the expected shape', async () => {
+  it('start action surfaces a JSON object with the expected shape', async () => {
     setPlatformForTest('linux');
     // Pre-seed the running probe to true so runStartAction takes the
     // already-running short-circuit. This avoids spawning a real detached
@@ -341,7 +467,7 @@ describe('guardianCommand JSON surface', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('stop action surfaces stopped:false when not running', async () => {
+  it('stop action surfaces stopped:false when not running', async () => {
     setPlatformForTest('linux');
     const detection = await import('./detection.js');
     const isRunningSpy = vi.spyOn(detection, 'isGuardianRunning').mockResolvedValue(false);
@@ -360,7 +486,7 @@ describe('guardianCommand JSON surface', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('reload action throws TunnelCliError when not running', async () => {
+  it('reload action throws TunnelCliError when not running', async () => {
     setPlatformForTest('linux');
     const detection = await import('./detection.js');
     const isRunningSpy = vi.spyOn(detection, 'isGuardianRunning').mockResolvedValue(false);
@@ -425,14 +551,14 @@ describe('guardianCommand JSON surface', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('rejects unknown subcommand with TunnelCliError', async () => {
+  it('rejects unknown subcommand with TunnelCliError', async () => {
     setPlatformForTest('linux');
     await expect(guardianCommand({ json: true }, 'bogus')).rejects.toBeInstanceOf(TunnelCliError);
   });
 });
 
 describe('runReloadAction', () => {
-  it.skipIf(process.platform === 'win32')('sends SIGHUP to the running guardian pid', async () => {
+  it('sends SIGHUP to the running guardian pid', async () => {
     setPlatformForTest('linux');
     const det = await import('./detection.js');
     const isRunningSpy = vi.spyOn(det, 'isGuardianRunning').mockResolvedValue(true);
@@ -441,11 +567,26 @@ describe('runReloadAction', () => {
     const pidFile = getDefaultGuardianPidFile();
     fs.mkdirSync(path.dirname(pidFile), { recursive: true });
     const fakePid = 99991;
-    fs.writeFileSync(pidFile, String(fakePid));
+    const markerIdentity = {
+      processStartTicks: '123',
+      launch: { commandLine: 'node openchamber-guardian.js', cwd: path.dirname(pidFile) },
+      owner: '1000',
+    };
+    fs.writeFileSync(pidFile, JSON.stringify({
+      version: 1,
+      pid: fakePid,
+      token: 'reload-test-token',
+      identity: markerIdentity,
+    }));
     const killFn = vi.fn();
     const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     try {
-      await runReloadAction({ options: { json: true }, killFn });
+      await runReloadAction({
+        options: { json: true },
+        killFn,
+        processIdentityFn: () => markerIdentity,
+        processLivenessFn: () => 'alive',
+      });
       const last = writeSpy.mock.calls.at(-1)?.[0];
       const parsed = JSON.parse(String(last));
       expect(parsed).toMatchObject({
@@ -464,7 +605,7 @@ describe('runReloadAction', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('throws TunnelCliError when guardian is not running', async () => {
+  it('throws TunnelCliError when guardian is not running', async () => {
     setPlatformForTest('linux');
     const det = await import('./detection.js');
     const isRunningSpy = vi.spyOn(det, 'isGuardianRunning').mockResolvedValue(false);
@@ -475,21 +616,36 @@ describe('runReloadAction', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('maps ESRCH from process.kill to a TunnelCliError', async () => {
+  it('maps ESRCH from process.kill to a TunnelCliError', async () => {
     setPlatformForTest('linux');
     const det = await import('./detection.js');
     const isRunningSpy = vi.spyOn(det, 'isGuardianRunning').mockResolvedValue(true);
     _resetCachedGuardianPathsForTest();
     const pidFile = getDefaultGuardianPidFile();
     fs.mkdirSync(path.dirname(pidFile), { recursive: true });
-    fs.writeFileSync(pidFile, '99992');
+    const markerIdentity = {
+      processStartTicks: '123',
+      launch: { commandLine: 'node openchamber-guardian.js', cwd: path.dirname(pidFile) },
+      owner: '1000',
+    };
+    fs.writeFileSync(pidFile, JSON.stringify({
+      version: 1,
+      pid: 99992,
+      token: 'reload-esrch-token',
+      identity: markerIdentity,
+    }));
     const killFn = vi.fn(() => {
       const err = new Error('no such process');
       err.code = 'ESRCH';
       throw err;
     });
     try {
-      await expect(runReloadAction({ options: { json: true }, killFn })).rejects.toThrow(/no longer alive/);
+      await expect(runReloadAction({
+        options: { json: true },
+        killFn,
+        processIdentityFn: () => markerIdentity,
+        processLivenessFn: () => 'alive',
+      })).rejects.toThrow(/no longer alive/);
     } finally {
       isRunningSpy.mockRestore();
       try { fs.unlinkSync(pidFile); } catch { /* ignore */ }
@@ -499,14 +655,24 @@ describe('runReloadAction', () => {
 });
 
 describe('stopGuardianViaIpc escalation', () => {
-  it.skipIf(process.platform === 'win32')('falls back to SIGTERM when the IPC shutdown throws', async () => {
+  it('falls back to SIGTERM when the IPC shutdown throws', async () => {
     setPlatformForTest('linux');
     _resetCachedGuardianPathsForTest();
     const pidFile = getDefaultGuardianPidFile();
     const fakePid = 99993;
     // Seed a PID file; isProcessAlive will be probed against it.
     fs.mkdirSync(path.dirname(pidFile), { recursive: true });
-    fs.writeFileSync(pidFile, String(fakePid));
+    const markerIdentity = {
+      processStartTicks: '123',
+      launch: { commandLine: 'node openchamber-guardian.js', cwd: path.dirname(pidFile) },
+      owner: '1000',
+    };
+    fs.writeFileSync(pidFile, JSON.stringify({
+      version: 1,
+      pid: fakePid,
+      token: 'stop-fallback-token',
+      identity: markerIdentity,
+    }));
     // Use a non-existent socket so GuardianClient.connect() throws.
     const killFn = vi.fn().mockReturnValue(true);
     const logCalls = [];
@@ -515,6 +681,8 @@ describe('stopGuardianViaIpc escalation', () => {
         socketPath: '/tmp/launch-wiring-test-no-such-sock',
         timeoutMs: 200,
         killFn,
+        processIdentityFn: () => markerIdentity,
+        processLivenessFn: () => 'alive',
         logWarning: (msg) => logCalls.push(msg),
       });
       // The IPC path fails; the SIGTERM path runs; we then immediately remove
@@ -528,11 +696,18 @@ describe('stopGuardianViaIpc escalation', () => {
         return true;
       });
       // Re-run so the killFn is wired with the unlink behavior.
-      fs.writeFileSync(pidFile, String(fakePid));
+      fs.writeFileSync(pidFile, JSON.stringify({
+        version: 1,
+        pid: fakePid,
+        token: 'stop-fallback-token-2',
+        identity: markerIdentity,
+      }));
       const result2 = await stopGuardianViaIpc({
         socketPath: '/tmp/launch-wiring-test-no-such-sock',
         timeoutMs: 200,
         killFn,
+        processIdentityFn: () => markerIdentity,
+        processLivenessFn: () => 'alive',
         logWarning: (msg) => logCalls.push(msg),
       });
       expect(typeof result2).toBe('boolean');
@@ -540,6 +715,75 @@ describe('stopGuardianViaIpc escalation', () => {
       // Silence the unused-first-call warning.
       void result;
     } finally {
+      try { fs.unlinkSync(pidFile); } catch { /* ignore */ }
+      _resetCachedGuardianPathsForTest();
+    }
+  });
+});
+
+describe('guardian PID fallback identity revalidation', () => {
+  const markerIdentity = {
+    processStartTicks: '100',
+    launch: { commandLine: 'node openchamber-guardian.js', cwd: '/tmp/guardian' },
+    owner: '1000',
+  };
+
+  const seedMarker = (pid, token) => {
+    const pidFile = getDefaultGuardianPidFile();
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    fs.writeFileSync(pidFile, JSON.stringify({
+      version: 1,
+      pid,
+      token,
+      identity: markerIdentity,
+    }));
+    return pidFile;
+  };
+
+  it('refuses stop fallback after PID reuse without signaling', async () => {
+    setPlatformForTest('linux');
+    _resetCachedGuardianPathsForTest();
+    const pidFile = seedMarker(99996, 'stop-reuse-token');
+    const killFn = vi.fn();
+    try {
+      await expect(stopGuardianViaIpc({
+        socketPath: '/tmp/launch-wiring-test-no-such-sock',
+        timeoutMs: 5,
+        killFn,
+        processIdentityFn: () => ({
+          ...markerIdentity,
+          processStartTicks: '200',
+        }),
+        processLivenessFn: () => 'alive',
+      })).resolves.toBe(false);
+      expect(killFn).not.toHaveBeenCalled();
+    } finally {
+      try { fs.unlinkSync(pidFile); } catch { /* ignore */ }
+      _resetCachedGuardianPathsForTest();
+    }
+  });
+
+  it('refuses reload fallback after PID reuse without signaling', async () => {
+    setPlatformForTest('linux');
+    _resetCachedGuardianPathsForTest();
+    const det = await import('./detection.js');
+    const isRunningSpy = vi.spyOn(det, 'isGuardianRunning').mockResolvedValue(true);
+    const pidFile = seedMarker(99997, 'reload-reuse-token');
+    const killFn = vi.fn();
+    try {
+      await expect(runReloadAction({
+        options: { json: true },
+        killFn,
+        reloadViaIpcFn: async () => { throw new Error('IPC unavailable'); },
+        processIdentityFn: () => ({
+          ...markerIdentity,
+          processStartTicks: '200',
+        }),
+        processLivenessFn: () => 'alive',
+      })).rejects.toThrow(/identity.*refusing to signal/);
+      expect(killFn).not.toHaveBeenCalled();
+    } finally {
+      isRunningSpy.mockRestore();
       try { fs.unlinkSync(pidFile); } catch { /* ignore */ }
       _resetCachedGuardianPathsForTest();
     }

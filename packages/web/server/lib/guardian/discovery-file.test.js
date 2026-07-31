@@ -14,6 +14,7 @@ import {
 let tmpFiles = [];
 let tmpDirs = [];
 let aclSpy;
+const aclInspector = () => ({ entries: [{ principal: 'alice', rights: ['F'] }] });
 
 beforeEach(() => {
   aclSpy = vi.spyOn(windowsAcl, 'applyDiscoveryFileAcl').mockReturnValue({ ok: true, username: 'alice' });
@@ -46,10 +47,14 @@ describe('readDiscoveryFile', () => {
     // Use the platform override so the test exercises the read path,
     // not the non-Windows guard.
     const missing = path.join(os.tmpdir(), `openchamber-discovery-missing-${Date.now()}-${Math.random()}.port`);
-    expect(() => readDiscoveryFile(missing, { platform: 'win32' })).toThrow();
+    expect(() => readDiscoveryFile(missing, {
+      platform: 'win32', username: 'alice', aclInspector,
+    })).toThrow();
     // The underlying error is ENOENT; assert on the code.
     try {
-      readDiscoveryFile(missing, { platform: 'win32' });
+      readDiscoveryFile(missing, {
+        platform: 'win32', username: 'alice', aclInspector,
+      });
     } catch (error) {
       expect(error.code).toBe('ENOENT');
     }
@@ -58,21 +63,21 @@ describe('readDiscoveryFile', () => {
   it('parses a well-formed 127.0.0.1:<port> body on win32', () => {
     const file = mkTmpFile();
     fs.writeFileSync(file, '127.0.0.1:4096\n');
-    const parsed = readDiscoveryFile(file, { platform: 'win32' });
+    const parsed = readDiscoveryFile(file, { platform: 'win32', username: 'alice', aclInspector });
     expect(parsed).toEqual({ host: '127.0.0.1', port: 4096 });
   });
 
   it('returns null for a malformed body (test of internal parser)', () => {
     const file = mkTmpFile();
     fs.writeFileSync(file, 'not-a-valid-port-line\n');
-    const parsed = readDiscoveryFile(file, { platform: 'win32' });
+    const parsed = readDiscoveryFile(file, { platform: 'win32', username: 'alice', aclInspector });
     expect(parsed).toBeNull();
   });
 
   it('returns null for a port out of range', () => {
     const file = mkTmpFile();
     fs.writeFileSync(file, '127.0.0.1:70000\n');
-    const parsed = readDiscoveryFile(file, { platform: 'win32' });
+    const parsed = readDiscoveryFile(file, { platform: 'win32', username: 'alice', aclInspector });
     expect(parsed).toBeNull();
   });
 
@@ -99,6 +104,33 @@ describe('readDiscoveryFile', () => {
     expect(() => readDiscoveryFile('', { platform: 'win32' })).toThrow(/portPath is required/);
   });
 
+  it('rejects an injected reparse-point discovery path before reading it', () => {
+    const file = mkTmpFile('discovery-reparse');
+    const target = `${file}.target`;
+    fs.writeFileSync(target, '127.0.0.1:4096\n');
+    fs.symlinkSync(target, file);
+    expect(() => readDiscoveryFile(file, {
+      platform: 'win32',
+      username: 'alice',
+      aclInspector,
+    })).toThrow(/reparse point/);
+  });
+
+  it('rejects a discovery file with an unsafe existing ACL', () => {
+    const file = mkTmpFile('discovery-acl');
+    fs.writeFileSync(file, '127.0.0.1:4096\n');
+    expect(() => readDiscoveryFile(file, {
+      platform: 'win32',
+      username: 'alice',
+      aclInspector: () => ({
+        entries: [
+          { principal: 'alice', rights: ['F'] },
+          { principal: 'Everyone', rights: ['F'] },
+        ],
+      }),
+    })).toThrow(/unapproved principal/);
+  });
+
   it('rejects unsafe path characters (defense in depth)', () => {
     expect(() => readDiscoveryFile('/path/with&', { platform: 'win32' })).toThrow(/unsafe characters/);
   });
@@ -109,13 +141,15 @@ describe('removeDiscoveryFile', () => {
     const file = mkTmpFile();
     fs.writeFileSync(file, '127.0.0.1:4096\n');
     expect(fs.existsSync(file)).toBe(true);
-    removeDiscoveryFile(file, { platform: 'win32' });
+    removeDiscoveryFile(file, { platform: 'win32', username: 'alice', aclInspector });
     expect(fs.existsSync(file)).toBe(false);
   });
 
   it('is idempotent on a missing file (ENOENT is swallowed)', () => {
     const missing = path.join(os.tmpdir(), `openchamber-discovery-rm-missing-${Date.now()}-${Math.random()}.port`);
-    expect(() => removeDiscoveryFile(missing, { platform: 'win32' })).not.toThrow();
+    expect(() => removeDiscoveryFile(missing, {
+      platform: 'win32', username: 'alice', aclInspector,
+    })).not.toThrow();
   });
 
   it.runIf(process.platform !== 'win32')('throws on non-Windows', () => {
@@ -136,7 +170,9 @@ describe('removeDiscoveryFile', () => {
 describe('writeDiscoveryFileAtomic (W-B)', () => {
   it('happy path: publishes the file and applies ACL on the temp path (closes F-6)', () => {
     const file = mkTmpFile();
-    writeDiscoveryFileAtomic(file, 4096, { platform: 'win32', username: 'alice' });
+    writeDiscoveryFileAtomic(file, 4096, {
+      platform: 'win32', username: 'alice', aclInspector,
+    });
 
     // Final file exists and contains the right body.
     expect(fs.existsSync(file)).toBe(true);
@@ -158,7 +194,9 @@ describe('writeDiscoveryFileAtomic (W-B)', () => {
     // The factory passes a numeric port; the host is always
     // 127.0.0.1. Lock that contract.
     const file = mkTmpFile();
-    writeDiscoveryFileAtomic(file, 31337, { platform: 'win32', username: 'alice' });
+    writeDiscoveryFileAtomic(file, 31337, {
+      platform: 'win32', username: 'alice', aclInspector,
+    });
     expect(fs.readFileSync(file, 'utf8')).toBe('127.0.0.1:31337\n');
   });
 
@@ -167,7 +205,9 @@ describe('writeDiscoveryFileAtomic (W-B)', () => {
       throw new Error('icacls failed: access denied');
     });
     const file = mkTmpFile();
-    expect(() => writeDiscoveryFileAtomic(file, 4096, { platform: 'win32', username: 'alice' }))
+    expect(() => writeDiscoveryFileAtomic(file, 4096, {
+      platform: 'win32', username: 'alice', aclInspector,
+    }))
       .toThrow(/icacls failed: access denied/);
 
     // The rename never happened: no final file, no temp, no lock.
@@ -180,7 +220,9 @@ describe('writeDiscoveryFileAtomic (W-B)', () => {
     const file = mkTmpFile();
     // Pre-create the lock file to simulate a concurrent publisher.
     fs.writeFileSync(`${file}.lock`, '');
-    expect(() => writeDiscoveryFileAtomic(file, 4096, { platform: 'win32', username: 'alice' }))
+    expect(() => writeDiscoveryFileAtomic(file, 4096, {
+      platform: 'win32', username: 'alice', aclInspector,
+    }))
       .toThrow(/lock held/);
     // Cleanup: remove the lock so afterEach does not error.
     try { fs.unlinkSync(`${file}.lock`); } catch { /* ignore */ }
@@ -190,7 +232,9 @@ describe('writeDiscoveryFileAtomic (W-B)', () => {
     const file = mkTmpFile();
     // Pre-create the temp file to simulate an O_EXCL failure mode.
     fs.writeFileSync(`${file}.tmp`, 'stale');
-    expect(() => writeDiscoveryFileAtomic(file, 4096, { platform: 'win32', username: 'alice' }))
+    expect(() => writeDiscoveryFileAtomic(file, 4096, {
+      platform: 'win32', username: 'alice', aclInspector,
+    }))
       .toThrow(/temp file .* already exists/);
     // Cleanup.
     try { fs.unlinkSync(`${file}.tmp`); } catch { /* ignore */ }
@@ -224,8 +268,26 @@ describe('writeDiscoveryFileAtomic (W-B)', () => {
     const deepDir = path.join(dir, 'a', 'b', 'c');
     const file = path.join(deepDir, 'port');
     tmpFiles.push(file);
-    writeDiscoveryFileAtomic(file, 4096, { platform: 'win32', username: 'alice' });
+    writeDiscoveryFileAtomic(file, 4096, {
+      platform: 'win32', username: 'alice', aclInspector,
+    });
     expect(fs.existsSync(file)).toBe(true);
+  });
+
+  it('rejects a reparse-point ancestor before publishing nested discovery state', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-discovery-ancestor-reparse-'));
+    tmpDirs.push(dir);
+    const unsafeParent = path.join(dir, 'unsafe-parent');
+    const file = path.join(unsafeParent, 'nested', 'port');
+    fs.mkdirSync(unsafeParent);
+    tmpFiles.push(file);
+
+    expect(() => writeDiscoveryFileAtomic(file, 4096, {
+      platform: 'win32',
+      username: 'alice',
+      reparseChecker: (candidate) => candidate === unsafeParent,
+    })).toThrow(/ancestor.*reparse point/);
+    expect(fs.existsSync(file)).toBe(false);
   });
 });
 

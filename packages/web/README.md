@@ -44,8 +44,16 @@ openchamber logs                     # Follow latest instance logs
 OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber                    # Connect to external OpenCode server
 OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber  # Connect via custom host/HTTPS
 openchamber stop                     # Stop server
+openchamber guardian status           # Show the shared managed-process guardian
+openchamber guardian stop             # Administrative: stop guardian service and all its children
 openchamber update                   # Update to latest version
 ```
+
+`openchamber stop` is owner-scoped and stops only the current OpenChamber
+instance's managed OpenCode child. Use `openchamber guardian stop` only when
+you explicitly intend to shut down the shared guardian service and every child
+it owns. Normal `serve`, `stop`, and restart flows never issue guardian service
+shutdown.
 
 `startup enable` snapshots your current environment into the native service so startup behaves like you launched `openchamber` from the same shell. This preserves provider tokens, PATH, SSH agent settings, and other CLI auth/config env vars. Use `--no-env-snapshot` for a minimal service env.
 

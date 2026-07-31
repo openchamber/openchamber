@@ -17,12 +17,16 @@ import {
 
 export const MANAGED_OPENCODE_HANDOFF_V2_STORE_FILENAME = 'records.sqlite3';
 
-const STORE_USER_VERSION = 2_421_004;
+const STORE_USER_VERSION = 2_421_007;
 const STORE_APPLICATION_ID = 0x4f434832;
 const STORE_TABLE = 'managed_opencode_handoff_v2_records';
 const STORE_EXPIRY_INDEX = 'managed_opencode_handoff_v2_expiry_idx';
 const STORE_COLUMNS = Object.freeze([
   'incarnation',
+  'owner_instance_id',
+  'runtime_identity',
+  'launch_fingerprint',
+  'launch_spec',
   'version',
   'state',
   'credential_fingerprint',
@@ -38,15 +42,27 @@ const EXPECTED_KEYS = Object.freeze(['revision', 'mac', 'leaseExpiresAt']);
 const STATE_SQL = Object.values(ManagedOpenCodeHandoffV2State)
   .map((state) => `'${state}'`)
   .join(', ');
+// Lease expiry is not proof that an unresolved child is gone.  Only records
+// already in a terminal state may be removed by time-based cleanup alone;
+// stopping/handoff and other in-flight records remain the recovery handle
+// until the guardian records an authoritative transition.
+const SAFE_CLEANUP_STATES = Object.freeze([
+  ManagedOpenCodeHandoffV2State.Interrupted,
+  ManagedOpenCodeHandoffV2State.Retired,
+]);
 const CREATE_TABLE_SQL = `
   CREATE TABLE ${STORE_TABLE} (
     incarnation TEXT PRIMARY KEY NOT NULL,
+    owner_instance_id TEXT,
+    runtime_identity TEXT,
+    launch_fingerprint TEXT,
+    launch_spec TEXT,
     version INTEGER NOT NULL CHECK (version = 2),
     state TEXT NOT NULL CHECK (state IN (${STATE_SQL})),
     credential_fingerprint TEXT NOT NULL,
     pid INTEGER,
     port INTEGER,
-    process_start_ticks INTEGER,
+    process_start_ticks TEXT,
     created_at INTEGER NOT NULL,
     lease_expires_at INTEGER NOT NULL,
     revision INTEGER NOT NULL CHECK (revision >= 0),
@@ -54,7 +70,15 @@ const CREATE_TABLE_SQL = `
     CHECK (lease_expires_at > created_at),
     CHECK (
       (pid IS NULL AND port IS NULL AND process_start_ticks IS NULL)
-      OR (pid > 0 AND port > 0 AND port <= 65535 AND process_start_ticks >= 0)
+      OR (
+        pid > 0
+        AND port > 0
+        AND port <= 65535
+        AND typeof(process_start_ticks) = 'text'
+        AND length(process_start_ticks) > 0
+        AND process_start_ticks NOT GLOB '*[^0-9]*'
+        AND (process_start_ticks = '0' OR substr(process_start_ticks, 1, 1) <> '0')
+      )
     )
   ) STRICT
 `;
@@ -63,12 +87,16 @@ const CREATE_EXPIRY_INDEX_SQL = `
 `;
 const EXPECTED_TABLE_COLUMNS = Object.freeze([
   ['incarnation', 'TEXT', 1, 1],
+  ['owner_instance_id', 'TEXT', 0, 0],
+  ['runtime_identity', 'TEXT', 0, 0],
+  ['launch_fingerprint', 'TEXT', 0, 0],
+  ['launch_spec', 'TEXT', 0, 0],
   ['version', 'INTEGER', 1, 0],
   ['state', 'TEXT', 1, 0],
   ['credential_fingerprint', 'TEXT', 1, 0],
   ['pid', 'INTEGER', 0, 0],
   ['port', 'INTEGER', 0, 0],
-  ['process_start_ticks', 'INTEGER', 0, 0],
+  ['process_start_ticks', 'TEXT', 0, 0],
   ['created_at', 'INTEGER', 1, 0],
   ['lease_expires_at', 'INTEGER', 1, 0],
   ['revision', 'INTEGER', 1, 0],
@@ -179,7 +207,7 @@ const validateExactSchema = (database) => {
   if (
     expiryIndexColumns.length !== 1
     || expiryIndexColumns[0].seqno !== 0
-    || expiryIndexColumns[0].cid !== 8
+    || expiryIndexColumns[0].cid !== 12
     || expiryIndexColumns[0].name !== 'lease_expires_at'
   ) {
     throw schemaError();
@@ -201,6 +229,10 @@ const normalizeExpected = (value) => {
 
 const recordToParameters = (record) => [
   record.incarnation,
+  record.ownerInstanceId ?? null,
+  record.runtimeIdentity ?? null,
+  record.launchFingerprint ?? null,
+  record.launchSpec ? JSON.stringify(record.launchSpec) : null,
   record.v,
   record.state,
   record.credentialFingerprint,
@@ -221,6 +253,10 @@ const rowToRecord = (row) => {
     v: row.version,
     state: row.state,
     incarnation: row.incarnation,
+    ownerInstanceId: row.owner_instance_id,
+    runtimeIdentity: row.runtime_identity,
+    launchFingerprint: row.launch_fingerprint,
+    launchSpec: row.launch_spec === null ? null : JSON.parse(row.launch_spec),
     credentialFingerprint: row.credential_fingerprint,
     pid: row.pid,
     port: row.port,
@@ -234,9 +270,18 @@ const rowToRecord = (row) => {
   return record;
 };
 
-const assertExistingDatabaseFile = (databasePath) => {
+const assertExistingDatabaseFile = (
+  databasePath,
+  platform,
+  { username, aclInspector, reparseChecker } = {},
+) => {
   try {
-    assertPrivateRegularFile(databasePath);
+    assertPrivateRegularFile(databasePath, 0o600, {
+      platform,
+      username,
+      aclInspector,
+      reparseChecker,
+    });
     return true;
   } catch (error) {
     if (error?.code === 'ENOENT') return false;
@@ -260,6 +305,9 @@ export const createManagedOpenCodeHandoffV2Store = ({
   rootDir,
   busyTimeoutMs = 5_000,
   platform = process.platform,
+  username,
+  aclInspector,
+  reparseChecker,
 } = {}) => {
   if (!Number.isSafeInteger(busyTimeoutMs) || busyTimeoutMs <= 0 || busyTimeoutMs > 60_000) {
     throw new TypeError('Managed OpenCode handoff v2 store received an invalid busy timeout');
@@ -267,16 +315,20 @@ export const createManagedOpenCodeHandoffV2Store = ({
 
   const rootPath = ensurePrivateDirectory(
     resolveManagedOpenCodeHandoffV2Root(rootDir),
-    { platform },
+    { platform, username, aclInspector, reparseChecker },
   );
   const databasePath = path.join(rootPath, MANAGED_OPENCODE_HANDOFF_V2_STORE_FILENAME);
-  const existed = assertExistingDatabaseFile(databasePath);
+  const existed = assertExistingDatabaseFile(databasePath, platform, {
+    username,
+    aclInspector,
+    reparseChecker,
+  });
   let database;
   let closed = false;
 
   try {
     database = new Database(databasePath);
-    if (!existed) fs.chmodSync(databasePath, 0o600);
+    if (!existed && platform !== 'win32') fs.chmodSync(databasePath, 0o600);
     withInitializationRetry(() => {
       database.pragma(`busy_timeout = ${busyTimeoutMs}`);
       const journalMode = database.pragma('journal_mode = WAL', { simple: true });
@@ -324,8 +376,13 @@ export const createManagedOpenCodeHandoffV2Store = ({
       }
     });
 
-    assertPrivateRegularFile(databasePath);
-    fsyncDirectory(rootPath);
+    assertPrivateRegularFile(databasePath, 0o600, {
+      platform,
+      username,
+      aclInspector,
+      reparseChecker,
+    });
+    fsyncDirectory(rootPath, { platform });
   } catch (error) {
     try { database?.close(); } catch {}
     throw error;
@@ -337,11 +394,12 @@ export const createManagedOpenCodeHandoffV2Store = ({
     insert: database.prepare(`
       INSERT INTO ${STORE_TABLE} (
         ${STORE_COLUMNS.join(', ')}
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     update: database.prepare(`
       UPDATE ${STORE_TABLE}
-      SET version = ?, state = ?, credential_fingerprint = ?, pid = ?, port = ?,
+      SET owner_instance_id = ?, runtime_identity = ?, launch_fingerprint = ?, launch_spec = ?,
+          version = ?, state = ?, credential_fingerprint = ?, pid = ?, port = ?,
           process_start_ticks = ?, created_at = ?, lease_expires_at = ?, revision = ?, mac = ?
       WHERE incarnation = ?
         AND revision = ?
@@ -349,9 +407,20 @@ export const createManagedOpenCodeHandoffV2Store = ({
         AND lease_expires_at = ?
         AND lease_expires_at > ?
     `),
+    updateExpiredRecovery: database.prepare(`
+      UPDATE ${STORE_TABLE}
+      SET owner_instance_id = ?, runtime_identity = ?, launch_fingerprint = ?, launch_spec = ?,
+          version = ?, state = ?, credential_fingerprint = ?, pid = ?, port = ?,
+          process_start_ticks = ?, created_at = ?, lease_expires_at = ?, revision = ?, mac = ?
+      WHERE incarnation = ?
+        AND revision = ?
+        AND mac = ?
+        AND lease_expires_at = ?
+    `),
     deleteExpired: database.prepare(`
       DELETE FROM ${STORE_TABLE}
       WHERE lease_expires_at <= ?
+        AND state IN (?, ?)
     `),
     authoritativeTime: database.prepare(
       "SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER) AS now",
@@ -395,7 +464,7 @@ export const createManagedOpenCodeHandoffV2Store = ({
       const row = statements.read.get(incarnation);
       return row === undefined ? null : rowToRecord(row);
     },
-    compareAndSwap: async ({ incarnation, expected, next, nextForAuthoritativeTime } = {}) => {
+    compareAndSwap: async ({ incarnation, expected, next, nextForAuthoritativeTime, allowExpired = false } = {}) => {
       assertOpen();
       if (!isManagedOpenCodeHandoffV2Incarnation(incarnation)) {
         throw new TypeError('Invalid managed OpenCode handoff v2 incarnation');
@@ -410,6 +479,7 @@ export const createManagedOpenCodeHandoffV2Store = ({
         (expected !== null && !normalizedExpected)
         || hasStaticNext === hasAuthoritativeBuilder
         || (hasStaticNext && (!normalizedStaticNext || normalizedStaticNext.incarnation !== incarnation))
+        || (allowExpired !== true && allowExpired !== false)
       ) {
         throw new TypeError('Invalid managed OpenCode handoff v2 compare-and-swap input');
       }
@@ -434,7 +504,7 @@ export const createManagedOpenCodeHandoffV2Store = ({
           ) {
             return { status: 'conflict' };
           }
-          if (current.leaseExpiresAt <= now || normalizedExpected.leaseExpiresAt <= now) {
+          if (!allowExpired && (current.leaseExpiresAt <= now || normalizedExpected.leaseExpiresAt <= now)) {
             return { status: 'expired' };
           }
         }
@@ -446,7 +516,16 @@ export const createManagedOpenCodeHandoffV2Store = ({
         if (!normalizedNext || normalizedNext.incarnation !== incarnation) {
           throw new TypeError('Invalid managed OpenCode handoff v2 compare-and-swap candidate');
         }
-        if (normalizedNext.leaseExpiresAt <= now) return { status: 'expired' };
+        if (
+          normalizedNext.leaseExpiresAt <= now
+          && (!allowExpired
+            || ![
+              ManagedOpenCodeHandoffV2State.Stopping,
+              ManagedOpenCodeHandoffV2State.Retired,
+            ].includes(normalizedNext.state))
+        ) {
+          return { status: 'expired' };
+        }
         if (normalizedNext.leaseExpiresAt > maxLeaseExpiresAt) {
           throw new TypeError('Managed OpenCode handoff v2 lease exceeds the maximum horizon');
         }
@@ -456,7 +535,11 @@ export const createManagedOpenCodeHandoffV2Store = ({
           return { status: 'applied' };
         }
 
-        const result = statements.update.run(
+        const updateParameters = [
+          normalizedNext.ownerInstanceId,
+          normalizedNext.runtimeIdentity,
+          normalizedNext.launchFingerprint,
+          normalizedNext.launchSpec ? JSON.stringify(normalizedNext.launchSpec) : null,
           normalizedNext.v,
           normalizedNext.state,
           normalizedNext.credentialFingerprint,
@@ -471,8 +554,10 @@ export const createManagedOpenCodeHandoffV2Store = ({
           normalizedExpected.revision,
           normalizedExpected.mac,
           normalizedExpected.leaseExpiresAt,
-          now,
-        );
+        ];
+        const result = allowExpired
+          ? statements.updateExpiredRecovery.run(...updateParameters)
+          : statements.update.run(...updateParameters, now);
         return result.changes === 1 ? { status: 'applied' } : { status: 'conflict' };
       });
     },
@@ -480,12 +565,16 @@ export const createManagedOpenCodeHandoffV2Store = ({
       assertOpen();
       return auditRows().length > 0;
     },
+    list: async () => {
+      assertOpen();
+      return auditRows();
+    },
     cleanup: async () => {
       assertOpen();
       return runImmediate(() => {
         auditRows();
         const now = readAuthoritativeTime(statements.authoritativeTime);
-        const result = statements.deleteExpired.run(now);
+        const result = statements.deleteExpired.run(now, ...SAFE_CLEANUP_STATES);
         return { removed: result.changes };
       });
     },

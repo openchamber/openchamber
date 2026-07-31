@@ -39,10 +39,20 @@ const writeAllSync = (descriptor, buffer) => {
   }
 };
 
-const readPrivateFile = (filePath, expectedLength, label) => {
+const readPrivateFile = (
+  filePath,
+  expectedLength,
+  label,
+  { platform = process.platform, username, aclInspector, reparseChecker } = {},
+) => {
   let listed;
   try {
-    listed = assertPrivateRegularFile(filePath);
+    listed = assertPrivateRegularFile(filePath, 0o600, {
+      platform,
+      username,
+      aclInspector,
+      reparseChecker,
+    });
   } catch (error) {
     if (error?.code === 'ENOENT') return null;
     throw error;
@@ -67,10 +77,10 @@ const readPrivateFile = (filePath, expectedLength, label) => {
     ) {
       throw new Error(`Managed OpenCode handoff v2 ${label} changed while being read`);
     }
-    if (!opened.isFile() || (opened.mode & 0o777) !== 0o600) {
+    if (!opened.isFile() || (platform !== 'win32' && (opened.mode & 0o777) !== 0o600)) {
       throw new Error(`Managed OpenCode handoff v2 ${label} is unsafe`);
     }
-    if (typeof process.getuid === 'function' && opened.uid !== process.getuid()) {
+    if (platform !== 'win32' && typeof process.getuid === 'function' && opened.uid !== process.getuid()) {
       throw new Error(`Managed OpenCode handoff v2 ${label} is not owned by this user`);
     }
 
@@ -93,17 +103,19 @@ const readPrivateFile = (filePath, expectedLength, label) => {
   }
 };
 
-const readSecretFile = (secretPath) => readPrivateFile(
+const readSecretFile = (secretPath, platform, options) => readPrivateFile(
   secretPath,
   MANAGED_OPENCODE_HANDOFF_V2_MASTER_SECRET_BYTES,
   'secret',
+  { platform, ...options },
 );
 
-const readInitializationEvidence = (evidencePath) => {
+const readInitializationEvidence = (evidencePath, platform, options) => {
   const evidence = readPrivateFile(
     evidencePath,
     INITIALIZATION_EVIDENCE.length,
     'initialization evidence',
+    { platform, ...options },
   );
   if (!evidence) return false;
   try {
@@ -121,7 +133,7 @@ const createTemporaryPath = (rootPath, label) => path.join(
   `.${label}.${process.pid}.${randomBytes(16).toString('hex')}.tmp`,
 );
 
-const publishFileExclusively = (rootPath, targetPath, contents, label) => {
+const publishFileExclusively = (rootPath, targetPath, contents, label, { platform = process.platform } = {}) => {
   let temporaryPath;
   let descriptor;
 
@@ -139,7 +151,7 @@ const publishFileExclusively = (rootPath, targetPath, contents, label) => {
     if (descriptor === undefined) {
       throw new Error('Managed OpenCode handoff v2 secret temporary file could not be created');
     }
-    fs.fchmodSync(descriptor, 0o600);
+    if (platform !== 'win32') fs.fchmodSync(descriptor, 0o600);
     writeAllSync(descriptor, contents);
     fs.fsyncSync(descriptor);
     fs.closeSync(descriptor);
@@ -154,10 +166,10 @@ const publishFileExclusively = (rootPath, targetPath, contents, label) => {
       throw error;
     }
 
-    fsyncDirectory(rootPath);
+    fsyncDirectory(rootPath, { platform });
     fs.unlinkSync(temporaryPath);
     temporaryPath = undefined;
-    fsyncDirectory(rootPath);
+    fsyncDirectory(rootPath, { platform });
     return true;
   } finally {
     if (descriptor !== undefined) fs.closeSync(descriptor);
@@ -167,12 +179,12 @@ const publishFileExclusively = (rootPath, targetPath, contents, label) => {
   }
 };
 
-const createSecretFileExclusively = (rootPath, secretPath) => {
+const createSecretFileExclusively = (rootPath, secretPath, platform) => {
   let generated;
   let published = false;
   try {
     generated = randomBytes(MANAGED_OPENCODE_HANDOFF_V2_MASTER_SECRET_BYTES);
-    if (!publishFileExclusively(rootPath, secretPath, generated, 'master-secret')) return null;
+    if (!publishFileExclusively(rootPath, secretPath, generated, 'master-secret', { platform })) return null;
     published = true;
     return generated;
   } finally {
@@ -180,8 +192,14 @@ const createSecretFileExclusively = (rootPath, secretPath) => {
   }
 };
 
-const createInitializationEvidenceExclusively = (rootPath, evidencePath) =>
-  publishFileExclusively(rootPath, evidencePath, INITIALIZATION_EVIDENCE, 'master-secret-initialized');
+const createInitializationEvidenceExclusively = (rootPath, evidencePath, platform) =>
+  publishFileExclusively(
+    rootPath,
+    evidencePath,
+    INITIALIZATION_EVIDENCE,
+    'master-secret-initialized',
+    { platform },
+  );
 
 const validateDerivedKey = (value) => {
   if (!Buffer.isBuffer(value) || value.length !== MANAGED_OPENCODE_HANDOFF_V2_KEY_BYTES) {
@@ -197,6 +215,9 @@ const validateDerivedKey = (value) => {
 export const createManagedOpenCodeHandoffV2SecretProvider = ({
   rootDir,
   platform = process.platform,
+  username,
+  aclInspector,
+  reparseChecker,
   initializationHooks = {},
   initializationWaitAttempts = DEFAULT_INITIALIZATION_WAIT_ATTEMPTS,
 } = {}) => {
@@ -230,7 +251,7 @@ export const createManagedOpenCodeHandoffV2SecretProvider = ({
 
   const waitForSecretAfterEvidence = async () => {
     for (let attempt = 0; attempt < initializationWaitAttempts; attempt += 1) {
-      const converged = readSecretFile(secretPath);
+      const converged = readSecretFile(secretPath, platform, { username, aclInspector, reparseChecker });
       if (converged) return converged;
       if (attempt + 1 < initializationWaitAttempts) await waitForSecret({ attempt });
     }
@@ -238,10 +259,16 @@ export const createManagedOpenCodeHandoffV2SecretProvider = ({
   };
 
   const initializeMasterSecret = async () => {
-    ensurePrivateDirectory(rootPath, { platform });
+    ensurePrivateDirectory(rootPath, {
+      platform,
+      username,
+      aclInspector,
+      reparseChecker,
+    });
 
-    const hasEvidence = readInitializationEvidence(evidencePath);
-    const existing = readSecretFile(secretPath);
+    const fileOptions = { username, aclInspector, reparseChecker };
+    const hasEvidence = readInitializationEvidence(evidencePath, platform, fileOptions);
+    const existing = readSecretFile(secretPath, platform, fileOptions);
     try {
       if (existing) {
         if (!hasEvidence) {
@@ -260,9 +287,9 @@ export const createManagedOpenCodeHandoffV2SecretProvider = ({
 
       let evidenceCreated;
       try {
-        evidenceCreated = createInitializationEvidenceExclusively(rootPath, evidencePath);
+        evidenceCreated = createInitializationEvidenceExclusively(rootPath, evidencePath, platform);
       } catch (error) {
-        if (readInitializationEvidence(evidencePath)) {
+        if (readInitializationEvidence(evidencePath, platform, fileOptions)) {
           const converged = await waitForSecretAfterEvidence();
           if (!converged) {
             throw new Error('Managed OpenCode handoff v2 secret is missing after initialization evidence');
@@ -273,7 +300,7 @@ export const createManagedOpenCodeHandoffV2SecretProvider = ({
       }
 
       if (!evidenceCreated) {
-        if (!readInitializationEvidence(evidencePath)) {
+        if (!readInitializationEvidence(evidencePath, platform, fileOptions)) {
           throw new Error('Managed OpenCode handoff v2 initialization evidence did not converge');
         }
         const converged = await waitForSecretAfterEvidence();
@@ -286,9 +313,9 @@ export const createManagedOpenCodeHandoffV2SecretProvider = ({
       await afterEvidencePublished();
       let created;
       try {
-        created = createSecretFileExclusively(rootPath, secretPath);
+        created = createSecretFileExclusively(rootPath, secretPath, platform);
       } catch (error) {
-        const converged = readSecretFile(secretPath);
+        const converged = readSecretFile(secretPath, platform, fileOptions);
         if (converged) return converged;
         const waited = await waitForSecretAfterEvidence();
         if (!waited) {

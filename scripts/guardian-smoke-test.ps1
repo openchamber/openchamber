@@ -11,10 +11,11 @@
       1. Spawn `node packages/web/bin/openchamber-guardian.js --data-dir <tmp>`.
       2. Poll the discovery file (`<data-dir>/managed-opencode-handoff-v2/port`)
          for `127.0.0.1:<port>` (up to 10s).
-      3. Send `{ method: "list" }` over TCP via .NET `TcpClient`; assert the
-         response is an array.
-      4. Send `{ method: "shutdown" }` and wait for the process to exit
-         (up to 5s). Assert the discovery file is removed.
+    3. Run the cross-platform authenticated smoke client. It rejects
+       unauthenticated and replayed IPC, launches a real managed child fixture,
+       checks health and owner metadata, stops the child, and verifies list.
+    4. Send authenticated `{ method: "shutdown" }` and wait for the process
+       to exit (up to 5s). Assert the discovery file is removed.
 
     Exit codes:
       0 = ok (or skipped on non-Windows / when node.exe is unavailable)
@@ -58,11 +59,11 @@ function Fail([string]$msg) {
     # runtime output in `gh run view --log-failed`. Without this,
     # the redirected log files live in the runner's ephemeral
     # temp dir and are not visible to the reviewer.
-    if (Test-Path -LiteralPath $LogFile) {
+    if ($LogFile -and (Test-Path -LiteralPath $LogFile)) {
         Write-Host "---- $LogFile ----"
         Get-Content -LiteralPath $LogFile -Raw | Write-Host
     }
-    if (Test-Path -LiteralPath $LogErrFile) {
+    if ($LogErrFile -and (Test-Path -LiteralPath $LogErrFile)) {
         Write-Host "---- $LogErrFile ----"
         Get-Content -LiteralPath $LogErrFile -Raw | Write-Host
     }
@@ -174,55 +175,31 @@ try {
     }
     $port = [int]$Matches[1]
 
-    # Open a TCP connection and send a `list` request. BCL built-in
-    # `TcpClient` only — no PowerShell-specific module needed.
-    $client = [System.Net.Sockets.TcpClient]::new()
-    # Mirror the bash version's `setTimeout` budget for the
-    # JSON-line round-trip. The bash script uses 5s for `list`
-    # and 3s for `shutdown`; BCL `TcpClient` only exposes a
-    # single per-socket value, so 5s is the safe upper bound.
-    $client.ReceiveTimeout = 5000
-    $client.SendTimeout = 5000
-    try {
-        $client.Connect('127.0.0.1', $port)
-    } catch {
-        Fail "could not connect to guardian at 127.0.0.1:$port ($($_.Exception.Message))"
+$secretPath = Join-Path (Join-Path $DataDir 'managed-opencode-handoff-v2') 'guardian-auth.secret'
+$pidMarker = Join-Path (Join-Path $DataDir 'managed-opencode-handoff-v2') 'guardian.pid'
+    if (-not (Test-Path -LiteralPath $secretPath -PathType Leaf)) {
+        Fail "guardian auth secret not created at $secretPath"
     }
-    $stream = $client.GetStream()
-    $writer = [System.IO.StreamWriter]::new($stream, [System.Text.Encoding]::UTF8)
-    $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
-    $writer.NewLine = "`n"
-    try {
-        $listId = '1'
-        $listReq = "{`"id`":`"$listId`",`"method`":`"list`",`"params`":{}}" + "`n"
-        $writer.WriteLine($listReq)
-        $writer.Flush()
-        $listLine = $reader.ReadLine()
-        if ($null -eq $listLine) {
-            Fail 'no list response received (connection closed)'
-        }
-        $listObj = $listLine.Trim() | ConvertFrom-Json -ErrorAction Stop
-        if ($null -eq $listObj.result) {
-            Fail "list response missing 'result' field: $($listLine.Trim())"
-        }
-        if ($listObj.result -isnot [System.Array]) {
-            Fail "list response result is not an array: $($listLine.Trim())"
-        }
+    $smokeClient = Join-Path $RepoRoot 'scripts/guardian-smoke-client.js'
+    $smokeFixture = Join-Path $RepoRoot 'scripts/guardian-test-opencode.js'
+    if (-not (Test-Path -LiteralPath $smokeClient -PathType Leaf)) {
+        Fail "guardian smoke client not found at $smokeClient"
+    }
+    if (-not (Test-Path -LiteralPath $smokeFixture -PathType Leaf)) {
+        Fail "guardian smoke fixture not found at $smokeFixture"
+    }
 
-        # Send `shutdown`. The guardian may close the socket before our
-        # ReadLine returns, so tolerate EOF here. Per the W-A shutdown
-        # ordering fix, the entrypoint removes the discovery file
-        # before exiting.
-        $shutdownReq = "{`"id`":`"2`",`"method`":`"shutdown`",`"params`":{}}" + "`n"
-        $writer.WriteLine($shutdownReq)
-        $writer.Flush()
-        try { $null = $reader.ReadLine() } catch [System.IO.IOException] { }
-    }
-    finally {
-        try { $writer.Dispose() } catch { }
-        try { $reader.Dispose() } catch { }
-        try { $stream.Dispose() } catch { }
-        try { $client.Close() } catch { }
+    # The cross-platform client performs the authenticated `list`, `spawn`,
+    # `health`, `stop`, and `shutdown` requests over the real Windows TCP
+    # transport. It deliberately runs under Bun so the child fixture uses the
+    # same runtime/native-module ABI as the guardian on windows-latest.
+    & bun.exe $smokeClient `
+        '--port-path' $ResolvedPortPath `
+        '--secret-path' $secretPath `
+        '--fixture' $smokeFixture `
+        '--cwd' $RepoRoot
+    if ($LASTEXITCODE -ne 0) {
+        Fail "guardian authenticated managed-child smoke client failed with exit code $LASTEXITCODE"
     }
 
     # Wait up to 5s for the guardian to actually exit.
@@ -238,6 +215,9 @@ try {
     # The discovery file should have been removed on guardian exit.
     if (Test-Path -PathType Leaf $portFile) {
         Fail "port file still present at $portFile after guardian exit"
+    }
+    if (Test-Path -PathType Leaf $pidMarker) {
+        Fail "guardian PID marker still present at $pidMarker after guardian exit"
     }
 
     Write-Host 'ok'

@@ -79,7 +79,9 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
       updateSpin?.message(`Stopping ${runningInstances.length} running instance(s)...`);
       for (const instance of runningInstances) {
         try {
-          const requested = await requestServerShutdown(instance.port, instance.host);
+          const requested = await requestServerShutdown(instance.port, instance.host, {
+            mode: 'restart',
+          });
           await stopInstanceProcess(instance.pid, {
             shutdownWaitMs: requested ? 5000 : 0,
             gracefulTimeoutMs: 2500,
@@ -108,12 +110,14 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
         await serveCommand({
           port: storedOptions.port || instance.port,
           host: storedOptions.host,
-          explicitPort: true,
-          uiPassword: storedOptions.uiPassword,
-          suppressStartupSummary: true,
-          suppressUiPasswordWarning: true,
-          quiet: true,
-        });
+           explicitPort: true,
+           uiPassword: storedOptions.uiPassword,
+           suppressStartupSummary: true,
+           suppressUiPasswordWarning: true,
+           quiet: true,
+           guardianOwnerInstanceId: storedOptions.guardianOwnerInstanceId,
+           mode: 'restart',
+         });
       }
     }
 

@@ -12,64 +12,25 @@ import {
   logStatus,
 } from '../cli-output.js';
 import { getGuardianSocketPath, isGuardianRunning } from '../../server/lib/guardian/detection.js';
-import { resolveManagedOpenCodeHandoffV2Root } from '../../server/lib/opencode/managed-opencode-handoff-v2/filesystem.js';
 import { GuardianClient } from '../../server/lib/guardian/guardian-client.js';
-import { defaultIpcPaths } from '../../server/lib/guardian/ipc-transport.js';
+import { resolveGuardianPaths } from '../../server/lib/guardian/paths.js';
+import { readProcessIdentity, probeProcessLiveness } from '../../server/lib/guardian/process-identity.js';
+import {
+  inspectGuardianPidMarker,
+  readGuardianPidMarker,
+} from '../../server/lib/guardian/pid-marker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const GUARDIAN_ENTRY = path.resolve(__dirname, '..', 'openchamber-guardian.js');
 
-const DEFAULT_GUARDIAN_DATA_DIR = path.join(
-  process.env.HOME || process.env.USERPROFILE || '/tmp',
-  '.local',
-  'state',
-  'openchamber',
-  'managed-opencode-handoff-v2',
-);
-
-/**
- * Resolve the v2 root that the entrypoint and the CLI both use for the
- * guardian's PID file and IPC socket. Honors OPENCHAMBER_DATA_DIR when it
- * is set to a valid absolute path; otherwise falls back to the per-user
- * default under ~/.local/state/openchamber/managed-opencode-handoff-v2.
- *
- * `resolveManagedOpenCodeHandoffV2Root` requires an absolute path. Relative
- * values of OPENCHAMBER_DATA_DIR are rejected so the CLI never silently
- * agrees with the entrypoint on a CWD-relative path that would diverge.
- */
-function resolveGuardianDataDir() {
-  const envValue = process.env.OPENCHAMBER_DATA_DIR;
-  if (typeof envValue === 'string' && envValue.trim().length > 0) {
-    if (path.isAbsolute(envValue)) {
-      try {
-        return resolveManagedOpenCodeHandoffV2Root(envValue);
-      } catch {
-        // Fall through to the default if the env value is invalid.
-      }
-    }
-  }
-  return DEFAULT_GUARDIAN_DATA_DIR;
-}
-
 let cachedGuardianPaths = null;
 function getDefaultGuardianPaths() {
   if (cachedGuardianPaths === null) {
-    const rootDir = resolveGuardianDataDir();
-    // W-C: resolve both per-platform IPC paths through the factory
-    // (`defaultIpcPaths`) so the consumer never branches on
-    // `process.platform`. On Linux `portPath` is undefined; on Windows
-    // `socketPath` is undefined.
-    const ipc = defaultIpcPaths({
-      platform: process.platform,
-      rootDir,
-      portDir: rootDir,
-    });
+    const paths = resolveGuardianPaths();
     cachedGuardianPaths = {
-      rootDir,
-      socketPath: ipc.socketPath ?? getGuardianSocketPath(rootDir),
-      portPath: ipc.portPath,
-      pidFile: path.join(rootDir, 'guardian.pid'),
+      ...paths,
+      socketPath: getGuardianSocketPath(paths.rootDir),
     };
   }
   return cachedGuardianPaths;
@@ -80,8 +41,6 @@ const GUARDIAN_LOG_FILE = 'guardian.log';
 const PROBE_READY_TIMEOUT_MS = 5000;
 const PROBE_POLL_INTERVAL_MS = 100;
 const STOP_TIMEOUT_MS = 3000;
-
-let guardianAutoStarted = false;
 
 function getDefaultGuardianSocketPath() {
   return getDefaultGuardianPaths().socketPath;
@@ -114,27 +73,18 @@ function _resetCachedGuardianPathsForTest() {
 // behavior.
 
 function readPidFile() {
-  try {
-    const content = fs.readFileSync(getDefaultGuardianPidFile(), 'utf8').trim();
-    const pid = parseInt(content, 10);
-    return Number.isFinite(pid) && pid > 0 ? pid : null;
-  } catch {
-    return null;
-  }
+  const marker = readGuardianPidMarker(getDefaultGuardianPidFile());
+  return Number.isFinite(marker?.pid) && marker.pid > 0 ? marker.pid : null;
 }
 
 let processAliveOverride = null;
 async function isProcessAlive(pid) {
   if (typeof processAliveOverride === 'function') {
-    return Boolean(processAliveOverride(pid));
+    const state = processAliveOverride(pid);
+    return state === true || state === 'alive';
   }
   if (!Number.isFinite(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+  return probeProcessLiveness(pid) === 'alive';
 }
 function _setProcessAliveOverrideForTest(fn) {
   processAliveOverride = fn;
@@ -144,21 +94,24 @@ async function waitForGuardianReady({
   socketPath = getDefaultGuardianSocketPath(),
   portPath = getDefaultGuardianPortPath(),
   timeoutMs = PROBE_READY_TIMEOUT_MS,
+  intervalMs = PROBE_POLL_INTERVAL_MS,
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    if (await isGuardianRunning(socketPath, portPath)) return true;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    await new Promise((r) => setTimeout(r, Math.min(intervalMs, remaining)));
+  }
+}
+
+async function waitForPidFileRemoved({
+  timeoutMs = STOP_TIMEOUT_MS,
 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await isGuardianRunning(socketPath, portPath)) return true;
-    await new Promise((r) => setTimeout(r, PROBE_POLL_INTERVAL_MS));
-  }
-  return false;
-}
-
-async function waitForPidFileRemoved({ timeoutMs = STOP_TIMEOUT_MS } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const pid = readPidFile();
-    if (!pid) return true;
-    if (!(await isProcessAlive(pid))) return true;
+    const marker = readGuardianPidMarker(getDefaultGuardianPidFile());
+    if (!marker) return true;
     await new Promise((r) => setTimeout(r, PROBE_POLL_INTERVAL_MS));
   }
   return false;
@@ -167,8 +120,9 @@ async function waitForPidFileRemoved({ timeoutMs = STOP_TIMEOUT_MS } = {}) {
 async function startGuardianDetached({
   logFd,
   env,
-  socketPath = getDefaultGuardianSocketPath(),
-  portPath = getDefaultGuardianPortPath(),
+  dataDir,
+  socketPath,
+  portPath,
   spawnFn = spawn,
 } = {}) {
   // W-C: the Windows early-rejection is removed. The standalone
@@ -176,21 +130,35 @@ async function startGuardianDetached({
   // factory inside it dispatches per-platform. `windowsHide: true`
   // remains defense-in-depth against a console flash on Windows.
 
+  const childEnv = { ...process.env, ...(env || {}) };
+  const effectiveDataDir = dataDir ?? childEnv.OPENCHAMBER_DATA_DIR;
+  const resolvedPaths = resolveGuardianPaths({
+    dataDir: effectiveDataDir,
+    socketPath,
+    portPath,
+  });
+  const effectiveSocketPath = resolvedPaths.socketPath;
+  const effectivePortPath = resolvedPaths.portPath;
+
   const args = [GUARDIAN_ENTRY];
-  if (typeof socketPath === 'string' && socketPath && socketPath !== getDefaultGuardianSocketPath()) {
-    args.push('--socket-path', socketPath);
+  if (typeof effectiveSocketPath === 'string'
+      && effectiveSocketPath
+      && effectiveSocketPath !== getDefaultGuardianSocketPath()) {
+    args.push('--socket-path', effectiveSocketPath);
   }
-  if (typeof portPath === 'string' && portPath && portPath !== getDefaultGuardianPortPath()) {
-    args.push('--port-path', portPath);
+  if (typeof effectivePortPath === 'string'
+      && effectivePortPath
+      && effectivePortPath !== getDefaultGuardianPortPath()) {
+    args.push('--port-path', effectivePortPath);
   }
-  if (process.env.OPENCHAMBER_DATA_DIR) {
-    args.push('--data-dir', process.env.OPENCHAMBER_DATA_DIR);
+  if (effectiveDataDir) {
+    args.push('--data-dir', effectiveDataDir);
   }
 
   const child = spawnFn(process.execPath, args, {
     detached: true,
     stdio: ['ignore', logFd, logFd],
-    env: { ...process.env, ...(env || {}) },
+    env: childEnv,
     windowsHide: true,
   });
 
@@ -199,7 +167,7 @@ async function startGuardianDetached({
   }
 
   const pid = child && Number.isFinite(child.pid) ? child.pid : 0;
-  return { pid, socketPath, portPath, child };
+  return { pid, socketPath: effectiveSocketPath, portPath: effectivePortPath, child };
 }
 
 async function stopGuardianViaIpc({
@@ -207,6 +175,8 @@ async function stopGuardianViaIpc({
   socketPath = getDefaultGuardianSocketPath(),
   portPath = getDefaultGuardianPortPath(),
   killFn = process.kill,
+  processIdentityFn = readProcessIdentity,
+  processLivenessFn = probeProcessLiveness,
   logWarning,
 } = {}) {
   // W-C: the Windows early-return is removed. The IPC shutdown RPC is
@@ -223,6 +193,7 @@ async function stopGuardianViaIpc({
   };
 
   let ipcError = null;
+  let shutdownAcknowledged = false;
   try {
     const client = new GuardianClient({
       socketPath,
@@ -232,37 +203,65 @@ async function stopGuardianViaIpc({
     });
     try {
       await client.connect();
-      await client.shutdown();
+      const shutdownResult = await client.shutdown();
+      shutdownAcknowledged = shutdownResult?.acknowledged === true;
     } finally {
       try { client.disconnect(); } catch { /* ignore */ }
     }
     if (await waitForPidFileRemoved({ timeoutMs })) {
       return true;
     }
+    if (shutdownAcknowledged) {
+      let reachable = true;
+      try {
+        reachable = await isGuardianRunning(socketPath, portPath);
+      } catch {
+        // An ambiguous post-shutdown probe is not proof that the guardian is
+        // gone; preserve the live-child recovery path below.
+        reachable = true;
+      }
+      if (reachable) {
+        emitWarning('Guardian acknowledged shutdown but remains reachable; refusing direct termination while child state is unresolved.');
+        return false;
+      }
+      emitWarning('Guardian acknowledged shutdown but guardian.pid remains; refusing to report success or signal a PID fallback.');
+      return false;
+    }
     ipcError = new Error('IPC shutdown completed but PID file was not removed within timeout');
   } catch (error) {
     ipcError = error;
   }
 
-  // IPC path failed (connect refused, hung, stale socket, ...). Escalate to direct
-  // signaling. The PID file is the same one the entrypoint writes via O_EXCL.
+  // IPC path failed (connect refused, hung, stale socket, ...). A direct signal
+  // is only a last resort after revalidating the persisted marker identity.
   emitWarning(
-    `Guardian IPC shutdown failed (${ipcError?.message || String(ipcError)}); escalating to SIGTERM.`
+    `Guardian IPC shutdown failed (${ipcError?.message || String(ipcError)}); checking persisted identity before fallback signaling.`
   );
 
-  const pid = readPidFile();
-  if (!Number.isFinite(pid) || pid <= 0) {
+  const marker = readGuardianPidMarker(getDefaultGuardianPidFile());
+  if (!marker || !Number.isFinite(marker.pid) || marker.pid <= 0) {
+    emitWarning('Guardian PID marker is missing or malformed; refusing direct termination.');
     return false;
   }
-  if (!(await isProcessAlive(pid))) {
-    return true;
+  const verifyIdentity = () => inspectGuardianPidMarker(marker, {
+    readIdentity: processIdentityFn,
+    liveness: processLivenessFn,
+  });
+  const beforeTerm = verifyIdentity();
+  if (beforeTerm.state === 'stale' && beforeTerm.reason === 'recorded process is dead') {
+    emitWarning('Guardian PID marker is stale but was not removed; refusing to report a confirmed stop.');
+    return false;
+  }
+  if (beforeTerm.state !== 'alive') {
+    emitWarning(`Guardian PID marker identity is unresolved (${beforeTerm.reason || 'unknown'}); refusing direct termination.`);
+    return false;
   }
 
   try {
-    killFn(pid, 'SIGTERM');
+    killFn(marker.pid, 'SIGTERM');
   } catch (error) {
     emitWarning(
-      `Guardian SIGTERM failed (${error?.message || String(error)}); trying SIGKILL.`
+      `Guardian SIGTERM failed (${error?.message || String(error)}); checking identity before SIGKILL.`
     );
   }
 
@@ -270,9 +269,18 @@ async function stopGuardianViaIpc({
     return true;
   }
 
-  if (await isProcessAlive(pid)) {
+  const beforeKill = verifyIdentity();
+  if (beforeKill.state === 'stale' && beforeKill.reason === 'recorded process is dead') {
+    emitWarning('Guardian PID marker remains after the process exited; refusing to report a confirmed stop.');
+    return false;
+  }
+  if (beforeKill.state !== 'alive') {
+    emitWarning(`Guardian PID marker identity is unresolved (${beforeKill.reason || 'unknown'}); refusing SIGKILL.`);
+    return false;
+  }
+  {
     try {
-      killFn(pid, 'SIGKILL');
+      killFn(marker.pid, 'SIGKILL');
     } catch (error) {
       emitWarning(
         `Guardian SIGKILL failed (${error?.message || String(error)}).`
@@ -310,7 +318,15 @@ function shouldAutoStartGuardian({ options } = {}) {
   return true;
 }
 
-async function maybeAutoStartGuardian({ logFd, options, emitNotice, spawnFn } = {}) {
+async function maybeAutoStartGuardian({
+  logFd,
+  options,
+  emitNotice,
+  spawnFn,
+  waitForReadyFn = waitForGuardianReady,
+  readyTimeoutMs = PROBE_READY_TIMEOUT_MS,
+  readyPollIntervalMs = PROBE_POLL_INTERVAL_MS,
+} = {}) {
   if (!shouldAutoStartGuardian({ options })) {
     return { started: false, reason: 'opt-out' };
   }
@@ -340,6 +356,15 @@ async function maybeAutoStartGuardian({ logFd, options, emitNotice, spawnFn } = 
         && Number.isFinite(winnerPid) && winnerPid > 0
         && winnerPid !== pid
         && (await isProcessAlive(winnerPid))) {
+      const ready = await waitForReadyFn({
+        socketPath,
+        portPath,
+        timeoutMs: readyTimeoutMs,
+        intervalMs: readyPollIntervalMs,
+      });
+      if (!ready) {
+        throw new Error(`guardian IPC endpoint did not become ready within ${readyTimeoutMs}ms`);
+      }
       if (typeof emitNotice === 'function') {
         emitNotice({
           level: 'info',
@@ -350,18 +375,18 @@ async function maybeAutoStartGuardian({ logFd, options, emitNotice, spawnFn } = 
       return { started: false, reason: 'already-running', pid: winnerPid };
     }
     if (Number.isFinite(pid) && pid > 0 && !(await isProcessAlive(pid))) {
-      // Our spawned child died before the PID file was observed; surface
-      // the failure rather than reporting a fake success.
-      if (typeof emitNotice === 'function') {
-        emitNotice({
-          level: 'warning',
-          code: 'GUARDIAN_AUTOSTART_FAILED',
-          message: `guardian autostart failed: spawned pid ${pid} exited unexpectedly`,
-        });
-      }
-      return { started: false, reason: 'spawn-failed' };
+      throw new Error(`spawned pid ${pid} exited unexpectedly`);
     }
-    guardianAutoStarted = true;
+
+    const ready = await waitForReadyFn({
+      socketPath,
+      portPath,
+      timeoutMs: readyTimeoutMs,
+      intervalMs: readyPollIntervalMs,
+    });
+    if (!ready) {
+      throw new Error(`guardian IPC endpoint did not become ready within ${readyTimeoutMs}ms`);
+    }
     if (typeof emitNotice === 'function') {
       emitNotice({
         level: 'info',
@@ -371,23 +396,16 @@ async function maybeAutoStartGuardian({ logFd, options, emitNotice, spawnFn } = 
     }
     return { started: true, pid: Number.isFinite(pid) ? pid : null };
   } catch (error) {
+    const message = `guardian autostart failed: ${error?.message || String(error)}`;
     if (typeof emitNotice === 'function') {
       emitNotice({
         level: 'warning',
         code: 'GUARDIAN_AUTOSTART_FAILED',
-        message: `guardian autostart failed: ${error?.message || String(error)}`,
+        message,
       });
     }
-    return { started: false, reason: 'spawn-failed', error: error?.message || String(error) };
+    throw new TunnelCliError(message, EXIT_CODE.GENERAL_ERROR);
   }
-}
-
-function isGuardianAutoStarted() {
-  return guardianAutoStarted;
-}
-
-function resetGuardianAutoStarted() {
-  guardianAutoStarted = false;
 }
 
 async function runStartAction({ options }) {
@@ -452,7 +470,8 @@ async function runStartAction({ options }) {
 async function runStopAction({ options }) {
   // W-C: assertPlatformSupported removed.
   const status = await getGuardianStatus();
-  if (!status.running) {
+  const marker = readGuardianPidMarker(getDefaultGuardianPidFile());
+  if (!status.running && !marker) {
     const result = { action: 'stop', stopped: false, alreadyStopped: true, ...status };
     if (isJsonMode(options)) {
       printJson(result);
@@ -470,10 +489,12 @@ async function runStopAction({ options }) {
 
   const stopped = await stopGuardianViaIpc({ timeoutMs: STOP_TIMEOUT_MS });
   const result = {
+    status: stopped ? 'ok' : 'error',
     action: 'stop',
     stopped,
-    pid: status.pid,
+    pid: status.pid ?? (Number.isFinite(marker?.pid) ? marker.pid : null),
     socketPath: status.socketPath,
+    ...(stopped ? {} : { reason: 'guardian-stop-unconfirmed' }),
   };
   if (isJsonMode(options)) {
     printJson(result);
@@ -516,31 +537,111 @@ async function runStatusAction({ options }) {
   clackOutro('status complete');
 }
 
-async function runReloadAction({ options, killFn = process.kill } = {}) {
+async function reloadGuardianViaIpc({
+  timeoutMs = STOP_TIMEOUT_MS,
+  socketPath = getDefaultGuardianSocketPath(),
+  portPath = getDefaultGuardianPortPath(),
+} = {}) {
+  const client = new GuardianClient({
+    socketPath,
+    portPath,
+    connectTimeoutMs: Math.min(timeoutMs, 1500),
+    requestTimeoutMs: timeoutMs,
+  });
+  try {
+    await client.connect();
+    return await client.reload();
+  } finally {
+    try { client.disconnect(); } catch { /* ignore */ }
+  }
+}
+
+async function runReloadAction({
+  options,
+  killFn = process.kill,
+  processIdentityFn = readProcessIdentity,
+  processLivenessFn = probeProcessLiveness,
+  reloadViaIpcFn = reloadGuardianViaIpc,
+} = {}) {
   // W-C: assertPlatformSupported removed.
   const status = await getGuardianStatus();
-  if (!status.running || !Number.isFinite(status.pid) || status.pid <= 0) {
+  if (!status.running) {
     throw new TunnelCliError(
       'Guardian not running. Use `openchamber guardian start` before reloading.',
       EXIT_CODE.GENERAL_ERROR
     );
   }
 
-  // SIGHUP is the entrypoint's reload signal (openchamber-guardian.js:132-137).
-  // It stops + restarts the timer pair. Config-file reload is not yet wired.
+  // POSIX uses SIGHUP; Windows uses SIGBREAK because Node does not deliver
+  // SIGHUP there. Both signals restart the timer pair; config-file reload is
+  // not yet wired.
+  const reloadSignal = process.platform === 'win32' ? 'SIGBREAK' : 'SIGHUP';
+  let ipcError = null;
   try {
-    killFn(status.pid, 'SIGHUP');
+    await reloadViaIpcFn({
+      timeoutMs: STOP_TIMEOUT_MS,
+      socketPath: status.socketPath,
+      portPath: status.portPath,
+    });
+  } catch (error) {
+    ipcError = error;
+  }
+
+  if (!ipcError) {
+    const result = {
+      action: 'reload',
+      reloaded: true,
+      signal: reloadSignal,
+      controlPath: 'ipc',
+      configReloaded: false,
+      ...status,
+    };
+    if (isJsonMode(options)) {
+      printJson(result);
+      return;
+    }
+    if (isQuietMode(options)) {
+      process.stdout.write(`guardian reload-signal:${reloadSignal} control:ipc pid:${status.pid ?? 'unknown'}\n`);
+      return;
+    }
+    clackIntro('OpenChamber Guardian');
+    logStatus('success', `guardian reload requested over authenticated IPC${status.pid ? ` (pid ${status.pid})` : ''}`);
+    logStatus('info', `config reload is not yet wired; ${reloadSignal} only restarts timers with current values`);
+    clackOutro('reloaded');
+    return;
+  }
+
+  const marker = readGuardianPidMarker(getDefaultGuardianPidFile());
+  const verification = inspectGuardianPidMarker(marker, {
+    readIdentity: processIdentityFn,
+    liveness: processLivenessFn,
+  });
+  if (verification.state === 'stale' && verification.reason === 'recorded process is dead') {
+    throw new TunnelCliError(
+      `Guardian reload failed: process ${marker?.pid ?? status.pid ?? 'unknown'} is no longer alive.`,
+      EXIT_CODE.GENERAL_ERROR,
+    );
+  }
+  if (verification.state !== 'alive') {
+    throw new TunnelCliError(
+      `Guardian reload failed: persisted process identity is unresolved (${verification.reason || 'unknown'}); refusing to signal a PID fallback.`,
+      EXIT_CODE.GENERAL_ERROR,
+    );
+  }
+
+  try {
+    killFn(marker.pid, reloadSignal);
   } catch (error) {
     const code = error?.code;
     if (code === 'ESRCH') {
       throw new TunnelCliError(
-        `Guardian reload failed: process ${status.pid} is no longer alive.`,
+        `Guardian reload failed: process ${marker.pid} is no longer alive.`,
         EXIT_CODE.GENERAL_ERROR
       );
     }
     if (code === 'EPERM') {
       throw new TunnelCliError(
-        `Guardian reload failed: insufficient permissions to signal pid ${status.pid}.`,
+        `Guardian reload failed: insufficient permissions to signal pid ${marker.pid}.`,
         EXIT_CODE.GENERAL_ERROR
       );
     }
@@ -553,7 +654,8 @@ async function runReloadAction({ options, killFn = process.kill } = {}) {
   const result = {
     action: 'reload',
     reloaded: true,
-    signal: 'SIGHUP',
+    signal: reloadSignal,
+    controlPath: 'pid-fallback',
     configReloaded: false,
     ...status,
   };
@@ -562,12 +664,12 @@ async function runReloadAction({ options, killFn = process.kill } = {}) {
     return;
   }
   if (isQuietMode(options)) {
-    process.stdout.write(`guardian reload-signal:SIGHUP pid:${status.pid ?? 'unknown'}\n`);
+    process.stdout.write(`guardian reload-signal:${reloadSignal} pid:${status.pid ?? 'unknown'}\n`);
     return;
   }
   clackIntro('OpenChamber Guardian');
-  logStatus('success', `guardian reload signal sent${status.pid ? ` (pid ${status.pid}, SIGHUP)` : ''}`);
-  logStatus('info', 'config reload is not yet wired; SIGHUP only restarts timers with current values');
+  logStatus('success', `guardian reload signal sent${status.pid ? ` (pid ${status.pid}, ${reloadSignal})` : ''}`);
+  logStatus('info', `config reload is not yet wired; ${reloadSignal} only restarts timers with current values`);
   clackOutro('reloaded');
 }
 
@@ -598,7 +700,8 @@ function showGuardianHelp(options) {
     notes: [
       'Cross-platform: Linux/POSIX (Unix-domain socket mode 0600) and Windows (loopback TCP + per-user ACL on a discovery file under %LOCALAPPDATA%).',
       '`start` spawns the guardian process detached; `stop` issues a graceful shutdown RPC.',
-      '`reload` sends SIGHUP to the guardian so it reloads its timers. (Currently a no-op for config; config reload is not yet wired.)',
+      '`guardian stop` is administrative and stops all guardian-owned children; normal `openchamber stop` is owner-scoped.',
+      '`reload` sends SIGHUP (SIGBREAK on Windows) to restart guardian timers. (Config reload is not yet wired.)',
     ],
   };
   if (isJsonMode(options)) {
@@ -619,10 +722,9 @@ function showGuardianHelp(options) {
 export {
   startGuardianDetached,
   stopGuardianViaIpc,
+  reloadGuardianViaIpc,
   maybeAutoStartGuardian,
   getGuardianStatus,
-  isGuardianAutoStarted,
-  resetGuardianAutoStarted,
   shouldAutoStartGuardian,
   runReloadAction,
   _setProcessAliveOverrideForTest,

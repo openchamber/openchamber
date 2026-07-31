@@ -9,6 +9,7 @@ import { Worker } from 'node:worker_threads';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as windowsAcl from '../../guardian/windows-acl.js';
 import { ManagedOpenCodeHandoffV2State } from './record.js';
 import {
   MANAGED_OPENCODE_HANDOFF_V2_STORE_FILENAME,
@@ -36,6 +37,10 @@ const createRecord = ({
   v: 2,
   state,
   incarnation,
+  ownerInstanceId: null,
+  runtimeIdentity: null,
+  launchFingerprint: null,
+  launchSpec: null,
   credentialFingerprint,
   pid: null,
   port: null,
@@ -51,6 +56,11 @@ const expectedFor = (record) => ({
   mac: record.mac,
   leaseExpiresAt: record.leaseExpiresAt,
 });
+
+const windowsAclOptions = {
+  username: 'alice',
+  aclInspector: () => ({ entries: [{ principal: 'alice', rights: ['F'] }] }),
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -130,6 +140,46 @@ const stopStoreChild = async (child) => {
 };
 
 describe('managed OpenCode handoff v2 SQLite store', () => {
+  it('uses Windows ACL/durability handling without an unconditional POSIX mode check', async () => {
+    const root = createRoot();
+    vi.spyOn(windowsAcl, 'applyDirectoryAcl').mockReturnValue({ ok: true, username: 'alice' });
+    const chmodSpy = vi.spyOn(fs, 'chmodSync');
+    const store = createManagedOpenCodeHandoffV2Store({ rootDir: root, platform: 'win32', ...windowsAclOptions });
+    await store.close();
+
+    const databasePath = path.join(root, MANAGED_OPENCODE_HANDOFF_V2_STORE_FILENAME);
+    expect(chmodSpy).not.toHaveBeenCalled();
+
+    // A Windows ACL, rather than a POSIX mode bit, is the permission check
+    // for an existing database when the platform seam is exercised on Linux.
+    fs.chmodSync(databasePath, 0o644);
+    const reopened = createManagedOpenCodeHandoffV2Store({ rootDir: root, platform: 'win32', ...windowsAclOptions });
+    await reopened.close();
+  });
+
+  it('rejects an existing SQLite file with an unsafe Windows ACL', async () => {
+    const root = createRoot();
+    vi.spyOn(windowsAcl, 'applyDirectoryAcl').mockReturnValue({ ok: true, username: 'alice' });
+    const store = createManagedOpenCodeHandoffV2Store({
+      rootDir: root,
+      platform: 'win32',
+      ...windowsAclOptions,
+    });
+    await store.close();
+
+    expect(() => createManagedOpenCodeHandoffV2Store({
+      rootDir: root,
+      platform: 'win32',
+      username: 'alice',
+      aclInspector: () => ({
+        entries: [
+          { principal: 'alice', rights: ['F'] },
+          { principal: 'Everyone', rights: ['F'] },
+        ],
+      }),
+    })).toThrow(/unapproved principal/);
+  });
+
   it.skipIf(process.platform === 'win32')('persists a public record in a separate WAL database', async () => {
     const root = createRoot();
     const record = createRecord();
@@ -180,6 +230,39 @@ describe('managed OpenCode handoff v2 SQLite store', () => {
     journalDatabase.close();
     expect(fs.statSync(root).mode & 0o777).toBe(0o700);
     expect(fs.statSync(databasePath).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === 'win32')('retains an expired stopping record as a recovery handle', async () => {
+    const root = createRoot();
+    const record = createRecord({
+      state: ManagedOpenCodeHandoffV2State.Stopping,
+      createdAt: Date.now() - 10_000,
+      leaseExpiresAt: Date.now() + 60_000,
+    });
+    const store = createManagedOpenCodeHandoffV2Store({ rootDir: root });
+    await expect(store.compareAndSwap({
+      incarnation: record.incarnation,
+      expected: null,
+      next: record,
+    })).resolves.toEqual({ status: 'applied' });
+    await store.close();
+
+    const database = new Database(path.join(root, MANAGED_OPENCODE_HANDOFF_V2_STORE_FILENAME));
+    const expiredAt = Date.now() - 10_000;
+    database.prepare(`
+      UPDATE managed_opencode_handoff_v2_records
+      SET created_at = ?, lease_expires_at = ?
+      WHERE incarnation = ?
+    `).run(expiredAt - 1_000, expiredAt, record.incarnation);
+    database.close();
+
+    const reopened = createManagedOpenCodeHandoffV2Store({ rootDir: root });
+    await expect(reopened.cleanup()).resolves.toEqual({ removed: 0 });
+    await expect(reopened.read({ incarnation: record.incarnation })).resolves.toMatchObject({
+      incarnation: record.incarnation,
+      state: ManagedOpenCodeHandoffV2State.Stopping,
+    });
+    await reopened.close();
   });
 
   it.skipIf(process.platform === 'win32')('atomically fences concurrent, stale, and expired compare-and-swap requests', async () => {

@@ -10,7 +10,9 @@ import {
   MANAGED_OPENCODE_HANDOFF_V2_RECORD_VERSION,
   ManagedOpenCodeHandoffV2State,
   normalizeManagedOpenCodeHandoffV2ProcessIdentity,
+  normalizeManagedOpenCodeHandoffV2OwnerIdentity,
   normalizeManagedOpenCodeHandoffV2Record,
+  normalizeManagedOpenCodeHandoffV2LaunchSpec,
   toPublicManagedOpenCodeHandoffV2Record,
 } from './record.js';
 
@@ -27,6 +29,8 @@ const succeeded = (record, extra = {}) => ({
 const isSafeNonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
 const normalizeLease = (value) =>
   Number.isSafeInteger(value) && value > 0 && value <= MANAGED_OPENCODE_HANDOFF_V2_MAX_LEASE_MS ? value : null;
+const isExpiredRecoveryState = (state) => state === ManagedOpenCodeHandoffV2State.Stopping
+  || state === ManagedOpenCodeHandoffV2State.HandoffPrepared;
 
 const nextRevision = (record) =>
   record.revision < Number.MAX_SAFE_INTEGER ? record.revision + 1 : null;
@@ -146,7 +150,7 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
     }
   };
 
-  const loadRecord = async (incarnation) => {
+  const loadRecord = async (incarnation, { allowExpired = false } = {}) => {
     if (!isManagedOpenCodeHandoffV2Incarnation(incarnation)) {
       return failed('invalid-incarnation');
     }
@@ -161,18 +165,20 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
     if (current === null) return failed('clock-invalid');
     if (current >= record.leaseExpiresAt) {
       revokeInFlightLaunchMaterial(incarnation);
-      return failed('record-expired');
+      if (!allowExpired || !isExpiredRecoveryState(record.state)) return failed('record-expired');
+      return { ok: true, record, expired: true };
     }
     return { ok: true, record };
   };
 
-  const compareAndSwap = async ({ incarnation, expected, next, nextForAuthoritativeTime }) => {
+  const compareAndSwap = async ({ incarnation, expected, next, nextForAuthoritativeTime, allowExpired = false }) => {
     try {
       const input = { incarnation, expected };
       if (next !== undefined) input.next = { ...next };
       if (nextForAuthoritativeTime !== undefined) {
         input.nextForAuthoritativeTime = nextForAuthoritativeTime;
       }
+      if (allowExpired) input.allowExpired = true;
       const result = await store.compareAndSwap(input);
       if (!result || Object.keys(result).length !== 1) return failed('compare-and-swap-failed');
       if (result.status === 'applied') return { ok: true };
@@ -269,9 +275,9 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
     return getInFlightLaunchMaterialAuthority(record.incarnation, material, record);
   };
 
-  const transition = async ({ incarnation, expectedRevision, nextState }) => {
+  const transition = async ({ incarnation, expectedRevision, nextState, allowExpired = false }) => {
     if (!isSafeNonNegativeInteger(expectedRevision)) return failed('invalid-revision');
-    const loaded = await loadRecord(incarnation);
+    const loaded = await loadRecord(incarnation, { allowExpired });
     if (!loaded.ok) return loaded;
     const record = loaded.record;
     if (record.revision !== expectedRevision) return failed('stale-revision');
@@ -280,6 +286,16 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
     }
     if (!MANAGED_OPENCODE_HANDOFF_V2_ALLOWED_TRANSITIONS[record.state].includes(nextState)) {
       return failed('illegal-transition');
+    }
+    if (
+      loaded.expired
+      && (!allowExpired
+        || ![
+          ManagedOpenCodeHandoffV2State.Stopping,
+          ManagedOpenCodeHandoffV2State.Retired,
+        ].includes(nextState))
+    ) {
+      return failed('record-expired');
     }
 
     const revision = nextRevision(record);
@@ -294,6 +310,7 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
       incarnation: record.incarnation,
       expected: expectedRecord(record),
       next,
+      allowExpired,
     });
     if (!stored.ok) return stored;
     if (
@@ -328,9 +345,15 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
     return stored;
   };
 
-  const reserveLaunch = async ({ leaseMs = configuredDefaultLease } = {}) => {
+  const reserveLaunch = async ({ leaseMs = configuredDefaultLease, owner, launchSpec = null } = {}) => {
     const lease = normalizeLease(leaseMs);
     if (!lease) return failed('invalid-lease');
+    const normalizedOwner = normalizeManagedOpenCodeHandoffV2OwnerIdentity(owner ?? {});
+    if (!normalizedOwner) {
+      return failed('invalid-owner-identity');
+    }
+    const normalizedLaunchSpec = normalizeManagedOpenCodeHandoffV2LaunchSpec(launchSpec);
+    if (launchSpec !== null && !normalizedLaunchSpec) return failed('invalid-launch-spec');
 
     let incarnationBytes;
     let incarnation;
@@ -350,6 +373,8 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
             v: MANAGED_OPENCODE_HANDOFF_V2_RECORD_VERSION,
             state: ManagedOpenCodeHandoffV2State.Reserved,
             incarnation,
+            ...normalizedOwner,
+            launchSpec: normalizedLaunchSpec,
             credentialFingerprint,
             pid: null,
             port: null,
@@ -458,7 +483,7 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
     }
   };
 
-  const bindSpawnedProcess = async ({ incarnation, expectedRevision, identity } = {}) => {
+  const bindSpawnedProcess = async ({ incarnation, expectedRevision, identity, owner, launchSpec } = {}) => {
     if (!isSafeNonNegativeInteger(expectedRevision)) return failed('invalid-revision');
     const normalizedIdentity = normalizeManagedOpenCodeHandoffV2ProcessIdentity(identity);
     if (!normalizedIdentity) return failed('invalid-process-identity');
@@ -468,12 +493,36 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
     if (record.state !== ManagedOpenCodeHandoffV2State.Launching) return failed('bind-not-allowed');
     if (record.revision !== expectedRevision) return failed('stale-revision');
 
+    const normalizedOwner = normalizeManagedOpenCodeHandoffV2OwnerIdentity(owner ?? {
+      ownerInstanceId: record.ownerInstanceId,
+      runtimeIdentity: record.runtimeIdentity,
+      launchFingerprint: record.launchFingerprint,
+    });
+    if (!normalizedOwner) {
+      return failed('invalid-owner-identity');
+    }
+    const normalizedLaunchSpec = normalizeManagedOpenCodeHandoffV2LaunchSpec(launchSpec ?? record.launchSpec);
+    if ((launchSpec !== undefined && launchSpec !== null && !normalizedLaunchSpec)
+      || (record.launchSpec !== null && !normalizedLaunchSpec)) {
+      return failed('invalid-launch-spec');
+    }
+    if (
+      record.ownerInstanceId !== null
+      && (record.ownerInstanceId !== normalizedOwner.ownerInstanceId
+        || record.runtimeIdentity !== normalizedOwner.runtimeIdentity
+        || record.launchFingerprint !== normalizedOwner.launchFingerprint)
+    ) {
+      return failed('owner-identity-mismatch');
+    }
+
     const revision = nextRevision(record);
     if (revision === null) return failed('revision-exhausted');
     let next;
     try {
       next = await signRecord({
         ...record,
+        ...normalizedOwner,
+        launchSpec: normalizedLaunchSpec,
         ...normalizedIdentity,
         state: ManagedOpenCodeHandoffV2State.Active,
         revision,
@@ -525,21 +574,73 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
     }
   };
 
+  // A handoff-prepared record represents a still-bound child.  If the
+  // guardian was down long enough for its lease to expire, an authenticated
+  // recovery inspection may re-establish an active lease after the caller has
+  // independently verified that child.  This is intentionally narrower than
+  // normal renewal: it cannot revive an arbitrary expired state.
+  const recoverExpiredHandoff = async ({
+    incarnation,
+    expectedRevision,
+    leaseMs = configuredDefaultLease,
+  } = {}) => {
+    if (!isSafeNonNegativeInteger(expectedRevision)) return failed('invalid-revision');
+    const lease = normalizeLease(leaseMs);
+    if (!lease) return failed('invalid-lease');
+
+    const loaded = await loadRecord(incarnation, { allowExpired: true });
+    if (!loaded.ok) return loaded;
+    if (!loaded.expired || loaded.record.state !== ManagedOpenCodeHandoffV2State.HandoffPrepared) {
+      return failed('handoff-recovery-not-allowed');
+    }
+    const record = loaded.record;
+    if (record.revision !== expectedRevision) return failed('stale-revision');
+    const revision = nextRevision(record);
+    if (revision === null) return failed('revision-exhausted');
+
+    let next;
+    try {
+      const stored = await withRecordMacKey(record.incarnation, async (key) => compareAndSwap({
+        incarnation: record.incarnation,
+        expected: expectedRecord(record),
+        allowExpired: true,
+        nextForAuthoritativeTime: (authoritativeNow) => {
+          if (authoritativeNow > Number.MAX_SAFE_INTEGER - lease) {
+            throw new Error('Managed OpenCode handoff v2 lease overflows the clock');
+          }
+          next = signRecordWithKey({
+            ...record,
+            state: ManagedOpenCodeHandoffV2State.Active,
+            leaseExpiresAt: authoritativeNow + lease,
+            revision,
+          }, key);
+          return next;
+        },
+      }));
+      return stored.ok && next ? succeeded(next) : stored;
+    } catch {
+      return failed('handoff-recovery-failed');
+    }
+  };
+
   return Object.freeze({
     reserveLaunch,
     beginLaunch,
     bindSpawnedProcess,
     renewLease,
-    readRecord: async ({ incarnation } = {}) => {
-      const loaded = await loadRecord(incarnation);
+    readRecord: async ({ incarnation, allowExpired = false } = {}) => {
+      const loaded = await loadRecord(incarnation, { allowExpired });
       return loaded.ok ? succeeded(loaded.record) : loaded;
     },
-    verifyRecord: async (record) => {
+    verifyRecord: async (record, { allowExpired = false } = {}) => {
       const verified = await verifySignedRecord(record);
       if (!verified) return failed('record-invalid');
       const current = nowMs();
       if (current === null) return failed('clock-invalid');
-      if (current >= verified.leaseExpiresAt) return failed('record-expired');
+      if (current >= verified.leaseExpiresAt) {
+        if (!allowExpired || !isExpiredRecoveryState(verified.state)) return failed('record-expired');
+        return succeeded(verified, { expired: true });
+      }
       return succeeded(verified);
     },
     markInterrupted: (input = {}) => transition({
@@ -550,9 +651,14 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
       ...input,
       nextState: ManagedOpenCodeHandoffV2State.Stopping,
     }),
+    abortHandoff: (input = {}) => transition({
+      ...input,
+      nextState: ManagedOpenCodeHandoffV2State.Active,
+    }),
     retire: (input = {}) => transition({
       ...input,
       nextState: ManagedOpenCodeHandoffV2State.Retired,
     }),
+    recoverExpiredHandoff,
   });
 };

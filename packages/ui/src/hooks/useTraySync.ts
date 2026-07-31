@@ -1,11 +1,19 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } from '@/lib/desktop';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import {
+  getRuntimeApiBaseUrl,
+  getRuntimeKey,
+  subscribeRuntimeEndpointWillChange,
+} from '@/lib/runtime-switch';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { getSyncChildStores, getAllSyncSessions } from '@/sync/sync-refs';
 import { opencodeClient } from '@/lib/opencode/client';
-import { useGlobalSessionStatusStore, applyGlobalSessionStatusSnapshot } from '@/sync/global-session-status';
+import {
+  useGlobalSessionStatusStore,
+  applyGlobalSessionStatusSnapshot,
+  clearGlobalSessionStatusForUnavailable,
+} from '@/sync/global-session-status';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
@@ -134,6 +142,31 @@ const basenameOf = (p: string): string => {
   const norm = p.replace(/\\/g, '/').replace(/\/+$/, '');
   const idx = norm.lastIndexOf('/');
   return idx >= 0 ? norm.slice(idx + 1) : norm;
+};
+
+type TrayRuntimeGenerationToken = { generation: number; runtimeKey: string };
+
+// The tray hook can outlive an endpoint switch in desktop windows. Keep the
+// same generation + runtime identity commit guard used by sync-context so an
+// old status request cannot write into the new global live-status store.
+export const createTrayRuntimeGenerationGuard = (
+  readRuntimeKey: () => string = getRuntimeKey,
+) => {
+  let generation = 0;
+  let runtimeKey = readRuntimeKey();
+
+  return {
+    capture: (): TrayRuntimeGenerationToken => ({ generation, runtimeKey }),
+    invalidate: (nextRuntimeKey?: string): void => {
+      generation += 1;
+      runtimeKey = nextRuntimeKey ?? readRuntimeKey();
+    },
+    isCurrent: (token: TrayRuntimeGenerationToken): boolean => (
+      token.generation === generation
+      && token.runtimeKey === runtimeKey
+      && token.runtimeKey === readRuntimeKey()
+    ),
+  };
 };
 
 // Resolve the "project · branch" metadata line for a session from its directory,
@@ -437,6 +470,7 @@ export const useTraySync = (): void => {
     // The active instance is fixed per window load (switching hosts re-navigates
     // the window, remounting this hook). Resolve it once, then re-push.
     let instanceName = '';
+    const runtimeGeneration = createTrayRuntimeGenerationGuard();
     const flushNow = () => {
       if (disposed) return;
       const snapshot = buildSnapshot(instanceName);
@@ -446,8 +480,16 @@ export const useTraySync = (): void => {
       void invokeDesktop('desktop_tray_update', snapshot);
     };
 
+    const unsubscribeRuntimeWillChange = subscribeRuntimeEndpointWillChange((detail) => {
+      runtimeGeneration.invalidate(detail.runtimeKey);
+      // The next runtime must publish even when its first snapshot serializes
+      // identically to the previous runtime's snapshot.
+      lastSerialized = '';
+    });
+
+    const instanceNameRequest = runtimeGeneration.capture();
     void resolveInstanceName().then((name) => {
-      if (disposed) return;
+      if (disposed || !runtimeGeneration.isCurrent(instanceNameRequest)) return;
       instanceName = name;
       flushNow();
     });
@@ -457,12 +499,19 @@ export const useTraySync = (): void => {
     // sessions already busy before this window opened and any missed events.
     // Cheap: ~ms per directory, bounded by the tray's visible session count.
     const refreshGlobalStatus = async () => {
+      const requestGeneration = runtimeGeneration.capture();
       const targets = collectStatusPollDirectories();
       await Promise.all([...targets.entries()].map(async ([directory, sessionIds]) => {
         // null = fetch failed → keep that directory's current entries;
         // {} = authoritative "everything here is idle".
         const raw = await opencodeClient.getSessionStatusForDirectory(directory).catch(() => null);
-        if (disposed || raw === null) return;
+        if (disposed || !runtimeGeneration.isCurrent(requestGeneration)) return;
+        if (raw === null) {
+          // A failed fetch is not an empty snapshot. Remove stale live
+          // evidence explicitly while preserving the global session cache.
+          clearGlobalSessionStatusForUnavailable(directory, sessionIds);
+          return;
+        }
         applyGlobalSessionStatusSnapshot(directory, raw, sessionIds);
       }));
     };
@@ -587,6 +636,7 @@ export const useTraySync = (): void => {
       unsubscribePinnedSessions();
       unsubscribeQuota();
       unsubscribeRegistry?.();
+      unsubscribeRuntimeWillChange();
       for (const unsub of storeUnsubs.values()) unsub();
       storeUnsubs.clear();
     };

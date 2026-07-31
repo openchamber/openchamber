@@ -77,6 +77,58 @@ describe('terminateChildWindows', () => {
     });
   });
 
+  it('polls OS liveness for a rehydrated child instead of waiting for close', async () => {
+    spawnSyncMock.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+    const child = createFakeChild({ pid: 12345 });
+    child.isRehydrated = true;
+    const isProcessAlive = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+
+    await expect(terminateChildWindows(child, {
+      timeoutMs: 100,
+      spawnSync: spawnSyncMock,
+      isProcessAlive,
+    })).resolves.toEqual({ ok: true });
+
+    expect(isProcessAlive).toHaveBeenCalledWith(12345);
+    expect(isProcessAlive).toHaveBeenCalledTimes(2);
+    expect(child.listenerCount('close')).toBe(0);
+  });
+
+  it('does not skip taskkill when a rehydrated liveness probe is unknown', async () => {
+    spawnSyncMock.mockReturnValue({ status: 128, stdout: '', stderr: 'process not found' });
+    const child = createFakeChild({ pid: 12346 });
+    child.isRehydrated = true;
+
+    await expect(terminateChildWindows(child, {
+      timeoutMs: 100,
+      spawnSync: spawnSyncMock,
+      isProcessAlive: () => 'unknown',
+    })).resolves.toEqual({ ok: true });
+
+    expect(spawnSyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not treat EPERM from the default probe as an already-dead child', async () => {
+    spawnSyncMock.mockReturnValue({ status: 128, stdout: '', stderr: 'process not found' });
+    const child = createFakeChild({ pid: 12347 });
+    child.isRehydrated = true;
+    const processKill = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('permission denied'), { code: 'EPERM' });
+    });
+
+    try {
+      await expect(terminateChildWindows(child, {
+        timeoutMs: 100,
+        spawnSync: spawnSyncMock,
+      })).resolves.toEqual({ ok: true });
+      expect(spawnSyncMock).toHaveBeenCalledTimes(1);
+    } finally {
+      processKill.mockRestore();
+    }
+  });
+
   it('treats taskkill exit 128 (process not found) as success', async () => {
     spawnSyncMock.mockReturnValue({ status: 128, stdout: '', stderr: 'process not found' });
     const child = createFakeChild({ pid: 99999 });
@@ -86,13 +138,13 @@ describe('terminateChildWindows', () => {
     expect(spawnSyncMock).toHaveBeenCalledTimes(1);
   });
 
-  it('treats EPERM spawn error as success (process gone or no perms)', async () => {
+  it('treats EPERM spawn error as a termination failure', async () => {
     const eperm = Object.assign(new Error('permission denied'), { code: 'EPERM' });
     spawnSyncMock.mockReturnValue({ error: eperm, status: null });
     const child = createFakeChild({ pid: 88888 });
 
     const result = await terminateChildWindows(child, { timeoutMs: 100, spawnSync: spawnSyncMock });
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: false, reason: 'taskkill.exe spawn failed: permission denied' });
   });
 
   it('treats ESRCH spawn error as success (no such process)', async () => {
@@ -176,11 +228,11 @@ describe('runTaskkillForce (lower-level envelope)', () => {
     expect(r).toEqual({ status: 'already-gone' });
   });
 
-  it('returns { status: "already-gone" } on EPERM spawn error', () => {
+  it('returns { status: "error" } on EPERM spawn error', () => {
     const eperm = Object.assign(new Error('permission denied'), { code: 'EPERM' });
     spawnSyncMock.mockReturnValue({ error: eperm, status: null });
     const r = runTaskkillForce({ pid: 1, spawnSync: spawnSyncMock });
-    expect(r).toEqual({ status: 'already-gone' });
+    expect(r).toEqual({ status: 'error', reason: 'taskkill.exe spawn failed: permission denied' });
   });
 
   it('returns { status: "already-gone" } on ESRCH spawn error', () => {

@@ -12,20 +12,18 @@ design-only artifact; it is **not part of the #2421 delivery**.
 
 ## Current decision
 
-**Linux/POSIX only. Windows: not implemented. Phase 2C ships Linux-only.**
+**The web guardian is POSIX + Windows. VS Code remains out of scope.**
 
-`packages/web/bin/openchamber-guardian.js` exits 1 on `win32`.
-`maybeAutoStartGuardian` in `commands-serve.js` short-circuits on
-Windows with a friendly CLI-layer error pointing at `--no-handoff`.
-VS Code users on Windows fall back to the legacy restart path: web
-server restart kills the OpenCode child, no session recovery.
+`packages/web/bin/openchamber-guardian.js` now selects a Unix-domain socket
+on POSIX and loopback TCP with an ACL-protected discovery file on Windows.
+Both transports use the same authenticated JSON-line protocol, stable
+owner/runtime identity checks, and owner-scoped child lifecycle. These notes
+do not authorize VS Code integration; a future VS Code issue still needs its
+own bridge and lifecycle design.
 
-**Rationale:** The web-server guardian uses a Unix-domain socket at
-mode `0600` as its trust boundary. Windows does not have Unix-domain
-sockets; portable alternatives have materially different security and
-ergonomic properties. Building a separate Windows guardian path would
-roughly double the surface area for the same feature; the current user
-base and project policy treat Windows as out of scope.
+The old POSIX-only paragraphs below are historical sketches for a hypothetical
+VS Code implementation and are superseded for the web runtime. They must not
+be read as current OpenChamber platform behavior.
 
 ## Why a separate doc (not a section of `plan.md`)
 
@@ -36,11 +34,11 @@ plan stays focused on the actual delivery.
 
 ---
 
-## Hypothetical Linux-only VS Code plan (the "do it" version)
+## Hypothetical POSIX VS Code plan (the "do it" version)
 
 ### Architecture
 
-VS Code extension on **Linux/POSIX** uses the existing standalone
+VS Code extension on **POSIX** uses the existing standalone
 guardian process unchanged. The extension's `activate(context)` hook:
 
 1. Resolves a `GuardianClient` socket path via the same `getGuardianSocketPath()` helper `packages/web/server/lib/guardian/detection.js` already exports.
@@ -184,7 +182,7 @@ windowsHide            N/A                        required on autostart spawn to
 | `packages/web/server/lib/guardian/ipc-server.js`                                        | Constructor takes `createIpcServer` options `{ platform, socketPath, portPath }`. Switch from `net.createServer(path)` to the factory result. Keep all method-dispatch + JSON-line framing unchanged. | +12 / -10 |
 | `packages/web/server/lib/guardian/guardian-client.js`                                   | **Constructor signature stays `{ socketPath }` for backward compatibility**; add optional `portPath`. `#call` decides transport internally based on `process.platform`. On `win32` it dials via `readDiscoveryFile(portPath)`. The factory in `ipc-transport.js` is the single point that knows about platform-specific paths; consumers just pass `socketPath: '', portPath: '...'` on Windows to opt in. **Closes F-1 (no breaking change).** | +18 / -2  |
 | `packages/web/server/lib/guardian/detection.js`                                         | `isGuardianRunning(socketPath, portPath)` — `portPath` is optional. On `win32`, dial via `portPath`. On Linux, dial `socketPath`. Caller picks which to pass. Docstring trust-boundary paragraph mentions Windows as a second transport with the weaker same-Windows-user guarantee. | +14 / -2 |
-| `packages/web/bin/lib/commands-guardian.js`                                             | Drop `assertPlatformSupported` from `guardianCommand`. Keep `windowsHide: true` in `startGuardianDetached` spawn options. Update help text to remove the "Linux-only" wording; replace with "Cross-platform (Linux/POSIX + Windows via T2 TCP+ACL)." | +6 / -8   |
+| `packages/web/bin/lib/commands-guardian.js`                                             | Drop `assertPlatformSupported` from `guardianCommand`. Keep `windowsHide: true` in `startGuardianDetached` spawn options. Update help text to describe the cross-platform POSIX + Windows transports. | +6 / -8   |
 | `packages/web/bin/lib/commands-serve.js`                                                | `maybeAutoStartGuardian` no longer short-circuits on Windows. The autostart spawn already passes `windowsHide: true` from D5 — verify and add explicit `windowsHide: true` flag. | +3 / -5   |
 | `packages/web/server/lib/opencode/lifecycle.js`                                         | **Remove the `process.platform !== 'win32'` gates** at `lifecycle.js:684` (handoff branch in `restartOpenCode`) and `:960` (bootstrap adoption). Both now route through the new `GuardianClient({ socketPath, portPath })` constructor (see F-1 closure) and let the transport factory decide. The handoff branch checks `isGuardianRunning(socketPath, portPath)` — on Windows it dials via `portPath`. The bootstrap branch uses `detectAndAdoptGuardianChild(socketPath, portPath)`. **This is the single largest code change in T2** and is required for end-to-end Windows operation. The plan's W-C sub-phase owns this. **Closes F-4.** | ~+25 / -8  |
 | `packages/web/server/lib/opencode/DOCUMENTATION.md`                                     | Add "Windows guardian (T2)" subsection under the existing Phase 2C section. Document trust model (loopback+ACL vs Unix socket 0600), new IPC port-file location, `icacls` failure semantics, and Windows-specific test matrix. | +60 / -2  |
@@ -274,7 +272,7 @@ Each sub-phase has explicit **exit criteria** and **validation** that must pass 
 **Exit criteria:**
 1. `bin/openchamber-guardian.js` on Windows creates the v2 root, writes the PID file, and starts the IPC server via `createIpcServer({ platform: 'win32', ... })`.
 2. `commands-guardian.js:guardianCommand('status')` on Windows returns a real status, not a `TunnelCliError`.
-3. `commands-guardian.js` help text no longer says "Linux/POSIX only".
+3. `commands-guardian.js` help text describes both supported guardian transports.
 4. Backward compatibility: `--no-handoff` and `--no-guardian` still work on both platforms.
 5. `--no-guardian` on Windows: web serve runs without autostarting a guardian, falls back to legacy `restartOpenCode()` path.
 
@@ -365,7 +363,7 @@ Each sub-phase has explicit **exit criteria** and **validation** that must pass 
 
 Before opening the PR:
 
-- [x] All sub-phases W-A through W-F landed. (Branch policy per session: continue on the existing `fix/issue-2421-restart-handoff` branch — T2 work sits alongside the uncommitted Phase 2C + ipc-fix changes. Do not create `fix/windows-guardian-t2` unless the user explicitly requests a new branch.) — **Pass; uncommitted changes on the branch.**
+- [x] All sub-phases W-A through W-F landed. (Branch policy per session: continue on the existing `fix/issue-2421-restart-handoff` branch; do not create `fix/windows-guardian-t2` unless the user explicitly requests a new branch.) — **Pass; publication remains pending.**
 - [x] All 866+ existing tests pass on Linux CI. — **Pass; 1085 / 3 skipped on full server + bin regression.**
 - [x] All new tests pass on Linux CI (with mocked Windows paths). — **Pass; 156 guardian + 40 v2 + 82 CLI + 24 launch-wiring + 12 lifecycle-integration + 13 filesystem, all green.**
 - [ ] All new tests pass on real Windows CI (`windows-latest`). — **PENDING — `.github/workflows/guardian-windows-baseline.yml` created in W-A step 5 + extended in W-E with PowerShell smoke. Will execute on push; not run locally.**
@@ -405,7 +403,7 @@ Before opening the PR:
 | Discovery file is created in `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port` but the operator expects it under `~/.local/state/openchamber`             | Low      | Document the path layout clearly in `DOCUMENTATION.md`. Operators who customize `OPENCHAMBER_DATA_DIR` get the same path layout under the override.                                                                                              |
 | A future engineer adds a third platform (macOS, BSD) and forgets to extend the factory                               | Low      | Add a comment to `ipc-transport.js`'s default case: `// FIXME: extend the factory for any new platform`. Add a runtime check that throws if `createIpcServer` is called with an unknown platform.                                            |
 | `windows-acl.js` shelling out to `icacls` without escaping the path                                                | High     | Validate `portPath` is an absolute path; quote it for `icacls` invocation (`spawn('icacls', ['"' + portPath + '"', ...])`); reject paths containing shell metacharacters. Add unit test.                                                            |
-| **Operator downgrades OpenChamber from a T2 build to a legacy (Linux-only) build without uninstalling the Windows guardian port file** | Medium   | **Downgrade story (closes F-10):** if a `port` discovery file exists under `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\` but no guardian is running, the legacy entrypoint (no factory knowledge) ignores it. The orphan file is harmless until something tries to dial it. Add a one-line migration comment to the entrypoint's startup branch: if the factory is unavailable but `portPath` exists, delete it (idempotent). Document in CHANGELOG. |
+| **Operator downgrades OpenChamber from a Windows-aware guardian build to an older build without uninstalling the Windows guardian port file** | Medium   | **Downgrade story (closes F-10):** if a `port` discovery file exists under `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\` but no guardian is running, the older entrypoint ignores it. The orphan file is harmless until something tries to dial it. Document in CHANGELOG. |
 | **Rollback if T2 ships broken on Windows**                                              | Low      | Revert the PR. The factory dispatches to Unix by default on non-Windows; on Windows without the new code, `bin/openchamber-guardian.js` exits 1 with the friendly error, web-server falls back to legacy lifecycle. Document the failure mode in CHANGELOG. |
 
 ## Total effort / exit criteria summary
@@ -434,7 +432,7 @@ path. The extension doesn't care about the transport — it talks to
 
 | Date       | Decision                                                                                                                                                                              | Made by          |
 |------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------|
-| 2026-07-29 | Out of scope for #2421. Linux-only delivery.                                                                                                                                         | User direction   |
+| 2026-07-29 | Out of scope for #2421. Cross-runtime VS Code delivery remains a separate issue.                                                                                                       | User direction   |
 | 2026-07-29 | Document this as a future-reference design notes file, not a section of `plan.md`.                                                                                                   | Orchestrator     |
 | 2026-07-29 | If a future issue requests VS Code Windows support, the recommended Windows standalone guardian approach is **T2 (Localhost TCP + discovery file with `icacls` ACL)**.                | Orchestrator (per user request for analysis) |
 | 2026-07-29 | VS Code extension integration on Linux is a separate ~1-week task using the existing standalone guardian unchanged.                                                                 | Orchestrator     |

@@ -32,7 +32,7 @@ No guardian, process spawn, signals, ports, health probes, registry/reaper integ
 - Credential material is armed before a durable `reserved -> launch-delivering` fence. A terminal mutation either wins before the fence and prevents callback delivery, or is rejected while the fenced callback completes to `launching`.
 - Renewals derive expiry from store-authoritative current time and reject an unbounded horizon.
 - Durable master-initialization evidence closes the record-check/create race; a secret-only root without evidence is corrupt and fails closed. Deleted-root loss of evidence remains documented.
-- SQLite initialization retries concurrent locking, verifies exact schema/metadata, rejects `sqliteEvil` lookalikes, and treats POSIX directory-fsync failures as fatal.
+- SQLite initialization retries concurrent locking, verifies exact schema/metadata, rejects `sqliteEvil` lookalikes, and treats POSIX directory-fsync failures as fatal while dispatching Windows durability and permission checks to its ACL trust boundary.
 - Focused tests cover deterministic delivery fencing, real provider+SQLite+protocol MAC tamper/reopen behavior, worker-thread and OS-process initialization, and actual secret-provider fsync failure.
 - Final validation passed: focused v2 tests (25), unchanged v1 tests (19), source syntax checks, `type-check:web`, `lint:web`, and `docs:validate`. `dead-code` remains non-blocking and reports repository-wide findings plus intentionally unwired v2 entries.
 

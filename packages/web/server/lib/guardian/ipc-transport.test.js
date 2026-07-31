@@ -12,6 +12,7 @@ import {
 } from './ipc-transport.js';
 
 let tmpDirs = [];
+const aclInspector = () => ({ entries: [{ principal: 'alice', rights: ['F'] }] });
 
 const mkTmp = (label = 'ipc-transport') => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `openchamber-${label}-`));
@@ -176,6 +177,7 @@ describe('createIpcServer (Windows / W-B)', () => {
       platform: 'win32',
       portPath,
       username,
+      aclInspector,
       log: () => {},
     });
     expect(typeof transport.listen).toBe('function');
@@ -224,7 +226,9 @@ describe('createIpcServer (Windows / W-B)', () => {
 
     const dir = mkTmp('ipc-transport-win32-order');
     const portPath = path.join(dir, 'port');
-    const transport = createIpcServer({ platform: 'win32', portPath, username: 'alice', log: () => {} });
+    const transport = createIpcServer({
+      platform: 'win32', portPath, username: 'alice', aclInspector, log: () => {},
+    });
 
     try {
       await transport.listen({ onRequest: () => {} });
@@ -251,7 +255,9 @@ describe('createIpcServer (Windows / W-B)', () => {
     const portPath = path.join(dir, 'port');
     fs.writeFileSync(`${portPath}.lock`, '');
 
-    const transport = createIpcServer({ platform: 'win32', portPath, username: 'alice', log: () => {} });
+    const transport = createIpcServer({
+      platform: 'win32', portPath, username: 'alice', aclInspector, log: () => {},
+    });
 
     try {
       await expect(transport.listen({ onRequest: () => {} })).rejects.toThrow(/lock held/);
@@ -274,7 +280,9 @@ describe('createIpcServer (Windows / W-B)', () => {
 
     const dir = mkTmp('ipc-transport-win32-idle');
     const portPath = path.join(dir, 'port');
-    const transport = createIpcServer({ platform: 'win32', portPath, username: 'alice', log: () => {} });
+    const transport = createIpcServer({
+      platform: 'win32', portPath, username: 'alice', aclInspector, log: () => {},
+    });
     try {
       await expect(transport.close()).resolves.toBeUndefined();
     } finally {
@@ -356,7 +364,12 @@ describe('createIpcDialer (Windows / W-B)', () => {
     fs.writeFileSync(portPath, `127.0.0.1:${port}\n`);
 
     try {
-      const dial = createIpcDialer({ platform: 'win32', portPath });
+      const dial = createIpcDialer({
+        platform: 'win32',
+        portPath,
+        username: 'alice',
+        aclInspector: () => ({ entries: [{ principal: 'alice', rights: ['F'] }] }),
+      });
       const sock = await dial();
       await new Promise((resolve, reject) => {
         const t = setTimeout(() => { sock.destroy(); reject(new Error('dial timeout')); }, 2000);

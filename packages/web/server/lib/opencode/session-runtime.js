@@ -293,6 +293,20 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     }
   };
 
+  // OpenCode replacement is a live-runtime boundary. Drop all in-memory
+  // activity/status/attention observations from the old process without
+  // touching durable OpenCode session or message data.
+  const resetForOpenCodeReplacement = () => {
+    for (const timer of sessionActivityCooldowns.values()) {
+      clearTimeout(timer);
+    }
+    sessionActivityCooldowns.clear();
+    sessionActivityPhases.clear();
+    sessionStates.clear();
+    sessionAttentionStates.clear();
+    activeSessionCount = 0;
+  };
+
   const cleanupOldSessionStates = () => {
     const now = Date.now();
     for (const [sessionId, data] of sessionStates) {
@@ -358,6 +372,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     markSessionUnviewed,
     markUserMessageSent,
     resetAllSessionActivityToIdle,
+    resetForOpenCodeReplacement,
     dispose,
   };
 };

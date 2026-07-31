@@ -9,6 +9,7 @@ import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { requestJson } from './lib/cli-http.js';
+import { requestServerShutdown } from './lib/cli-http.js';
 import { requestControlAction } from './lib/cli-control.js';
 import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
 import { formatGoal } from './lib/commands-schedule.js';
@@ -41,6 +42,7 @@ import {
   parseArgs,
   resolveServeHost,
 } from './cli.js';
+import { readInstanceOptions, stopInstanceProcess, writeInstanceOptions } from './lib/cli-process.js';
 
 async function withTempOpenChamberDataDir(fn) {
   const previous = process.env.OPENCHAMBER_DATA_DIR;
@@ -186,6 +188,29 @@ function spawnOpenChamberLikeHungServer(port) {
     setInterval(() => {}, 1000);
   `;
   return spawn(process.execPath, ['-e', script, 'openchamber-hung-server'], { stdio: 'ignore' });
+}
+
+function spawnOpenChamberLikeShutdownFailureServer(port) {
+  const script = `
+    const http = require('http');
+    const server = http.createServer((req, res) => {
+      if (req.method === 'GET' && req.url === '/api/system/info') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ runtime: 'web', pid: process.pid }));
+        return;
+      }
+      if (req.method === 'POST' && req.url === '/api/system/shutdown') {
+        res.writeHead(200, { 'content-type': 'application/json', connection: 'close' });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+      res.writeHead(404);
+      res.end('not found');
+    });
+    server.listen(${port}, '127.0.0.1');
+    setInterval(() => {}, 1000);
+  `;
+  return spawn(process.execPath, ['-e', script, 'openchamber-shutdown-failure-server'], { stdio: 'ignore' });
 }
 
 describe('cli args', () => {
@@ -769,6 +794,43 @@ describe('compatibility exports', () => {
 });
 
 describe('CLI HTTP helpers', () => {
+  it('sends an explicit restart mode without exposing the legacy preserve flag', async () => {
+    const originalFetch = globalThis.fetch;
+    let request;
+    globalThis.fetch = async (url, options = {}) => {
+      request = { url: String(url), options };
+      return createMockJsonResponse({ ok: true });
+    };
+
+    try {
+      await expect(requestServerShutdown(45676, undefined, { mode: 'restart' })).resolves.toBe(true);
+      expect(request.options.body).toBe(JSON.stringify({ mode: 'restart' }));
+      expect(request.options.headers).toEqual({ 'Content-Type': 'application/json' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('persists and reads the stable guardian owner ID in instance metadata', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const port = 45675;
+      const instancePath = await getInstanceFilePath(port);
+      const ownerInstanceId = 'owner-instance-persisted';
+
+      writeInstanceOptions(instancePath, {
+        port,
+        host: '127.0.0.1',
+        launchMode: 'daemon',
+        guardianOwnerInstanceId: ownerInstanceId,
+      });
+
+      expect(readInstanceOptions(instancePath)).toEqual(expect.objectContaining({
+        port,
+        guardianOwnerInstanceId: ownerInstanceId,
+      }));
+    });
+  });
+
   it('sends one typed request to the shared control endpoint', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url, options = {}) => {
@@ -990,6 +1052,23 @@ describe('isOpenchamberProcessRunning', () => {
       }
     }
   );
+});
+
+describe('stopInstanceProcess', () => {
+  it('can preserve a live process when owner-scoped cleanup must be retried', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'openchamber-stop-retry'], { stdio: 'ignore' });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      await expect(stopInstanceProcess(child.pid, {
+        shutdownWaitMs: 0,
+        allowForce: false,
+      })).resolves.toBe(false);
+      expect(child.exitCode).toBeNull();
+    } finally {
+      child.kill('SIGKILL');
+    }
+  });
 });
 
 describe('lifecycle instance discovery', () => {
@@ -1264,9 +1343,40 @@ describe('lifecycle instance discovery', () => {
       } finally {
         child.kill('SIGKILL');
       }
+      });
     });
   });
-});
+
+  it('retains guardian owner metadata after the web PID is dead for next-start adoption', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const port = 45125;
+      const pid = 2147483646;
+      const pidFile = await getPidFilePath(port);
+      const instanceFile = await getInstanceFilePath(port);
+      const ownerInstanceId = 'owner-retained-for-guardian-adoption';
+      fs.writeFileSync(pidFile, String(pid));
+      writeInstanceOptions(instanceFile, {
+        port,
+        host: '127.0.0.1',
+        launchMode: 'daemon',
+        guardianOwnerInstanceId: ownerInstanceId,
+      });
+
+      const instances = await discoverRunningInstances({
+        fetchImpl: async () => createMockJsonResponse(null, false),
+        getOpenchamberProcessState: () => 'dead',
+      });
+
+      expect(instances).toEqual([]);
+      expect(fs.existsSync(pidFile)).toBe(false);
+      expect(readInstanceOptions(instanceFile)).toMatchObject({ guardianOwnerInstanceId: ownerInstanceId });
+
+      // The retained owner is what serve/lifecycle passes to exact-owner
+      // guardian adoption on the next startup; it must not be lost with the
+      // dead web PID cleanup.
+      expect(readInstanceOptions(instanceFile)?.guardianOwnerInstanceId).toBe(ownerInstanceId);
+    });
+  });
 
 describe('lifecycle commands with unmanaged explicit ports', () => {
   it('serve refuses to start on a live OpenChamber port without requiring pid files', async () => {
@@ -1337,6 +1447,38 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
     });
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'preserves guardian owner metadata when accepted shutdown does not terminate the web process',
+    async () => {
+      await withTempOpenChamberDataDir(async () => {
+        const port = await allocateLoopbackPort();
+        const child = spawnOpenChamberLikeShutdownFailureServer(port);
+        const pidFile = await getPidFilePath(port);
+        const instanceFile = await getInstanceFilePath(port);
+        const ownerInstanceId = 'owner-preserved-after-stop-failure';
+        try {
+          expect(await waitForTcpPort(port)).toBe(true);
+          fs.writeFileSync(pidFile, String(child.pid));
+          writeInstanceOptions(instanceFile, {
+            port,
+            host: '127.0.0.1',
+            launchMode: 'daemon',
+            guardianOwnerInstanceId: ownerInstanceId,
+          });
+
+          await commands.stop({ explicitPort: true, port, host: '127.0.0.1', quiet: true, suppressQuietOutput: true });
+
+          expect(child.exitCode).toBeNull();
+          expect(fs.existsSync(pidFile)).toBe(true);
+          expect(readInstanceOptions(instanceFile)).toMatchObject({ guardianOwnerInstanceId: ownerInstanceId });
+        } finally {
+          child.kill('SIGKILL');
+        }
+      });
+    },
+    15000,
+  );
+
   it('plain stop ignores a stale CLI registry entry that resolves to desktop runtime', async () => {
     await withTempOpenChamberDataDir(async () => {
       const server = await startMockOpenChamberServer({ runtime: 'desktop' });
@@ -1368,7 +1510,7 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
       try {
         const output = await captureStdout(() => commands.restart.call({
           stop: async (options) => {
-            calls.push(['stop', options.port, options.host]);
+          calls.push(['stop', options.port, options.host]);
           },
           serve: async (options) => {
             calls.push(['serve', options.port, options.host]);
@@ -1386,6 +1528,42 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
           expect.objectContaining({ fromPort: server.port, toPort: server.port, ok: true }),
         ]);
       } finally {
+        await server.close();
+      }
+    });
+  });
+
+  it('reuses the persisted guardian owner ID when restarting a daemon instance', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const server = await startMockOpenChamberServer({ runtime: 'web' });
+      const child = spawnOpenChamberLikeIdleProcess();
+      const ownerInstanceId = 'owner-instance-reused-on-restart';
+      const pidFile = await getPidFilePath(server.port);
+      const instanceFile = await getInstanceFilePath(server.port);
+      const served = [];
+
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        fs.writeFileSync(pidFile, String(child.pid));
+        writeInstanceOptions(instanceFile, {
+          port: server.port,
+          host: '127.0.0.1',
+          launchMode: 'daemon',
+          guardianOwnerInstanceId: ownerInstanceId,
+        });
+
+        await captureStdout(() => commands.restart.call({
+          stop: async () => {},
+          serve: async (options) => {
+            served.push(options);
+            return options.port;
+          },
+        }, { explicitPort: true, port: server.port, host: '127.0.0.1', json: true }));
+
+        expect(served).toHaveLength(1);
+        expect(served[0].guardianOwnerInstanceId).toBe(ownerInstanceId);
+      } finally {
+        child.kill('SIGKILL');
         await server.close();
       }
     });

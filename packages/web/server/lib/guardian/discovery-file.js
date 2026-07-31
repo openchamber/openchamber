@@ -1,7 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { applyDiscoveryFileAcl, resolveCurrentUsername } from './windows-acl.js';
+import {
+  applyDiscoveryFileAcl,
+  resolveCurrentUsername,
+  validateWindowsAcl,
+} from './windows-acl.js';
+import { assertSafeWindowsAncestors } from '../opencode/managed-opencode-handoff-v2/filesystem.js';
 
 /**
  * Windows discovery-file helpers (W-B).
@@ -53,6 +58,34 @@ const assertSafePath = (value, label) => {
   }
 };
 
+const defaultIsReparsePoint = (_filePath, stat) => Boolean(stat?.isSymbolicLink?.());
+
+const assertRegularDiscoveryFile = (
+  portPath,
+  {
+    username,
+    aclInspector,
+    reparseChecker = defaultIsReparsePoint,
+  } = {},
+) => {
+  assertSafeWindowsAncestors(portPath, {
+    username,
+    aclInspector,
+    reparseChecker,
+  });
+  const stat = fs.lstatSync(portPath);
+  if (reparseChecker(portPath, stat) === true) {
+    throw Object.assign(
+      new Error('discovery-file: path must not be a reparse point'),
+      { code: 'WINDOWS_ACL_UNSAFE' },
+    );
+  }
+  if (!stat.isFile()) {
+    throw new Error('discovery-file: path must be a regular file');
+  }
+  return stat;
+};
+
 /**
  * Parse a discovery file body. Exported for unit tests; the W-B
  * write side produces strings exactly in this shape.
@@ -69,6 +102,7 @@ const parseDiscoveryBody = (body) => {
   if (colonAt <= 0 || colonAt === trimmed.length - 1) return null;
   const host = trimmed.slice(0, colonAt);
   const portStr = trimmed.slice(colonAt + 1);
+  if (!/^\d+$/.test(portStr)) return null;
   const port = Number.parseInt(portStr, 10);
   if (!Number.isFinite(port) || port <= 0 || port > 65535) return null;
   return { host, port };
@@ -97,7 +131,17 @@ const parseDiscoveryBody = (body) => {
  * @param {(message: string) => void} [options.log]
  * @returns {void}
  */
-export function writeDiscoveryFileAtomic(portPath, port, { platform = process.platform, username, log = () => {} } = {}) {
+export function writeDiscoveryFileAtomic(
+  portPath,
+  port,
+  {
+    platform = process.platform,
+    username,
+    log = () => {},
+    aclInspector,
+    reparseChecker = defaultIsReparsePoint,
+  } = {},
+) {
   assertWindows(platform);
   assertSafePath(portPath, 'portPath');
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
@@ -109,7 +153,27 @@ export function writeDiscoveryFileAtomic(portPath, port, { platform = process.pl
     : resolveCurrentUsername({ log });
 
   const dirPath = path.dirname(portPath);
+  assertSafeWindowsAncestors(portPath, {
+    username: resolvedUsername,
+    aclInspector,
+    reparseChecker,
+  });
   fs.mkdirSync(dirPath, { recursive: true });
+  try {
+    assertRegularDiscoveryFile(portPath, {
+      username: resolvedUsername,
+      aclInspector,
+      reparseChecker,
+    });
+    validateWindowsAcl({
+      targetPath: portPath,
+      username: resolvedUsername,
+      kind: 'discovery file',
+      ...(aclInspector ? { inspectAcl: aclInspector } : {}),
+    });
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
 
   const lockPath = `${portPath}${LOCK_FILE_SUFFIX}`;
   const tempPath = `${portPath}${TEMP_FILE_SUFFIX}`;
@@ -150,10 +214,22 @@ export function writeDiscoveryFileAtomic(portPath, port, { platform = process.pl
 
     // 7. ACL on the temp file. Throws on failure; the catch below
     //    cleans up the temp and lock and re-throws.
-    applyDiscoveryFileAcl({ portPath: tempPath, username: resolvedUsername, log });
+    applyDiscoveryFileAcl({
+      portPath: tempPath,
+      username: resolvedUsername,
+      log,
+      ...(aclInspector ? { inspectAcl: aclInspector } : {}),
+    });
 
     // 8. atomic rename. On Windows, fs.renameSync is MoveFileEx
-    //    which is atomic on the same volume.
+    //    which is atomic on the same volume. A prior guardian crash can leave
+    //    a stale final file behind; unlinking that regular path does not
+    //    follow a symlink and lets the fresh ACL-protected temp file publish.
+    try {
+      fs.unlinkSync(portPath);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
     fs.renameSync(tempPath, portPath);
 
     // 9. release the lock.
@@ -187,9 +263,28 @@ export function writeDiscoveryFileAtomic(portPath, port, { platform = process.pl
  * @param {NodeJS.Platform} [options.platform] - Override for tests.
  * @returns {{ host: string, port: number } | null}
  */
-export function readDiscoveryFile(portPath, { platform = process.platform } = {}) {
+export function readDiscoveryFile(
+  portPath,
+  {
+    platform = process.platform,
+    username,
+    aclInspector,
+    reparseChecker = defaultIsReparsePoint,
+  } = {},
+) {
   assertWindows(platform);
   assertSafePath(portPath, 'portPath');
+  assertRegularDiscoveryFile(portPath, {
+    username,
+    aclInspector,
+    reparseChecker,
+  });
+  validateWindowsAcl({
+    targetPath: portPath,
+    username,
+    kind: 'discovery file',
+    ...(aclInspector ? { inspectAcl: aclInspector } : {}),
+  });
   // Re-throw the underlying error so callers can distinguish missing
   // file (ENOENT), permission denied (EACCES), etc.
   const body = fs.readFileSync(portPath, 'utf8');
@@ -204,10 +299,23 @@ export function readDiscoveryFile(portPath, { platform = process.platform } = {}
  * @param {object} [options]
  * @param {NodeJS.Platform} [options.platform] - Override for tests.
  */
-export function removeDiscoveryFile(portPath, { platform = process.platform } = {}) {
+export function removeDiscoveryFile(
+  portPath,
+  {
+    platform = process.platform,
+    username,
+    aclInspector,
+    reparseChecker = defaultIsReparsePoint,
+  } = {},
+) {
   assertWindows(platform);
   assertSafePath(portPath, 'portPath');
   try {
+    assertRegularDiscoveryFile(portPath, {
+      username,
+      aclInspector,
+      reparseChecker,
+    });
     fs.unlinkSync(portPath);
   } catch (error) {
     if (error?.code === 'ENOENT') return;
@@ -216,4 +324,11 @@ export function removeDiscoveryFile(portPath, { platform = process.platform } = 
 }
 
 // Exported for unit tests; not part of the public surface.
-export const __test__ = { parseDiscoveryBody, WINDOWS_ONLY_ERROR, assertSafePath, UNSAFE_PATH_CHARS };
+export const __test__ = {
+  parseDiscoveryBody,
+  WINDOWS_ONLY_ERROR,
+  assertSafePath,
+  UNSAFE_PATH_CHARS,
+  defaultIsReparsePoint,
+  assertRegularDiscoveryFile,
+};

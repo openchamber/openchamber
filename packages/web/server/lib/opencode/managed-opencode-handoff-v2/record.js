@@ -3,9 +3,11 @@
  *
  * Trust boundary for bootstrap adoption (Phase 2B):
  *   The canonical bootstrap adoption path from the lifecycle startup
- *   (`detectAndAdoptGuardianChild` -> `GuardianClient.list()`) trusts the
- *   returned `(pid, port, incarnation)` of an `Active` child without
- *   requiring a `claimCapability`. This is intentional:
+ *   (`detectAndAdoptGuardianChild` -> `GuardianClient.list()`) accepts only
+ *   an `Active` child with a complete stable owner/runtime identity matching
+ *   the current OpenChamber instance. It never selects by list order and
+ *   rejects ownerless or ambiguous records. It does not require a
+ *   `claimCapability`. This is intentional:
  *
  *     - `claimCapability` is only issued during `beginLaunch` (spawn time)
  *       by the issuing guardian
@@ -62,6 +64,7 @@ export const MANAGED_OPENCODE_HANDOFF_V2_ALLOWED_TRANSITIONS = Object.freeze({
     ManagedOpenCodeHandoffV2State.Stopping,
   ]),
   [ManagedOpenCodeHandoffV2State.HandoffPrepared]: Object.freeze([
+    ManagedOpenCodeHandoffV2State.Active,
     ManagedOpenCodeHandoffV2State.Claimed,
     ManagedOpenCodeHandoffV2State.Interrupted,
     ManagedOpenCodeHandoffV2State.Stopping,
@@ -79,6 +82,23 @@ export const MANAGED_OPENCODE_HANDOFF_V2_ALLOWED_TRANSITIONS = Object.freeze({
 });
 
 const RECORD_KEYS = Object.freeze([
+  'v',
+  'state',
+  'incarnation',
+  'ownerInstanceId',
+  'runtimeIdentity',
+  'launchFingerprint',
+  'launchSpec',
+  'credentialFingerprint',
+  'pid',
+  'port',
+  'processStartTicks',
+  'createdAt',
+  'leaseExpiresAt',
+  'revision',
+  'mac',
+]);
+const LEGACY_RECORD_KEYS = Object.freeze([
   'v',
   'state',
   'incarnation',
@@ -102,6 +122,35 @@ const hasExactlyKeys = (value, expectedKeys) => isObject(value)
 const isSafeNonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
 const isPid = (value) => Number.isSafeInteger(value) && value > 0;
 const isPort = (value) => Number.isSafeInteger(value) && value > 0 && value <= 65535;
+const isIdentityString = (value) => value === null
+  || (typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\x00-\x1F\x7F]/.test(value));
+const normalizeProcessStartTicks = (value) => {
+  if (Number.isSafeInteger(value) && value >= 0) return String(value);
+  if (typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value)) return value;
+  return null;
+};
+
+export const normalizeManagedOpenCodeHandoffV2LaunchSpec = (value) => {
+  if (value === null) return null;
+  if (!isObject(value)) return null;
+  const keys = ['binary', 'args', 'hostname', 'port', 'cwd'];
+  if (Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key))) return null;
+  if (
+    typeof value.binary !== 'string' || value.binary.length === 0 || value.binary.length > 4096
+    || !Array.isArray(value.args) || value.args.length > 32
+    || value.args.some((arg) => typeof arg !== 'string' || arg.length > 4096)
+    || typeof value.hostname !== 'string' || value.hostname.length === 0 || value.hostname.length > 255
+    || !isPort(value.port)
+    || typeof value.cwd !== 'string' || value.cwd.length === 0 || value.cwd.length > 4096
+  ) return null;
+  return {
+    binary: value.binary,
+    args: [...value.args],
+    hostname: value.hostname,
+    port: value.port,
+    cwd: value.cwd,
+  };
+};
 
 const decodeCanonicalBase64Url = (value, byteLength) => {
   if (typeof value !== 'string' || !BASE64_URL_PATTERN.test(value)) return null;
@@ -122,24 +171,42 @@ const isCanonicalKey = (value) =>
 
 export const normalizeManagedOpenCodeHandoffV2ProcessIdentity = (value) => {
   if (!hasExactlyKeys(value, PROCESS_IDENTITY_KEYS)) return null;
-  if (!isPid(value.pid) || !isPort(value.port) || !isSafeNonNegativeInteger(value.processStartTicks)) {
+  const processStartTicks = normalizeProcessStartTicks(value.processStartTicks);
+  if (!isPid(value.pid) || !isPort(value.port) || processStartTicks === null) {
     return null;
   }
   return {
     pid: value.pid,
     port: value.port,
-    processStartTicks: value.processStartTicks,
+    processStartTicks,
   };
+};
+
+export const normalizeManagedOpenCodeHandoffV2OwnerIdentity = (value) => {
+  if (!isObject(value)) return null;
+  const ownerInstanceId = value.ownerInstanceId ?? null;
+  const runtimeIdentity = value.runtimeIdentity ?? null;
+  const launchFingerprint = value.launchFingerprint ?? null;
+  if (
+    !isIdentityString(ownerInstanceId)
+    || !isIdentityString(runtimeIdentity)
+    || !isIdentityString(launchFingerprint)
+    || ((ownerInstanceId === null || runtimeIdentity === null || launchFingerprint === null)
+      && (ownerInstanceId !== null || runtimeIdentity !== null || launchFingerprint !== null))
+  ) {
+    return null;
+  }
+  return { ownerInstanceId, runtimeIdentity, launchFingerprint };
 };
 
 const hasNoProcessIdentity = (record) =>
   record.pid === null && record.port === null && record.processStartTicks === null;
 
-const hasProcessIdentity = (record) => normalizeManagedOpenCodeHandoffV2ProcessIdentity({
+const normalizeProcessIdentity = (record) => normalizeManagedOpenCodeHandoffV2ProcessIdentity({
   pid: record.pid,
   port: record.port,
   processStartTicks: record.processStartTicks,
-}) !== null;
+});
 
 const allowsMissingIdentity = (state) => state === ManagedOpenCodeHandoffV2State.Reserved
   || state === ManagedOpenCodeHandoffV2State.LaunchDelivering
@@ -153,7 +220,8 @@ const requiresIdentity = (state) => state === ManagedOpenCodeHandoffV2State.Acti
   || state === ManagedOpenCodeHandoffV2State.Claimed;
 
 export const normalizeManagedOpenCodeHandoffV2Record = (value) => {
-  if (!hasExactlyKeys(value, RECORD_KEYS)) return null;
+  const isLegacy = hasExactlyKeys(value, LEGACY_RECORD_KEYS);
+  if (!isLegacy && !hasExactlyKeys(value, RECORD_KEYS)) return null;
   if (value.v !== MANAGED_OPENCODE_HANDOFF_V2_RECORD_VERSION || !STATE_VALUES.has(value.state)) {
     return null;
   }
@@ -170,9 +238,10 @@ export const normalizeManagedOpenCodeHandoffV2Record = (value) => {
     return null;
   }
 
-  if (requiresIdentity(value.state) && !hasProcessIdentity(value)) return null;
+  const processIdentity = normalizeProcessIdentity(value);
+  if (requiresIdentity(value.state) && !processIdentity) return null;
   if (!allowsMissingIdentity(value.state) && !requiresIdentity(value.state)) return null;
-  if (!hasNoProcessIdentity(value) && !hasProcessIdentity(value)) return null;
+  if (!hasNoProcessIdentity(value) && !processIdentity) return null;
   if (
     (value.state === ManagedOpenCodeHandoffV2State.Reserved
       || value.state === ManagedOpenCodeHandoffV2State.LaunchDelivering
@@ -182,14 +251,33 @@ export const normalizeManagedOpenCodeHandoffV2Record = (value) => {
     return null;
   }
 
+  const ownerInstanceId = isLegacy ? null : value.ownerInstanceId;
+  const runtimeIdentity = isLegacy ? null : value.runtimeIdentity;
+  const launchFingerprint = isLegacy ? null : value.launchFingerprint;
+  const launchSpec = isLegacy ? null : normalizeManagedOpenCodeHandoffV2LaunchSpec(value.launchSpec);
+  if (
+    !isIdentityString(ownerInstanceId)
+    || !isIdentityString(runtimeIdentity)
+    || !isIdentityString(launchFingerprint)
+    || (!isLegacy && value.launchSpec !== null && launchSpec === null)
+    || ((ownerInstanceId === null || runtimeIdentity === null || launchFingerprint === null)
+      && (ownerInstanceId !== null || runtimeIdentity !== null || launchFingerprint !== null))
+  ) {
+    return null;
+  }
+
   return {
     v: value.v,
     state: value.state,
     incarnation: value.incarnation,
+    ownerInstanceId,
+    runtimeIdentity,
+    launchFingerprint,
+    launchSpec,
     credentialFingerprint: value.credentialFingerprint,
     pid: value.pid,
     port: value.port,
-    processStartTicks: value.processStartTicks,
+    processStartTicks: processIdentity?.processStartTicks ?? null,
     createdAt: value.createdAt,
     leaseExpiresAt: value.leaseExpiresAt,
     revision: value.revision,
@@ -201,10 +289,14 @@ export const canonicalizeManagedOpenCodeHandoffV2Record = (record) => {
   const normalized = normalizeManagedOpenCodeHandoffV2Record(record);
   if (!normalized) throw new TypeError('Invalid managed OpenCode handoff v2 record');
   return Buffer.from(JSON.stringify([
-    normalized.v,
-    normalized.state,
-    normalized.incarnation,
-    normalized.credentialFingerprint,
+  normalized.v,
+  normalized.state,
+  normalized.incarnation,
+  normalized.ownerInstanceId,
+  normalized.runtimeIdentity,
+  normalized.launchFingerprint,
+  normalized.launchSpec,
+  normalized.credentialFingerprint,
     normalized.pid,
     normalized.port,
     normalized.processStartTicks,
@@ -218,6 +310,10 @@ export const toPublicManagedOpenCodeHandoffV2Record = (record) => ({
   v: record.v,
   state: record.state,
   incarnation: record.incarnation,
+  ownerInstanceId: record.ownerInstanceId ?? null,
+  runtimeIdentity: record.runtimeIdentity ?? null,
+  launchFingerprint: record.launchFingerprint ?? null,
+  launchSpec: record.launchSpec ?? null,
   credentialFingerprint: record.credentialFingerprint,
   pid: record.pid,
   port: record.port,

@@ -1,11 +1,14 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
-import os from 'node:os';
-import path from 'node:path';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { detectAndAdoptGuardianChild, getGuardianSocketPath, isGuardianRunning } from '../guardian/detection.js';
 import { GuardianClient } from '../guardian/guardian-client.js';
-import { resolveManagedOpenCodeHandoffV2Root } from './managed-opencode-handoff-v2/filesystem.js';
+import { resolveGuardianPaths } from '../guardian/paths.js';
+import {
+  createLaunchFingerprint,
+  createRuntimeIdentity,
+  normalizeOwnerInstanceId,
+} from '../guardian/owner-identity.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -20,37 +23,15 @@ const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
 const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
 const OPENCODE_HEALTH_PATH = '/global/health';
+const GUARDIAN_BLOCKED_ENV_KEY = /^(?:NODE_OPTIONS|NODE_PATH|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_INSERT_LIBRARIES|COMSPEC|ComSpec)$/i;
 
-/**
- * Windows IPC port-discovery file path.
- *
- * W-C closes F-4: the lifecycle handoff + bootstrap paths now run on
- * Windows through the new `portPath` channel (loopback TCP + per-user
- * discovery file under `%LOCALAPPDATA%`). Returns `undefined` on
- * non-Windows so callers can pass it through unconditionally.
- *
- * Resolution rules:
- *   1. If `OPENCHAMBER_DATA_DIR` is an absolute path, reuse it (the
- *      POSIX default already lives here; Windows operators who set
- *      this override use the same root for parity).
- *   2. Otherwise fall back to
- *      `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port`,
- *      or `~/AppData/Local/openchamber/...` if `LOCALAPPDATA` is unset
- *      (rare, but possible in stripped-down environments).
- */
-const getWindowsPortPath = () => {
-  if (process.platform !== 'win32') return undefined;
-  const envValue = process.env.OPENCHAMBER_DATA_DIR;
-  let rootDir;
-  if (typeof envValue === 'string' && envValue.trim().length > 0 && path.isAbsolute(envValue)) {
-    rootDir = envValue;
-  } else {
-    const localAppData = process.env.LOCALAPPDATA
-      || path.join(os.homedir(), 'AppData', 'Local');
-    rootDir = path.join(localAppData, 'openchamber', 'managed-opencode-handoff-v2');
-  }
-  return path.join(resolveManagedOpenCodeHandoffV2Root(rootDir), 'port');
-};
+const buildGuardianSpawnEnv = (env) => Object.fromEntries(
+  Object.entries(env || {}).filter(([key]) => !GUARDIAN_BLOCKED_ENV_KEY.test(key)),
+);
+
+const getGuardianPaths = () => resolveGuardianPaths();
+const getGuardianSocket = () => getGuardianSocketPath(getGuardianPaths().rootDir);
+const getWindowsPortPath = () => getGuardianPaths().portPath;
 
 export const createOpenCodeLifecycleRuntime = (deps) => {
   const {
@@ -65,6 +46,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     applyOpencodeBinaryFromSettings,
     ensureOpencodeCliEnv,
     ensureLocalOpenCodeServerPassword,
+    captureOpenCodeAuthState,
     resolveManagedOpenCodeLaunchSpec,
     setOpenCodePort,
     setDetectedOpenCodeApiPrefix,
@@ -76,7 +58,68 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getManagedOpenCodeShellEnvSnapshot,
     getManagedOpenCodeEnv = async () => ({}),
     getActiveSessionCount = () => 0,
+    resetSessionRuntimeForOpenCodeReplacement = () => {},
+    waitForPortRelease: injectedWaitForPortRelease,
   } = deps;
+
+  // The CLI allocates and persists this identity in the per-port instance
+  // metadata, then passes it through OPENCHAMBER_GUARDIAN_OWNER_ID. Do not
+  // generate a process-local replacement here: a new random value would make
+  // a restarted web server unable to distinguish its own child from another
+  // OpenChamber instance using the same guardian.
+  const guardianOwnerInstanceId = normalizeOwnerInstanceId(
+    deps.guardianOwnerInstanceId || process.env.OPENCHAMBER_GUARDIAN_OWNER_ID,
+  ) || null;
+  let guardianDataDirectory;
+  try {
+    guardianDataDirectory = getGuardianPaths().rootDir;
+  } catch {
+    guardianDataDirectory = process.env.OPENCHAMBER_DATA_DIR || 'default';
+  }
+  const guardianRuntimeIdentity = deps.guardianRuntimeIdentity || createRuntimeIdentity({
+    dataDir: guardianDataDirectory,
+    runtime: process.env.OPENCHAMBER_RUNTIME || 'web',
+  });
+
+  const createGuardianLaunch = ({ binary, args = [], hostname, port, cwd }) => {
+    const launchSpec = {
+      binary,
+      args: Array.isArray(args) ? [...args] : [],
+      hostname,
+      port,
+      cwd,
+    };
+    return {
+      launchSpec,
+      owner: guardianOwnerInstanceId
+        ? {
+          ownerInstanceId: guardianOwnerInstanceId,
+          runtimeIdentity: guardianRuntimeIdentity,
+          launchFingerprint: createLaunchFingerprint(launchSpec),
+        }
+        : null,
+    };
+  };
+
+  const canUseGuardian = Boolean(guardianOwnerInstanceId && guardianRuntimeIdentity);
+  const expectedGuardianOwner = canUseGuardian
+    ? {
+      ownerInstanceId: guardianOwnerInstanceId,
+      runtimeIdentity: guardianRuntimeIdentity,
+    }
+    : null;
+
+  const hasCompleteOwnerIdentity = (owner) => Boolean(
+    owner
+    && typeof owner.ownerInstanceId === 'string'
+    && owner.ownerInstanceId.length > 0
+    && typeof owner.runtimeIdentity === 'string'
+    && owner.runtimeIdentity.length > 0
+    && typeof owner.launchFingerprint === 'string'
+    && owner.launchFingerprint.length > 0
+  );
+
+  const withOwner = (params, owner) => owner ? { ...params, owner } : params;
 
   // Reset the OpenCode API prefix detection state. Mirrors the legacy
   // restart fallback (previously inlined): mark the prefix as detected,
@@ -90,31 +133,154 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
   };
 
-  // Build a closeable proxy for a guardian-managed child. The proxy exposes
-  // the same surface as a spawned child (`pid`, `close()`, `kill()`) so that
-  // shutdown-runtime.js can terminate it via the same code path used for
-  // locally-spawned children. `close()`/`kill()` ask the guardian to stop
-  // the incarnation gracefully; if the guardian is unreachable, the caller
-  // falls back to the port-kill path.
-  const createGuardianChildProxy = ({ pid, incarnation, client }) => {
-    const stopViaGuardian = async () => {
-      if (!client || !incarnation) return;
-      try {
-        await client.stop({ incarnation });
-      } catch {
-        // Best-effort; shutdown-runtime falls back to port-kill.
+  // Build a proxy for a guardian-managed child. Stopping the owned child and
+  // detaching this web process are intentionally separate operations:
+  // restart shutdown detaches, while explicit stop/ordinary full shutdown
+  // uses the owner-scoped stop operation.
+  const createGuardianChildProxy = ({ pid, incarnation, client, owner }) => {
+    const stopOwnedOpenCode = async () => {
+      if (!client || !incarnation) return false;
+      if (!hasCompleteOwnerIdentity(owner)) {
+        throw new Error('Guardian child owner identity is required for an owner-scoped stop');
+      }
+      await client.stop(withOwner({ incarnation }, owner));
+      return true;
+    };
+    const detach = () => {
+      if (!client) return;
+      if (typeof client.detach === 'function') {
+        client.detach();
+      } else {
+        client.disconnect();
       }
     };
     return {
       pid,
       isGuardianManaged: true,
+      owner: owner || null,
+      detach,
+      stopOwnedOpenCode,
       async close() {
-        await stopViaGuardian();
+        try {
+          await stopOwnedOpenCode();
+        } catch {
+          // The shutdown path must not kill an arbitrary listener when the
+          // guardian is unreachable or rejects an owner-scoped stop.
+        }
       },
       async kill() {
-        await stopViaGuardian();
+        try {
+          await stopOwnedOpenCode();
+        } catch {
+          // See close().
+        }
       },
     };
+  };
+
+  const disconnectGuardianClient = async (client) => {
+    if (!client) return true;
+    try {
+      const result = typeof client.detach === 'function'
+        ? client.detach()
+        : client.disconnect?.();
+      if (result && typeof result.then === 'function') {
+        await result;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const createGuardianClient = ({ connectTimeoutMs = 5000, requestTimeoutMs } = {}) => {
+    const paths = getGuardianPaths();
+    return new GuardianClient({
+      socketPath: getGuardianSocket(),
+      portPath: getWindowsPortPath(),
+      authSecretPath: paths.authSecretPath,
+      connectTimeoutMs,
+      ...(Number.isFinite(requestTimeoutMs) ? { requestTimeoutMs } : {}),
+    });
+  };
+
+  // A completed probe that returns false means the guardian transport is
+  // unavailable. A rejected probe means its state is unknown, so treating it
+  // as false could start a legacy child beside a live guardian child.
+  const probeGuardianRunning = async () => {
+    try {
+      return await isGuardianRunning(getGuardianSocket(), getWindowsPortPath());
+    } catch (error) {
+      const probeError = new Error(
+        `Guardian status probe failed; refusing legacy lifecycle fallback: ${error?.message || String(error)}`,
+      );
+      probeError.code = 'GUARDIAN_STATUS_UNKNOWN';
+      probeError.cause = error;
+      throw probeError;
+    }
+  };
+
+  // A successful owner-scoped stop is authoritative for the real
+  // GuardianClient. When a test/injected client exposes list(), additionally
+  // verify that no live record for the incarnation remains before allowing a
+  // legacy fallback.
+  const verifyGuardianChildGone = async (client, { incarnation } = {}) => {
+    if (!client || typeof client.list !== 'function') return true;
+    const children = await client.list();
+    if (!Array.isArray(children)) return true;
+    return !children.some((child) => {
+      if (!child || child.incarnation !== incarnation) return false;
+      return child.state !== 'retired' && child.state !== 'interrupted';
+    });
+  };
+
+  const findLiveGuardianSuccessor = async (client, owner) => {
+    if (!client || typeof client.list !== 'function' || !owner) return null;
+    const children = await client.list();
+    if (!Array.isArray(children)) return null;
+    return children.find((child) => (
+      child?.state !== 'retired'
+      && child?.state !== 'interrupted'
+      && child?.ownerInstanceId === owner.ownerInstanceId
+      && child?.runtimeIdentity === owner.runtimeIdentity
+      && child?.launchFingerprint === owner.launchFingerprint
+    )) || null;
+  };
+
+  const adoptGuardianChildForRestart = async ({ socketPath, portPath }) => {
+    const guardianChild = await detectAndAdoptGuardianChild(socketPath, portPath, {
+      expectedOwner: expectedGuardianOwner,
+    });
+    if (!guardianChild) return null;
+
+    if (!hasCompleteOwnerIdentity(guardianChild.owner)) {
+      const error = new Error('Guardian adoption returned an incomplete owner identity');
+      error.code = 'GUARDIAN_ADOPTION_OWNER_INVALID';
+      throw error;
+    }
+
+    const client = createGuardianClient();
+    const owner = guardianChild.owner;
+    state.openCodeProcess = createGuardianChildProxy({
+      pid: guardianChild.pid,
+      incarnation: guardianChild.incarnation,
+      client,
+      owner,
+    });
+    setOpenCodePort(guardianChild.port);
+    resetOpenCodeApiPrefixState();
+    state.currentIncarnation = guardianChild.incarnation;
+    state.currentOwner = owner;
+    state.isExternalOpenCode = false;
+    state.isOpenCodeReady = true;
+    state.lastOpenCodeError = null;
+    state.openCodeNotReadySince = 0;
+    syncToHmrState();
+
+    console.log(
+      `[lifecycle] Adopted guardian child ${guardianChild.incarnation} for owner-scoped restart`,
+    );
+    return { child: guardianChild, client };
   };
 
   // Shared env-construction for any managed OpenCode spawn path (legacy
@@ -154,6 +320,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     return {
       binary,
+      args: Array.isArray(launchSpec?.args) ? [...launchSpec.args] : [],
       env: {
         ...shellEnv,
         ...process.env,
@@ -221,7 +388,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     child.once('error', onError);
   });
 
-  const waitForPortRelease = (port, timeoutMs, hostname = env.ENV_CONFIGURED_OPENCODE_HOSTNAME) => {
+  const waitForPortRelease = injectedWaitForPortRelease || ((port, timeoutMs, hostname = env.ENV_CONFIGURED_OPENCODE_HOSTNAME) => {
     if (!port) {
       return Promise.resolve(true);
     }
@@ -262,7 +429,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       attempt();
     });
-  };
+  });
 
   const terminateChildProcess = async (child) => {
     if (!child) {
@@ -670,6 +837,108 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     throw lastError;
   };
 
+  const startOpenCodeThroughGuardian = async () => {
+    if (!canUseGuardian) {
+      throw new Error('Guardian launch requires a stable OpenChamber owner identity');
+    }
+    const client = createGuardianClient({ connectTimeoutMs: 5000 });
+    let successor = null;
+    let successorOwner = null;
+    let connected = false;
+
+    try {
+      await client.connect();
+      connected = true;
+      const desiredPort = env.ENV_CONFIGURED_OPENCODE_PORT ?? 0;
+      const spawnPort = await resolveManagedOpenCodePort(desiredPort, env.ENV_CONFIGURED_OPENCODE_HOSTNAME);
+      const launch = await buildManagedOpenCodeSpawnEnv({ rotatePassword: true });
+      const guardianLaunch = createGuardianLaunch({
+        binary: launch.binary,
+        args: launch.args,
+        hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
+        port: spawnPort,
+        cwd: state.openCodeWorkingDirectory,
+      });
+      successorOwner = guardianLaunch.owner;
+
+      successor = await client.spawn({
+        port: spawnPort,
+        hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
+        binary: launch.binary,
+        args: launch.args,
+        cwd: state.openCodeWorkingDirectory,
+        env: buildGuardianSpawnEnv(launch.env),
+        ...guardianLaunch,
+      });
+      if (!successor?.port || !(await waitForReady(`http://127.0.0.1:${successor.port}`, 10000))) {
+        throw new Error('Guardian initial OpenCode launch failed health check');
+      }
+
+      const activeOwner = hasCompleteOwnerIdentity(successor.owner)
+        ? successor.owner
+        : successorOwner;
+      state.openCodeProcess = createGuardianChildProxy({
+        pid: successor.pid,
+        incarnation: successor.incarnation,
+        client,
+        owner: activeOwner,
+      });
+      setOpenCodePort(successor.port);
+      resetOpenCodeApiPrefixState();
+      state.currentIncarnation = successor.incarnation;
+      state.currentOwner = activeOwner;
+      state.isExternalOpenCode = false;
+      state.isOpenCodeReady = true;
+      state.lastOpenCodeError = null;
+      state.openCodeNotReadySince = 0;
+      syncToHmrState();
+
+      if (state.expressApp) {
+        setupProxy(state.expressApp);
+        ensureOpenCodeApiPrefix();
+      }
+      return state.openCodeProcess;
+    } catch (error) {
+      let cleanupUncertain = false;
+      if (successor?.incarnation) {
+        try {
+          await client.stop(withOwner(
+            { incarnation: successor.incarnation },
+            hasCompleteOwnerIdentity(successor.owner) ? successor.owner : successorOwner,
+          ));
+          if (!(await verifyGuardianChildGone(client, { incarnation: successor.incarnation }))) {
+            cleanupUncertain = true;
+          }
+        } catch {
+          cleanupUncertain = true;
+        }
+      } else if (successorOwner) {
+        try {
+          const liveSuccessor = await findLiveGuardianSuccessor(client, successorOwner);
+          if (liveSuccessor?.incarnation) {
+            await client.stop(withOwner({ incarnation: liveSuccessor.incarnation }, successorOwner));
+            if (!(await verifyGuardianChildGone(client, { incarnation: liveSuccessor.incarnation }))) {
+              cleanupUncertain = true;
+            }
+          }
+        } catch {
+          cleanupUncertain = true;
+        }
+      }
+      if (connected && !(await disconnectGuardianClient(client))) {
+        cleanupUncertain = true;
+      }
+      if (cleanupUncertain) {
+        const cleanupError = new Error(
+          `Guardian initial OpenCode launch failed without confirmed cleanup: ${error?.message || String(error)}`,
+        );
+        cleanupError.code = 'GUARDIAN_CLEANUP_UNCERTAIN';
+        throw cleanupError;
+      }
+      throw error;
+    }
+  };
+
   const restartOpenCode = async () => {
     if (state.isShuttingDown) return;
     if (state.currentRestartPromise) {
@@ -678,6 +947,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     state.currentRestartPromise = (async () => {
+      let previousRuntimeState = {
+        openCodeProcess: state.openCodeProcess,
+        openCodePort: state.openCodePort,
+        currentIncarnation: state.currentIncarnation,
+        currentOwner: state.currentOwner,
+        isOpenCodeReady: state.isOpenCodeReady,
+        openCodeNotReadySince: state.openCodeNotReadySince,
+        lastOpenCodeError: state.lastOpenCodeError,
+      };
       state.isRestartingOpenCode = true;
       state.isOpenCodeReady = false;
       state.openCodeNotReadySince = Date.now();
@@ -696,6 +974,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           state.openCodeNotReadySince = 0;
           syncToHmrState();
         } else {
+          resetSessionRuntimeForOpenCodeReplacement();
           state.lastOpenCodeError = `External OpenCode server on port ${probePort} is not responding`;
           console.error(state.lastOpenCodeError);
           throw new Error(state.lastOpenCodeError);
@@ -708,9 +987,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         return;
       }
 
-      const portToKill = state.openCodePort;
+      resetSessionRuntimeForOpenCodeReplacement();
+      let portToKill = state.openCodePort;
+      let guardianRunningObserved = false;
 
-      // Phase 2B/3: Try guardian handoff restart on Linux/POSIX.
+      // Phase 2B/3: Try guardian handoff restart on the supported web
+      // transports (POSIX Unix socket or Windows loopback TCP).
       // Handoff is enabled by default. CLI flag `--no-handoff` (or env
       // OPENCHAMBER_RESTART_HANDOFF=disabled) forces the legacy restart path
       // so callers can opt out without losing the rest of the lifecycle.
@@ -719,97 +1001,317 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       // discovery file under %LOCALAPPDATA%); the transport factory
       // dispatches per-platform inside GuardianClient / isGuardianRunning.
       const handoffEnabled = process.env.OPENCHAMBER_RESTART_HANDOFF !== 'disabled';
-      if (handoffEnabled) {
-        try {
-          const socketPath = getGuardianSocketPath();
+      let currentGuardianOwner = state.currentOwner || state.openCodeProcess?.owner || null;
+      if (handoffEnabled && canUseGuardian) {
+        const guardianRunning = await probeGuardianRunning();
+
+        if (guardianRunning) {
+          guardianRunningObserved = true;
+          const socketPath = getGuardianSocket();
           const portPath = getWindowsPortPath();
-          const guardianRunning = await isGuardianRunning(socketPath, portPath);
-          if (guardianRunning) {
-            const client = new GuardianClient({ socketPath, portPath, connectTimeoutMs: 5000 });
-            try {
-              await client.connect();
-              const newPort = env.ENV_CONFIGURED_OPENCODE_PORT ?? await resolveManagedOpenCodePort(0, env.ENV_CONFIGURED_OPENCODE_HOSTNAME);
+          let adoptedGuardianClient = null;
 
-              // Prepare handoff for current child.
-              if (state.currentIncarnation) {
-                await client.prepareHandoff({ incarnation: state.currentIncarnation });
-              }
-
-              // Spawn successor through guardian. Build the spawn env the
-              // same way startOpenCodeOnce does so the successor authenticates
-              // (OPENCODE_SERVER_PASSWORD) and inherits the agent-tool env
-              // required by proxied requests carrying getOpenCodeAuthHeaders().
-              const launch = await buildManagedOpenCodeSpawnEnv({ rotatePassword: true });
-              const successor = await client.spawn({
-                port: newPort,
-                hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
-                binary: launch.binary,
-                cwd: state.openCodeWorkingDirectory,
-                env: launch.env,
-              });
-
-              // Wait for successor health.
-              await waitForReady(`http://127.0.0.1:${successor.port}`, 10000);
-
-              // Stop old child through guardian.
-              if (state.currentIncarnation) {
-                await client.stop({ incarnation: state.currentIncarnation });
-              }
-
-              // Update state. Hand the still-connected client to the proxy so
-              // shutdown-runtime can stop the successor gracefully.
-              state.openCodeProcess = createGuardianChildProxy({
-                pid: successor.pid,
-                incarnation: successor.incarnation,
-                client,
-              });
-              setOpenCodePort(successor.port);
-              resetOpenCodeApiPrefixState();
-              state.currentIncarnation = successor.incarnation;
-              state.isOpenCodeReady = true;
-              state.lastOpenCodeError = null;
-              state.openCodeNotReadySince = 0;
-              syncToHmrState();
-
-              if (state.expressApp) {
-                setupProxy(state.expressApp);
-                ensureOpenCodeApiPrefix();
-              }
-              return;
-            } catch (error) {
-              console.log('[lifecycle] guardian handoff failed, falling back to legacy restart:', error.message);
-              // Reset the incarnation pointer: the previous incarnation is
-              // gone (or unreachable) and the next restart must not try to
-              // prepareHandoff for it. Otherwise the guardian would throw
-              // "Child not found", the catch would swallow it, and we'd
-              // silently fall through to the legacy path every time.
-              state.currentIncarnation = null;
-              try {
-                client.disconnect();
-              } catch {
-                // Ignore.
-              }
+           // HMR, legacy startup, and migration states can retain a live
+           // guardian child without retaining its incarnation in memory.
+           // Inspect the authenticated record set before allowing the legacy
+           // path to spawn. `detectAndAdoptGuardianChild` rejects ownerless,
+           // ambiguous, unhealthy, and unavailable guardian states; none of
+           // those may be treated as an empty guardian.
+          if (!state.currentIncarnation || !hasCompleteOwnerIdentity(currentGuardianOwner)) {
+            const adopted = await adoptGuardianChildForRestart({ socketPath, portPath });
+            if (adopted) {
+              adoptedGuardianClient = adopted.client;
+              currentGuardianOwner = state.currentOwner;
+              portToKill = state.openCodePort;
+              previousRuntimeState = {
+                ...previousRuntimeState,
+                openCodeProcess: state.openCodeProcess,
+                openCodePort: state.openCodePort,
+                currentIncarnation: state.currentIncarnation,
+                currentOwner: state.currentOwner,
+                isOpenCodeReady: state.isOpenCodeReady,
+                openCodeNotReadySince: state.openCodeNotReadySince,
+                lastOpenCodeError: state.lastOpenCodeError,
+              };
             }
           }
-        } catch {
-          // Best-effort: fall through to legacy restart.
+
+          if (!state.currentIncarnation || !hasCompleteOwnerIdentity(currentGuardianOwner)) {
+            // No exact owner child exists. The later legacy path may proceed
+            // only after the owner-scoped state above has proved that there is
+            // no child to hand off.
+            console.log('[lifecycle] guardian has no exact child for this owner; using legacy restart');
+          } else {
+            const client = adoptedGuardianClient || createGuardianClient({ connectTimeoutMs: 5000 });
+            const previousIncarnation = state.currentIncarnation;
+            const previousOwner = currentGuardianOwner;
+            const fixedPort = Number.isFinite(env.ENV_CONFIGURED_OPENCODE_PORT)
+              && env.ENV_CONFIGURED_OPENCODE_PORT > 0;
+            let prepared = false;
+            let oldStopped = false;
+            let successor = null;
+            let successorOwner = null;
+            let successorStopped = false;
+            let restoreOpenCodeAuthState = null;
+
+          try {
+            await client.connect();
+            const newPort = fixedPort
+              ? env.ENV_CONFIGURED_OPENCODE_PORT
+              : await resolveManagedOpenCodePort(0, env.ENV_CONFIGURED_OPENCODE_HOSTNAME);
+
+            // Fence the old record before either handoff ordering. The
+            // fixed-port path must stop and release the old listener before
+            // spawning its successor; dynamic ports can start the successor
+            // first and keep the cutover fast.
+            await client.prepareHandoff(withOwner({ incarnation: previousIncarnation }, previousOwner));
+            prepared = true;
+
+            if (typeof captureOpenCodeAuthState === 'function') {
+              const restore = captureOpenCodeAuthState();
+              restoreOpenCodeAuthState = typeof restore === 'function' ? restore : null;
+            }
+            const launch = await buildManagedOpenCodeSpawnEnv({ rotatePassword: true });
+            const guardianLaunch = createGuardianLaunch({
+              binary: launch.binary,
+              args: launch.args,
+              hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
+              port: newPort,
+              cwd: state.openCodeWorkingDirectory,
+            });
+            successorOwner = guardianLaunch.owner;
+
+            if (fixedPort) {
+              await client.stop(withOwner({ incarnation: previousIncarnation }, previousOwner));
+              oldStopped = true;
+              state.openCodeProcess = null;
+              state.currentIncarnation = null;
+              state.currentOwner = null;
+              syncToHmrState();
+
+              if (!(await waitForPortRelease(newPort, 5000, env.ENV_CONFIGURED_OPENCODE_HOSTNAME))) {
+                throw new Error(`Fixed OpenCode port ${newPort} was not released after stopping the previous child`);
+              }
+            }
+
+            successor = await client.spawn({
+              port: newPort,
+              hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
+              binary: launch.binary,
+              args: launch.args,
+              cwd: state.openCodeWorkingDirectory,
+              env: buildGuardianSpawnEnv(launch.env),
+              ...guardianLaunch,
+            });
+
+            if (!successor?.port || !(await waitForReady(`http://127.0.0.1:${successor.port}`, 10000))) {
+              throw new Error('Guardian successor failed health check');
+            }
+
+            if (!fixedPort) {
+              await client.stop(withOwner({ incarnation: previousIncarnation }, previousOwner));
+              oldStopped = true;
+            }
+
+            const activeOwner = hasCompleteOwnerIdentity(successor.owner)
+              ? successor.owner
+              : successorOwner;
+            state.openCodeProcess = createGuardianChildProxy({
+              pid: successor.pid,
+              incarnation: successor.incarnation,
+              client,
+              owner: activeOwner,
+            });
+            setOpenCodePort(successor.port);
+            resetOpenCodeApiPrefixState();
+            state.currentIncarnation = successor.incarnation;
+            state.isOpenCodeReady = true;
+            state.lastOpenCodeError = null;
+            state.openCodeNotReadySince = 0;
+            state.currentOwner = activeOwner;
+            syncToHmrState();
+
+            if (state.expressApp) {
+              setupProxy(state.expressApp);
+              ensureOpenCodeApiPrefix();
+            }
+            return;
+          } catch (error) {
+            // A rehydrated child that fails its identity check is not a
+            // recoverable handoff failure. Legacy port cleanup could target a
+            // reused PID or a foreign listener, so refuse fallback and leave
+            // the guardian attention record authoritative.
+            let cleanupUncertain = error?.code === 'GUARDIAN_CHILD_IDENTITY_INVALID';
+
+            if (successor?.incarnation && !successorStopped) {
+              try {
+                await client.stop(withOwner(
+                  { incarnation: successor.incarnation },
+                  hasCompleteOwnerIdentity(successor.owner) ? successor.owner : successorOwner,
+                ));
+                successorStopped = await verifyGuardianChildGone(client, {
+                  incarnation: successor.incarnation,
+                });
+                if (!successorStopped) {
+                  cleanupUncertain = true;
+                }
+              } catch {
+                cleanupUncertain = true;
+              }
+            } else if (!successor?.incarnation) {
+              try {
+                const liveSuccessor = await findLiveGuardianSuccessor(client, successorOwner);
+                if (liveSuccessor?.incarnation) {
+                  await client.stop(withOwner({ incarnation: liveSuccessor.incarnation }, successorOwner));
+                  if (!(await verifyGuardianChildGone(client, { incarnation: liveSuccessor.incarnation }))) {
+                    cleanupUncertain = true;
+                  }
+                }
+              } catch {
+                cleanupUncertain = true;
+              }
+            }
+
+            // A prepared handoff can fall back only after an old child that
+            // was not confirmed stopped is explicitly returned to active and
+            // health-checked. This includes the dynamic ordering where the
+            // successor is launched before the old stop attempt: a rejected
+            // old stop is not proof that the old child is gone.
+            let oldRollbackConfirmed = false;
+            if (prepared && !oldStopped) {
+              let rollbackError = null;
+              try {
+                if (typeof client.abortHandoff !== 'function') {
+                  throw new Error('Guardian client cannot abort the old handoff');
+                }
+                // Guardian.abortHandoff returns the active record directly;
+                // it does not use the protocol's { ok, record } envelope.
+                const rollback = await client.abortHandoff(
+                  withOwner({ incarnation: previousIncarnation }, previousOwner),
+                );
+                if (rollback?.state !== 'active' || rollback?.incarnation !== previousIncarnation) {
+                  throw new Error(
+                    `Guardian old-child rollback did not return active incarnation ${previousIncarnation}`,
+                  );
+                }
+                if (typeof client.health === 'function') {
+                  const health = await client.health({ incarnation: previousIncarnation });
+                  oldRollbackConfirmed = health?.healthy === true;
+                  if (!oldRollbackConfirmed) {
+                    throw new Error('Guardian old-child rollback health check failed');
+                  }
+                } else {
+                  oldRollbackConfirmed = true;
+                }
+                if (oldRollbackConfirmed && restoreOpenCodeAuthState) {
+                  restoreOpenCodeAuthState();
+                  restoreOpenCodeAuthState = null;
+                }
+              } catch (rollbackFailure) {
+                rollbackError = rollbackFailure;
+              }
+
+              if (oldRollbackConfirmed) {
+                console.log(
+                  `[lifecycle] guardian handoff old-child rollback confirmed for ${previousIncarnation}`,
+                );
+              } else {
+                cleanupUncertain = true;
+                console.warn(
+                  `[lifecycle] guardian handoff old-child rollback failed for ${previousIncarnation}: ${rollbackError?.message || 'unconfirmed'}`,
+                );
+              }
+            } else if (prepared && oldStopped) {
+              // Once the old child is confirmed stopped, a failed successor
+              // cannot safely fall back to a legacy spawn beside an unknown
+              // replacement state.
+              cleanupUncertain = true;
+            }
+
+            if (oldStopped) {
+              state.openCodeProcess = null;
+              state.currentIncarnation = null;
+              state.currentOwner = null;
+              state.isOpenCodeReady = false;
+              syncToHmrState();
+            } else {
+              // The old child was never confirmed stopped. Restore the
+              // reference/readiness so an explicit failure does not strand a
+              // still-valid owner or make a fallback create a second child.
+              // Rebind the proxy to this still-connected client when rollback
+              // was confirmed; the legacy fallback must stop this exact owner
+              // before it can spawn anything directly.
+              if (oldRollbackConfirmed
+                  && hasCompleteOwnerIdentity(previousOwner)
+                  && (previousRuntimeState.openCodeProcess?.isGuardianManaged === true
+                    || !previousRuntimeState.openCodeProcess)) {
+                state.openCodeProcess = createGuardianChildProxy({
+                  pid: previousRuntimeState.openCodeProcess?.pid ?? null,
+                  incarnation: previousIncarnation,
+                  client,
+                  owner: previousOwner,
+                });
+              } else {
+                state.openCodeProcess = previousRuntimeState.openCodeProcess;
+              }
+              state.openCodePort = previousRuntimeState.openCodePort;
+              state.currentIncarnation = previousRuntimeState.currentIncarnation;
+              state.currentOwner = previousRuntimeState.currentOwner;
+              state.isOpenCodeReady = previousRuntimeState.isOpenCodeReady;
+              state.openCodeNotReadySince = previousRuntimeState.openCodeNotReadySince;
+              state.lastOpenCodeError = previousRuntimeState.lastOpenCodeError;
+              syncToHmrState();
+            }
+
+            const retainGuardianClientForFallback = oldRollbackConfirmed
+              && state.openCodeProcess?.isGuardianManaged === true;
+            if (!retainGuardianClientForFallback && !(await disconnectGuardianClient(client))) {
+              cleanupUncertain = true;
+            }
+
+            if (cleanupUncertain) {
+              throw new Error(`Guardian handoff failed without a confirmed rollback: ${error?.message || String(error)}`);
+            }
+
+            console.log('[lifecycle] guardian handoff failed, falling back to legacy restart:', error.message);
+          }
         }
+      }
       }
 
       if (state.openCodeProcess) {
         console.log('Stopping existing OpenCode process...');
-        try {
-          await state.openCodeProcess.close();
-        } catch (error) {
-          console.warn('Error closing OpenCode process:', error);
+        if (state.openCodeProcess.isGuardianManaged) {
+          if (typeof state.openCodeProcess.stopOwnedOpenCode !== 'function') {
+            throw new Error('Guardian-managed OpenCode has no owner-scoped stop operation');
+          }
+          // A guardian-managed child must be stopped through its exact owner;
+          // never continue to a port-wide kill after an owner-scoped failure.
+          await state.openCodeProcess.stopOwnedOpenCode();
+          if (typeof state.openCodeProcess.detach === 'function') {
+            await state.openCodeProcess.detach();
+          }
+        } else {
+          try {
+            await state.openCodeProcess.close();
+          } catch (error) {
+            console.warn('Error closing OpenCode process:', error);
+          }
         }
         state.openCodeProcess = null;
         syncToHmrState();
       }
 
-      killProcessOnPort(portToKill);
-      if (!(await waitForPortRelease(portToKill, 5000))) {
-        console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
+      if (previousRuntimeState.openCodeProcess?.isGuardianManaged !== true) {
+        // Once an authenticated guardian was observed, an absent exact owner
+        // is an authoritative no-child result. A port-wide kill at this point
+        // could terminate a foreign listener that reused the old port.
+        if (!guardianRunningObserved) killProcessOnPort(portToKill);
+        if (!(await waitForPortRelease(portToKill, 5000))) {
+          console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
+        }
+      } else if (!(await waitForPortRelease(portToKill, 5000))) {
+        console.warn(`Timed out waiting for guardian-managed OpenCode port ${portToKill} to be released`);
       }
 
       if (env.ENV_CONFIGURED_OPENCODE_PORT) {
@@ -829,6 +1331,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       state.lastOpenCodeError = null;
       state.openCodeProcess = await startOpenCode();
+      state.currentIncarnation = null;
+      state.currentOwner = null;
       syncToHmrState();
 
       if (state.expressApp) {
@@ -997,6 +1501,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (await isOpenCodeProcessHealthy()) {
         console.log(`[HMR] Reusing existing OpenCode process on port ${state.openCodePort}`);
       } else {
+        resetSessionRuntimeForOpenCodeReplacement();
+        state.openCodeProcess = null;
+        state.currentIncarnation = null;
+        state.currentOwner = null;
         // W-C: previously this branch was gated `else if (process.platform
         // !== 'win32')` and the Windows path was duplicated below. The
         // platform gate is removed; `detectAndAdoptGuardianChild()` now
@@ -1005,21 +1513,24 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         // post-adoption cascade (skip-start, external probe, fresh
         // spawn) is the same on every platform.
         const portPath = getWindowsPortPath();
-        const guardianChild = await detectAndAdoptGuardianChild(undefined, portPath);
+        const guardianChild = canUseGuardian
+          ? await detectAndAdoptGuardianChild(getGuardianSocket(), portPath, {
+            expectedOwner: expectedGuardianOwner,
+          })
+          : null;
         if (guardianChild) {
           console.log(`[lifecycle] Adopted guardian-managed OpenCode on port ${guardianChild.port}`);
           // Construct a fresh GuardianClient for the adopted child so the
           // proxy can later ask the guardian to stop it. The client lazily
           // connects on first use; if the guardian is unreachable when
-          // shutdown runs, the port-kill fallback handles it.
-          const adoptionClient = new GuardianClient({
-            socketPath: getGuardianSocketPath(),
-            portPath,
-          });
+          // shutdown runs, ownership is preserved rather than killing a
+          // potentially unrelated listener on that port.
+           const adoptionClient = createGuardianClient();
           state.openCodeProcess = createGuardianChildProxy({
             pid: guardianChild.pid,
             incarnation: guardianChild.incarnation,
             client: adoptionClient,
+            owner: guardianChild.owner || null,
           });
           setOpenCodePort(guardianChild.port);
           resetOpenCodeApiPrefixState();
@@ -1027,6 +1538,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           state.isExternalOpenCode = false;
           state.isRestartingOpenCode = false;
           state.currentIncarnation = guardianChild.incarnation;
+          state.currentOwner = guardianChild.owner || null;
           syncToHmrState();
         } else if (env.ENV_SKIP_OPENCODE_START && env.ENV_EFFECTIVE_PORT) {
           const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
@@ -1035,6 +1547,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           setOpenCodePort(env.ENV_EFFECTIVE_PORT);
           state.isOpenCodeReady = true;
           state.isExternalOpenCode = true;
+          state.currentIncarnation = null;
+          state.currentOwner = null;
           state.lastOpenCodeError = null;
           state.openCodeNotReadySince = 0;
           syncToHmrState();
@@ -1045,6 +1559,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           setOpenCodePort(env.ENV_EFFECTIVE_PORT);
           state.isOpenCodeReady = true;
           state.isExternalOpenCode = true;
+          state.currentIncarnation = null;
+          state.currentOwner = null;
           state.lastOpenCodeError = null;
           state.openCodeNotReadySince = 0;
           syncToHmrState();
@@ -1057,16 +1573,45 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           // port 4096 used to hijack a user's separately-running OpenCode (e.g.
           // the OpenCode desktop app), coupling our lifecycle to theirs and
           // breaking init against an unexpected server version/config.
-          if (env.ENV_EFFECTIVE_PORT) {
+           // Probe even when this runtime lacks a stable owner identity. A
+           // live guardian is not the same as an unavailable guardian, and
+           // direct startup beside it would create an unowned duplicate.
+            const guardianRunning = await probeGuardianRunning();
+          if (guardianRunning) {
+            try {
+              await startOpenCodeThroughGuardian();
+            } catch (error) {
+              const guardianFailure = new Error(
+                `Guardian is running but initial OpenCode launch failed; refusing legacy fallback: ${error?.message || String(error)}`,
+              );
+              guardianFailure.code = error?.code === 'GUARDIAN_CLEANUP_UNCERTAIN'
+                ? error.code
+                : 'GUARDIAN_LIVE_START_FAILED';
+              guardianFailure.cause = error;
+              state.isOpenCodeReady = false;
+              state.openCodeNotReadySince = Date.now();
+              state.lastOpenCodeError = guardianFailure.message;
+              syncToHmrState();
+              console.error(`[lifecycle] ${guardianFailure.message}`);
+              throw guardianFailure;
+            }
+          } else if (env.ENV_EFFECTIVE_PORT) {
             console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
             setOpenCodePort(env.ENV_EFFECTIVE_PORT);
           } else {
             state.openCodePort = null;
             syncToHmrState();
+            state.currentIncarnation = null;
+            state.currentOwner = null;
           }
 
-          state.lastOpenCodeError = null;
-          state.openCodeProcess = await startOpenCode();
+          if (!state.openCodeProcess) {
+            state.lastOpenCodeError = null;
+            state.openCodeProcess = await startOpenCode();
+          }
+          state.isExternalOpenCode = false;
+          state.currentIncarnation = state.currentIncarnation || null;
+          state.currentOwner = state.currentOwner || null;
           syncToHmrState();
         }
       }
@@ -1077,6 +1622,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         console.error(`OpenCode readiness check failed: ${error.message}`);
       }
     } catch (error) {
+      if (error?.code === 'GUARDIAN_CLEANUP_UNCERTAIN') {
+        throw error;
+      }
       console.error(`Failed to start OpenCode: ${error.message}`);
       console.log('Continuing without OpenCode integration...');
       state.lastOpenCodeError = error.message;

@@ -21,11 +21,30 @@ type GlobalSessionStatusEntry = { status: SessionStatus; directory: string };
 
 type GlobalSessionStatusState = {
   statusById: Map<string, GlobalSessionStatusEntry>;
+  /** False while a runtime boundary is waiting for its first new snapshot. */
+  acceptEventUpdates: boolean;
 };
 
 export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() => ({
   statusById: new Map(),
+  acceptEventUpdates: true,
 }));
+
+/**
+ * Clear all live status evidence when the active OpenCode runtime is no
+ * longer authoritative. This intentionally does not touch the global session
+ * cache or any durable session/message state.
+ */
+export const resetGlobalSessionStatus = (options?: { blockEventUpdates?: boolean }): void => {
+  useGlobalSessionStatusStore.setState({
+    statusById: new Map(),
+    acceptEventUpdates: options?.blockEventUpdates !== true,
+  });
+};
+
+export const areGlobalSessionStatusEventsEnabled = (): boolean => (
+  useGlobalSessionStatusStore.getState().acceptEventUpdates !== false
+);
 
 const normalizeStatusType = (type: unknown): ActiveStatusType | 'idle' => {
   if (type === 'busy') return 'busy';
@@ -63,6 +82,8 @@ const setStatus = (sessionId: string, directory: string, status: SessionStatus |
 // whose directory has no child store. Mirrors the child reducer's semantics
 // (`session.idle` / `session.error` both resolve to idle).
 export const applyGlobalSessionStatusEvent = (directory: string, payload: Event): void => {
+  if (!areGlobalSessionStatusEventsEnabled()) return;
+
   switch (payload.type) {
     case 'session.status': {
       const props = payload.properties as { sessionID?: string; status?: { type?: string } } | undefined;
@@ -88,7 +109,11 @@ export const applyGlobalSessionStatusEvent = (directory: string, payload: Event)
     case 'session.deleted': {
       const props = payload.properties as { sessionID?: string; info?: { id?: string } } | undefined;
       const sessionId = props?.sessionID ?? props?.info?.id;
-      if (sessionId) removeSessionOrdering(sessionId);
+      if (sessionId) {
+        setStatus(sessionId, normalizeDirectory(directory), { type: 'idle' });
+        observeSessionActivityEvent(sessionId, 'settled');
+        removeSessionOrdering(sessionId);
+      }
       return;
     }
     default:
@@ -108,6 +133,9 @@ export const applyGlobalSessionStatusSnapshot = (
 ): void => {
   const directory = normalizeDirectory(rawDirectory);
   const known = new Set(knownSessionIds ?? []);
+  for (const [sessionId, entry] of useGlobalSessionStatusStore.getState().statusById) {
+    if (entry.directory === directory) known.add(sessionId);
+  }
   const activeSessionIds = Object.entries(raw)
     .filter(([, status]) => normalizeStatusType(status?.type) !== 'idle')
     .map(([sessionId]) => sessionId);
@@ -140,6 +168,39 @@ export const applyGlobalSessionStatusSnapshot = (
       }
     }
 
+    if (!state.acceptEventUpdates) changed = true;
+    return changed ? { statusById: next, acceptEventUpdates: true } : state;
+  });
+};
+
+/**
+ * A failed status request is not an authoritative empty snapshot. It does,
+ * however, mean that entries from the unavailable runtime cannot remain
+ * confirmed live activity. Remove only the live index evidence and let the
+ * process/connection health surface describe the unavailable runtime.
+ */
+export const clearGlobalSessionStatusForUnavailable = (
+  rawDirectory: string,
+  knownSessionIds?: Iterable<string>,
+): void => {
+  const directory = normalizeDirectory(rawDirectory);
+  const known = new Set(knownSessionIds ?? []);
+  for (const [sessionId, entry] of useGlobalSessionStatusStore.getState().statusById) {
+    if (entry.directory === directory) known.add(sessionId);
+  }
+  reconcileSessionActivitySnapshot([], known);
+
+  const removedSessionIds: string[] = [];
+  useGlobalSessionStatusStore.setState((state) => {
+    let changed = false;
+    const next = new Map(state.statusById);
+    for (const [sessionId, entry] of state.statusById) {
+      if (entry.directory !== directory && !known.has(sessionId)) continue;
+      next.delete(sessionId);
+      removedSessionIds.push(sessionId);
+      changed = true;
+    }
     return changed ? { statusById: next } : state;
   });
+  for (const sessionId of removedSessionIds) removeSessionOrdering(sessionId);
 };

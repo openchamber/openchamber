@@ -44,6 +44,16 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
     return normalized;
   };
 
+  // Handoff restart may rotate the password before the successor is known to
+  // be healthy. Keep the previous state behind an opaque restore callback so
+  // a confirmed rollback can put the still-running child and request headers
+  // back in sync without exposing credentials to callers or logs.
+  const captureOpenCodeAuthState = () => {
+    const previousPassword = getAuthPassword();
+    const previousSource = getAuthSource();
+    return () => setOpenCodeAuthState(previousPassword, previousSource);
+  };
+
   const getOpenCodeAuthHeaders = () => {
     const password = normalizeOpenCodePassword(getAuthPassword() || process.env.OPENCODE_SERVER_PASSWORD || '');
 
@@ -85,5 +95,6 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
     getOpenCodeAuthHeaders,
     isOpenCodeConnectionSecure,
     ensureLocalOpenCodeServerPassword,
+    captureOpenCodeAuthState,
   };
 };

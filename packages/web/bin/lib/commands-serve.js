@@ -8,8 +8,9 @@ import { isPortAvailable, resolveAvailablePort } from './cli-ports.js';
 import { ensureLogsDir, getLogFilePath } from './cli-paths.js';
 import { rotateLogFile } from './cli-log-files.js';
 import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
-import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
+import { getPidFilePath, getInstanceFilePath, readInstanceOptions, writePidFile, writeInstanceOptions, removePidFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
+import { createOwnerInstanceId, normalizeOwnerInstanceId } from '../../server/lib/guardian/owner-identity.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -21,9 +22,16 @@ import {
   logStatus,
 } from '../cli-output.js';
 
-import { isGuardianAutoStarted, maybeAutoStartGuardian, stopGuardianViaIpc } from './commands-guardian.js';
+import { maybeAutoStartGuardian } from './commands-guardian.js';
 
 const DAEMON_READY_TIMEOUT_MS = 30000;
+
+const resolveGuardianOwnerInstanceId = (options = {}) => {
+  const configured = normalizeOwnerInstanceId(
+    options.guardianOwnerInstanceId || process.env.OPENCHAMBER_GUARDIAN_OWNER_ID,
+  );
+  return configured || createOwnerInstanceId();
+};
 
 function createServeCommand({
   serverPath,
@@ -67,6 +75,13 @@ async function serveCommand(options) {
     const explicitPort = options.explicitPort === true;
     const effectiveHost = resolveServeHost(options.host);
     const targetPort = await resolveAvailablePort(options.port, explicitPort, emitNotice);
+    const storedOwnerInstanceId = targetPort > 0
+      ? readInstanceOptions(await getInstanceFilePath(targetPort))?.guardianOwnerInstanceId
+      : undefined;
+    const guardianOwnerInstanceId = resolveGuardianOwnerInstanceId({
+      ...options,
+      guardianOwnerInstanceId: options.guardianOwnerInstanceId || storedOwnerInstanceId,
+    });
 
     if (targetPort !== 0 && !options.suppressUnsafePortWarning) {
       assertSafeBrowserPort(targetPort, { context: 'OpenChamber serve' });
@@ -159,6 +174,7 @@ async function serveCommand(options) {
       }
       process.env.OPENCHAMBER_HOST = effectiveHost;
       process.env.OPENCHAMBER_RUNTIME = 'web';
+      process.env.OPENCHAMBER_GUARDIAN_OWNER_ID = guardianOwnerInstanceId;
       // Default-true opt-out: when handoff is disabled, the server's
       // restartOpenCode() must skip the guardian handoff branch and use the
       // legacy restart path. Only override the env var when explicitly
@@ -220,15 +236,9 @@ async function serveCommand(options) {
           exitOnShutdown: false,
         });
       } catch (startError) {
-        // If we auto-started the guardian, take it down before propagating
-        // the error so a failed serve never leaks an orphaned guardian.
-        if (isGuardianAutoStarted()) {
-          try {
-            await stopGuardianViaIpc({ timeoutMs: 3000 });
-          } catch {
-            /* best-effort; never mask the original error */
-          }
-        }
+        // The guardian intentionally outlives the web server. A failed web
+        // startup must not tear down an operator-owned or already-running
+        // guardian; the next serve attempt can reuse the singleton.
         throw startError;
       }
 
@@ -239,13 +249,16 @@ async function serveCommand(options) {
       const fgPidFilePath = await getPidFilePath(resolvedPort);
       const fgInstanceFilePath = await getInstanceFilePath(resolvedPort);
       writePidFile(fgPidFilePath, process.pid, emitNotice);
-      writeInstanceOptions(fgInstanceFilePath, {
+      const foregroundInstanceOptions = {
         port: resolvedPort,
         host: effectiveHost,
         launchMode: 'foreground',
         uiPassword: effectiveUiPassword,
         apiOnly: options.apiOnly === true,
-      }, emitNotice);
+        guardianOwnerInstanceId,
+        startedAt: Date.now(),
+      };
+      writeInstanceOptions(fgInstanceFilePath, foregroundInstanceOptions, emitNotice);
 
       if (isQuietMode(options)) {
         if (!options.suppressQuietOutput) {
@@ -253,10 +266,14 @@ async function serveCommand(options) {
         }
       }
 
-      // Clean up PID / instance files.
+      // Remove the liveness marker on exit but retain an owner-only instance
+      // record. A foreground service manager may restart this command without
+      // going through `openchamber restart`; the next serve must still reuse
+      // the same guardian owner identity. Explicit `openchamber stop` removes
+      // the retained metadata after the process has exited.
       const cleanupFiles = () => {
         removePidFile(fgPidFilePath);
-        removeInstanceFile(fgInstanceFilePath);
+        writeInstanceOptions(fgInstanceFilePath, foregroundInstanceOptions, emitNotice);
       };
 
       process.on('exit', cleanupFiles);
@@ -268,13 +285,17 @@ async function serveCommand(options) {
         shutdownInProgress = true;
         try {
           await controller.stop({ exitProcess: false });
-        } catch {
-        }
-        if (isGuardianAutoStarted()) {
-          try {
-            await stopGuardianViaIpc({ timeoutMs: 3000 });
-          } catch {
-          }
+        } catch (error) {
+          // A failed owner-scoped guardian stop leaves the web process and its
+          // owner metadata authoritative for a retry. Do not remove the PID
+          // marker or exit here, otherwise the next startup loses the stable
+          // owner identity while the guardian child is still live.
+          shutdownInProgress = false;
+          console.error(
+            'Foreground shutdown failed; preserving OpenChamber metadata for retry:',
+            error?.message || error,
+          );
+          return false;
         }
         cleanupFiles();
         setForegroundServerActive(false);
@@ -319,6 +340,7 @@ async function serveCommand(options) {
         ...(options.apiOnly === true ? { OPENCHAMBER_API_ONLY: 'true' } : {}),
         ...(process.env.OPENCODE_SKIP_START ? { OPENCHAMBER_SKIP_OPENCODE_START: process.env.OPENCODE_SKIP_START } : {}),
         ...(options.handoff === false ? { OPENCHAMBER_RESTART_HANDOFF: 'disabled' } : {}),
+        OPENCHAMBER_GUARDIAN_OWNER_ID: guardianOwnerInstanceId,
       },
     });
 
@@ -360,13 +382,6 @@ async function serveCommand(options) {
       });
     } catch (error) {
       await terminateProcessTree(child.pid, { gracefulTimeoutMs: 1500, forceTimeoutMs: 1500 });
-      if (isGuardianAutoStarted()) {
-        try {
-          await stopGuardianViaIpc({ timeoutMs: 3000 });
-        } catch {
-          /* best-effort; never mask the original error */
-        }
-      }
       throw error;
     }
 
@@ -404,6 +419,7 @@ async function serveCommand(options) {
       launchMode: 'daemon',
       uiPassword: effectiveUiPassword,
       apiOnly: options.apiOnly === true,
+      guardianOwnerInstanceId,
     }, emitNotice);
 
     const serveResult = {

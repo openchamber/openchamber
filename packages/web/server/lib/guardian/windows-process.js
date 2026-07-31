@@ -1,4 +1,5 @@
 import { spawnSync as defaultSpawnSync } from 'node:child_process';
+import { probeProcessLiveness } from './process-identity.js';
 
 /**
  * Windows process-termination helpers (W-D).
@@ -24,15 +25,14 @@ import { spawnSync as defaultSpawnSync } from 'node:child_process';
  *     group via accidental /t" — High).
  *   - Exit code 128 ("process not found") is treated as success
  *     because it means the process is already gone.
- *   - `EPERM` / `ESRCH` errors are also treated as success because
- *     they mean the process is no longer accessible to us or never
- *     existed; either way, the close-wait below will observe the
- *     child's `close` event and resolve.
+ *   - `ESRCH` errors are treated as success because the process was never
+ *     present. `EPERM` remains an error: permission loss is ambiguous and
+ *     must not be mistaken for a terminated child.
  *
  * The helper is **synchronous inside an async wrapper** for parity
  * with the Unix path, which calls `process.kill` synchronously
- * before awaiting a close-wait. The only `await` is on the child's
- * own `close` event, which is how we know the kill landed.
+ * before awaiting a close-wait. Live ChildProcess objects use their
+ * `close` event; rehydrated children use an operating-system liveness poll.
  *
  * No raw secret / password / token is ever logged or persisted here.
  */
@@ -42,6 +42,7 @@ const TASKKILL_TIMEOUT_MS = 5000;
 // `ERROR_INVALID_PARAMETER` mapped by `taskkill.exe` to its own
 // status). Treat as already-gone.
 const TASKKILL_EXIT_NOT_FOUND = 128;
+const PROCESS_POLL_INTERVAL_MS = 25;
 
 const assertIntegerPid = (pid, label) => {
   if (!Number.isInteger(pid) || pid <= 0) {
@@ -51,6 +52,26 @@ const assertIntegerPid = (pid, label) => {
 
 const hasChildExited = (child) =>
   !child || child.exitCode !== null || child.signalCode !== null;
+
+const isRehydratedChild = (child) => child?.isRehydrated === true;
+
+const defaultIsProcessAlive = probeProcessLiveness;
+
+const normalizeLiveness = (value) => {
+  if (value === false || value === 'dead') return 'dead';
+  if (value === true || value === 'alive') return 'alive';
+  return 'unknown';
+};
+
+const readLiveness = (pid, isProcessAlive) => {
+  try {
+    return normalizeLiveness(isProcessAlive(pid));
+  } catch {
+    // A failed liveness probe is not proof that a process is gone.  Keep the
+    // termination attempt fail-closed and let taskkill make the next decision.
+    return 'unknown';
+  }
+};
 
 const waitForClose = (child, timeoutMs) => new Promise((resolve) => {
   if (hasChildExited(child)) {
@@ -64,6 +85,22 @@ const waitForClose = (child, timeoutMs) => new Promise((resolve) => {
   });
 });
 
+const waitForProcessExit = (pid, timeoutMs, isProcessAlive) => new Promise((resolve) => {
+  const deadline = Date.now() + timeoutMs;
+  const check = () => {
+    if (readLiveness(pid, isProcessAlive) === 'dead') {
+      resolve(true);
+      return;
+    }
+    if (Date.now() >= deadline) {
+      resolve(false);
+      return;
+    }
+    setTimeout(check, Math.min(PROCESS_POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())));
+  };
+  check();
+});
+
 /**
  * Run `taskkill.exe /F /PID <pid>` synchronously and translate the
  * outcome into a `{ status, reason }` envelope. Exposed for unit
@@ -72,11 +109,12 @@ const waitForClose = (child, timeoutMs) => new Promise((resolve) => {
  * The result envelope is:
  *   - `{ status: 'killed' }` — `taskkill` accepted the request against
  *     a live process (exit 0). The caller should wait for the child
- *     `close` event to confirm the kill landed.
+ *     `close` event, or poll a rehydrated child's OS liveness, to confirm
+ *     the kill landed.
  *   - `{ status: 'already-gone' }` — `taskkill` confirmed the process
  *     is no longer reachable (exit 128 = "process not found", or
- *     `EPERM` / `ESRCH` spawn error). The caller can return success
- *     without waiting for a close event that will never fire.
+ *     `ESRCH` spawn error). The caller can return success without waiting
+ *     for a close event that will never fire.
  *   - `{ status: 'error', reason }` — unexpected failure
  *     (`ENOENT` for missing binary, non-zero non-128 exit, killed
  *     by signal, etc.).
@@ -103,7 +141,7 @@ export function runTaskkillForce({ pid, spawnSync = defaultSpawnSync } = {}) {
     timeout: TASKKILL_TIMEOUT_MS,
   });
   if (result.error) {
-    if (result.error.code === 'EPERM' || result.error.code === 'ESRCH') {
+    if (result.error.code === 'ESRCH') {
       return { status: 'already-gone' };
     }
     if (result.error.code === 'ENOENT') {
@@ -133,29 +171,38 @@ export function runTaskkillForce({ pid, spawnSync = defaultSpawnSync } = {}) {
  *   1. If the child has already exited (`exitCode !== null` or
  *      `signalCode !== null`), return `{ ok: true }` immediately.
  *   2. Otherwise, invoke `taskkill /F /PID <pid>` (no `/T`).
- *   3. Wait up to `timeoutMs` for the child's `close` event.
+ *   3. Wait up to `timeoutMs` for the child's `close` event, or poll the
+ *      operating-system liveness of a rehydrated child (which has no live
+ *      ChildProcess handle and therefore cannot emit `close`).
  *   4. Return `{ ok: true }` on observed close; `{ ok: false, reason: 'still-running' }` otherwise.
  *
- * `EPERM` / `ESRCH` from `taskkill` and exit code 128 ("process not
- * found") are treated as success because they both indicate the
- * process is no longer reachable. The `close` event then either
- * fires (if the child was actually alive and now exits) or has
- * already fired (if the process was gone before we called
- * `taskkill`); either way, the helper reports `ok: true`.
+ * `ESRCH` from `taskkill` and exit code 128 ("process not found") are
+ * treated as success because they indicate the process is no longer
+ * reachable. `EPERM` remains a failure because it does not prove that the
+ * child is gone. A live ChildProcess may emit `close`, while a rehydrated
+ * child is checked with the OS liveness probe instead.
  *
- * @param {object} child - A Node.js ChildProcess handle. Must have a
- *   numeric `pid` and expose `exitCode`, `signalCode`, and a
- *   `close` event.
+ * @param {object} child - A Node.js ChildProcess handle or a guardian
+ *   rehydrated child. Must have a numeric `pid`; live handles expose
+ *   `exitCode`, `signalCode`, and a `close` event, while rehydrated handles
+ *   set `isRehydrated: true`.
  * @param {object} [options]
- * @param {number} [options.timeoutMs=2500] - Outer close-wait
+ * @param {number} [options.timeoutMs=2500] - Outer close-wait or liveness-poll
  *   window. Matches the Unix `STOP_SIGNAL_TIMEOUT_MS` so both
  *   platforms spend the same wall-clock time waiting for the child
  *   to die before reporting failure.
  * @param {typeof defaultSpawnSync} [options.spawnSync] - Override for tests.
+ * @param {(pid: number) => ('alive'|'dead'|'unknown'|boolean)} [options.isProcessAlive]
+ *   Operating system liveness probe used for rehydrated children; defaults to
+ *   the shared tri-state `process.kill(pid, 0)` probe. Unknown is never dead.
  * @returns {Promise<{ ok: true } | { ok: false, reason: 'still-running' }>}
  */
-export async function terminateChildWindows(child, { timeoutMs = 2500, spawnSync = defaultSpawnSync } = {}) {
-  if (hasChildExited(child)) {
+export async function terminateChildWindows(
+  child,
+  { timeoutMs = 2500, spawnSync = defaultSpawnSync, isProcessAlive = defaultIsProcessAlive } = {},
+) {
+  const rehydrated = isRehydratedChild(child);
+  if (!rehydrated && hasChildExited(child)) {
     return { ok: true };
   }
   const pid = child?.pid;
@@ -163,6 +210,10 @@ export async function terminateChildWindows(child, { timeoutMs = 2500, spawnSync
     // No PID means we cannot construct the taskkill command. The
     // Unix path returns silently in the same situation; mirror that.
     return { ok: true };
+  }
+
+  if (rehydrated) {
+    if (readLiveness(pid, isProcessAlive) === 'dead') return { ok: true };
   }
 
   const result = runTaskkillForce({ pid, spawnSync });
@@ -176,15 +227,22 @@ export async function terminateChildWindows(child, { timeoutMs = 2500, spawnSync
   }
   if (result.status === 'already-gone') {
     // `taskkill` confirmed the process is no longer reachable
-    // (exit 128 = "process not found", or EPERM/ESRCH). No close
+    // (exit 128 = "process not found", or ESRCH). No close
     // event will ever fire from the missing process; treat the
     // operation as immediately successful.
     return { ok: true };
   }
-  // result.status === 'killed': wait for the JS-side `close` event
-  // to confirm the kill landed.
-  if (hasChildExited(child)) {
+  // result.status === 'killed': wait for the JS-side `close` event to
+  // confirm a live ChildProcess kill, or poll the OS for a rehydrated
+  // synthetic child that has no process handle to emit that event.
+  if (!rehydrated && hasChildExited(child)) {
     return { ok: true };
+  }
+  if (rehydrated) {
+    if (await waitForProcessExit(pid, timeoutMs, isProcessAlive)) {
+      return { ok: true };
+    }
+    return { ok: false, reason: 'still-running' };
   }
   if (await waitForClose(child, timeoutMs)) {
     return { ok: true };

@@ -1,4 +1,5 @@
 import { spawn as defaultSpawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHmac } from 'node:crypto';
@@ -9,11 +10,9 @@ import { createHmac } from 'node:crypto';
  * Trust boundary (Phase 2B):
  *   The guardian is the sole authoritative owner of an `Active` v2 record for
  *   a given incarnation on this host. Bootstrap adoption from the lifecycle
- *   startup path uses `client.list()` and trusts the returned
- *   `(pid, port, incarnation)` tuple. This is intentional — the bootstrap
- *   scenario finds a child that already reached `Active` (no spawn-time
- *   `claimCapability` exists), so there is no protocol-level credential to
- *   hand to a would-be `adopt()` RPC.
+ *   startup path uses `client.list()` only after the lifecycle supplies its
+ *   stable owner/runtime identity. Ownerless or ambiguous active records are
+ *   surfaced as attention and are never silently attached.
  *
  *   The IPC permissioning model already enforces the trust boundary:
  *     Linux/POSIX (sub-phase W-A):
@@ -46,6 +45,8 @@ import {
   ManagedOpenCodeHandoffV2State,
   canonicalizeManagedOpenCodeHandoffV2Record,
   normalizeManagedOpenCodeHandoffV2Record,
+  normalizeManagedOpenCodeHandoffV2OwnerIdentity,
+  normalizeManagedOpenCodeHandoffV2LaunchSpec,
 } from '../opencode/managed-opencode-handoff-v2/record.js';
 import { createManagedOpenCodeHandoffV2Store } from '../opencode/managed-opencode-handoff-v2/store.js';
 import { createManagedOpenCodeHandoffV2Protocol } from '../opencode/managed-opencode-handoff-v2/protocol.js';
@@ -53,6 +54,9 @@ import { createManagedOpenCodeHandoffV2SecretProvider } from '../opencode/manage
 import { resolveManagedOpenCodeHandoffV2Root } from '../opencode/managed-opencode-handoff-v2/filesystem.js';
 import { GuardianIpcServer } from './ipc-server.js';
 import { terminateChildWindows } from './windows-process.js';
+import { readProcessLaunchIdentity, readProcessStartTicks } from './process-identity.js';
+import { createLaunchFingerprint } from './owner-identity.js';
+import { resolveGuardianPaths } from './paths.js';
 
 const DEFAULT_HEALTH_CHECK_INTERVAL_MS = 5000;
 const DEFAULT_LEASE_RENEWAL_INTERVAL_MS = 30000;
@@ -60,22 +64,18 @@ const DEFAULT_CLEANUP_INTERVAL_MS = 60000;
 const DEFAULT_LEASE_MS = 5 * 60 * 1000;
 const STOP_SIGNAL_TIMEOUT_MS = 2500;
 const STOP_KILL_TIMEOUT_MS = 1000;
-const BOOT_TIME_PATH = '/proc/1';
 const ZERO_MAC = Buffer.alloc(32).toString('base64url');
 
 const isSafeNonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
-
-const getBootTime = () => {
-  if (process.platform === 'win32') {
-    return 0;
-  }
-  try {
-    const stat = fs.statSync(BOOT_TIME_PATH);
-    return Math.floor(stat.ctimeMs);
-  } catch {
-    return 0;
-  }
+const normalizeObservedProcessStartTicks = (value) => {
+  if (Number.isSafeInteger(value) && value >= 0) return String(value);
+  if (typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value)) return value;
+  return null;
 };
+const isCanonicalProcessStartTicks = (value) => typeof value === 'string'
+  && /^(?:0|[1-9]\d*)$/.test(value);
+const isExpiredRecoveryState = (state) => state === ManagedOpenCodeHandoffV2State.Stopping
+  || state === ManagedOpenCodeHandoffV2State.HandoffPrepared;
 
 const defaultLog = (message) => {
   // eslint-disable-next-line no-console
@@ -96,6 +96,63 @@ const defaultSocketPath = (rootDir) => path.join(
   'guardian.sock',
 );
 
+const isSafeHostname = (value) => typeof value === 'string'
+  && value.length > 0
+  && value.length <= 255
+  && /^[A-Za-z0-9_.:[\]-]+$/.test(value);
+
+const isSafeEnvironmentKey = (key) => typeof key === 'string'
+  && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+  && !/^(?:NODE_OPTIONS|NODE_PATH|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_INSERT_LIBRARIES|COMSPEC|ComSpec)$/i.test(key);
+
+const normalizeSpawnRequest = ({ binary, args = [], hostname, port, cwd, env, launchSpec } = {}) => {
+  const spec = launchSpec && typeof launchSpec === 'object'
+    ? launchSpec
+    : { binary, args, hostname, port, cwd };
+  if (typeof spec.binary !== 'string' || spec.binary.length === 0) {
+    throw new TypeError('Invalid binary');
+  }
+  if (!Number.isSafeInteger(spec.port) || spec.port <= 0 || spec.port > 65535) {
+    throw new TypeError('Invalid port');
+  }
+  const normalized = normalizeManagedOpenCodeHandoffV2LaunchSpec({
+    binary: spec.binary,
+    args: Array.isArray(spec.args) ? spec.args : [],
+    hostname: spec.hostname,
+    port: spec.port,
+    cwd: spec.cwd,
+  });
+  if (!normalized || !isSafeHostname(normalized.hostname)) {
+    throw new TypeError('Invalid managed OpenCode launch specification');
+  }
+  const binaryName = path.basename(normalized.binary).toLowerCase();
+  const wrapperName = normalized.args[0] ? path.basename(normalized.args[0]).toLowerCase() : '';
+  const isOpenCodeBinary = binaryName.startsWith('opencode')
+    || wrapperName.includes('opencode')
+    || (normalized.binary === process.execPath && wrapperName.includes('guardian-test-opencode'));
+  if (!isOpenCodeBinary) {
+    throw new Error('Guardian launch rejected: executable is not an allowed OpenCode launch target');
+  }
+  const normalizedEnv = {};
+  if (env !== undefined) {
+    if (!env || typeof env !== 'object' || Array.isArray(env)) {
+      throw new TypeError('Invalid managed OpenCode environment');
+    }
+    const entries = Object.entries(env);
+    if (entries.length > 512) throw new Error('Guardian launch rejected: environment is too large');
+    for (const [key, value] of entries) {
+      if (!isSafeEnvironmentKey(key) || typeof value !== 'string' || value.length > 64 * 1024) {
+        throw new Error(`Guardian launch rejected: invalid environment key ${key}`);
+      }
+      normalizedEnv[key] = value;
+    }
+  }
+  if (!path.isAbsolute(normalized.cwd)) {
+    throw new Error('Guardian launch rejected: cwd must be absolute');
+  }
+  return { ...normalized, env: normalizedEnv };
+};
+
 export class ManagedOpenCodeGuardian {
   #store;
   #protocol;
@@ -110,9 +167,21 @@ export class ManagedOpenCodeGuardian {
   #ipcServer;
   #timers = [];
   #children = new Map();
+  #attention = new Map();
   #started = false;
   #rootDir;
   #spawnFn;
+  #authSecretPath;
+  #processInspector;
+  #processLiveness;
+  #aclInspector;
+  #reparseChecker;
+  #stopSignalTimeoutMs;
+  #stopKillTimeoutMs;
+  #onStopped;
+  #stoppedCallbackInvoked = false;
+  #mutationQueue = Promise.resolve();
+  #shutdownRequested = false;
 
   constructor({
     store,
@@ -132,6 +201,14 @@ export class ManagedOpenCodeGuardian {
     log = defaultLog,
     rootDir,
     spawnFn,
+    authSecretPath,
+    processInspector,
+    processLiveness,
+    aclInspector,
+    reparseChecker,
+    stopSignalTimeoutMs = STOP_SIGNAL_TIMEOUT_MS,
+    stopKillTimeoutMs = STOP_KILL_TIMEOUT_MS,
+    onStopped,
   } = {}) {
     if (!store || typeof store.read !== 'function') {
       throw new TypeError('ManagedOpenCodeGuardian requires a store');
@@ -159,11 +236,30 @@ export class ManagedOpenCodeGuardian {
       ? cleanupIntervalMs
       : DEFAULT_CLEANUP_INTERVAL_MS;
     this.#rootDir = rootDir;
-    this.#socketPath = socketPath ?? defaultSocketPath(rootDir);
-    this.#portPath = typeof portPath === 'string' && portPath.length > 0 ? portPath : undefined;
+    const resolvedPaths = resolveGuardianPaths({ rootDir });
+    this.#socketPath = socketPath ?? resolvedPaths.socketPath ?? defaultSocketPath(rootDir);
+    this.#portPath = typeof portPath === 'string' && portPath.length > 0
+      ? portPath
+      : undefined;
     this.#username = typeof username === 'string' && username.length > 0 ? username : undefined;
     this.#log = log;
     this.#spawnFn = spawnFn;
+    this.#authSecretPath = authSecretPath ?? resolveGuardianPaths({
+      rootDir,
+      socketPath: this.#socketPath,
+      portPath: this.#portPath,
+    }).authSecretPath;
+    this.#processInspector = processInspector;
+    this.#processLiveness = processLiveness;
+    this.#aclInspector = aclInspector;
+    this.#reparseChecker = reparseChecker;
+    this.#stopSignalTimeoutMs = isSafeNonNegativeInteger(stopSignalTimeoutMs)
+      ? stopSignalTimeoutMs
+      : STOP_SIGNAL_TIMEOUT_MS;
+    this.#stopKillTimeoutMs = isSafeNonNegativeInteger(stopKillTimeoutMs)
+      ? stopKillTimeoutMs
+      : STOP_KILL_TIMEOUT_MS;
+    this.#onStopped = typeof onStopped === 'function' ? onStopped : null;
   }
 
   get portPath() {
@@ -186,10 +282,33 @@ export class ManagedOpenCodeGuardian {
     this.#spawnFn = fn;
   }
 
+  #enqueueMutation(operation, { markShutdown = false } = {}) {
+    const blockedByShutdown = !markShutdown && this.#shutdownRequested;
+    if (markShutdown) this.#shutdownRequested = true;
+
+    const queued = this.#mutationQueue.then(() => {
+      if (blockedByShutdown) {
+        throw new Error('Guardian shutdown is in progress');
+      }
+      return operation();
+    });
+    // Keep the queue usable after a failed mutation while preserving the
+    // failure for the caller that owns this operation.
+    this.#mutationQueue = queued.catch(() => {});
+    return queued;
+  }
+
   async start() {
     if (this.#started) {
       throw new Error('ManagedOpenCodeGuardian is already started');
     }
+    if (process.platform === 'win32' && !this.#portPath) {
+      throw new TypeError('Windows portPath is required');
+    }
+    if (process.platform !== 'win32' && !this.#socketPath) {
+      throw new TypeError('POSIX socketPath is required');
+    }
+
     // W-C: the `process.platform === 'win32'` rejection is removed.
     // The transport factory inside `GuardianIpcServer.start()` dispatches
     // per-platform: Linux uses the Unix-domain socket bound to
@@ -199,19 +318,40 @@ export class ManagedOpenCodeGuardian {
     this.#log('[guardian] starting');
     this.#started = true;
 
-    this.#ipcServer = new GuardianIpcServer({
-      socketPath: this.#socketPath,
-      portPath: this.#portPath,
-      username: this.#username,
-      guardian: this,
-      log: this.#log,
-    });
-    await this.#ipcServer.start();
-    this.startTimers();
-    this.#log('[guardian] started');
+    try {
+      this.#ipcServer = new GuardianIpcServer({
+        platform: process.platform,
+        socketPath: this.#socketPath,
+        portPath: this.#portPath,
+        username: this.#username,
+        guardian: this,
+        log: this.#log,
+        authSecretPath: this.#authSecretPath,
+        aclInspector: this.#aclInspector,
+        reparseChecker: this.#reparseChecker,
+      });
+      await this.#rehydrateChildren();
+      await this.#ipcServer.start();
+      this.startTimers();
+      this.#log('[guardian] started');
+    } catch (error) {
+      this.stopTimers();
+      try { await this.#ipcServer.stop(); } catch { /* best-effort startup rollback */ }
+      this.#ipcServer = null;
+      try { await this.#store.close(); } catch (closeError) {
+        this.#log(`[guardian] error closing recovery store after startup failure: ${closeError.message}`);
+      }
+      this.#started = false;
+      throw error;
+    }
   }
 
   async stop() {
+    if (!this.#started && !this.#shutdownRequested) return;
+    return this.#enqueueMutation(() => this.#stopInternal(), { markShutdown: true });
+  }
+
+  async #stopInternal() {
     if (!this.#started) {
       return;
     }
@@ -220,14 +360,27 @@ export class ManagedOpenCodeGuardian {
 
     // Stop all tracked children.
     const children = Array.from(this.#children.entries());
+    const failures = [];
     for (const [incarnation] of children) {
       try {
-        await this.stopChild({ incarnation });
+        await this.#stopChild({ incarnation, administrative: true });
       } catch (error) {
         this.#log(`[guardian] error stopping child ${incarnation}: ${error.message}`);
+        failures.push({ incarnation, error });
       }
     }
+
+    if (failures.length > 0) {
+      const details = failures
+        .map(({ incarnation, error }) => `${incarnation}: ${error.message}`)
+        .join('; ');
+      const failure = new Error(`Guardian stop failed; live child records remain recoverable: ${details}`);
+      failure.code = 'GUARDIAN_STOP_FAILED';
+      throw failure;
+    }
+
     this.#children.clear();
+    this.#attention.clear();
 
     if (this.#ipcServer) {
       await this.#ipcServer.stop();
@@ -242,29 +395,543 @@ export class ManagedOpenCodeGuardian {
 
     this.#started = false;
     this.#log('[guardian] stopped');
+    if (this.#onStopped && !this.#stoppedCallbackInvoked) {
+      this.#stoppedCallbackInvoked = true;
+      try {
+        await this.#onStopped();
+      } catch (error) {
+        this.#log(`[guardian] stopped callback failed: ${error?.message || String(error)}`);
+      }
+    }
   }
 
-  async spawnManagedOpenCode({ port, hostname, binary, cwd, env, leaseMs = DEFAULT_LEASE_MS }) {
-    if (!isSafeNonNegativeInteger(port) || port <= 0 || port > 65535) {
-      throw new TypeError('Invalid port');
+  async reload() {
+    return this.#enqueueMutation(() => {
+      if (!this.#started) throw new Error('Guardian is not started');
+      this.stopTimers();
+      this.startTimers();
+      return { reloaded: true };
+    });
+  }
+
+  #inspectProcess(pid, record) {
+    if (this.#processInspector) {
+      return this.#processInspector({ pid, record }) || null;
     }
-    if (typeof binary !== 'string' || binary.length === 0) {
-      throw new TypeError('Invalid binary');
+    return {
+      processStartTicks: readProcessStartTicks(pid),
+      launch: readProcessLaunchIdentity(pid),
+    };
+  }
+
+  #readProcessStartTicks(pid) {
+    const inspected = this.#inspectProcess(pid);
+    return normalizeObservedProcessStartTicks(inspected?.processStartTicks);
+  }
+
+  #validateProcessIdentity(record, inspected, { requireLaunch = false } = {}) {
+    const processStartTicks = normalizeObservedProcessStartTicks(inspected?.processStartTicks);
+    if (requireLaunch && (!record?.launchSpec || typeof record.launchSpec !== 'object')) {
+      return process.platform === 'win32'
+        ? 'Windows process launch identity is unavailable'
+        : 'POSIX process launch identity is unavailable';
     }
-    if (typeof cwd !== 'string' || cwd.length === 0) {
-      throw new TypeError('Invalid cwd');
+    if (requireLaunch && !isCanonicalProcessStartTicks(record?.processStartTicks)) {
+      return process.platform === 'win32'
+        ? 'Windows process start identity is unavailable'
+        : 'POSIX process start identity is unavailable';
+    }
+    if (record.processStartTicks !== null && processStartTicks === null) {
+      return process.platform === 'win32'
+        ? 'Windows process start identity is unavailable'
+        : 'POSIX process start identity is unavailable';
+    }
+    if (
+      processStartTicks !== null
+      && processStartTicks !== record.processStartTicks
+    ) {
+      return 'PID start identity changed';
     }
 
-    this.#log(`[guardian] spawning managed OpenCode on port ${port}`);
+    const commandLine = inspected?.launch?.commandLine;
+    if (requireLaunch && (typeof commandLine !== 'string' || commandLine.length === 0)) {
+      return process.platform === 'win32'
+        ? 'Windows process launch identity is unavailable'
+        : 'POSIX process launch identity is unavailable';
+    }
+    if (commandLine && record.launchSpec) {
+      const tokens = [
+        path.basename(record.launchSpec.binary),
+        ...record.launchSpec.args.map((arg) => path.basename(arg)),
+        '--hostname',
+        record.launchSpec.hostname,
+        '--port',
+        String(record.port),
+      ];
+      if (!tokens.every((token) => commandLine.includes(token))) {
+        return 'live executable or launch arguments do not match';
+      }
+      if (inspected.launch.cwd && path.resolve(inspected.launch.cwd) !== path.resolve(record.launchSpec.cwd)) {
+        return 'live working directory does not match';
+      }
+    }
+    if (inspected?.launchFingerprint && inspected.launchFingerprint !== record.launchFingerprint) {
+      return 'live launch identity changed';
+    }
+    return null;
+  }
+
+  #validateRehydratedRecordIdentity(record, pid) {
+    let inspected;
+    try {
+      inspected = this.#inspectProcess(pid, record);
+    } catch {
+      inspected = null;
+    }
+    return this.#validateProcessIdentity(record, inspected, { requireLaunch: true });
+  }
+
+  #validateRehydratedIdentity(entry) {
+    if (!entry?.rehydrated) return null;
+    const failure = this.#validateRehydratedRecordIdentity(entry.record, entry.pid);
+    if (failure) this.#rememberAttention(entry.record, failure);
+    return failure;
+  }
+
+  #assertRehydratedIdentity(entry) {
+    const failure = this.#validateRehydratedIdentity(entry);
+    if (!failure) return;
+    const error = new Error(`Guardian child identity validation failed: ${failure}`);
+    error.code = 'GUARDIAN_CHILD_IDENTITY_INVALID';
+    throw error;
+  }
+
+  #isProcessAlive(pid) {
+    if (typeof this.#processLiveness === 'function') {
+      try {
+        const state = this.#processLiveness(pid);
+        return state !== false && state !== 'dead';
+      } catch {
+        return true;
+      }
+    }
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      // ESRCH is authoritative death. Permission and other probe failures
+      // are unknown and must not retire or clear a durable child record.
+      return error?.code !== 'ESRCH';
+    }
+  }
+
+  #isProcessDefinitelyGone(pid) {
+    if (typeof this.#processLiveness === 'function') {
+      try {
+        const state = this.#processLiveness(pid);
+        return state === false || state === 'dead';
+      } catch {
+        return false;
+      }
+    }
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (error) {
+      return error?.code === 'ESRCH';
+    }
+  }
+
+  #rememberAttention(record, reason) {
+    const incarnation = typeof record?.incarnation === 'string' && record.incarnation.length <= 256
+      ? record.incarnation
+      : `invalid-${this.#attention.size + 1}`;
+    const launchPort = record?.launchSpec?.port;
+    const port = Number.isSafeInteger(record?.port) && record.port > 0 && record.port <= 65535
+      ? record.port
+      : (Number.isSafeInteger(launchPort) && launchPort > 0 && launchPort <= 65535 ? launchPort : null);
+    this.#attention.set(incarnation, {
+      state: 'attention',
+      attention: true,
+      incarnation,
+      ...(typeof record?.ownerInstanceId === 'string' ? { ownerInstanceId: record.ownerInstanceId } : {}),
+      ...(typeof record?.runtimeIdentity === 'string' ? { runtimeIdentity: record.runtimeIdentity } : {}),
+      ...(Number.isSafeInteger(record?.pid) && record.pid > 0 ? { pid: record.pid } : {}),
+      ...(port !== null ? { port } : {}),
+      reason,
+    });
+  }
+
+  #assertLaunchAvailable(port, owner) {
+    for (const [incarnation, entry] of this.#children) {
+      const entryPort = entry.port ?? entry.record?.launchSpec?.port ?? null;
+      const sameStoppingOwner = entry.record?.state === ManagedOpenCodeHandoffV2State.Stopping
+        && owner
+        && entry.owner?.ownerInstanceId === owner.ownerInstanceId
+        && entry.owner?.runtimeIdentity === owner.runtimeIdentity;
+      if (entryPort === port || !Number.isSafeInteger(entryPort) || sameStoppingOwner) {
+        throw new Error(`Guardian launch blocked by unresolved child ${incarnation}`);
+      }
+    }
+
+    for (const attention of this.#attention.values()) {
+      const sameOwner = owner
+        && attention.ownerInstanceId === owner.ownerInstanceId
+        && attention.runtimeIdentity === owner.runtimeIdentity;
+      if (attention.port === port || !Number.isSafeInteger(attention.port) || sameOwner) {
+        throw new Error(`Guardian launch blocked by attention record ${attention.incarnation}`);
+      }
+    }
+  }
+
+  async #interruptLatestLaunchRecord(incarnation, fallbackRecord) {
+    if (typeof this.#protocol.readRecord !== 'function') {
+      return this.#protocol.markInterrupted({
+        incarnation,
+        expectedRevision: fallbackRecord.revision,
+      });
+    }
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const loaded = await this.#protocol.readRecord({ incarnation });
+      if (!loaded?.ok) {
+        this.#rememberAttention(fallbackRecord, `launch cleanup could not read the authoritative record: ${loaded?.reason || 'read-failed'}`);
+        return loaded || { ok: false, reason: 'record-read-failed' };
+      }
+
+      const record = loaded.record;
+      if (
+        record.state === ManagedOpenCodeHandoffV2State.Interrupted
+        || record.state === ManagedOpenCodeHandoffV2State.Retired
+      ) {
+        return loaded;
+      }
+      if (record.state === ManagedOpenCodeHandoffV2State.LaunchDelivering) {
+        this.#rememberAttention(record, 'launch delivery is still fenced; refusing to guess child ownership');
+        return { ok: false, reason: 'launch-delivery-fenced' };
+      }
+      if (
+        record.state !== ManagedOpenCodeHandoffV2State.Reserved
+        && record.state !== ManagedOpenCodeHandoffV2State.Launching
+      ) {
+        return loaded;
+      }
+
+      const interrupted = await this.#protocol.markInterrupted({
+        incarnation,
+        expectedRevision: record.revision,
+      });
+      if (interrupted?.ok || interrupted?.reason !== 'stale-revision' || attempt === 1) {
+        if (!interrupted?.ok) {
+          this.#rememberAttention(record, `launch cleanup failed: ${interrupted?.reason || 'unknown failure'}`);
+        }
+        return interrupted;
+      }
+    }
+
+    return { ok: false, reason: 'launch-cleanup-failed' };
+  }
+
+  async #markStaleRecord(record, reason) {
+    this.#log(`[guardian] ignoring stale child record ${record.incarnation}: ${reason}`);
+    this.#rememberAttention(record, reason);
+    try {
+      await this.#protocol.markInterrupted({
+        incarnation: record.incarnation,
+        expectedRevision: record.revision,
+      });
+    } catch {
+      // A concurrent guardian or a damaged record remains non-adoptable. Do
+      // not turn a failed authority update into a live child claim.
+    }
+  }
+
+  #createRehydratedChild(record) {
+    const child = new EventEmitter();
+    const confirmExit = (signal = 'SIGTERM') => {
+      if (!this.#isProcessDefinitelyGone(record.pid)) return false;
+      if (child.exitCode === null && child.signalCode === null) {
+        child.exitCode = 0;
+        child.signalCode = signal;
+        queueMicrotask(() => child.emit('close', 0, signal));
+      }
+      return true;
+    };
+    Object.assign(child, {
+      pid: record.pid,
+      exitCode: null,
+      signalCode: null,
+      isRehydrated: true,
+      confirmExit,
+      kill: (signal = 'SIGTERM') => {
+        if (process.platform !== 'win32') {
+          if (confirmExit(signal)) return false;
+          if (this.#validateRehydratedRecordIdentity(record, record.pid)) return false;
+        }
+        try {
+          if (process.platform === 'win32') {
+            // The actual Windows termination is performed by the helper in
+            // #terminateChild. This method only satisfies ChildProcess shape.
+            return true;
+          }
+          process.kill(-record.pid, signal);
+          process.kill(record.pid, signal);
+        } catch {
+          // The process may have exited between identity and termination.
+        }
+        // A synthetic child has no kernel-backed ChildProcess close event. Do
+        // not set exitCode/signalCode or emit `close` until confirmExit() has
+        // observed authoritative OS death.
+        return true;
+      },
+    });
+    return child;
+  }
+
+  async #rehydrateChildren() {
+    if (typeof this.#store.list !== 'function') {
+      throw new Error('Guardian recovery store cannot list child records');
+    }
+    let rows;
+    try {
+      rows = await this.#store.list();
+    } catch (error) {
+      this.#log(`[guardian] recovery store read failed: ${error.message}`);
+      throw new Error(`Guardian recovery store read failed: ${error.message}`, { cause: error });
+    }
+    if (!Array.isArray(rows)) {
+      throw new Error('Guardian recovery store returned an invalid child list');
+    }
+
+    for (const raw of rows) {
+      const verified = await this.#protocol.verifyRecord(raw, {
+        allowExpired: isExpiredRecoveryState(raw?.state),
+      });
+      if (!verified.ok) {
+        this.#rememberAttention(raw, `record verification failed: ${verified.reason}`);
+        continue;
+      }
+      let record = verified.record;
+      if (
+        record.state === ManagedOpenCodeHandoffV2State.Reserved
+        || record.state === ManagedOpenCodeHandoffV2State.LaunchDelivering
+        || record.state === ManagedOpenCodeHandoffV2State.Launching
+      ) {
+        this.#rememberAttention(
+          record,
+          'durable launch has no bound process identity; refusing to resume or guess a detached child',
+        );
+        continue;
+      }
+      if (record.state === ManagedOpenCodeHandoffV2State.Stopping) {
+        if (
+          !Number.isSafeInteger(record.pid)
+          || record.pid <= 0
+          || !Number.isSafeInteger(record.port)
+          || record.port <= 0
+          || !isCanonicalProcessStartTicks(record.processStartTicks)
+        ) {
+          this.#rememberAttention(record, 'stopping record has no complete process identity');
+          continue;
+        }
+        if (!this.#isProcessAlive(record.pid)) {
+          const retired = await this.#protocol.retire({
+            incarnation: record.incarnation,
+            expectedRevision: record.revision,
+            allowExpired: verified.expired === true,
+          });
+          if (!retired.ok) {
+            this.#rememberAttention(record, `stopping record could not be retired: ${retired.reason}`);
+          }
+          continue;
+        }
+        const inspected = this.#inspectProcess(record.pid, record);
+        const identityFailure = this.#validateProcessIdentity(record, inspected, { requireLaunch: true });
+        if (identityFailure) {
+          this.#rememberAttention(record, identityFailure);
+          continue;
+        }
+        this.#children.set(record.incarnation, {
+          child: this.#createRehydratedChild(record),
+          pid: record.pid,
+          port: record.port,
+          url: `http://127.0.0.1:${record.port}`,
+          incarnation: record.incarnation,
+          owner: record.ownerInstanceId && record.runtimeIdentity && record.launchFingerprint
+            ? {
+              ownerInstanceId: record.ownerInstanceId,
+              runtimeIdentity: record.runtimeIdentity,
+              launchFingerprint: record.launchFingerprint,
+            }
+            : null,
+          launchSpec: record.launchSpec,
+          record,
+          rehydrated: true,
+        });
+        this.#log(`[guardian] recovered stopping OpenCode pid=${record.pid} port=${record.port} incarnation=${record.incarnation}`);
+        continue;
+      }
+      if (![
+        ManagedOpenCodeHandoffV2State.Active,
+        ManagedOpenCodeHandoffV2State.HandoffPrepared,
+        ManagedOpenCodeHandoffV2State.Claimed,
+      ].includes(record.state)) continue;
+      if (!record.ownerInstanceId || !record.runtimeIdentity || !record.launchFingerprint || !record.launchSpec) {
+        await this.#markStaleRecord(record, 'missing stable owner or launch identity');
+        continue;
+      }
+      if (!this.#isProcessAlive(record.pid)) {
+        if (record.state === ManagedOpenCodeHandoffV2State.HandoffPrepared && verified.expired === true) {
+          const stopping = await this.#protocol.beginStopping({
+            incarnation: record.incarnation,
+            expectedRevision: record.revision,
+            allowExpired: true,
+          });
+          if (stopping.ok) {
+            const retired = await this.#protocol.retire({
+              incarnation: record.incarnation,
+              expectedRevision: stopping.record.revision,
+              allowExpired: true,
+            });
+            if (retired.ok) continue;
+            this.#rememberAttention(record, `expired handoff record could not be retired: ${retired.reason}`);
+            continue;
+          }
+          this.#rememberAttention(record, `expired handoff record could not enter stopping state: ${stopping.reason}`);
+          continue;
+        }
+        await this.#markStaleRecord(record, 'process is not alive');
+        continue;
+      }
+      const inspected = this.#inspectProcess(record.pid, record);
+      const identityFailure = this.#validateProcessIdentity(record, inspected, { requireLaunch: true });
+      if (identityFailure) {
+        await this.#markStaleRecord(record, identityFailure);
+        continue;
+      }
+      const expectedFingerprint = createLaunchFingerprint(record.launchSpec);
+      if (expectedFingerprint !== record.launchFingerprint) {
+        await this.#markStaleRecord(record, 'stored launch fingerprint is inconsistent');
+        continue;
+      }
+      const health = await this.#probeHealth(record.port);
+      if (!health) {
+        await this.#markStaleRecord(record, 'health endpoint is unavailable');
+        continue;
+      }
+      if (record.state === ManagedOpenCodeHandoffV2State.HandoffPrepared) {
+        let active = await this.#protocol.abortHandoff({
+          incarnation: record.incarnation,
+          expectedRevision: record.revision,
+        });
+        if (!active.ok && active.reason === 'record-expired'
+          && typeof this.#protocol.recoverExpiredHandoff === 'function') {
+          active = await this.#protocol.recoverExpiredHandoff({
+            incarnation: record.incarnation,
+            expectedRevision: record.revision,
+          });
+        }
+        if (!active.ok) {
+          await this.#markStaleRecord(record, `handoff recovery failed: ${active.reason}`);
+          continue;
+        }
+        record = active.record;
+      }
+      this.#children.set(record.incarnation, {
+        child: this.#createRehydratedChild(record),
+        pid: record.pid,
+        port: record.port,
+        url: `http://127.0.0.1:${record.port}`,
+        incarnation: record.incarnation,
+        owner: {
+          ownerInstanceId: record.ownerInstanceId,
+          runtimeIdentity: record.runtimeIdentity,
+          launchFingerprint: record.launchFingerprint,
+        },
+        launchSpec: record.launchSpec,
+        record,
+        rehydrated: true,
+      });
+      this.#log(`[guardian] recovered OpenCode pid=${record.pid} port=${record.port} incarnation=${record.incarnation}`);
+    }
+  }
+
+  async #probeHealth(port) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/global/health`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) return false;
+      const body = await response.json().catch(() => null);
+      return body?.healthy === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async spawnManagedOpenCode(options = {}) {
+    return this.#enqueueMutation(() => this.#spawnManagedOpenCode(options));
+  }
+
+  async #spawnManagedOpenCode({
+    port,
+    hostname,
+    binary,
+    args,
+    cwd,
+    env,
+    leaseMs = DEFAULT_LEASE_MS,
+    owner,
+    launchSpec,
+  } = {}) {
+    if (!this.#started) throw new Error('Guardian is not started');
+    const normalizedSpec = normalizeSpawnRequest({
+      binary,
+      args,
+      hostname,
+      port,
+      cwd,
+      env,
+      launchSpec,
+    });
+    const { env: normalizedEnv, ...normalizedLaunchSpec } = normalizedSpec;
+    const parsedOwner = normalizeManagedOpenCodeHandoffV2OwnerIdentity(owner ?? {});
+    const legacyInjectedSpawn = !owner && this.#spawnFn;
+    const normalizedOwner = parsedOwner && Object.values(parsedOwner).every((value) => value !== null)
+      ? parsedOwner
+      : null;
+    if (!normalizedOwner && !legacyInjectedSpawn) {
+      throw new Error('Guardian launch rejected: stable owner identity is required');
+    }
+    const expectedLaunchFingerprint = createLaunchFingerprint(normalizedLaunchSpec);
+    if (normalizedOwner && normalizedOwner.launchFingerprint !== expectedLaunchFingerprint) {
+      throw new Error('Guardian launch rejected: launch fingerprint does not match launch specification');
+    }
+    this.#assertLaunchAvailable(normalizedSpec.port, normalizedOwner);
+    if (!this.#spawnFn) {
+      try {
+        const stat = fs.statSync(normalizedSpec.cwd);
+        if (!stat.isDirectory()) throw new Error('not a directory');
+      } catch {
+        throw new Error('Guardian launch rejected: cwd is not an accessible directory');
+      }
+    }
+
+    this.#log(`[guardian] spawning managed OpenCode on port ${normalizedSpec.port}`);
 
     // 1. Reserve launch.
-    const reservation = await this.#protocol.reserveLaunch({ leaseMs });
+    const reservation = await this.#protocol.reserveLaunch({
+      leaseMs,
+      ...(normalizedOwner ? { owner: normalizedOwner, launchSpec: normalizedLaunchSpec } : {}),
+    });
     if (!reservation.ok) {
       throw new Error(`Failed to reserve launch: ${reservation.reason}`);
     }
     const incarnation = reservation.record.incarnation;
 
     let child;
+    let childTerminationConfirmed = true;
     try {
       // 2. Begin launch with credential.
       const launching = await this.#protocol.beginLaunch({
@@ -272,10 +939,8 @@ export class ManagedOpenCodeGuardian {
         expectedRevision: reservation.record.revision,
         withCredential: async (credential) => {
           try {
-            const credentialFingerprint = createHmac('sha256', credential)
-              .update(Buffer.from(incarnation, 'base64url'))
-              .digest('base64url');
-            this.#log(`[guardian] armed credential for ${incarnation} (fingerprint: ${credentialFingerprint.slice(0, 8)}...)`);
+            // Credential bytes are deliberately never logged. The v2 record
+            // already stores only a derived fingerprint.
           } finally {
             credential?.fill(0);
           }
@@ -287,12 +952,20 @@ export class ManagedOpenCodeGuardian {
       }
 
       // 3. Spawn child process.
-      const spawnArgs = ['serve', '--hostname', hostname ?? '127.0.0.1', '--port', String(port)];
+      const spawnArgs = [
+        ...normalizedSpec.args,
+        'serve',
+        '--hostname',
+        normalizedSpec.hostname,
+        '--port',
+        String(normalizedSpec.port),
+      ];
       const spawnFn = this.#spawnFn ?? defaultSpawn;
-      child = spawnFn(binary, spawnArgs, {
-        cwd,
-        env,
+      child = spawnFn(normalizedSpec.binary, spawnArgs, {
+        cwd: normalizedSpec.cwd,
+        env: normalizedEnv,
         detached: true,
+        windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
@@ -357,9 +1030,10 @@ export class ManagedOpenCodeGuardian {
         expectedRevision: launching.record.revision,
         identity: {
           pid: child.pid,
-          port,
-          processStartTicks: getBootTime(),
+          port: normalizedSpec.port,
+          processStartTicks: this.#readProcessStartTicks(child.pid),
         },
+        ...(normalizedOwner ? { owner: normalizedOwner, launchSpec: normalizedLaunchSpec } : {}),
       });
 
       if (!active.ok) {
@@ -372,81 +1046,162 @@ export class ManagedOpenCodeGuardian {
       this.#children.set(incarnation, {
         child,
         pid: child.pid,
-        port,
+        port: normalizedSpec.port,
         url,
         incarnation,
+        owner: normalizedOwner,
+        launchSpec: normalizedLaunchSpec,
         record: active.record,
       });
 
-      this.#log(`[guardian] spawned OpenCode pid=${child.pid} port=${port} incarnation=${incarnation}`);
-      return { incarnation, pid: child.pid, port };
+      this.#log(`[guardian] spawned OpenCode pid=${child.pid} port=${normalizedSpec.port} incarnation=${incarnation}`);
+      return {
+        incarnation,
+        pid: child.pid,
+        port: normalizedSpec.port,
+        owner: normalizedOwner,
+      };
     } catch (error) {
       // Terminate orphaned child and clean up v2 record on failure.
       if (child) {
         try {
           await this.#terminateChild(child);
+          childTerminationConfirmed = !this.#isProcessAlive(child.pid);
         } catch {
-          // Best-effort termination.
+          childTerminationConfirmed = false;
         }
       }
-      try {
-        await this.#protocol.markInterrupted({
-          incarnation,
-          expectedRevision: reservation.record.revision,
-        });
-      } catch {
-        // Best-effort cleanup.
+      if (childTerminationConfirmed) {
+        try {
+          await this.#interruptLatestLaunchRecord(incarnation, reservation.record);
+        } catch (cleanupError) {
+          this.#rememberAttention(
+            reservation.record,
+            `launch cleanup failed: ${cleanupError?.message || String(cleanupError)}`,
+          );
+        }
+      } else {
+        const latest = typeof this.#protocol.readRecord === 'function'
+          ? await this.#protocol.readRecord({ incarnation }).catch(() => null)
+          : null;
+        this.#rememberAttention(
+          latest?.ok ? latest.record : reservation.record,
+          'failed launch child could not be confirmed terminated; refusing to clear its durable binding',
+        );
       }
       throw error;
     }
   }
 
-  async stopChild({ incarnation }) {
+  #assertOwnerMatch(entry, owner, administrative = false) {
+    if (administrative) return;
+    if (!entry.owner?.ownerInstanceId) {
+      throw new Error('Guardian child ownership identity is required');
+    }
+    const normalized = normalizeManagedOpenCodeHandoffV2OwnerIdentity(owner ?? {});
+    if (!normalized || Object.values(normalized).some((value) => value === null)) {
+      throw new Error('Guardian child ownership identity is required');
+    }
+    if (
+      normalized.ownerInstanceId !== entry.owner.ownerInstanceId
+      || normalized.runtimeIdentity !== entry.owner.runtimeIdentity
+      || normalized.launchFingerprint !== entry.owner.launchFingerprint
+    ) {
+      throw new Error('Guardian child ownership identity does not match');
+    }
+  }
+
+  async stopChild(options = {}) {
+    return this.#enqueueMutation(() => this.#stopChild(options));
+  }
+
+  async #stopChild({ incarnation, owner, administrative = false }) {
     const entry = this.#children.get(incarnation);
     if (!entry) {
       throw new Error(`Child not found: ${incarnation}`);
     }
+    this.#assertOwnerMatch(entry, owner, administrative);
 
     this.#log(`[guardian] stopping child ${incarnation}`);
 
     const record = entry.record;
-    const stopping = await this.#protocol.beginStopping({
-      incarnation,
-      expectedRevision: record.revision,
-    });
-    if (!stopping.ok) {
-      throw new Error(`Failed to begin stopping: ${stopping.reason}`);
-    }
+    const stopping = record.state === ManagedOpenCodeHandoffV2State.Stopping
+      ? { ok: true, record }
+      : await this.#protocol.beginStopping({
+        incarnation,
+        expectedRevision: record.revision,
+        allowExpired: true,
+      });
+    if (!stopping.ok) throw new Error(`Failed to begin stopping: ${stopping.reason}`);
+    entry.record = stopping.record;
 
-    await this.#terminateChild(entry.child);
+    const terminationConfirmed = await this.#terminateChild(entry.child, stopping.record);
+    if (terminationConfirmed === false) {
+      const error = new Error(`Child ${incarnation} is still running; durable stopping record retained for retry`);
+      error.code = 'GUARDIAN_CHILD_STILL_RUNNING';
+      throw error;
+    }
 
     let retired;
     try {
       retired = await this.#protocol.retire({
         incarnation,
         expectedRevision: stopping.record.revision,
+        allowExpired: true,
       });
       if (!retired.ok) {
         throw new Error(`Failed to retire: ${retired.reason}`);
       }
-    } finally {
-      this.#children.delete(incarnation);
+    } catch (error) {
+      // Keep the child entry and its durable `stopping` record so an
+      // administrative retry can revalidate and finish termination.
+      throw error;
     }
+    this.#children.delete(incarnation);
+    this.#attention.delete(incarnation);
 
     this.#log(`[guardian] stopped child ${incarnation}`);
     return retired.record;
   }
 
-  async #terminateChild(child) {
+  async #terminateChild(child, record = null) {
     // W-D: on Windows, route termination through `taskkill.exe`
     // (no SIGTERM/SIGKILL escalation — those POSIX concepts do
     // not exist on Windows). The Unix branch below is preserved
     // byte-for-byte for Linux behavior parity.
     if (process.platform === 'win32') {
-      return terminateChildWindows(child, { timeoutMs: STOP_SIGNAL_TIMEOUT_MS });
+      if (record && !this.#isProcessDefinitelyGone(record.pid)) {
+        const identityFailure = this.#validateProcessIdentity(record, this.#inspectProcess(record.pid, record), {
+          requireLaunch: child?.isRehydrated === true,
+        });
+        if (identityFailure) {
+          throw new Error(`Windows child identity validation failed: ${identityFailure}`);
+        }
+      }
+      const result = await terminateChildWindows(child, { timeoutMs: this.#stopSignalTimeoutMs });
+      if (!result?.ok) {
+        throw new Error(`Windows child termination failed: ${result?.reason || 'still-running'}`);
+      }
+      return true;
     }
     const pid = child?.pid;
-    if (!pid) return;
+    if (!pid) return true;
+
+    const rehydrated = child?.isRehydrated === true;
+
+    const validateRehydratedIdentityBeforeSignal = (signal) => {
+      if (!record || !rehydrated) return { gone: false };
+      // A definitely exited process is safe to retire without signaling. The
+      // synthetic child may emit close only from this authoritative check.
+      if (typeof child.confirmExit === 'function' && child.confirmExit(signal)) {
+        return { gone: true };
+      }
+      const identityFailure = this.#validateRehydratedRecordIdentity(record, pid);
+      if (identityFailure) {
+        throw new Error(`POSIX child identity validation failed: ${identityFailure}`);
+      }
+      return { gone: false };
+    };
 
     const hasChildProcessExited = () =>
       !child || child.exitCode !== null || child.signalCode !== null;
@@ -465,41 +1220,80 @@ export class ManagedOpenCodeGuardian {
       });
     });
 
+    const waitForRehydratedExit = (timeoutMs, signal) => new Promise((resolve) => {
+      const deadline = Date.now() + timeoutMs;
+      const check = () => {
+        if (typeof child.confirmExit === 'function' && child.confirmExit(signal)) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() >= deadline) {
+          resolve(false);
+          return;
+        }
+        setTimeout(check, Math.min(25, Math.max(1, deadline - Date.now())));
+      };
+      check();
+    });
+
+    const waitForTermination = (timeoutMs, signal) => rehydrated
+      ? waitForRehydratedExit(timeoutMs, signal)
+      : waitForClose(timeoutMs);
+
     // SIGTERM to process group.
+    const beforeTerm = validateRehydratedIdentityBeforeSignal('SIGTERM');
+    if (beforeTerm.gone) return true;
     try {
       process.kill(-pid, 'SIGTERM');
     } catch {
       // Ignore.
     }
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      // Ignore.
+    if (!rehydrated || !validateRehydratedIdentityBeforeSignal('SIGTERM').gone) {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // Ignore.
+      }
     }
 
-    if (await waitForClose(STOP_SIGNAL_TIMEOUT_MS)) {
-      return;
+    if (await waitForTermination(this.#stopSignalTimeoutMs, 'SIGTERM')) {
+      return true;
     }
 
     // SIGKILL.
+    const beforeKill = validateRehydratedIdentityBeforeSignal('SIGKILL');
+    if (beforeKill.gone) return true;
     try {
       process.kill(-pid, 'SIGKILL');
     } catch {
       // Ignore.
     }
-    try {
-      child.kill('SIGKILL');
-    } catch {
-      // Ignore.
+    if (!rehydrated || !validateRehydratedIdentityBeforeSignal('SIGKILL').gone) {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // Ignore.
+      }
     }
 
-    await waitForClose(STOP_KILL_TIMEOUT_MS);
+    const terminated = await waitForTermination(this.#stopKillTimeoutMs, 'SIGKILL');
+    if (!terminated) {
+      const error = new Error(`POSIX child ${pid} is still running after termination signals`);
+      error.code = 'GUARDIAN_CHILD_STILL_RUNNING';
+      return false;
+    }
+    return true;
   }
 
   async healthCheck({ incarnation }) {
     const entry = this.#children.get(incarnation);
     if (!entry) {
       throw new Error(`Child not found: ${incarnation}`);
+    }
+
+    const identityFailure = this.#validateRehydratedIdentity(entry);
+    if (identityFailure) {
+      return { healthy: false, reason: identityFailure };
     }
 
     const url = `http://127.0.0.1:${entry.port}/global/health`;
@@ -557,11 +1351,17 @@ export class ManagedOpenCodeGuardian {
     return next;
   }
 
-  async prepareHandoff({ incarnation }) {
+  async prepareHandoff(options = {}) {
+    return this.#enqueueMutation(() => this.#prepareHandoff(options));
+  }
+
+  async #prepareHandoff({ incarnation, owner, administrative = false }) {
     const entry = this.#children.get(incarnation);
     if (!entry) {
       throw new Error(`Child not found: ${incarnation}`);
     }
+    this.#assertOwnerMatch(entry, owner, administrative);
+    this.#assertRehydratedIdentity(entry);
 
     const record = entry.record;
     const prepared = await this.#transitionRecord({
@@ -576,10 +1376,32 @@ export class ManagedOpenCodeGuardian {
     return prepared;
   }
 
+  async abortHandoff(options = {}) {
+    return this.#enqueueMutation(() => this.#abortHandoff(options));
+  }
+
+  async #abortHandoff({ incarnation, owner, administrative = false }) {
+    const entry = this.#children.get(incarnation);
+    if (!entry) throw new Error(`Child not found: ${incarnation}`);
+    this.#assertOwnerMatch(entry, owner, administrative);
+    this.#assertRehydratedIdentity(entry);
+    const record = entry.record;
+    const active = await this.#protocol.abortHandoff({
+      incarnation,
+      expectedRevision: record.revision,
+    });
+    if (!active.ok) throw new Error(`Failed to abort handoff: ${active.reason}`);
+    entry.record = active.record;
+    return active.record;
+  }
+
   async listChildren() {
     const results = [];
     for (const [incarnation, entry] of this.#children) {
-      const loaded = await this.#protocol.readRecord({ incarnation });
+      const loaded = await this.#protocol.readRecord({
+        incarnation,
+        allowExpired: isExpiredRecoveryState(entry.record?.state),
+      });
       if (loaded.ok) {
         results.push(loaded.record);
       } else {
@@ -592,6 +1414,7 @@ export class ManagedOpenCodeGuardian {
         });
       }
     }
+    results.push(...this.#attention.values());
     return results;
   }
 
@@ -629,11 +1452,18 @@ export class ManagedOpenCodeGuardian {
             if (!loaded.ok) continue;
             const record = loaded.record;
             if (record.state !== ManagedOpenCodeHandoffV2State.Active) continue;
-            await this.#protocol.renewLease({
+            const renewed = await this.#protocol.renewLease({
               incarnation,
               expectedRevision: record.revision,
               leaseMs: DEFAULT_LEASE_MS,
             });
+            if (
+              renewed?.ok
+              && this.#children.get(incarnation) === entry
+              && entry.record?.revision === record.revision
+            ) {
+              entry.record = renewed.record;
+            }
           } catch {
             // Ignore renewal failures.
           }

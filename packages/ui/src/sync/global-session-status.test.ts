@@ -3,12 +3,14 @@ import type { Event } from "@opencode-ai/sdk/v2/client"
 import {
   applyGlobalSessionStatusEvent,
   applyGlobalSessionStatusSnapshot,
+  areGlobalSessionStatusEventsEnabled,
+  resetGlobalSessionStatus,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
 import { resetSessionOrdering, useSessionOrderingStore } from "./session-ordering"
 
 beforeEach(() => {
-  useGlobalSessionStatusStore.setState({ statusById: new Map() })
+  resetGlobalSessionStatus()
   resetSessionOrdering()
 })
 
@@ -70,5 +72,19 @@ describe("global session status index", () => {
     applyGlobalSessionStatusSnapshot("/alias/repo", { "session-a": { type: "idle" } }, ["session-a"])
 
     expect(useGlobalSessionStatusStore.getState().statusById.has("session-a")).toBe(false)
+  })
+
+  test("blocks old status events across a runtime boundary until a new snapshot arrives", () => {
+    resetGlobalSessionStatus({ blockEventUpdates: true })
+    expect(areGlobalSessionStatusEventsEnabled()).toBe(false)
+
+    applyGlobalSessionStatusEvent("/repo", {
+      type: "session.status",
+      properties: { sessionID: "session-a", status: { type: "busy" } },
+    } as Event)
+    expect(useGlobalSessionStatusStore.getState().statusById.has("session-a")).toBe(false)
+
+    applyGlobalSessionStatusSnapshot("/repo", {}, ["session-a"])
+    expect(areGlobalSessionStatusEventsEnabled()).toBe(true)
   })
 })

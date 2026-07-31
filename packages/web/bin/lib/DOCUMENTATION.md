@@ -15,11 +15,11 @@ Command modules implement user-facing commands and preserve output contracts acr
 
 - `commands-serve.js`
   - Implements `openchamber serve`.
-  - Owns OpenCode CLI checks, port resolution, log rotation, PID/instance registry writes, foreground/background server launch, startup summaries, and foreground shutdown behavior.
+  - Owns OpenCode CLI checks, port resolution, log rotation, PID/instance registry writes, stable `guardianOwnerInstanceId` persistence and `OPENCHAMBER_GUARDIAN_OWNER_ID` propagation, foreground/background server launch, startup summaries, and owner-scoped foreground shutdown behavior.
 
 - `commands-lifecycle.js`
   - Implements `openchamber stop` and `openchamber restart`.
-  - Owns lifecycle stop/restart semantics, desktop-managed port rejection, unmanaged instance shutdown attempts, PID/instance cleanup, and restart reuse of stored instance options.
+  - Owns lifecycle stop/restart semantics, including explicit `{ mode: 'restart' }` shutdown requests that preserve the guardian child, desktop-managed port rejection, unmanaged instance shutdown attempts, PID/instance cleanup, and restart reuse of stored instance options/owner identity. Dead or unconfirmed web-PID cleanup retains guardian owner metadata so the next startup can adopt the same guardian child instead of creating a duplicate.
 
 - `commands-status.js`
   - Implements `openchamber status`.
@@ -48,6 +48,11 @@ Command modules implement user-facing commands and preserve output contracts acr
 - `commands-startup.js`
   - Implements `openchamber startup`.
   - Handles startup subcommand dispatch and presentation around the lower-level startup service helpers.
+
+- `commands-guardian.js`
+  - Implements `openchamber guardian status|start|stop|reload` on POSIX and Windows.
+  - Prefers authenticated IPC for reload/stop. Direct PID fallback is allowed only after the persisted guardian marker's process identity and authoritative OS liveness are revalidated; missing or ambiguous identity fails closed.
+  - Preserves human, `--quiet`, `--json`, and non-TTY output contracts while keeping marker ownership and guardian lifecycle logic in the server guardian modules.
 
 - `commands-connect-url.js`
   - Implements `openchamber connect-url`.
