@@ -53,6 +53,9 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   const outputRewriteCarryRef = React.useRef('');
   const safeResetRef = React.useRef(getGhosttySafeResetSequence(theme.background));
   const writingRef = React.useRef(false);
+  // Incremented whenever the replay stream restarts, so a write completing from
+  // before the restart cannot clear the in-flight flag of a newer write.
+  const writeEpochRef = React.useRef(0);
   const visibleRef = React.useRef(isVisible);
   const rendererReadyRef = React.useRef(false);
   const [ready, setReady] = React.useState(0);
@@ -98,19 +101,39 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       return;
     }
     writingRef.current = true;
+    const epoch = writeEpochRef.current;
     terminal.write(rewritten.data, () => {
-      if (terminalRef.current !== terminal) return;
+      if (terminalRef.current !== terminal || writeEpochRef.current !== epoch) return;
       writingRef.current = false;
       if (writeQueueRef.current) flush();
     });
   }, []);
 
+  /**
+   * Replay discontinuities (restart, reconnect, buffer reset) only need the VT
+   * state cleared. `Terminal.reset()` frees and rebuilds the WASM terminal while
+   * keeping the canvas, renderer and font atlas, so prefer it over remounting the
+   * whole terminal; the generation bump remains the fallback before the terminal
+   * exists.
+   */
   const recreateRenderer = React.useCallback(() => {
     lastChunkRef.current = null;
     writeQueueRef.current = '';
     outputRewriteCarryRef.current = '';
     writingRef.current = false;
-    setRendererGeneration((value) => value + 1);
+    writeEpochRef.current += 1;
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      setRendererGeneration((value) => value + 1);
+      return;
+    }
+    try {
+      terminal.reset();
+      const safeReset = safeResetRef.current;
+      if (safeReset) terminal.write(`${safeReset}\u001b[2J\u001b[H`);
+    } catch {
+      setRendererGeneration((value) => value + 1);
+    }
   }, []);
 
   React.useEffect(() => {
@@ -195,6 +218,7 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       writeQueueRef.current = '';
       outputRewriteCarryRef.current = '';
       writingRef.current = false;
+      writeEpochRef.current += 1;
       rendererReadyRef.current = false;
     };
   }, [fit, fontFamily, fontSize, rendererGeneration, theme]);
@@ -214,10 +238,20 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       return;
     }
     const previous = lastChunkRef.current;
-    const previousIndex = previous === null ? -1 : chunks.findIndex((chunk) => chunk.id === previous);
-    if (previous !== null && previousIndex < 0) {
-      recreateRenderer();
-      return;
+    // Chunk ids are monotonic and the store appends, so the already-written chunk
+    // is normally the last one. Scanning from the end keeps this O(1) per chunk
+    // instead of O(chunks) on every streamed write.
+    let previousIndex = -1;
+    if (previous !== null) {
+      for (let index = chunks.length - 1; index >= 0; index -= 1) {
+        const id = chunks[index].id;
+        if (id === previous) { previousIndex = index; break; }
+        if (id < previous) break;
+      }
+      if (previousIndex < 0) {
+        recreateRenderer();
+        return;
+      }
     }
     const isReplay = previousIndex < 0;
     const pending = previousIndex >= 0 ? chunks.slice(previousIndex + 1) : chunks;

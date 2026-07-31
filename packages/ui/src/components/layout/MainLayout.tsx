@@ -13,6 +13,9 @@ import { HelpDialog } from '../ui/HelpDialog';
 import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
+import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
+import { ArchiveView } from '@/components/views/ArchiveView';
+import { WorktreesView } from '@/components/views/WorktreesView';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { MultiRunLauncher } from '@/components/multirun';
 import { TerminalView } from '@/components/views/TerminalView';
@@ -37,7 +40,6 @@ import { PlanView } from '@/components/views/PlanView';
 const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
-const MultiRunWindow = lazyWithChunkRecovery(() => import('@/components/views/MultiRunWindow').then(m => ({ default: m.MultiRunWindow })));
 
 export const MainLayout: React.FC = () => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
@@ -49,6 +51,32 @@ export const MainLayout: React.FC = () => {
     const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
+    const isScheduledTasksPageOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
+    const isArchivePageOpen = useUIStore((state) => state.isArchivePageOpen);
+    const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
+    // Any full-page surface replacing the chat area. While open, the chat and
+    // secondary views are fully hidden (not just covered) so none of their
+    // floating chrome bleeds through, and selecting a session / draft / main
+    // tab anywhere closes the surface.
+    const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || Boolean(worktreesPageProjectId) || isMultiRunLauncherOpen;
+
+    React.useEffect(() => {
+        const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
+        const unsubscribeSession = useSessionUIStore.subscribe((state, prev) => {
+            const sessionSelected = Boolean(state.currentSessionId) && state.currentSessionId !== prev.currentSessionId;
+            // Draft identity change covers re-opening a draft while one is
+            // already open (the boolean alone never transitions then).
+            const draftOpened = Boolean(state.newSessionDraft?.open) && state.newSessionDraft !== prev.newSessionDraft;
+            if (sessionSelected || draftOpened) closeSurfacePages();
+        });
+        const unsubscribeTab = useUIStore.subscribe((state, prev) => {
+            if (state.activeMainTab !== prev.activeMainTab) closeSurfacePages();
+        });
+        return () => {
+            unsubscribeSession();
+            unsubscribeTab();
+        };
+    }, []);
     const { isMobile } = useDeviceInfo();
     const mobilePanelsResetRef = React.useRef(false);
 
@@ -306,11 +334,11 @@ export const MainLayout: React.FC = () => {
                         )}
                     >
                         <main className="w-full h-full overflow-hidden bg-background relative" data-page-scroll-lock="true">
-                            <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
-                                <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen} /></ErrorBoundary>
+                            <div className={cn('absolute inset-0', (!isChatActive || isSurfacePageOpen) && 'invisible')}>
+                                <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                             </div>
                             {secondaryView && (
-                                <div className="absolute inset-0">
+                                <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
                                     <ErrorBoundary>{secondaryView}</ErrorBoundary>
                                 </div>
                             )}
@@ -325,6 +353,9 @@ export const MainLayout: React.FC = () => {
                                     </ErrorBoundary>
                                 </div>
                             )}
+                            <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
+                            <ErrorBoundary><ArchiveView /></ErrorBoundary>
+                            <ErrorBoundary><WorktreesView /></ErrorBoundary>
                             {/* Always mount SessionSidebar on mobile to match desktop behavior.
                                 Conditional mount (mobileLeftDrawerVisible && ...) caused a
                                 data-loading cascade on every drawer open: paginated sessions
@@ -383,7 +414,7 @@ export const MainLayout: React.FC = () => {
                         <Sidebar
                             isOpen={isSidebarOpen}
                             isMobile={isMobile}
-                            className="border-border/50"
+                            className="border-border"
                             topBar={<SidebarTopBar />}
                         >
                             <SessionSidebar isVisible={isSidebarOpen} />
@@ -391,24 +422,41 @@ export const MainLayout: React.FC = () => {
                         <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                             <Header />
                             <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
-                                <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border/50 bg-background" data-page-scroll-lock="true">
+                                <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border bg-background" data-page-scroll-lock="true">
                                     <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
                                         <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
                                             <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
-                                                <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
-                                                    <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen} /></ErrorBoundary>
+                                                <div className={cn('absolute inset-0', (!isChatActive || isSurfacePageOpen) && 'invisible')}>
+                                                    <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                                                 </div>
                                                 {secondaryView && (
-                                                    <div className="absolute inset-0">
+                                                    <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
                                                         <ErrorBoundary>{secondaryView}</ErrorBoundary>
                                                     </div>
                                                 )}
+                                                {isMultiRunLauncherOpen && (
+                                                    <div className="absolute inset-0 z-10 bg-background">
+                                                        <ErrorBoundary>
+                                                            {/* isWindowed: the app Header already shows the surface
+                                                                title, so skip the launcher's own title bar. */}
+                                                            <MultiRunLauncher
+                                                                isWindowed
+                                                                initialPrompt={multiRunLauncherPrefillPrompt}
+                                                                onCreated={() => setMultiRunLauncherOpen(false)}
+                                                                onCancel={() => setMultiRunLauncherOpen(false)}
+                                                            />
+                                                        </ErrorBoundary>
+                                                    </div>
+                                                )}
+                                                <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
+                                                <ErrorBoundary><ArchiveView /></ErrorBoundary>
+                                                <ErrorBoundary><WorktreesView /></ErrorBoundary>
                                             </main>
                                             <ContextPanel />
                                         </div>
                                     </div>
                                 </div>
-                                <div className="border-t border-border/50" data-page-scroll-lock="true">
+                                <div className="border-t border-border" data-page-scroll-lock="true">
                                     <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
                                 </div>
                             </div>
@@ -420,13 +468,6 @@ export const MainLayout: React.FC = () => {
                         <SettingsWindow
                             open={isSettingsDialogOpen}
                             onOpenChange={setSettingsDialogOpen}
-                        />
-                    </React.Suspense>
-                    <React.Suspense fallback={null}>
-                        <MultiRunWindow
-                            open={isMultiRunLauncherOpen}
-                            onOpenChange={setMultiRunLauncherOpen}
-                            initialPrompt={multiRunLauncherPrefillPrompt}
                         />
                     </React.Suspense>
                 </>

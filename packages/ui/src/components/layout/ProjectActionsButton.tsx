@@ -308,8 +308,9 @@ export const ProjectActionsButton = ({
 
   React.useEffect(() => {
     const monitorRuns = () => {
-      const terminalSessions = useTerminalStore.getState().sessions;
-      const currentRuns = useTerminalStore.getState().projectActionRuns;
+      const terminalStore = useTerminalStore.getState();
+      const terminalSessions = terminalStore.sessions;
+      const currentRuns = terminalStore.projectActionRuns;
       for (const [runKey, entry] of Object.entries(currentRuns)) {
         const directoryState = terminalSessions.get(entry.directory);
         const tab = directoryState?.tabs.find((item) => item.id === entry.tabId);
@@ -321,9 +322,10 @@ export const ProjectActionsButton = ({
         const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '', openInPreview: false };
         urlWatchByRunKeyRef.current[runKey] = watch;
         const action = displayActions.find((item) => item.id === entry.actionId);
-        if (!action || !Array.isArray(tab.bufferChunks) || tab.bufferChunks.length === 0) continue;
+        const bufferChunks = terminalStore.getBuffer(entry.directory, entry.tabId).chunks;
+        if (!action || bufferChunks.length === 0) continue;
 
-        const nextChunks = tab.bufferChunks.filter((chunk) => watch.lastSeenChunkId === null || chunk.id > watch.lastSeenChunkId);
+        const nextChunks = bufferChunks.filter((chunk) => watch.lastSeenChunkId === null || chunk.id > watch.lastSeenChunkId);
         if (nextChunks.length === 0) continue;
 
         const combined = nextChunks.map((chunk) => chunk.data).join('');
@@ -364,7 +366,7 @@ export const ProjectActionsButton = ({
 
     monitorRuns();
     return useTerminalStore.subscribe((state, previousState) => {
-      if (state.sessions !== previousState.sessions) monitorRuns();
+      if (state.sessions !== previousState.sessions || state.buffers !== previousState.buffers) monitorRuns();
     });
   }, [displayActions, openContextPreview, openExternal, projectActionRuns, removeProjectActionRun, setTabPreviewUrl, t, updateProjectActionRunStatus]);
 

@@ -313,6 +313,20 @@ export const useChatTimelineController = ({
         setActiveTurnId(null);
     }, [sessionId]);
 
+    React.useLayoutEffect(() => {
+        if (!isPinned) {
+            return;
+        }
+        const latestTurnId = turnWindowModel.turnIds[turnWindowModel.turnIds.length - 1];
+        if (!latestTurnId) {
+            return;
+        }
+        // A sent prompt updates the timeline model before its new DOM node is
+        // measurable by the scroll spy. While pinned, the latest turn is
+        // authoritative and keeps the rail in sync for that interval.
+        setActiveTurnId((current) => current === latestTurnId ? current : latestTurnId);
+    }, [isPinned, turnWindowModel.turnIds]);
+
     const resolvePendingRenderWaiters = React.useCallback(() => {
         const resolvers = pendingRenderResolversRef.current;
         if (resolvers.length === 0) {

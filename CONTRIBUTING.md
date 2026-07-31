@@ -176,6 +176,9 @@ behavior before and after the change. Attach screenshots for static states and
 a short recording for motion, gestures, drag-and-drop, focus, or multi-step
 interactions.
 
+Claims about performance, memory, CPU, rendering, startup, or similar empirical
+behavior require relevant before and after measurements.
+
 Choose evidence based on the affected behavior:
 
 - Include before and after states. If a meaningful before state cannot be
@@ -205,8 +208,9 @@ against them.
 The reviewer records the exact HEAD it inspected and returns one verdict:
 
 - `PASS`: no blocking correctness, compliance, or evidence issue was found.
-- `NEEDS_EVIDENCE`: the change may be correct, but required proof is missing,
-  stale, or too weak to review responsibly.
+- `NEEDS_EVIDENCE`: no correctness, repository-guidance, or contribution-contract
+  blocker was found, but a required screenshot, interaction recording, or
+  empirical measurement is missing, stale, contradictory, or inadequate.
 - `BLOCKED`: a concrete correctness, security, repository-rule, or contribution
   contract violation must be fixed.
 - `HUMAN_REVIEW_REQUIRED`: the change affects review policy or another boundary

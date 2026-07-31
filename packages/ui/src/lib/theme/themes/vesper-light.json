@@ -27,10 +27,10 @@
       "elevated": "#f6f5f5",
       "elevatedForeground": "#101010",
       "overlay": "#00000020",
-      "subtle": "#f5f3f3"
+      "subtle": "#f6f2f2"
     },
     "interactive": {
-      "border": "#d0cece",
+      "border": "#dfdada",
       "borderHover": "#E0E0E0",
       "borderFocus": "#9e9e9e",
       "selection": "#5e5b5b22",

@@ -497,4 +497,74 @@ describe('updateDesktopSettings', () => {
     expect(saveCalls.some((changes) => changes.terminalShell === 'zsh')).toBe(true);
     expect(saveCalls.some((changes) => changes.terminalLoginShells?.includes('zsh'))).toBe(true);
   });
+
+  test('applies persisted autoSaveEnabled from server settings', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useUIStore.getState().setAutoSaveEnabled(true);
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { autoSaveEnabled: false, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().autoSaveEnabled).toBe(false);
+  });
+
+  test('autosaves autoSaveEnabled changes to shared settings', async () => {
+    getWindow();
+    useUIStore.getState().setAutoSaveEnabled(true);
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsSave(async (changes) => {
+      saveCalls.push(changes);
+      return changes as SettingsPayload;
+    });
+    startAppearanceAutoSave();
+
+    useUIStore.getState().setAutoSaveEnabled(false);
+    await delay(500);
+
+    expect(saveCalls.some((changes) => changes.autoSaveEnabled === false)).toBe(true);
+  });
+
+  test('seeds omitted autoSaveEnabled from the hydrated client preference', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useUIStore.getState().setAutoSaveEnabled(false);
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsApi(async (changes) => {
+      saveCalls.push(changes);
+      return { ...changes } as SettingsPayload;
+    }, async () => ({
+      settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+    await delay(500);
+
+    expect(useUIStore.getState().autoSaveEnabled).toBe(false);
+    expect(saveCalls.some((changes) => changes.autoSaveEnabled === false)).toBe(true);
+  });
+
+  test('seeds default autoSaveEnabled when omitted and client still has the default', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useUIStore.getState().setAutoSaveEnabled(true);
+    const saveCalls: Array<Partial<SettingsPayload>> = [];
+    registerSettingsApi(async (changes) => {
+      saveCalls.push(changes);
+      return { ...changes } as SettingsPayload;
+    }, async () => ({
+      settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+    await delay(500);
+
+    expect(useUIStore.getState().autoSaveEnabled).toBe(true);
+    expect(saveCalls.some((changes) => changes.autoSaveEnabled === true)).toBe(true);
+  });
 });

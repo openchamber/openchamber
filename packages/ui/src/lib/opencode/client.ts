@@ -1580,9 +1580,10 @@ class OpencodeService {
     }));
   }
 
-  async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
+  async listCommandsWithDetails(directory?: string | null): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
+    const requestDirectory = this.normalizeCandidatePath(directory ?? null) ?? this.currentDirectory;
     const response = await this.client.command.list(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+      requestDirectory ? { directory: requestDirectory } : undefined
     );
     const commands = unwrapSdkData(response, 'command.list');
     // Return full command details including template

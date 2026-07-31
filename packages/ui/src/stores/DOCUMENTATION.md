@@ -79,6 +79,29 @@ Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sess
 
 Composer draft edits remain immediate in memory and use a trailing durable-write debounce. Pending text and confirmed mentions flush synchronously when the document becomes hidden, freezes, receives `pagehide`, switches identity, or unmounts; authoritative deletion cancels pending work before any lifecycle flush can run. The shared chat-draft envelope reuses its parsed snapshot until the storage value changes. Inline-comment draft byte accounting indexes serialized buckets and recalculates only the changed session bucket during normal edits; deferred storage still performs the final full-envelope serialization and lifecycle flush.
 
+### `useTerminalStore.ts`
+
+`useTerminalStore` owns terminal tab arrangement per directory plus PTY scrollback.
+
+Scrollback is deliberately **not** stored on the tab. `buffers` is a separate map keyed by
+directory and tab id, and `getBuffer()` returns a shared frozen empty buffer for tabs that
+have produced no output. PTY output arrives at streaming frequency, so keeping it inside
+`sessions` made every output chunk allocate a new tab, a new directory entry and a new
+`sessions` map. That invalidated every tab-strip subscription, re-ran the project-action
+run monitor, and made Zustand persist rewrite the session-storage snapshot per chunk.
+
+Invariants to preserve when editing:
+
+- Output actions (`appendToBuffer`, `replaceBuffer`) must leave `sessions` referentially
+  unchanged; only `buffers` and `nextChunkId` may change.
+- Buffer entries are owned by their tab. `closeTab`, `removeDirectory`, `clearAll`, and
+  rebinding a tab to a different terminal session must drop the entry.
+- Output for an unknown tab is ignored rather than creating an orphan buffer.
+- Only `sessions` and `nextTabId` are persisted. `partialize` reuses its previous
+  projection while both are referentially unchanged, and the storage adapter skips a write
+  for an unchanged projection, so streaming output performs no persistence work.
+- Consumers that react to output must subscribe to `buffers`, not `sessions`.
+
 ## Git / PR Stores
 
 The Git and PR stores are the most important stores to understand before editing this directory.

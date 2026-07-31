@@ -5,6 +5,7 @@ import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import {
@@ -127,28 +128,30 @@ export const OpenCodeUpdateToast: React.FC = () => {
       });
     };
 
-    const onUpdateAvailable = (event: Event) => {
-      const version = resolveOpenCodeUpdateVersion((event as CustomEvent<unknown>).detail);
-      showUpdateAvailableToast(version);
-    };
-
     let cancelled = false;
     const timeoutIds: Array<ReturnType<typeof setTimeout>> = [];
 
-    const checkForUpdate = async (attempt: number) => {
+    const checkForUpdate = async (attempt: number, runtimeKey = getRuntimeKey()) => {
       try {
         const response = await runtimeFetch('/api/opencode/upgrade-status', { headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error(response.statusText || 'OpenCode upgrade status check failed');
         const status = await response.json().catch(() => null) as OpenCodeUpgradeStatusLike | null;
         const version = resolveOpenCodeUpgradeStatusVersion(status);
-        if (!cancelled && version) {
+        if (!cancelled && runtimeKey === getRuntimeKey() && version) {
           showUpdateAvailableToast(version);
         }
       } catch {
         const delay = CHECK_RETRY_DELAYS_MS[attempt];
-        if (!cancelled && delay !== undefined) {
-          timeoutIds.push(setTimeout(() => { void checkForUpdate(attempt + 1); }, delay));
+        if (!cancelled && runtimeKey === getRuntimeKey() && delay !== undefined) {
+          timeoutIds.push(setTimeout(() => { void checkForUpdate(attempt + 1, runtimeKey); }, delay));
         }
+      }
+    };
+
+    const onUpdateAvailable = (event: Event) => {
+      const version = resolveOpenCodeUpdateVersion((event as CustomEvent<unknown>).detail);
+      if (version) {
+        void checkForUpdate(0);
       }
     };
 
@@ -156,10 +159,19 @@ export const OpenCodeUpdateToast: React.FC = () => {
       timeoutIds.push(setTimeout(() => { void checkForUpdate(0); }, INITIAL_CHECK_DELAY_MS));
     }
 
+    const unsubscribeRuntime = subscribeRuntimeEndpointChanged(({ runtimeKey }) => {
+      seenVersionsRef.current.clear();
+      toast.dismiss(UPDATE_TOAST_ID);
+      if (useUIStore.getState().showOpenCodeUpdateNotifications) {
+        void checkForUpdate(0, runtimeKey);
+      }
+    });
+
     window.addEventListener('openchamber:opencode-update-available', onUpdateAvailable);
     return () => {
       cancelled = true;
       for (const timeoutId of timeoutIds) clearTimeout(timeoutId);
+      unsubscribeRuntime();
       window.removeEventListener('openchamber:opencode-update-available', onUpdateAvailable);
     };
   }, [runUpgrade, showOpenCodeUpdateNotifications, t]);

@@ -28,11 +28,9 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
-import { getImageMimeType, getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
+import { getImageMimeType, getLanguageFromExtension, isBinaryFile, isImageFile, isPdfFile, isSvgFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import type { FileListEntry, FileSearchResult } from '@/lib/api/types';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
 
 type MobileFilesRoute =
@@ -77,13 +75,6 @@ const formatFileSize = (size?: number): string => {
   return '';
 };
 
-const getImageSrc = (path: string): string => {
-  if (path.toLowerCase().endsWith('.svg')) {
-    return '';
-  }
-  return getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path });
-};
-
 const isMarkdownFile = (path: string): boolean => /\.(md|mdx|markdown)$/i.test(path);
 const isJsonFile = (path: string): boolean => /\.(json|jsonc)$/i.test(path);
 
@@ -104,8 +95,10 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
   const [searchResults, setSearchResults] = React.useState<FileSearchResult[]>([]);
   const [isSearching, setIsSearching] = React.useState(false);
   const [fileContent, setFileContent] = React.useState('');
+  const [imageSrc, setImageSrc] = React.useState('');
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = React.useState(false);
+  const [binaryBlocked, setBinaryBlocked] = React.useState(false);
   const directoryLoadRequestIdRef = React.useRef(0);
 
   React.useEffect(() => {
@@ -180,9 +173,42 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
   React.useEffect(() => {
     if (route.type !== 'file') return;
     setFileContent('');
+    setImageSrc('');
     setFileError(null);
+    setBinaryBlocked(false);
 
-    if (isImageFile(route.path) && !route.path.toLowerCase().endsWith('.svg')) {
+    if (isImageFile(route.path) && !isSvgFile(route.path)) {
+      let cancelled = false;
+      let objectUrl = '';
+      setIsLoadingFile(true);
+      void runtimeFetch('/api/fs/raw', { query: { path: route.path, directory: root || undefined } })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(t('filesView.error.readFileFailed'));
+          objectUrl = URL.createObjectURL(await response.blob());
+          if (cancelled) {
+            URL.revokeObjectURL(objectUrl);
+            objectUrl = '';
+            return;
+          }
+          setImageSrc(objectUrl);
+        })
+        .catch((error) => {
+          if (!cancelled) setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoadingFile(false);
+        });
+
+      return () => {
+        cancelled = true;
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+      };
+    }
+
+    // Never load PDF/office/archives/etc. as UTF-8 text — that path can corrupt originals
+    // if a future write path is added, and it shows gibberish in the viewer.
+    if (isBinaryFile(route.path) || isPdfFile(route.path)) {
+      setBinaryBlocked(true);
       setIsLoadingFile(false);
       return;
     }
@@ -198,6 +224,11 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
     void files.readFile(route.path)
       .then((result) => {
         if (cancelled) return;
+        if (looksLikeBinaryText(result.content)) {
+          setBinaryBlocked(true);
+          setFileContent('');
+          return;
+        }
         setFileContent(result.content.length > MAX_MOBILE_FILE_CHARS
           ? `${result.content.slice(0, MAX_MOBILE_FILE_CHARS)}\n\n${t('mobile.files.file.truncated')}`
           : result.content);
@@ -212,7 +243,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
     return () => {
       cancelled = true;
     };
-  }, [files, route, t]);
+  }, [files, root, route, t]);
 
   const openDirectory = (directory: string) => {
     setQuery('');
@@ -244,8 +275,10 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
       <MobileFileDetail
         path={route.path}
         content={fileContent}
+        imageSrc={imageSrc}
         error={fileError}
         isLoading={isLoadingFile}
+        binaryBlocked={binaryBlocked}
         onBack={() => setRoute({ type: 'browser', directory: route.returnDirectory })}
         onCopyPath={() => void handleCopyPath(route.path)}
         onCopyContent={() => void handleCopyContent()}
@@ -393,37 +426,15 @@ const MobileSearchResults: React.FC<{
 const MobileFileDetail: React.FC<{
   path: string;
   content: string;
+  imageSrc: string;
   error: string | null;
   isLoading: boolean;
+  binaryBlocked: boolean;
   onBack: () => void;
   onCopyPath: () => void;
   onCopyContent: () => void;
-}> = ({ path, content, error, isLoading, onBack, onCopyPath, onCopyContent }) => {
+}> = ({ path, content, imageSrc, error, isLoading, binaryBlocked, onBack, onCopyPath, onCopyContent }) => {
   const { t } = useI18n();
-  const imageAuthKey = isImageFile(path) && !path.toLowerCase().endsWith('.svg') ? path : '';
-  const [imageAuthReadyKey, setImageAuthReadyKey] = React.useState('');
-
-  React.useEffect(() => {
-    if (!imageAuthKey) {
-      setImageAuthReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setImageAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setImageAuthReadyKey(imageAuthKey);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [imageAuthKey]);
-
-  const imageAuthLoading = Boolean(imageAuthKey && imageAuthReadyKey !== imageAuthKey);
-  const imageSrc = imageAuthLoading ? '' : getImageSrc(path);
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
@@ -439,7 +450,7 @@ const MobileFileDetail: React.FC<{
         <div className="min-w-0 flex-1">
           <h2 className="truncate typography-ui-header text-foreground">{getNameFromPath(path)}</h2>
         </div>
-        {!isImageFile(path) ? (
+        {!isImageFile(path) && !binaryBlocked ? (
           <Button type="button" variant="ghost" size="icon" onClick={onCopyContent} aria-label={t('mobile.files.copyContentAria')}>
             <RiFileCopyLine className="size-4" />
           </Button>
@@ -449,7 +460,7 @@ const MobileFileDetail: React.FC<{
         </Button>
       </header>
       <div className="min-h-0 flex-1 overflow-hidden">
-        {isLoading || imageAuthLoading ? (
+        {isLoading ? (
           <MobileFilesState loading message={t('filesView.state.loading')} />
         ) : error ? (
           <MobileFilesState message={error} />
@@ -461,6 +472,11 @@ const MobileFileDetail: React.FC<{
           <ScrollShadow className="h-full overflow-auto p-4">
             <img src={`data:${getImageMimeType(path)};utf8,${encodeURIComponent(content)}`} alt={getNameFromPath(path)} className="mx-auto max-h-full max-w-full rounded-lg object-contain" />
           </ScrollShadow>
+        ) : binaryBlocked ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+            <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
+            <div className="max-w-sm typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
+          </div>
         ) : (
           <MobileTextFile path={path} content={content} />
         )}

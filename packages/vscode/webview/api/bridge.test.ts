@@ -21,7 +21,7 @@ describe('VS Code webview bridge requests', () => {
         }),
       });
 
-      const { sendBridgeMessageWithOptions } = await import('./bridge');
+      const { sendBridgeMessageWithOptions, startSseProxy } = await import('./bridge');
       const controller = new AbortController();
       controller.abort();
 
@@ -36,6 +36,19 @@ describe('VS Code webview bridge requests', () => {
       assert.ok(result instanceof DOMException);
       assert.equal(result.name, 'AbortError');
       assert.equal(messages.length, 0);
+
+      const startPromise = startSseProxy({ path: '/global/event', streamId: 'sse_webview_1_1' });
+      const request = messages[0] as { id: string; payload?: { streamId?: string } };
+      assert.equal(request.payload?.streamId, 'sse_webview_1_1');
+      globalThis.window.dispatchEvent(new MessageEvent('message', {
+        data: {
+          id: request.id,
+          type: 'api:sse:start',
+          success: true,
+          data: { status: 200, headers: {}, streamId: 'sse_webview_1_1' },
+        },
+      }));
+      assert.equal((await startPromise).streamId, 'sse_webview_1_1');
     } finally {
       Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
       Object.defineProperty(globalThis, 'acquireVsCodeApi', { configurable: true, value: originalAcquire });

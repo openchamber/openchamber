@@ -20,6 +20,7 @@
     "sim:install": "node scripts/with-mobile-env.mjs \"node scripts/ios-sim.mjs install\"",
     "sim:launch": "node scripts/with-mobile-env.mjs \"node scripts/ios-sim.mjs launch\"",
     "sim:run": "node scripts/with-mobile-env.mjs \"node scripts/ios-sim.mjs run\"",
+    "sim:dev": "node scripts/with-mobile-env.mjs \"node scripts/ios-sim-dev.mjs\"",
     "sim:serve": "node scripts/with-mobile-env.mjs \"serve-sim --detach -q\"",
     "sim:list": "node scripts/with-mobile-env.mjs \"serve-sim --list -q\"",
     "sim:kill": "node scripts/with-mobile-env.mjs \"serve-sim --kill\"",
@@ -42,7 +43,7 @@
     "@capacitor/cli": "^8.4.1",
     "@capacitor/ios": "^8.4.1",
     "@types/node": "^24.3.1",
-    "serve-sim": "^0.1.34",
+    "serve-sim": "^0.1.45",
     "typescript": "~5.9.0"
   }
 }

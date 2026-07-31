@@ -97,6 +97,24 @@ export const fetchQuota = async () => {
       });
     }
 
+    // Business/enterprise accounts expose a dollar spend cap under
+    // `spend_control.individual_limit`. Surface it as an additive `credits`
+    // window so existing consumers keep working.
+    if (payload?.spend_control?.individual_limit) {
+      const spendLimit = payload.spend_control.individual_limit;
+      const used = toNumber(spendLimit.used);
+      const limit = toNumber(spendLimit.limit);
+      const valueLabel = used !== null && limit !== null
+        ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
+        : null;
+      windows.credits = toUsageWindow({
+        usedPercent: toNumber(spendLimit.used_percent),
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel
+      });
+    }
+
     return buildResult({
       providerId,
       providerName,

@@ -132,6 +132,51 @@ describe('terminal transport', () => {
     transport.dispose();
   });
 
+  test('reuses the open socket when switching between terminals', async () => {
+    const sockets: FakeSocket[] = [];
+    let authCalls = 0;
+    const transport = new TerminalTransport({
+      refreshAuth: async () => { authCalls += 1; },
+      openSocket: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    });
+
+    const unsubscribeFirst = transport.subscribe('term-1', { onEvent: () => {} });
+    await tick();
+    sockets[0].open();
+    await tick();
+    expect(authCalls).toBe(1);
+
+    // Switching tabs detaches the old terminal before attaching the new one.
+    unsubscribeFirst();
+    transport.subscribe('term-2', { onEvent: () => {} });
+    await tick();
+
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0].readyState).toBe(1);
+    expect(authCalls).toBe(1);
+    expect(sockets[0].sent.some((message) => message.t === 'detach' && message.s === 'term-1')).toBe(true);
+    expect(sockets[0].sent.some((message) => message.t === 'attach' && message.s === 'term-2')).toBe(true);
+    transport.dispose();
+  });
+
+  test('disposing closes a socket that was being held for reuse', async () => {
+    const sockets: FakeSocket[] = [];
+    const transport = new TerminalTransport({
+      refreshAuth: async () => '',
+      openSocket: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    });
+
+    const unsubscribe = transport.subscribe('term-1', { onEvent: () => {} });
+    await tick();
+    sockets[0].open();
+    await tick();
+
+    unsubscribe();
+    expect(sockets[0].readyState).toBe(1);
+    transport.dispose();
+    expect(sockets[0].readyState).toBe(3);
+  });
+
   test('does not reconnect after the last subscriber detaches', async () => {
     let attempts = 0;
     const transport = new TerminalTransport({

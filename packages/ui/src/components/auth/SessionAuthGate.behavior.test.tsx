@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 type ComponentFn<P extends Record<string, unknown> = Record<string, unknown>> = (props: P) => unknown;
 
@@ -16,12 +16,43 @@ const hookRecords = new Map<unknown, HookRecord>();
 let currentRecord: HookRecord | null = null;
 let hookIndex = 0;
 let pendingEffects: Array<() => void> = [];
+const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+
+afterEach(() => {
+  if (originalWindow) {
+    Object.defineProperty(globalThis, 'window', originalWindow);
+  } else {
+    Reflect.deleteProperty(globalThis, 'window');
+  }
+});
 
 const resetHarness = () => {
   hookRecords.clear();
   currentRecord = null;
   hookIndex = 0;
   pendingEffects = [];
+  runtimeApiBaseUrl = '';
+  runtimeKey = 'local';
+  runtimeEndpointChangedListener = null;
+  desktopInvoke = async () => null;
+  desktopHostsGetCalls = 0;
+  desktopHostsSetCalls = 0;
+  runtimeSwitchCalls = 0;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      isSecureContext: false,
+      localStorage: {
+        getItem: () => null,
+        setItem: () => undefined,
+      },
+      setTimeout: (callback: () => void) => {
+        queueMicrotask(callback);
+        return 0;
+      },
+      clearTimeout: () => undefined,
+    },
+  });
 };
 
 const shallowEqualDeps = (left?: unknown[], right?: unknown[]): boolean => {
@@ -149,6 +180,13 @@ const reactJsxRuntime = {
 
 let desktopShell = false;
 let runtimeFetchRejects = true;
+let runtimeApiBaseUrl = '';
+let runtimeKey = 'local';
+let runtimeEndpointChangedListener: (() => void) | null = null;
+let desktopInvoke: () => Promise<unknown> = async () => null;
+let desktopHostsGetCalls = 0;
+let desktopHostsSetCalls = 0;
+let runtimeSwitchCalls = 0;
 
 mock.module('react/jsx-runtime', () => reactJsxRuntime);
 mock.module('react/jsx-dev-runtime', () => reactJsxRuntime);
@@ -172,7 +210,7 @@ mock.module('@/components/ui/checkbox', () => ({
 }));
 
 mock.module('@/components/ui/input', () => ({
-  Input: () => null,
+  Input: (props: JSXProps) => ({ type: 'input', props }),
 }));
 
 mock.module('@/components/ui', () => ({
@@ -200,7 +238,7 @@ mock.module('@/lib/i18n', () => ({
 }));
 
 mock.module('@/lib/desktop', () => ({
-  invokeDesktop: mock(() => Promise.resolve(null)),
+  invokeDesktop: () => desktopInvoke(),
   isDesktopShell: mock(() => desktopShell),
   isVSCodeRuntime: mock(() => false),
 }));
@@ -232,14 +270,26 @@ mock.module('@/lib/runtime-auth', () => ({
 }));
 
 mock.module('@/lib/runtime-switch', () => ({
-  getRuntimeApiBaseUrl: mock(() => ''),
-  subscribeRuntimeEndpointChanged: mock(() => () => {}),
-  switchRuntimeEndpoint: mock(() => undefined),
+  getRuntimeApiBaseUrl: () => runtimeApiBaseUrl,
+  getRuntimeKey: () => runtimeKey,
+  subscribeRuntimeEndpointChanged: (listener: () => void) => {
+    runtimeEndpointChangedListener = listener;
+    return () => {
+      if (runtimeEndpointChangedListener === listener) runtimeEndpointChangedListener = null;
+    };
+  },
+  switchRuntimeEndpoint: () => { runtimeSwitchCalls += 1; },
 }));
 
 mock.module('@/lib/desktopHosts', () => ({
-  desktopHostsGet: mock(() => Promise.resolve(null)),
-  desktopHostsSet: mock(() => Promise.resolve()),
+  desktopHostsGet: () => {
+    desktopHostsGetCalls += 1;
+    return Promise.resolve(null);
+  },
+  desktopHostsSet: () => {
+    desktopHostsSetCalls += 1;
+    return Promise.resolve();
+  },
   getDesktopHostApiUrl: mock(() => ''),
   normalizeHostUrl: mock(() => ''),
 }));
@@ -288,6 +338,21 @@ const collectText = (node: unknown): string => {
   return '';
 };
 
+const findElement = (node: unknown, type: string): { type: string; props: JSXProps } | null => {
+  if (!node || typeof node !== 'object') return null;
+  const element = node as { type?: unknown; props?: JSXProps };
+  if (element.type === type && element.props) return { type, props: element.props };
+  const children = element.props?.children;
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const match = findElement(child, type);
+      if (match) return match;
+    }
+    return null;
+  }
+  return findElement(children, type);
+};
+
 describe('SessionAuthGate status-check failure behavior', () => {
   test('keeps non-desktop status-check rejection on the error screen', async () => {
     resetHarness();
@@ -311,5 +376,38 @@ describe('SessionAuthGate status-check failure behavior', () => {
 
     expect(text).toContain('sessionAuth.locked.unlockTitle');
     expect(text).not.toContain('sessionAuth.error.networkTitle');
+  });
+
+  test('discards a password completion after switching to another host', async () => {
+    resetHarness();
+    desktopShell = true;
+    runtimeFetchRejects = false;
+    runtimeApiBaseUrl = 'https://host-a.example';
+    runtimeKey = 'host:a';
+    let resolveLogin: (value: unknown) => void = () => {
+      throw new Error('Password login did not start');
+    };
+    desktopInvoke = () => new Promise((resolve) => { resolveLogin = resolve; });
+
+    const lockedTree = await renderGate();
+    const input = findElement(lockedTree, 'input');
+    expect(input).not.toBeNull();
+    (input?.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: 'password-a' } });
+
+    const passwordTree = await renderGate();
+    const form = findElement(passwordTree, 'form');
+    expect(form).not.toBeNull();
+    const pending = (form?.props.onSubmit as (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: () => undefined });
+    await Promise.resolve();
+
+    runtimeApiBaseUrl = 'https://host-b.example';
+    runtimeKey = 'host:b';
+    runtimeEndpointChangedListener?.();
+    resolveLogin({ token: 'token-a' });
+    await pending;
+
+    expect(desktopHostsGetCalls).toBe(0);
+    expect(desktopHostsSetCalls).toBe(0);
+    expect(runtimeSwitchCalls).toBe(0);
   });
 });

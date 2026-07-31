@@ -61,6 +61,7 @@ import type { QuestionRequest } from "@/types/question"
 import {
   getSessionMaterializationRequestKey,
   getSessionMaterializationStatus,
+  getStaleRunningToolMessageID,
   isSessionMaterializationStillNeeded,
   type SessionMaterializationRequest,
 } from "./materialization"
@@ -72,7 +73,6 @@ import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { listGlobalSessionPages } from "@/stores/globalSessions"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type UserMessageHistorySnapshot } from "./user-message-history"
-import { runtimeFetch } from "@/lib/runtime-fetch"
 import {
   EMPTY_SESSION_MESSAGE_LOAD_STATE,
   SessionMessageLoader,
@@ -293,7 +293,11 @@ function enqueueSessionMaterialization(
   const runtimeKey = getRuntimeKey()
   const k = getSessionMaterializationRequestKey(runtimeKey, directory, sessionID)
   const existing = pendingSessionMaterializations.get(k)
-  if (existing && Date.now() - existing.enqueuedAt < SESSION_MATERIALIZATION_COOLDOWN_MS) return
+  if (existing && Date.now() - existing.enqueuedAt < SESSION_MATERIALIZATION_COOLDOWN_MS) {
+    const settlementMustFollowEarlierRecovery = request.reason === "settled-running-tool"
+      && existing.request.reason !== "settled-running-tool"
+    if (!settlementMustFollowEarlierRecovery) return
+  }
 
   const pending = { runtimeKey, sessionID, directory, enqueuedAt: Date.now(), request }
   pendingSessionMaterializations.set(k, pending)
@@ -1824,6 +1828,18 @@ function handleEvent(
     }
   }
 
+  if (payload.type === "session.idle" || payload.type === "session.error") {
+    const sessionID = getSessionIdFromPayload(payload) ?? undefined
+    const state = getDirectoryEventState(store, batch)
+    const messageID = sessionID ? getStaleRunningToolMessageID(state, sessionID) : undefined
+    if (sessionID && messageID) {
+      enqueueSessionMaterialization(resolvedDirectory, sessionID, childStores, {
+        reason: "settled-running-tool",
+        messageID,
+      })
+    }
+  }
+
   updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
 }
 
@@ -1834,40 +1850,6 @@ function handleEvent(
 const dispatchOpenCodeUpdateAvailable = (payload: { version: string }) => {
   if (typeof window === "undefined") return
   window.dispatchEvent(new CustomEvent("openchamber:opencode-update-available", { detail: payload }))
-}
-
-let bundledOpenCodeRuntimeCache: { runtimeKey: string; promise: Promise<boolean> } | null = null
-
-const isBundledOpenCodeRuntime = async () => {
-  const runtimeKey = getRuntimeKey()
-  if (!bundledOpenCodeRuntimeCache || bundledOpenCodeRuntimeCache.runtimeKey !== runtimeKey) {
-    bundledOpenCodeRuntimeCache = {
-      runtimeKey,
-      promise: runtimeFetch("/api/config/opencode-resolution", { signal: AbortSignal.timeout(4000) })
-        .then(async (response) => {
-          if (response.ok) {
-            const resolution = await response.json() as { source?: unknown; detectedSourceNow?: unknown }
-            return resolution.source === "bundled" || resolution.detectedSourceNow === "bundled"
-          }
-
-          const healthResponse = await runtimeFetch("/health", { signal: AbortSignal.timeout(4000) })
-          if (!healthResponse.ok) return false
-          const health = await healthResponse.json() as { opencodeBinarySource?: unknown }
-          return health.opencodeBinarySource === "bundled"
-        })
-        .catch(() => false),
-    }
-  }
-  return bundledOpenCodeRuntimeCache.promise
-}
-
-const dispatchOpenCodeUpdateAvailableUnlessBundled = (payload: { version: string }) => {
-  if (typeof window === "undefined") return
-  void isBundledOpenCodeRuntime().then((isBundled) => {
-    if (!isBundled) {
-      dispatchOpenCodeUpdateAvailable(payload)
-    }
-  })
 }
 
 export function SyncProvider(props: {
@@ -1894,6 +1876,7 @@ export function SyncProvider(props: {
     })
   }
   const messageLoader = messageLoaderRef.current
+  const messageLoaderDisposalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   messageLoader.configure({ sdk: props.sdk, runtimeKey })
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
@@ -2147,7 +2130,7 @@ export function SyncProvider(props: {
                 ? (payload.properties as { version: string }).version
                 : ""
               if (version) {
-                dispatchOpenCodeUpdateAvailableUnlessBundled({ version })
+                dispatchOpenCodeUpdateAvailable({ version })
               }
             }
             handleEvent(directory, payload, childStores, routingIndex, runtimeKey, false, currentDirectoryRef.current, batch)
@@ -2401,9 +2384,22 @@ export function SyncProvider(props: {
     }
   }, [props.sdk, props.directory, childStores, messageLoader, routingIndex])
 
-  useEffect(() => () => {
-    messageLoader.dispose()
-    childStores.disposeAll()
+  useEffect(() => {
+    if (messageLoaderDisposalTimerRef.current) {
+      clearTimeout(messageLoaderDisposalTimerRef.current)
+      messageLoaderDisposalTimerRef.current = null
+    }
+    messageLoader.activate()
+    return () => {
+      // Strict Mode probes effects with setup → cleanup → setup in one task.
+      // Deferring destruction lets child effects issue their second setup load
+      // before this provider is installed again and cancels the cleanup.
+      messageLoaderDisposalTimerRef.current = setTimeout(() => {
+        messageLoaderDisposalTimerRef.current = null
+        messageLoader.dispose()
+        childStores.disposeAll()
+      }, 0)
+    }
   }, [childStores, messageLoader])
 
   // Subscribe to child store for streaming state derivation

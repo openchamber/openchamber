@@ -109,22 +109,6 @@ html[data-oc-vibrancy] .oc-vibrancy-pill {
   }
 }
 
-/* Suppress WebKit-specific hover/focus adornments on the chat textarea */
-textarea[data-chat-input="true"] {
-  -webkit-appearance: none;
-  background: transparent !important;
-  border: none;
-  box-shadow: none;
-}
-
-textarea[data-chat-input="true"]:hover,
-textarea[data-chat-input="true"]:focus,
-textarea[data-chat-input="true"]:focus-visible {
-  outline: none;
-  border: none;
-  box-shadow: none;
-}
-
 /* Ensure interactive controls consistently show pointer cursor */
 :where(
   button,
@@ -303,12 +287,12 @@ textarea[data-chat-input="true"]:focus-visible {
   color: color-mix(in srgb, var(--syntax-comment) 85%, var(--syntax-foreground) 15%);
 }
 
-:root.vscode-runtime textarea[data-chat-input="true"]::placeholder {
+:root.vscode-runtime [data-chat-input="true"] .cm-placeholder {
   color: color-mix(in srgb, var(--vscode-input-placeholderForeground, var(--muted-foreground)) 65%, transparent);
 }
 
 /* Match chat footer background to input in WebKit to avoid dual-tone hover/focus */
-[data-chat-input="true"] + div[data-chat-input-footer="true"] {
+div[data-chat-input-footer="true"] {
   background: transparent !important;
   border: none;
   box-shadow: none;
@@ -332,14 +316,16 @@ textarea[data-chat-input="true"]:focus-visible {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 calc(100% - var(--scroll-shadow-size)),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 calc(100% - var(--scroll-shadow-size)),
     transparent 100%
   );
@@ -349,15 +335,32 @@ textarea[data-chat-input="true"]:focus-visible {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
     #000 100%
   );
+}
+
+/* Sticky-fade overlay (desktop sidebar): the crisp duplicate identity stays
+   mounted and its visibility is driven synchronously by the scroller's own
+   top-scroll data attribute — the same signal that engages the mask — so the
+   overlay appears in the exact frame the mask hides the real header (no blink).
+   ScrollShadow sets data-top-scroll when nothing is below the viewport and
+   data-top-bottom-scroll when content is both above and below. */
+.oc-sticky-fade-overlay {
+  opacity: 0;
+}
+
+.oc-sticky-fade-root:has(.oc-sidebar-scroller[data-top-scroll="true"]) .oc-sticky-fade-overlay,
+.oc-sticky-fade-root:has(.oc-sidebar-scroller[data-top-bottom-scroll="true"]) .oc-sticky-fade-overlay {
+  opacity: 1;
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"] {
@@ -680,7 +683,9 @@ html:not(.dark) .chat-scroll {
   inset: 0;
   pointer-events: none;
   transition: opacity 0.2s ease;
-  z-index: 10;
+  /* Above sticky zone headers (z-20) — the thumb must never dive under
+     a stuck sidebar header while scrolling. */
+  z-index: 30;
 }
 
 .overlay-scrollbar--dense,
