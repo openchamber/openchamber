@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canCommentOnDocument, drainPending, dropPendingById, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
+import { broadcastRemoval, canCommentOnDocument, drainPending, dropPendingById, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
 
 const selection = (startLine: number, startChar: number, endLine: number, endChar: number) => ({
     start: { line: startLine, character: startChar },
@@ -123,6 +123,43 @@ describe('dropPendingById', () => {
 
     test('an empty hold reports nothing dropped', () => {
         assert.equal(dropPendingById([], 'a'), false);
+    });
+});
+
+describe('broadcastRemoval', () => {
+    const surface = (draftIds: string[]) => {
+        const notified: number[] = [];
+        return {
+            pendingLineComments: draftIds.map((draftId) => ({ draftId })),
+            notify: () => notified.push(1),
+            notified,
+        };
+    };
+
+    test('every surface is told, because only one of them holds the draft', () => {
+        const a = surface([]);
+        const b = surface([]);
+        broadcastRemoval([a, b], 'icd-1');
+        assert.equal(a.notified.length, 1);
+        assert.equal(b.notified.length, 1);
+    });
+
+    test('a comment still held for a booting surface is dropped from the hold', () => {
+        // The notification alone would find nothing: an undelivered comment is
+        // in no store yet, and would land after the user removed its thread.
+        const holding = surface(['icd-1', 'icd-2']);
+        broadcastRemoval([holding], 'icd-1');
+        assert.deepEqual(holding.pendingLineComments.map((p) => p.draftId), ['icd-2']);
+    });
+
+    test('surfaces holding nothing keep their queues intact', () => {
+        const other = surface(['icd-9']);
+        broadcastRemoval([other], 'icd-1');
+        assert.deepEqual(other.pendingLineComments.map((p) => p.draftId), ['icd-9']);
+    });
+
+    test('no surfaces at all is not an error', () => {
+        assert.doesNotThrow(() => broadcastRemoval([], 'icd-1'));
     });
 });
 
