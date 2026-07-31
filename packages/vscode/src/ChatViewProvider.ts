@@ -8,6 +8,7 @@ import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders, type WorkspaceFolderCandidate } from './workspaceResolver';
+import { SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
 
 type ActiveEditorFilePayload = {
   filePath: string;
@@ -137,7 +138,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       // reports every change. Handled before the id check because this is a
       // one-way notification, not a bridge request awaiting a response.
       if (message.type === 'inlineComments:sync') {
-        void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', message.payload);
+        // Tagged with the sidebar's identity: a snapshot only speaks for the
+        // store that produced it, and each session panel has its own.
+        void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', {
+          ...(message.payload as Record<string, unknown>),
+          surfaceId: SIDEBAR_SURFACE_ID,
+        });
         return;
       }
 

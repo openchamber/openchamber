@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canCommentOnDocument, drainPending, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody } from './inlineCommentSelection';
+import { canCommentOnDocument, drainPending, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
 
 const selection = (startLine: number, startChar: number, endLine: number, endChar: number) => ({
     start: { line: startLine, character: startChar },
@@ -101,6 +101,29 @@ describe('drainPending', () => {
 
     test('an empty hold drains to nothing', () => {
         assert.deepEqual(drainPending([]), []);
+    });
+});
+
+describe('snapshotOwnsThread', () => {
+    test('the surface holding the draft speaks for its thread', () => {
+        assert.equal(snapshotOwnsThread('panel-a', 'panel-a'), true);
+    });
+
+    test('another tab says nothing about this thread', () => {
+        // Every webview has its own draft store, so a second session tab
+        // reporting an empty list is not evidence that this comment is gone.
+        // Before this rule, opening a tab disposed the other tab's threads.
+        assert.equal(snapshotOwnsThread('panel-a', 'panel-b'), false);
+    });
+
+    test('the sidebar does not speak for a panel, nor a panel for the sidebar', () => {
+        assert.equal(snapshotOwnsThread('panel-a', 'sidebar'), false);
+        assert.equal(snapshotOwnsThread('sidebar', 'panel-a'), false);
+    });
+
+    test('a thread with no surface yet is owned by nobody', () => {
+        assert.equal(snapshotOwnsThread(undefined, 'panel-a'), false);
+        assert.equal(snapshotOwnsThread('', 'panel-a'), false);
     });
 });
 

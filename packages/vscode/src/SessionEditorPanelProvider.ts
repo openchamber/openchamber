@@ -25,6 +25,8 @@ type LineCommentPayload = {
 };
 
 type SessionPanelState = {
+  /** This panel's id, which is also its surface identity for comment threads. */
+  id: string;
   panel: vscode.WebviewPanel;
   sseStreams: Map<string, AbortController>;
   /**
@@ -129,6 +131,7 @@ export class SessionEditorPanelProvider {
     };
 
     const state: SessionPanelState = {
+      id: panelId,
       panel,
       sseStreams: new Map(),
       pendingLineComments: [],
@@ -168,7 +171,12 @@ export class SessionEditorPanelProvider {
       // Editor comment threads mirror the composer's drafts, so the webview
       // reports every change. One-way notification, no response expected.
       if (message.type === 'inlineComments:sync') {
-        void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', message.payload);
+        // Tagged with this panel's identity: a snapshot only speaks for the
+        // store that produced it, and every panel has its own.
+        void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', {
+          ...(message.payload as Record<string, unknown>),
+          surfaceId: panelId,
+        });
         return;
       }
 
@@ -302,14 +310,14 @@ export class SessionEditorPanelProvider {
     code: string;
     language: string;
     comment: string;
-  }): boolean {
+  }): string | null {
     if (!payload.relativePath.trim()) {
-      return false;
+      return null;
     }
 
     const entry = this._getActivePanelEntry();
     if (!entry) {
-      return false;
+      return null;
     }
 
     entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, true);
@@ -319,7 +327,7 @@ export class SessionEditorPanelProvider {
     // Hold it on the same path a freshly opened panel uses.
     if (!entry.webviewReady) {
       entry.pendingLineComments.push(payload);
-      return true;
+      return entry.id;
     }
 
     void entry.panel.webview.postMessage({
@@ -327,7 +335,7 @@ export class SessionEditorPanelProvider {
       command: 'addLineComment',
       payload,
     });
-    return true;
+    return entry.id;
   }
 
   /**
@@ -338,13 +346,14 @@ export class SessionEditorPanelProvider {
    * like the toolbar's new-session button, then delivers into that tab once its
    * webview is listening.
    */
-  public openWithLineComment(payload: LineCommentPayload, activeSessionId: string | null): boolean {
+  public openWithLineComment(payload: LineCommentPayload, activeSessionId: string | null): string | null {
     if (!payload.relativePath.trim()) {
-      return false;
+      return null;
     }
 
-    if (this.addLineCommentToActivePanel(payload)) {
-      return true;
+    const accepted = this.addLineCommentToActivePanel(payload);
+    if (accepted) {
+      return accepted;
     }
 
     if (activeSessionId) {
@@ -355,11 +364,11 @@ export class SessionEditorPanelProvider {
 
     const entry = this._getActivePanelEntry();
     if (!entry) {
-      return false;
+      return null;
     }
 
     entry.pendingLineComments.push(payload);
-    return true;
+    return entry.id;
   }
 
   /**
