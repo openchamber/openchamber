@@ -15,7 +15,7 @@
 
 import * as vscode from 'vscode';
 
-import { canCommentOnDocument, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, type LineRange } from './inlineCommentSelection';
+import { canCommentOnDocument, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, snapshotOwnsThread, type LineRange } from './inlineCommentSelection';
 
 // Also written literally in package.json, which gates the thread menus with
 // `commentController == openchamber.inlineComments`. JSON cannot import, so the
@@ -45,11 +45,27 @@ interface OpenChamberCommentThread extends vscode.CommentThread {
      * been seen at least once.
      */
     confirmed?: boolean;
+    /**
+     * The chat webview holding this comment's draft.
+     *
+     * Only that surface's snapshots can decide this thread's fate; every other
+     * webview has its own store where the draft never existed.
+     */
+    surfaceId?: string;
 }
 
+/** Identifies one chat webview: a session panel id, or the sidebar. */
+export const SIDEBAR_SURFACE_ID = 'sidebar';
+
 export interface InlineCommentThreadsOptions {
-    /** Hands a finished draft to the chat webview. Returns false when nothing accepted it. */
-    submitDraft: (payload: InlineCommentDraftPayload) => boolean | Promise<boolean>;
+    /**
+     * Hands a finished draft to a chat webview.
+     *
+     * Returns the id of the surface that accepted it, or null when none did.
+     * The identity matters: only that surface's later snapshots can speak for
+     * this comment, because every webview holds its own draft store.
+     */
+    submitDraft: (payload: InlineCommentDraftPayload) => Promise<string | null> | string | null;
     /** Asks the webview to drop a draft the user removed from the editor side. */
     removeDraft: (draftId: string) => void;
     /** The extension's own icon, shown as the comment's avatar. */
@@ -160,14 +176,15 @@ export class InlineCommentThreads implements vscode.Disposable {
             comment: reply.text,
         };
 
-        const accepted = await this.options.submitDraft(payload);
-        if (!accepted) {
+        const surfaceId = await this.options.submitDraft(payload);
+        if (!surfaceId) {
             // Nothing took the draft (no chat surface open). Leaving the thread
             // would promise an attachment that does not exist.
             this.disposeThread(thread);
             return;
         }
 
+        thread.surfaceId = surfaceId;
         thread.draftId = draftId;
         thread.commentBody = reply.text;
         thread.canReply = false;
@@ -187,11 +204,16 @@ export class InlineCommentThreads implements vscode.Disposable {
      * Only threads this controller created are ever touched, so an unknown id in
      * the snapshot (a comment written in the in-app file viewer) is ignored
      * rather than treated as something to reconcile.
+     *
+     * A snapshot speaks only for the surface that sent it. Every webview keeps
+     * its own draft store, so a second session tab reporting an empty list says
+     * nothing about a comment attached to the first one.
      */
-    public reconcile(drafts: ReadonlyArray<{ id: string; text: string }>): void {
+    public reconcile(surfaceId: string, drafts: ReadonlyArray<{ id: string; text: string }>): void {
         const byId = new Map(drafts.map((draft) => [draft.id, draft.text]));
 
         for (const [draftId, thread] of [...this.threadsByDraftId]) {
+            if (!snapshotOwnsThread(thread.surfaceId, surfaceId)) continue;
             const text = byId.get(draftId);
             const fate = reconcileThreadFate(text, Boolean(thread.confirmed));
 
