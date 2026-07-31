@@ -10,7 +10,7 @@ import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { pickActivePanelId } from './activePanelRouting';
-import { drainPending } from './inlineCommentSelection';
+import { drainPending, dropPendingById } from './inlineCommentSelection';
 
 const t = vscode.l10n.t;
 
@@ -411,6 +411,11 @@ export class SessionEditorPanelProvider {
    */
   public removeLineComment(draftId: string): void {
     for (const state of this._panels.values()) {
+      // Drop it from the hold first. A comment still waiting on a booting
+      // webview is not in any store yet, so the message below would find
+      // nothing to remove and the draft would land after the user dropped it.
+      dropPendingById(state.pendingLineComments, draftId);
+
       void state.panel.webview.postMessage({
         type: 'command',
         command: 'removeLineComment',
