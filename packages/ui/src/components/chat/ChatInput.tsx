@@ -878,15 +878,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
         const drafts = inlineDraftTarget ? consumeDrafts(inlineDraftTarget) : [];
-        // Terminal captures serialize into the queued text; everything else is
-        // captured as parts now, so a queued message keeps the comment cards it
-        // was written with instead of re-reading drafts at send time.
-        const terminalDrafts = drafts.filter((draft) => draft.source === 'terminal');
-        const commentParts = buildInlineCommentParts(drafts.filter((draft) => draft.source !== 'terminal'));
+        // Only code comments become cards. Terminal captures and attached
+        // context stay in the queued text, where they are visible in the sent
+        // message; a metadata-less part would be dropped as ephemeral prompt
+        // context and never shown. Cards are captured now so a queued message
+        // keeps what it was written with instead of re-reading drafts at send.
+        const textDrafts = drafts.filter((draft) => !isCommentCardSource(draft.source));
+        const commentParts = buildInlineCommentParts(drafts.filter((draft) => isCommentCardSource(draft.source)));
 
         let messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
-        if (terminalDrafts.length > 0) {
-            messageToQueue = appendInlineComments(messageToQueue, terminalDrafts);
+        if (textDrafts.length > 0) {
+            messageToQueue = appendInlineComments(messageToQueue, textDrafts);
         }
         const attachmentsToQueue = sanitizeAttachmentsForSend(attachedFiles);
 
@@ -1030,11 +1032,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             ? consumeDrafts(consumedDraftTarget)
             : [];
 
-        // Terminal captures stay prose and ride along in the last authored body;
-        // every other comment becomes its own part, so it renders as a card in
-        // OpenChamber and in OpenCode Desktop rather than as fenced text.
-        const terminalDrafts = drafts.filter((draft) => draft.source === 'terminal');
-        const commentCards = buildInlineCommentParts(drafts.filter((draft) => draft.source !== 'terminal'));
+        // Only code comments become cards. Terminal captures and attached
+        // context stay prose and ride along in the last authored body, because
+        // that is what keeps them in the sent message: a part carrying no
+        // comment metadata is treated as ephemeral prompt context and is not
+        // shown back to the user.
+        const textDrafts = drafts.filter((draft) => !isCommentCardSource(draft.source));
+        const commentCards = buildInlineCommentParts(drafts.filter((draft) => isCommentCardSource(draft.source)));
 
         const availableSkillNames = new Set(
             useSkillsStore.getState().skills.map((skill) => skill.name),
@@ -1048,7 +1052,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             })),
             composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
             composerAttachments: attachedFiles,
-            inlineComments: terminalDrafts,
+            inlineComments: textDrafts,
             commentCards,
             syntheticTexts: syntheticParts?.map((part) => part.text) ?? [],
             linkedIssueContext: linkedIssue?.contextText ?? null,
