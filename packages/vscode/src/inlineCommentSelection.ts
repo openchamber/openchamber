@@ -89,6 +89,19 @@ export function drainPending<T>(pending: T[]): T[] {
     return pending.splice(0, pending.length);
 }
 
+/**
+ * Whether a draft snapshot is authoritative for a thread.
+ *
+ * Every webview — the sidebar and each session tab — runs its own draft store
+ * and publishes its whole list. Only the surface that accepted a comment knows
+ * whether it still holds it; to any other surface the draft simply never
+ * existed. Letting a foreign snapshot decide disposed threads that were alive
+ * and about to be sent, which is what opening a second tab used to do.
+ */
+export function snapshotOwnsThread(threadSurfaceId: string | undefined, snapshotSurfaceId: string): boolean {
+    return Boolean(threadSurfaceId) && threadSurfaceId === snapshotSurfaceId;
+}
+
 /** What a draft-list snapshot says should happen to one editor thread. */
 export type ThreadFate = 'wait' | 'dispose' | 'show';
 

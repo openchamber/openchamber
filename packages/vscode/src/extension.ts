@@ -5,7 +5,7 @@ import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
 import { resolveWorkspaceFolders } from './workspaceResolver';
-import { InlineCommentThreads } from './InlineCommentThreads';
+import { InlineCommentThreads, SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -479,20 +479,21 @@ export async function activate(context: vscode.ExtensionContext) {
       // A comment is written against code the user is reading, so it cannot
       // require them to have opened a chat first: with no session tab open,
       // one is opened, exactly as the toolbar's new-session button does.
-      if (sessionEditorProvider?.openWithLineComment(payload, activeSessionId)) {
-        return true;
+      const panelId = sessionEditorProvider?.openWithLineComment(payload, activeSessionId);
+      if (panelId) {
+        return panelId;
       }
       // No session editor at all (provider gone): fall back to the sidebar
       // rather than accepting a comment that has nowhere to land.
       if (!(await revealChatViewForPayload())) {
-        return false;
+        return null;
       }
       if (!chatViewProvider) {
         vscode.window.showWarningMessage(t('OpenChamber: Chat sidebar is not ready'));
-        return false;
+        return null;
       }
       chatViewProvider.addLineComment(payload);
-      return true;
+      return SIDEBAR_SURFACE_ID;
     },
     removeDraft: (draftId) => {
       // Every surface is told, because each webview holds its own draft store
@@ -548,13 +549,18 @@ export async function activate(context: vscode.ExtensionContext) {
   // a user should find in the palette.
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.internal.inlineCommentsSync', (payload: unknown) => {
-      const drafts = (payload as { drafts?: unknown })?.drafts;
-      if (!Array.isArray(drafts)) return;
+      const record = payload as { drafts?: unknown; surfaceId?: unknown };
+      const drafts = record?.drafts;
+      // The surface id is stamped by the provider that received the snapshot,
+      // so an untagged one cannot be attributed and is ignored rather than
+      // applied to threads it may know nothing about.
+      if (!Array.isArray(drafts) || typeof record?.surfaceId !== 'string') return;
       inlineCommentThreads.reconcile(
+        record.surfaceId,
         drafts.flatMap((entry) => {
-          const record = entry as { id?: unknown; text?: unknown };
-          if (typeof record?.id !== 'string') return [];
-          return [{ id: record.id, text: typeof record.text === 'string' ? record.text : '' }];
+          const draft = entry as { id?: unknown; text?: unknown };
+          if (typeof draft?.id !== 'string') return [];
+          return [{ id: draft.id, text: typeof draft.text === 'string' ? draft.text : '' }];
         })
       );
     })
