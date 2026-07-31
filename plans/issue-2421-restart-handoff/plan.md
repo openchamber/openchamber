@@ -23,7 +23,7 @@
 
 ## Current status
 
-Phases 1, 2A, 2B, 2C, and 3 are implemented in the current worktree on branch `fix/issue-2421-restart-handoff`. The guardian path is cross-platform, uses stable persisted owner identity, preserves guardian-managed children across web-server restart, and fails closed on ambiguous cleanup/adoption. The latest review remediation keeps v2 filesystem durability/mode checks platform-aware, retries launch cleanup against the authoritative CAS revision, preserves failed-stop records and IPC, aborts startup when recovery listing fails, and preserves CLI/foreground owner metadata when an accepted guardian stop is not confirmed. Final local validation passes: the web suite reports 118 files, 1171 passed, and 3 skipped; focused five-area tests pass, Linux smoke prints `ok`, and docs, type-check, lint, and changed-file syntax checks are clean. Real Windows validation remains the required platform gate. Nothing is committed or pushed in this session.
+Phases 1, 2A, 2B, 2C, and 3 are implemented on `fix/issue-2421-restart-handoff`. The current provenance is aligned with `upstream/main` at `eafa7ceec`: PR #2485 is OPEN/Draft, head `a2951d4cf`, and GitHub reports the branch mergeable. The PR comparison against the current base is 90 task-scoped files covering guardian/lifecycle/IPC, shared live-status reconciliation in `packages/ui`, CI, docs, tests, and plans. UI client persistence (tabs, drafts, scroll) remains out of scope. Previous local validation reports were collected before this final base alignment and must be refreshed on `a2951d4cf`; real Windows validation remains a required platform gate. No Draft/status change is part of this workflow.
 
 ## Phase 2A state machine
 
@@ -52,6 +52,16 @@ User direction (2026-07-29) closes the originally-listed Phase 4 items as follow
 **Net Phase 4 status: closed.** Phase 2C closes the user-visible bug in #2421; there is no Phase 4 work on our roadmap. If a future request brings VS Code, Electron, mobile, or hosted-mobile guardian support, each becomes a fresh issue with its own design.
 
 **VS Code forward-reference:** an out-of-scope VS Code design sketch is documented in `plans/vscode-handoff-design-notes.md`. Its historical POSIX-only assumptions are superseded by the current web guardian's POSIX + Windows implementation. Read that file only if a fresh VS Code issue is opened.
+
+## PR review comments and remaining gates (read 2026-07-31)
+
+- The original review blockers (guardian launch wiring, managed launch environment, and list-trust adoption decision) are recorded by the PR bot as addressed. Shared `packages/ui` live-status changes are an intentional affected surface, not UI-persistence scope.
+- Workflow files under `.github/workflows/` are a trust boundary. Automated review must remain `human-review-required`; a maintainer must review the Linux/Windows workflows. The separate `pr-review.yml` oversized-diff fail-closed issue is a repository follow-up, not silently waived here.
+- `parseAclOutput` now strips the validated target path case-insensitively before parsing inline ACEs, including paths with spaces (for example `C:\Users\Jane Doe\...`); focused regression passes. Native Windows `icacls` output remains unverified.
+- The negative test for an explicit, non-inherited `CREATOR OWNER` ACL entry is now present and passing.
+- Document the operator-visible guardian-owned `openchamber stop` behavior: an unresponsive web process is not force-killed when owner metadata must be preserved; retry `openchamber stop` or use the explicit guardian administrative command.
+- Refresh the validation table on exact head `a2951d4cf`, including the current Windows workflow result; earlier green-run comments are not evidence for this final head.
+- The merge-conflict review finding is resolved by the current merge with `upstream/main`; do not rewrite or force-push this published branch without separate approval.
 
 ## Risks and gates
 

@@ -74,6 +74,18 @@
 
 **Net: #2421 ends with Phase 2C.** No Phase 4 work. See `plan.md` "Phase 4 scope" for the reasoning.
 
+## PR review follow-up — current head `a2951d4cf`
+- [x] Read the PR review threads and issue comments through the current bot review; preserve PR #2485 as OPEN/Draft.
+- [x] Align provenance with `upstream/main`; current PR metadata reports `MERGEABLE`.
+- [x] Treat shared `packages/ui` live-status reconciliation as an affected surface; keep UI client persistence out of this issue.
+- [x] Fix `icacls` parsing for target paths containing spaces and add regression coverage; native Windows output remains pending.
+- [x] Add the negative explicit/non-inherited `CREATOR OWNER` ACL test.
+- [ ] Update the PR handoff with the guardian-owned `openchamber stop` failure/retry behavior.
+- [ ] Rerun and record focused/full validation at exact head `a2951d4cf`, including the current Windows workflow result.
+- [ ] Obtain human maintainer review for both workflow files; automation cannot clear this trust-boundary gate.
+- [ ] Track the oversized-diff fail-closed fix for `.github/workflows/pr-review.yml` separately unless explicitly added to this issue.
+
 ## Issue closure path
-- [ ] Explicit approval to commit (Phase 2A/2B/3 + Phase 2C + ipc-server fix) on `fix/issue-2421-restart-handoff`.
-- [ ] Explicit approval to push and update PR #2485 from `Refs #2421` → `Closes #2421` once Phase 2C ships.
+- [x] Provenance audited at current head; no history rewrite or Draft-status change is planned.
+- [ ] Complete the PR review follow-ups above and refresh final-head validation.
+- [ ] Require explicit approval before any additional commit, push, force-push, PR body update, or status change.

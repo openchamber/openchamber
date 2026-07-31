@@ -246,6 +246,18 @@ describe('__test__ helpers', () => {
       { principal: 'NT AUTHORITY\\SYSTEM', rights: ['I', 'F'], inherited: true },
     ]);
   });
+
+  it('strips a case-insensitive target path before parsing an inline first ACL entry', () => {
+    const targetPath = 'C:\\Users\\Jane Doe\\AppData\\Local';
+    expect(__test__.parseAclOutput([
+      'c:\\users\\jane doe\\appdata\\local alice:(F)',
+      '                                      NT AUTHORITY\\SYSTEM:(I)(F)',
+      'Successfully processed 1 files; Failed processing 0 files',
+    ].join('\n'), targetPath)).toEqual([
+      { principal: 'alice', rights: ['F'], inherited: false },
+      { principal: 'NT AUTHORITY\\SYSTEM', rights: ['I', 'F'], inherited: true },
+    ]);
+  });
 });
 
 describe('validateWindowsAcl', () => {
@@ -318,6 +330,17 @@ describe('validateWindowsAncestorAcl', () => {
         { principal: 'CREATOR OWNER', rights: ['I', 'OI', 'CI', 'IO', 'F'], inherited: true },
       ],
     })).toEqual({ ok: true, username: 'alice' });
+  });
+
+  it('rejects an explicit non-inherited creator-owner entry', () => {
+    expect(() => validateWindowsAncestorAcl({
+      targetPath: 'C:\\Users\\alice\\AppData',
+      username: 'alice',
+      aclEntries: [
+        { principal: 'alice', rights: ['I', 'F'], inherited: true },
+        { principal: 'CREATOR OWNER', rights: ['OI', 'CI', 'IO', 'F'], inherited: false },
+      ],
+    })).toThrow(/unsafe explicit creator-owner entry/);
   });
 
   it('rejects an attacker-writable ancestor even when the current user is safe', () => {

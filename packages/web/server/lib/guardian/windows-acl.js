@@ -90,7 +90,19 @@ const assertUsername = (value) => {
 
 const normalizePrincipal = (value) => String(value ?? '').trim().toLowerCase();
 
-const parseAclOutput = (output) => {
+const stripKnownTargetPath = (rawLine, targetPath) => {
+  if (typeof targetPath !== 'string' || targetPath.length === 0) return rawLine;
+  if (
+    rawLine.length <= targetPath.length
+    || rawLine.slice(0, targetPath.length).toLowerCase() !== targetPath.toLowerCase()
+    || !/^[ \t]$/.test(rawLine[targetPath.length])
+  ) {
+    return rawLine;
+  }
+  return rawLine.slice(targetPath.length);
+};
+
+const parseAclOutput = (output, targetPath) => {
   const entries = [];
   let sawPath = false;
   for (const rawLine of String(output ?? '').split(/\r?\n/)) {
@@ -98,7 +110,7 @@ const parseAclOutput = (output) => {
     if (!line || /^successfully processed \d+ files?; failed processing \d+ files?$/i.test(line)) {
       continue;
     }
-    const match = rawLine.match(/\s+(.+?):((?:\([^)]+\))+)[ \t]*$/);
+    const match = stripKnownTargetPath(rawLine, targetPath).match(/\s+(.+?):((?:\([^)]+\))+)[ \t]*$/);
     if (match) {
       sawPath = true;
     } else if (!sawPath) {
@@ -134,7 +146,7 @@ const inspectWindowsAcl = ({ targetPath, spawnSync = defaultSpawnSync } = {}) =>
     const stderr = String(result?.stderr ?? '').trim();
     throw new Error(`icacls ACL query failed: ${stderr || `<no stderr, status=${result?.status}>`}`);
   }
-  return { entries: parseAclOutput(result?.stdout) };
+  return { entries: parseAclOutput(result?.stdout, targetPath) };
 };
 
 /**
