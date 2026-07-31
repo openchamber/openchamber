@@ -1,43 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
-import fs from 'fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { registerSkillRenameContract } from '../../../../../scripts/skill-rename-test-contract.js';
 import { getSkillSources, mergeDiscoveredSkills, updateSkill } from './skills.js';
-
-const SOURCE_SKILL_NAME = 'rename-source';
-const RENAMED_SKILL_NAME = 'rename-target';
-const SKILL_INSTRUCTIONS = '# Workflow\n\nKeep every instruction intact.';
-const ORIGINAL_SKILL_CONTENT = [
-  '---',
-  '# Preserve this comment and formatting.',
-  `name: "${SOURCE_SKILL_NAME}" # Keep the quotes and inline comment.`,
-  'description: Preserve this description',
-  'metadata: [one, two]',
-  '---',
-  '',
-  SKILL_INSTRUCTIONS,
-  '',
-].join('\n');
-const RENAMED_SKILL_CONTENT = ORIGINAL_SKILL_CONTENT.replace(
-  `"${SOURCE_SKILL_NAME}"`,
-  `"${RENAMED_SKILL_NAME}"`,
-);
-const SUPPORTING_CONTENT = 'Supporting content';
-
-async function createRenameFixture() {
-  const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-skills-rename-'));
-  const sourceDir = path.join(tempRoot, '.opencode', 'skills', SOURCE_SKILL_NAME);
-  const renamedDir = path.join(tempRoot, '.opencode', 'skills', RENAMED_SKILL_NAME);
-  const skillPath = path.join(sourceDir, 'SKILL.md');
-  const supportingPath = path.join(sourceDir, 'references', 'guide.md');
-
-  await fsPromises.mkdir(path.dirname(supportingPath), { recursive: true });
-  await fsPromises.writeFile(skillPath, ORIGINAL_SKILL_CONTENT, 'utf8');
-  await fsPromises.writeFile(supportingPath, SUPPORTING_CONTENT, 'utf8');
-
-  return { tempRoot, sourceDir, renamedDir, skillPath, supportingPath };
-}
 
 describe('skills', () => {
   it('merges locally discovered skills missing from OpenCode live discovery', () => {
@@ -146,135 +112,12 @@ describe('skills', () => {
     }
   });
 
-  it('renames a skill without losing its content or supporting files', async () => {
-    const fixture = await createRenameFixture();
-
-    try {
-      updateSkill(
-        SOURCE_SKILL_NAME,
-        { name: RENAMED_SKILL_NAME, targetPath: fixture.skillPath },
-        fixture.tempRoot,
-        fixture.skillPath,
-      );
-
-      await expect(fsPromises.stat(fixture.sourceDir)).rejects.toMatchObject({ code: 'ENOENT' });
-      const renamedSkillPath = path.join(fixture.renamedDir, 'SKILL.md');
-      const sources = getSkillSources(RENAMED_SKILL_NAME, fixture.tempRoot);
-      expect(sources.md.path).toBe(renamedSkillPath);
-      expect(sources.md.description).toBe('Preserve this description');
-      expect(sources.md.instructions).toBe(SKILL_INSTRUCTIONS);
-      await expect(fsPromises.readFile(renamedSkillPath, 'utf8')).resolves.toBe(RENAMED_SKILL_CONTENT);
-      await expect(fsPromises.readFile(
-        path.join(fixture.renamedDir, 'references', 'guide.md'),
-        'utf8',
-      )).resolves.toBe(SUPPORTING_CONTENT);
-    } finally {
-      await fsPromises.rm(fixture.tempRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects a selected path that is not the canonical skill path', async () => {
-    const fixture = await createRenameFixture();
-    const selectedPath = path.join(fixture.tempRoot, 'selected', SOURCE_SKILL_NAME, 'SKILL.md');
-
-    try {
-      await fsPromises.mkdir(path.dirname(selectedPath), { recursive: true });
-      await fsPromises.writeFile(selectedPath, ORIGINAL_SKILL_CONTENT, 'utf8');
-
-      expect(() => updateSkill(
-        SOURCE_SKILL_NAME,
-        { name: RENAMED_SKILL_NAME, targetPath: selectedPath },
-        fixture.tempRoot,
-        fixture.skillPath,
-      )).toThrow(`target does not match ${path.resolve(selectedPath)}`);
-
-      await expect(fsPromises.readFile(fixture.skillPath, 'utf8')).resolves.toBe(ORIGINAL_SKILL_CONTENT);
-      await expect(fsPromises.readFile(selectedPath, 'utf8')).resolves.toBe(ORIGINAL_SKILL_CONTENT);
-      await expect(fsPromises.stat(fixture.renamedDir)).rejects.toMatchObject({ code: 'ENOENT' });
-    } finally {
-      await fsPromises.rm(fixture.tempRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('restores the original content when moving the skill directory fails', async () => {
-    const fixture = await createRenameFixture();
-    const renameError = new Error('forced rename failure');
-    const renameSpy = vi.spyOn(fs, 'renameSync').mockImplementationOnce(() => {
-      throw renameError;
-    });
-
-    try {
-      expect(() => updateSkill(
-        SOURCE_SKILL_NAME,
-        { name: RENAMED_SKILL_NAME, targetPath: fixture.skillPath },
-        fixture.tempRoot,
-        fixture.skillPath,
-      )).toThrow(renameError);
-
-      expect(renameSpy).toHaveBeenCalledOnce();
-      await expect(fsPromises.readFile(fixture.skillPath, 'utf8')).resolves.toBe(ORIGINAL_SKILL_CONTENT);
-      await expect(fsPromises.readFile(fixture.supportingPath, 'utf8')).resolves.toBe(SUPPORTING_CONTENT);
-      await expect(fsPromises.stat(fixture.renamedDir)).rejects.toMatchObject({ code: 'ENOENT' });
-    } finally {
-      renameSpy.mockRestore();
-      await fsPromises.rm(fixture.tempRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects renaming a skill whose file is not in a dedicated directory', async () => {
-    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-skills-root-'));
-    const skillsDir = path.join(tempRoot, '.opencode', 'skills');
-    const skillPath = path.join(skillsDir, 'SKILL.md');
-    const siblingPath = path.join(skillsDir, 'keep.txt');
-
-    try {
-      await fsPromises.mkdir(skillsDir, { recursive: true });
-      await fsPromises.writeFile(skillPath, ORIGINAL_SKILL_CONTENT, 'utf8');
-      await fsPromises.writeFile(siblingPath, SUPPORTING_CONTENT, 'utf8');
-
-      expect(() => updateSkill(
-        SOURCE_SKILL_NAME,
-        { name: RENAMED_SKILL_NAME, targetPath: skillPath },
-        tempRoot,
-        skillPath,
-      )).toThrow('must be stored in its own directory');
-
-      await expect(fsPromises.readFile(skillPath, 'utf8')).resolves.toBe(ORIGINAL_SKILL_CONTENT);
-      await expect(fsPromises.readFile(siblingPath, 'utf8')).resolves.toBe(SUPPORTING_CONTENT);
-    } finally {
-      await fsPromises.rm(tempRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects invalid, combined, and colliding rename requests', async () => {
-    const fixture = await createRenameFixture();
-    const targetPath = path.join(fixture.renamedDir, 'SKILL.md');
-
-    try {
-      expect(() => updateSkill(
-        SOURCE_SKILL_NAME,
-        { name: 'Invalid Name', targetPath: fixture.skillPath },
-        fixture.tempRoot,
-        fixture.skillPath,
-      )).toThrow('Invalid skill name');
-      expect(() => updateSkill(
-        SOURCE_SKILL_NAME,
-        { name: RENAMED_SKILL_NAME, description: 'Changed', targetPath: fixture.skillPath },
-        fixture.tempRoot,
-        fixture.skillPath,
-      )).toThrow('cannot be combined with other updates');
-
-      await fsPromises.mkdir(fixture.renamedDir, { recursive: true });
-      await fsPromises.writeFile(targetPath, RENAMED_SKILL_CONTENT, 'utf8');
-      expect(() => updateSkill(
-        SOURCE_SKILL_NAME,
-        { name: RENAMED_SKILL_NAME, targetPath: fixture.skillPath },
-        fixture.tempRoot,
-        fixture.skillPath,
-      )).toThrow('already exists');
-      await expect(fsPromises.readFile(fixture.skillPath, 'utf8')).resolves.toBe(ORIGINAL_SKILL_CONTENT);
-    } finally {
-      await fsPromises.rm(fixture.tempRoot, { recursive: true, force: true });
-    }
+  registerSkillRenameContract({
+    afterEach,
+    expect,
+    spyOn: vi.spyOn,
+    test: it,
+    updateSkill,
+    tempPrefix: 'oc-web-skills-rename-',
   });
 });
