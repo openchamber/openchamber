@@ -81,7 +81,7 @@ describe('shared process identity', () => {
     })).toMatch(/changed/);
   });
 
-  it('reads a complete identity through the shared abstraction on Linux', () => {
+  it.skipIf(process.platform === 'win32')('reads a complete identity through the shared abstraction on Linux', () => {
     const identity = readProcessIdentity(process.pid, { platform: 'linux' });
     expect(identity).toMatchObject({
       processStartTicks: expect.stringMatching(/^(?:0|[1-9]\d*)$/),

@@ -136,7 +136,7 @@ describe('startGuardianDetached', () => {
     const spawnFn = vi.fn().mockReturnValue(mockChild);
     // Pass an explicit `portPath` (different from the platform default)
     // so `startGuardianDetached` adds the `--port-path` CLI arg.
-    const customPortPath = '/tmp/launch-wiring-test-explicit-portpath';
+    const customPortPath = path.resolve('/tmp/launch-wiring-test-explicit-portpath');
     const result = await startGuardianDetached({
       spawnFn,
       logFd: 1,

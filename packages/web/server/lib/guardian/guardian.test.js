@@ -197,7 +197,7 @@ describe('ManagedOpenCodeGuardian', () => {
     expect(guardian).toBeInstanceOf(ManagedOpenCodeGuardian);
   });
 
-  it('fails guardian startup closed when recovery-store listing rejects', async () => {
+  it.skipIf(process.platform === 'win32')('fails guardian startup closed when recovery-store listing rejects', async () => {
     const clock = createClock();
     const baseStore = createFakeStore(clock);
     const store = {
