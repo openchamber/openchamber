@@ -144,11 +144,21 @@ describe('scripts/guardian-smoke-test.ps1 well-formedness', () => {
     // `[System.Management.Automation.Language.Parser]::ParseFile`
     // throws on any parse error. We let the exception propagate
     // through vitest as a test failure.
+    const escapedPath = scriptPath.replaceAll("'", "''");
+    const parseCommand = [
+      '$tokens = $null',
+      '$errors = $null',
+      "[System.Management.Automation.Language.Parser]::ParseFile('" + escapedPath + "', [ref]$tokens, [ref]$errors) | Out-Null",
+      "if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }",
+      "Write-Host 'OK'",
+    ].join('; ');
     execFileSync(which, [
+      '-NoLogo',
       '-NoProfile',
+      '-NonInteractive',
       '-Command',
-      "[System.Management.Automation.Language.Parser]::ParseFile('" + scriptPath + "', [ref]$null, [ref]$null) | Out-Null; Write-Host 'OK'",
-    ], { stdio: 'pipe' });
+      parseCommand,
+    ], { stdio: 'pipe', timeout: 15000 });
   });
 });
 
