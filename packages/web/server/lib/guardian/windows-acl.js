@@ -189,9 +189,6 @@ export function validateWindowsAcl({
     if (rights.includes('DENY') || !rights.includes(FULL_CONTROL)) {
       throw unsafeAclError(`windows-acl: ${kind} ACL has unsafe rights for ${entry.principal}`);
     }
-    if (isSystem && !(entry.inherited === true || rights.includes('I'))) {
-      throw unsafeAclError(`windows-acl: ${kind} ACL has an unsafe explicit system/admin entry`);
-    }
     if (isOwner) ownerEntry = true;
   }
   if (!ownerEntry) {
@@ -205,8 +202,9 @@ export function validateWindowsAcl({
  * legitimately grant read/execute access to broad principals, so the target
  * ACL policy above is intentionally not reused verbatim. The security rule
  * here is narrower: an unapproved principal must not be able to modify the
- * path, while the current user and inherited SYSTEM/Administrators access
- * remain valid.
+ * path, while the current user and standard SYSTEM/Administrators access
+ * remain valid. `icacls /inheritance:r` may copy those standard OS entries as
+ * explicit ACEs, so inheritance state is not itself a trust decision.
  */
 export function validateWindowsAncestorAcl({
   targetPath,

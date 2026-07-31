@@ -273,6 +273,19 @@ describe('validateWindowsAcl', () => {
     })).toEqual({ ok: true, username: 'alice' });
   });
 
+  it('accepts explicit system/admin entries copied by inheritance removal', () => {
+    expect(validateWindowsAcl({
+      targetPath: 'C:\\safe\\root',
+      username: 'alice',
+      kind: 'private directory',
+      aclEntries: [
+        { principal: 'alice', rights: ['OI', 'CI', 'F'] },
+        { principal: 'NT AUTHORITY\\SYSTEM', rights: ['F'], inherited: false },
+        { principal: 'BUILTIN\\Administrators', rights: ['F'], inherited: false },
+      ],
+    })).toEqual({ ok: true, username: 'alice' });
+  });
+
   it('fails closed for an injected reparse-point observation', () => {
     expect(() => validateWindowsAcl({
       targetPath: 'C:\\safe\\secret',
