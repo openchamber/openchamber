@@ -15,7 +15,7 @@
 
 import * as vscode from 'vscode';
 
-import { nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, type LineRange } from './inlineCommentSelection';
+import { canCommentOnDocument, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, type LineRange } from './inlineCommentSelection';
 
 // Also written literally in package.json, which gates the thread menus with
 // `commentController == openchamber.inlineComments`. JSON cannot import, so the
@@ -80,17 +80,26 @@ export class InlineCommentThreads implements vscode.Disposable {
             'OpenChamber',
         );
         // Any line of a workspace file can take a comment; the gutter `+`
-        // follows from this. Files outside the workspace are excluded: the
-        // comment is filed against a workspace-relative path, so one written
-        // elsewhere would name a file the composer cannot resolve.
+        // follows from this.
         this.controller.commentingRangeProvider = {
             provideCommentingRanges: (document) => {
-                if (document.uri.scheme === 'comment') return [];
-                const filePath = resolveCommentFilePath(document.uri.fsPath, document.uri.query);
-                if (!vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath))) return [];
+                if (!this.canCommentOn(document.uri)) return [];
                 return [new vscode.Range(0, 0, Math.max(document.lineCount - 1, 0), 0)];
             },
         };
+    }
+
+    /**
+     * Whether this document can take a comment.
+     *
+     * Both entry points ask, so the gutter `+` and the right-click command
+     * agree: a comment is filed against a workspace-relative path, and one
+     * written outside the workspace would name a file that does not resolve.
+     */
+    public canCommentOn(uri: vscode.Uri): boolean {
+        const filePath = resolveCommentFilePath(uri.fsPath, uri.query);
+        const inWorkspace = Boolean(vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath)));
+        return canCommentOnDocument(uri.scheme, inWorkspace);
     }
 
     /** Opens an empty thread on a selection, with the reply box focused. */
