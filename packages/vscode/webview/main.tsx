@@ -1310,6 +1310,23 @@ onCommand('addContextSelection', (payload) => {
   });
 });
 
+// Comments the user dropped from their editor thread before the draft reached
+// this store. Delivery is asynchronous — a cold panel holds the payload, and the
+// handler below can wait seconds for a directory — so a removal can arrive while
+// the comment is still in flight. Without this the draft would land afterwards
+// as a chip the user had already dropped, and be sent with the next message.
+const removedDraftIds = new Set<string>();
+const REMEMBERED_REMOVALS = 50;
+
+const rememberRemoval = (draftId: string) => {
+  removedDraftIds.add(draftId);
+  // Ids are unique per comment, so this only bounds growth over a long session.
+  if (removedDraftIds.size > REMEMBERED_REMOVALS) {
+    const oldest = removedDraftIds.values().next();
+    if (!oldest.done) removedDraftIds.delete(oldest.value);
+  }
+};
+
 onCommand('addLineComment', (payload) => {
   const record = payload as {
     draftId?: unknown;
@@ -1373,6 +1390,12 @@ onCommand('addLineComment', (payload) => {
       return;
     }
 
+    // Checked after the wait, which is the window the removal can land in.
+    if (draftId && removedDraftIds.has(draftId)) {
+      removedDraftIds.delete(draftId);
+      return;
+    }
+
     const sessionKey = useSessionUIStore.getState().currentSessionId ?? 'draft';
 
     const addedId = useInlineCommentDraftStore.getState().addDraft({ directory, sessionKey }, {
@@ -1422,6 +1445,10 @@ onCommand('removeLineComment', (payload) => {
   if (typeof draftId !== 'string' || !draftId) {
     return;
   }
+
+  // Recorded even when the draft is already here: the store removal below is
+  // the normal path, and this only matters when the draft has not landed yet.
+  rememberRemoval(draftId);
 
   void Promise.all([
     import('@/stores/useInlineCommentDraftStore'),

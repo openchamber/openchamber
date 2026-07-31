@@ -90,6 +90,22 @@ export function drainPending<T>(pending: T[]): T[] {
 }
 
 /**
+ * Removes a held comment the user dropped before it was ever delivered.
+ *
+ * A comment waiting on a booting webview is in no store yet, so asking that
+ * webview to remove it finds nothing. Without dropping the hold too, the draft
+ * would land after the user had already removed its thread.
+ *
+ * @returns whether a held comment was dropped
+ */
+export function dropPendingById<T extends { draftId?: string }>(pending: T[], draftId: string): boolean {
+    const index = pending.findIndex((entry) => entry.draftId === draftId);
+    if (index < 0) return false;
+    pending.splice(index, 1);
+    return true;
+}
+
+/**
  * Whether a draft snapshot is authoritative for a thread.
  *
  * Every webview — the sidebar and each session tab — runs its own draft store
