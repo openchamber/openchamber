@@ -5,6 +5,7 @@ import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { InlineCommentThreads } from './InlineCommentThreads';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -467,33 +468,85 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Comments are written where the code is: the thread opens on the selected
+  // lines and stays there until the message is sent. The composer chips remain
+  // the authoritative list, so the threads follow what the webview reports.
+  const inlineCommentThreads = new InlineCommentThreads({
+    submitDraft: async (payload) => {
+      // A comment is written against code the user is reading, so it cannot
+      // require them to have opened a chat first: with no session tab open,
+      // one is opened, exactly as the toolbar's new-session button does.
+      if (sessionEditorProvider?.openWithLineComment(payload, activeSessionId)) {
+        return true;
+      }
+      // No session editor at all (provider gone): fall back to the sidebar
+      // rather than accepting a comment that has nowhere to land.
+      if (!(await revealChatViewForPayload())) {
+        return false;
+      }
+      if (!chatViewProvider) {
+        vscode.window.showWarningMessage(t('OpenChamber: Chat sidebar is not ready'));
+        return false;
+      }
+      chatViewProvider.addLineComment(payload);
+      return true;
+    },
+    removeDraft: (draftId) => {
+      if (sessionEditorProvider?.removeLineCommentFromActivePanel(draftId)) {
+        return;
+      }
+      chatViewProvider?.removeLineComment(draftId);
+    },
+    avatar: vscode.Uri.joinPath(context.extensionUri, 'assets', 'app-icon.png'),
+    strings: {
+      threadLabel: ({ startLine, endLine }) => (startLine === endLine
+        ? t('Comment on line {0}', String(startLine))
+        : t('Comment on lines {0}-{1}', String(startLine), String(endLine))),
+      author: t('OpenChamber'),
+      notSent: t('Not sent yet'),
+    },
+  });
+  context.subscriptions.push(inlineCommentThreads);
+
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.addLineComment', async () => {
+    vscode.commands.registerCommand('openchamber.addLineComment', () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
         vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: No active editor'));
         return;
       }
+      inlineCommentThreads.openThread(editor.document.uri, editor.selection);
+    })
+  );
 
-      const selection = editor.selection;
-      const filePath = editor.document.uri.fsPath;
-      const relativePath = vscode.workspace.asRelativePath(editor.document.uri);
-      const startLine = selection.start.line + 1;
-      const endLine = selection.end.line + 1;
-      const selectedText = editor.document.getText(selection);
-      const language = editor.document.languageId;
+  // Invoked by the thread's own Comment button, and by the gutter `+` flow,
+  // which both arrive as a CommentReply carrying the typed text.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.submitLineComment', async (reply: vscode.CommentReply) => {
+      await inlineCommentThreads.submitReply(reply);
+    })
+  );
 
-      // Drop the user straight into the in-webview comment editor (multi-line,
-      // Shift+Enter aware). An empty comment signals the webview to open the
-      // editor for the new draft. Route to the active session editor panel when
-      // one is focused, otherwise fall back to the sidebar chat.
-      const payload = { filePath, relativePath, startLine, endLine, code: selectedText, language, comment: '' };
-      if (!sessionEditorProvider?.addLineCommentToActivePanel(payload)) {
-        if (!(await revealChatViewForPayload())) {
-          return;
-        }
-        chatViewProvider?.addLineComment(payload);
-      }
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.removeLineComment', (thread: vscode.CommentThread) => {
+      inlineCommentThreads.removeThread(thread);
+    })
+  );
+
+  // The webview reports its whole draft list whenever it changes; the threads
+  // follow it. Not contributed in package.json: internal wiring, not a command
+  // a user should find in the palette.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.internal.inlineCommentsSync', (payload: unknown) => {
+      const drafts = (payload as { drafts?: unknown })?.drafts;
+      if (!Array.isArray(drafts)) return;
+      inlineCommentThreads.reconcile(
+        drafts.flatMap((entry) => {
+          const record = entry as { id?: unknown; text?: unknown };
+          if (typeof record?.id !== 'string') return [];
+          return [{ id: record.id, text: typeof record.text === 'string' ? record.text : '' }];
+        })
+      );
     })
   );
 

@@ -12,9 +12,26 @@ import { pickActivePanelId } from './activePanelRouting';
 
 const t = vscode.l10n.t;
 
+type LineCommentPayload = {
+  draftId?: string;
+  filePath: string;
+  relativePath: string;
+  startLine: number;
+  endLine: number;
+  code: string;
+  language: string;
+  comment: string;
+};
+
 type SessionPanelState = {
   panel: vscode.WebviewPanel;
   sseStreams: Map<string, AbortController>;
+  /**
+   * A comment that opened this panel, held until the webview proves it is
+   * listening. Posting into a panel whose script has not booted drops the
+   * message outright, and the user already saw the comment accepted.
+   */
+  pendingLineComment?: LineCommentPayload;
 };
 
 type ActiveEditorFilePayload = {
@@ -130,6 +147,25 @@ export class SessionEditorPanelProvider {
     }, null, this._context.subscriptions);
 
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+      // Any inbound message proves the webview script is running, which is the
+      // only readiness signal this panel has. Flush the comment that opened it.
+      if (state.pendingLineComment) {
+        const pending = state.pendingLineComment;
+        state.pendingLineComment = undefined;
+        void panel.webview.postMessage({
+          type: 'command',
+          command: 'addLineComment',
+          payload: pending,
+        });
+      }
+
+      // Editor comment threads mirror the composer's drafts, so the webview
+      // reports every change. One-way notification, no response expected.
+      if (message.type === 'inlineComments:sync') {
+        void vscode.commands.executeCommand('openchamber.internal.inlineCommentsSync', message.payload);
+        return;
+      }
+
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
         return;
@@ -252,6 +288,7 @@ export class SessionEditorPanelProvider {
   }
 
   public addLineCommentToActivePanel(payload: {
+    draftId?: string;
     filePath: string;
     relativePath: string;
     startLine: number;
@@ -274,6 +311,59 @@ export class SessionEditorPanelProvider {
       type: 'command',
       command: 'addLineComment',
       payload,
+    });
+    return true;
+  }
+
+  /**
+   * Delivers a comment to a session tab, opening one when none exists.
+   *
+   * A comment is written against code the user is reading, so it must not
+   * depend on their having opened a chat first. With no tab open this behaves
+   * like the toolbar's new-session button, then delivers into that tab once its
+   * webview is listening.
+   */
+  public openWithLineComment(payload: LineCommentPayload, activeSessionId: string | null): boolean {
+    if (!payload.relativePath.trim()) {
+      return false;
+    }
+
+    if (this.addLineCommentToActivePanel(payload)) {
+      return true;
+    }
+
+    if (activeSessionId) {
+      this.createOrShow(activeSessionId);
+    } else {
+      this.createOrShowNewSession();
+    }
+
+    const entry = this._getActivePanelEntry();
+    if (!entry) {
+      return false;
+    }
+
+    entry.pendingLineComment = payload;
+    return true;
+  }
+
+  /**
+   * Drops a draft the user removed from its editor thread.
+   *
+   * Unlike adding, this does not reveal the panel: the user is looking at the
+   * code, and stealing focus to show a chip disappearing would be worse than
+   * letting it disappear quietly.
+   */
+  public removeLineCommentFromActivePanel(draftId: string): boolean {
+    const entry = this._getActivePanelEntry();
+    if (!entry) {
+      return false;
+    }
+
+    void entry.panel.webview.postMessage({
+      type: 'command',
+      command: 'removeLineComment',
+      payload: { draftId },
     });
     return true;
   }
