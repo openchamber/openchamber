@@ -263,7 +263,11 @@ export const MainLayout: React.FC = () => {
             case 'terminal':
                 return <TerminalView />;
             case 'files':
-                return <React.Suspense fallback={null}><FilesView /></React.Suspense>;
+                return (
+                    <React.Suspense fallback={null}>
+                        <FilesView active={!isSettingsDialogOpen && !isSurfacePageOpen && !mobileLeftDrawerVisible && !mobileRightDrawerVisible} />
+                    </React.Suspense>
+                );
             case 'context':
                 return <React.Suspense fallback={null}><ProjectContextPanel /></React.Suspense>;
             case 'diagram':
@@ -271,7 +275,7 @@ export const MainLayout: React.FC = () => {
             default:
                 return null;
         }
-    }, [activeMainTab, isMobile, mobileRightSidebarOpen]);
+    }, [activeMainTab, isMobile, isSettingsDialogOpen, isSurfacePageOpen, mobileLeftDrawerVisible, mobileRightDrawerVisible, mobileRightSidebarOpen]);
 
     const isChatActive = activeMainTab === 'chat';
 
