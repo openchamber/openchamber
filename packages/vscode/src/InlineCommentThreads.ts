@@ -15,7 +15,7 @@
 
 import * as vscode from 'vscode';
 
-import { canCommentOnDocument, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, snapshotOwnsThread, type LineRange } from './inlineCommentSelection';
+import { DELIVERY_CONFIRMATION_TIMEOUT_MS, canCommentOnDocument, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldAbandonUnconfirmed, shouldDisposeOnEmptyBody, snapshotOwnsThread, type LineRange } from './inlineCommentSelection';
 
 // Also written literally in package.json, which gates the thread menus with
 // `commentController == openchamber.inlineComments`. JSON cannot import, so the
@@ -52,6 +52,8 @@ interface OpenChamberCommentThread extends vscode.CommentThread {
      * webview has its own store where the draft never existed.
      */
     surfaceId?: string;
+    /** Deadline for the composer to confirm it holds this draft. */
+    confirmationTimer?: ReturnType<typeof setTimeout>;
 }
 
 /** Identifies one chat webview: a session panel id, or the sidebar. */
@@ -68,6 +70,8 @@ export interface InlineCommentThreadsOptions {
     submitDraft: (payload: InlineCommentDraftPayload) => Promise<string | null> | string | null;
     /** Asks the webview to drop a draft the user removed from the editor side. */
     removeDraft: (draftId: string) => void;
+    /** Tells the user a comment never reached the composer and was given up on. */
+    reportUndelivered: () => void;
     /** The extension's own icon, shown as the comment's avatar. */
     avatar: vscode.Uri;
     /** Localized strings, injected so this module does not reach for the l10n bundle. */
@@ -191,6 +195,17 @@ export class InlineCommentThreads implements vscode.Disposable {
         thread.contextValue = 'openchamberAttached';
         thread.comments = [this.buildComment(reply.text)];
         this.threadsByDraftId.set(draftId, thread);
+
+        // Accepting the draft is not the same as it landing. A panel whose
+        // webview never boots leaves this thread showing "Not sent yet" for a
+        // comment that will never be sent and cannot be rewritten, so it is
+        // given up on rather than left as a standing promise.
+        thread.confirmationTimer = setTimeout(() => {
+            thread.confirmationTimer = undefined;
+            if (!shouldAbandonUnconfirmed(thread.confirmed)) return;
+            this.disposeThread(thread);
+            this.options.reportUndelivered();
+        }, DELIVERY_CONFIRMATION_TIMEOUT_MS);
     }
 
     /**
@@ -224,6 +239,10 @@ export class InlineCommentThreads implements vscode.Disposable {
             }
 
             thread.confirmed = true;
+            if (thread.confirmationTimer) {
+                clearTimeout(thread.confirmationTimer);
+                thread.confirmationTimer = undefined;
+            }
             if (text !== undefined && thread.commentBody !== text) {
                 thread.commentBody = text;
                 thread.comments = [this.buildComment(text)];
@@ -246,6 +265,9 @@ export class InlineCommentThreads implements vscode.Disposable {
     }
 
     public dispose(): void {
+        for (const thread of this.threadsByDraftId.values()) {
+            if (thread.confirmationTimer) clearTimeout(thread.confirmationTimer);
+        }
         this.threadsByDraftId.clear();
         this.controller.dispose();
     }
@@ -267,6 +289,10 @@ export class InlineCommentThreads implements vscode.Disposable {
     }
 
     private disposeThread(thread: OpenChamberCommentThread): void {
+        if (thread.confirmationTimer) {
+            clearTimeout(thread.confirmationTimer);
+            thread.confirmationTimer = undefined;
+        }
         if (thread.draftId) {
             this.threadsByDraftId.delete(thread.draftId);
         }

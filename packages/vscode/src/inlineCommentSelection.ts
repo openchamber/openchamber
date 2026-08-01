@@ -105,6 +105,27 @@ export function dropPendingById<T extends { draftId?: string }>(pending: T[], dr
     return true;
 }
 
+/**
+ * How long a submitted comment may go unconfirmed before it is given up on.
+ *
+ * Long enough to outlast a cold webview boot plus the composer's own wait for a
+ * directory, short enough that a thread does not sit there promising to send
+ * something that never will.
+ */
+export const DELIVERY_CONFIRMATION_TIMEOUT_MS = 30_000;
+
+/**
+ * Whether a submitted comment should be abandoned once its deadline passes.
+ *
+ * Confirmation means the composer reported holding the draft. Without it the
+ * comment reached no store: the panel's webview never booted, or the message
+ * was dropped. Keeping the thread would show "Not sent yet" forever, for a
+ * comment that cannot be sent and cannot be rewritten — only deleted.
+ */
+export function shouldAbandonUnconfirmed(confirmed: boolean | undefined): boolean {
+    return !confirmed;
+}
+
 /** A chat surface that may be holding, or showing, a comment draft. */
 export interface RemovalTarget {
     /** Comments still waiting on this surface's webview to boot. */

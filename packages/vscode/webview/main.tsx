@@ -1357,30 +1357,33 @@ onCommand('addLineComment', (payload) => {
     import('@/stores/useDirectoryStore'),
     import('@/stores/useInlineCommentDraftStore'),
   ]).then(async ([{ useSessionUIStore }, { useDirectoryStore }, { useInlineCommentDraftStore }]) => {
-    // Inline drafts are owned by runtime + directory + session. Resolve the
-    // directory with the same precedence the composer uses, otherwise the draft
-    // lands under a key ChatInput never reads and the comment silently vanishes.
-    const resolveDirectory = () => {
+    // Inline drafts are owned by runtime + directory + session. Both halves are
+    // read together, from one store snapshot: read apart, a session that
+    // finished loading between them would pair its key with the previous
+    // session's directory, and the draft would land under a key ChatInput never
+    // reads. Directory precedence matches the composer's own.
+    const resolveTarget = () => {
       const sessionState = useSessionUIStore.getState();
       const currentSessionId = sessionState.currentSessionId;
       const sessionDirectory = currentSessionId ? sessionState.getDirectoryForSession(currentSessionId) : null;
       const draftDirectory = sessionState.newSessionDraft?.open
         ? sessionState.newSessionDraft.bootstrapPendingDirectory ?? sessionState.newSessionDraft.directoryOverride ?? null
         : null;
-      return sessionDirectory ?? draftDirectory ?? useDirectoryStore.getState().currentDirectory;
+      const directory = sessionDirectory ?? draftDirectory ?? useDirectoryStore.getState().currentDirectory;
+      return directory ? { directory, sessionKey: currentSessionId ?? 'draft' } : null;
     };
 
     // A comment can arrive before the chat surface has finished booting: the
     // extension opens the sidebar and posts after a fixed delay, which a cold
     // webview can outlast. Dropping the draft here loses a comment the user
     // already wrote and already saw accepted in the editor, so wait for the
-    // directory to land instead.
-    let directory = resolveDirectory();
-    for (let attempt = 0; !directory && attempt < 40; attempt += 1) {
+    // target to land instead.
+    let target = resolveTarget();
+    for (let attempt = 0; !target && attempt < 40; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 250));
-      directory = resolveDirectory();
+      target = resolveTarget();
     }
-    if (!directory) {
+    if (!target) {
       console.warn('[openchamber] no directory resolved; dropping inline comment', { relativePath, startLine });
       return;
     }
@@ -1390,9 +1393,7 @@ onCommand('addLineComment', (payload) => {
       return;
     }
 
-    const sessionKey = useSessionUIStore.getState().currentSessionId ?? 'draft';
-
-    const addedId = useInlineCommentDraftStore.getState().addDraft({ directory, sessionKey }, {
+    const addedId = useInlineCommentDraftStore.getState().addDraft(target, {
       id: draftId,
       source: 'file',
       fileLabel,
