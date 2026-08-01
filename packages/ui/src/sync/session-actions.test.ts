@@ -926,6 +926,18 @@ describe("respondToPermission passes directory", () => {
     expect(replyCalls[0].params.reply).toBe("reject")
     expect(replyCalls[0].params.directory).toBe("/fallback/dir")
   })
+
+  test("uses an explicit event directory before incomplete local routing state", async () => {
+    const childStores = createChildStores([])
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/stale/current")
+
+    await respondToPermission("unknown-session", "perm-event", "once", "/event/project")
+
+    expect(scopedClientDirectories).toContain("/event/project")
+    expect(replyCalls[0].params.directory).toBe("/event/project")
+  })
 })
 
 describe("revertToMessage passes session directory", () => {

@@ -40,7 +40,10 @@ import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
-import { processVSCodePermissionAutoAccept } from "./vscode-permission-auto-accept"
+import {
+  processVSCodePermissionAutoAccept,
+  processVSCodeReconciledPermissionAutoAccept,
+} from "./vscode-permission-auto-accept"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
@@ -1247,7 +1250,7 @@ export async function resyncBlockingRequestsForDirectory(
       const acceptedIdsBySession = new Map<string, Set<string>>()
       await Promise.all(Object.entries(grouped).flatMap(([sessionId, permissions]) =>
         permissions.map(async (permission) => {
-          if (!(await processVSCodePermissionAutoAccept(permission, directory))) return
+          if (!(await processVSCodeReconciledPermissionAutoAccept(permission, directory))) return
           const accepted = acceptedIdsBySession.get(sessionId) ?? new Set<string>()
           accepted.add(permission.id)
           acceptedIdsBySession.set(sessionId, accepted)

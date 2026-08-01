@@ -1137,12 +1137,17 @@ export async function respondToPermission(
   sessionId: string,
   requestId: string,
   response: "once" | "always" | "reject",
+  directoryOverride?: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
+  const directory = directoryOverride
+    || resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
     || getSessionDirectory(sessionId)
     || dir()
-  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
+  const client = directoryOverride
+    ? opencodeClient.getScopedSdkClient(directoryOverride)
+    : getRequestReplyClient("permission", sessionId, requestId)
+  const result = await client.permission.reply({
     requestID: requestId,
     reply: response,
     ...(directory ? { directory } : {}),
