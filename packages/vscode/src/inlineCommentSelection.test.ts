@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { broadcastRemoval, canCommentOnDocument, drainPending, dropPendingById, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
+import { DELIVERY_CONFIRMATION_TIMEOUT_MS, broadcastRemoval, canCommentOnDocument, drainPending, dropPendingById, nextDraftId, reconcileThreadFate, resolveCommentFilePath, selectionLineRange, shouldAbandonUnconfirmed, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
 
 const selection = (startLine: number, startChar: number, endLine: number, endChar: number) => ({
     start: { line: startLine, character: startChar },
@@ -123,6 +123,26 @@ describe('dropPendingById', () => {
 
     test('an empty hold reports nothing dropped', () => {
         assert.equal(dropPendingById([], 'a'), false);
+    });
+});
+
+describe('shouldAbandonUnconfirmed', () => {
+    test('a comment the composer never reported holding is given up on', () => {
+        // The panel's webview never booted, or the message was dropped. The
+        // thread would otherwise show "Not sent yet" forever for a comment that
+        // cannot be sent and cannot be rewritten.
+        assert.equal(shouldAbandonUnconfirmed(undefined), true);
+        assert.equal(shouldAbandonUnconfirmed(false), true);
+    });
+
+    test('a comment the composer confirmed holding is kept', () => {
+        assert.equal(shouldAbandonUnconfirmed(true), false);
+    });
+
+    test('the deadline outlasts the composer own wait for a directory', () => {
+        // The webview waits up to 10s for a directory before filing the draft,
+        // so a shorter deadline here would abandon comments that were fine.
+        assert.ok(DELIVERY_CONFIRMATION_TIMEOUT_MS > 10_000);
     });
 });
 

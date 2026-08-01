@@ -499,6 +499,9 @@ export async function activate(context: vscode.ExtensionContext) {
       sessionEditorProvider?.removeLineComment(draftId);
       chatViewProvider?.removeLineComment(draftId);
     },
+    reportUndelivered: () => {
+      vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: The comment never reached the chat and was discarded'));
+    },
     avatar: vscode.Uri.joinPath(context.extensionUri, 'assets', 'app-icon.png'),
     strings: {
       threadLabel: ({ startLine, endLine }) => (startLine === endLine
