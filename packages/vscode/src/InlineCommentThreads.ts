@@ -203,6 +203,11 @@ export class InlineCommentThreads implements vscode.Disposable {
         thread.confirmationTimer = setTimeout(() => {
             thread.confirmationTimer = undefined;
             if (!shouldAbandonUnconfirmed(thread.confirmed)) return;
+            // Retract it everywhere before saying it was discarded. Dropping only
+            // the thread leaves the payload in a panel's hold, so a webview that
+            // boots after the deadline would still file the draft and send a
+            // comment the user was just told had been thrown away.
+            this.options.removeDraft(draftId);
             this.disposeThread(thread);
             this.options.reportUndelivered();
         }, DELIVERY_CONFIRMATION_TIMEOUT_MS);
