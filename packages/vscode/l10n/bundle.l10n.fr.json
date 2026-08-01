@@ -15,6 +15,7 @@
   "Improve the following Code:": "Améliorez le code suivant :",
   "OpenChamber [Add Comment]: No active editor": "OpenChamber [Ajouter un commentaire] : aucun éditeur actif",
   "OpenChamber [Add Comment]: File is outside the workspace": "OpenChamber [Ajouter un commentaire] : le fichier est en dehors de l’espace de travail",
+  "OpenChamber [Add Comment]: The comment never reached the chat and was discarded": "OpenChamber [Ajouter un commentaire] : le commentaire n’est jamais arrivé dans la discussion et a été abandonné",
   "Comment on line {0}": "Commentaire sur la ligne {0}",
   "Comment on lines {0}-{1}": "Commentaire sur les lignes {0} à {1}",
   "OpenChamber": "OpenChamber",
