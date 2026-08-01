@@ -81,6 +81,20 @@ export function registerSkillRenameContract({ afterEach, expect, spyOn, test, up
     expect(fs.readFileSync(fixture.skillPath, 'utf8')).toBe(ORIGINAL_CONTENT);
   });
 
+  test('restores the original directory when replacing its content fails', () => {
+    const fixture = createFixture();
+    const writeError = new Error('forced write failure');
+    const writeSpy = spyOn(fs, 'writeFileSync').mockImplementationOnce(() => {
+      throw writeError;
+    });
+    spies.push(writeSpy);
+
+    expect(() => renameSkill(fixture)).toThrow(writeError);
+    expect(fs.existsSync(fixture.renamedDir)).toBe(false);
+    expect(fs.readFileSync(fixture.skillPath, 'utf8')).toBe(ORIGINAL_CONTENT);
+    expect(fs.readFileSync(fixture.supportingPath, 'utf8')).toBe(SUPPORTING_CONTENT);
+  });
+
   test('rejects renaming shared or nested skill directories', () => {
     const fixture = createFixture(false);
     expect(() => renameSkill(fixture)).toThrow('must be stored in its own directory');
@@ -91,6 +105,18 @@ export function registerSkillRenameContract({ afterEach, expect, spyOn, test, up
     fs.mkdirSync(path.dirname(nestedSkillPath), { recursive: true });
     fs.writeFileSync(nestedSkillPath, ORIGINAL_CONTENT, 'utf8');
     expect(() => renameSkill(nestedFixture)).toThrow('contains nested skills');
+  });
+
+  test('rejects a skill directory that cannot be fully inspected', () => {
+    const fixture = createFixture();
+    const readError = new Error('forced read failure');
+    const readSpy = spyOn(fs, 'readdirSync').mockImplementationOnce(() => {
+      throw readError;
+    });
+    spies.push(readSpy);
+
+    expect(() => renameSkill(fixture)).toThrow(readError);
+    expect(fs.readFileSync(fixture.skillPath, 'utf8')).toBe(ORIGINAL_CONTENT);
   });
 
   test('rejects invalid, combined, and colliding rename requests', () => {

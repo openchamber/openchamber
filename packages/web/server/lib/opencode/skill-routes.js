@@ -15,6 +15,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     getOpenCodePort,
+    isInvalidSkillName,
     getSkillSources,
     discoverSkills,
     mergeDiscoveredSkills,
@@ -115,8 +116,11 @@ export const registerSkillRoutes = (app, dependencies) => {
     return { scope: SKILL_SCOPE.USER, source };
   };
 
-  const fetchOpenCodeDiscoveredSkills = async (workingDirectory) => {
+  const fetchOpenCodeDiscoveredSkills = async (workingDirectory, requireAuthoritative = false) => {
     if (!getOpenCodePort()) {
+      if (requireAuthoritative) {
+        throw new Error('Cannot update skills while OpenCode skill discovery is unavailable');
+      }
       return [];
     }
 
@@ -133,6 +137,9 @@ export const registerSkillRoutes = (app, dependencies) => {
       );
       const payload = response?.data;
       if (!Array.isArray(payload)) {
+        if (requireAuthoritative) {
+          throw new Error('OpenCode returned an invalid skill discovery response');
+        }
         return [];
       }
 
@@ -171,6 +178,9 @@ export const registerSkillRoutes = (app, dependencies) => {
         .filter(Boolean);
     } catch (error) {
       console.error('Failed to list OpenCode skills:', error);
+      if (requireAuthoritative) {
+        throw new Error('Cannot update skills while OpenCode skill discovery is unavailable', { cause: error });
+      }
       return [];
     }
   };
@@ -614,13 +624,30 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.log(`[Server] Updating skill: ${skillName}`);
       console.log('[Server] Working directory:', directory);
 
+      const isRename = typeof updates.name === 'string'
+        && !isInvalidSkillName(updates.name)
+        && updates.name !== skillName;
       const discoveredSkills = mergeDiscoveredSkills(
-        await fetchOpenCodeDiscoveredSkills(directory),
+        await fetchOpenCodeDiscoveredSkills(directory, isRename),
         discoverSkills(directory),
       );
       const selectedSkill = discoveredSkills.find((skill) => skill.name === skillName);
-      updateSkill(skillName, updates, directory, selectedSkill?.path, discoveredSkills.map((skill) => skill.name));
-      await refreshOpenCodeAfterConfigChange('skill update');
+      const updatedPath = updateSkill(skillName, updates, directory, selectedSkill?.path, discoveredSkills.map((skill) => skill.name));
+      try {
+        await refreshOpenCodeAfterConfigChange('skill update');
+      } catch (refreshError) {
+        if (updatedPath && isRename) {
+          try {
+            updateSkill(updates.name, { name: skillName, targetPath: updatedPath }, directory, updatedPath);
+          } catch (rollbackError) {
+            throw new AggregateError(
+              [refreshError, rollbackError],
+              `Skill "${skillName}" was renamed, but OpenCode refresh and rename rollback failed`,
+            );
+          }
+        }
+        throw refreshError;
+      }
 
       res.json({
         success: true,

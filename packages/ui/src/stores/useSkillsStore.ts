@@ -362,10 +362,11 @@ export const useSkillsStore = create<SkillsStore>()(
             invalidateSkillsLoadCache(currentDirectory);
             if (needsReload) {
               requiresReload = true;
+              // The mutation is committed; the refresh helper reports its own failure status.
               await refreshSkillsAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
-              });
+              }).catch(() => undefined);
               return true;
             }
 

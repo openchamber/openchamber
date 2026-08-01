@@ -51,6 +51,24 @@ afterEach(() => {
 
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
+const createSkill = (root) => {
+  const sourceDir = path.join(root, '.opencode', 'skills', 'rename-source');
+  const skillPath = path.join(sourceDir, 'SKILL.md');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.writeFileSync(skillPath, '---\nname: rename-source\ndescription: Rename test\n---\n\nKeep this body.\n', 'utf8');
+  return { sourceDir, skillPath, targetDir: path.join(path.dirname(sourceDir), 'rename-target') };
+};
+
+const renameSkill = (ctx, runtimeDeps, skillPath, name = 'rename-target') => handleConfigBridgeMessage({
+  id: `rename-${name}`,
+  type: 'api:config/skills',
+  payload: {
+    method: 'PATCH',
+    name: 'rename-source',
+    body: { name, targetPath: skillPath },
+  },
+}, ctx, runtimeDeps);
+
 describe('VS Code config bridge plugin parity', () => {
   test('removes agent fields when update payload sends null', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-agent-null-'));
@@ -273,5 +291,41 @@ describe('VS Code config bridge plugin parity', () => {
     expect(created?.data).toMatchObject({ success: true, requiresReload: false, reloadFailed: true });
     expect(created?.data?.warning).toContain('restart failed');
     expect(readJson(path.join(root, '.opencode', 'opencode.json')).plugin).toEqual(['plugin-restart']);
+  });
+
+  test('rejects skill renames when authoritative discovery is unavailable', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-skill-discovery-'));
+    tempRoots.push(root);
+    const ctx = createCtx(root);
+    const fixture = createSkill(root);
+
+    await expect(renameSkill(ctx, deps, fixture.skillPath, 'Invalid Name')).rejects.toThrow('Invalid skill name');
+    await expect(renameSkill(ctx, deps, fixture.skillPath)).rejects.toThrow('skill discovery is unavailable');
+    expect(ctx.restart).not.toHaveBeenCalled();
+    expect(fs.existsSync(fixture.sourceDir)).toBe(true);
+    expect(fs.existsSync(fixture.targetDir)).toBe(false);
+  });
+
+  test('rolls back a skill rename when restart fails', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-skill-restart-'));
+    tempRoots.push(root);
+    const ctx = createCtx(root, async () => {
+      throw new Error('restart failed');
+    });
+    const fixture = createSkill(root);
+    const skillDeps = {
+      ...deps,
+      fetchOpenCodeSkillsFromApi: async () => [{
+        name: 'rename-source',
+        path: fixture.skillPath,
+        scope: 'project',
+        source: 'opencode',
+      }],
+    };
+
+    await expect(renameSkill(ctx, skillDeps, fixture.skillPath)).rejects.toThrow('restart failed');
+    expect(fs.existsSync(fixture.sourceDir)).toBe(true);
+    expect(fs.existsSync(fixture.targetDir)).toBe(false);
+    expect(fs.readFileSync(fixture.skillPath, 'utf8')).toContain('name: rename-source');
   });
 });

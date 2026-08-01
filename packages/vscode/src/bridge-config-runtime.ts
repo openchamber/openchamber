@@ -19,6 +19,7 @@ import {
   type CommandScope,
   AGENT_SCOPE,
   COMMAND_SCOPE,
+  isInvalidSkillName,
   discoverSkills,
   mergeDiscoveredSkills,
   getSkillSources,
@@ -141,10 +142,14 @@ const resolveDiscoveredSkills = async (
   deps: ConfigRuntimeDeps,
   ctx: BridgeContext | undefined,
   workingDirectory?: string,
-): Promise<DiscoveredSkill[]> => mergeDiscoveredSkills(
-  (await deps.fetchOpenCodeSkillsFromApi(ctx, workingDirectory)) || [],
-  discoverSkills(workingDirectory),
-);
+  requireAuthoritative = false,
+): Promise<DiscoveredSkill[]> => {
+  const apiSkills = await deps.fetchOpenCodeSkillsFromApi(ctx, workingDirectory);
+  if (requireAuthoritative && apiSkills === null) {
+    throw new Error('Cannot update skills while OpenCode skill discovery is unavailable');
+  }
+  return mergeDiscoveredSkills(apiSkills || [], discoverSkills(workingDirectory));
+};
 
 export async function handleConfigBridgeMessage(
   message: BridgeMessageInput,
@@ -693,16 +698,34 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'PATCH') {
-        const discoveredSkills = await resolveDiscoveredSkills(deps, ctx, workingDirectory);
+        const requestedName = body?.name;
+        const isRename = typeof requestedName === 'string'
+          && !isInvalidSkillName(requestedName)
+          && requestedName !== skillName;
+        const discoveredSkills = await resolveDiscoveredSkills(deps, ctx, workingDirectory, isRename);
         const selectedSkill = discoveredSkills.find((skill) => skill.name === skillName);
-        updateSkill(
+        const updatedPath = updateSkill(
           skillName,
           (body || {}) as Record<string, unknown>,
           workingDirectory,
           selectedSkill?.path,
           discoveredSkills.map((skill) => skill.name),
         );
-        await ctx?.manager?.restart();
+        try {
+          await ctx?.manager?.restart();
+        } catch (restartError) {
+          if (updatedPath && isRename) {
+            try {
+              updateSkill(requestedName, { name: skillName, targetPath: updatedPath }, workingDirectory, updatedPath);
+            } catch (rollbackError) {
+              throw new AggregateError(
+                [restartError, rollbackError],
+                `Skill "${skillName}" was renamed, but OpenCode restart and rename rollback failed`,
+              );
+            }
+          }
+          throw restartError;
+        }
         return {
           id,
           type,

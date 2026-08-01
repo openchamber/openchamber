@@ -2684,8 +2684,12 @@ export const deleteSkillSupportingFile = (skillDir: string, relativePath: string
   }
 };
 
+export const isInvalidSkillName = (skillName: string): boolean => (
+  !/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(skillName) || skillName.length > 64
+);
+
 const validateSkillName = (skillName: string): void => {
-  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(skillName) || skillName.length > 64) {
+  if (isInvalidSkillName(skillName)) {
     throw new Error(`Invalid skill name "${skillName}". Must be 1-64 lowercase alphanumeric characters with hyphens, cannot start or end with hyphen.`);
   }
 };
@@ -2713,6 +2717,46 @@ const replaceSkillNameScalar = (content: string, currentName: string, nextName: 
 
   const frontmatterOffset = 3 + frontmatterMatch[1].length;
   return content.slice(0, frontmatterOffset + start) + nextToken + content.slice(frontmatterOffset + end);
+};
+
+const assertSkillRenameLayout = (skillDir: string, skillPath: string, skillName: string): void => {
+  if (fs.lstatSync(skillDir).isSymbolicLink() || fs.lstatSync(skillPath).isSymbolicLink()) {
+    throw new Error(`Skill "${skillName}" uses a symbolic path that cannot be renamed safely`);
+  }
+
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        if (fs.statSync(entryPath).isDirectory()) {
+          throw new Error(`Skill "${skillName}" directory contains symbolic directories`);
+        }
+      } else if (entry.isDirectory()) {
+        walk(entryPath);
+        continue;
+      }
+      if (entry.name === 'SKILL.md' && path.resolve(entryPath) !== path.resolve(skillPath)) {
+        throw new Error(`Skill "${skillName}" directory contains nested skills`);
+      }
+    }
+  };
+
+  walk(skillDir);
+};
+
+const replaceFileAtomically = (filePath: string, content: string): void => {
+  const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    fs.writeFileSync(temporaryPath, content, { encoding: 'utf8', mode: fs.statSync(filePath).mode });
+    fs.renameSync(temporaryPath, filePath);
+  } catch (error) {
+    try {
+      fs.rmSync(temporaryPath, { force: true });
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], `Failed to replace ${filePath} and clean up its temporary file`);
+    }
+    throw error;
+  }
 };
 
 export const createSkill = (skillName: string, config: Record<string, unknown>, workingDirectory?: string, scope?: SkillScope): void => {
@@ -2780,7 +2824,7 @@ export const updateSkill = (
   workingDirectory?: string,
   selectedPath?: string,
   discoveredSkillNames: string[] = [],
-): void => {
+): string | void => {
   const resolvedSelectedPath = typeof selectedPath === 'string' && selectedPath.trim()
     ? path.resolve(selectedPath.trim())
     : null;
@@ -2826,9 +2870,7 @@ export const updateSkill = (
     if (path.basename(mdDir) !== skillName) {
       throw new Error(`Skill "${skillName}" must be stored in its own directory to be renamed`);
     }
-    if (walkSkillMdFiles(mdDir).some((skillPath) => path.resolve(skillPath) !== path.resolve(mdPath))) {
-      throw new Error(`Skill "${skillName}" directory contains nested skills`);
-    }
+    assertSkillRenameLayout(mdDir, mdPath, skillName);
 
     if (discoveredSkillNames.includes(requestedName)) {
       throw new Error(`Skill ${requestedName} already exists`);
@@ -2845,21 +2887,22 @@ export const updateSkill = (
 
     const originalContent = fs.readFileSync(mdPath, 'utf8');
     const renamedContent = replaceSkillNameScalar(originalContent, skillName, requestedName);
+    const renamedPath = path.join(renamedDir, path.basename(mdPath));
+    fs.renameSync(mdDir, renamedDir);
     try {
-      fs.writeFileSync(mdPath, renamedContent, 'utf8');
-      fs.renameSync(mdDir, renamedDir);
+      replaceFileAtomically(renamedPath, renamedContent);
     } catch (error) {
       try {
-        fs.writeFileSync(mdPath, originalContent, 'utf8');
+        fs.renameSync(renamedDir, mdDir);
       } catch (rollbackError) {
         throw new AggregateError(
           [error, rollbackError],
-          `Failed to rename skill "${skillName}" and restore its content`,
+          `Failed to rename skill "${skillName}" and restore its directory`,
         );
       }
       throw error;
     }
-    return;
+    return renamedPath;
   }
 
   let mdModified = false;
