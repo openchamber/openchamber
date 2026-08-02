@@ -15,6 +15,8 @@ import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
+type UpdateTarget = 'desktop-app' | 'remote-instance';
+
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
 interface UpdateDialogProps {
@@ -29,6 +31,8 @@ interface UpdateDialogProps {
   onRestart: () => void;
   /** Runtime type to show different UI for desktop vs web */
   runtimeType?: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
+  /** Explicit user-facing target for update entry points with known scope. */
+  updateTarget?: UpdateTarget;
 }
 
 const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
@@ -200,6 +204,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   onDownload,
   onRestart,
   runtimeType = 'desktop',
+  updateTarget,
 }) => {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -218,6 +223,18 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const isWebRuntime = runtimeType === 'web';
   const isMobileRuntime = runtimeType === 'mobile';
   const updateCommand = info?.updateCommand || 'openchamber update';
+  const isDesktopAppTarget = updateTarget === 'desktop-app';
+  const isRemoteInstanceTarget = updateTarget === 'remote-instance';
+  const updateTitle = isDesktopAppTarget
+    ? t('updateDialog.target.desktop.title')
+    : isRemoteInstanceTarget
+      ? t('updateDialog.target.remote.title')
+      : t('updateDialog.header.updateAvailable');
+  const updateTargetDescription = isDesktopAppTarget
+    ? t('updateDialog.target.desktop.description')
+    : isRemoteInstanceTarget
+      ? t('updateDialog.target.remote.description')
+      : null;
 
   // Reset state when dialog closes
   useEffect(() => {
@@ -315,8 +332,8 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             <Icon name="download-cloud" className="h-5 w-5 text-[var(--primary-base)]" />
             <span className="text-lg font-semibold text-foreground">
               {webUpdateState === 'restarting' || webUpdateState === 'reconnecting'
-                ? t('updateDialog.header.updating')
-                : t('updateDialog.header.updateAvailable')}
+                ? (isRemoteInstanceTarget ? t('updateDialog.header.updatingRemote') : t('updateDialog.header.updating'))
+                : updateTitle}
             </span>
           </DialogTitle>
 
@@ -338,6 +355,12 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
         {/* Content Body */}
         <div className="space-y-2">
+
+          {updateTargetDescription && !isWebUpdating && (
+            <div className="rounded-lg border border-[var(--surface-subtle)] bg-[var(--surface-elevated)]/30 px-3 py-2">
+              <p className="text-sm text-muted-foreground">{updateTargetDescription}</p>
+            </div>
+          )}
 
           {/* Web update progress */}
           {isWebRuntime && isWebUpdating && (
@@ -447,7 +470,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           {!isWebRuntime && !isMobileRuntime && downloading && (
             <div className="space-y-2 mt-4">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">{t('updateDialog.status.downloadingPayload')}</span>
+                <span className="text-muted-foreground">
+                  {isDesktopAppTarget ? t('updateDialog.status.downloadingDesktopPayload') : t('updateDialog.status.downloadingPayload')}
+                </span>
                 <span className="font-mono text-foreground">{progressPercent}%</span>
               </div>
               <div className="h-1.5 bg-[var(--surface-subtle)] rounded-full overflow-hidden">
@@ -487,7 +512,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
               >
                 <Icon name="download" className="h-4 w-4" />
-                {t('updateDialog.actions.downloadUpdate')}
+                {isDesktopAppTarget ? t('updateDialog.actions.downloadDesktopUpdate') : t('updateDialog.actions.downloadUpdate')}
               </button>
             )}
 
@@ -497,7 +522,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)]/50 text-[var(--primary-foreground)] cursor-not-allowed"
               >
                 <Icon name="loader" className="h-4 w-4 animate-spin" />
-                {t('updateDialog.status.downloading')}
+                {isDesktopAppTarget ? t('updateDialog.status.downloadingDesktop') : t('updateDialog.status.downloading')}
               </button>
             )}
 
@@ -507,7 +532,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity"
               >
                 <Icon name="restart" className="h-4 w-4" />
-                {t('updateDialog.actions.restartToUpdate')}
+                {isDesktopAppTarget ? t('updateDialog.actions.restartDesktopToUpdate') : t('updateDialog.actions.restartToUpdate')}
               </button>
             )}
 
