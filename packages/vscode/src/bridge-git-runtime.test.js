@@ -173,6 +173,26 @@ describe('bridge git runtime index mutations', () => {
     });
     expect(gitService.createWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
       returnAfterDirectoryCreated: true,
-    }));
+    }), { projectCommandRuntime: expect.objectContaining({ loadStartCommand: expect.any(Function) }) });
+  });
+
+  it('passes manager-backed project command runtime to worktree creation', async () => {
+    gitService.createWorktree.mockResolvedValue({ path: '/repo-worktree' });
+    const manager = {
+      getApiUrl: mock(() => 'http://127.0.0.1:4096'),
+      getOpenCodeAuthHeaders: mock(() => ({ Authorization: 'Bearer test-token' })),
+    };
+
+    const response = await handleStandardGitBridgeMessage({
+      id: 'create-worktree',
+      type: 'api:git/worktrees',
+      payload: { directory: '/repo', method: 'POST' },
+    }, { manager });
+
+    expect(response?.success).toBe(true);
+    expect(gitService.createWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
+      directory: '/repo',
+      method: 'POST',
+    }), { projectCommandRuntime: expect.objectContaining({ loadStartCommand: expect.any(Function) }) });
   });
 });

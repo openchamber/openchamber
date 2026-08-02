@@ -76,7 +76,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     );
     if (permissionAutoAcceptResponse) return permissionAutoAcceptResponse;
 
-    const standardGitResponse = await handleStandardGitBridgeMessage({ id, type, payload });
+    const standardGitResponse = await handleStandardGitBridgeMessage({ id, type, payload }, ctx);
     if (standardGitResponse) {
       return standardGitResponse;
     }
