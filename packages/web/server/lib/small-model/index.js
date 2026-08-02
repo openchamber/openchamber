@@ -2,10 +2,10 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { readAuthFile } from '../opencode/auth.js';
-import { readConfigLayers } from '../opencode/shared.js';
+import { readConfigLayers, resolveConfigValue } from '../opencode/shared.js';
 import { getModelCatalog } from './catalog.js';
 import { resolveSmallModel, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
-import { callSmallModel } from './call.js';
+import { callSmallModel, listConfigCredentialProviders } from './call.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -47,14 +47,9 @@ const clampPromptToModelLimit = ({ prompt, catalog, providerID, modelID }) => {
   return { prompt: `${prompt.slice(0, maxChars)}…`, truncated: true };
 };
 
-const readConfiguredSmallModel = (workingDirectory) => {
-  try {
-    const { mergedConfig } = readConfigLayers(workingDirectory);
-    const value = mergedConfig?.small_model;
-    return typeof value === 'string' ? value : null;
-  } catch {
-    return null;
-  }
+const readConfiguredSmallModel = (layers, workingDirectory) => {
+  const value = resolveConfigValue(layers, 'small_model', workingDirectory);
+  return typeof value === 'string' ? value : null;
 };
 
 /**
@@ -67,6 +62,8 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
   }
 
   const auth = readAuthFile();
+  const configLayers = readConfigLayers(directory);
+  const { mergedConfig: config } = configLayers;
   const catalog = await getModelCatalog().catch(() => ({}));
 
   const explicit = parseModelRef(model);
@@ -75,10 +72,12 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     : resolveSmallModel({
       auth,
       catalog,
+      config,
       settingsSmallModel: readSmallModelSettingsOverride(),
-      configSmallModel: readConfiguredSmallModel(directory),
+      configSmallModel: readConfiguredSmallModel(configLayers, directory),
       preferredProviderID,
       preferredModelID,
+      configCredentialProviders: listConfigCredentialProviders(directory, config),
     });
 
   if (!resolved) {
@@ -111,6 +110,7 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
   const text = await callSmallModel({
     auth,
     catalog,
+    config,
     workingDirectory: directory,
     providerID: resolved.providerID,
     modelID: resolved.modelID,
@@ -133,16 +133,29 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
  * actually call. Used by the settings override picker to hide providers that
  * would only ever fail (e.g. opencode free models without a token).
  */
-export function listAuthenticatedProviders() {
+export function listAuthenticatedProviders(directory) {
   try {
     const auth = readAuthFile();
+    const { mergedConfig: config } = readConfigLayers(directory);
+    const configured = listConfigCredentialProviders(directory, config);
     const ids = new Set(
-      Object.keys(auth || {}).filter((providerID) => isUsableAuthEntry(auth[providerID])),
+      [...Object.keys(auth || {}), ...configured].filter((providerID) => {
+        const disabled = config?.disabled_providers?.includes(providerID);
+        const enabled = !Array.isArray(config?.enabled_providers)
+          || config.enabled_providers.includes(providerID);
+        const hasConfiguredKey = Object.hasOwn(config?.provider?.[providerID]?.options || {}, 'apiKey');
+        return !disabled && enabled && (hasConfiguredKey
+          ? configured.includes(providerID)
+          : isUsableAuthEntry(auth[providerID]));
+      }),
     );
     // The catalog id is github-copilot while legacy auth entries may sit
     // under the copilot alias.
     if (isUsableAuthEntry(getAuthEntryForProvider(auth, 'github-copilot'))) {
-      ids.add('github-copilot');
+      const disabled = config?.disabled_providers?.includes('github-copilot');
+      const enabled = !Array.isArray(config?.enabled_providers)
+        || config.enabled_providers.includes('github-copilot');
+      if (!disabled && enabled) ids.add('github-copilot');
     }
     return Array.from(ids);
   } catch {
@@ -155,14 +168,18 @@ export function listAuthenticatedProviders() {
  */
 export async function describeSmallModel({ directory, preferredProviderID, preferredModelID } = {}) {
   const auth = readAuthFile();
+  const configLayers = readConfigLayers(directory);
+  const { mergedConfig: config } = configLayers;
   const catalog = await getModelCatalog().catch(() => ({}));
   const resolved = resolveSmallModel({
     auth,
     catalog,
+    config,
     settingsSmallModel: readSmallModelSettingsOverride(),
-    configSmallModel: readConfiguredSmallModel(directory),
+    configSmallModel: readConfiguredSmallModel(configLayers, directory),
     preferredProviderID,
     preferredModelID,
+    configCredentialProviders: listConfigCredentialProviders(directory, config),
   });
   return resolved;
 }

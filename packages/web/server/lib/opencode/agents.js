@@ -193,23 +193,17 @@ function getAgentPermissionSource(agentName, workingDirectory, lookupCache = nul
     }
   }
 
-  // Check JSON layers in effective override order. readConfigLayers merges
-  // user -> project -> custom, so custom wins over project, project over user.
+  // Check JSON layers in effective override order.
   const layers = readConfigLayers(workingDirectory);
-
-  const customJsonPermission = layers.customConfig?.agent?.[agentName]?.permission;
-  if (customJsonPermission !== undefined && layers.paths.customPath) {
-    return { source: 'json', scope: 'custom', path: layers.paths.customPath };
-  }
-
-  const projectJsonPermission = layers.projectConfig?.agent?.[agentName]?.permission;
-  if (projectJsonPermission !== undefined && layers.paths.projectPath) {
-    return { source: 'json', scope: AGENT_SCOPE.PROJECT, path: layers.paths.projectPath };
-  }
-
-  const userJsonPermission = layers.userConfig?.agent?.[agentName]?.permission;
-  if (userJsonPermission !== undefined) {
-    return { source: 'json', scope: AGENT_SCOPE.USER, path: layers.paths.userPath };
+  const configSources = layers.sources || [
+    { config: layers.userConfig, filePath: layers.paths.userPath, scope: AGENT_SCOPE.USER },
+    { config: layers.customConfig, filePath: layers.paths.customPath, scope: 'custom' },
+    { config: layers.projectConfig, filePath: layers.paths.projectPath, scope: AGENT_SCOPE.PROJECT },
+  ];
+  for (const source of [...configSources].reverse()) {
+    if (source.config?.agent?.[agentName]?.permission !== undefined) {
+      return { source: 'json', scope: source.scope, path: source.filePath };
+    }
   }
 
   return { source: null, scope: null, path: null };
@@ -237,8 +231,10 @@ function getAgentSources(agentName, workingDirectory, lookupCache = createAgentL
   const layers = readConfigLayers(workingDirectory);
   const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
   const jsonSection = jsonSource.section;
-  const jsonPath = jsonSource.path || layers.paths.customPath || layers.paths.projectPath || layers.paths.userPath;
-  const jsonScope = jsonSource.path === layers.paths.projectPath ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER;
+  const jsonPath = jsonSource.exists
+    ? jsonSource.path
+    : layers.paths.customPath || layers.paths.projectPath || layers.paths.userPath;
+  const jsonScope = jsonSource.scope === 'project' ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER;
 
   const sources = {
     md: {
@@ -303,7 +299,7 @@ function getAgentConfig(agentName, workingDirectory, lookupCache = createAgentLo
   const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
 
   if (jsonSource.exists && jsonSource.section) {
-    const scope = jsonSource.path === layers.paths.projectPath ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER;
+    const scope = jsonSource.scope === 'project' ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER;
     return {
       source: 'json',
       scope,
@@ -371,6 +367,9 @@ function updateAgent(agentName, updates, workingDirectory) {
   const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
   const jsonSection = jsonSource.section;
   const hasJsonFields = jsonSource.exists && jsonSection && Object.keys(jsonSection).length > 0;
+  if (jsonSource.exists && !jsonSource.writable) {
+    throw new Error('Effective OpenCode configuration is read-only');
+  }
   const jsonTarget = jsonSource.exists
     ? { config: jsonSource.config, path: jsonSource.path }
     : getJsonWriteTarget(layers, AGENT_SCOPE.USER);
@@ -625,6 +624,9 @@ function deleteAgent(agentName, workingDirectory, scope) {
   }
 
   const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
+  if (jsonSource.exists && !jsonSource.writable) {
+    throw new Error('Effective OpenCode configuration is read-only');
+  }
   if (jsonSource.exists && jsonSource.config && jsonSource.path && deleteJsonAgentEntry(jsonSource.config, agentName)) {
     writeConfig(jsonSource.config, jsonSource.path);
     console.log(`Removed agent from opencode.json: ${agentName}`);

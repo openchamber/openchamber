@@ -47,6 +47,10 @@ All providers should return results via shared helpers to preserve API shape:
 Provider modules must export `providerId`, `providerName`, `aliases`, `isConfigured(auth?)`, and `fetchQuota()`.
 `fetchQuota()` should return a quota result with `usage.windows` keyed by window name (for example `5h`, `7d`, `daily`) and optional provider-specific `usage.models` data.
 
+Zhipu config fallback follows OpenCode provider semantics: merged config
+outranks auth.json, resolves `{env:}` / `{file:}` credentials, and fails closed
+for unavailable placeholders, malformed config, or disabled providers.
+
 OpenCode Go, Ollama Cloud, and Cursor credentials are explicitly managed through Settings. The server validates credentials before atomic `0600` writes and never returns secrets through its API. OpenChamber never scans browser cookie stores or automatically reads Cursor storage; Cursor import is an explicit one-time user action and never modifies Cursor's database.
 
 ## Add a new provider (quick steps)

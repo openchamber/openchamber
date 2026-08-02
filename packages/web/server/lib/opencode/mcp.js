@@ -27,9 +27,9 @@ function validateMcpName(name) {
 /**
  * List all MCP server configs from user-level opencode.json
  */
-function resolveMcpScopeFromPath(layers, sourcePath) {
-  if (!sourcePath) return null;
-  return sourcePath === layers.paths.projectPath ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER;
+function resolveMcpScope(source) {
+  if (!source.exists) return null;
+  return source.scope === 'project' ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER;
 }
 
 function ensureProjectMcpConfigPath(workingDirectory) {
@@ -51,7 +51,7 @@ function listMcpConfigs(workingDirectory) {
       return {
         name,
         ...buildMcpEntry(entry),
-        scope: resolveMcpScopeFromPath(layers, source.path),
+        scope: resolveMcpScope(source),
       };
     });
 }
@@ -70,7 +70,7 @@ function getMcpConfig(name, workingDirectory) {
   return {
     name,
     ...buildMcpEntry(entry),
-    scope: resolveMcpScopeFromPath(layers, source.path),
+    scope: resolveMcpScope(source),
   };
 }
 
@@ -122,6 +122,9 @@ function updateMcpConfig(name, updates, workingDirectory) {
   if (!source.exists) {
     throw new Error(`MCP server "${name}" not found`);
   }
+  if (!source.writable) {
+    throw new Error('Effective OpenCode configuration is read-only');
+  }
 
   const targetPath = source.path || CONFIG_FILE;
   const config = source.config || (fs.existsSync(targetPath) ? readConfigFile(targetPath) : {});
@@ -145,6 +148,9 @@ function updateMcpConfig(name, updates, workingDirectory) {
 function deleteMcpConfig(name, workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
   const source = getJsonEntrySource(layers, 'mcp', name);
+  if (source.exists && !source.writable) {
+    throw new Error('Effective OpenCode configuration is read-only');
+  }
   const targetPath = source.path || CONFIG_FILE;
   const config = source.config || (fs.existsSync(targetPath) ? readConfigFile(targetPath) : {});
 

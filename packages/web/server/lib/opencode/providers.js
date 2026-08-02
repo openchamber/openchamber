@@ -8,31 +8,28 @@ import {
 
 function getProviderSources(providerId, workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
-  const { userConfig, projectConfig, customConfig, paths } = layers;
-
-  const customProviders = isPlainObject(customConfig?.provider) ? customConfig.provider : {};
-  const customProvidersAlias = isPlainObject(customConfig?.providers) ? customConfig.providers : {};
-  const projectProviders = isPlainObject(projectConfig?.provider) ? projectConfig.provider : {};
-  const projectProvidersAlias = isPlainObject(projectConfig?.providers) ? projectConfig.providers : {};
-  const userProviders = isPlainObject(userConfig?.provider) ? userConfig.provider : {};
-  const userProvidersAlias = isPlainObject(userConfig?.providers) ? userConfig.providers : {};
-
-  const customExists =
-    Object.prototype.hasOwnProperty.call(customProviders, providerId) ||
-    Object.prototype.hasOwnProperty.call(customProvidersAlias, providerId);
-  const projectExists =
-    Object.prototype.hasOwnProperty.call(projectProviders, providerId) ||
-    Object.prototype.hasOwnProperty.call(projectProvidersAlias, providerId);
-  const userExists =
-    Object.prototype.hasOwnProperty.call(userProviders, providerId) ||
-    Object.prototype.hasOwnProperty.call(userProvidersAlias, providerId);
+  const hasProvider = (config) => [config?.provider, config?.providers].some((providers) =>
+    isPlainObject(providers) && Object.hasOwn(providers, providerId));
+  const findSource = (scope) => [...(layers.sources || [])].reverse()
+    .find((source) => source.scope === scope && hasProvider(source.config));
+  const sourceInfo = (scope, fallbackConfig, fallbackPath) => {
+    const source = findSource(scope);
+    if (source) return { exists: true, path: source.filePath };
+    return {
+      exists: layers.sources ? false : hasProvider(fallbackConfig),
+      path: fallbackPath ?? null,
+    };
+  };
 
   return {
     sources: {
       auth: { exists: false },
-      user: { exists: userExists, path: paths.userPath },
-      project: { exists: projectExists, path: paths.projectPath || null },
-      custom: { exists: customExists, path: paths.customPath }
+      user: sourceInfo('user', layers.userConfig, layers.paths.userPath),
+      project: sourceInfo('project', layers.projectConfig, layers.paths.projectPath),
+      custom: sourceInfo('custom', layers.customConfig, layers.paths.customPath),
+      customDirectory: sourceInfo('custom-directory'),
+      inline: sourceInfo('inline'),
+      managed: sourceInfo('managed'),
     }
   };
 }

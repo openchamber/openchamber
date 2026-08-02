@@ -113,8 +113,10 @@ function getCommandSources(commandName, workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
   const jsonSource = getJsonEntrySource(layers, 'command', commandName);
   const jsonSection = jsonSource.section;
-  const jsonPath = jsonSource.path || layers.paths.customPath || layers.paths.projectPath || layers.paths.userPath;
-  const jsonScope = jsonSource.path === layers.paths.projectPath ? COMMAND_SCOPE.PROJECT : COMMAND_SCOPE.USER;
+  const jsonPath = jsonSource.exists
+    ? jsonSource.path
+    : layers.paths.customPath || layers.paths.projectPath || layers.paths.userPath;
+  const jsonScope = jsonSource.scope === 'project' ? COMMAND_SCOPE.PROJECT : COMMAND_SCOPE.USER;
 
   const sources = {
     md: {
@@ -202,6 +204,9 @@ function updateCommand(commandName, updates, workingDirectory) {
   const jsonSource = getJsonEntrySource(layers, 'command', commandName);
   const jsonSection = jsonSource.section;
   const hasJsonFields = jsonSource.exists && jsonSection && Object.keys(jsonSection).length > 0;
+  if (jsonSource.exists && !jsonSource.writable) {
+    throw new Error('Effective OpenCode configuration is read-only');
+  }
   const jsonTarget = jsonSource.exists
     ? { config: jsonSource.config, path: jsonSource.path }
     : getJsonWriteTarget(layers, workingDirectory ? COMMAND_SCOPE.PROJECT : COMMAND_SCOPE.USER);
@@ -313,6 +318,9 @@ function deleteCommand(commandName, workingDirectory) {
 
   const layers = readConfigLayers(workingDirectory);
   const jsonSource = getJsonEntrySource(layers, 'command', commandName);
+  if (jsonSource.exists && !jsonSource.writable) {
+    throw new Error('Effective OpenCode configuration is read-only');
+  }
   if (jsonSource.exists && jsonSource.config && jsonSource.path) {
     if (!jsonSource.config.command) jsonSource.config.command = {};
     delete jsonSource.config.command[commandName];

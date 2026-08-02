@@ -12,7 +12,7 @@ vi.mock('../opencode/shared.js', () => ({
   readConfigLayers: vi.fn(),
 }));
 
-const { callSmallModel } = await import('./call.js');
+const { callSmallModel, listConfigCredentialProviders } = await import('./call.js');
 const { readConfig, readConfigLayers } = await import('../opencode/shared.js');
 
 // Minimal catalog fragment used by the catalog-based base URL resolution case.
@@ -93,6 +93,40 @@ describe('callSmallModel — custom provider config', () => {
       expect(JSON.stringify(fetchMock.mock.calls[0][1])).not.toContain('{file:');
     });
 
+    it('does not fall back to auth or reveal a missing credential file', async () => {
+      const secretPath = '/private/sk-must-not-leak';
+      readConfig.mockReturnValue({
+        provider: {
+          custom: {
+            options: { apiKey: `{file:${secretPath}}`, baseURL: 'https://proxy.example.test/v1' },
+          },
+        },
+      });
+      vi.spyOn(fs, 'readFileSync').mockImplementation(() => {
+        throw Object.assign(new Error(`ENOENT ${secretPath}`), { code: 'ENOENT' });
+      });
+
+      let failure;
+      try {
+        await callSmallModel({
+          auth: { custom: { type: 'api', key: 'auth-fallback-must-not-run' } },
+          catalog: {},
+          workingDirectory: '/proj',
+          providerID: 'custom',
+          modelID: 'model',
+          prompt: 'hi',
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).not.toContain(secretPath);
+      expect(failure.message).not.toContain('auth-fallback-must-not-run');
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('resolves an OpenCode environment variable before sending the API key', async () => {
       process.env.OPENCHAMBER_TEST_PROVIDER_KEY = 'sk-env-key';
       readConfig.mockReturnValue({
@@ -114,6 +148,40 @@ describe('callSmallModel — custom provider config', () => {
       });
 
       expect(lastCall(fetchMock).init.headers.Authorization).toBe('Bearer sk-env-key');
+    });
+
+    it('resolves embedded file variables in apiKey and baseURL', async () => {
+      const keyPath = '/private/provider-key';
+      const hostPath = '/private/provider-host';
+      const originalReadFileSync = fs.readFileSync;
+      vi.spyOn(fs, 'readFileSync').mockImplementation((filePath, ...args) => {
+        if (filePath === keyPath) return 'suffix';
+        if (filePath === hostPath) return 'proxy.example.test';
+        return originalReadFileSync(filePath, ...args);
+      });
+      readConfig.mockReturnValue({
+        provider: {
+          custom: {
+            options: {
+              apiKey: `sk-{file:${keyPath}}`,
+              baseURL: `https://{file:${hostPath}}/v1`,
+            },
+          },
+        },
+      });
+      fetchMock.mockResolvedValue(ok('hello'));
+
+      await callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'custom',
+        modelID: 'model',
+        prompt: 'hi',
+      });
+
+      expect(lastCall(fetchMock).url).toBe('https://proxy.example.test/v1/chat/completions');
+      expect(lastCall(fetchMock).init.headers.Authorization).toBe('Bearer sk-suffix');
     });
 
     it('uses apiKey and baseURL from provider config when no auth.json entry exists', async () => {
@@ -184,7 +252,7 @@ describe('callSmallModel — custom provider config', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it('treats a blank/whitespace apiKey in config as absent', async () => {
+    it('rejects a blank configured apiKey without falling back or exposing its value', async () => {
       readConfig.mockReturnValue({
         provider: {
           custom: { options: { apiKey: '   ', baseURL: 'https://proxy.example.test/v1' } },
@@ -192,13 +260,15 @@ describe('callSmallModel — custom provider config', () => {
       });
 
       await expect(callSmallModel({
-        auth: {},
+        auth: { custom: { type: 'api', key: 'auth-fallback-must-not-run' } },
         catalog: {},
         workingDirectory: '/proj',
         providerID: 'custom',
         modelID: 'gpt-4o-mini',
         prompt: 'hi',
-      })).rejects.toThrow('No OpenCode login found for provider "custom"');
+      })).rejects.toThrow(/^Configured apiKey is unavailable for provider "custom"$/);
+
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 
@@ -246,6 +316,30 @@ describe('callSmallModel — custom provider config', () => {
       // auth.json credential must never be sent.
       expect(lastCall(fetchMock).init.headers.Authorization).toBe('Bearer config-key');
       expect(JSON.stringify(fetchMock.mock.calls[0][1])).not.toContain('authjson-key');
+    });
+
+    it('does not fall back to auth when the higher-precedence config apiKey is unset', async () => {
+      readConfig.mockReturnValue({
+        provider: {
+          custom: {
+            options: {
+              apiKey: '{env:OPENCHAMBER_TEST_PROVIDER_KEY}',
+              baseURL: 'https://proxy.example.test/v1',
+            },
+          },
+        },
+      });
+
+      await expect(callSmallModel({
+        auth: { custom: { type: 'api', key: 'auth-fallback-must-not-run' } },
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'custom',
+        modelID: 'model',
+        prompt: 'hi',
+      })).rejects.toThrow(/^Configured apiKey is unavailable for provider "custom"$/);
+
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 
@@ -392,6 +486,97 @@ describe('callSmallModel — custom provider config', () => {
       // readConfig merges global + project-scoped layers for this directory;
       // confirm callSmallModel passes the working directory straight through.
       expect(readConfig).toHaveBeenCalledWith('/path/to/project');
+    });
+  });
+
+  // Base URLs may carry {env:...} variables too, not just the apiKey (#2269).
+  describe('baseURL {env:...} substitution', () => {
+    afterEach(() => {
+      delete process.env.OPENCHAMBER_TEST_BASE_URL;
+      delete process.env.OPENCHAMBER_TEST_BASE_HOST;
+      delete process.env.OPENCHAMBER_TEST_KEY_SUFFIX;
+    });
+
+    it('expands a whole-value {env:...} baseURL', async () => {
+      process.env.OPENCHAMBER_TEST_BASE_URL = 'https://gateway.example.test/v1';
+      readConfig.mockReturnValue({
+        provider: {
+          custom: { options: { apiKey: 'k', baseURL: '{env:OPENCHAMBER_TEST_BASE_URL}' } },
+        },
+      });
+      fetchMock.mockResolvedValue(ok('ok'));
+
+      await callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'custom',
+        modelID: 'gpt-4o-mini',
+        prompt: 'hi',
+      });
+
+      const { url } = lastCall(fetchMock);
+      expect(url).toBe('https://gateway.example.test/v1/chat/completions');
+      expect(url).not.toContain('{env:');
+    });
+
+    it('expands {env:...} tokens embedded inside the baseURL', async () => {
+      process.env.OPENCHAMBER_TEST_BASE_HOST = 'litellm.example.test';
+      readConfig.mockReturnValue({
+        provider: {
+          custom: { options: { apiKey: 'k', baseURL: 'https://{env:OPENCHAMBER_TEST_BASE_HOST}/v1' } },
+        },
+      });
+      fetchMock.mockResolvedValue(ok('ok'));
+
+      await callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'custom',
+        modelID: 'gpt-4o-mini',
+        prompt: 'hi',
+      });
+
+      expect(lastCall(fetchMock).url).toBe('https://litellm.example.test/v1/chat/completions');
+    });
+
+    it('fails before calling when the configured baseURL variable is unset', async () => {
+      readConfig.mockReturnValue({
+        provider: {
+          mistral: { options: { baseURL: '{env:OPENCHAMBER_TEST_BASE_URL}' } },
+        },
+      });
+      await expect(callSmallModel({
+        auth: { mistral: { type: 'api', key: 'm-key' } },
+        catalog: CATALOG,
+        workingDirectory: '/proj',
+        providerID: 'mistral',
+        modelID: 'mistral-small-latest',
+        prompt: 'hi',
+      })).rejects.toThrow('Configured baseURL is unavailable');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('expands {env:...} tokens embedded inside the apiKey', async () => {
+      process.env.OPENCHAMBER_TEST_KEY_SUFFIX = 'abc123';
+      readConfig.mockReturnValue({
+        provider: {
+          custom: { options: { apiKey: 'sk-{env:OPENCHAMBER_TEST_KEY_SUFFIX}', baseURL: 'https://proxy.example.test/v1' } },
+        },
+      });
+      fetchMock.mockResolvedValue(ok('ok'));
+
+      await callSmallModel({
+        auth: {},
+        catalog: {},
+        workingDirectory: '/proj',
+        providerID: 'custom',
+        modelID: 'gpt-4o-mini',
+        prompt: 'hi',
+      });
+
+      expect(lastCall(fetchMock).init.headers.Authorization).toBe('Bearer sk-abc123');
     });
   });
 });
@@ -633,5 +818,84 @@ describe('callSmallModel — GitHub Copilot endpoint routing', () => {
     await expect(callCopilot('mai-code-1-flash-picker'))
       .rejects.toThrow('GitHub Copilot model "mai-code-1-flash-picker" has no supported text endpoint');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Providers defined only in the OpenCode config are selectable when their
+// configured apiKey resolves (#2269).
+describe('listConfigCredentialProviders', () => {
+  beforeEach(() => {
+    readConfig.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env.OPENCHAMBER_TEST_PROVIDER_KEY;
+  });
+
+  it('lists providers whose configured apiKey resolves', () => {
+    process.env.OPENCHAMBER_TEST_PROVIDER_KEY = 'sk-env-key';
+    readConfig.mockReturnValue({
+      provider: {
+        'plain-key': { options: { apiKey: 'sk-plain' } },
+        'env-key': { options: { apiKey: '{env:OPENCHAMBER_TEST_PROVIDER_KEY}' } },
+        'no-key': { options: { baseURL: 'https://proxy.example.test/v1' } },
+      },
+    });
+
+    expect(listConfigCredentialProviders('/proj')).toEqual(['plain-key', 'env-key']);
+  });
+
+  it('omits providers whose {env:...} apiKey is unset in this process', () => {
+    readConfig.mockReturnValue({
+      provider: {
+        'env-key': { options: { apiKey: '{env:OPENCHAMBER_TEST_PROVIDER_KEY}' } },
+      },
+    });
+
+    expect(listConfigCredentialProviders('/proj')).toEqual([]);
+  });
+
+  it('returns an empty list without a provider block and surfaces config read failure', () => {
+    readConfig.mockReturnValue({});
+    expect(listConfigCredentialProviders('/proj')).toEqual([]);
+
+    readConfig.mockImplementation(() => {
+      throw new Error('Failed to read OpenCode configuration');
+    });
+    expect(() => listConfigCredentialProviders('/proj')).toThrow('Failed to read OpenCode configuration');
+  });
+});
+
+describe('callSmallModel — secret-safe provider failures', () => {
+  it('does not include an upstream response body in the error', async () => {
+    const originalFetch = globalThis.fetch;
+    const secret = 'sk-upstream-echo-must-not-leak';
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => `invalid credential ${secret}`,
+    });
+    readConfig.mockReturnValue({});
+
+    try {
+      let failure;
+      try {
+        await callSmallModel({
+          auth: { mistral: { type: 'api', key: 'configured-key' } },
+          catalog: CATALOG,
+          providerID: 'mistral',
+          modelID: 'mistral-small-latest',
+          prompt: 'hi',
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).toContain('401');
+      expect(failure.message).not.toContain(secret);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

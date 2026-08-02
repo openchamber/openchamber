@@ -23,9 +23,7 @@ const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
 
 const httpError = async (response, provider) => {
-  const body = await response.text().catch(() => '');
-  const snippet = body ? `: ${body.slice(0, 300)}` : '';
-  return new Error(`${provider} request failed with ${response.status}${snippet}`);
+  return new Error(`${provider} request failed with ${response.status}`);
 };
 
 // ---------------------------------------------------------------------------
@@ -398,8 +396,7 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
       completedText = event.text;
     }
     if (event?.type === 'response.failed' || event?.type === 'error') {
-      const message = event?.response?.error?.message || event?.message || 'response failed';
-      throw new Error(`OpenAI (ChatGPT plan) stream error: ${message}`);
+      throw new Error('OpenAI (ChatGPT plan) stream failed');
     }
   }
   const result = completedText || text;
@@ -413,72 +410,110 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
 // Custom provider configuration support
 // ---------------------------------------------------------------------------
 
-const resolveConfigApiKey = (value, workingDirectory, providerID) => {
-  const envMatch = value.match(/^\{env:([^}]+)\}$/i);
-  if (envMatch) {
-    return process.env[envMatch[1].trim()]?.trim() || null;
-  }
+const substituteEnvTokens = (value) =>
+  value.replace(/\{env:([^}]+)\}/gi, (_, name) => process.env[name.trim()] ?? '');
 
-  const fileMatch = value.match(/^\{file:(.+)\}$/i);
-  if (!fileMatch) return value;
+const hasUnsetEnvToken = (value) => Array.from(value.matchAll(/\{env:([^}]+)\}/gi))
+  .some(([, name]) => !process.env[name.trim()]);
 
-  const configuredPath = fileMatch[1].trim();
-  let resolvedPath;
-  if (configuredPath === '~' || configuredPath.startsWith('~/') || configuredPath.startsWith('~\\')) {
-    resolvedPath = path.join(os.homedir(), configuredPath.slice(2));
-  } else if (path.isAbsolute(configuredPath)) {
-    resolvedPath = configuredPath;
-  } else {
-    const layers = readConfigLayers(workingDirectory);
-    const source = [
-      { config: layers.customConfig, filePath: layers.paths.customPath },
-      { config: layers.projectConfig, filePath: layers.paths.projectPath },
-      { config: layers.userConfig, filePath: layers.paths.userPath },
-    ].find(({ config }) => config?.provider?.[providerID]?.options?.apiKey === value);
-    resolvedPath = path.resolve(source?.filePath ? path.dirname(source.filePath) : workingDirectory || process.cwd(), configuredPath);
-  }
+const unavailableConfigApiKey = (providerID) =>
+  new Error(`Configured apiKey is unavailable for provider "${providerID}"`);
 
+const resolveConfigOption = (value, workingDirectory, providerID, optionName, unavailable) => {
+  if (hasUnsetEnvToken(value)) return null;
+  const expanded = substituteEnvTokens(value);
+  if (!/\{file:[^}]+\}/i.test(expanded)) return expanded.trim() || null;
   try {
-    const key = fs.readFileSync(resolvedPath, 'utf8').trim();
-    if (!key) throw new Error('empty file');
-    return key;
+    let sourceDirectory;
+    return expanded.replace(/\{file:([^}]+)\}/gi, (_, rawPath) => {
+      const configuredPath = rawPath.trim();
+      let resolvedPath;
+      if (configuredPath === '~' || configuredPath.startsWith('~/') || configuredPath.startsWith('~\\')) {
+        resolvedPath = path.join(os.homedir(), configuredPath.slice(2));
+      } else if (path.isAbsolute(configuredPath)) {
+        resolvedPath = configuredPath;
+      } else {
+        if (!sourceDirectory) {
+          const layers = readConfigLayers(workingDirectory);
+          const source = [...(layers.sources || [])].reverse()
+            .find(({ config }) => config?.provider?.[providerID]?.options?.[optionName] === value);
+          sourceDirectory = source?.sourceDirectory
+            || (source?.filePath ? path.dirname(source.filePath) : workingDirectory || process.cwd());
+        }
+        resolvedPath = path.resolve(sourceDirectory, configuredPath);
+      }
+      const content = fs.readFileSync(resolvedPath, 'utf8').trim();
+      if (!content) throw new Error('empty file');
+      return content;
+    }).trim() || null;
   } catch {
-    throw new Error(`Failed to resolve configured apiKey file for provider "${providerID}"`);
+    throw unavailable();
   }
 };
 
-const readProviderConfig = (workingDirectory, providerID) => {
-  try {
-    const config = readConfig(workingDirectory);
-    const providerCfg = config?.provider?.[providerID];
-    if (!providerCfg || typeof providerCfg !== 'object') return null;
-    const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
-    const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
-    const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
-    return {
-      baseURL,
-      // Shape the config-supplied key as a regular api-key auth entry so it
-      // can win the precedence check below and flow through the dispatch's
-      // `entry.type === 'api' ? entry.key : ...` branch unchanged.
-      auth: apiKey ? { type: 'api', key: apiKey } : null,
-    };
-  } catch {
-    // Provider config is non-essential — continue with catalog-only resolution.
-    return null;
+export const resolveConfigApiKey = (value, workingDirectory, providerID) =>
+  resolveConfigOption(value, workingDirectory, providerID, 'apiKey', () => unavailableConfigApiKey(providerID));
+
+const readProviderConfig = (workingDirectory, providerID, loadedConfig) => {
+  const config = loadedConfig || readConfig(workingDirectory);
+  const disabled = new Set(config?.disabled_providers || []);
+  const enabled = Array.isArray(config?.enabled_providers) ? new Set(config.enabled_providers) : null;
+  if (disabled.has(providerID) || (enabled && !enabled.has(providerID))) {
+    throw new Error(`Provider "${providerID}" is disabled in OpenCode configuration`);
   }
+
+  const providerCfg = config?.provider?.[providerID];
+  if (!providerCfg || typeof providerCfg !== 'object') return null;
+  const rawBaseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
+  const baseURL = rawBaseURL
+    ? resolveConfigOption(rawBaseURL, workingDirectory, providerID, 'baseURL', () =>
+      new Error(`Configured baseURL is unavailable for provider "${providerID}"`))
+    : null;
+  if (rawBaseURL && !baseURL) throw new Error(`Configured baseURL is unavailable for provider "${providerID}"`);
+  const apiKeyConfigured = Object.hasOwn(providerCfg?.options || {}, 'apiKey');
+  const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : '';
+  const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
+  return {
+    baseURL,
+    apiKeyConfigured,
+    auth: apiKey ? { type: 'api', key: apiKey } : null,
+  };
+};
+
+/**
+ * Provider ids whose config `options.apiKey` resolves right now — callable
+ * without an auth.json login.
+ */
+export function listConfigCredentialProviders(workingDirectory, loadedConfig) {
+  const config = loadedConfig || readConfig(workingDirectory);
+  const providers = config?.provider;
+  if (!providers || typeof providers !== 'object') return [];
+  return Object.keys(providers).filter((providerID) => {
+    try {
+      return Boolean(readProviderConfig(workingDirectory, providerID, config)?.auth);
+    } catch (error) {
+      if (error?.message === 'Failed to read OpenCode configuration') throw error;
+      return false;
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
-export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens }) {
+export async function callSmallModel({ auth, catalog, config, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens }) {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
-  const providerConfig = readProviderConfig(workingDirectory, providerID);
+  const providerConfig = readProviderConfig(workingDirectory, providerID, config);
   // Match OpenCode's resolveSDK precedence:
   // config provider.<id>.options.apiKey (providerConfig.auth) wins; the
   // auth.json entry is only a fallback.
-  const entry = providerConfig?.auth || getAuthEntryForProvider(auth, providerID);
+  if (providerConfig?.apiKeyConfigured && !providerConfig.auth) {
+    throw unavailableConfigApiKey(providerID);
+  }
+  const entry = providerConfig?.apiKeyConfigured
+    ? providerConfig.auth
+    : getAuthEntryForProvider(auth, providerID);
   if (!entry) {
     throw new Error(`No OpenCode login found for provider "${providerID}"`);
   }

@@ -27,6 +27,7 @@
  */
 import { readAuthFile } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/shared.js';
+import { resolveConfigApiKey } from '../../small-model/call.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -41,28 +42,31 @@ export const providerName = 'Zhipu AI Coding Plan';
 const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
 
 function getApiKey() {
-  const auth = readAuthFile();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKeyFromAuth = entry?.key ?? entry?.token;
-
-  if (apiKeyFromAuth) {
-    return apiKeyFromAuth;
-  }
-
   try {
     const { mergedConfig } = readConfigLayers();
+    const disabled = new Set(mergedConfig?.disabled_providers || []);
+    const enabled = Array.isArray(mergedConfig?.enabled_providers)
+      ? new Set(mergedConfig.enabled_providers)
+      : null;
+    if (aliases.some((alias) => disabled.has(alias))
+      || (enabled && !aliases.some((alias) => enabled.has(alias)))) return null;
 
     for (const alias of aliases) {
-      const providerConfig = mergedConfig?.provider?.[alias];
-      if (providerConfig?.options?.apiKey) {
-        return providerConfig.options.apiKey;
-      }
+      const options = mergedConfig?.provider?.[alias]?.options;
+      if (!Object.hasOwn(options || {}, 'apiKey')) continue;
+      const rawApiKey = options.apiKey;
+      if (typeof rawApiKey !== 'string' || !rawApiKey.trim()) return null;
+      // Resolve {env:}/{file:} placeholders rather than send them literally.
+      const resolved = resolveConfigApiKey(rawApiKey.trim(), undefined, alias);
+      return resolved || null;
     }
   } catch {
-    // Ignore config read errors; the provider will be treated as not configured.
+    return null;
   }
 
-  return null;
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  return entry?.key ?? entry?.token ?? null;
 }
 
 export const isConfigured = () => {
@@ -149,7 +153,7 @@ export const fetchQuota = async () => {
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: 'Request failed'
     });
   }
 };
