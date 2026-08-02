@@ -869,6 +869,10 @@ export const settingsDict = {
   'settings.openchamber.passkeys.toast.removed': 'Passkey entfernt',
   'settings.openchamber.passkeys.toast.removeFailed': 'Konnte Passkey nicht entfernen.',
   'settings.openchamber.passkeys.toast.clearAuthFailed': 'Konnte gespeicherte Authentifizierung nicht löschen.',
+  'settings.openchamber.mobileLanding.title': 'Mobiler Startbildschirm',
+  'settings.openchamber.mobileLanding.recents.label': 'Mit letzten Sitzungen starten',
+  'settings.openchamber.mobileLanding.recents.description':
+    'Auf Mobiltelefonen wird bei keiner geöffneten Sitzung statt eines Entwurfs für eine neue Sitzung die projektübergreifende Liste der letzten Sitzungen angezeigt.',
   'settings.openchamber.sessionRetention.title': 'Sitzungsaufbewahrung',
   'settings.openchamber.sessionRetention.tooltip': 'Automatisches Archivieren oder Löschen inaktiver Sitzungen basierend auf letzter Aktivität. Behält die 5 neuesten Sitzungen bei.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Automatische Bereinigung aktivieren',

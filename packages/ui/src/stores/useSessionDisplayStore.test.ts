@@ -32,3 +32,31 @@ describe('useSessionDisplayStore project sorting', () => {
     expect(migrated.showArchivedSessions).toBe(true);
   });
 });
+
+describe('migrateSessionDisplayState', () => {
+  test('v4 state gains mobileLandingMode last-session default', () => {
+    const migrated = migrateSessionDisplayState({ showRecentSection: true }, 4);
+
+    expect(migrated.mobileLandingMode).toBe('last-session');
+  });
+
+  test('v4 state preserves recents and normalizes an invalid mobile landing mode', () => {
+    // Given: v4 can re-persist the v5 field after a v5→v4→v5 round trip.
+    const persistedRecents = { mobileLandingMode: 'recents' };
+    const persistedGarbage = { mobileLandingMode: 'garbage' };
+
+    // When: each v4 payload migrates to v5.
+    const migratedRecents = migrateSessionDisplayState(persistedRecents, 4);
+    const migratedGarbage = migrateSessionDisplayState(persistedGarbage, 4);
+
+    // Then: valid data is preserved while invalid data uses the canonical default.
+    expect(migratedRecents.mobileLandingMode).toBe('recents');
+    expect(migratedGarbage.mobileLandingMode).toBe('last-session');
+  });
+
+  test('v5 state keeps a persisted recents preference', () => {
+    const migrated = migrateSessionDisplayState({ mobileLandingMode: 'recents' }, 5);
+
+    expect(migrated.mobileLandingMode).toBe('recents');
+  });
+});

@@ -41,6 +41,7 @@ export const dict: Record<I18nKey, string> = {
   "layout.mainTab.terminal": "Terminal",
   "layout.mainTab.context": "Contexto",
   "mobile.nav.aria": "Navegação móvel",
+  "mobile.landing.recents.title": "Sessões recentes",
   "mobile.connect.welcome.title": "Conectar ao OpenChamber",
   "mobile.connect.welcome.description": "Adicione a URL de um servidor ou leia um código QR de pareamento para começar a usar o app móvel.",
   "mobile.connect.url.label": "URL do servidor",
