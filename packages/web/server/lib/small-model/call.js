@@ -447,26 +447,56 @@ const resolveConfigApiKey = (value, workingDirectory, providerID) => {
   }
 };
 
+const parseProviderConfig = (providerCfg, workingDirectory, providerID) => {
+  if (!providerCfg || typeof providerCfg !== 'object') return null;
+  const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
+  const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
+  const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
+  return {
+    baseURL,
+    // Shape the config-supplied key as a regular api-key auth entry so it
+    // can win the precedence check below and flow through the dispatch's
+    // `entry.type === 'api' ? entry.key : ...` branch unchanged.
+    auth: apiKey ? { type: 'api', key: apiKey } : null,
+  };
+};
+
 const readProviderConfig = (workingDirectory, providerID) => {
   try {
     const config = readConfig(workingDirectory);
-    const providerCfg = config?.provider?.[providerID];
-    if (!providerCfg || typeof providerCfg !== 'object') return null;
-    const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
-    const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
-    const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
-    return {
-      baseURL,
-      // Shape the config-supplied key as a regular api-key auth entry so it
-      // can win the precedence check below and flow through the dispatch's
-      // `entry.type === 'api' ? entry.key : ...` branch unchanged.
-      auth: apiKey ? { type: 'api', key: apiKey } : null,
-    };
+    return parseProviderConfig(config?.provider?.[providerID], workingDirectory, providerID);
   } catch {
     // Provider config is non-essential — continue with catalog-only resolution.
     return null;
   }
-}
+};
+
+/**
+ * Provider ids whose configured API keys resolve successfully. Credential
+ * values stay inside this module and are never returned to picker callers.
+ */
+export const listConfiguredProviderAuthIds = (workingDirectory) => {
+  let providers;
+  try {
+    const config = readConfig(workingDirectory);
+    providers = config?.provider;
+  } catch {
+    return [];
+  }
+
+  if (!providers || typeof providers !== 'object' || Array.isArray(providers)) return [];
+
+  const ids = [];
+  for (const [providerID, providerCfg] of Object.entries(providers)) {
+    try {
+      const providerConfig = parseProviderConfig(providerCfg, workingDirectory, providerID);
+      if (providerConfig?.auth) ids.push(providerID);
+    } catch {
+      // One invalid key reference must not hide other configured providers.
+    }
+  }
+  return ids;
+};
 
 // ---------------------------------------------------------------------------
 // Dispatch

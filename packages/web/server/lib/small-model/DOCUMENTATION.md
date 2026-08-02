@@ -1,7 +1,8 @@
 # Small Model
 
 Server-side direct LLM calls that reuse the user's existing OpenCode provider
-logins (`~/.local/share/opencode/auth.json`). OpenCode uses a "small model"
+credentials from `~/.local/share/opencode/auth.json` or resolved
+`provider.<id>.options.apiKey` configuration. OpenCode uses a "small model"
 internally (titles, summaries) but does not expose it through the SDK or
 plugins — this module replicates that mechanism as an OpenChamber runtime API.
 
@@ -14,7 +15,10 @@ other runtime API.
 
 ## Files
 
-- `index.js` — orchestration: `generateSmallModelText()` / `describeSmallModel()`.
+- `index.js` — orchestration: `generateSmallModelText()` /
+  `describeSmallModel()`, plus provider discovery for the settings override
+  picker. Authenticated providers include usable `auth.json` entries and
+  provider IDs whose configured API keys resolve successfully.
 - `resolve.js` — model selection, mirroring OpenCode's `getSmallModel` chain:
   0. OpenChamber's own settings override (Settings → Sessions → Small Model):
      when `smallModelUseDefault` is `false`, `smallModelOverride`
