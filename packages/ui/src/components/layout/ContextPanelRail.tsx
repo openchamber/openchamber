@@ -17,8 +17,11 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 import { Icon } from '@/components/icon/Icon';
+import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useDeviceInfo } from '@/lib/device';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import {
   sortContextSurfaces,
@@ -30,6 +33,9 @@ import { useGitStatus } from '@/stores/useGitStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 
 const RAIL_TOOLTIP_DELAY_MS = 150;
+// Tablet width and up: below this the walkthrough cannot show a stop and its
+// code side by side, which is the whole point of the surface.
+const WALKTHROUGH_MIN_WIDTH = 768;
 const EMPTY_TABS: never[] = [];
 
 type RailItemProps = {
@@ -75,7 +81,11 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            <Icon name={surface.icon} className="h-[18px] w-[18px]" />
+            {surface.id === 'diff' ? (
+              <DiffViewIcon />
+            ) : (
+              <Icon name={surface.icon} className="h-[18px] w-[18px]" />
+            )}
             {showActivityDot ? (
               <span
                 aria-hidden="true"
@@ -105,6 +115,7 @@ export const ContextPanelRail: React.FC = () => {
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
+  const { screenWidth } = useDeviceInfo();
   const gitStatus = useGitStatus(directoryKey || null);
 
   const sensors = useSensors(
@@ -124,12 +135,17 @@ export const ContextPanelRail: React.FC = () => {
       if (surface.id === 'plan' && !planModeEnabled) {
         return false;
       }
+      // The walkthrough needs room for a stop list beside real code, and its
+      // diffs come from OpenChamber's Git routes, which VS Code does not serve.
+      if (surface.id === 'walkthrough' && (isVSCodeRuntime() || screenWidth < WALKTHROUGH_MIN_WIDTH)) {
+        return false;
+      }
       if (surface.availability === 'has-content') {
         return tabs.some((tab) => tab.mode === surface.mode);
       }
       return true;
     });
-  }, [contextRailOrder, planModeEnabled, tabs]);
+  }, [contextRailOrder, planModeEnabled, screenWidth, tabs]);
 
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;

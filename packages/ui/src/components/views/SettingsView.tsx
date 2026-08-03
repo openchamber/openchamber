@@ -242,7 +242,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
 
   const [mobileStage, setMobileStage] = React.useState<MobileStage>(initialMobileStage);
-  const autoNavSlugRef = React.useRef<string | null>(null);
+  // Seed with the mount-time slug when opening at the nav stage: the slug
+  // persists across opens, and the deep-link auto-jump below must react only
+  // to slug CHANGES after mount — not re-enter the previously visited page
+  // every time settings reopen.
+  const autoNavSlugRef = React.useRef<string | null>(initialMobileStage === 'nav' ? settingsSlug : null);
 
   // No starter page on desktop: 'home' (fresh state) resolves to General.
   // settingsPage persists in the UI store, so subsequent opens restore the
@@ -924,7 +928,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                     {t(`settings.view.nav.group.${group}`)}
                   </div>
                   {pages.map((page) => {
-                    const selected = settingsSlug === page.slug;
+                    // On the mobile nav STAGE nothing is "current" — the user is
+                    // choosing, and settingsSlug only remembers the last visited
+                    // page. Keeping it highlighted read as a stuck selection.
+                    const selected = settingsSlug === page.slug && !(isMobile && mobileStage === 'nav');
                     const iconName = getSettingsNavIcon(page.slug);
                     if (!iconName && page.slug !== 'mcp') return null;
 
@@ -1069,15 +1076,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       {isMobile ? (
         <div
           className={cn(
-            'flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 border-b px-3',
+            'flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3',
+            // The root nav list reads as a single quiet page — no divider and
+            // no back arrow (the X on the right is the only way out); subpages
+            // keep both.
+            mobileStage !== 'nav' && 'border-b',
             'bg-background'
           )}
-          style={{ borderColor: 'var(--interactive-border)' }}
+          style={mobileStage !== 'nav' ? { borderColor: 'var(--interactive-border)' } : undefined}
         >
-          {(showBackButton || onClose) ? (
+          {showBackButton ? (
             <button
               type="button"
-              onClick={showBackButton ? handleBack : onClose}
+              onClick={handleBack}
               aria-label={mobileBackButtonLabel}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >

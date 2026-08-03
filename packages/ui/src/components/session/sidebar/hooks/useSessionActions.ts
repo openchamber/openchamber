@@ -117,36 +117,52 @@ export const useSessionActions = (args: Args) => {
     args.setEditTitle('');
   }, [args]);
 
+  const copyShareUrl = React.useCallback(async (url: string, sessionId: string): Promise<boolean> => {
+    try {
+      const result = await copyTextToClipboard(url);
+      if (!result.ok) return false;
+      setCopiedSessionId(sessionId);
+      if (copyTimeout.current) clearTimeout(copyTimeout.current);
+      copyTimeout.current = window.setTimeout(() => {
+        setCopiedSessionId(null);
+        copyTimeout.current = null;
+      }, 2000);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const handleShareSession = React.useCallback(async (session: Session) => {
     const result = await args.shareSession(session.id);
-    if (result && result.share?.url) {
-      toast.success(t('sessions.sidebar.session.share.successTitle'), {
-        description: t('sessions.sidebar.session.share.successDescription'),
-      });
-    } else {
+    if (!result?.share?.url) {
       toast.error(t('sessions.sidebar.session.share.error'));
+      return;
     }
-  }, [args, t]);
+    const copied = await copyShareUrl(result.share.url, session.id);
+    toast[copied ? 'success' : 'warning'](t('sessions.sidebar.session.share.successTitle'), {
+      description: t(copied
+        ? 'sessions.sidebar.session.share.successDescription'
+        : 'sessions.sidebar.session.share.copyUrlError'),
+    });
+  }, [args, copyShareUrl, t]);
 
   const handleCopyShareUrl = React.useCallback((url: string, sessionId: string) => {
-    void copyTextToClipboard(url)
+    void copyShareUrl(url, sessionId).then((copied) => {
+      if (!copied) toast.error(t('sessions.sidebar.session.share.copyUrlError'));
+    });
+  }, [copyShareUrl, t]);
+
+  const handleCopySessionId = React.useCallback((sessionId: string) => {
+    void copyTextToClipboard(sessionId)
       .then((result) => {
-        if (!result.ok) {
-          toast.error(t('sessions.sidebar.session.share.copyUrlError'));
+        if (result.ok) {
+          toast.success(t('sessions.sidebar.session.copyId.success'));
           return;
         }
-        setCopiedSessionId(sessionId);
-        if (copyTimeout.current) {
-          clearTimeout(copyTimeout.current);
-        }
-        copyTimeout.current = window.setTimeout(() => {
-          setCopiedSessionId(null);
-          copyTimeout.current = null;
-        }, 2000);
+        toast.error(t('sessions.sidebar.session.copyId.error'));
       })
-      .catch(() => {
-        toast.error(t('sessions.sidebar.session.share.copyUrlError'));
-      });
+      .catch(() => toast.error(t('sessions.sidebar.session.copyId.error')));
   }, [t]);
 
   const handleUnshareSession = React.useCallback(async (sessionId: string) => {
@@ -278,6 +294,7 @@ export const useSessionActions = (args: Args) => {
     handleCancelEdit,
     handleShareSession,
     handleCopyShareUrl,
+    handleCopySessionId,
     handleUnshareSession,
     handleDeleteSession,
     confirmDeleteSession,

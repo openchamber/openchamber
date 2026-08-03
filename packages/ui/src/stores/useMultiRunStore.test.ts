@@ -127,6 +127,7 @@ mock.module('./useGlobalSessionsStore', () => ({
 }));
 
 mock.module('@/sync/sync-refs', () => ({
+  getSyncSessionDirectory: () => null,
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredDirectories.push({ sessionID, directory });
   },

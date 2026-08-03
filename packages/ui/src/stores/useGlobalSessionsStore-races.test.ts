@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
-import type { Session } from "@opencode-ai/sdk/v2"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2"
+
+import { opencodeClient } from "@/lib/opencode/client"
+import { useGlobalSessionsStore } from "./useGlobalSessionsStore"
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -20,16 +23,17 @@ const deferred = <T>(): Deferred<T> => {
 let activeRequest: Deferred<Session[]>
 let archivedRequest: Deferred<Session[]>
 
-mock.module("@/lib/opencode/client", () => ({
-  opencodeClient: { getSdkClient: () => ({}), getDirectory: () => "/source", setDirectory: () => undefined },
-}))
-mock.module("@/stores/globalSessions", () => ({
-  listGlobalSessionPages: (_sdk: unknown, options: { archived?: boolean }) => (
-    options.archived ? archivedRequest.promise : activeRequest.promise
-  ),
-}))
-
-const { useGlobalSessionsStore } = await import("./useGlobalSessionsStore")
+const sdk = {
+  experimental: {
+    session: {
+      list: async (options: { archived?: boolean }) => ({
+        data: await (options.archived ? archivedRequest.promise : activeRequest.promise),
+        response: { headers: new Headers() },
+      }),
+    },
+  },
+} as unknown as OpencodeClient
+const originalGetSdkClient = opencodeClient.getSdkClient
 
 const session = (id: string, title = id, archived?: number): Session => ({
   id,
@@ -41,7 +45,12 @@ describe("global session mutation reconciliation", () => {
   beforeEach(() => {
     activeRequest = deferred<Session[]>()
     archivedRequest = deferred<Session[]>()
+    opencodeClient.getSdkClient = () => sdk
     useGlobalSessionsStore.getState().resetForRuntimeSwitch()
+  })
+
+  afterEach(() => {
+    opencodeClient.getSdkClient = originalGetSdkClient
   })
 
   test("keeps a session created after a full load starts", async () => {

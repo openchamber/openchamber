@@ -1,4 +1,6 @@
-import { isDesktopShell } from '@/lib/desktop';
+import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isCapacitorApp } from '@/lib/platform';
+import { getStoredMobileLayoutPreference } from '@/lib/mobileLayoutPreference';
 
 export type HostedSurface = 'desktop' | 'mobile';
 
@@ -20,7 +22,14 @@ const isTouchOrCoarsePointer = (): boolean => {
   return coarsePointer || touchPoints > 0;
 };
 
-const detectHostedSurface = (): HostedSurface => {
+/**
+ * Single authority for the mobile-vs-desktop surface decision.
+ *
+ * Priority: explicit stamp (set once at boot) → URL override → Capacitor
+ * shell (always the mobile surface) → desktop shells → phone heuristic
+ * gated by the stored mobile layout preference.
+ */
+export const detectHostedSurface = (): HostedSurface => {
   if (typeof window === 'undefined') return 'desktop';
 
   const explicitSurface = window.__OPENCHAMBER_SURFACE__;
@@ -33,12 +42,30 @@ const detectHostedSurface = (): HostedSurface => {
     return override;
   }
 
-  if (isDesktopShell()) return 'desktop';
+  if (isCapacitorApp()) return 'mobile';
+  if (isDesktopShell() || isVSCodeRuntime()) return 'desktop';
 
-  const width = window.innerWidth || window.screen?.width || 0;
-  return width > 0 && width <= MOBILE_SURFACE_MAX_WIDTH && isTouchOrCoarsePointer()
-    ? 'mobile'
-    : 'desktop';
+  const width = Math.min(
+    window.innerWidth || Number.POSITIVE_INFINITY,
+    window.screen?.width || Number.POSITIVE_INFINITY,
+  );
+  const likelyPhone = Number.isFinite(width)
+    && width <= MOBILE_SURFACE_MAX_WIDTH
+    && isTouchOrCoarsePointer();
+  return likelyPhone && getStoredMobileLayoutPreference() === 'new' ? 'mobile' : 'desktop';
+};
+
+/**
+ * Decides the surface once and stamps it on `window` so every later
+ * `isMobileSurfaceRuntime()` call (perf tuning, sync paging, device info)
+ * reads the same stable answer instead of re-running viewport heuristics.
+ */
+export const resolveHostedSurface = (): HostedSurface => {
+  const surface = detectHostedSurface();
+  if (typeof window !== 'undefined') {
+    window.__OPENCHAMBER_SURFACE__ = surface;
+  }
+  return surface;
 };
 
 export const isMobileSurfaceRuntime = (): boolean => detectHostedSurface() === 'mobile';

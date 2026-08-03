@@ -17,6 +17,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/guardian/pid-marker.js`: ownership-aware, O_EXCL-created guardian PID marker with identity metadata, fail-closed inspection/release helpers, and a cross-process recovery lease held through replacement-marker publication. Transport identity updates use a same-directory fsynced temporary replacement; the live marker is never truncated in place, and uncertain publication retains marker authority.
 - `packages/web/server/lib/opencode/managed-opencode-handoff-protocol.js`: standalone signed handoff-record protocol; it owns no process lifecycle, persistence, registry, auth-state, or runtime wiring.
 - `packages/web/server/lib/opencode/managed-opencode-handoff-v2/`: isolated v2 foundation for a private master secret, SQLite record fencing, and reservation/lease state. The guardian/lifecycle wiring is web-runtime-only; it is not a session-resume, UI, Electron, or VS Code feature.
+- `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring). After readiness it warms the most recently used directories (`getWarmupDirectories` dep, sequential and best-effort) because OpenCode initializes each directory lazily on first request and that cost would otherwise be paid by the user's first interactive session open.
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
 - `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname).
 - `packages/web/server/lib/opencode/hmr-state-runtime.js`: HMR-persistent runtime state initialization, auth-state bootstrap, and HMR sync helpers.
@@ -35,6 +36,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/upgrade-capability.js`: authoritative upgrade ownership policy for the active OpenCode runtime. Bundled, external, and unresolved runtimes fail closed; only managed non-bundled runtimes delegate upgrades to OpenCode.
 - `packages/web/server/lib/opencode/tunnel-wiring-runtime.js`: tunnel service/routes composition runtime and active-port wiring for main server startup.
 - `packages/web/server/lib/opencode/startup-pipeline-runtime.js`: server startup tail orchestration runtime for terminal/proxy/static/start-listen flow.
+- `packages/web/server/lib/opencode/startup-performance.js`: opt-in startup phase diagnostics with fixed labels and numeric metadata allowlists.
 - `packages/web/server/lib/agent-tool/runtime.js`: managed OpenCode custom-tool materialization, environment injection, loopback authentication, and fixed CLI action dispatch.
 - `packages/web/server/lib/system-prompt/runtime.js`: opt-in managed OpenCode system-prompt optimizer materialization and plugin injection.
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
@@ -62,8 +64,14 @@ This module provides OpenCode server integration utilities for the web server ru
 - `AUTH_FILE`: Auth file path constant.
 - `OPENCODE_DATA_DIR`: OpenCode data directory path constant.
 
+## Public exports (providers.js)
+- `getProviderSources(providerId, workingDirectory)`: Resolves which OpenCode config layers define a provider.
+- `upsertProviderConfig(providerId, config, workingDirectory, scope?, options?)`: Validates and writes a custom OpenAI-compatible provider block (`npm`, `name`, `options.baseURL`, `models`, optional `env`/`headers`) into the user/project/custom config layer. Does not store API keys. Requires `config.env` or `options.hasStoredAuth` (auth already written via OpenCode `auth.set`). Edit flows must pass the provider's effective existing layer (`custom` > `project` > `user`) so updates do not create a global user override.
+- `validateCustomProviderConfig(providerId, config, options?)`: Structural validation for custom provider payloads (id format, http(s) base URL, models, credentials via `env` or `hasStoredAuth`).
+- `removeProviderConfig(providerId, workingDirectory, scope?)`: Removes a provider block from the selected config layer.
+
 ## Public exports (shared.js)
-- `OPENCODE_CONFIG_DIR`, `AGENT_DIR`, `COMMAND_DIR`, `SKILL_DIR`, `CONFIG_FILE`, `CUSTOM_CONFIG_FILE`: Path constants.
+- `OPENCODE_CONFIG_DIR`, `AGENT_DIR`, `COMMAND_DIR`, `SKILL_DIR`, `CONFIG_FILE`: Path constants. `OPENCODE_CONFIG` is resolved at call time for the custom config layer path.
 - `AGENT_SCOPE`, `COMMAND_SCOPE`, `SKILL_SCOPE`: Scope constants with USER and PROJECT values.
 - `ensureDirs()`: Creates required OpenCode directories.
 - `parseMdFile(filePath)`, `writeMdFile(filePath, frontmatter, body)`: Markdown file operations with YAML frontmatter.
@@ -87,6 +95,7 @@ This module provides OpenCode server integration utilities for the web server ru
   - `GET /api/opencode/upgrade-status` (returns version availability plus the authoritative `upgrade.supported`, `upgrade.manager`, and `upgrade.reason` capability)
   - `POST /api/opencode/directory`
   - `GET /api/provider/:providerId/source`
+  - `PUT /api/provider` (create/update custom OpenAI-compatible provider config in OpenCode user/project/custom layers via `scope`; secrets stay in auth via the OpenCode auth API)
   - `DELETE /api/provider/:providerId/auth`
 - Owns lazy auth library loading for provider auth checks/removal.
 - Keeps route behavior independent from composition root; `index.js` now supplies dependencies only.
@@ -477,6 +486,11 @@ No automatic migration is required. Documented in the CHANGELOG entry under `[Un
 - Lifecycle integration: `packages/web/server/lib/opencode/lifecycle.js` — `restartOpenCode` (handoff branch) and `bootstrapOpenCodeAtStartup` (adoption branch) both route through the factory.
 - CLI wiring: `packages/web/bin/lib/commands-guardian.js` (`guardianCommand`, `maybeAutoStartGuardian`, `startGuardianDetached`), `packages/web/bin/lib/commands-serve.js` (autostart call site), `packages/web/bin/openchamber-guardian.js` (entrypoint).
 - Smoke tests: `scripts/guardian-smoke-test.sh` (Linux) and `scripts/guardian-smoke-test.ps1` (Windows). Both spawn the real `openchamber-guardian.js` binary against a temp data dir, list children (expect `[]`), send `shutdown`, and assert clean process exit.
+
+Set `OPENCHAMBER_STARTUP_PERF=1` to emit bounded startup phase records for server listen, managed OpenCode preparation/readiness, and proxy readiness holds. Every OpenCode bootstrap emits one terminal `opencode.bootstrap.ready` or `opencode.bootstrap.error` event, including reused and external server paths. Records contain controlled phase/outcome/route labels and timing values only; they never contain request URLs, runtime keys, directories, session IDs, credentials, or content.
+
+macOS `say` voice enumeration starts concurrently with server composition. The server listener and managed OpenCode startup do not wait for it; `/api/tts/say/status` awaits the same authoritative capability promise when queried before enumeration completes.
+
 Transport-triggered health checks share the periodic monitor's failure accounting interval. Rapid WS reconnect callbacks therefore cannot exhaust the managed-process restart threshold using one cached unhealthy result; an exited managed process still restarts immediately.
 
 ## Public exports (env-runtime.js)
@@ -707,6 +721,10 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
   - Skills config CRUD and metadata under `/api/config/skills*`
   - Skills catalog listing/source pagination, scan, and install routes
   - Supporting skill file read/write/delete routes
+  - Directory resolution prefers an explicit request directory, then soft-falls
+    back to the active project / `lastDirectory` so repository-local
+    `.agents/skills` and `.opencode/skills` remain discoverable when the client
+    omits `directory`. Requests without any project still list user-scoped skills.
 
 ## Public exports (proxy.js)
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.

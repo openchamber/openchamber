@@ -454,3 +454,72 @@ describe('routeMessage skill invocation', () => {
     expect(sendCommandCalls).toHaveLength(0);
   });
 });
+
+describe('archiveSessions option forwarding', () => {
+  let originalUpdateSession;
+  let updateSessionCalls;
+
+  beforeEach(() => {
+    updateSessionCalls = [];
+    originalUpdateSession = opencodeClient.updateSession;
+    opencodeClient.updateSession = (sessionId) => {
+      updateSessionCalls.push(sessionId);
+      return Promise.resolve(null);
+    };
+  });
+
+  afterEach(() => {
+    opencodeClient.updateSession = originalUpdateSession;
+  });
+
+  // The store used to accept an options object and silently drop it, so a
+  // caller-supplied runtime key had no effect. Passing a key that cannot match
+  // the active runtime must abort the batch before any SDK call.
+  test('honors expectedRuntimeKey instead of discarding the options object', async () => {
+    const result = await useSessionUIStore.getState().archiveSessions(['session-x', 'session-y'], {
+      expectedRuntimeKey: 'runtime-that-is-not-active',
+    });
+
+    expect(result).toEqual({ archivedIds: [], failedIds: ['session-x', 'session-y'] });
+    expect(updateSessionCalls).toEqual([]);
+  });
+});
+
+describe('deleteSessions option forwarding', () => {
+  let originalDeleteSession;
+  let deleteSessionCalls;
+
+  beforeEach(() => {
+    deleteSessionCalls = [];
+    originalDeleteSession = opencodeClient.deleteSession;
+    opencodeClient.deleteSession = (sessionId) => {
+      deleteSessionCalls.push(sessionId);
+      return Promise.resolve(true);
+    };
+  });
+
+  afterEach(() => {
+    opencodeClient.deleteSession = originalDeleteSession;
+  });
+
+  // The store accepted an options object and dropped it on both the single and
+  // batch delete paths. A key that cannot match the active runtime must abort
+  // before any SDK call rather than deleting and erasing persisted state.
+  test('honors expectedRuntimeKey on the batch delete instead of discarding options', async () => {
+    const result = await useSessionUIStore.getState().deleteSessions(['session-x', 'session-y'], {
+      expectedRuntimeKey: 'runtime-that-is-not-active',
+    });
+
+    expect(result).toEqual({ deletedIds: [], failedIds: ['session-x', 'session-y'] });
+    expect(deleteSessionCalls).toEqual([]);
+  });
+
+  test('honors expectedRuntimeKey on the single delete instead of discarding options', async () => {
+    const deleted = await useSessionUIStore.getState().deleteSession('session-x', {
+      expectedRuntimeKey: 'runtime-that-is-not-active',
+    });
+
+    expect(deleted).toBe(false);
+    expect(deleteSessionCalls).toEqual([]);
+  });
+});

@@ -38,7 +38,10 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
       if (statusCode >= 500) {
         console.error('Small model generation failed:', error);
       }
-      res.status(statusCode).json({ error: error.message || 'Small model generation failed' });
+      res.status(statusCode).json({
+        error: error.message || 'Small model generation failed',
+        ...(error?.code ? { code: error.code } : {}),
+      });
     }
   });
 }

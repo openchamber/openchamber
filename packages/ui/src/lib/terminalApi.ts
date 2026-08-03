@@ -3,7 +3,7 @@ import { openRuntimeWebSocket } from './relay/runtime-socket';
 import type { RelayTunnelWebSocket } from './relay/tunnel-client';
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
-import { refreshRuntimeUrlAuthToken } from './runtime-auth';
+import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from './runtime-auth';
 import { isTerminalShell } from './terminalShell';
 
 type Message = Record<string, unknown> & { t: string; s?: string; q?: number };
@@ -66,12 +66,12 @@ const trimProjection = (value: string): string => {
 type TerminalTransportDependencies = {
   refreshAuth: () => Promise<unknown>;
   openSocket: () => RelayTunnelWebSocket;
+  clearUrlAuthToken?: () => void;
 };
 
 export class TerminalTransport {
   private socket: RelayTunnelWebSocket | null = null;
   private opening: Promise<void> | null = null;
-  private openingGeneration: number | null = null;
   private subscribers = new Map<string, Set<Subscriber>>();
   private projections = new Map<string, TerminalProjection>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -85,6 +85,7 @@ export class TerminalTransport {
   constructor(private readonly dependencies: TerminalTransportDependencies = {
     refreshAuth: refreshRuntimeUrlAuthToken,
     openSocket: () => openRuntimeWebSocket(getRuntimeUrlResolver().websocket('/api/terminal/ws')),
+    clearUrlAuthToken: clearRuntimeUrlAuthToken,
   }) {}
 
   subscribe(sessionId: string, handlers: TerminalHandlers): () => void {
@@ -100,7 +101,13 @@ export class TerminalTransport {
       handlers.onEvent({ type: 'snapshot', sequence: projection.sequence, data: projection.history, status: projection.status, exitCode: projection.exitCode, signal: projection.signal, runtime: projection.runtime, ptyBackend: projection.ptyBackend });
     }
     const socketWasOpen = this.socket?.readyState === SOCKET_OPEN;
-    this.ensureConnected().then(() => { if (first && socketWasOpen && set.has(subscriber)) this.send({ t: 'attach', v: 3, s: sessionId }); }).catch((error) => {
+    this.ensureConnected().then(() => {
+      const current = this.subscribers.get(sessionId);
+      if (first && socketWasOpen && current === set && current.size > 0) {
+        this.send({ t: 'attach', v: 3, s: sessionId });
+      }
+    }).catch((error) => {
+      if (!set.has(subscriber)) return;
       handlers.onError?.(error, false);
       this.scheduleReconnect();
     });
@@ -114,6 +121,7 @@ export class TerminalTransport {
       }
       if (this.subscribers.size === 0) {
         this.cancelReconnect();
+        this.failures = 0;
         if (this.socket?.readyState === SOCKET_OPEN) {
           // Healthy socket: hold it briefly so a tab switch can reattach to it.
           this.scheduleIdleClose();
@@ -121,6 +129,7 @@ export class TerminalTransport {
         }
         // Nothing to reuse, so abandon any dial that is still in flight.
         this.generation += 1;
+        this.opening = null;
         this.closeSocket();
       }
     };
@@ -138,6 +147,7 @@ export class TerminalTransport {
   dispose(): void {
     this.disposed = true;
     this.generation += 1;
+    this.opening = null;
     this.subscribers.clear();
     this.projections.clear();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
@@ -155,71 +165,89 @@ export class TerminalTransport {
   private async ensureConnected(): Promise<void> {
     if (this.disposed) throw new Error('Terminal runtime changed');
     if (this.socket?.readyState === SOCKET_OPEN) return;
-    if (this.opening && this.openingGeneration === this.generation) {
+    if (this.opening) {
       await this.opening;
       if (this.socket?.readyState === SOCKET_OPEN) return;
       return this.ensureConnected();
-    }
-    if (this.openingGeneration !== this.generation) {
-      this.opening = null;
-      this.openingGeneration = null;
     }
     const generation = this.generation;
     const opening = (async () => {
       await this.dependencies.refreshAuth();
       if (generation !== this.generation || this.disposed) throw new Error('Terminal runtime changed');
       await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      let pendingSocket: RelayTunnelWebSocket | null = null;
-      const finish = (error?: Error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        if (error) reject(error);
-        else resolve();
-      };
-      const timeout = setTimeout(() => {
-        pendingSocket?.close();
-        finish(new Error('Terminal connection timed out'));
-      }, 10_000);
-      try {
-        const socket = this.dependencies.openSocket();
-        pendingSocket = socket;
-        socket.binaryType = 'arraybuffer';
-        this.socket = socket;
-        socket.onopen = () => {
-          if (generation !== this.generation || this.disposed) { socket.close(); finish(new Error('Terminal runtime changed')); return; }
-          this.failures = 0;
-          this.send({ t: 'hello', v: 3 });
-          for (const sessionId of this.subscribers.keys()) this.send({ t: 'attach', v: 3, s: sessionId });
-          this.startKeepalive();
-          finish();
+        let settled = false;
+        let opened = false;
+        let authInvalidated = false;
+        let pendingSocket: RelayTunnelWebSocket | null = null;
+        const isCurrentSocket = () => (
+          generation === this.generation &&
+          !this.disposed &&
+          pendingSocket !== null &&
+          this.socket === pendingSocket
+        );
+        const invalidatePreOpenAuth = () => {
+          if (authInvalidated || opened || !isCurrentSocket()) return;
+          authInvalidated = true;
+          this.dependencies.clearUrlAuthToken?.();
         };
-        socket.onmessage = (event) => void this.handleMessage(event.data);
-        socket.onerror = () => {
-          finish(new Error('Terminal WebSocket failed'));
+        const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          if (error) reject(error);
+          else resolve();
+        };
+        const timeout = setTimeout(() => {
+          invalidatePreOpenAuth();
+          pendingSocket?.close();
+          finish(new Error('Terminal connection timed out'));
+        }, 10_000);
+        try {
+          const socket = this.dependencies.openSocket();
+          pendingSocket = socket;
+          socket.binaryType = 'arraybuffer';
+          this.socket = socket;
+          socket.onopen = () => {
+            if (!isCurrentSocket()) { socket.close(); finish(new Error('Terminal runtime changed')); return; }
+            opened = true;
+            this.failures = 0;
+            this.send({ t: 'hello', v: 3 });
+            for (const sessionId of this.subscribers.keys()) this.send({ t: 'attach', v: 3, s: sessionId });
+            this.startKeepalive();
+            finish();
+          };
+          socket.onmessage = (event) => void this.handleMessage(event.data);
+          socket.onerror = () => {
+            const current = isCurrentSocket();
+            if (current) invalidatePreOpenAuth();
+            finish(new Error('Terminal WebSocket failed'));
+            if (current && this.subscribers.size > 0) this.scheduleReconnect();
+          };
+          socket.onclose = () => {
+            const current = isCurrentSocket();
+            if (current) {
+              this.stopKeepalive();
+              // An upgrade rejected before `open` commonly means the cached
+              // URL-scoped auth token is stale. Retrying it reaches the 8s
+              // backoff cap instead of minting a fresh token.
+              invalidatePreOpenAuth();
+            }
+            if (this.socket === socket) this.socket = null;
+            finish(new Error('Terminal WebSocket closed'));
+            if (current && this.subscribers.size > 0) this.scheduleReconnect();
+          };
+        } catch (error) {
+          finish(error instanceof Error ? error : new Error('Terminal WebSocket failed'));
           if (!this.disposed && this.subscribers.size > 0) this.scheduleReconnect();
-        };
-        socket.onclose = () => {
-          if (this.socket === socket) this.socket = null;
-          this.stopKeepalive();
-          finish(new Error('Terminal WebSocket closed'));
-          if (!this.disposed && this.subscribers.size > 0) this.scheduleReconnect();
-        };
-      } catch (error) {
-        finish(error instanceof Error ? error : new Error('Terminal WebSocket failed'));
-        if (!this.disposed && this.subscribers.size > 0) this.scheduleReconnect();
-      }
+        }
       });
     })();
     this.opening = opening;
-    this.openingGeneration = generation;
     try {
       await opening;
     } finally {
       if (this.opening === opening) {
         this.opening = null;
-        this.openingGeneration = null;
       }
     }
   }
@@ -279,7 +307,7 @@ export class TerminalTransport {
     if (this.reconnectTimer || this.disposed || this.subscribers.size === 0) return;
     this.failures += 1;
     const slow = (typeof document !== 'undefined' && document.visibilityState === 'hidden') || (typeof navigator !== 'undefined' && !navigator.onLine);
-    const delay = Math.min(500 * 2 ** Math.min(this.failures - 1, 10), slow ? 60_000 : 8_000);
+    const delay = slow ? 60_000 : Math.min(500 * 2 ** Math.min(this.failures - 1, 10), 8_000);
     for (const set of this.subscribers.values()) for (const sub of set) sub.handlers.onEvent({ type: 'reconnecting', attempt: this.failures, maxAttempts: Number.POSITIVE_INFINITY });
     const wake = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
@@ -304,6 +332,7 @@ export class TerminalTransport {
       this.idleCloseTimer = null;
       if (this.disposed || this.subscribers.size > 0) return;
       this.generation += 1;
+      this.opening = null;
       this.closeSocket();
     }, IDLE_SOCKET_GRACE_MS);
   }

@@ -41,7 +41,12 @@ sensitive URL parameters. The trace applies the same key and URL-parameter
 redaction, but profiling artifacts can still reveal project paths and endpoint
 names. Do not publish them without review.
 
-The capture bypasses the PWA service worker and reloads without the browser cache before recording, so repeated optimization runs execute the current local build instead of a previously cached bundle. Network recording begins after that reload, so startup asset downloads are not included in the HAR totals.
+`summary.json.sessionLoadPerformance.events` contains the bounded session-loading
+operation timeline without runtime keys, directories, session IDs, message
+content, or credentials. It includes recording-relative timing, caller, outcome,
+retry count, and downloaded record count where available.
+
+The capture bypasses the PWA service worker and reloads without the browser cache before recording, so repeated optimization runs execute the current local build instead of a previously cached bundle. By default, network recording begins after that preparation reload. Pass `--reload` to perform another cache-bypassing reload after recording starts and include startup requests in the HAR and session-load timeline.
 
 Useful options:
 
@@ -49,6 +54,7 @@ Useful options:
 bun run profile:browser -- --duration 120
 bun run profile:browser -- --url http://localhost:4173
 bun run profile:browser -- --output /tmp/openchamber-profile
+bun run profile:browser -- --reload --no-prompt --duration 60
 ```
 
 Run `bun run profile:browser -- --help` for all options.

@@ -61,7 +61,7 @@ struct OverviewWidgetView: View {
         VStack(spacing: 16) {
             HStack(spacing: 16) {
                 actionButton(systemImage: "plus", url: WidgetDeepLink.newSession())
-                actionButton(systemImage: "square.stack.3d.up", url: WidgetDeepLink.status())
+                actionButton(systemImage: "list.bullet", url: WidgetDeepLink.status())
             }
             HStack(spacing: 16) {
                 actionButton(systemImage: "server.rack", url: WidgetDeepLink.instances())
@@ -120,7 +120,7 @@ struct QuickActionsWidgetView: View {
 
             // Two round secondary actions.
             HStack(spacing: 10) {
-                quickCircle(systemImage: "square.stack.3d.up", url: WidgetDeepLink.status())
+                quickCircle(systemImage: "list.bullet", url: WidgetDeepLink.status())
                 quickCircle(systemImage: "server.rack", url: WidgetDeepLink.instances())
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

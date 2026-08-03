@@ -525,7 +525,6 @@ export class ChildStoreManager {
       this.notifyBootstrapSubscribers()
       const finishPerformanceEvent = startSessionLoadPerformanceEvent({
         operation: "bootstrap.directory",
-        directory: next.directory,
         caller: next.reason,
         queuedMs: Math.max(0, Date.now() - next.enqueuedAt),
       })

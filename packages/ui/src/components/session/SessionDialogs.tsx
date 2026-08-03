@@ -413,13 +413,7 @@ export const SessionDialogs: React.FC = () => {
                 const target = deleteDialog.sessions[0];
                 const success = isWorktreeDelete
                     ? await archiveSession(target.id)
-                    : await deleteSession(target.id, {
-                        // In "worktree" mode, remove the selected worktree explicitly below.
-                        // Don't try to derive worktree removal from per-session metadata (may be missing).
-                        archiveWorktree: false,
-                        deleteRemoteBranch: removeRemoteBranch,
-                        deleteLocalBranch,
-                    });
+                    : await deleteSession(target.id);
                 if (!success) {
                     toast.error(isWorktreeDelete
                         ? t('sessions.sidebar.session.archive.error')

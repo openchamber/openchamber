@@ -1,7 +1,7 @@
 import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2";
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { retry } from "@/sync/retry";
 import { stripSessionListDetails } from "@/sync/sanitize";
-import { getRuntimeKey } from "@/lib/runtime-switch";
 import { startSessionLoadPerformanceEvent } from "@/sync/session-load-performance";
 
 export type GlobalSessionRecord = Session & {
@@ -75,6 +75,15 @@ const unwrapSessionList = (
     return result.data as GlobalSessionRecord[];
 };
 
+/**
+ * OpenCode's `archived` query flag means "also include archived sessions", not
+ * "return only archived sessions": the server simply drops its
+ * `time_archived IS NULL` condition. Callers that ask for the archived list
+ * expect archived-only records, so narrow the response here, at the data
+ * boundary, instead of leaving every consumer to re-derive it.
+ */
+const isArchivedSession = (session: GlobalSessionRecord): boolean => Boolean(session.time?.archived);
+
 export async function listGlobalSessionPages(
     apiClient: OpencodeClient,
     options: {
@@ -103,11 +112,9 @@ export async function listGlobalSessionPages(
         let attempts = 0;
         const finishPerformanceEvent = startSessionLoadPerformanceEvent({
             operation,
-            runtimeKey: getRuntimeKey(),
-            directory: options.directory,
             caller: cursor === undefined ? "initial-page" : "pagination",
         });
-        const { response, payload } = await retry(
+        const { response, payload } = await runBackgroundNetworkTask(() => retry(
             async () => {
                 attempts += 1;
                 const response = await apiClient.experimental.session.list({
@@ -122,7 +129,7 @@ export async function listGlobalSessionPages(
                 return { response, payload };
             },
             { attempts: 3, delay: 500, retryIf: () => true },
-        ).catch((error) => {
+        )).catch((error) => {
             finishPerformanceEvent("error", { retryCount: Math.max(0, attempts - 1) });
             throw error;
         });
@@ -133,15 +140,22 @@ export async function listGlobalSessionPages(
         });
         if (payload.length === 0) break;
 
+        // `appended` tracks pagination progress over the raw response, while
+        // `accepted` holds the records this call actually returns. Filtering
+        // must not feed the pagination guards below, otherwise a page that is
+        // full upstream but mostly non-archived would look like a last page.
         let appended = 0;
+        const accepted: GlobalSessionRecord[] = [];
         for (const session of payload) {
             if (!session?.id || seenIds.has(session.id)) continue;
             seenIds.add(session.id);
-            all.push(session);
             appended += 1;
+            if (options.archived && !isArchivedSession(session)) continue;
+            all.push(session);
+            accepted.push(session);
         }
-        if (appended > 0) {
-            options.onPage?.(payload);
+        if (accepted.length > 0) {
+            options.onPage?.(accepted);
         }
 
         // Stop on partial page — nothing more to fetch.

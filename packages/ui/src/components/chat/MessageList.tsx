@@ -1483,10 +1483,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             return { ...entry, nextEntryFirstMessage };
         });
     }, [staticRenderEntries, trailingEntryFirstMessage]);
-    // All surfaces virtualize with @tanstack/react-virtual (see the engine
-    // note at the top of the file). An unvirtualized list is kept only for
-    // tiny histories where windowing overhead is not worth it.
-    const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
+    // Mobile always starts with the same virtualized engine it will use after
+    // pagination. Switching a short list from normal DOM to TanStack during a
+    // prepend remounts the history subtree, and the newly enabled end-anchored
+    // virtualizer initializes at the bottom before it has prior keyed state.
+    // Desktop keeps the small-list threshold where that transition is not tied
+    // to the explicit mobile load-older interaction.
+    const shouldVirtualizeHistory = isMobileSurfaceRuntime()
+        || historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
     const historyEngine: HistoryEngine = shouldVirtualizeHistory ? 'tanstack' : 'none';
     const tanstackVirtualizerRef = React.useRef<TanstackVirtualizerInstance | null>(null);
     const registerTanstackVirtualizer = React.useCallback((virtualizer: TanstackVirtualizerInstance | null) => {

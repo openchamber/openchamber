@@ -7,6 +7,7 @@ import {
 } from '../../proxy-headers.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
+import { recordStartupPerformance } from './startup-performance.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 
@@ -598,6 +599,12 @@ export const registerOpenCodeProxy = (app, deps) => {
       !runtimeState.openCodePort
     );
   };
+  const classifyReadinessRoute = (requestPath) => {
+    if (/^\/session\/[^/]+\/message(?:\/|$)/.test(requestPath)) return 'session-messages';
+    if (requestPath === '/session' || requestPath.startsWith('/session/')) return 'session';
+    if (requestPath === '/event' || requestPath === '/global/event') return 'events';
+    return 'other';
+  };
 
   app.use('/api', async (req, res, next) => {
     if (
@@ -617,16 +624,35 @@ export const registerOpenCodeProxy = (app, deps) => {
       return next();
     }
 
+    const holdStartedAt = performance.now();
+    const routeClass = classifyReadinessRoute(req.path);
     const deadline = Date.now() + Math.min(OPEN_CODE_READY_GRACE_MS, READINESS_HOLD_MAX_MS);
     while (Date.now() < deadline) {
       // Client gave up (closed/aborted) — stop holding.
-      if (res.writableEnded || req.aborted) return;
+      if (res.writableEnded || req.aborted) {
+        recordStartupPerformance('proxy.readiness-hold', {
+          durationMs: performance.now() - holdStartedAt,
+          outcome: 'aborted',
+          routeClass,
+        });
+        return;
+      }
       await sleep(READINESS_HOLD_POLL_MS);
       if (!isStillWaiting(getRuntime())) {
+        recordStartupPerformance('proxy.readiness-hold', {
+          durationMs: performance.now() - holdStartedAt,
+          outcome: 'ready',
+          routeClass,
+        });
         return next();
       }
     }
 
+    recordStartupPerformance('proxy.readiness-hold', {
+      durationMs: performance.now() - holdStartedAt,
+      outcome: 'timeout',
+      routeClass,
+    });
     if (!res.headersSent) {
       res.status(503).json({
         error: 'OpenCode is restarting',

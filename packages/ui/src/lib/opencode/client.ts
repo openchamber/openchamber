@@ -1183,12 +1183,13 @@ class OpencodeService {
   async fetchPermission(
     sessionID: string,
     requestID: string,
+    directory?: string,
   ): Promise<FetchPermissionResult> {
     try {
-      // The V2 path is session-scoped and does not require a `directory`
-      // parameter. The client-scoped directory (set via setDirectory) is
-      // honored by the underlying SDK client when the call is routed.
-      const response = await this.client.v2.session.permission.get({
+      // The V2 endpoint does not accept a directory parameter. Callers that
+      // reconcile a known project must therefore select its scoped SDK client.
+      const client = directory ? this.getScopedSdkClient(directory) : this.client;
+      const response = await client.v2.session.permission.get({
         sessionID,
         requestID,
       });

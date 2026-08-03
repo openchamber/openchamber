@@ -39,6 +39,21 @@ describe('useGlobalSessionsStore', () => {
     expect(useGlobalSessionsStore.getState().activeSessions[0]?.share?.url).toBe('https://share.example/b');
   });
 
+  test('publishes an updated session when sharing is removed', () => {
+    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/a'));
+    const sharedSessions = useGlobalSessionsStore.getState().activeSessions;
+
+    useGlobalSessionsStore.getState().upsertSession({
+      ...buildSession('https://share.example/a'),
+      share: undefined,
+      time: { created: 1, updated: 3 },
+    });
+
+    const unsharedSessions = useGlobalSessionsStore.getState().activeSessions;
+    expect(unsharedSessions).not.toBe(sharedSessions);
+    expect(unsharedSessions[0]?.share).toBe(undefined);
+  });
+
   test('preserves directory metadata when a live update omits it', () => {
     useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/a', { directory: '/repo/app' }));
     useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/b', {

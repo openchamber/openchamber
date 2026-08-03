@@ -44,6 +44,11 @@ type SortableTabsStripProps = {
   inactiveTabsIconOnly?: boolean;
   animateActivePill?: boolean;
   activePillLowercase?: boolean;
+  /** Position the active-pill indicator with left/top instead of translate3d.
+      Use when the strip lives inside an ancestor that transform-animates
+      (e.g. a sliding mobile drawer): creating a composited layer mid-slide
+      flickers in WKWebView. Tab-switch animation stays (layout transition). */
+  nonCompositedIndicator?: boolean;
   className?: string;
 };
 
@@ -100,6 +105,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   inactiveTabsIconOnly = false,
   animateActivePill,
   activePillLowercase = true,
+  nonCompositedIndicator = false,
   className,
 }) => {
   const { t } = useI18n();
@@ -409,13 +415,21 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
               // than a hard border, so the pill reads as raised above the track.
               'border border-[color-mix(in_srgb,var(--foreground)_7%,transparent)]',
               'shadow-[0_1px_2px_color-mix(in_srgb,var(--foreground)_10%,transparent),0_2px_6px_color-mix(in_srgb,var(--foreground)_6%,transparent)]',
-              shouldAnimateActivePill && pillTransitionEnabled && 'pill-tabs__indicator--is-animated'
+              shouldAnimateActivePill && pillTransitionEnabled
+                && (nonCompositedIndicator ? 'pill-tabs__indicator--is-animated-layout' : 'pill-tabs__indicator--is-animated')
             )}
-            style={{
-              transform: `translate3d(${pillRect.left + pillNudge}px, ${pillRect.top}px, 0)`,
-              width: `${pillRect.width}px`,
-              height: `${pillRect.height}px`,
-            }}
+            style={nonCompositedIndicator
+              ? {
+                  left: `${pillRect.left + pillNudge}px`,
+                  top: `${pillRect.top}px`,
+                  width: `${pillRect.width}px`,
+                  height: `${pillRect.height}px`,
+                }
+              : {
+                  transform: `translate3d(${pillRect.left + pillNudge}px, ${pillRect.top}px, 0)`,
+                  width: `${pillRect.width}px`,
+                  height: `${pillRect.height}px`,
+                }}
           />
         ) : null}
         {useUnderlineIndicator && pillRect ? (

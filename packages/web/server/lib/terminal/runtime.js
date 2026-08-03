@@ -145,7 +145,7 @@ export function createTerminalRuntime({
             background: session.terminalBackground,
             foreground: session.terminalForeground,
             modeEnabled: session.themeModeEnabled,
-          });
+          }, { respondToPrimaryDeviceAttributes: true });
           session.pendingThemeControlSequence = theme.pending;
           session.themeModeEnabled = theme.modeEnabled;
           for (const response of theme.responses) session.process?.write(response);
@@ -331,7 +331,7 @@ export function createTerminalRuntime({
       session.process = spawned.process; session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.cwd = cwd; session.cols = cols; session.rows = rows;
       session.history = ''; session.pendingHistoryControlSequence = ''; session.pendingThemeControlSequence = ''; session.themeModeEnabled = false; session.status = 'running'; session.exitCode = null; session.signal = null; session.eventQueue.length = 0;
       session.themeMode = themeMode === 'light' ? 'light' : 'dark'; session.terminalBackground = terminalBackground; session.terminalForeground = terminalForeground;
-      wire(session, spawned.process); void terminateProcess(oldProcess); publish(session, { t: 'restarted', history: '' });
+       wire(session, spawned.process); void terminateProcess(oldProcess); publish(session, { t: 'restarted', history: '' });
     });
     pendingSessionRestarts.set(session.id, restart);
     try {

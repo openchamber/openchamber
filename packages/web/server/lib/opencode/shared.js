@@ -11,9 +11,6 @@ const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const SKILL_DIR = path.join(OPENCODE_CONFIG_DIR, 'skills');
 const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'config.json');
-const CUSTOM_CONFIG_FILE = process.env.OPENCODE_CONFIG
-  ? path.resolve(process.env.OPENCODE_CONFIG)
-  : null;
 const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
 
 // ============== SCOPE TYPE CONSTANTS ==============
@@ -121,7 +118,10 @@ function getConfigPaths(workingDirectory) {
       path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
     ],
     projectPath: getProjectConfigPath(workingDirectory),
-    customPath: CUSTOM_CONFIG_FILE
+    // Resolve at call time so OPENCODE_CONFIG changes (and tests) take effect.
+    customPath: process.env.OPENCODE_CONFIG
+      ? path.resolve(process.env.OPENCODE_CONFIG)
+      : null,
   };
 }
 

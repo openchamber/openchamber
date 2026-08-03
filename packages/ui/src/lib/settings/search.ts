@@ -379,6 +379,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['small model', 'utility', 'summary', 'recap', 'cheap', 'override'],
   },
   {
+    id: 'sessions.walkthrough-model',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.walkthroughModel.title',
+    descriptionKey: 'settings.openchamber.defaults.walkthroughModel.description',
+    keywords: ['walkthrough', 'diff', 'review', 'changes', 'structured output', 'model', 'override'],
+  },
+  {
     id: 'sessions.auto-cleanup',
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionRetention.field.enableAutoCleanup',
@@ -753,6 +760,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'providers',
     titleKey: 'settings.providers.page.connect.title',
     keywords: ['add provider', 'connect provider', 'credentials'],
+  },
+  {
+    id: 'providers.custom',
+    page: 'providers',
+    titleKey: 'settings.providers.page.custom.title',
+    descriptionKey: 'settings.providers.page.custom.description',
+    keywords: ['other', 'custom', 'openai-compatible', 'base url', 'api key'],
   },
   {
     id: 'providers.auth',

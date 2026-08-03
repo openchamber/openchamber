@@ -131,9 +131,9 @@
       }
     },
     "markdown": {
-      "heading1": "#1e754f",
-      "heading2": "#1e754f",
-      "heading3": "#1e754f",
+      "heading1": "#393a34",
+      "heading2": "#393a34",
+      "heading3": "#393a34",
       "heading4": "#393a34",
       "link": "#2e808f",
       "linkHover": "#296aa3",
@@ -145,7 +145,7 @@
     },
     "chat": {
       "userMessage": "#393a34",
-      "userMessageBackground": "#fbf4f0",
+      "userMessageBackground": "#f7f2ee",
       "assistantMessage": "#393a34",
       "assistantMessageBackground": "#fdfcfa",
       "timestamp": "#6b6b63",

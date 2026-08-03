@@ -3,6 +3,7 @@ import { parsePatchFiles } from '@pierre/diffs';
 export type DiffPatchEntry = {
     id: string;
     title: string;
+    filePath?: string;
     patch: string;
     renderMode: 'diff' | 'text';
 };
@@ -138,6 +139,195 @@ export const getPatchText = (value: unknown): string | undefined => {
     }
 
     return undefined;
+};
+
+export const getApplyPatchFilePath = (file: unknown): string | null => {
+    if (!isRecord(file)) {
+        return null;
+    }
+
+    return typeof file.movePath === 'string'
+        ? file.movePath
+        : typeof file.filePath === 'string'
+            ? file.filePath
+            : typeof file.relativePath === 'string'
+                ? file.relativePath
+                : null;
+};
+
+export const getPrimaryToolPath = (
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    metadata: Record<string, unknown> | undefined,
+): string | null => {
+    if (toolName === 'apply_patch') {
+        const files = Array.isArray(metadata?.files) ? metadata.files : [];
+        for (const file of files) {
+            if (isRecord(file) && file.type !== 'delete') {
+                const filePath = getApplyPatchFilePath(file);
+                if (filePath) {
+                    return filePath;
+                }
+            }
+        }
+        return null;
+    }
+
+    if (toolName === 'edit' || toolName === 'multiedit') {
+        const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
+        if (fileDiff && typeof fileDiff.file === 'string') {
+            return fileDiff.file;
+        }
+        return typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : null;
+    }
+
+    if (toolName === 'write') {
+        return typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : null;
+    }
+
+    return null;
+};
+
+export const getMutatedToolPaths = (
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    metadata: Record<string, unknown> | undefined,
+): string[] => {
+    if (toolName === 'apply_patch') {
+        const files = Array.isArray(metadata?.files) ? metadata.files : [];
+        const paths = new Set<string>();
+        for (const file of files) {
+            if (!isRecord(file)) continue;
+            const filePath = getApplyPatchFilePath(file);
+            if (filePath) paths.add(filePath);
+            if (file.type === 'move' && typeof file.filePath === 'string') {
+                paths.add(file.filePath);
+            }
+        }
+        return [...paths];
+    }
+
+    const primaryPath = getPrimaryToolPath(toolName, input, metadata);
+    return primaryPath ? [primaryPath] : [];
+};
+
+const supportsDiffMetadata = (toolName: string): boolean => (
+    toolName === 'edit' || toolName === 'multiedit' || toolName === 'apply_patch'
+);
+
+const getMetadataFileForPath = (
+    metadata: Record<string, unknown>,
+    preferredPath?: string,
+): Record<string, unknown> | undefined => {
+    const files = Array.isArray(metadata.files) ? metadata.files : [];
+    if (!preferredPath) {
+        const first = files[0];
+        return isRecord(first) ? first : undefined;
+    }
+
+    return files.find((file): file is Record<string, unknown> => (
+        isRecord(file)
+        && (file.relativePath === preferredPath || file.filePath === preferredPath || file.movePath === preferredPath)
+    ));
+};
+
+export const getPrimaryDiffFromMetadata = (
+    toolName: string,
+    metadata?: Record<string, unknown>,
+    preferredPath?: string,
+): string | undefined => {
+    if (!metadata || !supportsDiffMetadata(toolName)) {
+        return undefined;
+    }
+
+    const matchedFile = getMetadataFileForPath(metadata, preferredPath);
+    const filePatch = getPatchText(matchedFile?.patch) ?? getPatchText(matchedFile?.diff);
+    if (filePatch) {
+        return filePatch;
+    }
+
+    return getPatchText(metadata.patch) ?? getPatchText(metadata.diff);
+};
+
+export const extractFirstChangedLineFromDiff = (diffText: string): number | undefined => {
+    if (!diffText) {
+        return undefined;
+    }
+
+    let currentNewLine: number | undefined;
+    let firstHunkStart: number | undefined;
+    for (const rawLine of diffText.split('\n')) {
+        const line = rawLine.replace(/\r$/, '');
+        const hunkMatch = line.match(/^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+        if (hunkMatch) {
+            const parsed = Number.parseInt(hunkMatch[1] ?? '', 10);
+            if (Number.isFinite(parsed)) {
+                currentNewLine = Math.max(1, parsed);
+                firstHunkStart ??= currentNewLine;
+            }
+            continue;
+        }
+
+        if (currentNewLine === undefined) {
+            continue;
+        }
+        if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ')) {
+            continue;
+        }
+        if (line.startsWith('+')) {
+            return currentNewLine;
+        }
+        if (line.startsWith(' ')) {
+            currentNewLine += 1;
+        }
+    }
+
+    return firstHunkStart;
+};
+
+export const getFirstChangedLineFromMetadata = (
+    toolName: string,
+    metadata?: Record<string, unknown>,
+    preferredPath?: string,
+): number | undefined => {
+    if (!metadata || !supportsDiffMetadata(toolName)) {
+        return undefined;
+    }
+
+    if (preferredPath) {
+        const matchedFile = getMetadataFileForPath(metadata, preferredPath);
+        const matchedPatch = getPatchText(matchedFile?.patch) ?? getPatchText(matchedFile?.diff);
+        if (matchedPatch) {
+            const matchedLine = extractFirstChangedLineFromDiff(matchedPatch);
+            if (matchedLine !== undefined) {
+                return matchedLine;
+            }
+        }
+    }
+
+    const topLevelPatch = getPatchText(metadata.patch) ?? getPatchText(metadata.diff);
+    if (topLevelPatch) {
+        const topLevelLine = extractFirstChangedLineFromDiff(topLevelPatch);
+        if (topLevelLine !== undefined) {
+            return topLevelLine;
+        }
+    }
+
+    const firstFile = getMetadataFileForPath(metadata);
+    const firstPatch = getPatchText(firstFile?.patch) ?? getPatchText(firstFile?.diff);
+    return firstPatch ? extractFirstChangedLineFromDiff(firstPatch) : undefined;
 };
 
 const normalizeParsedPath = (path: string | undefined): string => {
@@ -287,7 +477,7 @@ const getPatchEntriesFromText = (
     }];
 };
 
-const getFilePatch = (file: unknown): { patch: string; title: string } | null => {
+const getFilePatch = (file: unknown): { filePath?: string; patch: string; title: string } | null => {
     if (!isRecord(file)) {
         return null;
     }
@@ -304,6 +494,7 @@ const getFilePatch = (file: unknown): { patch: string; title: string } | null =>
             : '';
 
     return {
+        filePath: getApplyPatchFilePath(file) ?? undefined,
         patch,
         title: rawPath,
     };
@@ -325,7 +516,7 @@ export const getDiffPatchEntries = (
             filePatch.title || `File ${index + 1}`,
             `file-${index}`,
             resolveTitle,
-        );
+        ).map((entry) => ({ ...entry, filePath: filePatch.filePath }));
     });
 
     if (fileEntries.length > 0) {
