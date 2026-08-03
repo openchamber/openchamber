@@ -781,7 +781,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ active = true, aut
             const params = new URLSearchParams(window.location.search);
             if (params.get('session')) return;
         }
-        openNewSessionDraft();
+        // Programmatic fallback, not user navigation — must not clear the
+        // persisted last-session pointer the cold-launch restore reads.
+        openNewSessionDraft({ automatic: true });
     }, [autoOpenDraft, currentSessionId, draftOpen, openNewSessionDraft]);
 
     const activeTurnChangeRef = React.useRef<(turnId: string | null) => void>(() => {});

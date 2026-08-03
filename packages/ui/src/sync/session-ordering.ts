@@ -120,6 +120,48 @@ const baselineRank = (session: Session, pinned: boolean): number => {
   return rank;
 };
 
+/**
+ * Raise cached baselines to the sessions' current authoritative timestamps.
+ *
+ * The frozen baseline keeps live metadata churn from reordering an open list,
+ * but a client that slept through a session's whole active→settled cycle never
+ * saw the transition that would have promoted its live rank — so its stale
+ * baseline pins it in place forever. Call this when an authoritative session
+ * SNAPSHOT arrives (global refresh); monotonic, so it can never demote.
+ */
+export const raiseSessionOrderingBaselines = (sessions: Iterable<Session>): void => {
+  const currentRanks = useSessionOrderingStore.getState().rankById;
+  let nextRanks: Map<string, number> | null = null;
+  let baselinesChanged = false;
+
+  for (const session of sessions) {
+    const fresh = updatedAt(session);
+    const liveRank = currentRanks.get(session.id);
+    if (liveRank !== undefined) {
+      // A live rank frozen BEFORE this newer authoritative stamp is stale —
+      // the session was active again while this client wasn't watching (its
+      // transition events never arrived, e.g. другий пристрій + сон). Ranks
+      // share the epoch-ms scale with `updated`, so raising is well-ordered.
+      if (fresh > liveRank) {
+        nextRanks = nextRanks ?? new Map(currentRanks);
+        nextRanks.set(session.id, fresh);
+      }
+      continue;
+    }
+    const existing = baselineRankById.get(session.id);
+    if (existing?.updated !== undefined && existing.updated >= fresh) continue;
+    baselineRankById.set(session.id, { ...existing, updated: fresh });
+    baselinesChanged = true;
+  }
+
+  if (nextRanks) {
+    useSessionOrderingStore.setState({ rankById: nextRanks });
+  } else if (baselinesChanged) {
+    // Baselines live outside the store; nudge subscribers so open lists re-sort.
+    useSessionOrderingStore.setState((state) => ({ rankById: new Map(state.rankById) }));
+  }
+};
+
 export const getSessionLifecycleOrderValue = (
   session: Session,
   rankById: ReadonlyMap<string, number>,

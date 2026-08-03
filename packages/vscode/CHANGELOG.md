@@ -1,3 +1,13 @@
+## [1.17.2] - 2026-08-01
+
+- Per-session permission auto-accept now replies to live permission requests correctly when auto-accept is turned on.
+- Chat: messages arriving at the start of the SSE stream no longer drop silently after initial connection.
+- Sessions with active agents now show a live activity indicator even when the sidebar is collapsed (thanks to @pascalandr).
+- Usage: all Z.ai usage windows now appear in the usage view.
+- Chat: tool descriptions now show the glob pattern when a tool's input uses one.
+- Chat: clicking in the padding area of the composer now correctly places the cursor (thanks to @IbrahimKhan12).
+- Chat: the `/` command menu no longer lists a skill twice when a command shares its name (thanks to @IbrahimKhan12).
+
 ## [1.17.1] - 2026-07-29
 
 - **Chat tools:** Bash tool cards now show output before a command finishes, keep it in a fixed-height pane, and follow new lines until you scroll away. Long-running commands no longer remain at a 300-second duration, and their timers continue until they finish.

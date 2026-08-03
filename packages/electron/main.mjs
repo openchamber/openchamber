@@ -13,7 +13,7 @@ import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
-import { resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
+import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
@@ -90,13 +90,16 @@ if (isDev) {
 }
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
-// Lift Chromium's ~6-connections-per-host cap for the loopback backend. The
-// packaged renderer is cross-origin (openchamber-ui:// → http://127.0.0.1), so
-// every API call also needs a CORS preflight; during startup a few slow
-// OpenCode-proxied requests otherwise hold the whole pool and every other
-// request — including opening the first session — queues for seconds behind
-// them. Loopback has no per-host connection cost that the cap protects.
-app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
+// Lift Chromium's per-host cap only for bundled UI. Applying this to Vite HMR
+// lets the renderer request most of the module graph at once, overwhelming the
+// dev server's transform pipeline and leaving the HTML splash visible for up
+// to a minute before React mounts.
+if (shouldIgnoreLoopbackConnectionLimit({
+  development: isDev,
+  packagedUi: process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1',
+})) {
+  app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
+}
 
 const shouldDisableHardwareAcceleration = () => {
   const flag = String(process.env.OPENCHAMBER_DISABLE_GPU || '').trim().toLowerCase();

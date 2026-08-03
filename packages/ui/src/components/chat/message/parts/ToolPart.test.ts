@@ -5,6 +5,7 @@ import { tryParseJsonOutput } from '../toolRenderers';
 import { formatToolDurationMs } from './formatToolDuration';
 import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
 import { getStreamingOutputAppend, getToolOutput } from './toolOutput';
+import { getToolDescriptionFallback } from './toolRenderUtils';
 
 describe('getToolOutput', () => {
     test('prefers authoritative state output', () => {
@@ -76,5 +77,17 @@ describe('formatToolDurationMs', () => {
         expect(formatToolDurationMs(5 * 60 * 1000 + 12_000)).toBe('5m 12s');
         expect(formatToolDurationMs(65 * 60 * 1000)).toBe('1h 5m');
         expect(formatToolDurationMs(2 * 60 * 60 * 1000)).toBe('2h');
+    });
+});
+
+describe('getToolDescriptionFallback', () => {
+    test('uses the glob pattern when the provided description and title are empty', () => {
+        expect(getToolDescriptionFallback('glob', '', { pattern: 'packages/electron/README.md' }))
+            .toBe('packages/electron/README.md');
+    });
+
+    test('prefers an existing glob description over the pattern', () => {
+        expect(getToolDescriptionFallback('glob', 'Electron docs', { pattern: 'packages/electron/README.md' }))
+            .toBe('Electron docs');
     });
 });

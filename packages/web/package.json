@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "1.17.1",
+  "version": "1.17.2",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -26,7 +26,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",
     "@clack/prompts": "^1.1.0",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "1.18.9",
+    "@opencode-ai/sdk": "1.18.11",
     "@openchamber/quota-core": "workspace:*",
     "@simplewebauthn/server": "13.3.1",
     "adm-zip": "^0.5.16",

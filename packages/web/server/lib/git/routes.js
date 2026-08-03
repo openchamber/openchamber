@@ -7,6 +7,36 @@ export function registerGitRoutes(app) {
     return gitLibraries;
   };
 
+  const resolveDirectoryQuery = (value) => {
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (typeof raw !== 'string') {
+      return null;
+    }
+    const trimmed = raw.trim();
+    return trimmed || null;
+  };
+
+  const extractGitErrorText = (error) => {
+    const message = typeof error?.message === 'string' ? error.message : '';
+    const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
+    const stdout = typeof error?.stdout === 'string' ? error.stdout : '';
+    const fallback = !message && error != null ? String(error) : '';
+    return [message, stderr, stdout, fallback]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .join('\n');
+  };
+
+  const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
+
+  const nonRepoStatusPayload = () => ({
+    isGitRepository: false,
+    files: [],
+    branch: null,
+    ahead: 0,
+    behind: 0,
+  });
+
   app.get('/api/git/identities', async (req, res) => {
     const { getProfiles } = await getGitLibraries();
     try {
@@ -79,7 +109,7 @@ export function registerGitRoutes(app) {
   app.get('/api/git/check', async (req, res) => {
     const { isGitRepository } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -87,6 +117,10 @@ export function registerGitRoutes(app) {
       const isRepo = await isGitRepository(directory);
       res.json({ isGitRepository: isRepo });
     } catch (error) {
+      if (isNonRepoGitError(error)) {
+        console.warn('Git check treated non-repository path as not a git repo:', extractGitErrorText(error));
+        return res.json({ isGitRepository: false });
+      }
       console.error('Failed to check git repository:', error);
       res.status(500).json({ error: 'Failed to check git repository' });
     }
@@ -188,34 +222,26 @@ export function registerGitRoutes(app) {
   app.get('/api/git/status', async (req, res) => {
     const { getStatus, isGitRepository } = await getGitLibraries();
 
-    const extractGitErrorText = (error) => {
-      const message = typeof error?.message === 'string' ? error.message : '';
-      const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
-      const stdout = typeof error?.stdout === 'string' ? error.stdout : '';
-      return [message, stderr, stdout]
-        .map((value) => String(value || '').trim())
-        .filter(Boolean)
-        .join('\n');
-    };
-
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
       const isRepo = await isGitRepository(directory);
       if (!isRepo) {
-        return res.json({ isGitRepository: false, files: [], branch: null, ahead: 0, behind: 0 });
+        return res.json(nonRepoStatusPayload());
       }
 
       const mode = req.query.mode === 'light' ? 'light' : undefined;
       const status = await getStatus(directory, { mode });
       res.json(status);
     } catch (error) {
-      const errorText = extractGitErrorText(error);
-      if (/not a git repository/i.test(errorText)) {
-        return res.json({ isGitRepository: false, files: [], branch: null, ahead: 0, behind: 0 });
+      // Non-repo / GitError must not abort callers that enumerate projects or
+      // sessions (e.g. sidebar discovery). Log a warning and continue.
+      if (isNonRepoGitError(error)) {
+        console.warn('Git status skipped for non-repository path:', extractGitErrorText(error));
+        return res.json(nonRepoStatusPayload());
       }
       console.error('Failed to get git status:', error);
       res.status(500).json({ error: error.message || 'Failed to get git status' });

@@ -580,6 +580,19 @@ svg.animate-spin {
   background: transparent;
 }
 
+/* Fully hidden scrollbar for small mobile overlays (session switcher etc.)
+   where a visible bar reads as chrome noise. Scrolling stays intact. */
+.oc-hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.oc-hide-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 [data-scrollbar="chat"].chat-scroll,
 .chat-scroll {
   scrollbar-gutter: stable both-edges;
@@ -952,6 +965,16 @@ html:not(.dark) .chat-scroll {
     height 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Non-composited variant (left/top-positioned indicator, see
+   nonCompositedIndicator in sortable-tabs-strip): same travel curve. */
+.pill-tabs__indicator--is-animated-layout {
+  transition:
+    left 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 /* Underline indicator shares the pill's travel curve so both tab styles feel
    like the same control. */
 .underline-tabs__indicator--is-animated {
@@ -972,6 +995,7 @@ html:not(.dark) .chat-scroll {
 
 @media (prefers-reduced-motion: reduce) {
   .pill-tabs__indicator--is-animated,
+  .pill-tabs__indicator--is-animated-layout,
   .underline-tabs__indicator--is-animated {
     transition: none;
   }

@@ -357,17 +357,27 @@ const createGit = async (directory) => {
   const binary = getGitBinary();
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
   const unsafe = hasCustomBinary ? { allowUnsafeCustomBinary: true } : undefined;
-  if (!directory) {
-    return createSimpleGit({ env, spawnOptions, binary, unsafe });
+  // Always pin simple-git to an explicit working directory. Omitting baseDir
+  // makes simple-git use process.cwd(), which breaks when the OpenChamber
+  // server was launched from a neutral directory (e.g. $HOME) and the opened
+  // project lives elsewhere — session/project discovery then sees spurious
+  // "not a git repository" errors and can abort enumeration.
+  const baseDir = normalizeDirectoryPath(directory);
+  if (typeof baseDir !== 'string' || !baseDir.trim()) {
+    throw new Error('Git directory is required');
   }
   return createSimpleGit({
-    baseDir: normalizeDirectoryPath(directory),
+    baseDir,
     env,
     spawnOptions,
     binary,
     unsafe,
   });
 };
+
+// Global config reads do not need a repository; use the home directory as a
+// stable baseDir so we never accidentally inherit process.cwd().
+const createGitForGlobalConfig = async () => createGit(os.homedir());
 
 const normalizeDirectoryPath = (value) => {
   if (typeof value !== 'string') {
@@ -469,6 +479,9 @@ const resolveGitRepositoryRoot = async (directoryPath, git) => {
 
 const createRepositoryGitContext = async (directory) => {
   const directoryPath = normalizeDirectoryPath(directory);
+  if (typeof directoryPath !== 'string' || !directoryPath.trim()) {
+    throw new Error('Git directory is required');
+  }
   const directoryGit = await createGit(directoryPath);
   const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
   const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot);
@@ -767,7 +780,11 @@ const parseGitErrorText = (error) => {
   const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
   const stdout = typeof error?.stdout === 'string' ? error.stdout : '';
   const message = typeof error?.message === 'string' ? error.message : '';
-  return [stderr, stdout, message]
+  // Some runtimes (notably Bun + simple-git GitError) surface the fatal text
+  // primarily via message/toString; keep String(error) as a last resort so
+  // "not a git repository" matching never misses and aborts callers.
+  const fallback = !message && error != null ? String(error) : '';
+  return [stderr, stdout, message, fallback]
     .map((chunk) => String(chunk || '').trim())
     .filter(Boolean)
     .join('\n')
@@ -1942,7 +1959,7 @@ export async function isGitRepository(directory) {
 }
 
 export async function getGlobalIdentity() {
-  const git = await createGit();
+  const git = await createGitForGlobalConfig();
 
   try {
     const userName = await git.getConfig('user.name', 'global').catch(() => null);
@@ -2062,9 +2079,19 @@ export async function setLocalIdentity(directory, profile) {
 
 export async function getStatus(directory, options = {}) {
   const lightMode = options.mode === 'light';
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  if (typeof normalizedDirectory !== 'string' || !normalizedDirectory.trim()) {
+    throw new Error('directory is required');
+  }
 
   try {
-    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(directory);
+    // Prefer an explicit non-repo check before simple-git status so a missing
+    // repository never depends on process.cwd() or an opaque GitError shape.
+    if (!(await isGitRepository(normalizedDirectory))) {
+      throw new Error('fatal: not a git repository (or any of the parent directories): .git');
+    }
+
+    const { directoryPath, repoRoot, git } = await createRepositoryGitContext(normalizedDirectory);
 
     // Use -uall to show all untracked files individually, not just directories
     const status = await git.status(['-uall']);
@@ -2318,9 +2345,12 @@ export async function getStatus(directory, options = {}) {
       rebaseInProgress,
     };
   } catch (error) {
-    if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
-      console.error('Failed to get Git status:', error);
+    if (isNotGitRepositoryError(error) || isMissingDirectoryError(error)) {
+      // Re-throw a plain Error so route/session callers can match reliably and
+      // continue enumerating other projects instead of treating GitError as 500.
+      throw new Error('fatal: not a git repository (or any of the parent directories): .git');
     }
+    console.error('Failed to get Git status:', error);
     throw error;
   }
 }

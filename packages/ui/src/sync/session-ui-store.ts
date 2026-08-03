@@ -73,6 +73,7 @@ import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
 import { setSessionOpener } from "./session-navigation"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { clearLastActiveSession, persistLastActiveSession } from "./last-session-cache"
 import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
 import { HarnessClientError, harnessPrompt, type HarnessOpenCodeCommand } from "@/lib/harness/client"
@@ -479,7 +480,7 @@ export type SessionUIState = {
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
   prepareForRuntimeSwitch: (apiBaseUrl?: string | null) => void
   restoreForRuntimeSwitch: (apiBaseUrl?: string | null) => void
-  openNewSessionDraft: (options?: Partial<NewSessionDraftState>) => void
+  openNewSessionDraft: (options?: Partial<NewSessionDraftState> & { automatic?: boolean }) => void
   closeNewSessionDraft: () => void
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
@@ -807,6 +808,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // same child store that send/SSE events will update during startup races.
     set({ currentSessionId: id, currentSessionDirectory: id ? resolvedDir ?? null : null })
     writeRuntimeSessionMemory(key, { sessionId: id, directory: resolvedDir ?? null })
+    // Keep the last NON-null session per runtime across app restarts (cold
+    // mobile launches reopen it after the instance reconnects). Going back to
+    // a draft intentionally does not erase it.
+    if (id) {
+      persistLastActiveSession(key, { sessionId: id, directory: resolvedDir ?? null })
+    }
 
     // Kick off the message fetch on the same tick, before React commits the
     // state change and fires ChatContainer.useEffect. The fetch is
@@ -905,6 +912,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // openNewSessionDraft
   // ---------------------------------------------------------------------------
   openNewSessionDraft: (options) => {
+    // A USER-initiated draft open is a navigation choice: the next cold launch
+    // should land on the draft, not re-open the session left behind — drop the
+    // persisted last-session pointer for this runtime. `automatic: true` marks
+    // programmatic fallback opens (e.g. ChatContainer's "no session active"
+    // auto-draft at boot), which must NOT consume the pointer — the cold-launch
+    // restore races exactly that auto-open.
+    if (!options?.automatic) {
+      clearLastActiveSession(runtimeMemoryKey())
+    }
     const projectsState = useProjectsStore.getState()
     const projects = projectsState.projects
     const availableWorktreesByProject = get().availableWorktreesByProject

@@ -721,9 +721,6 @@ interface UIStore {
   expandedEditorToolbar: boolean;
   showSplitAssistantMessageActions: boolean;
   allowPromptingSubagentSessions: boolean;
-  isMobileSessionStatusBarCollapsed: boolean;
-  mobileSessionPanelOpen: boolean;
-  mobileSessionFilterProjectId: string | null;
   isExpandedInput: boolean;
   reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
@@ -888,9 +885,6 @@ interface UIStore {
   setExpandedEditorToolbar: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setAllowPromptingSubagentSessions: (value: boolean) => void;
-  setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
-  setMobileSessionPanelOpen: (value: boolean) => void;
-  setMobileSessionFilterProjectId: (value: string | null) => void;
   viewPagerPage: 'left' | 'center' | 'right';
   setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
   toggleExpandedInput: () => void;
@@ -1043,9 +1037,6 @@ export const useUIStore = create<UIStore>()(
         showSplitAssistantMessageActions: false,
         allowPromptingSubagentSessions: false,
         draftStartersVisible: true,
-        isMobileSessionStatusBarCollapsed: false,
-        mobileSessionPanelOpen: false,
-        mobileSessionFilterProjectId: null,
         isExpandedInput: false,
         reportUsage: true,
         shortcutOverrides: {},
@@ -2262,15 +2253,6 @@ export const useUIStore = create<UIStore>()(
         setAllowPromptingSubagentSessions: (value) => {
           set({ allowPromptingSubagentSessions: value });
         },
-        setIsMobileSessionStatusBarCollapsed: (value) => {
-          set({ isMobileSessionStatusBarCollapsed: value });
-        },
-        setMobileSessionPanelOpen: (value) => {
-          set({ mobileSessionPanelOpen: value });
-        },
-        setMobileSessionFilterProjectId: (value) => {
-          set({ mobileSessionFilterProjectId: value });
-        },
         setReportUsage: (value) => {
           set({ reportUsage: value });
         },
@@ -2596,8 +2578,6 @@ export const useUIStore = create<UIStore>()(
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           draftStartersVisible: state.draftStartersVisible,
-          isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
-          mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,
           fileEditorKeymap: state.fileEditorKeymap,
         })

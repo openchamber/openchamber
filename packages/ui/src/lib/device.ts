@@ -1,6 +1,6 @@
 import React from 'react';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
-import { isCapacitorApp } from '@/lib/platform';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
 type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
@@ -65,8 +65,6 @@ const setRootDeviceAttributes = (
   }
 
   const root = document.documentElement;
-  const isMobile = deviceType === 'mobile';
-  const isTablet = deviceType === 'tablet';
 
   root.classList.remove('device-mobile', 'device-tablet', 'device-desktop');
   root.classList.add(
@@ -79,19 +77,9 @@ const setRootDeviceAttributes = (
 
   if (isDesktopShellRuntime) {
     root.classList.add('desktop-runtime');
-    root.style.setProperty('--is-mobile', '0');
-    root.style.setProperty('--device-type', 'desktop');
-    root.style.setProperty('--font-scale', '1');
-    root.style.setProperty('--has-coarse-pointer', '0');
-    root.style.setProperty('--has-touch-input', '0');
     root.classList.remove('mobile-pointer');
   } else {
     root.classList.remove('desktop-runtime');
-    root.style.setProperty('--is-mobile', isMobile ? '1' : '0');
-    root.style.setProperty('--device-type', deviceType);
-    root.style.setProperty('--font-scale', isMobile ? '0.9' : isTablet ? '0.95' : '1');
-    root.style.setProperty('--has-coarse-pointer', hasTouchInput ? '1' : '0');
-    root.style.setProperty('--has-touch-input', hasTouchInput ? '1' : '0');
     if (hasTouchInput) {
       root.classList.add('mobile-pointer');
     } else {
@@ -128,10 +116,11 @@ export function getDeviceInfo(): DeviceInfo {
     isTablet = false;
     isDesktop = true;
     deviceType = 'desktop';
-  } else if (isCapacitorApp()) {
-    // The Capacitor shell IS the phone UI: every surface in that bundle is
-    // built mobile-first, so wide devices (iPad, Android tablets) must not
-    // fall into tablet/desktop branches scattered across shared components.
+  } else if (isMobileSurfaceRuntime()) {
+    // The mobile surface (Capacitor shell or hosted MobileApp) IS the phone
+    // UI: every component in that tree is built mobile-first, so wide devices
+    // (iPad, Android tablets, rotated phones) must not fall into
+    // tablet/desktop branches scattered across shared components.
     // iPad-specific layout upgrades gate on isIPadApp()/orientation instead.
     isMobile = true;
     isTablet = false;
@@ -288,16 +277,7 @@ const subscribeDeviceInfo = (listener: () => void): (() => void) => {
 
 export function isMobileDeviceViaCSS(): boolean {
   if (typeof window === 'undefined') return false;
-
-  if (typeof window !== 'undefined' && isDesktopShell()) {
-    return false;
-  }
-
-  const root = document.documentElement;
-  const isMobileValue = root.style.getPropertyValue('--is-mobile') ||
-                        getComputedStyle(root).getPropertyValue('--is-mobile');
-
-  return isMobileValue === '1' || isMobileValue === 'true';
+  return readDeviceInfoSnapshot().isMobile;
 }
 
 const isStandalonePwaRuntime = (): boolean => {

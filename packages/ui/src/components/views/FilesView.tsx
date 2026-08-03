@@ -725,7 +725,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
-  const showEditorTabsRow = isMobile || mode !== 'editor-only';
+  // editor-only hosts (desktop context panel, the mobile Files surface) bring
+  // their own chrome — the open-file tabs row is redundant there.
+  const showEditorTabsRow = mode !== 'editor-only';
   const suppressFileLoadingIndicator = mode === 'editor-only' && !isMobile;
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const gitStatus = useGitStatus(currentDirectory);
@@ -3753,10 +3755,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         </div>
         ) : null}
 
-        {/* Row 2: Docked editor toolbar (expanded). Desktop-only opt-in. */}
-        {settingsExpandedEditorToolbar && !isMobile && selectedFile ? (
+        {/* Row 2: Docked editor toolbar (expanded). Desktop opt-in; ALWAYS on
+            for mobile — floating hover controls don't work with touch. */}
+        {(settingsExpandedEditorToolbar || isMobile) && selectedFile ? (
           <div className="flex min-w-0 items-center gap-3 border-t border-border/40 bg-[var(--surface-subtle)] px-3 py-1">
-            {displaySelectedPath ? (
+            {/* Mobile hosts already show the file name in their own header;
+                a truncated duplicate here just eats toolbar width. */}
+            {displaySelectedPath && !isMobile ? (
               <span
                 className="min-w-0 flex-1 truncate typography-meta text-muted-foreground"
                 title={displaySelectedPath}
@@ -3773,7 +3778,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       </div>
 
       <div className="flex-1 min-h-0 min-w-0 relative">
-        {selectedFile && !isSearchOpen && !(settingsExpandedEditorToolbar && !isMobile) && (
+        {selectedFile && !isSearchOpen && !(settingsExpandedEditorToolbar || isMobile) && (
           <div
             ref={floatingToolbarRef}
             className="absolute right-3 top-3 z-30"

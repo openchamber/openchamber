@@ -4,7 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Chat: the `/` command menu no longer lists a skill twice when a command shares its name.
+## [1.17.2] - 2026-08-01
+
+- **Mobile:** rebuilt the app navigation around two swipe drawers — a sessions drawer (left) with a cross-project tree, swipe actions to rename, archive, or delete sessions, and a workspace drawer (right) with Changes, Files, Terminal, Notes, and MCP tabs. Tapping the session title in the header switches recents from a compact overlay with live status indicators. Cold launches reopen the last active session and land on an explicit connect screen on failure instead of flashing an empty draft.
+- **Desktop/Windows:** added Windows ARM64 support (thanks to @airtaxi).
+- UI: a new OpenChamber theme (dark and light) is now the default, replacing the previous default theme.
+- Desktop: the active session header now has a menu with rename, share, export, archive, delete, and copy-ID actions; share links copy to the clipboard automatically when created.
+- Performance: opening the first session after startup is faster — background startup requests no longer queue ahead of the initial message load (thanks to @yulia-ivashko).
+- Sessions: a root session can now be moved with all its sub-sessions into a new worktree directly from the header menu.
+- Git/Diff: symlinks now appear as link entries in the diff view instead of showing their file content.
+- Desktop/Linux: added a Window Controls Style setting to switch between classic rectangular buttons and macOS-style traffic lights (thanks to @kydorn).
+- Files: added a global Auto-save setting under Settings → General; binary, PDF, and Office files are excluded from auto-save (thanks to @makeittech).
+- Terminal: switching terminal tabs no longer rebuilds the connection from scratch on each open or switch (thanks to @makeittech).
+- Sidebar: sessions with active agents now show a live activity indicator even when the sidebar is collapsed (thanks to @pascalandr).
+- VSCode: per-session permission auto-accept now replies to live permission requests correctly when auto-accept is turned on.
+- Usage: all Z.ai usage windows now appear in the usage view.
+- Chat: tool descriptions now show the glob pattern when a tool's input uses one.
+- Desktop: sticky session headers in the sidebar no longer blink or shift position during page transitions (thanks to @ChangeHow).
+- Chat: clicking in the padding area of the composer now correctly places the cursor (thanks to @IbrahimKhan12).
+- Chat: the `/` command menu no longer lists a skill twice when a command shares its name (thanks to @IbrahimKhan12).
 
 ## [1.17.1] - 2026-07-29
 

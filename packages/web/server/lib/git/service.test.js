@@ -11,6 +11,7 @@ import {
   createWorktree,
   getWorktreeBootstrapStatus,
   getStatus,
+  isGitRepository,
   populateWorktreeWithLockRecovery,
   removeWorktree,
   resolvePrimaryWorktreeRoot,
@@ -302,6 +303,84 @@ describe('getStatus', () => {
     runGit(repo, ['commit', '-m', 'Initial commit']);
 
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+  });
+
+  it('rejects a non-git folder without using process.cwd()', async () => {
+    if (!canRunGit()) return;
+
+    const nonGit = createTempDir();
+    const previousCwd = process.cwd();
+    process.chdir(nonGit);
+    try {
+      await expect(getStatus(nonGit)).rejects.toThrow(/not a git repository/i);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('reads status for a git repo when process.cwd() is elsewhere', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const neutralCwd = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+
+    const previousCwd = process.cwd();
+    process.chdir(neutralCwd);
+    try {
+      await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main', isClean: true });
+      await expect(isGitRepository(repo)).resolves.toBe(true);
+      await expect(isGitRepository(neutralCwd)).resolves.toBe(false);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('supports a folder with nested git repositories from a foreign cwd', async () => {
+    if (!canRunGit()) return;
+
+    const parent = createTempDir();
+    const nested = path.join(parent, 'nested');
+    const neutralCwd = createTempDir();
+    fs.mkdirSync(nested, { recursive: true });
+
+    runGit(parent, ['init', '-b', 'main']);
+    runGit(parent, ['config', 'user.email', 'test@example.com']);
+    runGit(parent, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(parent, 'README.md'), '# Parent\n');
+    runGit(parent, ['add', 'README.md']);
+    runGit(parent, ['commit', '-m', 'Parent commit']);
+
+    runGit(nested, ['init', '-b', 'feature']);
+    runGit(nested, ['config', 'user.email', 'test@example.com']);
+    runGit(nested, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(nested, 'nested.txt'), 'nested\n');
+    runGit(nested, ['add', 'nested.txt']);
+    runGit(nested, ['commit', '-m', 'Nested commit']);
+
+    const previousCwd = process.cwd();
+    process.chdir(neutralCwd);
+    try {
+      await expect(getStatus(parent)).resolves.toMatchObject({ current: 'main' });
+      await expect(getStatus(nested)).resolves.toMatchObject({ current: 'feature' });
+      // Enumeration must continue when one path is not a repo.
+      const results = await Promise.allSettled([
+        getStatus(parent),
+        getStatus(neutralCwd),
+        getStatus(nested),
+      ]);
+      expect(results[0].status).toBe('fulfilled');
+      expect(results[1].status).toBe('rejected');
+      expect(results[1].reason?.message || String(results[1].reason)).toMatch(/not a git repository/i);
+      expect(results[2].status).toBe('fulfilled');
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 });
 

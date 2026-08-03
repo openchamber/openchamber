@@ -1,43 +1,5 @@
 /* Mobile Adaptations - All Devices */
 
-/* Set global device type variables */
-:root {
-  --is-mobile: 0;
-  --device-type: 'desktop';
-  --font-scale: 1;
-}
-
-@media (max-width: 1024px) {
-:root.mobile-pointer:not(.desktop-runtime) {
-    --is-mobile: 1;
-    --device-type: 'mobile';
-    --font-scale: 0.9;
-  }
-}
-
-/* Utility classes for device-specific styling */
-.desktop-only {
-  display: block;
-}
-
-.mobile-only {
-  display: none;
-}
-
-@media (max-width: 1024px) {
-  :root.mobile-pointer:not(.desktop-runtime) .desktop-only {
-    display: none !important;
-  }
-
-  :root.desktop-runtime .mobile-only {
-    display: none !important;
-  }
-
-  :root.mobile-pointer:not(.desktop-runtime) .mobile-only {
-    display: block !important;
-  }
-}
-
 /* General mobile improvements for all mobile devices */
 @media (max-width: 1024px) {
   /* Override CSS custom properties for mobile */
@@ -82,7 +44,10 @@
   /* Improve touch targets for mobile */
   :root.mobile-pointer:not(.desktop-runtime) button:not([role="radio"]):not([role="checkbox"]):not([role="switch"]),
   :root.mobile-pointer:not(.desktop-runtime) .btn,
-  :root.mobile-pointer:not(.desktop-runtime) [role="button"] {
+  :root.mobile-pointer:not(.desktop-runtime) [role="button"],
+  /* Static chat tool rows: not interactive as a whole, but they must share
+     the 36px rhythm of the [role="button"] expandable/reasoning rows. */
+  :root.mobile-pointer:not(.desktop-runtime) .oc-static-tool-row {
     min-height: 36px;
     min-width: 36px;
   }
@@ -144,17 +109,6 @@
     -webkit-touch-callout: default;
   }
 
-  /* Improve mobile spacing */
-  :root.mobile-pointer:not(.desktop-runtime) .px-4 {
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
-  }
-
-  :root.mobile-pointer:not(.desktop-runtime) .py-2 {
-    padding-top: 0.75rem !important;
-    padding-bottom: 0.75rem !important;
-  }
-
   /* Fix mobile scroll containers */
   :root.mobile-pointer:not(.desktop-runtime) .overflow-hidden {
     overflow-x: hidden !important;
@@ -205,30 +159,6 @@
     min-height: 0;
   }
 
-  /* Mobile sidebar positioning */
-  :root.mobile-pointer:not(.desktop-runtime) .mobile-sidebar-top {
-    top: var(--header-height, 3rem);
-    height: calc(100vh - var(--header-height, 3rem));
-  }
-
-  /* Set header height variable */
-  :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
-    --header-height: 3rem;
-  }
-
-  /* For mobile devices with larger header */
-  @media (max-width: 768px) {
-    :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
-      --header-height: 3.5rem;
-    }
-  }
-
-  /* For tablet devices */
-  @media (min-width: 769px) and (max-width: 1024px) {
-    :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
-      --header-height: 3.25rem;
-    }
-  }
 }
 
 /* iOS PWA Adaptations */
@@ -241,7 +171,7 @@
     --oc-safe-area-top: env(safe-area-inset-top, 0);
     --oc-safe-area-right: env(safe-area-inset-right, 0);
     --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
-    --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
+    --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.35), 12px);
     --oc-safe-area-left: env(safe-area-inset-left, 0);
   }
 
@@ -258,25 +188,10 @@
 
 /* Phase 1: iOS PWA safe area handling - Enhanced positioning approach */
 @media (display-mode: standalone) {
-  /* iOS-specific safe area handling with CSS variable support */
+  /* iOS-specific safe area handling. The --oc-safe-area-* tokens and the
+     .header-safe-area padding are already set by the unconditional iOS block
+     above; only the standalone-specific rules live here. */
   @supports (-webkit-touch-callout: none) {
-    /* Safe area handling for fixed positioned elements */
-    :root.device-mobile:not(.desktop-runtime),
-    :root.device-tablet:not(.desktop-runtime),
-    :root.mobile-pointer:not(.desktop-runtime) {
-      --oc-safe-area-top: env(safe-area-inset-top, 0);
-      --oc-safe-area-right: env(safe-area-inset-right, 0);
-      --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
-      --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
-      --oc-safe-area-left: env(safe-area-inset-left, 0);
-    }
-
-    :root.device-mobile:not(.desktop-runtime) .header-safe-area,
-    :root.device-tablet:not(.desktop-runtime) .header-safe-area,
-    :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
-      padding-top: var(--oc-safe-area-top);
-    }
-
     :root.device-mobile:not(.desktop-runtime) .main-content-safe-area,
     :root.device-tablet:not(.desktop-runtime) .main-content-safe-area,
     :root.mobile-pointer:not(.desktop-runtime) .main-content-safe-area {
@@ -291,14 +206,6 @@
     :root.device-tablet:not(.desktop-runtime) .bottom-safe-area,
     :root.mobile-pointer:not(.desktop-runtime) .bottom-safe-area {
       padding-bottom: var(--oc-safe-area-bottom-visual) !important;
-    }
-
-    /* Drawer safe area - top already offset by header height */
-    :root.device-mobile:not(.desktop-runtime) .drawer-safe-area,
-    :root.device-tablet:not(.desktop-runtime) .drawer-safe-area,
-    :root.mobile-pointer:not(.desktop-runtime) .drawer-safe-area {
-      padding-top: 0;
-      padding-bottom: var(--oc-safe-area-bottom-visual);
     }
 
     /* Fix iOS viewport issues */
@@ -316,19 +223,6 @@
       position: relative;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
-    }
-
-    /* Update header height for iOS */
-    :root.device-mobile:not(.desktop-runtime) .header-safe-area,
-    :root.device-tablet:not(.desktop-runtime) .header-safe-area,
-    :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
-      --header-height: 4.5rem;
-    }
-
-    :root.device-mobile:not(.desktop-runtime) .mobile-sidebar-top,
-    :root.device-tablet:not(.desktop-runtime) .mobile-sidebar-top,
-    :root.mobile-pointer:not(.desktop-runtime) .mobile-sidebar-top {
-      --header-height: 4.5rem;
     }
 
     /* Mobile typography improvements */
@@ -370,7 +264,7 @@
       --oc-safe-area-top: env(safe-area-inset-top, 0);
       --oc-safe-area-right: env(safe-area-inset-right, 0);
       --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
-      --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
+      --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.35), 12px);
       --oc-safe-area-left: env(safe-area-inset-left, 0);
     }
 
@@ -537,7 +431,7 @@
   --oc-safe-area-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
   --oc-safe-area-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
   --oc-safe-area-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
-  --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
+  --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.35), 12px);
   --oc-safe-area-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
 }
 
@@ -784,7 +678,7 @@
      collapsing browser chrome, so the dynamic and large viewports are the same
      thing — pin the shell to 100lvh, which always reports full screen height.
      Initial geometry is identical (lvh == dvh on load). */
-  :root:not(.oc-capacitor-app) .h-\[100dvh\] {
+  :root:not(.oc-capacitor-app) .oc-mobile-app-shell {
     height: 100lvh;
   }
 

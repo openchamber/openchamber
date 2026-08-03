@@ -135,7 +135,7 @@ The following functions are internal helpers used by exported functions:
 ### Adding a New Git Operation
 1. Add the function to `packages/web/server/lib/git/service.js`.
 2. Export the function if it's part of the public API.
-3. Use `createGit(directory)` to get a simple-git instance with the correct environment.
+3. Use `createGit(directory)` to get a simple-git instance with the correct environment. `directory` is required (`baseDir`); never omit it so commands cannot inherit `process.cwd()`.
 4. Use `runGitCommand(cwd, args)` for direct git command execution with better error handling.
 5. Use `runGitCommandOrThrow(cwd, args, fallbackMessage)` for commands that must succeed.
 6. Return consistent error messages; use `parseGitErrorText(error)` to extract meaningful git errors.
@@ -145,6 +145,11 @@ The following functions are internal helpers used by exported functions:
 - SSH keys are escaped and validated via `escapeSshKeyPath` to prevent command injection.
 - On Windows, paths are converted to MSYS format (`C:/path` → `/c/path`).
 - SSH_AUTH_SOCK is automatically resolved via `resolveSshAuthSock` (checks GPG agent, gpgconf).
+
+### Working directory (simple-git)
+- Repository operations always pass an explicit `baseDir` (the opened project/directory path) into simple-git. Omitting `baseDir` would default to `process.cwd()`, which breaks when the server was launched from a neutral directory (e.g. `$HOME`) while the opened project lives elsewhere.
+- Global identity reads use the user home directory as `baseDir` (they do not need a repository).
+- A `GitError` / non-repository result from status or check must not abort project/session enumeration: routes return a soft non-repo payload and log a warning.
 
 ### Worktree Naming
 - Worktree names are slugified via `slugWorktreeName`.
