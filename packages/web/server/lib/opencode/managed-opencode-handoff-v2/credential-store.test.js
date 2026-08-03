@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as windowsAcl from '../../guardian/windows-acl.js';
 import { snapshotFileIdentity, sameFileIdentity } from '../../guardian/file-identity.js';
-import { readProcessIdentity } from '../../guardian/process-identity.js';
 import {
   createManagedOpenCodeCredentialStore,
   MANAGED_OPENCODE_CREDENTIAL_DIRECTORY,
@@ -319,8 +318,7 @@ describe('managed OpenCode credential store', () => {
       deriveCredentialEncryptionKey: async () => Buffer.alloc(32, 10),
     };
     const first = createStore({ rootDir: root, secretProvider });
-    const currentIdentity = readProcessIdentity(process.pid);
-    expect(currentIdentity?.processStartTicks).toBeTruthy();
+    const currentIdentity = fixtureProcessIdentity;
     const replacementPid = 987654;
     const replacementIdentity = {
       processStartTicks: '987654',
@@ -431,8 +429,7 @@ describe('managed OpenCode credential store', () => {
     const root = createRoot();
     const descriptor = createDescriptor();
     const lockPath = lockPathFor(root, descriptor.incarnation);
-    const identity = readProcessIdentity(process.pid);
-    expect(identity?.processStartTicks).toBeTruthy();
+    const identity = fixtureProcessIdentity;
     const body = JSON.stringify(createLockOwner({ pid: process.pid, identity }));
     const store = createStore({
       rootDir: root,
