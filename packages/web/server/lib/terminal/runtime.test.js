@@ -154,8 +154,14 @@ describe('terminal runtime', () => {
       expect(harness.processes[0].options.cwd).toBe('/repo');
       expect(harness.processes[0].options.env.COLORFGBG).toBe('0;15');
       expect(harness.processes[0].options.env.NODE_CHANNEL_FD).toBe('');
-       harness.processes[0].emitData('\u001b[?2031h\u001b]10;?\u0007\u001b]11;?\u0007\u001b[0c');
-       expect(harness.processes[0].writes).toEqual(['\u001b]10;rgb:1b1b/1b1b/1b1b\u001b\\', '\u001b]11;rgb:fafa/f8f8/f0f0\u001b\\', '\u001b[?1;2c']);
+      expect(harness.processes[0].options.env).not.toHaveProperty('ARGV0');
+      expect(harness.processes[0].options.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
+      if (process.platform === 'linux') {
+        expect(harness.processes[0].shell).toMatch(/\/env$/);
+        expect(harness.processes[0].args.slice(0, 3)).toEqual(['-u', 'ARGV0', expect.any(String)]);
+      }
+      harness.processes[0].emitData('\u001b[?2031h\u001b]10;?\u0007\u001b]11;?\u0007\u001b[0c');
+      expect(harness.processes[0].writes).toEqual(['\u001b]10;rgb:1b1b/1b1b/1b1b\u001b\\', '\u001b]11;rgb:fafa/f8f8/f0f0\u001b\\', '\u001b[?1;2c']);
 
       const appearance = createResponse();
       harness.routes.post.get('/api/terminal/:sessionId/appearance')({ params: { sessionId: 'term-1' }, body: { themeMode: 'dark' } }, appearance);
@@ -171,6 +177,27 @@ describe('terminal runtime', () => {
       harness.routes.post.get('/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 1001, rows: 60 } }, invalid);
       expect(invalid.statusCode).toBe(400);
     } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('strips AppImage ARGV0 from PTY child environments', async () => {
+    const previousArgv0 = process.env.ARGV0;
+    process.env.ARGV0 = '/path/to/OpenChamber/OpenChamber-1.17.2-linux-x86_64.AppImage';
+    const harness = createHarness();
+    try {
+      const response = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-argv0', cwd: '/repo', cols: 80, rows: 24 } }, response);
+      expect(response.statusCode).toBe(200);
+      expect(harness.processes[0].options.env).not.toHaveProperty('ARGV0');
+      if (process.platform === 'linux') {
+        expect(harness.processes[0].shell).toMatch(/\/env$/);
+        expect(harness.processes[0].args[0]).toBe('-u');
+        expect(harness.processes[0].args[1]).toBe('ARGV0');
+      }
+    } finally {
+      if (previousArgv0 === undefined) delete process.env.ARGV0;
+      else process.env.ARGV0 = previousArgv0;
+      await harness.runtime.shutdown();
+    }
   });
 
   it('lists available shells and uses the selected shell for create and restart', async () => {
@@ -198,14 +225,24 @@ describe('terminal runtime', () => {
       const created = createResponse();
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-shell', cwd: '/repo', shell: 'zsh', loginShell: true } }, created);
       expect(created.statusCode).toBe(200);
-      expect(harness.processes[0].shell).toBe('/bin/zsh');
-      expect(harness.processes[0].args).toEqual(['-l']);
+      if (process.platform === 'linux') {
+        expect(harness.processes[0].shell).toMatch(/\/env$/);
+        expect(harness.processes[0].args).toEqual(['-u', 'ARGV0', '/bin/zsh', '-l']);
+      } else {
+        expect(harness.processes[0].shell).toBe('/bin/zsh');
+        expect(harness.processes[0].args).toEqual(['-l']);
+      }
 
       const restarted = createResponse();
       await harness.routes.post.get('/api/terminal/:sessionId/restart')({ params: { sessionId: 'term-shell' }, body: { shell: 'bash', loginShell: true } }, restarted);
       expect(restarted.statusCode).toBe(200);
-      expect(harness.processes[1].shell).toBe('/bin/bash');
-      expect(harness.processes[1].args).toEqual(['-l']);
+      if (process.platform === 'linux') {
+        expect(harness.processes[1].shell).toMatch(/\/env$/);
+        expect(harness.processes[1].args).toEqual(['-u', 'ARGV0', '/bin/bash', '-l']);
+      } else {
+        expect(harness.processes[1].shell).toBe('/bin/bash');
+        expect(harness.processes[1].args).toEqual(['-l']);
+      }
     } finally { await harness.runtime.shutdown(); }
   });
 

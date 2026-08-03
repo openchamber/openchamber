@@ -135,7 +135,9 @@ The runtime maintains active-session count incrementally from idempotent activit
 Managed OpenCode launch also merges the environment returned by the agent-tool
 runtime. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
 be replaced by injected values. External OpenCode processes receive no
-OpenChamber tool injection. Bounded startup stdout/stderr diagnostics redact
+OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
+spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
+path (#2588). Bounded startup stdout/stderr diagnostics redact
 managed password, token, and Basic-auth material before capture truncation;
 both labeled pipes share one bounded, match-aware overlap so a candidate split
 across stdout and stderr cannot be reconstructed, and the redactor never emits

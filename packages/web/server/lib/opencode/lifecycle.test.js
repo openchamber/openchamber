@@ -358,6 +358,40 @@ describe('OpenCode lifecycle', () => {
     expect(server.signalCode).toBe('SIGTERM');
   });
 
+  it('strips AppImage ARGV0 from managed OpenCode launch env', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const previousArgv0 = process.env.ARGV0;
+    process.env.ARGV0 = '/path/to/OpenChamber/OpenChamber-1.17.2-linux-x86_64.AppImage';
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    try {
+      const runtime = createRuntime({
+        getManagedOpenCodeShellEnvSnapshot: vi.fn(() => ({
+          PATH: '/home/user/.bun/bin:/usr/local/bin:/usr/bin',
+          ARGV0: '/leaked/from/shell/snapshot.AppImage',
+          SHELL_ONLY: 'yes',
+        })),
+      });
+      const server = await runtime.startOpenCode();
+      const [, , options] = spawnMock.mock.calls[0];
+
+      expect(options.env).not.toHaveProperty('ARGV0');
+      expect(options.env.SHELL_ONLY).toBe('yes');
+      expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
+
+      await server.close();
+    } finally {
+      if (previousArgv0 === undefined) delete process.env.ARGV0;
+      else process.env.ARGV0 = previousArgv0;
+    }
+  });
+
   it('adds managed OpenChamber tool environment without allowing it to replace launch invariants', async () => {
     const child = createMockChild();
     spawnMock.mockImplementationOnce(() => {

@@ -1137,6 +1137,24 @@ const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+// Kimi's weekly `usage` block reports `used`; its rate-limit `limits[].detail`
+// blocks report `remaining` instead. Neither field is guaranteed present, so
+// derive usedPercent from whichever one the API actually returned.
+const computeKimiUsedPercent = (
+  total: number | null,
+  used: number | null,
+  remaining: number | null,
+): number | null => {
+  if (!total) return null;
+  if (used !== null) {
+    return Math.max(0, Math.min(100, (used / total) * 100));
+  }
+  if (remaining !== null) {
+    return Math.max(0, Math.min(100, 100 - (remaining / total) * 100));
+  }
+  return null;
+};
+
 const fetchKimiQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi'])) as Record<string, unknown> | null;
@@ -1176,10 +1194,9 @@ const fetchKimiQuota = async (): Promise<ProviderResult> => {
     const usage = payload.usage as Record<string, unknown> | undefined;
     if (usage) {
       const limit = toNumber(usage.limit);
+      const used = toNumber(usage.used);
       const remaining = toNumber(usage.remaining);
-      const usedPercent = limit && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / limit) * 100))
-        : null;
+      const usedPercent = computeKimiUsedPercent(limit, used, remaining);
       windows.weekly = toUsageWindow({
         usedPercent,
         windowSeconds: null,
@@ -1195,10 +1212,9 @@ const fetchKimiQuota = async (): Promise<ProviderResult> => {
       const windowSeconds = durationToSeconds(window?.duration as number | undefined, window?.timeUnit as string | undefined);
       const label = windowSeconds === 5 * 60 * 60 ? `Rate Limit (${rawLabel})` : rawLabel;
       const total = toNumber(detail?.limit);
+      const used = toNumber(detail?.used);
       const remaining = toNumber(detail?.remaining);
-      const usedPercent = total && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / total) * 100))
-        : null;
+      const usedPercent = computeKimiUsedPercent(total, used, remaining);
       windows[label] = toUsageWindow({
         usedPercent,
         windowSeconds,

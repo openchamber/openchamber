@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
+import { stripAppImageArgv0Leak } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { detectAndAdoptGuardianChild, getGuardianSocketPath, isGuardianRunning } from '../guardian/detection.js';
 import { GuardianClient } from '../guardian/guardian-client.js';
@@ -714,6 +715,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       PATH: envPath,
       OPENCODE_SERVER_PASSWORD: openCodePassword,
     };
+    stripAppImageArgv0Leak(managedEnv);
     const startupSecretLease = createManagedStartupSecretLease(managedEnv);
 
     return {
