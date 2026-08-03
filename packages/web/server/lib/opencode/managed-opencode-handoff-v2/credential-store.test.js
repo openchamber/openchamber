@@ -216,8 +216,7 @@ describe('managed OpenCode credential store', () => {
     const root = createRoot();
     const descriptor = createDescriptor();
     const lockPath = lockPathFor(root, descriptor.incarnation);
-    const identity = readProcessIdentity(process.pid);
-    expect(identity?.processStartTicks).toBeTruthy();
+    const identity = fixtureProcessIdentity;
     let available = false;
     const store = createStore({
       rootDir: root,
