@@ -45,6 +45,25 @@ function spawnProcess(command, args, options = {}) {
   });
 }
 
+function ensureElectronInstalled() {
+  // Electron's postinstall can silently fail to extract the binary under
+  // Node 24 (see ensure-electron.mjs). Fail fast with a repair attempt
+  // before wiring up the dev servers so the error is actionable.
+  const result = spawnSync('node', [path.join(__dirname, 'ensure-electron.mjs')], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      '[electron:dev] electron binary is missing or incomplete and could not be repaired. ' +
+        'Run `bun run --cwd packages/electron ensure:electron` (or `bun install`) with a network connection.',
+    );
+  }
+}
+
 function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -182,6 +201,8 @@ async function main() {
   let devServer = null;
   let hmrApiPort = '';
   let hmrUiPort = '';
+
+  ensureElectronInstalled();
 
   if (useBundledUi) {
     await runProcess('bun', ['run', '--cwd', 'packages/electron', 'build:web-assets']);

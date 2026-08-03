@@ -1047,6 +1047,7 @@ export const dict = {
   'sidebarFilesTree.menu.rename': 'Rebaptiser',
   'sidebarFilesTree.menu.copyPath': 'Copier le chemin',
   'sidebarFilesTree.menu.save': 'Sauvegarder',
+  'sidebarFilesTree.menu.download': 'Télécharger',
   'sidebarFilesTree.menu.newFile': 'Nouveau fichier',
   'sidebarFilesTree.menu.newFolder': 'Nouveau dossier',
   'sidebarFilesTree.menu.delete': 'Supprimer',

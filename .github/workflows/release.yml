@@ -204,8 +204,8 @@ jobs:
           bun run bundle:main
           # npmRebuild=false in package.json, so electron-builder won't
           # recompile native deps on its own — we must rebuild against the
-          # target Electron ABI before packaging, otherwise better-sqlite3/
-          # node-pty/bun-pty crash on require inside the packaged app.
+          # target Electron ABI before packaging, otherwise node-pty/bun-pty
+          # crash on require inside the packaged app.
           bun run rebuild:native
           bunx electron-builder --mac --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged

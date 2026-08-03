@@ -1014,6 +1014,53 @@ describe("optimisticSend target directory", () => {
     expect(targetStore.getState().part[sentMessageID]?.[0]?.id).toBe("server-part")
   })
 
+  // Relay tunnel aborts carry no HTTP status and no wording the text-matching
+  // heuristic recognizes. Without the transport tag they were classified as
+  // definite failures, the accepted prompt was rolled back, and the queue
+  // re-sent a message the engine was already answering (#2425).
+  test("confirms a tunnel-tagged transport failure that no text heuristic matches", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+    let optimisticRemove: OptimisticRemoveCall | null = null
+    let optimisticConfirm: OptimisticRemoveCall | null = null
+    let sentMessageID = ""
+
+    const { markAmbiguousTransportFailure } = await import("@/lib/relay/transport-error")
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      () => {},
+      (input) => {
+        optimisticRemove = input
+      },
+      (input) => {
+        optimisticConfirm = input
+      },
+    )
+
+    await optimisticSend({
+      sessionId: "session-tunnel",
+      directory: "/target/project",
+      content: "hello",
+      providerID: "provider",
+      modelID: "model",
+      send: async (messageID) => {
+        sentMessageID = messageID
+        sessionMessagesResult = {
+          data: [{
+            info: { id: messageID, role: "user", sessionID: "session-tunnel", time: { created: 1 } } as Message,
+            parts: [{ id: "server-part", type: "text", text: "hello" } as Part],
+          }],
+        }
+        throw markAmbiguousTransportFailure(new Error("stream aborted by host"))
+      },
+    })
+
+    expect(optimisticRemove).toBe(null)
+    expect((optimisticConfirm as OptimisticRemoveCall | null)?.messageID).toBe(sentMessageID)
+    expect(targetStore.getState().message["session-tunnel"]?.[0]?.id).toBe(sentMessageID)
+  })
+
   test("rolls back an ambiguous send failure when recent messages do not contain the sent ID", async () => {
     const targetStore = createStore({})
     const childStores = createChildStores([["/target/project", targetStore]])

@@ -1228,6 +1228,7 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.menu.rename': '이름 변경',
   'sidebarFilesTree.menu.copyPath': '경로 복사',
   'sidebarFilesTree.menu.save': '저장',
+  'sidebarFilesTree.menu.download': '다운로드',
   'sidebarFilesTree.menu.newFile': '새 파일',
   'sidebarFilesTree.menu.newFolder': '새 폴더',
   'sidebarFilesTree.menu.delete': '삭제',

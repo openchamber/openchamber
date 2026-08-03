@@ -1191,6 +1191,7 @@ export const dict: Record<I18nKey, string> = {
   "sidebarFilesTree.menu.rename": "Cambiar nombre",
   "sidebarFilesTree.menu.copyPath": "Copiar ruta",
   "sidebarFilesTree.menu.save": "Guardar",
+  "sidebarFilesTree.menu.download": "Descargar",
   "sidebarFilesTree.menu.newFile": "Nuevo archivo",
   "sidebarFilesTree.menu.newFolder": "Nueva carpeta",
   "sidebarFilesTree.menu.delete": "Eliminar",

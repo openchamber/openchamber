@@ -123,13 +123,15 @@ export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][num
 }
 
 /**
- * Directory of the child store that actually holds this session.
+ * Directory of a child store that holds this session.
  *
- * This is the authoritative session→directory mapping: a session is present in
- * exactly the store for the directory it belongs to, regardless of whether the
- * server populated `session.directory` on the record itself. Returns `null`
- * when no initialized child store contains the session, which means "unknown",
- * never "no directory".
+ * This reports containment, not ownership, and a session can be held by more
+ * than one store: a project's session list includes the sessions of its
+ * worktrees so the sidebar can group them, so the parent repository holds
+ * worktree sessions too. Ownership comes from the session record's own
+ * directory; this is the fallback for a record that carries none. Returns
+ * `null` when no initialized child store contains the session, which means
+ * "unknown", never "no directory".
  */
 export function getSyncSessionDirectory(sessionId: string): string | null {
   if (!sessionId) return null

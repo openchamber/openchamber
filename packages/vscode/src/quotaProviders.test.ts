@@ -422,6 +422,12 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
 });
 
 describe('DeepSeek quota provider (VS Code parity)', () => {
+  beforeEach(() => {
+    const fsMock = fs as unknown as { existsSync: () => boolean; readFileSync: () => string };
+    fsMock.existsSync = () => true;
+    fsMock.readFileSync = () => AUTH;
+  });
+
   test('builds credits_balance window from documented USD payload (string balance)', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       is_available: true,
@@ -463,6 +469,15 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     assert.equal(result.error, 'Session expired — please re-authenticate with DeepSeek');
   });
 
+  test('reports a normalized timeout error', async () => {
+    stubFetchReturning(() => Promise.reject(new DOMException('The operation timed out.', 'TimeoutError')));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Request timed out');
+  });
+
   test('returns no-quota-data on a 200 payload with no usable balance', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       is_available: true,
@@ -487,5 +502,11 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
 
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$0.00');
+  });
+
+  test('teardown: restore fs', () => {
+    const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
+    fsMock.existsSync = ORIGINAL_FS.existsSync;
+    fsMock.readFileSync = ORIGINAL_FS.readFileSync;
   });
 });
