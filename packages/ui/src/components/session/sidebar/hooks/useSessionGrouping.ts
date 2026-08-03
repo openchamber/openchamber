@@ -13,6 +13,7 @@ import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getWorktreeFirstSeenAt } from '../worktreeFirstSeen';
+import { isSessionTreeRoot } from '../sessionNodeItemUtils';
 
 type Args = {
   homeDirectory: string | null;
@@ -23,7 +24,46 @@ type Args = {
   isVSCode: boolean;
 };
 
-const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
+export const indexSessionsByParent = (
+  sessions: Session[],
+): { roots: Session[]; childrenByParent: Map<string, Session[]>; sessionsById: Map<string, Session> } => {
+  const sessionMap = new Map(sessions.map((session) => [session.id, session]));
+  const roots: Session[] = [];
+  const childrenByParent = new Map<string, Session[]>();
+  sessions.forEach((session) => {
+    if (isSessionTreeRoot(session, sessionMap)) {
+      roots.push(session);
+      return;
+    }
+    const parentID = session.parentID;
+    if (!parentID) return;
+    const collection = childrenByParent.get(parentID) ?? [];
+    collection.push(session);
+    childrenByParent.set(parentID, collection);
+  });
+  return { roots, childrenByParent, sessionsById: sessionMap };
+};
+
+export const resolveSessionDirectoryFromLineage = (
+  session: Session,
+  sessionsById: ReadonlyMap<string, Session>,
+  worktreeMetadata: ReadonlyMap<string, WorktreeMetadata>,
+): string | null => {
+  const visited = new Set<string>();
+  let current: Session | undefined = session;
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    const metadataPath = normalizePath(worktreeMetadata.get(current.id)?.path ?? null);
+    const directory = metadataPath ?? resolveGlobalSessionDirectory(current);
+    if (directory) return directory;
+    const parentID: Session['parentID'] = current.parentID;
+    current = parentID ? sessionsById.get(parentID) : undefined;
+  }
+  return null;
+};
+
+export const subtreeHasLiveSession = (node: SessionNode): boolean =>
+  !node.session.time?.archived || node.children.some(subtreeHasLiveSession);
 
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
@@ -72,20 +112,13 @@ export const useSessionGrouping = (args: Args) => {
       const sortedProjectSessions = dedupeSessionsById(projectSessions)
         .sort((a, b) => compareSessionsByLifecycleOrder(a, b, args.pinnedSessionIds, args.sessionOrderRanks));
 
-      const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));
-      const childrenMap = new Map<string, Session[]>();
-      sortedProjectSessions.forEach((session) => {
-        const parentID = (session as Session & { parentID?: string | null }).parentID;
-        if (!parentID) return;
-        const parentSession = sessionMap.get(parentID);
-        if (!parentSession || isArchivedSession(parentSession) !== isArchivedSession(session)) {
-          return;
-        }
-        const collection = childrenMap.get(parentID) ?? [];
-        collection.push(session);
-        childrenMap.set(parentID, collection);
-      });
-      childrenMap.forEach((list) => list.sort((a, b) => compareSessionsByLifecycleOrder(a, b, args.pinnedSessionIds, args.sessionOrderRanks)));
+      const { roots, childrenByParent, sessionsById } = indexSessionsByParent(sortedProjectSessions);
+      childrenByParent.forEach((list) => list.sort((a, b) => compareSessionsByLifecycleOrder(
+        a,
+        b,
+        args.pinnedSessionIds,
+        args.sessionOrderRanks,
+      )));
 
       const worktreeByPath = new Map<string, WorktreeMetadata>();
       availableWorktrees.forEach((meta) => {
@@ -96,9 +129,9 @@ export const useSessionGrouping = (args: Args) => {
       });
 
       const getSessionWorktree = (session: Session): WorktreeMetadata | null => {
-        const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
         const sessionWorktreeMeta = args.worktreeMetadata.get(session.id) ?? null;
         if (sessionWorktreeMeta) return sessionWorktreeMeta;
+        const sessionDirectory = resolveSessionDirectoryFromLineage(session, sessionsById, args.worktreeMetadata);
         if (sessionDirectory) {
           const worktree = worktreeByPath.get(sessionDirectory) ?? null;
           if (worktree && sessionDirectory !== normalizedProjectRoot) {
@@ -109,39 +142,38 @@ export const useSessionGrouping = (args: Args) => {
       };
 
       const buildProjectNode = (session: Session): SessionNode => {
-        const children = childrenMap.get(session.id) ?? [];
+        const children = childrenByParent.get(session.id) ?? [];
         return { session, children: children.map((child) => buildProjectNode(child)), worktree: getSessionWorktree(session) };
       };
-
-      const roots = sortedProjectSessions.filter((session) => {
-        const parentID = (session as Session & { parentID?: string | null }).parentID;
-        if (!parentID) return true;
-        const parentSession = sessionMap.get(parentID);
-        if (!parentSession) return true;
-        return isArchivedSession(parentSession) !== isArchivedSession(session);
-      });
 
       const groupedNodes = new Map<string, SessionNode[]>();
       const archivedKey = '__archived__';
 
       const getGroupKey = (session: Session) => {
-        if (session.time?.archived) return archivedKey;
         // VS Code groups by open workspace, not by worktree: every non-archived
         // session in a project belongs to that project's single (root) group.
         // Worktrees aren't registered in VS Code, so the desktop directory-match
         // below would otherwise dump these sessions into the archived bucket.
         if (args.isVSCode) return normalizedProjectRoot ?? '__project_root__';
-        const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
-        const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
+        const normalizedDir = resolveSessionDirectoryFromLineage(session, sessionsById, args.worktreeMetadata);
         if (!normalizedDir) return archivedKey;
         if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
         if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
         return archivedKey;
       };
 
+      // The archived bucket only renders in the VS Code webview, so a tree that
+      // still owns a live session must land in a rendered group even when its own
+      // root is archived, or that descendant disappears everywhere else.
+      const resolveTreeGroupKey = (node: SessionNode): string => {
+        if (!subtreeHasLiveSession(node)) return archivedKey;
+        if (node.session.time?.archived) return normalizedProjectRoot ?? '__project_root__';
+        return getGroupKey(node.session);
+      };
+
       roots.forEach((session) => {
         const node = buildProjectNode(session);
-        const groupKey = getGroupKey(session);
+        const groupKey = resolveTreeGroupKey(node);
         if (!groupedNodes.has(groupKey)) groupedNodes.set(groupKey, []);
         groupedNodes.get(groupKey)?.push(node);
       });

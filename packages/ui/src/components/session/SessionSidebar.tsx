@@ -1119,6 +1119,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     foldersMap,
     createFolder,
     addSessionToFolder,
+    removeSessionsFromFolders,
   });
 
   // Keep last-known repo status to avoid UI jiggling during project switch

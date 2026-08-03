@@ -26,7 +26,7 @@ import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSession
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
-import { nodeContainsSessionId, nodeHasPinnedMembershipChange } from './sessionNodeItemUtils';
+import { isSessionArchived, nodeContainsSessionId, nodeHasPinnedMembershipChange } from './sessionNodeItemUtils';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import type { SessionNode } from './types';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from './utils';
@@ -307,7 +307,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     ? 'group-hover:opacity-0'
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
   const showOpenInEditorAction = isVSCode;
-  const showQuickArchiveAction = !archivedBucket && !mobileVariant;
+  const archivedSession = isSessionArchived(node.session);
+  const showQuickArchiveAction = !archivedSession && !mobileVariant;
   const revealPaddingClass = isVSCode
     // VS Code rows reveal up to three actions on hover
     // (open-in-editor + quick-archive + menu, each h-4). The date sits in the
@@ -800,14 +801,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     event.preventDefault();
     event.stopPropagation();
     setOpenSidebarMenuKey(null);
-    handleDeleteSession(session, { archivedBucket });
+    handleDeleteSession(session, { archivedBucket: archivedSession });
   };
 
   const handleQuickDeleteClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
     setOpenSidebarMenuKey(null);
-    handleDeleteSession(session, { archivedBucket, hardDelete: true, skipConfirm: true });
+    handleDeleteSession(session, { archivedBucket: archivedSession, hardDelete: true, skipConfirm: true });
   };
 
   const handleOpenInEditorPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -938,7 +939,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         <Icon name="download" className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.session.menu.exportMarkdown')}
       </Item>
-      {!isSubtaskSession && !archivedBucket && !isVSCode ? (
+      {!isSubtaskSession && !archivedSession && !isVSCode ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="block">
@@ -977,7 +978,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         </Item>
       ) : null}
 
-      {sessionDirectory && !archivedBucket ? (() => {
+      {sessionDirectory && !archivedSession ? (() => {
         // Folders are flat per project: list folders from every scope of the
         // owning project (root + all worktrees) so sessions can be filed
         // across worktrees. Each action targets the folder's owning scope,
@@ -1086,13 +1087,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       ) : null}
 
       <Separator />
-      {!archivedBucket ? (
-        <Item className="[&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
+      {!archivedSession ? (
+        <Item className="[&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket: false })}>
           <Icon name="inbox-archive" className="mr-1 h-4 w-4" />
           {t('sessions.sidebar.bulkActions.archive')}
         </Item>
       ) : null}
-      <Item className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket, hardDelete: true })}>
+      <Item className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket: archivedSession, hardDelete: true })}>
         <Icon name="delete-bin" className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.bulkActions.delete')}
       </Item>
@@ -1169,7 +1170,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
               <div
                 data-session-row={session.id}
                 data-session-scope={selectionScopeKey ?? ''}
-                data-session-archived={archivedBucket ? '1' : '0'}
+                data-session-archived={archivedSession ? '1' : '0'}
                 onClick={handleRowBackgroundClick}
                 // Row geometry mirrors the zone-header band: full container
                 // width, px-1.5 inner edge, a 14px icon-wide gutter (status

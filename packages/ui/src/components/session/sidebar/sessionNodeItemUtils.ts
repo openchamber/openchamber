@@ -2,6 +2,19 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
 import type { SessionNode } from './types';
 
+export const isSessionArchived = (session: SessionNode['session']): boolean => Boolean(session.time?.archived);
+
+export const shouldHardDeleteSession = (session: SessionNode['session'], hardDelete = false): boolean =>
+  isSessionArchived(session) || hardDelete;
+
+export const isSessionTreeRoot = (
+  session: SessionNode['session'],
+  sessionsById: ReadonlyMap<string, SessionNode['session']>,
+): boolean => {
+  const parent = session.parentID ? sessionsById.get(session.parentID) : undefined;
+  return !parent || (isSessionArchived(session) && !isSessionArchived(parent));
+};
+
 /**
  * Per-row render extras precomputed once per group render and threaded down to
  * each `SessionNodeItem`. Hoisting these out of the row `React.memo` comparator

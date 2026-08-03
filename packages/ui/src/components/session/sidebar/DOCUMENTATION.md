@@ -42,10 +42,10 @@
 - `hooks/useSessionActions.ts`: Centralizes session row actions (select/open, rename, share/unshare, archive/delete, confirmations).
 - `hooks/useSessionSearchEffects.ts`: Handles search open/close UX and input focus behavior.
 - `hooks/useSessionPrefetch.ts`: Publishes directory-aware nearby/active session prefetch demand to the shared message loader. Recent may prefetch across projects without substituting the current directory.
-- `hooks/useSessionGrouping.ts`: Builds grouped session structures and search text/filter helpers.
+- `hooks/useSessionGrouping.ts`: Builds grouped session structures and search text/filter helpers. Subagents stay nested under present parents unless a child was archived independently of its active parent. A tree only enters the archived bucket when every session in it is archived, because that bucket renders solely in the VS Code webview; an archived root that still owns a live descendant is grouped under the project root.
 - `hooks/useSessionSidebarSections.ts`: Composes final per-project sections and group search metadata for rendering.
 - `hooks/useProjectSessionSelection.ts`: Resolves active/current project-session selection logic and session-directory context.
-- `hooks/useArchivedAutoFolders.ts`: Maintains archived auto-folder structure and assignment behavior.
+- `hooks/useArchivedAutoFolders.ts`: Maintains archived auto-folder structure and assignment behavior. Only archived tree roots are assigned, and stale descendant/non-archived memberships are removed after authoritative loading.
 - `hooks/useSidebarPersistence.ts`: Persists sidebar UI state (expanded/collapsed/pinned/group order/active session) to storage + desktop settings.
 - `hooks/useProjectRepoStatus.ts`: Tracks per-project git-repo state and root branch metadata.
 - `hooks/useProjectSessionLists.ts`: Reads live and archived project buckets from the shared ownership index.
