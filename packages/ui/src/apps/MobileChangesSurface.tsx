@@ -42,7 +42,7 @@ const isUnstagedStatusFile = (file: GitStatus['files'][number]): boolean => {
 const diffCacheKey = (path: string, staged: boolean): string => staged ? `${path}\u0000staged` : path;
 
 type MobileChangesSurfaceProps = {
-  /** When provided, the list header gets a close X that calls this; used when the surface is hosted in MobileSurfaceShell. */
+  /** When provided, the list header gets a close X that calls this. */
   onClose?: () => void;
   /**
    * When set (and non-null), the surface opens directly into the per-file diff view for this
@@ -541,7 +541,7 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
               onVisiblePathsChange={setVisibleChangePaths}
             />
           </div>
-          <div className="shrink-0 border-t border-border/50 px-4 pb-4 pt-3">
+          <div className="shrink-0 border-t border-border/70 px-4 pb-4 pt-3">
             <CommitSection
               stagedCount={stagedChangeEntries.length}
               commitMessage={commitMessage}
@@ -596,7 +596,7 @@ const MobileDiffDetail: React.FC<{
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-3 border-b border-border/50 px-3 text-foreground">
+      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-3 border-b border-border/70 px-3 text-foreground">
         <button
           type="button"
           className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"

@@ -241,6 +241,20 @@
           }
         },
         {
+          "label": "Changes Walkthrough",
+          "link": "/walkthrough/",
+          "translations": {
+            "uk": "Розбір змін",
+            "zh-CN": "改动导读",
+            "es": "Recorrido por los cambios",
+            "pt-BR": "Percurso pelas mudanças",
+            "ko": "변경 워크스루",
+            "pl": "Przewodnik po zmianach",
+            "fr": "Parcours des modifications",
+            "ja": "変更のウォークスルー"
+          }
+        },
+        {
           "label": "GitHub Issues & PRs",
           "link": "/github/",
           "translations": {

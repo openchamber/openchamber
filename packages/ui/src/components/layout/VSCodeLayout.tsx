@@ -446,7 +446,7 @@ export const VSCodeLayout: React.FC = () => {
     // No initialSessionId means open a new session draft
     if (!initialSessionId) {
       hasAppliedInitialSession.current = true;
-      openNewSessionDraft();
+      openNewSessionDraft({ automatic: true });
       return;
     }
 

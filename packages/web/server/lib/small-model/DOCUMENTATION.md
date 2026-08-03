@@ -31,10 +31,48 @@ other runtime API.
      and as a final utility fallback.
   4. Last resort: the session's own model (`preferredModelID`) when no small
      model resolves anywhere — costlier, but always valid.
-- Input clamp: the prompt is truncated to the resolved model's catalog
+- Input clamp: the prompt is measured against the resolved model's catalog
   `limit.context` (minus an output reserve, ~4 chars/token estimate;
-  conservative default when the model is not in the catalog). Truncation is
-  reported as `inputTruncated: true` in the response.
+  conservative default when the model is not in the catalog). `onOverflow`
+  decides what an oversized prompt means:
+  - `truncate` (default) clips the tail and reports `inputTruncated: true`.
+    Correct for callers that degrade gracefully (summaries, commit messages).
+  - `error` throws a `413` with `code: 'context-too-small'` plus
+    `requiredChars`/`availableChars`. Correct for callers whose output would be
+    quietly wrong on a clipped input, so they can ask the user for a roomier
+    model instead of returning confident nonsense.
+- Structured output: pass `responseSchema` (a JSON Schema) to get
+  schema-shaped JSON back as `text`. Wire support differs per format —
+  `response_format: {type: 'json_schema'}` for OpenAI-compatible chat,
+  `text.format` for the Responses API, a forced single tool call for the
+  Anthropic messages API, and `generationConfig.responseSchema` for Google
+  (whose OpenAPI-flavored dialect drops unknown JSON Schema keywords). The
+  ChatGPT-plan codex backend has no equivalent and rejects a schema request
+  with `code: 'structured-output-unsupported'` rather than silently returning
+  prose.
+- Output budget: `maxOutputTokens` is capped at the catalog's `limit.output` for
+  the model, and the **same number** is reserved from the input allowance. The
+  two must not drift — a caller that asks for a large answer while the reserve
+  stays at the default overruns the context, and the failure looks like a
+  truncation bug rather than a budgeting one. `describeSmallModel` takes
+  `outputReserveTokens` so readiness checks agree with what generation will do.
+  It may be a **function** of `{ contextTokens, outputTokenLimit }` for callers
+  that want as much answer room as the resolved model allows — they cannot name
+  a number before knowing which model they got. The resolved value comes back as
+  `outputTokens`, which is what the caller should then request, so the reserve
+  and the request are the same number by construction.
+- Reasoning models can spend the entire output budget thinking and return
+  nothing. That case (empty content with `finish_reason: 'length'`, or content
+  empty while `reasoning_content` is populated) throws with
+  `code: 'output-exhausted'` so callers can offer a different model instead of
+  showing a transport error.
+- `timeoutMs` overrides the 60s default per call; `signal` lets a caller abort
+  a request that is no longer wanted. Both apply to every wire format.
+- `describeSmallModel()` additionally reports `inputCharBudget`,
+  `contextTokens`, `contextKnown`, and `structuredOutput`. The last is
+  tri-state: `true`/`false` from the catalog, `null` when the catalog omits the
+  field — which it does for roughly half of all models, aggregators and proxies
+  especially. Callers must treat `null` as "try it", not "unsupported".
 - `call.js` — wire formats and per-provider auth, replicating OpenCode's
   plugin auth loaders:
   - **GitHub Copilot**: fetches the requested model's authenticated `/models`

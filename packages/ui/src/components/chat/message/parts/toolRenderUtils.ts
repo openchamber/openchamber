@@ -29,3 +29,16 @@ export const isStandaloneTool = (toolName: unknown): boolean => {
 export const isStaticTool = (toolName: unknown): boolean => {
     return STATIC_TOOL_NAMES.has(normalizeToolName(toolName));
 };
+
+export const getToolDescriptionFallback = (
+    toolName: unknown,
+    description: unknown,
+    input: Record<string, unknown> | undefined,
+): string => {
+    if (typeof description === 'string' && description.trim().length > 0) {
+        return description;
+    }
+
+    const globPattern = normalizeToolName(toolName) === 'glob' ? input?.pattern : undefined;
+    return typeof globPattern === 'string' ? globPattern : '';
+};

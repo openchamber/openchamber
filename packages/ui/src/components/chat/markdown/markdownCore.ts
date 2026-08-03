@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { highlightCodeInWorker } from './markdown-worker';
+import { escapeRawMarkdownHtml, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
 
 const escapeAttr = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -166,6 +167,12 @@ const parser = marked.use({
   breaks: false,
   extensions: [inlineMathExtension, blockMathExtension],
   renderer: {
+    // Assistant output is untrusted. Markdown constructs still render as HTML,
+    // but raw HTML must remain visible text so it cannot introduce active DOM
+    // such as stylesheets or positioned overlays into the application shell.
+    html({ text }) {
+      return escapeRawMarkdownHtml(text);
+    },
     link({ href, title, text }) {
       const target = href ?? '';
       const agentName = parseAgentHref(target);
@@ -283,8 +290,10 @@ const SANITIZE_CONFIG = {
   USE_PROFILES: { html: true, mathMl: true, svg: true },
   ADD_TAGS: ['svg', 'path', 'g', 'rect', 'line', 'polygon', 'polyline', 'circle', 'ellipse', 'text', 'tspan', 'defs', 'marker'],
   ADD_ATTR: ['d', 'viewBox', 'preserveAspectRatio', 'xmlns', 'target', 'fill', 'stroke', 'stroke-width', 'transform', 'points', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'style'],
-  FORBID_TAGS: ['script'],
-  FORBID_CONTENTS: ['script'],
+  // Defense in depth for generated/highlighter HTML after raw markdown HTML
+  // has been escaped by the marked renderer above.
+  FORBID_TAGS: [...MARKDOWN_FORBIDDEN_TAGS],
+  FORBID_CONTENTS: [...MARKDOWN_FORBIDDEN_TAGS],
 };
 
 let sanitizeHookInstalled = false;

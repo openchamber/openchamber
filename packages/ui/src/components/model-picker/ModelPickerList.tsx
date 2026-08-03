@@ -339,6 +339,11 @@ interface ModelPickerListProps {
   selectedModel?: { providerID: string; modelID: string } | null;
   hiddenModels?: HiddenModel[];
   allowedProviderIds?: string[];
+  /**
+   * Per-model gate, for callers whose feature needs a capability rather than a
+   * provider (e.g. structured output). Applied on top of `allowedProviderIds`.
+   */
+  isModelAllowed?: (providerID: string, modelID: string) => boolean;
   includeNotSelected?: boolean;
   onSelectNone?: () => void;
   selectionCount?: (entry: ModelPickerEntry) => number;
@@ -379,6 +384,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   selectedModel,
   hiddenModels = [],
   allowedProviderIds,
+  isModelAllowed,
   includeNotSelected = false,
   onSelectNone,
   selectionCount,
@@ -448,17 +454,19 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
   const filteredFavorites = React.useMemo(() => favoriteModels.filter(({ model, providerID, modelID }) => {
     if (allowedProviderSet && !allowedProviderSet.has(providerID)) return false;
+    if (isModelAllowed && !isModelAllowed(providerID, modelID)) return false;
     if (isHidden(providerID, modelID)) return false;
     const providerName = providerById.get(providerID)?.name || providerID;
     return matchesQuery(getModelDisplayName(model), providerName);
-  }), [allowedProviderSet, favoriteModels, isHidden, matchesQuery, providerById]);
+  }), [allowedProviderSet, favoriteModels, isHidden, isModelAllowed, matchesQuery, providerById]);
 
   const filteredRecents = React.useMemo(() => recentModels.filter(({ model, providerID, modelID }) => {
     if (allowedProviderSet && !allowedProviderSet.has(providerID)) return false;
+    if (isModelAllowed && !isModelAllowed(providerID, modelID)) return false;
     if (isHidden(providerID, modelID)) return false;
     const providerName = providerById.get(providerID)?.name || providerID;
     return matchesQuery(getModelDisplayName(model), providerName);
-  }), [allowedProviderSet, isHidden, matchesQuery, providerById, recentModels]);
+  }), [allowedProviderSet, isHidden, isModelAllowed, matchesQuery, providerById, recentModels]);
 
   const orderedProviders = React.useMemo(() => {
     if (!providerOrder || providerOrder.length === 0) return providers;
@@ -477,11 +485,12 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       const filteredModels = models.filter((model) => {
         const modelID = typeof model.id === 'string' ? model.id : '';
         if (!modelID || isHidden(provider.id, modelID)) return false;
+        if (isModelAllowed && !isModelAllowed(provider.id, modelID)) return false;
         return matchesQuery(getModelDisplayName(model), provider.name || provider.id);
       });
       return { ...provider, models: filteredModels };
     })
-    .filter((provider) => provider.models.length > 0), [allowedProviderSet, isHidden, matchesQuery, orderedProviders]);
+    .filter((provider) => provider.models.length > 0), [allowedProviderSet, isHidden, isModelAllowed, matchesQuery, orderedProviders]);
 
   const flatModelList = React.useMemo(() => {
     const items: ModelPickerEntry[] = [];

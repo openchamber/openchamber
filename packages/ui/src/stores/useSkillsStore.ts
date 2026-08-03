@@ -9,6 +9,7 @@ import {
 } from "@/lib/configUpdate";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { runBackgroundNetworkTask } from "@/lib/background-network";
 
 import { opencodeClient } from '@/lib/opencode/client';
 
@@ -221,7 +222,7 @@ export const useSkillsStore = create<SkillsStore>()(
               try {
                 const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-                const response = await runtimeFetch(`/api/config/skills${queryParams}`);
+                const response = await runBackgroundNetworkTask(() => runtimeFetch(`/api/config/skills${queryParams}`, { priority: 'low' }));
                 if (!response.ok) {
                   throw new Error(`Failed to list skills: ${response.status}`);
                 }

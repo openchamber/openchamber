@@ -4,6 +4,7 @@ import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { tryParseJsonOutput } from '../toolRenderers';
 import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
 import { getStreamingOutputAppend, getToolOutput } from './toolOutput';
+import { getToolDescriptionFallback } from './toolRenderUtils';
 
 describe('getToolOutput', () => {
     test('prefers authoritative state output', () => {
@@ -62,5 +63,17 @@ describe('OpenChamber tool output', () => {
             data: { projects: [] },
         };
         expect(tryParseJsonOutput(JSON.stringify(result))).toEqual({ data: result, isJson: true });
+    });
+});
+
+describe('getToolDescriptionFallback', () => {
+    test('uses the glob pattern when the provided description and title are empty', () => {
+        expect(getToolDescriptionFallback('glob', '', { pattern: 'packages/electron/README.md' }))
+            .toBe('packages/electron/README.md');
+    });
+
+    test('prefers an existing glob description over the pattern', () => {
+        expect(getToolDescriptionFallback('glob', 'Electron docs', { pattern: 'packages/electron/README.md' }))
+            .toBe('Electron docs');
     });
 });

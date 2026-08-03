@@ -9,6 +9,8 @@ import { join, resolve } from "node:path"
 import { createInterface } from "node:readline/promises"
 import process from "node:process"
 
+import { projectSessionLoadPerformance } from "./profile-browser-session-load.mjs"
+
 const HELP = `Usage: bun run profile:browser -- [options]
 
 Options:
@@ -19,6 +21,7 @@ Options:
   --profile-dir <path>    Reusable isolated Chrome profile
   --headless              Run without a visible browser
   --no-prompt             Start after a 5 second preparation delay
+  --reload                Reload after recording starts to capture startup
   --help                  Show this help
 
 The command records a Chrome performance trace, a redacted HAR, browser metrics,
@@ -33,12 +36,14 @@ const parseArgs = (argv) => {
     profileDir: join(homedir(), ".openchamber", "browser-profile-google-chrome"),
     headless: false,
     prompt: true,
+    reload: false,
   }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === "--help") return { ...options, help: true }
     if (value === "--headless") options.headless = true
     else if (value === "--no-prompt") options.prompt = false
+    else if (value === "--reload") options.reload = true
     else if (value === "--url") options.url = argv[++index]
     else if (value === "--duration") options.duration = Number(argv[++index])
     else if (value === "--output") options.output = argv[++index]
@@ -374,6 +379,7 @@ const main = async () => {
     await evaluateValue(client, `
       localStorage.setItem("openchamber_sync_perf", "1")
       localStorage.setItem("openchamber_stream_perf", "1")
+      localStorage.setItem("openchamber_session_load_perf", "1")
     `)
     const reloaded = client.once("Page.loadEventFired", 30_000)
     await client.send("Page.reload", { ignoreCache: true })
@@ -392,6 +398,7 @@ const main = async () => {
     await evaluateValue(client, `window.__openchamberSyncPerformance?.reset()`)
     await evaluateValue(client, `window.__openchamberStreamPerformance?.setEnabled(true)`)
     await evaluateValue(client, `window.__openchamberStreamPerformance?.reset()`)
+    await evaluateValue(client, `if (window.__openchamberSessionLoadPerformance) window.__openchamberSessionLoadPerformance.events.length = 0`)
     const records = new Map()
     const traceEvents = []
     const startedAt = new Date().toISOString()
@@ -440,11 +447,21 @@ const main = async () => {
     })
 
     console.log(`Recording for ${options.duration} seconds. Use OpenChamber normally during this window.`)
-    await wait(options.duration * 1000)
+    const recordingStartedAt = Date.now()
+    if (options.reload) {
+      const recordedReload = client.once("Page.loadEventFired", 30_000)
+      await client.send("Page.reload", { ignoreCache: true })
+      await recordedReload
+    }
+    await wait(Math.max(0, options.duration * 1000 - (Date.now() - recordingStartedAt)))
     const afterMetrics = metricMap((await client.send("Performance.getMetrics")).metrics)
     const afterHeap = await client.send("Runtime.getHeapUsage")
     const syncCounters = await evaluateValue(client, `window.__openchamberSyncPerformance?.getSnapshot() ?? null`)
     const streamPerformance = await evaluateValue(client, `window.__openchamberStreamPerformance?.getSnapshot() ?? null`)
+    const sessionLoadPerformance = await evaluateValue(
+      client,
+      `(${projectSessionLoadPerformance.toString()})(window.__openchamberSessionLoadPerformance?.events ?? [], ${JSON.stringify(recordingStartedAt)})`,
+    )
     const traceCompleteEvent = client.once("Tracing.tracingComplete", 120_000)
     let traceComplete = true
     try {
@@ -482,6 +499,8 @@ const main = async () => {
       heapAfter: afterHeap,
       syncCounters,
       streamPerformance,
+      sessionLoadPerformance,
+      includesRecordedReload: options.reload,
       traceComplete,
       traceFileComplete: false,
       privacy: "Headers and sensitive URL parameters are redacted. Response bodies are not captured.",

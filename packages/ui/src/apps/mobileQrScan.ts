@@ -1,14 +1,8 @@
 // Connection payload parsing + native QR scanning for the dedicated mobile app.
 //
-// Pairing v2 links (openchamber://connect?v=2&p=<base64url>) carry a one-time
-// secret and a list of transport candidates (lan / tunnel / relay); they are
-// redeemed server-side over whichever candidate connects first. We also accept a
-// bare http(s) URL so a QR encoding only the server address works.
-//
-// QR scanning is delegated to a Capacitor barcode-scanner plugin if the native
-// shell registered one (`window.Capacitor.Plugins.BarcodeScanner`). We resolve it
-// at runtime instead of importing the package so the web build stays dependency-free
-// and the browser-hosted mobile UI degrades to `unsupported` cleanly.
+// Android uses the plugin's CameraX-backed startScan() flow. Unlike its ready-made
+// scan() activity, this path bundles the barcode model in the app and does not need
+// Google Play Services. iOS keeps the native ready-made scanner.
 
 import { parsePairingConnectionPayload, type PairingConnectionPayload } from '@/lib/connectionPayload';
 
@@ -32,74 +26,16 @@ export type QrScanResult =
   | { status: 'failed' };
 
 type ScannedBarcode = { rawValue?: string; displayValue?: string };
-
-type ModuleInstallProgress = { state?: number };
-type ListenerHandle = { remove: () => void };
-
+type ListenerHandle = { remove: () => void | Promise<void> };
 type BarcodeScannerPlugin = {
   requestPermissions?: () => Promise<{ camera?: string } | undefined>;
   scan?: (options?: { formats?: string[] }) => Promise<{ barcodes?: ScannedBarcode[] } | undefined>;
-  // Android-only: the Google code scanner used by scan() needs the ML Kit barcode module,
-  // which Play Services must download once before the first scan. Absent on iOS.
-  isGoogleBarcodeScannerModuleAvailable?: () => Promise<{ available?: boolean } | undefined>;
-  installGoogleBarcodeScannerModule?: () => Promise<void>;
+  startScan?: (options?: { formats?: string[] }) => Promise<void>;
+  stopScan?: () => Promise<void>;
   addListener?: (
-    event: 'googleBarcodeScannerModuleInstallProgress',
-    cb: (info: ModuleInstallProgress) => void,
-  ) => Promise<ListenerHandle>;
-};
-
-// Google's ModuleInstallProgress states: 4 = COMPLETED, 3 = CANCELED, 5 = FAILED.
-const MODULE_STATE_COMPLETED = 4;
-const MODULE_STATE_CANCELED = 3;
-const MODULE_STATE_FAILED = 5;
-const MODULE_INSTALL_TIMEOUT_MS = 90_000;
-
-// Ensure the Android Google barcode module is downloaded before scanning. No-op on platforms
-// where these methods don't exist (iOS) or when it's already available. Resolves once the module
-// is usable; rejects if the install is canceled, fails, or times out.
-const ensureScannerModule = async (plugin: BarcodeScannerPlugin): Promise<void> => {
-  const capacitor = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor;
-  if (
-    capacitor?.getPlatform?.() !== 'android' ||
-    !plugin.isGoogleBarcodeScannerModuleAvailable ||
-    !plugin.installGoogleBarcodeScannerModule
-  ) {
-    return;
-  }
-  const status = await plugin.isGoogleBarcodeScannerModuleAvailable().catch(() => undefined);
-  if (status?.available) return;
-
-  await new Promise<void>((resolve, reject) => {
-    let handle: ListenerHandle | undefined;
-    const finish = (fn: () => void) => {
-      window.clearTimeout(timer);
-      handle?.remove();
-      fn();
-    };
-    const timer = window.setTimeout(
-      () => finish(() => reject(new Error('module install timed out'))),
-      MODULE_INSTALL_TIMEOUT_MS,
-    );
-    // addListener may return a handle synchronously OR a Promise<handle> depending on the
-    // Capacitor proxy — normalize with Promise.resolve so a non-thenable handle doesn't throw
-    // and abort the install call below.
-    Promise.resolve(
-      plugin.addListener?.('googleBarcodeScannerModuleInstallProgress', (info) => {
-        if (info?.state === MODULE_STATE_COMPLETED) finish(resolve);
-        else if (info?.state === MODULE_STATE_CANCELED || info?.state === MODULE_STATE_FAILED) {
-          finish(() => reject(new Error('module install failed')));
-        }
-      }),
-    )
-      .then((h) => {
-        handle = h as ListenerHandle | undefined;
-      })
-      .catch(() => undefined);
-    Promise.resolve(plugin.installGoogleBarcodeScannerModule?.()).catch((error) =>
-      finish(() => reject(error instanceof Error ? error : new Error('module install failed'))),
-    );
-  });
+    event: 'barcodesScanned' | 'scanError',
+    cb: (info: { barcodes?: ScannedBarcode[]; message?: string }) => void,
+  ) => Promise<ListenerHandle> | ListenerHandle;
 };
 
 const getScannerPlugin = (): BarcodeScannerPlugin | null => {
@@ -108,7 +44,12 @@ const getScannerPlugin = (): BarcodeScannerPlugin | null => {
     Capacitor?: { Plugins?: Record<string, unknown> };
   }).Capacitor;
   const plugin = capacitor?.Plugins?.BarcodeScanner as BarcodeScannerPlugin | undefined;
-  return plugin && typeof plugin.scan === 'function' ? plugin : null;
+  return plugin && (typeof plugin.scan === 'function' || typeof plugin.startScan === 'function') ? plugin : null;
+};
+
+const isAndroid = (): boolean => {
+  const capacitor = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor;
+  return capacitor?.getPlatform?.() === 'android';
 };
 
 export const parseConnectionPayload = (raw: string): MobileConnectionPayload | MobilePairingPayload | null => {
@@ -124,54 +65,85 @@ export const parseConnectionPayload = (raw: string): MobileConnectionPayload | M
   return null;
 };
 
-// The Google code scanner can briefly still throw "module not available" in the moments right
-// after its install completes. Detect that specific error so we can re-ensure + retry rather
-// than surfacing a failure the user would have to manually tap through.
-const isModuleUnavailableError = (error: unknown): boolean => {
-  const message =
-    typeof error === 'object' && error && 'message' in error
-      ? String((error as { message?: unknown }).message ?? '')
-      : String(error ?? '');
-  return /module/i.test(message) && /not\s*available|unavailable/i.test(message);
+const resultFromRawValue = (raw: string): QrScanResult => {
+  const payload = parseConnectionPayload(raw);
+  if (!payload) return { status: 'invalid' };
+  if ('pairing' in payload) return { status: 'pairing', ...payload };
+  return { status: 'ok', ...payload };
+};
+
+const scanWithBundledAndroidScanner = async (
+  plugin: BarcodeScannerPlugin,
+  signal?: AbortSignal,
+): Promise<QrScanResult> => {
+  if (!plugin.startScan || !plugin.stopScan || !plugin.addListener) return { status: 'unsupported' };
+  if (signal?.aborted) return { status: 'cancelled' };
+
+  let barcodeListener: ListenerHandle | undefined;
+  let errorListener: ListenerHandle | undefined;
+  let settled = false;
+  let resolveResult: (result: QrScanResult) => void = () => undefined;
+
+  const result = new Promise<QrScanResult>((resolve) => {
+    resolveResult = resolve;
+  });
+  const finish = (scanResult: QrScanResult) => {
+    if (settled) return;
+    settled = true;
+    resolveResult(scanResult);
+  };
+  const abort = () => finish({ status: 'cancelled' });
+  signal?.addEventListener('abort', abort, { once: true });
+
+  try {
+    const listenerResults = await Promise.allSettled([
+      Promise.resolve(plugin.addListener('barcodesScanned', ({ barcodes }) => {
+        const barcode = barcodes?.[0];
+        const raw = (barcode?.rawValue ?? barcode?.displayValue ?? '').trim();
+        if (raw) finish(resultFromRawValue(raw));
+      })).then((handle) => { barcodeListener = handle; }),
+      Promise.resolve(plugin.addListener('scanError', () => finish({ status: 'failed' })))
+        .then((handle) => { errorListener = handle; }),
+    ]);
+
+    if (listenerResults.some(({ status }) => status === 'rejected')) {
+      finish({ status: 'failed' });
+    } else if (!settled) {
+      void plugin.startScan({ formats: ['QR_CODE'] }).catch(() => finish({ status: 'failed' }));
+    }
+
+    return await result;
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    await Promise.allSettled([
+      Promise.resolve(barcodeListener?.remove()),
+      Promise.resolve(errorListener?.remove()),
+      plugin.stopScan(),
+    ]);
+  }
 };
 
 export const isQrScanSupported = (): boolean => getScannerPlugin() !== null;
 
-export const scanConnectionQr = async (): Promise<QrScanResult> => {
+export const scanConnectionQr = async (options?: { signal?: AbortSignal }): Promise<QrScanResult> => {
   const plugin = getScannerPlugin();
-  if (!plugin?.scan) return { status: 'unsupported' };
+  if (!plugin) return { status: 'unsupported' };
 
   try {
     if (plugin.requestPermissions) {
       const permission = await plugin.requestPermissions();
       const camera = permission?.camera;
-      if (camera && camera !== 'granted' && camera !== 'limited') {
-        return { status: 'permission-denied' };
-      }
+      if (camera && camera !== 'granted' && camera !== 'limited') return { status: 'permission-denied' };
     }
 
-    // First scan on Android downloads the Google barcode module (the button stays in its
-    // scanning state for the whole wait). The module can still report "not available" for a
-    // moment right after install, so re-ensure + retry within this same call instead of erroring
-    // out — the user shouldn't have to guess to tap again.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        await ensureScannerModule(plugin);
-        const result = await plugin.scan({ formats: ['QR_CODE'] });
-        const barcode = result?.barcodes?.[0];
-        const raw = (barcode?.rawValue ?? barcode?.displayValue ?? '').trim();
-        if (!raw) return { status: 'cancelled' };
+    if (options?.signal?.aborted) return { status: 'cancelled' };
+    if (isAndroid()) return scanWithBundledAndroidScanner(plugin, options?.signal);
+    if (!plugin.scan) return { status: 'unsupported' };
 
-        const payload = parseConnectionPayload(raw);
-        if (!payload) return { status: 'invalid' };
-        if ('pairing' in payload) return { status: 'pairing', ...payload };
-        return { status: 'ok', ...payload };
-      } catch (error) {
-        if (!isModuleUnavailableError(error) || attempt === 2) return { status: 'failed' };
-        await new Promise((resolve) => window.setTimeout(resolve, 600));
-      }
-    }
-    return { status: 'failed' };
+    const result = await plugin.scan({ formats: ['QR_CODE'] });
+    const barcode = result?.barcodes?.[0];
+    const raw = (barcode?.rawValue ?? barcode?.displayValue ?? '').trim();
+    return raw ? resultFromRawValue(raw) : { status: 'cancelled' };
   } catch {
     return { status: 'failed' };
   }

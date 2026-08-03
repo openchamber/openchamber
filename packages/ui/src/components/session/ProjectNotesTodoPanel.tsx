@@ -78,6 +78,9 @@ interface ProjectNotesTodoPanelProps {
   projectLabel?: string | null;
   canCreateWorktree?: boolean;
   onActionComplete?: () => void;
+  /** When provided, opening a plan calls this instead of the desktop context
+      panel tab — hosts without ContextPanel (mobile) render their own viewer. */
+  onOpenPlan?: (plan: { path: string; title: string }) => void;
   className?: string;
 }
 
@@ -162,6 +165,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   projectLabel,
   canCreateWorktree = false,
   onActionComplete,
+  onOpenPlan,
   className,
 }) => {
   const { t } = useI18n();
@@ -725,6 +729,10 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
   const handleOpenPlan = React.useCallback(
     (plan: ProjectPlanListItem) => {
+      if (onOpenPlan) {
+        onOpenPlan({ path: plan.path, title: plan.title });
+        return;
+      }
       const projectPath = projectRef?.path?.trim();
       const panelDirectory = currentDirectory?.trim() || projectPath;
       if (!panelDirectory) {
@@ -737,7 +745,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         label: plan.title,
       });
     },
-    [currentDirectory, openContextPanelTab, projectRef]
+    [currentDirectory, onOpenPlan, openContextPanelTab, projectRef]
   );
 
   if (!projectRef) {

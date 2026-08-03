@@ -51,6 +51,10 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## Current important behavior
 
+- Assistant markdown treats raw HTML as inert visible text. The final generated
+  HTML is sanitized as defense in depth, with script and style elements
+  forbidden, so message content cannot inject active DOM or application-wide
+  CSS into any runtime surface.
 - `read` and `skill` are **static navigation tools** and render via `StaticToolRow`.
 - Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
 - The managed `openchamber` plugin tool uses the expandable path and hides its broad protocol input. The plugin supplies the selected action's human description as the native tool title; the UI renders that metadata without owning an action map. The full versioned result envelope renders through the same neutral JSON summary/tree/raw views as other tools, without a tool-specific output card.

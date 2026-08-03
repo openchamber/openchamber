@@ -441,6 +441,7 @@ interface ModelsDevModelEntry {
     reasoning?: boolean;
     temperature?: boolean;
     attachment?: boolean;
+    structured_output?: boolean;
     modalities?: {
         input?: string[];
         output?: string[];
@@ -577,6 +578,8 @@ const transformModelsDevResponse = (payload: unknown): Map<string, ModelMetadata
                 reasoning: typeof modelValue.reasoning === 'boolean' ? modelValue.reasoning : undefined,
                 temperature: typeof modelValue.temperature === 'boolean' ? modelValue.temperature : undefined,
                 attachment: typeof modelValue.attachment === 'boolean' ? modelValue.attachment : undefined,
+                structured_output:
+                    typeof modelValue.structured_output === 'boolean' ? modelValue.structured_output : undefined,
                 modalities: modelValue.modalities
                     ? {
                           input: isStringArray(modelValue.modalities.input) ? modelValue.modalities.input : undefined,

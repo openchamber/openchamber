@@ -2,6 +2,7 @@ import type {
   GitStatus,
   GitDiffResponse,
   GetGitDiffOptions,
+  GetGitRangeDiffOptions,
   GitFileDiffResponse,
   GetGitFileDiffOptions,
   GitBranch,
@@ -217,6 +218,31 @@ export async function getGitDiff(directory: string, options: GetGitDiffOptions):
 
   if (!response.ok) {
     throw new Error(`Failed to get git diff: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function getGitRangeDiff(
+  directory: string,
+  options: GetGitRangeDiffOptions
+): Promise<GitDiffResponse> {
+  const { base, head, path, contextLines } = options;
+  if (!base || !head) {
+    throw new Error('base and head are required to fetch git range diff');
+  }
+
+  const response = await runtimeFetch(
+    buildUrl(`${API_BASE}/range-diff`, directory, {
+      base,
+      head,
+      path: path || undefined,
+      context: contextLines,
+    })
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to get git range diff: ${response.statusText}`);
   }
 
   return response.json();

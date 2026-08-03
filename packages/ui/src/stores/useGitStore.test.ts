@@ -161,6 +161,32 @@ describe('useGitStore', () => {
     expect(useGitStore.getState().getDiff('/repo', 'stale.ts')).toBe(null);
   });
 
+  test('clears cached file contents when a git refresh hint invalidates diffs', () => {
+    setDirectoryStatus(createStatus(
+      { 'src/index.ts': { insertions: 1, deletions: 1 } },
+      [{ path: 'src/index.ts', index: ' ', working_dir: 'M' }],
+    ));
+    useGitStore.getState().setDiff('/repo', 'src/index.ts', { original: 'old', modified: 'stale' });
+
+    useGitStore.getState().clearDiffCache('/repo');
+
+    expect(useGitStore.getState().getDiff('/repo', 'src/index.ts')).toBe(null);
+  });
+
+  test('invalidates only the requested cached file contents', () => {
+    setDirectoryStatus(createStatus(undefined, [
+      { path: 'src/first.ts', index: ' ', working_dir: 'M' },
+      { path: 'src/second.ts', index: ' ', working_dir: 'M' },
+    ]));
+    useGitStore.getState().setDiff('/repo', 'src/first.ts', { original: 'a', modified: 'b' });
+    useGitStore.getState().setDiff('/repo', 'src/second.ts', { original: 'c', modified: 'd' });
+
+    useGitStore.getState().clearDiffCache('/repo', ['src/first.ts']);
+
+    expect(useGitStore.getState().getDiff('/repo', 'src/first.ts')).toBe(null);
+    expect(useGitStore.getState().getDiff('/repo', 'src/second.ts')?.modified).toBe('d');
+  });
+
   test('keeps the newest branch request when completions are reversed', async () => {
     const requests = [createDeferred<Awaited<ReturnType<GitAPI['getGitBranches']>>>(), createDeferred<Awaited<ReturnType<GitAPI['getGitBranches']>>>()];
     let index = 0;

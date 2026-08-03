@@ -305,7 +305,13 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   }
 
   return (
-    <div className={cn("mb-1", !hasLeftAccessory && "chat-column")} style={STATUS_ROW_CONTAINER_STYLE}>
+    <div
+      // Mobile: breathing room between the last message and the agent status
+      // line — without it the "<model> is running…" row sits flush against
+      // the message above.
+      className={cn("mb-1", isMobile && "mt-2", !hasLeftAccessory && "chat-column")}
+      style={STATUS_ROW_CONTAINER_STYLE}
+    >
       <div className={cn("flex items-center justify-between py-0.5 gap-2 h-[1.2rem]", hasLeftAccessory && "px-0.5")}>
         {/* Left: Abort status | Working placeholder | leftAccessory */}
         <div className={cn("flex-1 flex items-center min-w-0 gap-2", hasLeftAccessory ? "pl-1.5" : "overflow-x-hidden")}>
