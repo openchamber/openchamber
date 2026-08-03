@@ -9,7 +9,9 @@ import {
   deleteSkill,
   discoverSkills,
   getSkillSources,
+  isManagedSkillPath,
   mergeDiscoveredSkills,
+  renameSkill,
   updateSkill,
 } from './skills.js';
 import {
@@ -58,6 +60,8 @@ const startSkillsApp = ({ projectRoot }) => {
     createSkill,
     updateSkill,
     deleteSkill,
+    renameSkill,
+    isManagedSkillPath,
     readSkillSupportingFile,
     writeSkillSupportingFile,
     deleteSkillSupportingFile,
@@ -153,5 +157,63 @@ describe('skill-routes directory soft fallback', () => {
     expect(listResponse.status).toBe(200);
     const payload = await listResponse.json();
     expect(payload.skills.map((skill) => skill.name)).toContain('manual-repo-skill');
+  });
+
+  it('marks managed-root skills renamable and cache skills not renamable', async () => {
+    projectRoot = createTempProject();
+    const managedDir = path.join(projectRoot, '.opencode', 'skills', 'managed-list-skill');
+    fs.mkdirSync(managedDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(managedDir, 'SKILL.md'),
+      [
+        '---',
+        'name: managed-list-skill',
+        'description: Managed list skill',
+        '---',
+        '',
+        'Managed body',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const cacheStamp = `oc-skill-routes-${Date.now()}`;
+    const cacheDir = path.join(os.homedir(), '.cache', 'opencode', 'skills', cacheStamp, 'cache-list-skill');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(cacheDir, 'SKILL.md'),
+      [
+        '---',
+        'name: cache-list-skill',
+        'description: Cache list skill',
+        '---',
+        '',
+        'Cache body',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    try {
+      appHandle = startSkillsApp({ projectRoot });
+      const listResponse = await fetch(
+        `${appHandle.baseUrl}/api/config/skills?directory=${encodeURIComponent(projectRoot)}`,
+      );
+      expect(listResponse.status).toBe(200);
+      const payload = await listResponse.json();
+
+      const managed = payload.skills.find((entry) => entry.name === 'managed-list-skill');
+      const cached = payload.skills.find((entry) => entry.name === 'cache-list-skill');
+
+      expect(managed).toBeTruthy();
+      expect(managed.renamable).toBe(true);
+      expect(cached).toBeTruthy();
+      expect(cached.renamable).toBe(false);
+    } finally {
+      fs.rmSync(path.join(os.homedir(), '.cache', 'opencode', 'skills', cacheStamp), {
+        recursive: true,
+        force: true,
+      });
+    }
   });
 });

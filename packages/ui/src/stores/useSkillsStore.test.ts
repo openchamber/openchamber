@@ -98,7 +98,92 @@ describe('useSkillsStore directory resolution', () => {
       source: 'agents',
       description: 'Repository local',
       group: undefined,
+      renamable: false,
     }]);
+  });
+
+  test('loadSkills maps authoritative renamable from the list response', async () => {
+    runtimeFetchImpl = async () => new Response(JSON.stringify({
+      skills: [
+        {
+          name: 'managed-skill',
+          path: `${activeProjectPath}/.opencode/skills/managed-skill/SKILL.md`,
+          scope: 'project',
+          source: 'opencode',
+          renamable: true,
+          sources: { md: { description: 'Managed' } },
+        },
+        {
+          name: 'cache-skill',
+          path: '/home/ubuntu/.cache/opencode/skills/hash/cache-skill/SKILL.md',
+          scope: 'user',
+          source: 'opencode',
+          renamable: false,
+          sources: { md: { description: 'Cache' } },
+        },
+      ],
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    expect(await useSkillsStore.getState().loadSkills()).toBe(true);
+    expect(useSkillsStore.getState().skills).toEqual([
+      {
+        name: 'managed-skill',
+        path: `${activeProjectPath}/.opencode/skills/managed-skill/SKILL.md`,
+        scope: 'project',
+        source: 'opencode',
+        description: 'Managed',
+        group: undefined,
+        renamable: true,
+      },
+      {
+        name: 'cache-skill',
+        path: '/home/ubuntu/.cache/opencode/skills/hash/cache-skill/SKILL.md',
+        scope: 'user',
+        source: 'opencode',
+        description: 'Cache',
+        group: 'hash',
+        renamable: false,
+      },
+    ]);
+  });
+
+  test('renameSkill uses getRequestDirectory query and x-opencode-directory header', async () => {
+    runtimeFetchImpl = async (_url, init) => {
+      if (init?.method === 'PATCH') {
+        return new Response(JSON.stringify({
+          success: true,
+          requiresReload: false,
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify({
+        skills: [{
+          name: 'new-skill',
+          path: `${activeProjectPath}/.opencode/skills/new-skill/SKILL.md`,
+          scope: 'project',
+          source: 'opencode',
+          renamable: true,
+          sources: { md: { description: 'Renamed' } },
+        }],
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    const renamed = await useSkillsStore.getState().renameSkill('old-skill', 'new-skill');
+    expect(renamed).toBe(true);
+
+    const renameCall = runtimeFetchCalls.find((call) => String(call.url).includes('/api/config/skills/old-skill'));
+    expect(renameCall).toBeTruthy();
+    expect(renameCall?.url).toContain(`directory=${encodeURIComponent(activeProjectPath)}`);
+
+    const headers = new Headers(renameCall?.headers);
+    expect(headers.get('content-type')).toBe('application/json');
+    expect(headers.get('x-opencode-directory')).toBe(activeProjectPath);
   });
 
   test('invalidateSkillsLoadCache() with no argument clears the active-project cache key used by loadSkills', async () => {

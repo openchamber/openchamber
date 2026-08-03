@@ -76,6 +76,8 @@ export interface DiscoveredSkill {
   description?: string;
   /** Domain folder parsed from file path, e.g. "automation-ai", "lark-ecosystem" */
   group?: string;
+  /** Authoritative server flag: skill lives under a managed root and can be renamed in place. */
+  renamable?: boolean;
 }
 
 /** Parse the domain group folder from a skill file path.
@@ -99,6 +101,7 @@ interface RawSkillResponse {
   path: string;
   scope?: SkillScope;
   source?: SkillSource;
+  renamable?: boolean;
   sources?: {
     md?: {
       description?: string;
@@ -149,6 +152,7 @@ interface SkillsStore {
   getSkillDetail: (name: string) => Promise<SkillDetail | null>;
   createSkill: (config: SkillConfig) => Promise<boolean>;
   updateSkill: (name: string, config: Partial<SkillConfig>) => Promise<boolean>;
+  renameSkill: (name: string, newName: string) => Promise<boolean>;
   deleteSkill: (name: string) => Promise<boolean>;
   getSkillByName: (name: string) => DiscoveredSkill | undefined;
   
@@ -245,6 +249,7 @@ export const useSkillsStore = create<SkillsStore>()(
                   source: s.source ?? 'opencode',
                   description: s.sources?.md?.description || '',
                   group: parseSkillGroup(s.path),
+                  renamable: s.renamable === true,
                 }));
 
                 set({ skills: configSkills, isLoading: false });
@@ -371,6 +376,53 @@ export const useSkillsStore = create<SkillsStore>()(
             const payload = await response.json().catch(() => null);
             if (!response.ok) {
               const message = payload?.error || 'Failed to update skill';
+              throw new Error(message);
+            }
+
+            const needsReload = payload?.requiresReload ?? false;
+            invalidateSkillsLoadCache(directory);
+            if (needsReload) {
+              requiresReload = true;
+              await refreshSkillsAfterOpenCodeRestart({
+                message: payload?.message,
+                delayMs: payload?.reloadDelayMs,
+              });
+              return true;
+            }
+
+            const loaded = await get().loadSkills();
+            if (loaded) {
+              emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
+            }
+            return loaded;
+          } catch {
+            return false;
+          } finally {
+            if (!requiresReload) {
+              finishConfigUpdate();
+            }
+          }
+        },
+
+        renameSkill: async (name: string, newName: string) => {
+          startConfigUpdate("Renaming skill...");
+          let requiresReload = false;
+          try {
+            const directory = getRequestDirectory();
+            const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+
+            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(directory ? { 'x-opencode-directory': directory } : {}),
+              },
+              body: JSON.stringify({ renameTo: newName }),
+            });
+
+            const payload = await response.json().catch(() => null);
+            if (!response.ok) {
+              const message = payload?.error || 'Failed to rename skill';
               throw new Error(message);
             }
 

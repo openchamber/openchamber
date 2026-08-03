@@ -21,6 +21,8 @@ export const registerSkillRoutes = (app, dependencies) => {
     createSkill,
     updateSkill,
     deleteSkill,
+    renameSkill,
+    isManagedSkillPath,
     readSkillSupportingFile,
     writeSkillSupportingFile,
     deleteSkillSupportingFile,
@@ -236,9 +238,15 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       const enrichedSkills = skills.map((skill) => {
         const sources = getSkillSources(skill.name, directory, skill);
+        const skillPath = typeof skill.path === 'string' ? skill.path : null;
         return {
           ...skill,
-          sources
+          sources,
+          renamable: Boolean(
+            skillPath
+            && skillPath !== '<built-in>'
+            && isManagedSkillPath(skillPath, directory)
+          ),
         };
       });
 
@@ -633,6 +641,22 @@ export const registerSkillRoutes = (app, dependencies) => {
       const { directory, error } = await resolveSkillsDirectory(req);
       if (error) {
         return res.status(400).json({ error });
+      }
+
+      if (typeof updates?.renameTo === 'string') {
+        const newName = updates.renameTo.trim();
+        console.log(`[Server] Renaming skill: ${skillName} -> ${newName}`);
+        console.log('[Server] Working directory:', directory);
+        renameSkill(skillName, newName, directory);
+        await refreshOpenCodeAfterConfigChange('skill rename');
+
+        return res.json({
+          success: true,
+          name: newName,
+          requiresReload: true,
+          message: `Skill renamed to ${newName} successfully. Reloading interface…`,
+          reloadDelayMs: clientReloadDelayMs,
+        });
       }
 
       console.log(`[Server] Updating skill: ${skillName}`);
