@@ -36,9 +36,16 @@ const createDescriptor = (incarnation = createIncarnation()) => ({
   credentialFingerprint: randomBytes(32).toString('base64url'),
 });
 
+const fixtureProcessIdentity = {
+  processStartTicks: '123456789',
+  launch: { commandLine: 'node credential-store.test.js', cwd: '/tmp/credential-store-test' },
+  owner: 'credential-store-test',
+};
+
 const createStore = (options = {}) => createManagedOpenCodeCredentialStore({
   username: 'alice',
   aclInspector: () => ({ entries: [{ principal: 'alice', rights: ['F'] }] }),
+  processIdentity: () => fixtureProcessIdentity,
   ...options,
 });
 
