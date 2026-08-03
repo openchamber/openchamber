@@ -89,6 +89,51 @@ const listen = (server, host = '127.0.0.1') => new Promise((resolve, reject) => 
   });
 });
 
+const IPV6_LOOPBACK_UNAVAILABLE_CODES = new Set([
+  'EAFNOSUPPORT',
+  'EADDRNOTAVAIL',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+]);
+
+const probeIpv6Loopback = (port) => new Promise((resolve, reject) => {
+  const socket = net.connect({ host: '::1', port });
+  const finish = (result) => {
+    socket.destroy();
+    resolve(result);
+  };
+  socket.once('connect', () => finish({ available: true }));
+  socket.once('error', (error) => {
+    if (IPV6_LOOPBACK_UNAVAILABLE_CODES.has(error?.code)) {
+      finish({ available: false });
+      return;
+    }
+    socket.destroy();
+    reject(error);
+  });
+});
+
+const listenIpv6OrSkip = async (server, testContext) => {
+  let port;
+  try {
+    port = await listen(server, '::1');
+  } catch (error) {
+    if (IPV6_LOOPBACK_UNAVAILABLE_CODES.has(error?.code)) {
+      testContext.skip();
+      return null;
+    }
+    throw error;
+  }
+
+  const probe = await probeIpv6Loopback(port);
+  if (!probe.available) {
+    testContext.skip();
+    return null;
+  }
+  return port;
+};
+
 const close = (server) => new Promise((resolve) => {
   if (!server.listening) {
     resolve();
@@ -131,16 +176,8 @@ describe('connection-bound managed health', () => {
     });
     servers.push(server);
 
-    let port;
-    try {
-      port = await listen(server, '::1');
-    } catch (error) {
-      if (['EAFNOSUPPORT', 'EADDRNOTAVAIL'].includes(error?.code)) {
-        testContext.skip();
-        return;
-      }
-      throw error;
-    }
+    const port = await listenIpv6OrSkip(server, testContext);
+    if (port === null) return;
     const ipv6Record = { ...record, port };
     const connectSpy = vi.spyOn(net, 'connect');
     let result;
@@ -184,16 +221,8 @@ describe('connection-bound managed health', () => {
     });
     servers.push(server);
 
-    let port;
-    try {
-      port = await listen(server, '::1');
-    } catch (error) {
-      if (['EAFNOSUPPORT', 'EADDRNOTAVAIL'].includes(error?.code)) {
-        testContext.skip();
-        return;
-      }
-      throw error;
-    }
+    const port = await listenIpv6OrSkip(server, testContext);
+    if (port === null) return;
     const ipv6Record = { ...record, port };
     const previousTlsVerification = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';

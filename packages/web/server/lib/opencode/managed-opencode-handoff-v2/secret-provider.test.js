@@ -26,6 +26,10 @@ const createIncarnation = () => randomBytes(32).toString('base64url');
 const createProvider = (root, options = {}) =>
   createManagedOpenCodeHandoffV2SecretProvider({
     rootDir: root,
+    // General provider tests exercise secret lifecycle semantics, not the
+    // platform ACL implementation. Windows ACL coverage is explicit below
+    // and supplies its own mocked ACL seam.
+    platform: 'linux',
     username: 'alice',
     aclInspector: () => ({ entries: [{ principal: 'alice', rights: ['F'] }] }),
     ...options,
