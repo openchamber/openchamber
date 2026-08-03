@@ -4,8 +4,8 @@ import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
+import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
-import { isIPadApp } from '@/lib/platform';
 import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
 import { cn } from '@/lib/utils';
@@ -18,7 +18,7 @@ import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionMessages } from '@/sync/sync-context';
 
-const IPAD_METADATA_POPOVER_WIDTH = 380;
+const TABLET_METADATA_POPOVER_WIDTH = 380;
 
 const getNumericLimit = (limit: unknown, key: 'context' | 'output'): number | undefined => {
   if (!limit || typeof limit !== 'object') return undefined;
@@ -141,18 +141,18 @@ const SessionMetadataOverlay: React.FC<{
   const panelRef = React.useRef<HTMLDivElement>(null);
   const [shouldRender, setShouldRender] = React.useState(open);
   const [isExiting, setIsExiting] = React.useState(false);
-  // iPad: a phone-width sheet stretched across the whole chat column looks
+  // Tablet: a phone-width sheet stretched across the whole chat column looks
   // broken — render a popover anchored to the metadata button instead.
-  const isIPad = React.useMemo(() => isIPadApp(), []);
+  const { enabled: isTabletLayout } = useTabletLayout();
   const wrapperRef = React.useRef<HTMLDivElement>(null);
-  const [ipadAnchorLeft, setIpadAnchorLeft] = React.useState<number | null>(null);
+  const [anchorLeft, setIpadAnchorLeft] = React.useState<number | null>(null);
 
   // The shell has transformed ancestors, so the fixed wrapper's containing
   // block is the chat column, NOT the viewport. Anchor the popover in the
   // wrapper's own coordinate space — viewport-based lefts would double-count
   // the sidebar offset.
   React.useLayoutEffect(() => {
-    if (!open || !isIPad || !shouldRender) return;
+    if (!open || !isTabletLayout || !shouldRender) return;
     const compute = () => {
       const anchorRect = anchorRef.current?.getBoundingClientRect();
       const wrapperRect = wrapperRef.current?.getBoundingClientRect();
@@ -163,7 +163,7 @@ const SessionMetadataOverlay: React.FC<{
       const relativeLeft = anchorRect.left - wrapperRect.left;
       const left = Math.min(
         Math.max(relativeLeft, 8),
-        Math.max(8, wrapperRect.width - IPAD_METADATA_POPOVER_WIDTH - 8),
+        Math.max(8, wrapperRect.width - TABLET_METADATA_POPOVER_WIDTH - 8),
       );
       setIpadAnchorLeft(left);
     };
@@ -175,9 +175,9 @@ const SessionMetadataOverlay: React.FC<{
     const observer = new ResizeObserver(compute);
     observer.observe(wrapper);
     return () => observer.disconnect();
-  }, [anchorRef, isIPad, open, shouldRender]);
+  }, [anchorRef, isTabletLayout, open, shouldRender]);
 
-  const ipadPopover = isIPad && ipadAnchorLeft !== null;
+  const isPopover = isTabletLayout && anchorLeft !== null;
 
   React.useEffect(() => {
     if (open) {
@@ -235,17 +235,17 @@ const SessionMetadataOverlay: React.FC<{
         aria-label={t('mobile.header.openMetadataAria')}
         className={cn(
           'overflow-y-auto overscroll-contain rounded-[20px] border border-border/70 bg-[var(--surface-elevated)] p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
-          ipadPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
+          isPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
           isExiting ? 'pointer-events-none' : 'pointer-events-auto',
         )}
         style={{
           animation: `${isExiting ? 'session-metadata-out' : 'session-metadata-in'} ${isExiting ? 140 : 170}ms cubic-bezier(0.32, 0.72, 0, 1) forwards`,
           maxHeight: 'min(72dvh, calc(100dvh - var(--oc-safe-area-top, 0px) - var(--oc-header-height, 56px) - 1rem))',
-          ...(ipadPopover
+          ...(isPopover
             ? {
                 top: 8,
-                left: ipadAnchorLeft ?? 8,
-                width: `min(${IPAD_METADATA_POPOVER_WIDTH}px, calc(100% - 16px))`,
+                left: anchorLeft ?? 8,
+                width: `min(${TABLET_METADATA_POPOVER_WIDTH}px, calc(100% - 16px))`,
               }
             : null),
         }}

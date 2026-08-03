@@ -619,10 +619,14 @@
    the keyboard classes remain as fallbacks for keyboard-up states that do not
    go through the pill (and for mobile browsers). Instant show/hide (no squish
    animation); the title's own keyboard compensation (.oc-draft-center below)
-   carries the smooth motion. */
-:root.oc-composer-expanded .oc-draft-starters,
-:root.oc-capacitor-app.oc-keyboard-open .oc-draft-starters,
-:root.oc-browser-keyboard-open .oc-draft-starters {
+   carries the smooth motion.
+
+   A tablet has room to keep them: `oc-keep-draft-starters` is set by the shell
+   (portrait, or any orientation with a hardware keyboard — see MobileApp) and
+   opts the whole draft screen out of the hiding below. */
+:root:not(.oc-keep-draft-starters).oc-composer-expanded .oc-draft-starters,
+:root:not(.oc-keep-draft-starters).oc-capacitor-app.oc-keyboard-open .oc-draft-starters,
+:root:not(.oc-keep-draft-starters).oc-browser-keyboard-open .oc-draft-starters {
   display: none;
 }
 

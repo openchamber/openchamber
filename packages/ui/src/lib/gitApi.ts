@@ -135,6 +135,15 @@ export async function getGitFileDiff(
   return gitHttp.getGitFileDiff(directory, options);
 }
 
+export async function getGitRangeDiff(
+  directory: string,
+  options: import('./api/types').GetGitRangeDiffOptions
+): Promise<import('./api/types').GitDiffResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitRangeDiff) return runtime.getGitRangeDiff(directory, options);
+  return gitHttp.getGitRangeDiff(directory, options);
+}
+
 export async function revertGitFile(
   directory: string,
   filePath: string,

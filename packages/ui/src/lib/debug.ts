@@ -1,12 +1,19 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionUIStore, getRememberedSessionDirectory } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { copyTextToClipboard as copyPlainTextToClipboard } from '@/lib/clipboard';
-import { getSyncSessions, getSyncMessages, getSyncParts } from '@/sync/sync-refs';
+import { getSyncSessions, getSyncMessages, getSyncParts, getAllSyncSessions, getSyncSessionDirectory } from '@/sync/sync-refs';
+import {
+  describeSessionDirectorySources,
+  resolveSessionDirectoryFromSources,
+} from '@/sync/session-directory-resolution';
+import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
+import { getRecentSendFailures } from '@/sync/send-failure-log';
+import { getAttachedSessionDirectory } from '@/sync/session-worktree-contract';
 import { useStreamingStore } from '@/sync/streaming';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -375,9 +382,104 @@ export const debugUtils = {
       openchamber: {
         settingsInfo,
       },
+      // Empty is a meaningful answer here: it means no prompt was rejected in
+      // this session, so a "my message disappeared" report is not a rejected
+      // send and needs a different explanation.
+      recentSendFailures: getRecentSendFailures(),
+      currentSessionDirectoryResolution: sessionState.currentSessionId
+        ? this.diagnoseSessionDirectory(sessionState.currentSessionId)
+        : null,
     };
 
     console.log('[DEBUG] App status snapshot:', report);
+    return report;
+  },
+
+  /**
+   * Prompt sends that were rejected and rolled back in this app session.
+   * Newest first; empty means no send was rejected.
+   */
+  getRecentSendFailures() {
+    const failures = getRecentSendFailures();
+    if (failures.length === 0) {
+      console.log('[OK] No prompt sends were rejected in this session.');
+    } else {
+      console.warn(`[ALERT] ${failures.length} rejected prompt send(s):`);
+      console.table(failures);
+    }
+    return failures;
+  },
+
+  /**
+   * Report how a session's directory is resolved, from every source, in
+   * precedence order. A send is routed by the winning value, so a disagreement
+   * here explains a prompt that vanishes without an error: it was posted
+   * against a directory that does not own the session.
+   */
+  diagnoseSessionDirectory(sessionId?: string) {
+    const sessionState = useSessionUIStore.getState();
+    const targetSessionId = sessionId ?? sessionState.currentSessionId;
+
+    if (!targetSessionId) {
+      console.log('[ERROR] No session selected and no session id passed');
+      return null;
+    }
+
+    const attachment = getAttachedSessionDirectory(
+      useSessionWorktreeStore.getState().getAttachment(targetSessionId),
+    );
+    const worktreeMetadata = sessionState.worktreeMetadata.get(targetSessionId)?.path ?? null;
+    const owningStoreDirectory = getSyncSessionDirectory(targetSessionId);
+    const sessionRecord = getAllSyncSessions().find((session) => session.id === targetSessionId);
+    const recordDirectory = (sessionRecord as { directory?: string | null } | undefined)?.directory ?? null;
+    const selected = targetSessionId === sessionState.currentSessionId
+      ? sessionState.currentSessionDirectory
+      : null;
+
+    const remembered = getRememberedSessionDirectory(targetSessionId);
+
+    const sources = {
+      attachment,
+      worktreeMetadata,
+      authoritative: owningStoreDirectory ?? recordDirectory,
+      selected,
+      remembered: remembered.runtime,
+    };
+
+    const resolution = resolveSessionDirectoryFromSources(sources);
+    const routedDirectory = sessionState.getDirectoryForSession(targetSessionId);
+
+    const report = {
+      sessionId: targetSessionId,
+      isCurrentSession: targetSessionId === sessionState.currentSessionId,
+      routedDirectory,
+      resolvedFrom: resolution.source,
+      conflict: resolution.conflict,
+      sources: describeSessionDirectorySources(sources),
+      details: {
+        owningChildStore: owningStoreDirectory,
+        sessionRecordDirectory: recordDirectory,
+        sessionIndexed: Boolean(sessionRecord),
+        currentSessionDirectory: sessionState.currentSessionDirectory,
+        rememberedForRuntime: remembered.runtime,
+        persistedAcrossRestarts: remembered.persisted,
+        activeDirectory: useDirectoryStore.getState().currentDirectory ?? null,
+        opencodeClientDirectory: opencodeClient.getDirectory() ?? null,
+      },
+    };
+
+    console.log('[DEBUG] Session directory resolution:', report);
+    if (resolution.conflict) {
+      console.warn(
+        `[ALERT] Directory sources disagree: using "${resolution.directory}" (${resolution.source}) `
+        + `while "${resolution.conflict.directory}" came from ${resolution.conflict.source}.`,
+      );
+    } else if (!routedDirectory) {
+      console.warn('[ALERT] No directory resolved for this session — sends fall back to the active directory.');
+    } else {
+      console.log('[OK] All known sources agree on the session directory.');
+    }
+
     return report;
   },
 
@@ -697,6 +799,8 @@ if (typeof window !== 'undefined') {
     console.log('  __opencodeDebug.getAllMessages(truncate?) - List all messages (truncate=true for short preview)');
     console.log('  __opencodeDebug.truncateMessages(messages) - Truncate long fields in messages array');
     console.log('  __opencodeDebug.getAppStatus() - Show app status snapshot');
+    console.log('  __opencodeDebug.diagnoseSessionDirectory(sessionId?) - Show how the session directory is resolved');
+    console.log('  __opencodeDebug.getRecentSendFailures() - List prompt sends that were rejected and rolled back');
     console.log('  __opencodeDebug.checkLastMessage() - Check if last message is problematic');
     console.log('  __opencodeDebug.findEmptyMessages() - Find all empty assistant messages');
     console.log('  __opencodeDebug.showRetryHelp() - Show instructions for handling empty responses');

@@ -85,10 +85,18 @@ const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void }> = ({ onOpenM
   );
 };
 
-/** Full-width right drawer with the phone workspace surfaces as tabs
-    (Changes / Files / Terminal / Notes / MCP). Slides in from the right edge;
-    closes via the header X, Escape (unless the terminal tab owns the keys),
-    or the Android back button (handled by MobileShell). */
+/** The workspace surfaces as tabs (Changes / Files / Terminal / Notes / MCP).
+
+    Two hosts, same content and same state:
+     - `drawer` (default) covers the app and slides in from the right edge —
+       the phone, and a tablet in portrait where a side panel would leave no
+       usable chat column;
+     - `panel` renders inline so the caller can size it as a real sidebar
+       beside the chat (tablet, landscape). The caller owns the width and the
+       open/close animation there; this component only fills it.
+
+    Closes via the header X, Escape (unless the terminal tab owns the keys), or
+    the Android back button (handled by MobileShell). */
 export const MobileWorkspaceDrawer: React.FC<{
   open: boolean;
   onClose: () => void;
@@ -100,7 +108,8 @@ export const MobileWorkspaceDrawer: React.FC<{
   onOpenPlan: (plan: { path: string; title: string }) => void;
   /** MCP tab: jump to the MCP settings page pre-seeded with a new server draft. */
   onOpenMcpSettings: () => void;
-}> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, onOpenPlan, onOpenMcpSettings }) => {
+  variant?: 'drawer' | 'panel';
+}> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, onOpenPlan, onOpenMcpSettings, variant = 'drawer' }) => {
   const { t } = useI18n();
   const rootRef = React.useRef<HTMLElement | null>(null);
   const [entered, setEntered] = React.useState(false);
@@ -150,20 +159,22 @@ export const MobileWorkspaceDrawer: React.FC<{
 
   React.useEffect(() => {
     if (!open) return;
+    // Only the full-cover drawer owns the page scroll; the inline panel sits
+    // inside the shell and must leave the chat beside it scrollable.
     const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    if (variant === 'drawer') document.body.style.overflow = 'hidden';
     const handleKeyDown = (event: KeyboardEvent) => {
       // The terminal owns Escape (it goes to the PTY) — don't hijack it.
       if (event.key === 'Escape' && tabRef.current !== 'terminal') onCloseRef.current();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      if (variant === 'drawer') document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open]);
+  }, [open, variant]);
 
-  if (!rootRef.current) return null;
+  if (variant === 'drawer' && !rootRef.current) return null;
 
   const tabItems: SortableTabsStripItem[] = [
     { id: 'changes', label: t('mobile.menu.changes'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
@@ -173,23 +184,8 @@ export const MobileWorkspaceDrawer: React.FC<{
     { id: 'mcp', label: t('mobile.menu.mcp'), icon: <McpIcon className="h-3.5 w-3.5" /> },
   ];
 
-  return createPortal(
-    <section
-      role="dialog"
-      aria-modal="true"
-      aria-label={t('mobile.header.openWorkspaceAria')}
-      aria-hidden={!open}
-      className="oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
-      style={{
-        paddingTop: 'var(--oc-safe-area-top, 0px)',
-        // Settled state drops the transform entirely so the drawer isn't kept
-        // on a compositing layer (iOS clips those to the safe-area viewport).
-        transform: entered ? 'none' : 'translateX(100%)',
-        transition: `transform ${ENTER_DURATION_MS}ms ${DRAWER_EASING}`,
-        visibility: visible ? 'visible' : 'hidden',
-        pointerEvents: open ? 'auto' : 'none',
-      }}
-    >
+  const body = (
+    <>
       <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3">
         <div className="flex h-9 min-w-0 flex-1 items-center">
           {/* Mounted only while shown; nonCompositedIndicator keeps the active
@@ -268,7 +264,36 @@ export const MobileWorkspaceDrawer: React.FC<{
           </div>
         ) : null}
       </div>
+    </>
+  );
+
+  if (variant === 'panel') {
+    // The caller animates the width; the content itself is plain flow so it
+    // never gets its own compositing layer (iOS clips those to the safe-area
+    // viewport, which is exactly what the drawer's settled `transform: none`
+    // avoids on the other host).
+    return <div className="flex h-full min-h-0 flex-col bg-background text-foreground">{body}</div>;
+  }
+
+  return createPortal(
+    <section
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('mobile.header.openWorkspaceAria')}
+      aria-hidden={!open}
+      className="oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
+      style={{
+        paddingTop: 'var(--oc-safe-area-top, 0px)',
+        // Settled state drops the transform entirely so the drawer isn't kept
+        // on a compositing layer (iOS clips those to the safe-area viewport).
+        transform: entered ? 'none' : 'translateX(100%)',
+        transition: `transform ${ENTER_DURATION_MS}ms ${DRAWER_EASING}`,
+        visibility: visible ? 'visible' : 'hidden',
+        pointerEvents: open ? 'auto' : 'none',
+      }}
+    >
+      {body}
     </section>,
-    rootRef.current,
+    rootRef.current as HTMLElement,
   );
 };

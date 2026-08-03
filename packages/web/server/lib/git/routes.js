@@ -397,6 +397,37 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.get('/api/git/range-diff', async (req, res) => {
+    const { getRangeDiff } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory || typeof directory !== 'string') {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const base = req.query.base;
+      const head = req.query.head;
+      if (!base || typeof base !== 'string' || !head || typeof head !== 'string') {
+        return res.status(400).json({ error: 'base and head parameters are required' });
+      }
+
+      const pathParam = typeof req.query.path === 'string' && req.query.path ? req.query.path : undefined;
+      const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
+
+      const diff = await getRangeDiff(directory, {
+        base,
+        head,
+        path: pathParam,
+        contextLines: Number.isFinite(context) ? context : 3,
+      });
+
+      res.json({ diff });
+    } catch (error) {
+      console.error('Failed to get git range diff:', error);
+      res.status(500).json({ error: error.message || 'Failed to get git range diff' });
+    }
+  });
+
   app.post('/api/git/revert', async (req, res) => {
     const { revertFile } = await getGitLibraries();
     try {

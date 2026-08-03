@@ -1,0 +1,40 @@
+---
+title: Fehlerbehebung
+description: Häufige Einrichtungs- und Laufzeitprobleme mit schnellen Lösungen.
+---
+
+# Fehlerbehebung
+
+Hakt es irgendwo? Suchen Sie unten das Symptom und probieren Sie die Lösung.
+
+## OpenChamber-Befehl beendet sich oder startet nicht
+
+- bestätigen Sie Node.js `>=22`
+- führen Sie `openchamber --version` aus
+- installieren Sie die neueste CLI bei Bedarf neu
+
+## Web-UI ist nicht erreichbar
+
+- prüfen Sie die Server-Logs mit `openchamber logs`
+- verifizieren Sie den aktiven Port (standardmäßig `3000`)
+- öffnen Sie `http://localhost:3000` zuerst direkt, bevor Sie Tunnel-Links testen
+
+## Remote-/Tunnel-Link funktioniert nicht
+
+- führen Sie `openchamber tunnel status --all` aus
+- starten Sie den Tunnel von derselben Instanz / demselben Port neu
+- erzeugen Sie den Connect-Link neu, wenn das vorherige Token bereits verwendet wurde
+
+Die vollständige Einrichtung steht unter [Tunnel](/tunnels/) und [Reverse Proxy](/reverse-proxy/), falls Sie einen nutzen.
+
+## VS-Code-Erweiterung verbindet sich nicht
+
+- bestätigen Sie, dass der OpenChamber-Server läuft
+- prüfen Sie, ob die Erweiterung aktualisiert ist
+- laden Sie das VS-Code-Fenster neu und versuchen Sie die Verbindung erneut
+
+## Verwandt
+
+- [Schnellstart](/quickstart/)
+- [Tunnel](/tunnels/)
+- [Reverse Proxy](/reverse-proxy/)

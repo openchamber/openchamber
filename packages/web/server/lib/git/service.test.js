@@ -19,6 +19,7 @@ import {
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
+  setLocalIdentity,
   stageFiles,
   unstageFiles,
   applyHunk,
@@ -125,6 +126,23 @@ describe('git index path validation', () => {
   it('rejects unstage paths outside the repository before invoking git', async () => {
     await expect(unstageFiles('/repo', ['../secret.txt'])).rejects.toThrow(
       'Path is outside repository: ../secret.txt'
+    );
+  });
+});
+
+describe.runIf(canRunGit())('setLocalIdentity', () => {
+  it('configures the local SSH command with the targeted simple-git opt-in', async () => {
+    const { tmpDir } = await createTempRepo();
+
+    await setLocalIdentity(tmpDir, {
+      userName: 'SSH User',
+      userEmail: 'ssh@example.com',
+      authType: 'ssh',
+      sshKey: '/tmp/test key',
+    });
+
+    expect(runGit(tmpDir, ['config', '--local', '--get', 'core.sshCommand']).trim()).toBe(
+      "ssh -i '/tmp/test key' -o IdentitiesOnly=yes"
     );
   });
 });

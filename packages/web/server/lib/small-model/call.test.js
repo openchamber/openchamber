@@ -635,3 +635,156 @@ describe('callSmallModel — GitHub Copilot endpoint routing', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+// Structured output has no single wire format: each provider family needs its
+// own request shape and its own extraction, and one family cannot do it at all.
+// These lock the per-format translation so a provider is never silently sent a
+// schema it will ignore.
+describe('callSmallModel — structured output', () => {
+  let fetchMock;
+  let originalFetch;
+
+  const SCHEMA = {
+    type: 'object',
+    properties: { title: { type: 'string' } },
+    required: ['title'],
+    additionalProperties: false,
+  };
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    readConfig.mockReset();
+    readConfig.mockReturnValue({});
+    readConfigLayers.mockReset();
+    readConfigLayers.mockReturnValue({ mergedConfig: {} });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('sends a json_schema response_format on OpenAI-compatible chat', async () => {
+    fetchMock.mockResolvedValue(ok('{"title":"ok"}'));
+
+    const text = await callSmallModel({
+      auth: { openai: { type: 'api', key: 'sk-test' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'openai',
+      modelID: 'gpt-5.4-mini',
+      prompt: 'summarize',
+      responseSchema: SCHEMA,
+    });
+
+    expect(text).toBe('{"title":"ok"}');
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: { name: 'response', strict: true, schema: SCHEMA },
+    });
+  });
+
+  it('omits response_format entirely when no schema is requested', async () => {
+    fetchMock.mockResolvedValue(ok('plain text'));
+
+    await callSmallModel({
+      auth: { openai: { type: 'api', key: 'sk-test' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'openai',
+      modelID: 'gpt-5.4-mini',
+      prompt: 'summarize',
+    });
+
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.response_format).toBeUndefined();
+  });
+
+  it('forces a single tool call on the Anthropic messages API and returns its input', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        content: [
+          { type: 'text', text: 'thinking out loud' },
+          { type: 'tool_use', name: 'response', input: { title: 'ok' } },
+        ],
+      }),
+    });
+
+    const text = await callSmallModel({
+      auth: { anthropic: { type: 'api', key: 'sk-ant' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'anthropic',
+      modelID: 'claude-haiku-4-5',
+      prompt: 'summarize',
+      responseSchema: SCHEMA,
+    });
+
+    expect(JSON.parse(text)).toEqual({ title: 'ok' });
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.tool_choice).toEqual({ type: 'tool', name: 'response' });
+    expect(body.tools[0].input_schema).toEqual(SCHEMA);
+  });
+
+  it('fails loudly when Anthropic answers with prose instead of the tool call', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ content: [{ type: 'text', text: 'here you go' }] }),
+    });
+
+    await expect(callSmallModel({
+      auth: { anthropic: { type: 'api', key: 'sk-ant' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'anthropic',
+      modelID: 'claude-haiku-4-5',
+      prompt: 'summarize',
+      responseSchema: SCHEMA,
+    })).rejects.toThrow('returned no structured output');
+  });
+
+  it('strips JSON Schema keywords Google rejects', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '{"title":"ok"}' }] } }] }),
+    });
+
+    await callSmallModel({
+      auth: { google: { type: 'api', key: 'google-key' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'google',
+      modelID: 'gemini-2.5-flash',
+      prompt: 'summarize',
+      responseSchema: { ...SCHEMA, $schema: 'https://json-schema.org/draft/2020-12/schema' },
+    });
+
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.generationConfig.responseMimeType).toBe('application/json');
+    expect(body.generationConfig.responseSchema).toEqual({
+      type: 'object',
+      properties: { title: { type: 'string' } },
+      required: ['title'],
+    });
+  });
+
+  it('refuses a schema on the ChatGPT-plan backend instead of returning prose', async () => {
+    await expect(callSmallModel({
+      auth: { openai: { type: 'oauth', access: 'token', refresh: 'refresh' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'openai',
+      modelID: 'gpt-5.4-mini',
+      prompt: 'summarize',
+      responseSchema: SCHEMA,
+    })).rejects.toThrow('does not support structured output');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

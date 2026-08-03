@@ -4,17 +4,25 @@ export const IPAD_LEFT_SIDEBAR_WIDTH = 320;
 export const IPAD_RIGHT_SIDEBAR_WIDTH = 380;
 const IPAD_SIDEBAR_MIN_WIDTH = 280;
 const IPAD_SIDEBAR_MAX_WIDTH = 560;
+/** The workspace panel holds diffs, a file editor and a terminal, so it earns
+    far more room than the sessions list ever needs. */
+export const IPAD_WORKSPACE_SIDEBAR_MAX_WIDTH = 900;
 
 /** Drag-resize for the iPad sidebars: same live-width mechanics as the desktop
     Sidebar (imperative styles during the drag, committed to state at the end),
     but with a finger-sized grab strip instead of a 3px hover handle. */
-export function useIpadSidebarResize(side: 'left' | 'right', storageKey: string, defaultWidth: number) {
+export function useIpadSidebarResize(
+  side: 'left' | 'right',
+  storageKey: string,
+  defaultWidth: number,
+  maxWidth: number = IPAD_SIDEBAR_MAX_WIDTH,
+) {
   const asideRef = React.useRef<HTMLElement | null>(null);
   const [width, setWidth] = React.useState(() => {
     if (typeof window === 'undefined') return defaultWidth;
     const stored = Number.parseInt(window.localStorage.getItem(storageKey) ?? '', 10);
     if (!Number.isFinite(stored)) return defaultWidth;
-    return Math.min(IPAD_SIDEBAR_MAX_WIDTH, Math.max(IPAD_SIDEBAR_MIN_WIDTH, stored));
+    return Math.min(maxWidth, Math.max(IPAD_SIDEBAR_MIN_WIDTH, stored));
   });
   const [isResizing, setIsResizing] = React.useState(false);
   const startXRef = React.useRef(0);
@@ -23,8 +31,8 @@ export function useIpadSidebarResize(side: 'left' | 'right', storageKey: string,
   const pointerIdRef = React.useRef<number | null>(null);
 
   const clampWidth = React.useCallback((value: number) => (
-    Math.min(IPAD_SIDEBAR_MAX_WIDTH, Math.max(IPAD_SIDEBAR_MIN_WIDTH, Math.round(value)))
-  ), []);
+    Math.min(maxWidth, Math.max(IPAD_SIDEBAR_MIN_WIDTH, Math.round(value)))
+  ), [maxWidth]);
 
   const applyLiveWidth = React.useCallback((nextWidth: number) => {
     const aside = asideRef.current;

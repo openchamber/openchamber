@@ -44,7 +44,7 @@
     "qrcode-terminal": "^0.12.0",
     "reflect-metadata": "^0.2.2",
     "sherpa-onnx-node": "1.12.28",
-    "simple-git": "^3.28.0",
+    "simple-git": "^3.36.0",
     "web-push": "^3.6.7",
     "ws": "^8.18.3",
     "yaml": "^2.8.1"

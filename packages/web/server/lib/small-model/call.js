@@ -25,7 +25,44 @@ const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const httpError = async (response, provider) => {
   const body = await response.text().catch(() => '');
   const snippet = body ? `: ${body.slice(0, 300)}` : '';
-  return new Error(`${provider} request failed with ${response.status}${snippet}`);
+  // Callers need the status to tell "this provider rejected the request shape"
+  // (retryable with a different shape) from "this provider is down".
+  return Object.assign(new Error(`${provider} request failed with ${response.status}${snippet}`), {
+    status: response.status,
+    provider,
+  });
+};
+
+// Callers own two independent reasons to stop: their own abort signal (user
+// navigated away, request cancelled) and a per-call deadline. Long-running
+// callers such as the diff walkthrough need a deadline well past the default.
+const requestSignal = (timeoutMs, signal) => {
+  const deadline = AbortSignal.timeout(Number(timeoutMs) > 0 ? Number(timeoutMs) : REQUEST_TIMEOUT_MS);
+  return signal ? AbortSignal.any([deadline, signal]) : deadline;
+};
+
+const STRUCTURED_OUTPUT_NAME = 'response';
+
+// Google's schema dialect is OpenAPI-flavored and rejects JSON Schema keywords
+// it does not know, so unsupported keys are dropped rather than passed through.
+const GOOGLE_UNSUPPORTED_SCHEMA_KEYS = new Set([
+  '$schema',
+  'additionalProperties',
+  'definitions',
+  '$defs',
+  '$ref',
+  'strict',
+]);
+
+const toGoogleSchema = (schema) => {
+  if (Array.isArray(schema)) return schema.map(toGoogleSchema);
+  if (!schema || typeof schema !== 'object') return schema;
+  const result = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (GOOGLE_UNSUPPORTED_SCHEMA_KEYS.has(key)) continue;
+    result[key] = toGoogleSchema(value);
+  }
+  return result;
 };
 
 // ---------------------------------------------------------------------------
@@ -106,7 +143,7 @@ const ensureFreshOpenaiOauth = async (entry) => {
 // Wire formats
 // ---------------------------------------------------------------------------
 
-const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, extraBody }) => {
+const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, extraBody, responseSchema, timeoutMs, signal }) => {
   const trimmedBase = baseURL.replace(/\/+$/, '');
   console.log('[small-model:diagnostic] request', {
     provider: providerLabel,
@@ -132,9 +169,17 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
       ],
       max_tokens: maxOutputTokens,
       stream: false,
+      ...(responseSchema
+        ? {
+          response_format: {
+            type: 'json_schema',
+            json_schema: { name: STRUCTURED_OUTPUT_NAME, strict: true, schema: responseSchema },
+          },
+        }
+        : {}),
       ...(extraBody || {}),
     }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: requestSignal(timeoutMs, signal),
   });
   console.log('[small-model:diagnostic] response', {
     provider: providerLabel,
@@ -171,11 +216,16 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
       .map((part) => (typeof part?.text === 'string' ? part.text : ''))
       .join('');
   }
-  if (!text.trim() && typeof message?.reasoning_content === 'string' && message.reasoning_content.trim()) {
-    const finishReason = payload?.choices?.[0]?.finish_reason;
-    throw new Error(
-      `${providerLabel} spent the output budget on reasoning and returned no answer`
-      + (finishReason ? ` (finish_reason: ${finishReason})` : ''),
+  const finishReason = payload?.choices?.[0]?.finish_reason;
+  if (!text.trim() && (finishReason === 'length' || (typeof message?.reasoning_content === 'string' && message.reasoning_content.trim()))) {
+    // The model produced only reasoning, or was cut off before answering. This
+    // is a budget problem, not a transport problem, and callers can act on it.
+    throw Object.assign(
+      new Error(
+        `${providerLabel} spent the output budget on reasoning and returned no answer`
+        + (finishReason ? ` (finish_reason: ${finishReason})` : ''),
+      ),
+      { code: 'output-exhausted', provider: providerLabel },
     );
   }
   if (!text.trim()) {
@@ -184,7 +234,7 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
   return text;
 };
 
-const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel }) => {
+const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, maxOutputTokens, providerLabel, responseSchema, timeoutMs, signal }) => {
   const trimmedBase = baseURL.replace(/\/+$/, '');
   const response = await fetch(`${trimmedBase}/responses`, {
     method: 'POST',
@@ -201,10 +251,22 @@ const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, 
         content: [{ type: 'input_text', text: prompt }],
       }],
       max_output_tokens: maxOutputTokens,
+      ...(responseSchema
+        ? {
+          text: {
+            format: {
+              type: 'json_schema',
+              name: STRUCTURED_OUTPUT_NAME,
+              strict: true,
+              schema: responseSchema,
+            },
+          },
+        }
+        : {}),
       stream: false,
       store: false,
     }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: requestSignal(timeoutMs, signal),
   });
   if (!response.ok) {
     throw await httpError(response, providerLabel);
@@ -224,7 +286,7 @@ const callOpenaiResponses = async ({ baseURL, headers, modelID, prompt, system, 
   return text;
 };
 
-const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTokens, providerLabel }) => {
+const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTokens, providerLabel, responseSchema, timeoutMs, signal }) => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -237,13 +299,36 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
       max_tokens: maxOutputTokens,
       ...(system ? { system } : {}),
       messages: [{ role: 'user', content: prompt }],
+      // The messages API has no response_format; a forced single-tool call is
+      // the supported way to get schema-shaped output.
+      ...(responseSchema
+        ? {
+          tools: [{
+            name: STRUCTURED_OUTPUT_NAME,
+            description: 'Return the answer in the required structure.',
+            input_schema: responseSchema,
+          }],
+          tool_choice: { type: 'tool', name: STRUCTURED_OUTPUT_NAME },
+        }
+        : {}),
     }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: requestSignal(timeoutMs, signal),
   });
   if (!response.ok) {
     throw await httpError(response, providerLabel);
   }
   const payload = await response.json();
+
+  if (responseSchema) {
+    const toolUse = (payload?.content || []).find(
+      (part) => part?.type === 'tool_use' && part.name === STRUCTURED_OUTPUT_NAME,
+    );
+    if (!toolUse || typeof toolUse.input !== 'object' || toolUse.input === null) {
+      throw new Error(`${providerLabel} returned no structured output`);
+    }
+    return JSON.stringify(toolUse.input);
+  }
+
   const text = (payload?.content || [])
     .filter((part) => part?.type === 'text' && typeof part.text === 'string')
     .map((part) => part.text)
@@ -254,7 +339,7 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
   return text;
 };
 
-const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) => callMessages({
+const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
   url: 'https://api.anthropic.com/v1/messages',
   headers: {
     'x-api-key': apiKey,
@@ -265,6 +350,9 @@ const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens 
   system,
   maxOutputTokens,
   providerLabel: 'Anthropic',
+  responseSchema,
+  timeoutMs,
+  signal,
 });
 
 const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
@@ -312,7 +400,7 @@ const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
   throw new Error(`GitHub Copilot model "${modelID}" has no supported text endpoint`);
 };
 
-const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) => {
+const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelID)}:generateContent`;
   const thinkingConfig = modelID.toLowerCase().startsWith('gemini-3')
     ? { thinkingLevel: modelID.toLowerCase().includes('flash') ? 'minimal' : 'low' }
@@ -327,9 +415,15 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) 
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-      generationConfig: { maxOutputTokens, thinkingConfig },
+      generationConfig: {
+        maxOutputTokens,
+        thinkingConfig,
+        ...(responseSchema
+          ? { responseMimeType: 'application/json', responseSchema: toGoogleSchema(responseSchema) }
+          : {}),
+      },
     }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: requestSignal(timeoutMs, signal),
   });
   if (!response.ok) {
     throw await httpError(response, 'Google');
@@ -346,7 +440,7 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens }) 
 
 // ChatGPT-plan traffic goes to the codex backend, which only speaks the
 // streaming Responses API — collect the output_text deltas from the SSE body.
-const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, system }) => {
+const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, system, timeoutMs, signal }) => {
   const response = await fetch(CODEX_RESPONSES_URL, {
     method: 'POST',
     headers: {
@@ -372,7 +466,7 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
       stream: true,
       store: false,
     }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: requestSignal(timeoutMs, signal),
   });
   if (!response.ok) {
     throw await httpError(response, 'OpenAI (ChatGPT plan)');
@@ -472,7 +566,7 @@ const readProviderConfig = (workingDirectory, providerID) => {
 // Dispatch
 // ---------------------------------------------------------------------------
 
-export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens }) {
+export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
   const providerConfig = readProviderConfig(workingDirectory, providerID);
   // Match OpenCode's resolveSDK precedence:
@@ -516,6 +610,9 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
       system,
       maxOutputTokens: tokens,
       providerLabel: 'GitHub Copilot',
+      responseSchema,
+      timeoutMs,
+      signal,
     };
     if (endpoint === 'messages') {
       return callMessages({
@@ -534,6 +631,15 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   }
 
   if (providerID === 'openai' && entry.type === 'oauth') {
+    // The codex backend speaks only the streaming Responses API and rejects
+    // the structured-output fields, so a schema request fails loudly here
+    // instead of silently returning free-form prose.
+    if (responseSchema) {
+      throw Object.assign(
+        new Error('The ChatGPT-plan OpenAI login does not support structured output — choose another small model'),
+        { code: 'structured-output-unsupported' },
+      );
+    }
     const fresh = await ensureFreshOpenaiOauth(entry);
     return callCodexResponses({
       accessToken: fresh.access,
@@ -541,6 +647,8 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
       modelID,
       prompt,
       system,
+      timeoutMs,
+      signal,
     });
   }
 
@@ -552,10 +660,10 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   }
 
   if (providerID === 'anthropic') {
-    return callAnthropic({ apiKey, modelID, prompt, system, maxOutputTokens: tokens });
+    return callAnthropic({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
   }
   if (providerID === 'google') {
-    return callGoogle({ apiKey, modelID, prompt, system, maxOutputTokens: tokens });
+    return callGoogle({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
   }
 
   // Everything else: OpenAI-compatible chat completions against the catalog's
@@ -600,5 +708,8 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     maxOutputTokens: tokens,
     providerLabel: provider?.name || providerID,
     extraBody,
+    responseSchema,
+    timeoutMs,
+    signal,
   });
 }

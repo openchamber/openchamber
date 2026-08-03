@@ -36,12 +36,47 @@ export const isQueuedAutoSendBackedOff = (
   now: number,
 ): boolean => failure !== undefined && failure.messageId === messageId && now < failure.nextAttemptAt;
 
-const hasRecentAbort = (sessionId: string): boolean => {
+export const createQueuedAutoSendRetryScheduler = (
+  onWake: () => void,
+  now: () => number = Date.now,
+  scheduleTimeout: (callback: () => void, delay: number) => ReturnType<typeof setTimeout> = setTimeout,
+  cancelTimeout: (timer: ReturnType<typeof setTimeout>) => void = clearTimeout,
+) => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let scheduledAt: number | null = null;
+
+  return {
+    schedule(retryAt: number) {
+      if (scheduledAt !== null && scheduledAt <= retryAt) return;
+      if (timer !== null) cancelTimeout(timer);
+      scheduledAt = retryAt;
+      timer = scheduleTimeout(() => {
+        timer = null;
+        scheduledAt = null;
+        onWake();
+      }, Math.max(0, retryAt - now()));
+    },
+    dispose() {
+      if (timer !== null) cancelTimeout(timer);
+      timer = null;
+      scheduledAt = null;
+    },
+  };
+};
+
+/**
+ * When the abort window is still open, returns the time it expires so the
+ * caller can wake the queue then. Returns `null` once sending is allowed
+ * again — a queued item must not wait for an unrelated state change to be
+ * retried after the window closes.
+ */
+const getAbortHoldUntil = (sessionId: string): number | null => {
   const abortRecord = useSessionUIStore.getState().sessionAbortFlags.get(sessionId);
   if (!abortRecord) {
-    return false;
+    return null;
   }
-  return Date.now() - abortRecord.timestamp < RECENT_ABORT_WINDOW_MS;
+  const holdUntil = abortRecord.timestamp + RECENT_ABORT_WINDOW_MS;
+  return Date.now() < holdUntil ? holdUntil : null;
 };
 
 export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
@@ -180,21 +215,18 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const sendFailuresRef = React.useRef<Map<string, QueuedAutoSendFailure>>(new Map());
   const previousStatusRef = React.useRef<Map<string, SessionStatusType>>(new Map());
   const autoReviewBlockedSessionsRef = React.useRef<Set<string>>(new Set());
-  const [retryClock, setRetryClock] = React.useState(0);
+  const [retryTick, setRetryTick] = React.useState(0);
+  const retryScheduler = React.useMemo(
+    () => createQueuedAutoSendRetryScheduler(() => setRetryTick((value) => value + 1)),
+    [],
+  );
+
+  React.useEffect(() => () => retryScheduler.dispose(), [retryScheduler]);
 
   React.useEffect(() => {
     if (!enabled) {
       return;
     }
-
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const armRetryTimer = (delayMs: number) => {
-      if (retryTimer) return;
-      retryTimer = setTimeout(() => {
-        retryTimer = null;
-        setRetryClock((value) => value + 1);
-      }, Math.max(delayMs, 0));
-    };
 
     const dispatchSessionQueue = async (target: MessageQueueTarget, queueSnapshot: QueuedMessage[]) => {
       const { sessionId } = target;
@@ -205,7 +237,9 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       if (inFlightSessionsRef.current.has(targetKey)) {
         return;
       }
-      if (hasRecentAbort(sessionId)) {
+      const abortHoldUntil = getAbortHoldUntil(sessionId);
+      if (abortHoldUntil !== null) {
+        retryScheduler.schedule(abortHoldUntil);
         return;
       }
       if (useAutoReviewStore.getState().isRunningForSession(sessionId)) {
@@ -226,8 +260,8 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       const failure = sendFailuresRef.current.get(targetKey);
       if (failure && failure.messageId !== payload.queuedMessageId) {
         sendFailuresRef.current.delete(targetKey);
-      } else if (isQueuedAutoSendBackedOff(failure, payload.queuedMessageId, Date.now())) {
-        armRetryTimer((failure?.nextAttemptAt ?? Date.now()) - Date.now());
+      } else if (failure && isQueuedAutoSendBackedOff(failure, payload.queuedMessageId, Date.now())) {
+        retryScheduler.schedule(failure.nextAttemptAt);
         return;
       }
 
@@ -237,6 +271,10 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         ? captured
         : resolveSessionSendConfig(sessionId);
       if (!resolved.providerID || !resolved.modelID) {
+        // Legacy queues may predate captured send configuration. Config
+        // hydration is asynchronous, so retry instead of stranding the item
+        // until an unrelated status or directory update happens.
+        retryScheduler.schedule(Date.now() + AUTO_SEND_RETRY_BASE_DELAY_MS);
         return;
       }
 
@@ -259,7 +297,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           // on idle→idle with no status Map change.
           sendFailuresRef.current.delete(targetKey);
           previousStatusRef.current.set(sessionId, 'busy');
-          armRetryTimer(TURN_IN_PROGRESS_WAKE_MS);
+          retryScheduler.schedule(Date.now() + TURN_IN_PROGRESS_WAKE_MS);
           return;
         }
         const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
@@ -270,7 +308,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           failures,
           nextAttemptAt,
         });
-        armRetryTimer(nextAttemptAt - Date.now());
+        retryScheduler.schedule(nextAttemptAt);
       } finally {
         inFlightSessionsRef.current.delete(targetKey);
       }
@@ -312,9 +350,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-
-    return () => {
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-  }, [enabled, queuedMessages, directorySessionStatus, directorySessionStatusLoaded, globalStatusById, autoReviewRuns, retryClock]);
+  }, [enabled, queuedMessages, directorySessionStatus, directorySessionStatusLoaded, globalStatusById, autoReviewRuns, retryTick, retryScheduler]);
 }

@@ -34,11 +34,14 @@ import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { sessionEvents } from '@/lib/sessionEvents';
+import { findDiffScrollAnchor, getRestoredDiffScrollTop, type DiffScrollAnchor } from './diffScrollAnchor';
 import { useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n/store';
 import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { startReviewFlow } from '@/lib/reviewFlow';
+import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
+import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessages } from '@/sync/sync-context';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
@@ -961,6 +964,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const { t } = useI18n();
     const { git, files } = useRuntimeAPIs();
     const effectiveDirectory = useEffectiveDirectory();
+    const openContextSurface = useUIStore((state) => state.openContextSurface);
+    const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
     const { screenWidth, isMobile } = useDeviceInfo();
 
     const isGitRepo = useIsGitRepo(effectiveDirectory ?? null);
@@ -969,6 +974,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
     const ensureStatus = useGitStore((state) => state.ensureStatus);
     const fetchStatus = useGitStore((state) => state.fetchStatus);
+    const clearDiffCache = useGitStore((state) => state.clearDiffCache);
     const setDiff = useGitStore((state) => state.setDiff);
     const [displayFile, setDisplayFile] = React.useState<string | null>(null);
     const [displayFileStaged, setDisplayFileStaged] = React.useState(false);
@@ -977,6 +983,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const [mountedStackedFiles, setMountedStackedFiles] = React.useState<Set<string>>(() => new Set());
     const [loadFullFiles, setLoadFullFiles] = React.useState(false);
     const [scrollRequestNonce, setScrollRequestNonce] = React.useState(0);
+    const [fileDiffRefreshNonce, setFileDiffRefreshNonce] = React.useState<Map<string, number>>(() => new Map());
     const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
     const [reviewFlowSubmitting, setReviewFlowSubmitting] = React.useState(false);
     const [activeDiffScope, setActiveDiffScope] = React.useState(diffScope);
@@ -1003,6 +1010,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     const isMobileLayout = isMobile || screenWidth <= 768;
     const showReviewAction = Boolean(currentSessionId) && activeDiffScope !== 'turn' && !isMobileLayout && !isVSCodeRuntime();
+    // Same runtime and width rules as the rail surface: no point offering an
+    // entry point to a surface that cannot open here.
+    const showWalkthroughAction = activeDiffScope !== 'turn' && !isMobileLayout && !isVSCodeRuntime();
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
@@ -1011,6 +1021,20 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const shouldPinAfterAlignRef = React.useRef(false);
     const visibleSyncFrameRef = React.useRef<number | null>(null);
     const stackedStateScopeRef = React.useRef<string | null>(null);
+    const lastScrollAnchorRef = React.useRef<DiffScrollAnchor | null>(null);
+    const pendingScrollAnchorRestoreRef = React.useRef<DiffScrollAnchor | null>(null);
+
+    const captureScrollAnchor = React.useCallback((): DiffScrollAnchor | null => {
+        const scrollRoot = diffScrollRef.current;
+        if (!scrollRoot) return null;
+
+        const rootTop = scrollRoot.getBoundingClientRect().top;
+        const sections: Array<{ path: string; top: number }> = [];
+        for (const [path, node] of fileSectionRefs.current) {
+            if (node) sections.push({ path, top: node.getBoundingClientRect().top });
+        }
+        return findDiffScrollAnchor(rootTop, sections);
+    }, []);
 
     const cancelPendingScrollAlignment = React.useCallback(() => {
         pendingScrollTargetRef.current = null;
@@ -1164,13 +1188,17 @@ export const DiffView: React.FC<DiffViewProps> = ({
         const top = rootRect.top - STACKED_DIFF_MOUNT_MARGIN;
         const bottom = rootRect.bottom + STACKED_DIFF_MOUNT_MARGIN;
         const next: Record<string, boolean> = {};
+        const sectionPositions: Array<{ path: string; top: number }> = [];
 
         for (const [path, node] of fileSectionRefs.current) {
-            if (!node || !expandedFiles.has(path)) continue;
+            if (!node) continue;
             const rect = node.getBoundingClientRect();
+            sectionPositions.push({ path, top: rect.top });
+            if (!expandedFiles.has(path)) continue;
             if (rect.bottom < top || rect.top > bottom) continue;
             next[path] = true;
         }
+        lastScrollAnchorRef.current = findDiffScrollAnchor(rootRect.top, sectionPositions);
 
         setMountedStackedFiles((previous) => {
             let changed = false;
@@ -1252,9 +1280,40 @@ export const DiffView: React.FC<DiffViewProps> = ({
             if (normalizePath(hint.directory) !== normalizePath(effectiveDirectory)) {
                 return;
             }
-            void fetchStatus(effectiveDirectory, git);
+            if (hint.paths?.length) {
+                pendingScrollAnchorRestoreRef.current = captureScrollAnchor() ?? lastScrollAnchorRef.current;
+                clearDiffCache(effectiveDirectory, hint.paths);
+                setFileDiffRefreshNonce((previous) => {
+                    const next = new Map(previous);
+                    for (const path of hint.paths ?? []) {
+                        next.set(path, (next.get(path) ?? 0) + 1);
+                    }
+                    return next;
+                });
+            }
+            void fetchStatus(effectiveDirectory, git, { silent: true });
         });
-    }, [effectiveDirectory, fetchStatus, git]);
+    }, [captureScrollAnchor, clearDiffCache, effectiveDirectory, fetchStatus, git]);
+
+    React.useLayoutEffect(() => {
+        const anchor = pendingScrollAnchorRestoreRef.current;
+        if (!anchor) return;
+        pendingScrollAnchorRestoreRef.current = null;
+
+        const scrollRoot = diffScrollRef.current;
+        const node = fileSectionRefs.current.get(anchor.path);
+        if (!scrollRoot || !node) return;
+
+        const rootTop = scrollRoot.getBoundingClientRect().top;
+        const currentTopOffset = node.getBoundingClientRect().top - rootTop;
+        scrollRoot.scrollTop = getRestoredDiffScrollTop(
+            scrollRoot.scrollTop,
+            anchor.topOffset,
+            currentTopOffset,
+            scrollRoot.scrollHeight - scrollRoot.clientHeight,
+        );
+        lastScrollAnchorRef.current = anchor;
+    }, [fileDiffRefreshNonce]);
 
     // Handle pending diff file from external navigation
     React.useEffect(() => {
@@ -1392,11 +1451,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
             return false;
         }
 
-        const rootRect = scrollRoot.getBoundingClientRect();
-        const nodeRect = node.getBoundingClientRect();
-        const delta = nodeRect.top - rootRect.top;
-        const maxTop = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight);
-        scrollRoot.scrollTop = Math.min(maxTop, Math.max(0, scrollRoot.scrollTop + delta));
+        const scrollOffset = node.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top;
+        scrollRoot.scrollTo({ top: scrollRoot.scrollTop + scrollOffset, behavior: 'auto' });
         return true;
     }, []);
 
@@ -1408,14 +1464,16 @@ export const DiffView: React.FC<DiffViewProps> = ({
         const maxAttempts = 20;
         let cancelled = false;
 
-        const cancelPending = () => {
+        const cancelPending = (clearPinnedTarget = true) => {
             if (cancelled) {
                 return;
             }
             cancelled = true;
             pendingScrollTargetRef.current = null;
             shouldPinAfterAlignRef.current = false;
-            setPinnedStackedTarget(null);
+            if (clearPinnedTarget) {
+                setPinnedStackedTarget(null);
+            }
             if (pendingScrollFrameRef.current !== null) {
                 window.cancelAnimationFrame(pendingScrollFrameRef.current);
                 pendingScrollFrameRef.current = null;
@@ -1448,6 +1506,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
             if (pinSelectedFileHeaderToTopOnNavigate && shouldPinAfterAlignRef.current) {
                 setPinnedStackedTarget(currentTarget);
+                cancelPending(false);
+                return;
             }
             cancelPending();
         };
@@ -1592,7 +1652,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         <div className="flex flex-col [overflow-anchor:none]" data-diff-virtual-content>
                             {changedFiles.map((file) => (
                                 <MultiFileDiffEntry
-                                    key={file.path}
+                                    key={`${file.path}:${fileDiffRefreshNonce.get(file.path) ?? 0}`}
                                     directory={effectiveDirectory}
                                     file={file}
                                     layout={getLayoutForFile(file)}
@@ -1721,6 +1781,32 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         )}
                         <span className="diff-toolbar__review-label typography-ui-label">
                             {t('diffView.actions.review')}
+                        </span>
+                    </Button>
+                )}
+                {changedFiles.length > 0 && showWalkthroughAction && (
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                            // Carry the scope across: opening the walkthrough
+                            // while looking at staged changes should review
+                            // staged changes, not whatever the panel showed last.
+                            const directory = effectiveDirectory ?? '';
+                            requestWalkthroughSource(directory, {
+                                kind: 'working-tree',
+                                scope: activeDiffScope === 'staged' || activeDiffScope === 'working'
+                                    ? activeDiffScope
+                                    : 'all',
+                            });
+                            openContextSurface(directory, 'walkthrough');
+                        }}
+                        className={cn('diff-toolbar__walkthrough-button h-7 flex-shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
+                        aria-label={t('walkthrough.action.open')}
+                    >
+                        <Icon name="route" className="size-4" />
+                        <span className="diff-toolbar__walkthrough-label typography-ui-label">
+                            {t('walkthrough.action.open')}
                         </span>
                     </Button>
                 )}

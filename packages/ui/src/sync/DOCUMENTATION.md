@@ -208,6 +208,30 @@ Message sidecar consumers also filter targeted updates by purpose before notifyi
 
 The active-session watchdog finalizes orphan tool parts left `running`/`pending` when the owning session (or a linked task child session) is already idle, and when a busy tool has exceeded its declared `input.timeout` plus a short grace. This covers OpenCode miss-settle after idle or after the tool's own kill window without inventing `session.idle` and without wall-clock-killing long shell tasks that omit a timeout (5m–1h+ remain live). Pending tools with an open permission request are left alone. Tool duration display is unbounded so long busy tools do not appear frozen at a 5-minute cap.
 
+## Session directory resolution
+
+`session-directory-resolution.ts` owns the precedence used to answer "which directory does this session belong to". Every send, message fetch, message-queue key, and send-confirmation lookup is routed by that answer, so a wrong value is not a display problem: the prompt is posted against a directory that does not own the session, the request is rejected, and the optimistic message is rolled back with no visible error.
+
+Precedence, highest authority first:
+
+The discriminator is whether the server confirmed the path, not whether the value is local or synced.
+
+| Source | Meaning |
+|---|---|
+| `authoritative` | The child store that actually holds the session, then its own record |
+| `selected` | Server-confirmed directory captured at selection; a guessed one is never passed |
+| `attachment` | Worktree attachment recorded by this client; the *requested* path |
+| `worktree-metadata` | Worktree captured when the session was created in one; the *requested* path |
+| `remembered` | Per-runtime directory persisted across restarts |
+
+Rules:
+
+1. `getSyncSessionDirectory()` is the authoritative session→directory mapping: a session lives in exactly the child store for its directory, whether or not the server populated `session.directory`. `null` means "not indexed yet", never "no directory".
+2. `attachment` and `worktreeMetadata` hold the worktree path this client asked for, before the server canonicalized it. They are a hint for a session sync has not indexed yet, never a correction of a confirmed directory — otherwise a stale local path re-creates the very mismatch this precedence exists to prevent.
+3. Never persist or rank a guessed directory. `selectSession` may fall back to the active directory to keep routing usable, but that value is not written to runtime memory, not written to the last-active snapshot, and not passed as `selected` — a persisted guess outlives the race that produced it and survives reloads and restarts.
+4. Components must not read `currentSessionDirectory` to build request or queue keys; use `getDirectoryForSession()` so every consumer resolves identically.
+5. A disagreement between sources is logged once per session, and `__opencodeDebug.diagnoseSessionDirectory()` reports every source in precedence order.
+
 ## Session action rules
 
 Session actions live in `session-actions.ts` and are the canonical place for SDK-calling session mutations that affect global session lists.
@@ -218,6 +242,7 @@ Rules:
 2. If an action targets a session by ID, resolve the **session's own directory**. Do not assume the current directory is correct.
 3. `session-ui-store.ts` should delegate to `session-actions.ts` for these mutations instead of duplicating SDK calls.
 4. Sending after a revert commits the new branch optimistically: remove the reverted tail and marker before inserting the new message, and restore both if the send is rejected.
+5. After session creation, the directory returned by the server is authoritative over the requested draft directory. The server may canonicalize a worktree path, and the first prompt must use the same directory identity as the created session.
 
 Permission replies (`respondToPermission` / `dismissPermission`) resolve the harness target through `getSessionTarget` first, then walk up from synthetic Claude harness subagent session ids (`ses_claude_sub_*`): such ids are transcript-only broadcast shells that are never selectable sessions, so the direct lookup misses the `claude-code` target. The walk reads the child session's `parentID` from the loaded child stores, falling back to the pending ask's `metadata.parentSessionID`, and replies through the parent's harness target — otherwise Allow/Deny would silently hit the OpenCode runtime instead of the Claude harness reply endpoint.
 
@@ -226,9 +251,42 @@ Examples of global-store updates performed in `session-actions.ts`:
 - `createSession()` -> `upsertSession(session)`
 - `updateSessionTitle()` -> `upsertSession(result.data)`
 - `shareSession()` / `unshareSession()` -> `upsertSession(result.data)`
-- `archiveSession()` -> waits for server confirmation, then upserts the archived session
-- `deleteSession()` -> waits for server confirmation or `404`, then removes the session and its persisted state
+- `archiveSession()` / `archiveSessions()` -> wait for server confirmation, then upsert each archived session
+- `deleteSession()` / `deleteSessions()` -> wait for server confirmation or `404`, then remove the session and its persisted state
 - `moveSessionToDirectory()` -> move the session between directory stores and update the global directory index
+
+Archive and delete actions capture the active runtime key when they start and
+recheck it before every store reconciliation, so a response
+produced by the previous runtime is rejected instead of mutating the current
+runtime's live or global session state. A guarded batch stops at the first
+observed runtime change: sessions the server already confirmed remain archived
+or deleted and stay in `archivedIds`/`deletedIds`, while every ID not confirmed
+on the captured runtime is returned in `failedIds` so existing partial-failure
+feedback stays truthful.
+Callers whose confirmation can span a runtime switch may pass an
+`expectedRuntimeKey` captured earlier; ordinary callers are guarded by default.
+
+Deletion needs this guard more than archiving does. Session IDs are not unique
+across runtimes, and a committed deletion does more than hide a row: it evicts
+the session from every live store, removes it from the global cache, clears the
+current-session pointer, and calls `cleanupPersistedSessionState`, which erases
+that session's queued messages, todos, folder membership, inline-comment drafts,
+chat draft, and pins. Committing a stale deletion can therefore destroy user
+state belonging to an unrelated session on the new runtime.
+
+`cleanupPersistedSessionState` already refuses an identity whose runtime is no
+longer active, so `finalizeConfirmedSessionDeletion` must forward the **captured**
+runtime key. Passing the live key would make that check compare a value with
+itself and always pass. The in-memory live, global, and UI stores it mutates are
+not runtime-scoped, so the calling action must reject a stale runtime before
+committing rather than relying on that helper alone.
+
+A `404` still means "already deleted" and commits cleanup, but only while the
+captured runtime is active. After a runtime change the `404` describes either
+the previous runtime or one this session never belonged to, so the action
+reports failure instead of committing. The deletion already accepted by the
+server stays deleted there; its persisted state is left as harmless stale
+metadata and the next authoritative load reconciles it.
 
 ## The golden rule
 

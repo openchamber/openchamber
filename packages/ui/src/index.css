@@ -891,7 +891,20 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Diff toolbar: drop low-priority labels only when the context panel is genuinely tight. */
+/* Diff toolbar: the walkthrough label goes first. Review is the primary action
+   in this row, so it keeps its label longest; the walkthrough is reachable from
+   the rail as well and reads fine as an icon. */
+@container diff-toolbar (max-width: 36rem) {
+  .diff-toolbar__walkthrough-label {
+    display: none;
+  }
+
+  .diff-toolbar__walkthrough-button {
+    padding-inline: 0.5rem;
+  }
+}
+
+/* Then the rest, once the panel is genuinely tight. */
 @container diff-toolbar (max-width: 28rem) {
   .diff-toolbar__scope-count,
   .diff-toolbar__review-label,
@@ -905,14 +918,27 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Status row: collapse optional text when narrow to keep both sides in one line. */
-@container status-row (max-width: 30rem) {
+/* Pull request actions: the walkthrough label goes first, since merge controls
+   are the reason the row exists. */
+@container pr-actions (max-width: 30rem) {
+  .pr-actions__walkthrough-label {
+    display: none;
+  }
+
+  .pr-actions__walkthrough-button {
+    padding-inline: 0.5rem;
+  }
+}
+
+/* Hide the long active todo before it can collide with the changed-files summary. */
+@container status-row (max-width: 38rem) {
   .status-row__active-todo {
     display: none;
   }
 }
 
-@container status-row (max-width: 24rem) {
+/* Hide the secondary changed-files label on narrow mobile layouts. */
+@container status-row (max-width: 30rem) {
   .status-row__changed-label {
     display: none;
   }

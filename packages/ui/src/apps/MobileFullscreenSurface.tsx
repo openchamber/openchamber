@@ -35,6 +35,18 @@ export type MobileFullscreenSurfaceProps = {
   /** Drop the header's bottom divider (quiet single-page surfaces). */
   noHeaderBorder?: boolean;
   ariaLabel?: string;
+  /**
+   * `dialog` packs the same surface into a centered card over a scrim instead
+   * of covering the app. Tablets use it: a settings or instances page stretched
+   * across a 13" screen is mostly empty space, and losing the chat entirely for
+   * an app-level page is a heavier context switch than the content deserves.
+   */
+  variant?: 'fullscreen' | 'dialog';
+  /**
+   * What the dialog centers on. App-level pages (settings, instances) belong to
+   * the whole window; content that came out of the chat column stays with it.
+   */
+  dialogAlign?: 'chat' | 'app';
   children: React.ReactNode;
 };
 
@@ -51,6 +63,8 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
   headerless = false,
   noHeaderBorder = false,
   ariaLabel,
+  variant = 'fullscreen',
+  dialogAlign = 'chat',
   children,
 }) => {
   const { t } = useI18n();
@@ -148,15 +162,29 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
 
   if (!open || !rootRef.current) return null;
 
-  return createPortal(
+  const isDialog = variant === 'dialog';
+
+  const surface = (
     <section
       ref={surfaceRef}
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel}
       tabIndex={-1}
-      className="oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
-      style={{
+      className={cn(
+        'flex flex-col bg-background text-foreground',
+        isDialog
+          ? 'h-[min(88dvh,860px)] w-full max-w-[720px] overflow-hidden rounded-2xl border border-border/70 shadow-[0_24px_64px_rgb(0_0_0_/_0.32)]'
+          : 'oc-keyboard-inset-surface fixed inset-0 z-50',
+      )}
+      style={isDialog ? {
+        // Scale/fade instead of the push slide: the card is not a navigation
+        // step, and a settled `transform: none` keeps it off its own
+        // compositing layer (iOS clips those to the safe-area viewport).
+        opacity: entered ? 1 : 0,
+        transform: entered ? 'none' : 'scale(0.97)',
+        transition: `opacity ${ENTER_DURATION_MS}ms ease-out, transform ${ENTER_DURATION_MS}ms cubic-bezier(0.32, 0.72, 0, 1)`,
+      } : {
         paddingTop: 'var(--oc-safe-area-top, 0px)',
         // Push-style enter: slide in from the right edge; settled state drops
         // the transform entirely so the surface isn't kept on a compositing
@@ -165,7 +193,7 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
         transition: `transform ${ENTER_DURATION_MS}ms cubic-bezier(0.32, 0.72, 0, 1)`,
       }}
       onTransitionEnd={(event) => {
-        // Reveal content exactly when the enter slide ends — not on a fixed timer.
+        // Reveal content exactly when the enter transition ends — not on a fixed timer.
         if (entered && event.target === event.currentTarget && event.propertyName === 'transform') {
           setContentReady(true);
         }
@@ -214,7 +242,29 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
         ) : null}
       </div>
       <style>{'@keyframes oc-surface-content-in { from { opacity: 0 } to { opacity: 1 } }'}</style>
-    </section>,
+    </section>
+  );
+
+  if (!isDialog) return createPortal(surface, rootRef.current);
+
+  return createPortal(
+    <div
+      className="oc-keyboard-inset-surface fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ease-out"
+      style={{
+        background: 'rgb(0 0 0 / 0.45)',
+        opacity: entered ? 1 : 0,
+        // 'chat' matches every other mobile overlay (the sessions sidebar keeps
+        // its width); 'app' ignores the panels and centers on the window.
+        paddingLeft: dialogAlign === 'chat' ? 'max(1rem, var(--oc-chat-inset-left, 0px))' : '1rem',
+        paddingRight: dialogAlign === 'chat' ? 'max(1rem, var(--oc-chat-inset-right, 0px))' : '1rem',
+        paddingTop: 'max(1rem, var(--oc-safe-area-top, 0px))',
+      }}
+      onClick={onClose}
+    >
+      <div className="flex w-full max-w-[720px] justify-center" onClick={(event) => event.stopPropagation()}>
+        {surface}
+      </div>
+    </div>,
     rootRef.current,
   );
 };

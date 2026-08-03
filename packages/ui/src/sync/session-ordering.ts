@@ -140,7 +140,7 @@ export const raiseSessionOrderingBaselines = (sessions: Iterable<Session>): void
     if (liveRank !== undefined) {
       // A live rank frozen BEFORE this newer authoritative stamp is stale —
       // the session was active again while this client wasn't watching (its
-      // transition events never arrived, e.g. другий пристрій + сон). Ranks
+      // transition events never arrived, e.g. another device + sleep). Ranks
       // share the epoch-ms scale with `updated`, so raising is well-ordered.
       if (fresh > liveRank) {
         nextRanks = nextRanks ?? new Map(currentRanks);

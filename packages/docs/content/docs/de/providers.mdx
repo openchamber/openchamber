@@ -1,0 +1,49 @@
+---
+title: Provider, Modelle & Agents
+description: Verbinde KI-Provider, wähle Modelle aus und richte Agents ein.
+---
+
+# Provider, Modelle & Agents
+
+Bevor OpenChamber etwas tun kann, braucht es mindestens einen verbundenen KI-Provider. Diese Seite erklärt, wie du einen Provider verbindest, ein Modell auswählst und Agents anpasst.
+
+## Einen Provider verbinden
+
+1. Öffne **Einstellungen → Provider**.
+2. Öffne das Menü **Provider hinzufügen** und wähle einen Provider aus, der noch nicht verbunden ist.
+3. Melde dich auf eine von zwei Arten an, je nach Provider:
+   - **API-Schlüssel** — füge deinen Schlüssel ein und speichere.
+   - **Anmeldung (Gerätefluss)** — OpenChamber zeigt einen Link und einen kurzen Code an. Öffne den Link, gib den Code ein und bestätige. OpenChamber schließt die Verbindung dann selbstständig ab.
+
+Wenn ein Provider als verbunden angezeigt wird, sind seine Modelle im Chat verfügbar.
+
+Zum Trennen öffnest du den Provider und entfernst seine Anmeldung.
+
+## Ein Modell auswählen
+
+Du wählst das Modell dort aus, wo du arbeitest:
+
+- im Chat verwendest du den Modellwähler in der Nachrichtenleiste, um Provider und Modell für diese Sitzung festzulegen
+- pro Agent legst du unten ein Standardmodell fest
+
+## Agents einrichten
+
+Ein Agent ist eine benannte Konfiguration — ein Modell, eine Persönlichkeit und das, was er tun darf.
+
+1. Öffne **Einstellungen → Agents**.
+2. Wähle einen Agenten aus oder erstelle einen neuen.
+3. Bearbeite beliebige dieser Felder:
+   - **Beschreibung** — wofür der Agent gedacht ist
+   - **Modell** — sein Standardmodell
+   - **Temperatur** — wie kreativ seine Antworten sind
+   - **Prompt** — dauerhafte Anweisungen, denen er immer folgt
+   - **Tool-Regeln** — welche Werkzeuge er verwenden darf
+
+## Wo deine Anmeldungen gespeichert werden
+
+Provider-Anmeldungen werden von OpenCode gespeichert, nicht von OpenChamber, daher sind sie mit der OpenCode-CLI geteilt. Wenn du denselben Provider an mehr als einem Ort einrichtest, gewinnt die spezifischste Einstellung: Eine projektbezogene Einstellung überschreibt deine persönliche.
+
+## Weiterführend
+
+- [MCP-Server](/mcp/) — füge Agents zusätzliche Werkzeuge hinzu
+- [Nutzung & Kontingente](/usage/) — verfolge, wie viel du verbraucht hast

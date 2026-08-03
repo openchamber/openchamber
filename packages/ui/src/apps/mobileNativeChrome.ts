@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { observeNativeKeyboardHeight, resetHardwareKeyboardDetection, startHardwareKeyboardBridge } from '@/lib/hardwareKeyboard';
+
 /** True when running inside the native Capacitor shell (iOS/Android app). */
 export const isCapacitorMobileApp = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -26,6 +28,10 @@ export const useNativeMobileChrome = (): void => {
     if (capacitorPlatform === 'android') {
       root.classList.add('oc-platform-android');
     }
+
+    // iOS reports hardware keyboards natively (GCKeyboard); adopting that
+    // answer switches the layout off its keyboard-event inference entirely.
+    cleanup.push(startHardwareKeyboardBridge());
 
     const setInset = (px: number) => {
       root.style.setProperty('--oc-keyboard-inset', `${Math.max(0, Math.round(px))}px`);
@@ -88,7 +94,8 @@ export const useNativeMobileChrome = (): void => {
         // oc-keyboard-open drives CSS (draft starters, composer padding), and
         // the settled event gives the chat its one deterministic re-pin after
         // the native resize (the auto-follow idle gate ignores it otherwise).
-        const willShowHandle = await Keyboard.addListener('keyboardWillShow', () => {
+        const willShowHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
+          observeNativeKeyboardHeight(info.keyboardHeight);
           root.classList.add('oc-keyboard-open');
           // The composer already expanded on tap — re-pin the chat to it now,
           // so the native resize that follows is the only remaining movement.
@@ -178,6 +185,7 @@ export const useNativeMobileChrome = (): void => {
 
       const showHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
         clearSettle();
+        observeNativeKeyboardHeight(info.keyboardHeight);
         keyboardOpen = true;
         keyboardHeight = info.keyboardHeight;
         if (!layoutApplied) {
@@ -330,6 +338,7 @@ export const useNativeMobileChrome = (): void => {
     return () => {
       disposed = true;
       cleanup.forEach((remove) => remove());
+      resetHardwareKeyboardDetection();
       root.classList.remove('oc-capacitor-app', 'oc-keyboard-open', 'oc-kb-animating', 'oc-kb-hide', 'oc-kb-caret-hold', 'oc-platform-android');
       root.style.removeProperty('--oc-keyboard-inset');
       root.style.removeProperty('--oc-kb-shift');

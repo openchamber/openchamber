@@ -2,6 +2,7 @@ import { registerFsRoutes } from '../fs/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerHarnessRoutes } from '../harness/routes.js';
+import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
@@ -19,7 +20,7 @@ import { registerPluginRoutes } from './plugin-routes.js';
 import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
 import { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';
 import { registerOpenCodeRoutes } from './routes.js';
-import { getProviderSources, removeProviderConfig } from './providers.js';
+import { getProviderSources, removeProviderConfig, upsertProviderConfig } from './providers.js';
 import { getAgentSources, getAgentConfig, createAgent, updateAgent, deleteAgent } from './agents.js';
 import { getCommandSources, createCommand, updateCommand, deleteCommand } from './commands.js';
 import { listMcpConfigs, getMcpConfig, createMcpConfig, updateMcpConfig, deleteMcpConfig } from './mcp.js';
@@ -38,7 +39,7 @@ import {
   decodePluginId,
 } from './plugins.js';
 import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from './shared.js';
-import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill } from './skills.js';
+import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill, renameSkill, isManagedSkillPath } from './skills.js';
 import { getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
 import { getCacheKey, getCachedScan, setCachedScan } from '../skills-catalog/cache.js';
 import { isClawdHubSource, parseSkillRepoSource } from '../skills-catalog/source.js';
@@ -66,6 +67,18 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       smallModelService = await import('../small-model/index.js');
     }
     return smallModelService;
+  };
+
+  let walkthroughService = null;
+  const getWalkthroughService = async () => {
+    if (!walkthroughService) {
+      const [service, pullRequest] = await Promise.all([
+        import('../walkthrough/index.js'),
+        import('../walkthrough/pull-request.js'),
+      ]);
+      walkthroughService = { ...service, getPullRequestDiff: pullRequest.getPullRequestDiff };
+    }
+    return walkthroughService;
   };
 
   const registerRoutes = async (app, routeDependencies) => {
@@ -136,6 +149,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveProjectDirectory,
       getProviderSources,
       removeProviderConfig,
+      upsertProviderConfig,
       refreshOpenCodeAfterConfigChange,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
@@ -247,6 +261,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createSkill,
       updateSkill,
       deleteSkill,
+      renameSkill,
+      isManagedSkillPath,
       readSkillSupportingFile,
       writeSkillSupportingFile,
       deleteSkillSupportingFile,
@@ -279,6 +295,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenCodeAuthHeaders,
       ...(harnessRouter ? { router: harnessRouter } : {}),
     });
+    registerWalkthroughRoutes(app, { getWalkthroughService });
     registerSessionGoalRoutes(app);
     registerGitHubRoutes(app);
     registerGitRoutes(app);

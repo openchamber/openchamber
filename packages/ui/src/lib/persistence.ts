@@ -1252,6 +1252,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     result.smallModelOverride = candidate.smallModelOverride;
   }
   Object.assign(result, sanitizeHarnessSettings(candidate));
+  if (typeof candidate.walkthroughModelOverride === 'string' && candidate.walkthroughModelOverride.length > 0) {
+    result.walkthroughModelOverride = candidate.walkthroughModelOverride;
+  }
   if (typeof candidate.autoCreateWorktree === 'boolean') {
     result.autoCreateWorktree = candidate.autoCreateWorktree;
   }

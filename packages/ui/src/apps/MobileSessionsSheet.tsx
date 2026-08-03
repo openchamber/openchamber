@@ -1437,8 +1437,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       </>
     ) : null;
 
+  // flex-1 + min-h-0 rather than h-full: both hosts put a fixed-height header
+  // above this, so a 100% height overflows by exactly that header — and the
+  // clipped overflow swallowed the footer.
   const surfaceContent = (
-      <div ref={contentRootRef} className="flex h-full flex-col">
+      <div ref={contentRootRef} className="flex min-h-0 flex-1 flex-col">
         <ScrollShadow className="min-h-0 flex-1 overflow-y-auto pb-4">
           {/* The search bar scrolls WITH the list (iOS-style): the open-time
               auto-scroll to the current session naturally tucks it away, and

@@ -26,6 +26,18 @@ import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { opencodeClient } from '@/lib/opencode/client';
 import { shouldLoadAvailableProviders } from './providerAvailability';
+import { CustomProviderForm } from './CustomProviderForm';
+import {
+  buildAuthSetRequest,
+  buildProviderUpsertRequest,
+  CUSTOM_PROVIDER_ID,
+  isConfigDefinedCustomProvider,
+  providerToCustomFormState,
+  resolveProviderConfigScope,
+  type CustomProviderFormState,
+  type CustomProviderPersistPlan,
+  type ProviderConfigScope,
+} from './custom-provider-form';
 
 const formatCompactNumber = (value: number) => new Intl.NumberFormat(getCurrentIntlLocale(), {
   notation: 'compact',
@@ -172,7 +184,19 @@ export const ProvidersPage: React.FC = () => {
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const [editingCustomProviderId, setEditingCustomProviderId] = React.useState<string | null>(null);
+  const [editingCustomFormInitial, setEditingCustomFormInitial] = React.useState<CustomProviderFormState | null>(null);
+  const [editingCustomScope, setEditingCustomScope] = React.useState<ProviderConfigScope | null>(null);
+  const [customAuthFailureHint, setCustomAuthFailureHint] = React.useState<string | null>(null);
+  const [lastCustomPersistId, setLastCustomPersistId] = React.useState<string | null>(null);
   const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
+  const isCustomCreateMode = isAddMode && candidateProviderId === CUSTOM_PROVIDER_ID;
+  const isCustomEditMode = Boolean(
+    editingCustomProviderId
+    && selectedProviderId
+    && editingCustomProviderId === selectedProviderId
+    && !isAddMode,
+  );
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -271,7 +295,11 @@ export const ProvidersPage: React.FC = () => {
       return;
     }
 
-    if (candidateProviderId && !unconnectedProviders.some((provider) => provider.id === candidateProviderId)) {
+    if (
+      candidateProviderId
+      && candidateProviderId !== CUSTOM_PROVIDER_ID
+      && !unconnectedProviders.some((provider) => provider.id === candidateProviderId)
+    ) {
       setCandidateProviderId('');
     }
   }, [selectedProviderId, candidateProviderId, unconnectedProviders]);
@@ -279,11 +307,21 @@ export const ProvidersPage: React.FC = () => {
   React.useEffect(() => {
     if (selectedProviderId === ADD_PROVIDER_ID) {
       setShowAuthPanel(true);
+      setEditingCustomProviderId(null);
+      setEditingCustomFormInitial(null);
+      setEditingCustomScope(null);
+      setCustomAuthFailureHint(null);
       return;
     }
 
     setShowAuthPanel(false);
-  }, [selectedProviderId, t]);
+    if (editingCustomProviderId && editingCustomProviderId !== selectedProviderId) {
+      setEditingCustomProviderId(null);
+      setEditingCustomFormInitial(null);
+      setEditingCustomScope(null);
+      setCustomAuthFailureHint(null);
+    }
+  }, [selectedProviderId, editingCustomProviderId]);
 
   React.useEffect(() => {
     if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
@@ -356,6 +394,68 @@ export const ProvidersPage: React.FC = () => {
     } catch (error) {
       console.error('Failed to save API key:', error);
       toast.error(t('settings.providers.page.toast.apiKeySaveFailed'));
+    } finally {
+      setAuthBusyKey(null);
+    }
+  };
+
+  const handleSaveCustomProvider = async (plan: CustomProviderPersistPlan) => {
+    const busyKey = `custom:${plan.providerID}`;
+    setAuthBusyKey(busyKey);
+    setLastCustomPersistId(plan.providerID);
+    setCustomAuthFailureHint(null);
+
+    try {
+      // Auth first so a failed key write cannot leave an orphan config that
+      // blocks create validation, and so PUT can pass hasStoredAuth for literal keys.
+      const authRequest = buildAuthSetRequest(plan);
+      if (authRequest) {
+        const authResult = await opencodeClient.getSdkClient().auth.set(authRequest);
+        if (authResult.error) {
+          throw new Error(t('settings.providers.page.toast.apiKeySaveFailed'));
+        }
+      }
+
+      const upsertBody = buildProviderUpsertRequest(plan, {
+        // Create defaults to user. Edit must rewrite the winning config layer
+        // (custom > project > user) so project/custom providers are not copied
+        // into a global user override.
+        scope: editingCustomProviderId
+          ? (editingCustomScope ?? resolveProviderConfigScope(providerSources[editingCustomProviderId]))
+          : 'user',
+      });
+      const response = await runtimeFetch('/api/provider', {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(upsertBody),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        if (authRequest) {
+          setCustomAuthFailureHint(t('settings.providers.page.custom.authFailure.configAfterAuth'));
+        }
+        throw new Error(payload?.error || t('settings.providers.page.toast.customProviderSaveFailed'));
+      }
+
+      toast.success(t('settings.providers.page.toast.customProviderSaved', { provider: plan.name }));
+      setCandidateProviderId('');
+      setEditingCustomProviderId(null);
+      setEditingCustomFormInitial(null);
+      setEditingCustomScope(null);
+      setCustomAuthFailureHint(null);
+      setLastCustomPersistId(null);
+      await reloadOpenCodeConfiguration({ scopes: ['providers'], mode: 'active' });
+      setSelectedProvider(plan.providerID);
+    } catch (error) {
+      console.error('Failed to save custom provider:', error);
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : t('settings.providers.page.toast.customProviderSaveFailed'),
+      );
     } finally {
       setAuthBusyKey(null);
     }
@@ -499,6 +599,19 @@ export const ProvidersPage: React.FC = () => {
     }
   };
 
+  const handleDisconnectCustomProvider = async (providerId: string) => {
+    if (!providerId) {
+      return;
+    }
+    await handleDisconnectProvider(providerId);
+    setEditingCustomProviderId(null);
+    setEditingCustomFormInitial(null);
+    setEditingCustomScope(null);
+    setCustomAuthFailureHint(null);
+    setLastCustomPersistId(null);
+    setCandidateProviderId('');
+  };
+
   if (!isAddMode && providers.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -528,8 +641,6 @@ export const ProvidersPage: React.FC = () => {
                     <p className="typography-meta text-muted-foreground">{t('settings.providers.page.state.loading')}</p>
                   ) : availableError ? (
                     <p className="typography-meta text-muted-foreground">{availableError}</p>
-                  ) : unconnectedProviders.length === 0 ? (
-                    <p className="typography-meta text-muted-foreground">{t('settings.providers.page.connect.allProvidersConnected')}</p>
                   ) : (
                     <DropdownMenu open={providerDropdownOpen} onOpenChange={(open) => {
                       setProviderDropdownOpen(open);
@@ -541,11 +652,15 @@ export const ProvidersPage: React.FC = () => {
                           className={SETTINGS_CUSTOM_TRIGGER_CLASS}
                         >
                           <span className="flex items-center gap-2 min-w-0">
-                            {candidateProviderId ? <ProviderLogo providerId={candidateProviderId} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
+                            {candidateProviderId && candidateProviderId !== CUSTOM_PROVIDER_ID ? (
+                              <ProviderLogo providerId={candidateProviderId} className="h-3.5 w-3.5 flex-shrink-0" />
+                            ) : null}
                             <span className={cn("truncate typography-ui-label font-normal", candidateProviderId ? "text-foreground" : "text-muted-foreground")}>
-                              {candidateProviderId
-                                ? (unconnectedProviders.find(p => p.id === candidateProviderId)?.name || candidateProviderId)
-                                : t('settings.providers.page.connect.selectProviderPlaceholder')}
+                              {candidateProviderId === CUSTOM_PROVIDER_ID
+                                ? t('settings.providers.page.custom.optionLabel')
+                                : candidateProviderId
+                                  ? (unconnectedProviders.find(p => p.id === candidateProviderId)?.name || candidateProviderId)
+                                  : t('settings.providers.page.connect.selectProviderPlaceholder')}
                             </span>
                           </span>
                           <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
@@ -573,32 +688,60 @@ export const ProvidersPage: React.FC = () => {
                         </div>
                         <ScrollableOverlay outerClassName="max-h-[240px]" className="p-1">
                           {(() => {
+                            const query = providerSearchQuery.toLowerCase();
+                            const customLabel = t('settings.providers.page.custom.optionLabel');
+                            const customMatches = !query
+                              || customLabel.toLowerCase().includes(query)
+                              || 'other'.includes(query)
+                              || 'custom'.includes(query);
                             const filtered = unconnectedProviders.filter(p => {
-                              const query = providerSearchQuery.toLowerCase();
                               return (p.name || p.id).toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
                             });
-                            if (filtered.length === 0) {
+                            if (filtered.length === 0 && !customMatches) {
                               return <p className="py-4 text-center typography-meta text-muted-foreground">{t('settings.providers.page.connect.noProvidersFound')}</p>;
                             }
-                            return filtered.map((provider) => (
-                              <DropdownMenuItem
-                                key={provider.id}
-                                onSelect={() => {
-                                  setCandidateProviderId(provider.id);
-                                  setProviderDropdownOpen(false);
-                                  setProviderSearchQuery('');
-                                }}
-                                className="flex items-center justify-between"
-                              >
-                                <span className="flex items-center gap-2 min-w-0">
-                                  <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />
-                                  <span className="truncate">{provider.name || provider.id}</span>
-                                </span>
-                                {candidateProviderId === provider.id && (
-                                  <Icon name="check" className="h-4 w-4 text-[var(--primary-base)]" />
-                                )}
-                              </DropdownMenuItem>
-                            ));
+                            return (
+                              <>
+                                {filtered.map((provider) => (
+                                  <DropdownMenuItem
+                                    key={provider.id}
+                                    onSelect={() => {
+                                      setCandidateProviderId(provider.id);
+                                      setProviderDropdownOpen(false);
+                                      setProviderSearchQuery('');
+                                    }}
+                                    className="flex items-center justify-between"
+                                  >
+                                    <span className="flex items-center gap-2 min-w-0">
+                                      <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />
+                                      <span className="truncate">{provider.name || provider.id}</span>
+                                    </span>
+                                    {candidateProviderId === provider.id && (
+                                      <Icon name="check" className="h-4 w-4 text-[var(--primary-base)]" />
+                                    )}
+                                  </DropdownMenuItem>
+                                ))}
+                                {customMatches ? (
+                                  <DropdownMenuItem
+                                    key={CUSTOM_PROVIDER_ID}
+                                    onSelect={() => {
+                                      setCandidateProviderId(CUSTOM_PROVIDER_ID);
+                                      setProviderDropdownOpen(false);
+                                      setProviderSearchQuery('');
+                                    }}
+                                    className="flex items-center justify-between"
+                                  >
+                                    <span className="flex items-center gap-2 min-w-0">
+                                      <Icon name="add" className="h-4 w-4 flex-shrink-0" />
+                                      <span className="truncate">{customLabel}</span>
+                                    </span>
+                                    {candidateProviderId === CUSTOM_PROVIDER_ID && (
+                                      <Icon name="check" className="h-4 w-4 text-[var(--primary-base)]" />
+                                    )}
+                                  </DropdownMenuItem>
+                                ) : null}
+                              </>
+                            );
                           })()}
                         </ScrollableOverlay>
                       </DropdownMenuContent>
@@ -607,7 +750,25 @@ export const ProvidersPage: React.FC = () => {
               </div>
         </SettingsSection>
 
-          {candidateProviderId && (
+          {isCustomCreateMode ? (
+            <CustomProviderForm
+              mode="create"
+              existingProviderIDs={connectedProviderIds}
+              busy={authBusyKey?.startsWith('custom:') ?? false}
+              authFailureHint={customAuthFailureHint}
+              onCancel={() => {
+                setCandidateProviderId('');
+                setCustomAuthFailureHint(null);
+                setLastCustomPersistId(null);
+              }}
+              onDisconnect={
+                customAuthFailureHint && lastCustomPersistId
+                  ? () => void handleDisconnectCustomProvider(lastCustomPersistId)
+                  : undefined
+              }
+              onSubmit={handleSaveCustomProvider}
+            />
+          ) : candidateProviderId ? (
             <SettingsSection
               title={t('settings.providers.page.auth.title')}
               settingsItem="providers.auth"
@@ -741,7 +902,7 @@ export const ProvidersPage: React.FC = () => {
                 </>
               )}
             </SettingsSection>
-          )}
+          ) : null}
       </SettingsPageLayout>
     );
   }
@@ -761,6 +922,16 @@ export const ProvidersPage: React.FC = () => {
   const providerModels = Array.isArray(selectedProvider.models) ? selectedProvider.models : [];
   const providerAuthMethods = authMethodsByProvider[selectedProvider.id] ?? [];
   const oauthAuthMethods = providerAuthMethods.filter((method) => normalizeAuthType(method) === 'oauth');
+  const sourcesLoaded = Boolean(selectedSources);
+  const isEditableCustomProvider = sourcesLoaded
+    && isConfigDefinedCustomProvider(selectedProvider, selectedSources);
+  const providerEnv = Array.isArray(selectedProvider.env)
+    ? selectedProvider.env.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : [];
+  const hasStoredAuth = Boolean(selectedSources?.auth.exists);
+  const hasEnvCredentials = providerEnv.length > 0;
+  const hasCredentials = hasStoredAuth || hasEnvCredentials;
+  const authStatusIncomplete = isEditableCustomProvider && !hasCredentials;
 
   const filteredModels = providerModels.filter((model) => {
     const name = typeof model?.name === 'string' ? model.name : '';
@@ -769,6 +940,35 @@ export const ProvidersPage: React.FC = () => {
     if (!query) return true;
     return name.toLowerCase().includes(query) || id.toLowerCase().includes(query);
   });
+
+  if (isCustomEditMode && isEditableCustomProvider && editingCustomFormInitial) {
+    return (
+      <SettingsPageLayout
+        title={selectedProvider.name || selectedProvider.id}
+        titleLeading={<ProviderLogo providerId={selectedProvider.id} className="h-5 w-5 shrink-0" />}
+        description={<span className="font-mono typography-settings-description text-muted-foreground">{selectedProvider.id}</span>}
+        showSaveStatus={false}
+      >
+        <CustomProviderForm
+          mode="edit"
+          existingProviderIDs={connectedProviderIds}
+          initialValues={editingCustomFormInitial}
+          allowExistingAuth={hasCredentials || !sourcesLoaded}
+          busy={authBusyKey?.startsWith('custom:') ?? false}
+          authFailureHint={customAuthFailureHint}
+          onCancel={() => {
+            setEditingCustomProviderId(null);
+            setEditingCustomFormInitial(null);
+            setEditingCustomScope(null);
+            setCustomAuthFailureHint(null);
+            setLastCustomPersistId(null);
+          }}
+          onDisconnect={() => void handleDisconnectCustomProvider(selectedProvider.id)}
+          onSubmit={handleSaveCustomProvider}
+        />
+      </SettingsPageLayout>
+    );
+  }
 
   return (
     <SettingsPageLayout
@@ -781,23 +981,48 @@ export const ProvidersPage: React.FC = () => {
         title={t('settings.providers.page.auth.title')}
         divider={false}
         headerAction={(
-          <Button
-            variant="outline"
-            size="xs"
-            className="!font-normal"
-            onClick={() => setShowAuthPanel((prev) => !prev)}
-          >
-            {showAuthPanel ? t('settings.providers.page.actions.hide') : t('settings.providers.page.actions.reconnect')}
-          </Button>
+          <div className="flex items-center gap-1">
+            {isEditableCustomProvider ? (
+              <Button
+                variant="outline"
+                size="xs"
+                className="!font-normal"
+                onClick={() => {
+                  setCustomAuthFailureHint(null);
+                  setEditingCustomFormInitial(providerToCustomFormState(selectedProvider));
+                  setEditingCustomScope(resolveProviderConfigScope(selectedSources));
+                  setEditingCustomProviderId(selectedProvider.id);
+                }}
+              >
+                {t('settings.providers.page.actions.edit')}
+              </Button>
+            ) : null}
+            <Button
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={() => setShowAuthPanel((prev) => !prev)}
+            >
+              {showAuthPanel ? t('settings.providers.page.actions.hide') : t('settings.providers.page.actions.reconnect')}
+            </Button>
+          </div>
         )}
         settingsItem="providers.auth"
       >
             {!showAuthPanel ? (
-              <div className="flex items-center gap-1.5 py-1.5">
-                <Icon name="check" className="w-4 h-4 text-[var(--status-success)] shrink-0" />
-                <span className="typography-ui-label text-foreground">{t('settings.providers.page.auth.connected')}</span>
-                <SettingsInfoHint>{t('settings.providers.page.auth.useReconnectHint')}</SettingsInfoHint>
-              </div>
+              authStatusIncomplete ? (
+                <div className="flex items-center gap-1.5 py-1.5">
+                  <Icon name="alert" className="w-4 h-4 text-[var(--status-warning)] shrink-0" />
+                  <span className="typography-ui-label text-foreground">{t('settings.providers.page.auth.incomplete')}</span>
+                  <SettingsInfoHint>{t('settings.providers.page.auth.incompleteHint')}</SettingsInfoHint>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 py-1.5">
+                  <Icon name="check" className="w-4 h-4 text-[var(--status-success)] shrink-0" />
+                  <span className="typography-ui-label text-foreground">{t('settings.providers.page.auth.connected')}</span>
+                  <SettingsInfoHint>{t('settings.providers.page.auth.useReconnectHint')}</SettingsInfoHint>
+                </div>
+              )
             ) : authLoading ? (
               <div className="py-1.5 typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</div>
             ) : (

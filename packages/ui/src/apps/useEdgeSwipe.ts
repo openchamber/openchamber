@@ -15,6 +15,10 @@ import React from 'react';
  */
 
 const EDGE_ZONE = 32; // px from a side where the swipe must begin
+// Android reserves the physical screen edge for system navigation. Accept a
+// wider start area so both OpenChamber drawers can be invoked beyond the
+// system Back gesture region without changing the browser/iOS gesture.
+const ANDROID_EDGE_ZONE = 80;
 const MIN_DISTANCE = 64; // px of horizontal travel required to commit
 const MAX_OFF_AXIS_RATIO = 0.7; // |dy| must stay below |dx| * this (keep it horizontal)
 
@@ -36,6 +40,8 @@ export const useEdgeSwipe = (
   React.useEffect(() => {
     const element = ref.current;
     if (!element) return;
+    const platform = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor?.getPlatform?.();
+    const edgeZone = platform === 'android' ? ANDROID_EDGE_ZONE : EDGE_ZONE;
 
     let tracking = false;
     let fromLeftEdge = false;
@@ -49,8 +55,8 @@ export const useEdgeSwipe = (
       }
       const touch = event.touches[0];
       const width = element.clientWidth;
-      const nearLeft = touch.clientX <= EDGE_ZONE;
-      const nearRight = touch.clientX >= width - EDGE_ZONE;
+      const nearLeft = touch.clientX <= edgeZone;
+      const nearRight = touch.clientX >= width - edgeZone;
       tracking = nearLeft || nearRight;
       fromLeftEdge = nearLeft;
       startX = touch.clientX;

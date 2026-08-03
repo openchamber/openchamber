@@ -143,6 +143,10 @@ export type DesktopSettings = {
    * `claude` — native Claude Code agents / prompts / permissions.
    */
   harnessClaudeCodeAgentsMode?: 'claude' | 'opencode';
+  // The walkthrough needs structured output and a roomy context, which the
+  // small model is often deliberately not chosen for. Unset means "use the
+  // small model"; a value replaces it for this feature only.
+  walkthroughModelOverride?: string; // format: "provider/model"
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;
