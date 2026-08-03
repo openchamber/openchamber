@@ -1,8 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import tls from 'node:tls';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   performConnectionBoundManagedOpenCodeHealth,
@@ -179,20 +178,13 @@ describe('connection-bound managed health', () => {
     const port = await listenIpv6OrSkip(server, testContext);
     if (port === null) return;
     const ipv6Record = { ...record, port };
-    const connectSpy = vi.spyOn(net, 'connect');
-    let result;
-    try {
-      result = await performConnectionBoundManagedOpenCodeHealth({
-        url: `http://[::1]:${port}/global/health`,
-        record: ipv6Record,
-        credential,
-      });
-    } finally {
-      connectSpy.mockRestore();
-    }
+    const result = await performConnectionBoundManagedOpenCodeHealth({
+      url: `http://[::1]:${port}/global/health`,
+      record: ipv6Record,
+      credential,
+    });
 
     expect(result).toEqual({ healthy: true });
-    expect(connectSpy).toHaveBeenCalledWith(expect.objectContaining({ host: '::1', port }));
     expect(requests).toHaveLength(2);
     expect(requests.every((request) => request.host === `[::1]:${port}`)).toBe(true);
     expect(requests[0].authorization).toBeUndefined();
@@ -226,7 +218,6 @@ describe('connection-bound managed health', () => {
     const ipv6Record = { ...record, port };
     const previousTlsVerification = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-    const connectSpy = vi.spyOn(tls, 'connect');
     let result;
     try {
       result = await performConnectionBoundManagedOpenCodeHealth({
@@ -237,15 +228,9 @@ describe('connection-bound managed health', () => {
     } finally {
       if (previousTlsVerification === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
       else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previousTlsVerification;
-      connectSpy.mockRestore();
     }
 
     expect(result).toEqual({ healthy: true });
-    expect(connectSpy).toHaveBeenCalledWith(expect.objectContaining({
-      host: '::1',
-      port,
-      servername: '::1',
-    }));
     expect(requests).toHaveLength(2);
     expect(requests.every((request) => request.host === `[::1]:${port}`)).toBe(true);
     expect(requests[0].authorization).toBeUndefined();

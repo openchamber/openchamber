@@ -2,8 +2,9 @@ import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as windowsAcl from '../../guardian/windows-acl.js';
 import { snapshotFileIdentity, sameFileIdentity } from '../../guardian/file-identity.js';
 import { readProcessIdentity } from '../../guardian/process-identity.js';
 import {
@@ -27,14 +28,6 @@ const createRoot = () => {
 
 const createIncarnation = () => randomBytes(32).toString('base64url');
 
-// These tests cover encrypted credential lifecycle and fencing. Keep their
-// filesystem contract deterministic on every host; Windows ACL behavior is
-// covered by the dedicated filesystem/store tests with explicit ACL seams.
-const createStore = (options = {}) => createManagedOpenCodeCredentialStore({
-  platform: 'linux',
-  ...options,
-});
-
 const createDescriptor = (incarnation = createIncarnation()) => ({
   incarnation,
   ownerInstanceId: 'owner-instance',
@@ -47,11 +40,10 @@ const createFixture = () => {
   const root = createRoot();
   const secretProvider = createManagedOpenCodeHandoffV2SecretProvider({
     rootDir: root,
-    platform: 'linux',
     username: 'alice',
     aclInspector: () => ({ entries: [{ principal: 'alice', rights: ['F'] }] }),
   });
-  const store = createStore({
+  const store = createManagedOpenCodeCredentialStore({
     rootDir: root,
     secretProvider,
     username: 'alice',
@@ -74,6 +66,13 @@ const createLockOwner = ({ pid, identity, token = randomBytes(32).toString('base
   processStartTicks: identity.processStartTicks,
   identity,
   token,
+});
+
+beforeEach(() => {
+  if (process.platform === 'win32') {
+    vi.spyOn(windowsAcl, 'applyDirectoryAcl').mockReturnValue({ ok: true, username: 'alice' });
+    vi.spyOn(windowsAcl, 'applyPrivateFileAcl').mockReturnValue({ ok: true, username: 'alice' });
+  }
 });
 
 afterEach(() => {
@@ -162,7 +161,7 @@ describe('managed OpenCode credential store', () => {
         return Buffer.alloc(32, 4);
       }),
     };
-    const store = createStore({ rootDir: root, secretProvider });
+    const store = createManagedOpenCodeCredentialStore({ rootDir: root, secretProvider });
     const descriptor = createDescriptor();
     const password = 'lock-owner-test-password';
     const creation = store.create({ ...descriptor, password });
@@ -188,7 +187,7 @@ describe('managed OpenCode credential store', () => {
     const root = createRoot();
     const descriptor = createDescriptor();
     const lockPath = lockPathFor(root, descriptor.incarnation);
-    const store = createStore({
+    const store = createManagedOpenCodeCredentialStore({
       rootDir: root,
       secretProvider: { deriveCredentialEncryptionKey: async () => Buffer.alloc(32, 12) },
       processIdentity: () => {
@@ -209,7 +208,7 @@ describe('managed OpenCode credential store', () => {
     const identity = readProcessIdentity(process.pid);
     expect(identity?.processStartTicks).toBeTruthy();
     let available = false;
-    const store = createStore({
+    const store = createManagedOpenCodeCredentialStore({
       rootDir: root,
       secretProvider: { deriveCredentialEncryptionKey: async () => Buffer.alloc(32, 13) },
       processIdentity: () => (available ? identity : null),
@@ -234,7 +233,7 @@ describe('managed OpenCode credential store', () => {
     const descriptor = createDescriptor();
     const lockPath = lockPathFor(root, descriptor.incarnation);
     const secretProvider = { deriveCredentialEncryptionKey: async () => Buffer.alloc(32, 5) };
-    const store = createStore({
+    const store = createManagedOpenCodeCredentialStore({
       rootDir: root,
       secretProvider,
       processLiveness: (pid) => pid === 987654 ? 'dead' : 'alive',
@@ -258,7 +257,7 @@ describe('managed OpenCode credential store', () => {
     const root = createRoot();
     const descriptor = createDescriptor();
     const lockPath = lockPathFor(root, descriptor.incarnation);
-    const store = createStore({
+    const store = createManagedOpenCodeCredentialStore({
       rootDir: root,
       secretProvider: { deriveCredentialEncryptionKey: async () => Buffer.alloc(32, 6) },
       processLiveness: () => 'alive',
@@ -309,7 +308,7 @@ describe('managed OpenCode credential store', () => {
     const secretProvider = {
       deriveCredentialEncryptionKey: async () => Buffer.alloc(32, 10),
     };
-    const first = createStore({ rootDir: root, secretProvider });
+    const first = createManagedOpenCodeCredentialStore({ rootDir: root, secretProvider });
     const currentIdentity = readProcessIdentity(process.pid);
     expect(currentIdentity?.processStartTicks).toBeTruthy();
     const replacementPid = 987654;
@@ -323,7 +322,7 @@ describe('managed OpenCode credential store', () => {
       token: randomBytes(32).toString('base64url'),
     });
     let replacementAlive = true;
-    const second = createStore({
+    const second = createManagedOpenCodeCredentialStore({
       rootDir: root,
       secretProvider,
       processLiveness: (pid) => pid === replacementPid
@@ -381,7 +380,7 @@ describe('managed OpenCode credential store', () => {
       processStartTicks: '987653',
       launch: { commandLine: 'node foreign-operation.js', cwd: root },
     };
-    const store = createStore({
+    const store = createManagedOpenCodeCredentialStore({
       rootDir: root,
       secretProvider: { deriveCredentialEncryptionKey: async () => Buffer.alloc(32, 11) },
       processLiveness: (pid) => pid === foreignPid ? 'alive' : 'dead',
@@ -405,7 +404,7 @@ describe('managed OpenCode credential store', () => {
     const root = createRoot();
     const descriptor = createDescriptor();
     const lockPath = lockPathFor(root, descriptor.incarnation);
-    const store = createStore({
+    const store = createManagedOpenCodeCredentialStore({
       rootDir: root,
       secretProvider: { deriveCredentialEncryptionKey: async () => Buffer.alloc(32, 7) },
       processLiveness: () => 'unknown',
@@ -425,7 +424,7 @@ describe('managed OpenCode credential store', () => {
     const identity = readProcessIdentity(process.pid);
     expect(identity?.processStartTicks).toBeTruthy();
     const body = JSON.stringify(createLockOwner({ pid: process.pid, identity }));
-    const store = createStore({
+    const store = createManagedOpenCodeCredentialStore({
       rootDir: root,
       secretProvider: { deriveCredentialEncryptionKey: async () => Buffer.alloc(32, 8) },
       processLiveness: () => 'alive',
@@ -557,7 +556,7 @@ describe('managed OpenCode credential store', () => {
         return Buffer.alloc(32, 9);
       }),
     };
-    const store = createStore({ rootDir: root, secretProvider });
+    const store = createManagedOpenCodeCredentialStore({ rootDir: root, secretProvider });
     const descriptor = createDescriptor();
     const file = filePathFor(root, descriptor.incarnation);
 
@@ -578,7 +577,7 @@ describe('managed OpenCode credential store', () => {
     const secretProvider = {
       deriveCredentialEncryptionKey: async () => Buffer.alloc(32, 7),
     };
-    const store = createStore({ rootDir: root, secretProvider });
+    const store = createManagedOpenCodeCredentialStore({ rootDir: root, secretProvider });
     const descriptor = createDescriptor();
     await store.create({ ...descriptor, password: 'original-password' });
     const file = filePathFor(root, descriptor.incarnation);
@@ -841,8 +840,8 @@ describe('managed OpenCode credential store', () => {
         return Buffer.alloc(32, 8);
       }),
     };
-    const first = createStore({ rootDir: root, secretProvider });
-    const second = createStore({ rootDir: root, secretProvider });
+    const first = createManagedOpenCodeCredentialStore({ rootDir: root, secretProvider });
+    const second = createManagedOpenCodeCredentialStore({ rootDir: root, secretProvider });
     const descriptor = createDescriptor();
 
     const publication = first.create({ ...descriptor, password: 'fenced-publication-password' });
@@ -893,7 +892,7 @@ describe('managed OpenCode credential store', () => {
   it('zeroes every derived encryption key buffer after use', async () => {
     const root = createRoot();
     const issuedKeys = [];
-    const store = createStore({
+    const store = createManagedOpenCodeCredentialStore({
       rootDir: root,
       secretProvider: {
         deriveCredentialEncryptionKey: async () => {
