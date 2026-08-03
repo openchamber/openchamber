@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
@@ -47,20 +47,43 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   const {
     selectedSkillName,
     skills,
+    excludeSources,
     setSelectedSkill,
     setSkillDraft,
     createSkill,
     deleteSkill,
     getSkillDetail,
+    loadExcludeSources,
+    setExcludeSources,
   } = useSkillsStore(useShallow((s) => ({
     selectedSkillName: s.selectedSkillName,
     skills: s.skills,
+    excludeSources: s.excludeSources,
     setSelectedSkill: s.setSelectedSkill,
     setSkillDraft: s.setSkillDraft,
     createSkill: s.createSkill,
     deleteSkill: s.deleteSkill,
     getSkillDetail: s.getSkillDetail,
+    loadExcludeSources: s.loadExcludeSources,
+    setExcludeSources: s.setExcludeSources,
   })));
+
+  React.useEffect(() => {
+    loadExcludeSources();
+  }, [loadExcludeSources]);
+
+  const isClaudeExcluded = excludeSources.includes('claude');
+  const isAgentsExcluded = excludeSources.includes('agents');
+
+  const handleToggleSource = useCallback(async (source: 'claude' | 'agents') => {
+    const next = excludeSources.includes(source)
+      ? excludeSources.filter((s) => s !== source)
+      : [...excludeSources, source];
+    const ok = await setExcludeSources(next);
+    if (!ok) {
+      toast.error(t('settings.skills.sidebar.toast.sourceToggleFailed'));
+    }
+  }, [excludeSources, setExcludeSources, t]);
 
   // Skills are loaded by the Settings shell when this page is active.
 
@@ -244,6 +267,25 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
             onClick={handleCreateNew}
           >
             <Icon name="add" className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-1.5 mt-2">
+          <span className="typography-micro text-muted-foreground">{t('settings.skills.sidebar.sourcesLabel')}</span>
+          <Button
+            variant="chip"
+            size="xs"
+            aria-pressed={!isClaudeExcluded}
+            onClick={() => handleToggleSource('claude')}
+          >
+            {t('settings.skills.sidebar.source.claude')}
+          </Button>
+          <Button
+            variant="chip"
+            size="xs"
+            aria-pressed={!isAgentsExcluded}
+            onClick={() => handleToggleSource('agents')}
+          >
+            {t('settings.skills.sidebar.source.agents')}
           </Button>
         </div>
       </div>

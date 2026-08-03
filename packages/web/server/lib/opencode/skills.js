@@ -156,9 +156,18 @@ function getSkillWritePath(skillName, workingDirectory, requestedScope) {
 function discoverSkills(workingDirectory) {
   const skills = new Map();
 
+  let excludeSources = [];
+  try {
+    const config = readConfig(workingDirectory);
+    excludeSources = Array.isArray(config?.skills?.excludeSources) ? config.skills.excludeSources : [];
+  } catch {
+    excludeSources = [];
+  }
+
   for (const externalRootName of ['.claude', '.agents']) {
-    const homeRoot = path.join(os.homedir(), externalRootName, 'skills');
     const source = externalRootName === '.agents' ? 'agents' : 'claude';
+    if (excludeSources.includes(source)) continue;
+    const homeRoot = path.join(os.homedir(), externalRootName, 'skills');
     for (const skillMdPath of walkSkillMdFiles(homeRoot)) {
       addSkillFromMdFile(skills, skillMdPath, SKILL_SCOPE.USER, source);
     }
@@ -170,6 +179,7 @@ function discoverSkills(workingDirectory) {
     for (const ancestor of ancestors) {
       for (const externalRootName of ['.claude', '.agents']) {
         const source = externalRootName === '.agents' ? 'agents' : 'claude';
+        if (excludeSources.includes(source)) continue;
         const externalSkillsRoot = path.join(ancestor, externalRootName, 'skills');
         for (const skillMdPath of walkSkillMdFiles(externalSkillsRoot)) {
           addSkillFromMdFile(skills, skillMdPath, SKILL_SCOPE.PROJECT, source);

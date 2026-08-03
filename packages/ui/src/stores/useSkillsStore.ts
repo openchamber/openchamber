@@ -137,15 +137,20 @@ interface SkillDetail {
   source?: SkillSource | null;
 }
 
+type ExcludableSkillSource = 'claude' | 'agents';
+
 interface SkillsStore {
   selectedSkillName: string | null;
   skills: DiscoveredSkill[];
   isLoading: boolean;
   skillDraft: SkillDraft | null;
+  excludeSources: ExcludableSkillSource[];
 
   setSelectedSkill: (name: string | null) => void;
   setSkillDraft: (draft: SkillDraft | null) => void;
   loadSkills: () => Promise<boolean>;
+  loadExcludeSources: () => Promise<void>;
+  setExcludeSources: (sources: ExcludableSkillSource[]) => Promise<boolean>;
   getSkillDetail: (name: string) => Promise<SkillDetail | null>;
   createSkill: (config: SkillConfig) => Promise<boolean>;
   updateSkill: (name: string, config: Partial<SkillConfig>) => Promise<boolean>;
@@ -194,6 +199,7 @@ export const useSkillsStore = create<SkillsStore>()(
         skills: [],
         isLoading: false,
         skillDraft: null,
+        excludeSources: [],
 
         setSelectedSkill: (name: string | null) => {
           set({ selectedSkillName: name });
@@ -201,6 +207,39 @@ export const useSkillsStore = create<SkillsStore>()(
 
         setSkillDraft: (draft: SkillDraft | null) => {
           set({ skillDraft: draft });
+        },
+
+        loadExcludeSources: async () => {
+          try {
+            const response = await runtimeFetch('/api/config/skills/exclude-sources');
+            if (!response.ok) return;
+            const data = await response.json();
+            set({ excludeSources: data.excludeSources || [] });
+          } catch {
+            // ignore
+          }
+        },
+
+        setExcludeSources: async (sources: ExcludableSkillSource[]) => {
+          const prev = get().excludeSources;
+          set({ excludeSources: sources });
+          try {
+            const response = await runtimeFetch('/api/config/skills/exclude-sources', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ excludeSources: sources }),
+            });
+            if (!response.ok) {
+              set({ excludeSources: prev });
+              return false;
+            }
+            invalidateSkillsLoadCache();
+            await get().loadSkills();
+            return true;
+          } catch {
+            set({ excludeSources: prev });
+            return false;
+          }
         },
 
         loadSkills: async () => {
