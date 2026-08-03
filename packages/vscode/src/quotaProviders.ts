@@ -124,6 +124,16 @@ type CrofPayload = {
   credits?: number | string;
 };
 
+type DeepseekPayload = {
+  is_available?: boolean;
+  balance_infos?: Array<{
+    currency?: string;
+    total_balance?: number | string;
+    granted_balance?: number | string;
+    topped_up_balance?: number | string;
+  }>;
+};
+
 type NeuralwattPayload = {
   balance?: {
     credits_remaining_usd?: number | string;
@@ -490,6 +500,11 @@ export const listConfiguredQuotaProviders = () => {
   const neuralwattAuth = normalizeAuthEntry(getAuthEntry(auth, ['neuralwatt']));
   if (neuralwattAuth && ((neuralwattAuth as Record<string, unknown>).key || (neuralwattAuth as Record<string, unknown>).token)) {
     configured.add('neuralwatt');
+  }
+
+  const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
+  if (deepseekAuth && ((deepseekAuth as Record<string, unknown>).key || (deepseekAuth as Record<string, unknown>).token)) {
+    configured.add('deepseek');
   }
 
   return Array.from(configured);
@@ -2191,6 +2206,101 @@ const fetchCrofQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const DEEPSEEK_QUOTA_URL = 'https://api.deepseek.com/user/balance';
+
+const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['deepseek'])) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch(DEEPSEEK_QUOTA_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        ok: false,
+        configured: true,
+        error: response.status === 401 || response.status === 403
+          ? 'Session expired — please re-authenticate with DeepSeek'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as DeepseekPayload;
+    const balanceInfos = Array.isArray(payload?.balance_infos) ? payload.balance_infos : [];
+    const balanceInfo = balanceInfos.find((info) => info?.currency === 'USD')
+      ?? balanceInfos.find((info) => info?.currency === 'CNY')
+      ?? null;
+    const rawBalance = balanceInfo?.total_balance;
+    const totalBalance = (typeof rawBalance === 'number' || (typeof rawBalance === 'string' && rawBalance.trim() !== ''))
+      ? toNumber(rawBalance)
+      : null;
+
+    if (totalBalance === null) {
+      return buildResult({
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const symbol = balanceInfo?.currency === 'CNY' ? '¥' : '$';
+    const windows: Record<string, UsageWindow> = {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `${symbol}${formatMoney(totalBalance)}`,
+      }),
+    };
+
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && error.name === 'AbortError' && timeoutSignal.aborted;
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
@@ -2234,6 +2344,8 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchCursorQuota();
     case 'crof':
       return fetchCrofQuota();
+    case 'deepseek':
+      return fetchDeepseekQuota();
     case 'neuralwatt':
       return fetchNeuralwattQuota();
     default:
