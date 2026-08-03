@@ -230,7 +230,10 @@ const main = async () => {
       .digest('base64url');
     const spawnResponse = await request('smoke-spawn', 'spawn', {
       ...launchSpec,
-      env: {},
+      env: {
+        OPENCODE_SERVER_USERNAME: 'smoke-user',
+        OPENCODE_SERVER_PASSWORD: 'smoke-password',
+      },
       owner: { ...owner, launchFingerprint },
       launchSpec,
     });
@@ -239,7 +242,10 @@ const main = async () => {
     }
     const child = spawnResponse.result;
 
-    const health = await request('smoke-health', 'health', { incarnation: child.incarnation });
+    const health = await request('smoke-health', 'health', {
+      incarnation: child.incarnation,
+      owner: { ...owner, launchFingerprint },
+    });
     if (health?.error || health?.result?.healthy !== true) {
       throw new Error(`managed child health failed: ${JSON.stringify(health)}`);
     }

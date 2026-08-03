@@ -1,5 +1,7 @@
 import { spawnSync as defaultSpawnSync } from 'node:child_process';
 
+import { resolveWindowsSystemToolPath } from './process-identity.js';
+
 /**
  * Windows ACL helpers (W-B).
  *
@@ -22,12 +24,13 @@ import { spawnSync as defaultSpawnSync } from 'node:child_process';
  *   - The discovery file is created with `O_EXCL`; the temp file is
  *     never a symlink target because the temp filename cannot pre-exist
  *     on disk.
- *   - The ACL is applied to the **temp** file before the atomic rename
- *     to the published path so a half-published file is never readable
+ *   - The ACL is applied to the **temp** file before the identity-fenced
+ *     hard-link publication so a half-published file is never readable
  *     by anyone but the owner.
  *
  * The helpers in this module are **synchronous** by design: the
- * discovery-file publish sequence is itself synchronous (`renameSync`),
+ * discovery-file publish sequence is itself synchronous (ACL plus hard-link
+ * publication),
  * and the ACL step is a brief shell-out. No
  * async coordination is needed.
  *
@@ -133,9 +136,12 @@ const parseAclOutput = (output, targetPath) => {
   return entries;
 };
 
-const inspectWindowsAcl = ({ targetPath, spawnSync = defaultSpawnSync } = {}) => {
+const inspectWindowsAcl = ({ targetPath, spawnSync = defaultSpawnSync, systemRoot } = {}) => {
   assertSafePath(targetPath, 'targetPath');
-  const result = spawnSync('icacls', [targetPath], { encoding: 'utf8', shell: false });
+  const result = spawnSync(resolveWindowsSystemToolPath('icacls', systemRoot), [targetPath], {
+    encoding: 'utf8',
+    shell: false,
+  });
   if (result?.error) {
     if (result.error.code === 'ENOENT') {
       throw new Error('Could not locate icacls binary; refusing to validate the Windows trust boundary');
@@ -161,11 +167,12 @@ export function validateWindowsAcl({
   aclEntries,
   inspectAcl: inspect = inspectWindowsAcl,
   spawnSync = defaultSpawnSync,
+  systemRoot,
 } = {}) {
   assertSafePath(targetPath, 'targetPath');
   let resolvedUsername;
   try {
-    resolvedUsername = assertUsername(username || resolveCurrentUsername({ spawnSync }));
+    resolvedUsername = assertUsername(username || resolveCurrentUsername({ spawnSync, systemRoot }));
   } catch (error) {
     throw unsafeAclError(error?.message || 'Windows username resolution failed');
   }
@@ -173,7 +180,7 @@ export function validateWindowsAcl({
   try {
     snapshot = Array.isArray(aclEntries)
       ? { entries: aclEntries }
-      : inspect({ targetPath, username: resolvedUsername, kind, spawnSync });
+      : inspect({ targetPath, username: resolvedUsername, kind, spawnSync, systemRoot });
   } catch (error) {
     if (error?.code === 'WINDOWS_ACL_UNSAFE') throw error;
     throw unsafeAclError(error?.message || 'Windows ACL inspection failed');
@@ -224,11 +231,12 @@ export function validateWindowsAncestorAcl({
   aclEntries,
   inspectAcl: inspect = inspectWindowsAcl,
   spawnSync = defaultSpawnSync,
+  systemRoot,
 } = {}) {
   assertSafePath(targetPath, 'targetPath');
   let resolvedUsername;
   try {
-    resolvedUsername = assertUsername(username || resolveCurrentUsername({ spawnSync }));
+    resolvedUsername = assertUsername(username || resolveCurrentUsername({ spawnSync, systemRoot }));
   } catch (error) {
     throw unsafeAclError(error?.message || 'Windows username resolution failed');
   }
@@ -237,7 +245,7 @@ export function validateWindowsAncestorAcl({
   try {
     snapshot = Array.isArray(aclEntries)
       ? { entries: aclEntries }
-      : inspect({ targetPath, username: resolvedUsername, kind: 'ancestor', spawnSync });
+      : inspect({ targetPath, username: resolvedUsername, kind: 'ancestor', spawnSync, systemRoot });
   } catch (error) {
     if (error?.code === 'WINDOWS_ACL_UNSAFE') throw error;
     throw unsafeAclError(error?.message || 'Windows ancestor ACL inspection failed');
@@ -288,14 +296,23 @@ export function validateWindowsAncestorAcl({
  * @param {object} [options]
  * @param {typeof defaultSpawnSync} [options.spawnSync] - Override for tests.
  * @param {(message: string) => void} [options.log]
+ * @param {string} [options.systemRoot] - Test seam for the trusted Windows
+ *   installation root; production uses `process.env.SystemRoot`.
  * @returns {string}
  */
-export function resolveCurrentUsername({ spawnSync = defaultSpawnSync, log = () => {} } = {}) {
-  const result = spawnSync('whoami', [], { encoding: 'utf8' });
+export function resolveCurrentUsername({
+  spawnSync = defaultSpawnSync,
+  log = () => {},
+  systemRoot,
+} = {}) {
+  const result = spawnSync(resolveWindowsSystemToolPath('whoami', systemRoot), [], {
+    encoding: 'utf8',
+    shell: false,
+  });
   if (result.error) {
     if (result.error.code === 'ENOENT') {
       log('[guardian-acl] whoami binary not found; cannot resolve Windows username');
-      throw new Error('Could not resolve current Windows username (whoami not found on PATH); refusing to start guardian to preserve trust boundary');
+      throw new Error('Could not resolve current Windows username (whoami not found at the trusted Windows system path); refusing to start guardian to preserve trust boundary');
     }
     throw new Error(`Could not resolve current Windows username: ${result.error.message}`);
   }
@@ -314,7 +331,7 @@ export function resolveCurrentUsername({ spawnSync = defaultSpawnSync, log = () 
  * Apply a per-user ACL to the discovery file. Used as the second-to-last
  * step of the atomic publish sequence:
  *
- *   O_EXCL temp → write → fsync → close → applyDiscoveryFileAcl → rename
+ *   O_EXCL temp → write → fsync → close → applyDiscoveryFileAcl → hard-link publish
  *
  * The grant is `/grant:r <username>:F` (no inheritance, full control for
  * the owner). The command intentionally does not use `icacls /c`: an ACL
@@ -326,7 +343,7 @@ export function resolveCurrentUsername({ spawnSync = defaultSpawnSync, log = () 
  * @param {object} options
  * @param {string} options.portPath - The discovery file path (already
  *   created with O_EXCL). The ACL is applied to **this** path. In the
- *   publish sequence the temp path is passed here before rename.
+ *   publish sequence the temp path is passed here before hard-link publication.
  * @param {string} options.username - The grant target (output of
  *   `resolveCurrentUsername`).
  * @param {(message: string) => void} [options.log]
@@ -338,6 +355,7 @@ export function applyDiscoveryFileAcl({
   username,
   log = () => {},
   spawnSync = defaultSpawnSync,
+  systemRoot,
   inspectAcl: inspect,
   aclEntries,
 } = {}) {
@@ -349,10 +367,13 @@ export function applyDiscoveryFileAcl({
     '/grant:r',
     `${username}:F`,
   ];
-  const result = spawnSync('icacls', args, { encoding: 'utf8', shell: false });
+  const result = spawnSync(resolveWindowsSystemToolPath('icacls', systemRoot), args, {
+    encoding: 'utf8',
+    shell: false,
+  });
   if (result.error) {
     if (result.error.code === 'ENOENT') {
-      log('[guardian-acl] icacls binary not found on PATH');
+      log('[guardian-acl] icacls binary not found at the trusted Windows system path');
       throw new Error('Could not locate icacls binary; refusing to start guardian to preserve trust boundary');
     }
     throw new Error(`icacls spawn failed: ${result.error.message}`);
@@ -368,6 +389,7 @@ export function applyDiscoveryFileAcl({
     ...(inspect ? { inspectAcl: inspect } : {}),
     ...(aclEntries ? { aclEntries } : {}),
     spawnSync,
+    systemRoot,
   });
   return { ok: true, username };
 };
@@ -378,6 +400,7 @@ export function applyPrivateFileAcl({
   username,
   log = () => {},
   spawnSync = defaultSpawnSync,
+  systemRoot,
   inspectAcl: inspect,
   aclEntries,
 } = {}) {
@@ -389,10 +412,13 @@ export function applyPrivateFileAcl({
     '/grant:r',
     `${username}:F`,
   ];
-  const result = spawnSync('icacls', args, { encoding: 'utf8', shell: false });
+  const result = spawnSync(resolveWindowsSystemToolPath('icacls', systemRoot), args, {
+    encoding: 'utf8',
+    shell: false,
+  });
   if (result.error) {
     if (result.error.code === 'ENOENT') {
-      log('[guardian-acl] icacls binary not found on PATH');
+      log('[guardian-acl] icacls binary not found at the trusted Windows system path');
       throw new Error('Could not locate icacls binary; refusing to start guardian to preserve trust boundary');
     }
     throw new Error(`icacls spawn failed: ${result.error.message}`);
@@ -408,6 +434,7 @@ export function applyPrivateFileAcl({
     ...(inspect ? { inspectAcl: inspect } : {}),
     ...(aclEntries ? { aclEntries } : {}),
     spawnSync,
+    systemRoot,
   });
   return { ok: true, username };
 }
@@ -431,6 +458,7 @@ export function applyDirectoryAcl({
   username,
   log = () => {},
   spawnSync = defaultSpawnSync,
+  systemRoot,
   inspectAcl: inspect,
   aclEntries,
 } = {}) {
@@ -442,10 +470,13 @@ export function applyDirectoryAcl({
     '/grant:r',
     `${username}:(OI)(CI)F`,
   ];
-  const result = spawnSync('icacls', args, { encoding: 'utf8', shell: false });
+  const result = spawnSync(resolveWindowsSystemToolPath('icacls', systemRoot), args, {
+    encoding: 'utf8',
+    shell: false,
+  });
   if (result.error) {
     if (result.error.code === 'ENOENT') {
-      log('[guardian-acl] icacls binary not found on PATH');
+      log('[guardian-acl] icacls binary not found at the trusted Windows system path');
       throw new Error('Could not locate icacls binary; refusing to start guardian to preserve trust boundary');
     }
     throw new Error(`icacls spawn failed: ${result.error.message}`);
@@ -461,6 +492,7 @@ export function applyDirectoryAcl({
     ...(inspect ? { inspectAcl: inspect } : {}),
     ...(aclEntries ? { aclEntries } : {}),
     spawnSync,
+    systemRoot,
   });
   return { ok: true, username };
 };

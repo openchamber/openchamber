@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
@@ -8,11 +11,16 @@ vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(),
 }));
 
-const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const {
+  createOpenCodeLifecycleRuntime,
+  __test__: lifecycleTest,
+} = await import('./lifecycle.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
+const originalRegistry = process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
 const originalFetch = globalThis.fetch;
+const STARTUP_CAPTURE_LIMIT = 16 * 1024;
 
 afterEach(() => {
   spawnMock.mockReset();
@@ -28,12 +36,21 @@ afterEach(() => {
   } else {
     delete process.env.PATH;
   }
+
+  if (typeof originalRegistry === 'string') {
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = originalRegistry;
+  } else {
+    delete process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
+  }
+  vi.useRealTimers();
 });
 
 const createMockChild = () => {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
+  child.stdout.destroy = vi.fn();
+  child.stderr.destroy = vi.fn();
   child.exitCode = null;
   child.signalCode = null;
   child.pid = 12345;
@@ -70,7 +87,7 @@ const createRuntime = (overrides = {}, stateOverrides = {}) => {
     ...stateOverrides,
   };
 
-  return createOpenCodeLifecycleRuntime({
+  const runtime = createOpenCodeLifecycleRuntime({
     state,
     env: {
       ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -105,6 +122,10 @@ const createRuntime = (overrides = {}, stateOverrides = {}) => {
     })),
     ...overrides,
   });
+  // Test-only state access for assertions about the lifecycle's stored
+  // startup diagnostic. The production runtime does not expose this field.
+  runtime.__testState = state;
+  return runtime;
 };
 
 describe('OpenCode lifecycle', () => {
@@ -140,6 +161,31 @@ describe('OpenCode lifecycle', () => {
     expect(warn).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('(2/20)'));
     warn.mockRestore();
+  });
+
+  it('does not send auth headers through generic readiness for a guardian-managed child', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ healthy: true }),
+    }));
+    globalThis.fetch = fetchMock;
+    const waitForReady = vi.fn(async () => true);
+    const guardianHealth = vi.fn(async () => ({
+      healthy: false,
+      reason: 'managed OpenCode health proof failed',
+    }));
+    const runtime = createRuntime({ waitForReady, getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic should-not-send' }) }, {
+      openCodePort: 45678,
+      openCodeProcess: {
+        isGuardianManaged: true,
+        health: guardianHealth,
+      },
+    });
+
+    await expect(runtime.waitForOpenCodeReady(0, 0)).rejects.toThrow(/managed OpenCode health proof failed/);
+    expect(guardianHealth).toHaveBeenCalledOnce();
+    expect(waitForReady).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('restarts an exited managed process without waiting for the failure interval', async () => {
@@ -288,6 +334,413 @@ describe('OpenCode lifecycle', () => {
 
     await expect(runtime.startOpenCode()).rejects.toThrow('OpenCode process exited before serving with signal SIGTERM. Binary used: opencode. No stdout/stderr captured');
     expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(firstChild.kill).toHaveBeenCalled();
+    expect(secondChild.kill).toHaveBeenCalled();
+  });
+
+  it('redacts managed credentials from direct startup output, errors, logs, and lastOpenCodeError', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const password = 'direct-managed-startup-secret';
+    const agentToken = 'managed-agent-tool-token';
+    const encodedBasic = Buffer.from(`opencode:${password}`, 'utf8').toString('base64');
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warningLog = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => {
+        child.stdout.emit('data', `child stdout password=${password} token=${agentToken}\n`);
+        child.stderr.emit('data', `Authorization: Basic ${encodedBasic}\nBearer ${agentToken}\nchild stderr password=${password}\n`);
+        child.emit('exit', 1, null);
+      });
+      return child;
+    });
+
+    try {
+      const runtime = createRuntime({
+        ensureLocalOpenCodeServerPassword: vi.fn(async () => password),
+        getManagedOpenCodeEnv: vi.fn(async () => ({
+          OPENCHAMBER_AGENT_TOOL_TOKEN: agentToken,
+        })),
+      });
+
+      const thrown = await runtime.startOpenCode().catch((error) => error);
+      expect(thrown).toBeInstanceOf(Error);
+      expect(thrown.message).toContain('[REDACTED]');
+      expect(thrown.message).not.toContain(password);
+      expect(thrown.message).not.toContain(encodedBasic);
+      expect(thrown.message).not.toContain(agentToken);
+
+      const logged = [
+        ...errorLog.mock.calls.flat(),
+        ...warningLog.mock.calls.flat(),
+      ].join('\n');
+      expect(logged).toContain('stdout:');
+      expect(logged).toContain('stderr:');
+      expect(logged).not.toContain(password);
+      expect(logged).not.toContain(encodedBasic);
+      expect(logged).not.toContain(agentToken);
+      expect(runtime.__testState.lastOpenCodeError).not.toContain(password);
+      expect(runtime.__testState.lastOpenCodeError).not.toContain(encodedBasic);
+      expect(runtime.__testState.lastOpenCodeError).not.toContain(agentToken);
+    } finally {
+      errorLog.mockRestore();
+      warningLog.mockRestore();
+    }
+  });
+
+  it.each([
+    {
+      label: 'password',
+      password: 'boundary-password-secret',
+      output: ({ password }) => password,
+    },
+    {
+      label: 'agent token',
+      password: 'boundary-password-for-token',
+      token: 'boundary-agent-token-secret',
+      output: ({ token }) => token,
+    },
+    {
+      label: 'encoded Basic auth',
+      password: 'boundary-basic-auth-password',
+      output: ({ password }) => `Basic ${Buffer.from(`opencode:${password}`, 'utf8').toString('base64')}`,
+    },
+  ])('redacts a $label secret split across startup chunks and the capture limit', async ({
+    password,
+    token,
+    output: buildOutput,
+  }) => {
+    delete process.env.OPENCODE_BINARY;
+    const secret = buildOutput({ password, token });
+    const prefixLength = STARTUP_CAPTURE_LIMIT - Math.ceil(secret.length / 2);
+    const prefix = 'useful-startup-diagnostic-'.repeat(
+      Math.ceil(prefixLength / 'useful-startup-diagnostic-'.length),
+    ).slice(0, prefixLength);
+    const outputText = `${prefix}${secret}\n`;
+    const splitAt = prefixLength + Math.ceil(secret.length / 2);
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warningLog = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const infoLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => {
+        child.stdout.emit('data', outputText.slice(0, splitAt));
+        child.stdout.emit('data', outputText.slice(splitAt));
+        child.emit('exit', 1, null);
+      });
+      return child;
+    });
+
+    try {
+      const runtime = createRuntime({
+        ensureLocalOpenCodeServerPassword: vi.fn(async () => password),
+        ...(token ? {
+          getManagedOpenCodeEnv: vi.fn(async () => ({ OPENCHAMBER_AGENT_TOOL_TOKEN: token })),
+        } : {}),
+      });
+      const thrown = await runtime.startOpenCode().catch((error) => error);
+      const logged = [
+        ...errorLog.mock.calls.flat(),
+        ...warningLog.mock.calls.flat(),
+        ...infoLog.mock.calls.flat(),
+      ].join('\n');
+      const diagnostics = [
+        thrown.message,
+        runtime.__testState.lastOpenCodeError,
+        logged,
+      ].join('\n');
+      const fragments = [
+        secret.slice(0, Math.min(8, secret.length - 1)),
+        secret.slice(-Math.min(8, secret.length - 1)),
+      ];
+
+      expect(diagnostics).toContain('stdout:');
+      expect(diagnostics).toContain('[REDACTED]');
+      expect(diagnostics).toContain('startup output truncated');
+      expect(diagnostics).not.toContain(secret);
+      for (const fragment of fragments) expect(diagnostics).not.toContain(fragment);
+    } finally {
+      errorLog.mockRestore();
+      warningLog.mockRestore();
+      infoLog.mockRestore();
+    }
+  });
+
+  it('does not reconstruct a secret from an adversarial prefix/suffix placement', () => {
+    const password = 'adversarial-password';
+    const secret = `Basic ${Buffer.from(`opencode:${password}`, 'utf8').toString('base64')}`;
+    const formatter = lifecycleTest.createManagedStartupOutputFormatter({
+      OPENCODE_SERVER_PASSWORD: password,
+    });
+    const redactor = formatter.createStreamingRedactor();
+    const first = `${'safe-diagnostic-'.repeat(20)}x${secret.slice(0, -1)}`;
+    const second = `${secret.slice(-1)}y`;
+    const emissions = [redactor.push(first), redactor.push(second), redactor.flush()];
+
+    expect(emissions.join('')).not.toContain(secret);
+    expect(emissions.join('')).not.toContain(secret.slice(0, 8));
+    expect(emissions.join('')).not.toContain(secret.slice(-8));
+    expect(emissions).toContainEqual(expect.stringContaining('[REDACTED]'));
+  });
+
+  it.each([
+    {
+      label: 'password',
+      password: 'cross-stream-password-7c9e1a4b',
+      output: ({ password }) => password,
+    },
+    {
+      label: 'token',
+      password: 'cross-stream-password-for-token-6b2d8f',
+      token: 'cross-stream-agent-token-4f8a2c',
+      output: ({ token }) => token,
+    },
+    {
+      label: 'encoded Basic auth',
+      password: 'cross-stream-basic-password-91e4d0',
+      output: ({ password }) => `Basic ${Buffer.from(`opencode:${password}`, 'utf8').toString('base64')}`,
+    },
+  ])('redacts a $label split across stdout/stderr and the capture boundary in either stream order', async ({
+    password,
+    token,
+    output: buildOutput,
+  }) => {
+    delete process.env.OPENCODE_BINARY;
+    const secret = buildOutput({ password, token });
+    const splitAt = Math.ceil(secret.length / 2);
+    const prefixLength = STARTUP_CAPTURE_LIMIT - splitAt + 64;
+    const prefix = 'capture-boundary-diagnostic-'.repeat(
+      Math.ceil(prefixLength / 'capture-boundary-diagnostic-'.length),
+    ).slice(0, prefixLength);
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warningLog = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const infoLog = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      for (const [firstStream, secondStream] of [['stdout', 'stderr'], ['stderr', 'stdout']]) {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          spawnMock.mockImplementationOnce(() => {
+            const child = createMockChild();
+            queueMicrotask(() => {
+              child[firstStream].emit('data', `${prefix}${secret.slice(0, splitAt)}`);
+              child[secondStream].emit('data', `${secret.slice(splitAt)}\n`);
+              child.emit('exit', 1, null);
+            });
+            return child;
+          });
+        }
+
+        const runtime = createRuntime({
+          ensureLocalOpenCodeServerPassword: vi.fn(async () => password),
+          ...(token ? {
+            getManagedOpenCodeEnv: vi.fn(async () => ({ OPENCHAMBER_AGENT_TOOL_TOKEN: token })),
+          } : {}),
+        });
+        const thrown = await runtime.startOpenCode().catch((error) => error);
+        const logged = [
+          ...errorLog.mock.calls.flat(),
+          ...warningLog.mock.calls.flat(),
+          ...infoLog.mock.calls.flat(),
+        ].join('\n');
+        const diagnostics = [
+          thrown.message,
+          runtime.__testState.lastOpenCodeError,
+          logged,
+        ].join('\n');
+
+        expect(diagnostics).toContain('stdout:');
+        expect(diagnostics).toContain('stderr:');
+        expect(diagnostics).toContain('startup output truncated');
+        expect(diagnostics).not.toContain(secret);
+        expect(diagnostics).not.toContain(secret.slice(0, 8));
+        expect(diagnostics).not.toContain(secret.slice(-8));
+      }
+    } finally {
+      errorLog.mockRestore();
+      warningLog.mockRestore();
+      infoLog.mockRestore();
+    }
+  });
+
+  it('does not emit xpasswordx as raw fragments across a candidate boundary', () => {
+    const formatter = lifecycleTest.createManagedStartupOutputFormatter({
+      OPENCODE_SERVER_PASSWORD: 'password',
+    });
+    const redactor = formatter.createStreamingRedactor();
+
+    const first = redactor.push('xpass');
+    const second = redactor.push('wordx');
+    const output = `${first}${second}${redactor.flush()}`;
+
+    // The leading raw span is held until the candidate boundary is known;
+    // callers must never be able to concatenate emitted fragments into the
+    // managed password.
+    expect(first).toBe('');
+    expect(output).toBe('x[REDACTED]x');
+    expect(output).not.toContain('password');
+  });
+
+  it.each([
+    {
+      label: 'password',
+      env: { OPENCODE_SERVER_PASSWORD: 'chunk-password-secret' },
+      secret: 'chunk-password-secret',
+    },
+    {
+      label: 'token',
+      env: { OPENCHAMBER_AGENT_TOOL_TOKEN: 'chunk-agent-token-secret' },
+      secret: 'chunk-agent-token-secret',
+    },
+    {
+      label: 'Basic value',
+      env: { OPENCODE_SERVER_PASSWORD: 'chunk-basic-secret' },
+      secret: `Basic ${Buffer.from('opencode:chunk-basic-secret', 'utf8').toString('base64')}`,
+    },
+  ])('keeps the $label redacted across chunk and capture boundaries', ({ env, secret }) => {
+    const formatter = lifecycleTest.createManagedStartupOutputFormatter(env);
+    const capture = lifecycleTest.createManagedStartupCapture(formatter);
+    const prefixLength = lifecycleTest.MANAGED_STARTUP_CAPTURE_LIMIT - Math.ceil(secret.length / 2);
+    const prefix = 'capture-boundary-diagnostic-'.repeat(
+      Math.ceil(prefixLength / 'capture-boundary-diagnostic-'.length),
+    ).slice(0, prefixLength);
+    const splitAt = Math.ceil(secret.length / 2);
+
+    capture.append(`${prefix}${secret.slice(0, splitAt)}`);
+    capture.append(`${secret.slice(splitAt)}\n`);
+    const result = capture.finish();
+
+    expect(result.truncated).toBe(true);
+    expect(result.value).not.toContain(secret);
+    expect(result.value).not.toContain(secret.slice(0, Math.min(8, secret.length - 1)));
+    expect(result.value).not.toContain(secret.slice(-Math.min(8, secret.length - 1)));
+  });
+
+  it('does not include raw malformed URL startup output in lifecycle errors', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const password = 'malformed-url-secret';
+    const children = [];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      children.push(child);
+      queueMicrotask(() => {
+        child.stdout.emit('data', `opencode server listening password=${password}\n`);
+        child.emit('exit', 1, null);
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      ensureLocalOpenCodeServerPassword: vi.fn(async () => password),
+    });
+    const thrown = await runtime.startOpenCode().catch((error) => error);
+
+    expect(thrown.message).toContain('Failed to parse server url from OpenCode startup output');
+    expect(thrown.message).not.toContain('opencode server listening');
+    expect(thrown.message).not.toContain(password);
+    expect(runtime.__testState.lastOpenCodeError).not.toContain('opencode server listening');
+    expect(runtime.__testState.lastOpenCodeError).not.toContain(password);
+    expect(children).toHaveLength(2);
+    for (const child of children) {
+      expect(child.kill).toHaveBeenCalled();
+      expect(child.stdout.destroy).toHaveBeenCalled();
+      expect(child.stderr.destroy).toHaveBeenCalled();
+    }
+  });
+
+  it('fails closed without retrying when a detached startup child survives escalation', async () => {
+    vi.useFakeTimers();
+    const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-lifecycle-registry-'));
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = registryRoot;
+    const child = createMockChild();
+    child.pid = 2_147_483_647;
+    child.kill = vi.fn();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => child.emit('exit', 1, null));
+      return child;
+    });
+
+    try {
+      const startup = createRuntime().startOpenCode().then(
+        () => null,
+        (error) => error,
+      );
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      await expect(startup).resolves.toMatchObject({
+        code: 'OPENCODE_CHILD_STILL_RUNNING',
+      });
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(child.kill).toHaveBeenCalled();
+      expect(child.stdout.destroy).toHaveBeenCalled();
+      expect(child.stderr.destroy).toHaveBeenCalled();
+      // A surviving detached child remains in the existing recovery registry;
+      // only confirmed exit permits lifecycle cleanup to unregister it.
+      expect(fs.existsSync(path.join(registryRoot, `${child.pid}.json`))).toBe(true);
+    } finally {
+      fs.rmSync(registryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not spawn a restart successor when direct child cleanup is uncertain', async () => {
+    const close = vi.fn(async () => {
+      throw Object.assign(
+        new Error('OpenCode child process is still running after termination escalation'),
+        { code: 'OPENCODE_CHILD_STILL_RUNNING' },
+      );
+    });
+    const runtime = createRuntime({}, {
+      openCodeProcess: { pid: 2_147_483_646, close },
+      openCodePort: 45678,
+      isOpenCodeReady: true,
+    });
+
+    await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+      code: 'OPENCODE_CHILD_STILL_RUNNING',
+    });
+    expect(close).toHaveBeenCalledOnce();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('terminates every child when the announced URL is syntactically malformed after startup', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const children = [];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      children.push(child);
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://[invalid\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime();
+    await expect(runtime.startOpenCode()).rejects.toThrow(/Invalid URL/);
+    expect(children).toHaveLength(2);
+    for (const child of children) expect(child.kill).toHaveBeenCalled();
+  });
+
+  it('terminates a registered child when readiness fails before returning the server instance', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const children = [];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      children.push(child);
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({ waitForReady: vi.fn(async () => false) });
+    await expect(runtime.startOpenCode()).rejects.toThrow(/health check failed/);
+    expect(children).toHaveLength(2);
+    for (const child of children) {
+      expect(child.kill).toHaveBeenCalled();
+      expect(child.stdout.destroy).toHaveBeenCalled();
+      expect(child.stderr.destroy).toHaveBeenCalled();
+    }
   });
 
   it('does not retry managed startup when the configured OpenCode binary is invalid', async () => {
@@ -327,6 +780,91 @@ describe('OpenCode lifecycle', () => {
     const server = await runtime.startOpenCode();
 
     expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(firstChild.kill).toHaveBeenCalled();
     await server.close();
+  });
+
+  it('retires rotated startup-secret leases after confirmed child cleanup', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const passwords = Array.from({ length: 6 }, (_, index) => (
+      `rotated-startup-password-${index}-${'x'.repeat(index + 1)}`
+    ));
+    let rotation = 0;
+    const children = [];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      children.push(child);
+      const password = passwords[Math.max(0, rotation - 1)];
+      queueMicrotask(() => {
+        child.stdout.emit('data', `startup password=${password.slice(0, Math.ceil(password.length / 2))}\n`);
+        child.stderr.emit('data', `${password.slice(Math.ceil(password.length / 2))}\n`);
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      ensureLocalOpenCodeServerPassword: vi.fn(async () => passwords[rotation++]),
+      waitForPortRelease: vi.fn(async () => true),
+    });
+    const firstServer = await runtime.startOpenCode();
+    runtime.__testState.openCodeProcess = firstServer;
+    runtime.__testState.openCodePort = 45678;
+    runtime.__testState.isOpenCodeReady = true;
+    const initial = runtime.__testManagedStartupSecretState();
+    expect(initial.leaseCount).toBe(1);
+
+    for (let attempt = 1; attempt < passwords.length; attempt += 1) {
+      await runtime.restartOpenCode();
+      expect(runtime.__testManagedStartupSecretState()).toEqual(initial);
+    }
+
+    await runtime.__testState.openCodeProcess.close();
+    expect(runtime.__testManagedStartupSecretState()).toEqual({
+      leaseCount: 0,
+      secretCount: 0,
+    });
+    expect(children).toHaveLength(passwords.length);
+  });
+
+  it('keeps the active secret lease through failed cleanup and redacts its value', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const password = 'active-secret-retained-during-cleanup';
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      ensureLocalOpenCodeServerPassword: vi.fn(async () => password),
+      waitForPortRelease: vi.fn(async () => true),
+    });
+    const server = await runtime.startOpenCode();
+    runtime.__testState.openCodeProcess = server;
+    runtime.__testState.openCodePort = 45678;
+    runtime.__testState.isOpenCodeReady = true;
+    const originalClose = server.close;
+    server.close = vi.fn(async () => {
+      throw Object.assign(new Error(`cleanup failed for ${password}`), {
+        code: 'OPENCODE_CHILD_STILL_RUNNING',
+      });
+    });
+
+    await expect(runtime.restartOpenCode()).rejects.toMatchObject({
+      code: 'OPENCODE_CHILD_STILL_RUNNING',
+    });
+    expect(runtime.__testState.lastOpenCodeError).toContain('[REDACTED]');
+    expect(runtime.__testState.lastOpenCodeError).not.toContain(password);
+    expect(runtime.__testManagedStartupSecretState().leaseCount).toBe(1);
+
+    server.close = originalClose;
+    await originalClose();
+    expect(runtime.__testManagedStartupSecretState()).toEqual({
+      leaseCount: 0,
+      secretCount: 0,
+    });
   });
 });

@@ -288,6 +288,26 @@ describe('stopGuardianViaIpc', () => {
       _resetCachedGuardianPathsForTest();
     }
   });
+
+  it('fails closed on Windows after IPC failure without signaling the persisted PID', async () => {
+    setPlatformForTest('win32');
+    _resetCachedGuardianPathsForTest();
+    const killFn = vi.fn();
+    const warnings = [];
+
+    await expect(stopGuardianViaIpc({
+      timeoutMs: 5,
+      socketPath: '/tmp/does-not-exist-guardian.sock',
+      portPath: '/tmp/does-not-exist-guardian.port',
+      killFn,
+      logWarning: (message) => warnings.push(message),
+    })).resolves.toBe(false);
+
+    expect(killFn).not.toHaveBeenCalled();
+    expect(warnings.join('\n')).toMatch(/Windows/);
+    expect(warnings.join('\n')).toMatch(/PID fallback signaling is disabled/);
+    expect(warnings.join('\n')).toMatch(/Retry/);
+  });
 });
 
 describe('maybeAutoStartGuardian', () => {
@@ -649,6 +669,25 @@ describe('runReloadAction', () => {
     } finally {
       isRunningSpy.mockRestore();
       try { fs.unlinkSync(pidFile); } catch { /* ignore */ }
+      _resetCachedGuardianPathsForTest();
+    }
+  });
+
+  it('refuses the Windows PID fallback after IPC failure', async () => {
+    setPlatformForTest('win32');
+    _resetCachedGuardianPathsForTest();
+    const detection = await import('./detection.js');
+    const isRunningSpy = vi.spyOn(detection, 'isGuardianRunning').mockResolvedValue(true);
+    const killFn = vi.fn();
+    try {
+      await expect(runReloadAction({
+        options: { json: true },
+        killFn,
+        reloadViaIpcFn: async () => { throw new Error('IPC unavailable'); },
+      })).rejects.toThrow(/authenticated guardian IPC is required on Windows.*PID fallback signaling is disabled/);
+      expect(killFn).not.toHaveBeenCalled();
+    } finally {
+      isRunningSpy.mockRestore();
       _resetCachedGuardianPathsForTest();
     }
   });

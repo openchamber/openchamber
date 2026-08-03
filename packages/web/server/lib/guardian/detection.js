@@ -1,8 +1,10 @@
 import net from 'node:net';
 import path from 'node:path';
 import { GuardianClient } from './guardian-client.js';
+import { buildManagedOpenCodeOrigin } from './host.js';
 import { resolveGuardianPaths } from './paths.js';
 import { readDiscoveryFile } from './discovery-file.js';
+import { isSupportedGuardianPlatform } from './ipc-transport.js';
 
 /**
  * Guardian detection and bootstrap adoption.
@@ -10,11 +12,17 @@ import { readDiscoveryFile } from './discovery-file.js';
  * Intentional list-trust decision (Phase 2B):
  *   `detectAndAdoptGuardianChild()` calls `GuardianClient.list()` and trusts
  *   only the returned `Active` child whose stable owner/runtime identity
- *   exactly matches this OpenChamber instance. Ownerless records and multiple
- *   matches fail closed; list order is never an ownership decision.
+ *   exactly matches this OpenChamber instance. It then performs an
+ *   owner/incarnation-scoped health check and retrieves the encrypted managed
+ *   credential through the authenticated RPC before invoking the supplied
+ *   auth-state restore callback. Raw credentials are never returned in the
+ *   adoption result. Ownerless records and multiple matches fail closed; list
+ *   order is never an ownership decision.
  *
- *   The trust boundary is enforced by the IPC permissioning model, not by a
- *   protocol-level credential. The model differs per platform:
+ *   The claim-capability trust boundary is enforced by the IPC permissioning
+ *   model, not by a protocol-level claim credential. Managed child credentials
+ *   are separately owner-scoped by the authenticated credential RPC. The model
+ *   differs per platform:
  *
  *     - Linux/POSIX (sub-phase W-A): v2 root dir is mode `0700` (UID-scoped);
  *       the IPC Unix-domain socket is mode `0600` (umask `0o077` + explicit
@@ -65,10 +73,17 @@ export function selectGuardianChild(children, { expectedOwner } = {}) {
   const hasCompleteOwner = (child) => typeof child?.ownerInstanceId === 'string'
     && child.ownerInstanceId.length > 0
     && typeof child?.runtimeIdentity === 'string'
-    && child.runtimeIdentity.length > 0;
+    && child.runtimeIdentity.length > 0
+    && typeof child?.launchFingerprint === 'string'
+    && child.launchFingerprint.length > 0;
+  const expectedLaunchFingerprint = typeof expectedOwner?.launchFingerprint === 'string'
+    && expectedOwner.launchFingerprint.length > 0
+    ? expectedOwner.launchFingerprint
+    : null;
   const isExactOwner = (child) => hasCompleteOwner(child)
     && child.ownerInstanceId === expectedOwner.ownerInstanceId
-    && child.runtimeIdentity === expectedOwner.runtimeIdentity;
+    && child.runtimeIdentity === expectedOwner.runtimeIdentity
+    && (expectedLaunchFingerprint === null || child.launchFingerprint === expectedLaunchFingerprint);
   // A complete, different owner is unrelated to this startup and must not
   // block it.  Ownerless records remain globally ambiguous and therefore
   // continue to fail closed rather than being guessed as foreign.
@@ -129,8 +144,7 @@ export function selectGuardianChild(children, { expectedOwner } = {}) {
   }
 
   const matchingChildren = activeChildren.filter((child) =>
-    child.ownerInstanceId === expectedOwner.ownerInstanceId
-    && child.runtimeIdentity === expectedOwner.runtimeIdentity
+    isExactOwner(child)
     && child.pid
     && child.port
   );
@@ -151,16 +165,24 @@ export function getGuardianSocketPath(rootDir) {
   return paths.socketPath ?? path.join(paths.rootDir, 'guardian.sock');
 }
 
-export function isGuardianRunning(socketPath, portPath) {
+export function isGuardianRunning(socketPath, portPath, { platform = process.platform } = {}) {
   return new Promise((resolve, reject) => {
-    if (process.platform === 'win32') {
-      // W-A: Windows branch. Preliminary; gated behind the same
-      // `process.platform === 'win32'` early-return W-C removes. The
-      // loopback dialer does not throw on construction so callers can
-      // safely pass `portPath: undefined`; the read fails at probe
-      // time with ENOENT, which we translate to "not running".
+    if (!isSupportedGuardianPlatform(platform)) {
+      const error = new Error(`Unsupported guardian transport platform: ${String(platform)}`);
+      error.code = 'GUARDIAN_TRANSPORT_UNSUPPORTED';
+      reject(error);
+      return;
+    }
+
+    if (platform === 'win32') {
+      // A missing discovery file is the only Windows "not running" signal.
+      // Every other read/parse/ACL failure is an unresolved transport state;
+      // treating it as false could start a duplicate legacy child beside a
+      // guardian whose endpoint is merely unreadable.
       if (typeof portPath !== 'string' || portPath.length === 0) {
-        resolve(false);
+        const error = new Error('Guardian discovery path is unavailable; refusing to infer guardian absence');
+        error.code = 'GUARDIAN_DISCOVERY_INVALID';
+        reject(error);
         return;
       }
       let parsed;
@@ -175,7 +197,9 @@ export function isGuardianRunning(socketPath, portPath) {
         return;
       }
       if (!parsed || typeof parsed.port !== 'number') {
-        resolve(false);
+        const error = new Error('Guardian discovery body is malformed');
+        error.code = 'GUARDIAN_DISCOVERY_INVALID';
+        reject(error);
         return;
       }
       const socket = net.createConnection({ host: '127.0.0.1', port: parsed.port });
@@ -222,7 +246,11 @@ export function isGuardianRunning(socketPath, portPath) {
   });
 }
 
-export async function detectAndAdoptGuardianChild(socketPath, portPath, { expectedOwner } = {}) {
+export async function detectAndAdoptGuardianChild(
+  socketPath,
+  portPath,
+  { expectedOwner, restoreCredential, platform = process.platform } = {},
+) {
   // W-C: previously returned `null` on Windows before the W-B backend
   // shipped. The transport factory now handles both platforms; on
   // Windows we dial via `portPath` (loopback-TCP + discovery file),
@@ -231,7 +259,7 @@ export async function detectAndAdoptGuardianChild(socketPath, portPath, { expect
   const targetSocketPath = socketPath ?? getGuardianSocketPath();
   const targetPortPath = portPath;
 
-  const running = await isGuardianRunning(targetSocketPath, targetPortPath);
+  const running = await isGuardianRunning(targetSocketPath, targetPortPath, { platform });
   if (!running) {
     return null;
   }
@@ -263,7 +291,12 @@ export async function detectAndAdoptGuardianChild(socketPath, portPath, { expect
       return null;
     }
 
-    const health = await client.health({ incarnation: activeChild.incarnation });
+    const owner = {
+      ownerInstanceId: activeChild.ownerInstanceId,
+      runtimeIdentity: activeChild.runtimeIdentity,
+      launchFingerprint: activeChild.launchFingerprint,
+    };
+    const health = await client.health({ incarnation: activeChild.incarnation, owner });
     if (health?.healthy !== true) {
       const error = new Error(
         `Guardian adoption refused: active child ${activeChild.incarnation || 'unknown'} is not healthy`,
@@ -272,11 +305,46 @@ export async function detectAndAdoptGuardianChild(socketPath, portPath, { expect
       throw error;
     }
 
+    if (typeof restoreCredential !== 'function') {
+      const error = new Error('Guardian adoption requires an auth-state restore handler');
+      error.code = 'GUARDIAN_ADOPTION_AUTH_UNAVAILABLE';
+      throw error;
+    }
+    if (typeof client.credential !== 'function') {
+      const error = new Error('Guardian adoption credential retrieval is unavailable');
+      error.code = 'GUARDIAN_ADOPTION_CREDENTIAL_UNAVAILABLE';
+      throw error;
+    }
+    let credential;
+    try {
+      credential = await client.credential({ incarnation: activeChild.incarnation, owner });
+      await restoreCredential(credential);
+    } catch {
+      const error = new Error(
+        `Guardian adoption could not restore credentials for child ${activeChild.incarnation || 'unknown'}`,
+      );
+      error.code = 'GUARDIAN_ADOPTION_CREDENTIAL_UNAVAILABLE';
+      throw error;
+    } finally {
+      if (credential && typeof credential === 'object') {
+        try {
+          credential.username = '';
+          credential.password = '';
+        } catch {
+          // A transport/client implementation may freeze its response object;
+          // never let best-effort secret scrubbing mask the adoption result.
+        }
+      }
+    }
+
     return {
       incarnation: activeChild.incarnation,
       pid: activeChild.pid,
       port: activeChild.port,
-      url: `http://127.0.0.1:${activeChild.port}`,
+      url: buildManagedOpenCodeOrigin({
+        hostname: activeChild.launchSpec?.hostname,
+        port: activeChild.port,
+      }),
       ...(activeChild.ownerInstanceId && activeChild.runtimeIdentity && activeChild.launchFingerprint
         ? {
           owner: {

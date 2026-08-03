@@ -603,9 +603,11 @@ const getOpenCodeAuthHeaders = (...args) => openCodeAuthStateRuntime.getOpenCode
 const isOpenCodeConnectionSecure = (...args) => openCodeAuthStateRuntime.isOpenCodeConnectionSecure(...args);
 const ensureLocalOpenCodeServerPassword = (...args) => openCodeAuthStateRuntime.ensureLocalOpenCodeServerPassword(...args);
 const captureOpenCodeAuthState = (...args) => openCodeAuthStateRuntime.captureOpenCodeAuthState(...args);
+const restoreManagedOpenCodeCredential = (...args) => openCodeAuthStateRuntime.restoreManagedOpenCodeCredential(...args);
 
 const openCodeNetworkState = {};
 Object.defineProperties(openCodeNetworkState, {
+  openCodeProcess: { get: () => openCodeProcess },
   openCodePort: { get: () => openCodePort, set: (value) => { openCodePort = value; } },
   openCodeBaseUrl: { get: () => openCodeBaseUrl, set: (value) => { openCodeBaseUrl = value; } },
   openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
@@ -1055,6 +1057,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   ensureOpencodeCliEnv,
   ensureLocalOpenCodeServerPassword,
   captureOpenCodeAuthState,
+  restoreManagedOpenCodeCredential,
   resolveManagedOpenCodeLaunchSpec,
   setOpenCodePort,
   setDetectedOpenCodeApiPrefix,

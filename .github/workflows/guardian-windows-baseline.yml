@@ -95,6 +95,19 @@ jobs:
         run: |
           bunx node --input-type=module -e "import('./packages/web/server/lib/guardian/ipc-transport.js').then(m => { if (typeof m.createIpcServer !== 'function') { console.error('FAIL: createIpcServer is not a function'); process.exit(1); } if (typeof m.createIpcDialer !== 'function') { console.error('FAIL: createIpcDialer is not a function'); process.exit(1); } console.log('OK: ipc-transport namespace loaded; createIpcServer and createIpcDialer are both functions'); }).catch(err => { console.error('FAIL: ipc-transport module failed to load on Windows:', err && err.stack ? err.stack : err); process.exit(1); });"
 
+      - name: Run Phase 2E credential, secret, protocol, and health tests on Windows
+        # This is a required cross-platform unit/integration gate for the
+        # protected credential contract. Keep it separate from the existing
+        # lifecycle and real-process smoke gates below; failures remain hard.
+        working-directory: packages/web
+        run: >-
+          npx vitest run
+          server/lib/opencode/managed-opencode-handoff-v2/credential-store.test.js
+          server/lib/opencode/managed-opencode-handoff-v2/secret-provider.test.js
+          server/lib/opencode/managed-opencode-handoff-v2/protocol.test.js
+          server/lib/guardian/health-client.test.js
+          server/lib/guardian/health-proof.test.js
+
       - name: Run guardian and lifecycle vitest suites on Windows
         # The guardian transport tests plus the owner-filtered lifecycle
         # integration suite run on the real Windows runner. They
@@ -103,8 +116,11 @@ jobs:
         # `process.platform` and `net.createServer`. The `npx vitest`
         # invocation is intentional: `bun run test` would dispatch to
         # the bun vitest-compat runner, and at least one existing
-        # integration test (lifecycle-guardian-integration.test.js)
-        # comments that `vi.stubGlobal` is not available there.
+         # integration test (lifecycle-guardian-integration.test.js)
+         # comments that `vi.stubGlobal` is not available there.
+         # These unit/injected paths do not claim native restart or
+         # rehydration evidence; the real Windows smoke and a future native
+         # rehydration run remain separate evidence gates.
         working-directory: packages/web
         run: >-
           npx vitest run
@@ -161,7 +177,7 @@ jobs:
       - name: Upload smoke artifacts
         # W-E: upload the smoke script, the entrypoint log directory
         # (under `<data-dir>/run/`), and the v2 filesystem helper
-        # (so a reviewer can confirm `icacls` / `taskkill` invocation
+         # (so a reviewer can confirm `icacls` / handle-helper invocation
         # paths on a failed run without re-cloning). The artifact
         # name now reflects the W-E smoke scope; existing W-A
         # downloads continue to work because GitHub artifacts are
@@ -182,7 +198,7 @@ jobs:
       - name: Upload smoke logs (always)
         # Captures the runtime stdout/stderr the spawned entrypoint
         # redirected to `$LogFile` / `$LogErrFile`. The .ps1 writes
-        # those files under `<workspace>/.smoke-logs/` (rather than
+        # those files under `<workspace>/scripts/.smoke-logs/` (rather than
         # the runner's ephemeral temp dir) so they survive the job
         # and the upload step can pick them up. On a smoke failure,
         # this is the artifact a reviewer opens to see the actual
@@ -194,6 +210,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: guardian-smoke-logs-${{ github.run_id }}
-          path: .smoke-logs/
+          path: scripts/.smoke-logs/
           if-no-files-found: ignore
           retention-days: 7

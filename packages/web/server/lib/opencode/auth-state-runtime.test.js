@@ -45,4 +45,19 @@ describe('OpenCode auth state runtime', () => {
     });
     expect(fixture.syncToHmrState).toHaveBeenCalled();
   });
+
+  it('restores an adopted guardian credential through the auth-state runtime', () => {
+    const fixture = createFixture();
+
+    expect(fixture.runtime.restoreManagedOpenCodeCredential({
+      username: 'managed-user',
+      password: 'adopted-password',
+    })).toBe(true);
+
+    expect(fixture.processLike.env.OPENCODE_SERVER_USERNAME).toBe('managed-user');
+    expect(fixture.getState()).toEqual({ password: 'adopted-password', source: 'guardian-adopted' });
+    expect(fixture.runtime.getOpenCodeAuthHeaders()).toEqual({
+      Authorization: `Basic ${Buffer.from('managed-user:adopted-password').toString('base64')}`,
+    });
+  });
 });

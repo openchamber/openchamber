@@ -11,8 +11,10 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/cli-entry-runtime.js`: CLI entrypoint runtime that detects direct execution, parses CLI options, and starts server bootstrap.
 - `packages/web/server/lib/opencode/routes.js`: OpenCode/provider settings and auth-related route registration.
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring).
-- `packages/web/server/lib/guardian/process-identity.js`: shared owner/start-time/command-line process identity and authoritative liveness probes used by guardian recovery and CLI fallbacks.
-- `packages/web/server/lib/guardian/pid-marker.js`: ownership-aware, O_EXCL-created guardian PID marker with identity metadata and fail-closed inspection/release helpers.
+- `packages/web/server/lib/guardian/process-identity.js`: shared owner/start-time/command-line process identity and authoritative liveness probes used by guardian recovery, credential-lock recovery, and CLI fallbacks. Windows discovery probes treat only `ENOENT` as absence; malformed, oversized, unsafe, permission-denied, and identity-uncertain discovery state rejects as unknown so lifecycle cannot launch a duplicate child.
+- `packages/web/server/lib/guardian/file-identity.js`: shared JSON-safe transport/discovery artifact identity snapshots and comparisons; dev/ino are fenced with stable birth-time metadata (ctime fallback) and file type, failing closed when required metadata is unavailable.
+- `packages/web/server/lib/guardian/host.js`: shared managed-child connect-host and origin formatting used by guardian health, adoption results, and lifecycle probes.
+- `packages/web/server/lib/guardian/pid-marker.js`: ownership-aware, O_EXCL-created guardian PID marker with identity metadata, fail-closed inspection/release helpers, and a cross-process recovery lease held through replacement-marker publication. Transport identity updates use a same-directory fsynced temporary replacement; the live marker is never truncated in place, and uncertain publication retains marker authority.
 - `packages/web/server/lib/opencode/managed-opencode-handoff-protocol.js`: standalone signed handoff-record protocol; it owns no process lifecycle, persistence, registry, auth-state, or runtime wiring.
 - `packages/web/server/lib/opencode/managed-opencode-handoff-v2/`: isolated v2 foundation for a private master secret, SQLite record fencing, and reservation/lease state. The guardian/lifecycle wiring is web-runtime-only; it is not a session-resume, UI, Electron, or VS Code feature.
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
@@ -124,7 +126,17 @@ The runtime maintains active-session count incrementally from idempotent activit
 Managed OpenCode launch also merges the environment returned by the agent-tool
 runtime. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
 be replaced by injected values. External OpenCode processes receive no
-OpenChamber tool injection.
+OpenChamber tool injection. Bounded startup stdout/stderr diagnostics redact
+managed password, token, and Basic-auth material before capture truncation;
+both labeled pipes share one bounded, match-aware overlap so a candidate split
+across stdout and stderr cannot be reconstructed, and the redactor never emits
+a raw candidate prefix that could be completed by a later chunk. Launch
+credentials are held in explicit leases while the associated child/output
+streams or uncertain cleanup remain possible sources; confirmed child and pipe
+cleanup retires the lease so repeated rotation does not accumulate secrets for
+the web-runtime lifetime. URL discovery continues to parse only the separately
+bounded raw stdout prefix and never logs the launch environment. Malformed URL
+diagnostics omit the raw startup line entirely.
 
 ## Public exports (managed-opencode-handoff-protocol.js)
 - `createManagedOpenCodeHandoffProtocol(dependencies)`: creates the isolated phase-1 handoff protocol.
@@ -142,10 +154,34 @@ OpenChamber tool injection.
 - This phase intentionally does **not** wire lifecycle/Electron/VS Code behavior, alter `managed-process-registry.js`, persist or generate auth state, change shutdown/UI behavior, add an admission journal, or implement V2 resume.
 
 ## Public exports (managed-opencode-handoff-v2/)
-- `createManagedOpenCodeHandoffV2SecretProvider({ rootDir?, platform? })`: owns a v2-only 32-byte local master secret in closure. It exposes record-MAC derivation, a public credential fingerprint, and opaque one-shot lifecycle credential callbacks; it never accepts JWTs, user passwords, OpenCode server passwords, HMR state, CLI arguments, or environment overrides as secret input.
+- `createManagedOpenCodeHandoffV2SecretProvider({ rootDir?, platform? })`: owns a v2-only 32-byte local master secret in closure. It exposes record-MAC and domain-separated managed-credential encryption-key derivation, a public credential fingerprint, and opaque one-shot lifecycle credential callbacks; it never accepts JWTs, user passwords, OpenCode server passwords, HMR state, CLI arguments, or environment overrides as secret input. Returned derived key buffers remain caller-owned and must be zeroed after use.
+- `createManagedOpenCodeCredentialStore({ rootDir?, secretProvider, platform?, username?, aclInspector?, reparseChecker?, processIdentity?, processLiveness? })`: stores one authenticated-encrypted managed OpenCode username/password record per incarnation under the private v2 root. Its `create()`, `read()`, and `remove()` APIs bind records to the exact incarnation, owner/runtime/launch identity, and v2 credential fingerprint; a per-incarnation cross-process operation fence writes a versioned `{ pid, processStartTicks, identity, token }` owner payload immediately after `O_EXCL` creation, reclaims an existing lock only after authoritative owner death or identity mismatch, and fails closed for malformed, ambiguous, or live locks. Same-store operations queue, while a concurrent cross-store operation fails closed rather than racing the active fence. Lock and credential cleanup use identity-fenced quarantine/removal, retaining recovery artifacts when replacement or cleanup certainty is unavailable. A transient post-link directory-fsync failure retries durability without publishing a second file, then verifies the same target file identity and durable existence before returning `created: true`. A concurrent removal/replacement therefore remains an error. Persistent failure remains recoverable through authenticated idempotent removal. Missing removal is confirmed only after the credential directory's durable absence and recovery-artifact cleanup are rechecked; corrupt, tampered, or failed removal state remains an error. Raw credentials never enter SQLite, JSON, public records, list responses, or logs.
 - `createManagedOpenCodeHandoffV2Store({ rootDir?, busyTimeoutMs? })`: opens the separate v2 SQLite database and exposes async `read()`, `list()`, `compareAndSwap()`, `hasV2Records()`, `cleanup()`, and `close()` operations. The store uses WAL, FULL synchronous mode, a busy timeout, exact schema validation, POSIX parent-directory fsync, and `BEGIN IMMEDIATE` fencing with SQLite's transaction-time clock. Windows uses the ACL-protected root and skips only the POSIX directory-fsync primitive; shared Windows validation rejects reparse points in the target and every existing ancestor, plus ACLs with unapproved or unsafe access. Its renewal callback form creates a signed next record from that transaction-time clock.
-- `createManagedOpenCodeHandoffV2Protocol({ secretProvider, store, now?, defaultLeaseMs? })`: returns `reserveLaunch()`, fenced `beginLaunch({ incarnation, expectedRevision, withCredential })`, `bindSpawnedProcess()`, bounded `renewLease()`, read/verify helpers, and explicit interruption/stopping/retirement transitions.
+- `createManagedOpenCodeHandoffV2Protocol({ secretProvider, store, now?, defaultLeaseMs? })`: returns `reserveLaunch()`, fenced `beginLaunch({ incarnation, expectedRevision, withCredential })`, `bindSpawnedProcess()`, bounded `renewLease()`, `prepareHandoff()`, read/verify helpers, and explicit interruption/stopping/retirement transitions.
 - `ManagedOpenCodeHandoffV2State` and `MANAGED_OPENCODE_HANDOFF_V2_ALLOWED_TRANSITIONS`: v2 state names and the full future graph: `reserved -> launch-delivering -> launching -> active -> handoff-prepared -> claimed -> active`, with explicit `interrupted`, `stopping`, and `retired` rules.
+
+### Managed credential health proof
+
+Before a guardian health probe sends a managed OpenCode `Authorization: Basic`
+header, it opens one HTTP connection and sends an unauthenticated
+`/global/health` challenge containing the incarnation, owner/runtime identity,
+launch fingerprint, and port. A proof-capable managed child must return
+`healthy: true` plus an HMAC-SHA-256 proof keyed by its managed password. The
+guardian verifies that proof and sends Basic Auth only on the exact same
+connection; it never reconnects between proof and credential delivery. A
+missing, malformed, rejected, replaced, or non-reusable proof connection fails
+closed and never sends Basic Auth. Password-free normal launches keep the
+existing health probe without this credential gate.
+
+This is the strongest proof available at the current boundary, but it is not
+cryptographic OS process attestation: a stock OpenCode server does not implement
+the OpenChamber challenge/proof contract, and loopback HTTP cannot distinguish a
+same-user proxy that relays a valid response. Consequently, a stock or custom
+managed runtime that does not implement the contract is not eligible for a
+credential-bearing guardian health probe; it fails closed before Basic Auth is
+sent. `scripts/guardian-test-opencode.js` is the reference password-protected
+fixture and enforces the connection-bound contract. Adding native OpenCode
+support or a process-bound transport is a separate protocol/runtime change.
 
 ### Managed OpenCode handoff v2 Phase-2A scope and invariants
 - The v2 root defaults to `~/.local/state/openchamber/managed-opencode-handoff-v2/`; POSIX uses a private (`0700`) root and regular owner-only (`0600`) `master-secret.bin`/evidence files, while Windows uses the per-user ACL trust boundary. Evidence is atomically published before first secret creation, so concurrent initializers converge. A missing/corrupt secret after evidence **or a secret without evidence** fails closed and is never repaired by backfilling evidence. Deleting the root (or both the evidence and secret) destroys that evidence and is the unavoidable fresh-initialization boundary.
@@ -160,11 +196,11 @@ OpenChamber tool injection.
 ### Architecture
 - A standalone **guardian process** (`openchamber-guardian.js`) outlives the web server and manages OpenCode child processes via the Phase 2A v2 durable protocol.
 - POSIX uses a `0600` Unix-domain socket; Windows uses loopback TCP plus an ACL-protected discovery file. Both transports carry the same authenticated JSON-line protocol.
-- Web server integration is owner-scoped. The guardian service may outlive the web server; ordinary shutdown stops only this instance's OpenCode child, while restart detaches from a live guardian child and explicit `openchamber guardian stop` is the administrative service shutdown.
+- Web server integration is owner-scoped. The guardian service may outlive the web server; ordinary shutdown and `SIGTERM` stop only this instance's OpenCode child, while the explicit `openchamber restart` command requests a restart and may hand off to a live guardian child. `openchamber guardian stop` is the administrative service shutdown.
 
 ### Detection module (`guardian/detection.js`)
 - `isGuardianRunning(socketPath, portPath?)`: Probes the platform-specific guardian transport with a 100ms connect timeout.
-- `detectAndAdoptGuardianChild(socketPath, portPath?, { expectedOwner })`: Authenticates via `GuardianClient`, rejects ownerless, incomplete, unhealthy, ambiguous, or attention-state records, and returns only the exact matching `{ incarnation, pid, port, url, owner, launchSpec }` or `null`.
+- `detectAndAdoptGuardianChild(socketPath, portPath?, { expectedOwner, restoreCredential })`: Authenticates via `GuardianClient`, rejects ownerless, incomplete, unhealthy, ambiguous, or attention-state records, performs exact owner/runtime/launch-fingerprint/incarnation health and credential RPCs, uses a supplied launch fingerprint to disambiguate otherwise identical owner/runtime records, invokes the owning auth-state restore callback, and returns only the matching `{ incarnation, pid, port, url, owner, launchSpec }` or `null` (never raw credentials).
 - `getGuardianSocketPath(rootDir?)`: Returns the deterministic socket label; Windows transport selection uses the sibling discovery-file path.
 - Custom data-directory, socket, and discovery-file inputs are normalized through `resolveGuardianPaths`; an explicit data root remains authoritative for the IPC auth secret, while a transport-only override derives its secret from that custom transport root rather than the process's default environment paths.
 
@@ -172,25 +208,39 @@ OpenChamber tool injection.
 
 **`bootstrapOpenCodeAtStartup()`**
 - After orphan reaping and HMR state check, attempts to detect a guardian-managed child on every supported platform.
-  - Requires the stable `OPENCHAMBER_GUARDIAN_OWNER_ID` supplied by the CLI. If a guardian child is found:
-  - Sets a closeable guardian proxy, `state.openCodePort`, `state.isOpenCodeReady`, `state.currentIncarnation`, and the exact owner identity.
-  - Skips spawning a new child process
+   - Requires the stable `OPENCHAMBER_GUARDIAN_OWNER_ID` supplied by the CLI. If a guardian child is found:
+   - Sets a closeable guardian proxy, `state.openCodePort`, `state.isOpenCodeReady`, `state.currentIncarnation`, and the exact owner identity.
+   - Retrieves the child credential through the exact owner/incarnation guardian RPC and restores it through `auth-state-runtime.js`; the raw value is not returned in adoption records, lists, or logs.
+   - Skips spawning a new child process
 - If the guardian is running but has no child, performs the initial managed spawn through the guardian. If that live guardian launch fails, lifecycle records an explicit error and refuses a legacy spawn; direct startup is allowed only when the guardian probe was false or guardian use was explicitly disabled.
 - A rejected guardian-running probe is treated as unknown, not as `false`; startup/restart record the probe failure and refuse a legacy lifecycle spawn beside an uncertain guardian.
-- Guardian startup requires a successful recovery-store `list()` before publishing IPC. A list failure aborts startup and leaves no healthy endpoint. Administrative stop keeps the authenticated IPC service and durable `stopping` child records available when termination fails, so the operation can be retried instead of hiding a live child. Lease expiry never deletes an unresolved `stopping` or `handoff-prepared` record; rehydration verifies those records through the explicit recovery path, retains a live child, or surfaces attention until liveness/termination is authoritative. `reserved`, `launch-delivering`, and `launching` records without a durable process identity become attention records that block conflicting launch rather than being silently discarded. Guardian launch, stop, handoff, abort, reload, and shutdown mutations share one serialized queue; read-only list and health requests remain unqueued.
+- Guardian startup requires a successful recovery-store `list()` before publishing IPC. A list failure aborts startup and leaves no healthy endpoint. Before transport bind, a prior guardian's POSIX socket or Windows discovery lock/temp/final artifacts may be removed only when the O_EXCL PID marker has a complete identity and its recorded process is authoritatively dead; stale-marker recovery holds a cross-process lease until the replacement marker is published, and Windows cleanup revalidates existing ancestors, ACLs, reparse points, and file identity before unlinking explicit transport paths. Strict Windows recovery propagates a replaced or identity-uncertain final discovery artifact, so the stale marker remains the authority and acquisition cannot claim `{ recovered: true }`; normal close remains idempotent and never unlinks a new transport. Legacy, live, PID-reused, or ambiguous markers leave startup blocked. Transport close also removes only the socket inode or discovery port that the current listener published. Administrative stop keeps the authenticated IPC service and durable `stopping` child records available when termination fails, so the operation can be retried instead of hiding a live child. If startup rollback cannot clean the transport, the guardian retains its IPC/store ownership and marker for a later stop retry rather than invoking `onStopped`. Lease expiry never deletes an unresolved `stopping` or `handoff-prepared` record; rehydration verifies those records through the explicit recovery path, retains a live child, or surfaces typed attention until liveness/termination is authoritative. Timeout, connection, 5xx, malformed, and unhealthy responses are recoverable health attention; credential rejection, credential unavailability, identity uncertainty, and confirmed death are distinct recovery conditions. Confirmed-dead active, expired-handoff, and stopping paths durably/idempotently remove credentials before terminal transitions. `reserved`, `launch-delivering`, and `launching` records without a durable process identity become attention records that block conflicting launch rather than being silently discarded. Guardian launch, stop, handoff, abort, reload, and shutdown mutations share one serialized queue; read-only list and health requests remain unqueued.
+- Authenticated guardian IPC exposes `credential({ incarnation, owner })` through `GuardianClient.credential()`. It requires the exact owner/runtime/launch tuple and incarnation, never permits an administrative bypass, and returns no credential material from `list()`. External health RPCs require that same complete owner/incarnation identity; only direct internal timer probes may use the narrower `healthCheck({ incarnation })` call. Credential operations serialize per incarnation, fence removal by file identity, and verify durable absence after directory fsync. JSON-line frames are bounded inclusively before parsing and before every client/server write; the client checks the newline-inclusive size before outbound writes and parses coalesced frames independently.
+
+- Startup rollback ownership: when transport/store cleanup succeeds after an initial guardian startup error with no unresolved attention records, `start()` settles the guardian stopped so the standalone entrypoint may release its marker. Live, identity-uncertain, health, and credential attention records are durable ownership blockers even when no child was attached; rollback and normal `stop()` retain the guardian IPC/store authority and marker, return `GUARDIAN_CLEANUP_UNCERTAIN`, and defer `onStopped` until the record is resolved or retired. If recovered child ownership, transport cleanup, or store cleanup remains uncertain, the guardian and marker stay retryable and `onStopped` is deferred.
+- Direct lifecycle startup registers a spawned detached child before readiness output is parsed and unregisters it only after confirmed exit. If SIGTERM/SIGKILL or the Windows escalation path cannot prove exit, lifecycle throws `OPENCODE_CHILD_STILL_RUNNING`, destroys stdout/stderr pipes, retains registry recovery state, and does not retry beside the live child.
+- A verified-dead pre-ready guardian marker may recover without `transportIdentity` only when both POSIX public/owner paths and their quarantine sidecars are absent. Any artifact without persisted identity retains the marker and fails closed. Marker release and recovery-lease cleanup use identity-fenced quarantine removal, so a replacement pathname or uncertain cleanup is retained.
+- If an unannounced helper cleanup returns anything other than proven `removed` or `absent`, the helper reports cleanup uncertainty with its identity/quarantine tracking. The parent retains transport authority and retries the same hidden `.remove` artifacts; it never treats a discarded helper result as successful cleanup.
+- POSIX helper callbacks carry a per-listen generation fence. Messages, errors, disconnects, and exits from an old helper cannot mutate a relistened transport; late forwarded sockets are destroyed while closing or when their generation is stale.
+- POSIX guardian listen forks `guardian/ipc-listener-helper.js`. The helper applies umask `077`, binds the `0600` Unix socket, validates the bound listener descriptor (`fstat(listener._handle.fd)`) as a socket, and holds a descriptor-backed filesystem identity for the bound pathname (Linux `O_PATH`) before publishing a deterministic same-directory `<socketPath>.owner` hard link with no-clobber (`O_EXCL`-equivalent) semantics. It sends the handle-backed identity for the descriptor, public path, and owner-alias path and forwards accepted `net.Socket` handles to the guardian parent over Node IPC; it receives no auth secret or credential material and emits no diagnostics. The parent resolves listen only after all handle/path identities are present, same-inode, owner-only, and equal through the shared metadata-aware comparator, while `GuardianIpcServer` continues to own authentication, frame limits, request ordering, and socket parsing. A verified POSIX transport identity is same-inode descriptor-fenced onto the guardian PID marker under its current token before startup is considered ready. Close sets a closing fence before stopping the helper, destroys late/queued handles, drains parent IPC messages, waits for helper exit (using the child process handle for a bounded kill fallback), and only then identity-removes both paths. Before ready is announced, a helper shutdown/disconnect performs best-effort identity-fenced cleanup of only its descriptor-backed paths; a replacement is preserved. After ready, the parent owns cleanup and the helper never calls `server.close()` or unlinks either pathname. Helper crash, startup/identity failure, replacement, missing alias/public path, or cleanup uncertainty preserves marker/transport authority; if ready was never verified, close never captures a currently matching pair as ownership. Stale recovery requires the persisted public/owner identities and compares both artifacts against them before removal; old markers, missing identity, and replacement pairs fail closed. The standalone guardian releases its PID marker only from verified startup rollback or the successful `onStopped` callback, never from an unexpected process exit.
+
+- After ready, the POSIX helper retains its Linux `O_PATH` descriptor through shutdown. Its `closed` handoff includes the descriptor-backed identity and is accepted by the parent only when both current pathnames still match that held object and the previously published object identity; a replacement pair is retained for explicit recovery rather than adopted as cleanup authority. Non-Linux POSIX uses the owner pathname and the same actual-listener probe/handle fence because it has no Linux `O_PATH` equivalent.
+- POSIX startup readiness uses a two-phase acknowledged handle fence: after publication and an actual-listener probe, the helper transfers one accepted probe socket with a random publication token as a candidate. The parent validates the helper-issued marker on that held handle, corroborates the public/owner pathnames, and sends acceptance. The helper re-probes and sends the final tokened `ready` frame; the parent acknowledges over the held handle, the helper re-probes again, and emits a commit marker. The parent then identity-corrobates the committed proof against both current pathnames, sends a bounded commit acknowledgement, and waits for the helper's post-acknowledgement re-probe confirmation before corroborating the pair once more. Only that final helper-proof/parent-corroboration exchange resolves `listen()`. The token is destroyed deterministically on commit, confirmation, or failure; pathname checks remain identity-safe and are never timing delays or unbounded waits. Pair cleanup and rollback likewise refresh a surviving hard link only after its object identity matches the prior descriptor/proof identity, so ctime-only mutations cannot authorize a different sibling.
 
 **`restartOpenCode()`**
 - Before stopping the existing child, checks if the guardian is running on the current platform.
-  - If the in-memory incarnation is missing, first queries/adopts the exact stable-owner child. Multiple, ownerless, unhealthy, or unavailable records fail closed rather than selecting a list entry.
+   - If the in-memory incarnation is missing, first queries/adopts the exact stable-owner child. Multiple, ownerless, unhealthy, or unavailable records fail closed rather than selecting a list entry.
+   - Restart adoption restores the exact guardian credential before the child is marked ready, so proxy and readiness requests use the adopted auth state.
 - If guardian is running:
   1. Connects via `GuardianClient`
   2. Prepares handoff for current incarnation via `client.prepareHandoff()`
   3. Spawns successor via `client.spawn()`
-  4. Waits for successor health via `waitForReady()`
+   4. Waits for successor health via the owner-scoped GuardianClient proof check
   5. Stops old child via owner-checked `client.stop()`
   6. Updates `state.openCodeProcess`, `state.openCodePort`, `state.currentIncarnation`, and owner identity
 - Dynamic-port handoff starts and health-checks the successor before stopping the old child. Fixed-port handoff stops the old child and waits for port release before spawning the successor.
 - Legacy fallback is allowed only when the old child was not stopped, abort/health rollback restores it to active, and the exact owner can be stopped before the legacy spawn. Durable `stopping`, `unknown`, and `attention` records are unresolved blockers until the authenticated guardian retires or otherwise resolves them. Once a guardian has been observed, an authoritative no-exact-owner result never triggers a port-wide kill; lifecycle only uses the legacy port cleanup when the guardian was unavailable. If cleanup or ownership is uncertain, lifecycle fails closed instead of creating a second child.
+- Lifecycle cleanup and fallback verification treat a present non-array or malformed authenticated child list as `GUARDIAN_CHILD_LIST_INVALID`; only clients that genuinely do not expose `list()` retain the compatibility path that skips list verification.
 - If a managed password was rotated while a rollback-capable old child was still running, confirmed rollback restores the previous auth state before the old child is made ready again.
 - Failed successor cleanup is verified through the guardian record list when available; a failed guardian disconnect also fails closed. The previous owner/reference is restored when the old child was not confirmed stopped.
 
@@ -202,8 +252,10 @@ OpenChamber tool injection.
 - `state.currentIncarnation` is tracked in the lifecycle state object when a guardian-managed child is adopted or spawned through handoff. This is optional and additive — existing fields are unchanged.
 
 ### Platform constraints
-- POSIX and Windows use separate transport backends, but share owner validation, authenticated IPC, durable records, and lifecycle sequencing. POSIX recovery requires revalidation of the persisted process-start and launch identity; an unavailable or mismatched identity is an attention condition rather than a PID-only adoption. Rehydrated children repeat that check before health probes and immediately before each POSIX signal, while normal live `ChildProcess` instances retain their existing signaling behavior.
-- Windows process rehydration uses bounded hidden PowerShell queries for start-time and command-line identity. Start-time query failures, PID reuse, and unavailable command-line identity are rejected rather than adopted ambiguously. The supported `Win32_Process` query does not provide a reliable working directory, so launch identity intentionally keeps `cwd: null`; guardian recovery validates the available identity fields and does not infer `cwd`. Destructive Windows termination revalidates the process identity immediately before `taskkill.exe` for the same fail-closed behavior.
+- POSIX and Windows use separate transport backends, but share owner validation, authenticated IPC, durable records, and lifecycle sequencing. POSIX recovery requires revalidation of the persisted process-start and launch identity; an unavailable or mismatched identity is an attention condition rather than a PID-only adoption. Rehydrated children repeat that check before health probes, after a port-based health response and immediately before adoption/healthy state, and immediately before each POSIX signal, while normal live `ChildProcess` instances retain their existing signaling behavior.
+- Guardian launch validation accepts direct OpenCode native/node/bun targets and only the resolver's Windows batch-shim shape: `cmd.exe` (or the resolved ComSpec basename) with exactly `/d /s /c call <absolute opencode*.cmd|.bat target>`. The guardian appends `serve --hostname ... --port ...` after that target; arbitrary cmd commands, shell operators, and unrelated batch files are rejected.
+- Windows process identity and rehydrated termination share the `process-identity.js` resolver for absolute `%SystemRoot%`-derived system-tool paths (`powershell.exe`, `icacls.exe`, and `whoami.exe`), with the fixed `C:\Windows` root only as a fallback when `SystemRoot` is unavailable or malformed. All PowerShell probes, ACL commands, and current-user queries pass those executables as argv values with shell execution disabled; they never use PATH lookup or current-directory resolution.
+- Windows process rehydration uses bounded hidden PowerShell queries for start-time, command-line, and owner identity. Start-time query failures, PID reuse, and unavailable command-line identity are rejected rather than adopted ambiguously. The supported `Win32_Process` query does not provide a reliable working directory, so launch identity intentionally keeps `cwd: null`; guardian recovery validates the available identity fields and does not infer `cwd`. Live children terminate through their Node process handles. Rehydrated children use the hidden PowerShell/.NET handle terminator, which opens and retains one process handle, rechecks the persisted start-time and exact normalized command identity (including `serve`, hostname, and port), and terminates that handle; if the helper is unavailable, guardian termination fails closed and never falls back to PID-only `taskkill.exe`. Helper diagnostics are bounded and sanitized without credential material. Native Windows execution remains a CI evidence requirement.
 - Other runtimes do not attach to the web guardian; they continue using their existing runtime boundaries.
 
 ## Phase 2C — Launch wiring
@@ -250,16 +302,19 @@ OpenChamber tool injection.
 
 ### Reload semantics
 - `openchamber guardian reload` first sends an authenticated reload RPC over the
-  guardian transport. If IPC is unavailable, it reads the JSON PID marker and
-  revalidates the recorded owner/start-time/command-line identity and OS
-  liveness before sending `SIGHUP` (or `SIGBREAK` on Windows). Missing,
-  legacy-only, reused, dead, or otherwise unresolved identities refuse the
-  fallback signal.
+  guardian transport. On POSIX, if IPC is unavailable, it reads the JSON PID
+  marker and revalidates the recorded owner/start-time/command-line identity
+  and OS liveness before sending `SIGHUP`. On Windows, IPC failure refuses the
+  PID fallback entirely to avoid a PID-reuse TOCTOU; retry after the guardian
+  endpoint is reachable. Missing, legacy-only, reused, dead, or otherwise
+  unresolved identities refuse the POSIX fallback signal.
 - The guardian entrypoint owns an O_EXCL-created JSON marker containing its PID,
-  process identity, and an in-memory ownership token. Clean IPC shutdown,
-  signal handling, and startup-error cleanup remove the marker only when the
-  current process still owns that marker; an empty, malformed, or in-progress
-  marker is never unlinked by a different process.
+   process identity, and an in-memory ownership token. Clean IPC shutdown,
+   successful signal handling, and startup-error cleanup after verified
+   transport teardown remove the marker only when the current process still
+   owns that marker; an empty, malformed, or in-progress marker is never
+   unlinked by a different process. An uncertain startup rollback retains the
+   process and marker for an explicit stop retry.
 - The guardian entrypoint restarts its internal timer pair (no config-file
   parsing yet).
 - Config reload is **not** wired in Phase 2C. The subcommand reports
@@ -290,12 +345,13 @@ OpenChamber tool injection.
    unreachable, or its marker/child state remains unresolved while `guardian.pid`
    is still present, the CLI reports an incomplete/unknown stop and refuses
    direct PID termination so a live guardian cannot be replaced by a reused-PID
-   process.
+   process. Windows also refuses PID signaling after any IPC failure and tells
+   the operator to retry through authenticated IPC.
 
 ### Windows behavior
 - Windows uses loopback TCP with an ephemeral port published only after the discovery file has been ACL-protected for the current user.
 - The guardian and web client perform a challenge/response handshake, then MAC every request with an ordered sequence number. A valid sequence is consumed before handler dispatch even when the handler returns an error; the client advances after write acceptance and reconnects after an ambiguous timeout. Missing, stale, replayed, or tampered requests fail closed.
-- `taskkill.exe /F /PID <pid>` is the Windows termination primitive; `/T` is intentionally not used.
+- The lifecycle does not use PID-only `taskkill.exe` for Windows termination. Live children use `child.kill()` through the Node process handle; rehydrated children use the default hidden PowerShell/.NET handle terminator, with an injected seam for tests and alternate native hosts. The low-level `runTaskkillForce` helper remains only for compatibility/tests, and `/T` is intentionally not used.
 
 ### Smoke test
 - `scripts/guardian-smoke-test.sh` and `scripts/guardian-smoke-test.ps1` are
@@ -309,13 +365,29 @@ OpenChamber tool injection.
   `.github/workflows/guardian-windows-baseline.yml` hard-gate the corresponding
   smoke tests on `ubuntu-latest` and `windows-latest`.
 
+### Process-boundary runner contract
+- `packages/web/server/lib/guardian/process-boundary.test.js` and
+  `guardian/ipc-transport.boundary.mjs` are Node-authoritative boundary checks.
+  They require Node.js 22+ because the real socket-handle transfer and
+  process-boundary teardown are validated through Node child-process IPC; a
+  Bun unit run must not be presented as equivalent evidence.
+- Run both explicitly with `bun run --cwd packages/web test:node-boundary` (the
+  script invokes Node directly). The Linux workflow runs this step separately
+  and excludes only `process-boundary.test.js` from the ordinary Bun guardian
+  unit job. The remaining Bun tests still run and fail normally; the exclusion
+  is limited to this known Node-only boundary.
+- The Vitest boundary file also skips when loaded by Bun, with the same reason,
+  while the POSIX process-boundary tests remain hard-gated on the Linux Node
+  step. Windows uses the separate native Windows workflow and does not claim
+  POSIX socket-handle evidence.
+
 
 ## Phase 2D — Cross-platform guardian (Windows support via T2)
 
 The cross-platform guardian keeps the v2 record layer, authenticated JSON-line protocol, secret provider, store, and lifecycle integration shared. Only the IPC transport, filesystem ACL handling, and child-termination primitive are platform-specific.
 
 ### Architecture summary
-- Linux/POSIX path: `net.createServer(path)` over a Unix-domain socket at `mode 0600`. The guardian writes the socket path; clients dial it directly.
+- POSIX path: a dedicated Node child helper calls `net.createServer(<socketPath>.owner)` over a Unix-domain socket at `mode 0600`, then creates the private same-inode `<socketPath>.owner` hard-link proof. Linux publishes the public link from a held `O_PATH` descriptor; darwin/BSD/SunOS/AIX use a checked owner pathname plus an actual-listener probe. Startup transfers one accepted probe socket as a helper-issued publication token and completes only after the two-phase helper proof, parent identity corroboration, bounded commit acknowledgement, and final confirmation fence; clients still dial the public path directly.
 - Windows path: `net.createServer({ host: '127.0.0.1', port: 0 })` over loopback TCP. The guardian picks an ephemeral port, writes `127.0.0.1:<port>\n` to a discovery file at `<guardian-root>/port`, and applies an ACL to that file before publishing. Clients read the discovery file and dial `127.0.0.1:<port>`.
 - Default Windows discovery-file path: `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\port` (resolved from `OPENCHAMBER_DATA_DIR` by the shared path resolver). The directory itself lives at `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\` and is created with `ensurePrivateDirectoryWindows`.
 - The factory that selects between the two paths is `createIpcServer` / `createIpcDialer` in `packages/web/server/lib/guardian/ipc-transport.js`. It is the single point that knows about platform-specific paths; everything above it is transport-agnostic.
@@ -325,6 +397,7 @@ The cross-platform guardian keeps the v2 record layer, authenticated JSON-line p
 - Windows trust boundary (enforced by the ACL we apply): "any local process running as the same Windows user can connect." Enforced by the per-user ACL on the discovery file (`/inheritance:r /grant:r <username>:F`) plus loopback-only TCP (`127.0.0.1`; the server never binds `0.0.0.0` or any operator-supplied hostname). ACL commands do not use `/c`; publication fails closed on any ACL error.
 - The Windows guarantee is strictly weaker than the Linux one. Windows has no per-process UID; the OS primitive "same Windows user" is the closest analog, and it does not isolate processes within a logon session the way Unix UIDs isolate processes within a host. Any local process owned by the same Windows user — including any future code that account runs — can dial `127.0.0.1:<port>` and speak the JSON-line protocol. The port file is the only attribute gating which user account can find the port; it does not gate which of that account's processes may connect.
 - This is the same trade-off `vscode-test`, Electron, and Playwright make on Windows: they bind loopback and rely on the same-Windows-user attribute as the cross-process isolation primitive. We do the same. There is no portable way to get Unix-socket-grade isolation on Windows without a kernel-mode component.
+- Windows lock, temp, and discovery artifacts are not removed by a bare path `unlink` after validation. The transport opens and identity-checks the file, performs the shared ancestor ACL/reparse checks, atomically moves it to a private same-directory quarantine name, verifies the identity and original-path absence again, and only then removes the quarantine entry. Discovery reads likewise use a validated file handle and reject an ancestor, path, or file-identity replacement. POSIX close has no listener pathname in the guardian parent: the helper publishes `<socketPath>.owner`, exits without `server.close()`/unlink, then the parent identity-removes the public socket and owner alias only after the helper process is gone and both identities still match. A replacement, missing path, missing alias, or unknown object is preserved and keeps transport authority retryable; stale recovery requires the owner alias proof before cleanup and never falls back to legacy pathname-only removal. Any helper, identity, or cleanup failure retains the live transport or cleanup authority and never falls through to a pathname-based listener close or replacement unlink. The final Windows operation is still implemented through Node's portable filesystem API; native Windows handle-relative delete/process-boundary coverage remains a CI/runtime limitation rather than an assumption of cryptographic isolation.
 
 ### Filesystem changes
 - The v2 root on Windows uses `ensurePrivateDirectoryWindows` (in `packages/web/server/lib/opencode/managed-opencode-handoff-v2/filesystem.js`). The dispatcher `ensurePrivateDirectory({ platform })` selects the Windows variant on `win32`; the POSIX variant is unchanged. Existing roots and files, plus every existing ancestor on their paths, are lstat-checked for reparse points and their ACLs are inspected fail-closed; only the current user plus supported inherited SYSTEM/Administrators entries are accepted.
@@ -334,12 +407,20 @@ The cross-platform guardian keeps the v2 record layer, authenticated JSON-line p
 
 ### Process termination
 - Linux: SIGTERM → SIGKILL escalation via `process.kill(-pid, …)` (process group kill on the spawned child group). Unchanged for normal live children; rehydrated children revalidate their persisted process-start and launch identity immediately before each signal and fail closed on unavailable or mismatched identity.
-- Windows: `taskkill.exe /F /PID <pid>` (no `/T`). We only target the OpenCode child PID we spawned — never the entire tree — because `/T` would risk killing our own guardian process group. See `packages/web/server/lib/guardian/windows-process.js` (`terminateChildWindows` / `runTaskkillForce`). On `ESRCH` or `taskkill` exit code 128 ("process not found"), we treat the child as already-gone; `EPERM` remains an ambiguous termination failure.
+- Windows: live ChildProcess instances use the process handle exposed by
+  `child.kill()`. Rehydrated children use the default hidden PowerShell/.NET
+  handle helper, which opens and retains one handle, rechecks persisted
+  start/launch identity, and terminates that handle; helper or identity failure
+  remains fail-closed and never falls back to PID-only `taskkill`. The
+  low-level `runTaskkillForce` helper remains available for compatibility and
+  tests but is not used for lifecycle termination. Native Windows runtime
+  evidence for this path remains an open CI gate.
 
 ### CLI surface (no new flags)
 - The Windows path reuses the existing CLI surface. No new subcommands, no new flags, no new environment variables.
 - `openchamber serve` — autostarts the guardian on both platforms via `maybeAutoStartGuardian` in `packages/web/bin/lib/commands-guardian.js`. The autostart spawn passes `windowsHide: true` so the detached guardian does not flash a console window.
 - `openchamber guardian {status|start|stop|reload}` — works on both platforms. Help text identifies the POSIX Unix-socket and Windows TCP+ACL transports.
+- `openchamber-guardian` always resolves the current Windows user for ACLs; the removed `--username` principal override is rejected. Tests inject usernames through the lower-level ACL/filesystem dependency seams.
 - `--guardian` / `--no-guardian` — same semantics on both platforms. `--no-guardian` skips autostart on Windows too.
 - `--handoff` / `--no-handoff` — same semantics. **Important Windows note:** before T2, `--no-handoff` was redundant on Windows because the handoff branch was unconditionally gated on `process.platform === 'win32'`. With T2 that platform gate is gone, so `--no-handoff` is now the only way to opt Windows users out of the guardian branch and fall back to the legacy lifecycle path.
 - `OPENCHAMBER_RESTART_HANDOFF=disabled` — applies to both platforms. Still the recommended opt-out for users who want legacy restart behavior on Windows.
@@ -348,7 +429,7 @@ The cross-platform guardian keeps the v2 record layer, authenticated JSON-line p
 ### Operator runbook — `icacls` failures
 The guardian fails closed at startup if it cannot guarantee the per-user ACL on the discovery file. The two common failure modes:
 
-- **`icacls` not on PATH.** Rare on Windows desktop SKUs; possible on stripped Server Core / Nano images. The guardian exits 1 with `Could not locate icacls binary; refusing to start guardian to preserve trust boundary` (the actual error string thrown by `windows-acl.js`; the per-user ACL on the discovery file is what would be lost if we proceeded, so the guardian refuses rather than bind loopback without an ACL on the port file). Fix: install the `Server-Media-Foundation` Windows feature (which ships `icacls.exe`), or run on a full Windows desktop SKU.
+- **`icacls` unavailable at the trusted system path.** Rare on Windows desktop SKUs; possible on stripped Server Core / Nano images. The guardian exits 1 with `Could not locate icacls binary; refusing to start guardian to preserve trust boundary` (the actual error string thrown by `windows-acl.js`; the per-user ACL on the discovery file is what would be lost if we proceeded, so the guardian refuses rather than bind loopback without an ACL on the port file). Fix: install the `Server-Media-Foundation` Windows feature (which ships `icacls.exe`), or run on a full Windows desktop SKU. The command is resolved from `%SystemRoot%\System32` with a fixed `C:\Windows` fallback; PATH and the current directory are never consulted.
 - **`icacls` returns non-zero.** The guardian exits 1 with `icacls failed: <stderr>` (the exact `icacls` stderr text is captured). Read the stderr; the common causes are:
   - the parent directory rejects the inheritance reset (a permissions issue with `%LOCALAPPDATA%\openchamber\managed-opencode-handoff-v2\`);
   - a file-system reparse point in the parent path blocks the inheritance propagation;
@@ -361,9 +442,9 @@ The guardian fails closed at startup if it cannot guarantee the per-user ACL on 
   2. `writeFileSync` the `127.0.0.1:<port>\n` body;
   3. `fsync` the temp file;
   4. `applyDiscoveryFileAcl(<portPath>.tmp, { username })` — the ACL is applied to the **temp** file, so a half-published file at the final name is never observable;
-  5. `renameSync(<portPath>.tmp, <portPath>)` — atomic on Windows via `MoveFileEx`.
-- Removed on clean shutdown by `removeDiscoveryFile(portPath)` as the last step in `GuardianIpcServer#stop` (close listener → remove file).
-- A stale `port` file after a crash is harmless: clients get a TCP connection refused when they try to dial. The `GuardianClient.connect` error path already treats any TCP failure as "guardian not running", so the next lifecycle call falls through to the legacy restart path without manual cleanup.
+  5. identity-fenced hard-link publication from `<portPath>.tmp` to `<portPath>` — an existing final path is rejected rather than replaced; the temp entry is then removed through the same identity fence. Artifact identity snapshots normalize dev/ino, stable birth-time metadata (ctime fallback), and file type; the post-link snapshot is refreshed because hard-link publication may update ctime. If validation or temp/lock cleanup fails after the link, the final entry is rolled back by its recorded identity before the publish error is returned; failure to prove that rollback returns a stable cleanup-uncertain error and retains the transport/guardian ownership for retry. A final path that pre-existed outside the publication is never treated as settled cleanup: startup rollback retains transport/guardian authority until that unknown path is gone or otherwise resolved.
+- Removed on clean shutdown by `removeDiscoveryFile(portPath)` as the last step in `GuardianIpcServer#stop` (close listener → remove file). The Windows transport retains the published file identity as well as its port; a missing or replaced path is safe for normal idempotent close, and a replacement—including a same-port replacement—is never unlinked. POSIX cleanup treats `guardian.sock` and `guardian.sock.owner` as one retryable pair and restores the public hard link if owner cleanup fails partway through.
+- Discovery reads use a validated file handle and recheck the path identity before returning a port. After a crash, the next guardian may remove `port.lock`, `port.tmp`, and the stale final `port` only through `recoverStaleGuardianTransportArtifacts()` after the prior PID marker's complete identity has been revalidated as dead. Recovery invokes strict discovery removal: a final-file replacement or identity uncertainty propagates instead of authorizing stale-marker removal. Explicit Windows paths reuse ancestor ACL/reparse validation and atomically quarantine plus recheck file identity before removal; a live, PID-reused, legacy, malformed, or ambiguous marker leaves all artifacts untouched and startup fails closed. Detection remains read-only and reports an unreachable stale endpoint as not running. Startup rollback also retains transport/marker authority when an unknown POSIX path survives; it settles only after the public/owner pair and hidden quarantine entries are gone.
 
 ### Downgrade story (closes F-10)
 If the operator downgrades from a Windows-aware guardian build to an older build without uninstalling the Windows guardian state, the orphan files are harmless:
@@ -388,6 +469,7 @@ No automatic migration is required. Documented in the CHANGELOG entry under `[Un
 
 ### Cross-references
 - Transport factory: `packages/web/server/lib/guardian/ipc-transport.js` — `createIpcServer` / `createIpcDialer` / `defaultIpcPaths`.
+- Transport recovery: `packages/web/server/lib/guardian/ipc-transport.js` — `recoverStaleGuardianTransportArtifacts` validates prior PID identity and the POSIX `<socketPath>.owner` same-inode proof before removing crash leftovers; POSIX close waits for `guardian/ipc-listener-helper.js` to exit and identity-fences both public and owner paths, while Windows cleanup also uses identity-safe artifact removal and Windows close checks the published discovery port before cleanup. The dependency-free `guardian/ipc-transport.boundary.mjs` Node test exercises real IPC handle transfer and process-boundary failures; Bun's unit runner cannot deserialize transferred `net.Socket` handles, so those two cases are skipped there rather than given a non-IPC fallback.
 - Discovery-file helpers: `packages/web/server/lib/guardian/discovery-file.js` — `writeDiscoveryFileAtomic`, `readDiscoveryFile`, `removeDiscoveryFile`.
 - ACL helpers: `packages/web/server/lib/guardian/windows-acl.js` — `applyDiscoveryFileAcl`, `applyDirectoryAcl`, `resolveCurrentUsername`.
 - v2 root dispatcher: `packages/web/server/lib/opencode/managed-opencode-handoff-v2/filesystem.js` — `ensurePrivateDirectory` (POSIX vs `ensurePrivateDirectoryWindows`).

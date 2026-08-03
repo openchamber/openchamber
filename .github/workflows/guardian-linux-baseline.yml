@@ -44,11 +44,24 @@ jobs:
       - name: Run real guardian lifecycle smoke test
         run: bash scripts/guardian-smoke-test.sh
 
+      - name: Run web-process-boundary restart (POSIX, real guardian + fixture + GuardianClient)
+        run: bash scripts/web-restart-boundary-posix.sh
+
+      - name: Run Node-authoritative process and socket-handle boundaries
+        # These checks exercise real Node child-process IPC and net.Socket
+        # handle transfer. Bun remains the ordinary unit-test runtime, but it
+        # must not claim compatibility with this boundary.
+        working-directory: packages/web
+        run: |
+          node -e "if (Number(process.versions.node.split('.')[0]) < 22) { throw new Error('Node.js >=22 is required for the process-boundary gate'); } console.log('Node ' + process.versions.node + ' is authoritative for this boundary');"
+          bun run test:node-boundary
+
       - name: Run guardian and lifecycle tests
         working-directory: packages/web
         run: >-
           bun run test --
           server/lib/guardian/
+          --exclude server/lib/guardian/process-boundary.test.js
           server/lib/opencode/lifecycle-guardian-integration.test.js
           server/lib/opencode/shutdown-runtime.test.js
 

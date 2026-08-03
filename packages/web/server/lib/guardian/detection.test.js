@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { selectGuardianChild } from './detection.js';
+import { isGuardianRunning, selectGuardianChild } from './detection.js';
 
 const expectedOwner = {
   ownerInstanceId: 'owner-a',
@@ -26,6 +30,49 @@ const child = (overrides = {}) => ({
   ...overrides,
 });
 
+const staleSocketRoots = [];
+
+const createCrashedSocket = async (socketPath) => {
+  const child = spawn(process.execPath, [
+    '--input-type=module',
+    '-e',
+    `import net from 'node:net'; const server = net.createServer(); server.listen(${JSON.stringify(socketPath)}, '127.0.0.1');`,
+  ], { stdio: 'ignore' });
+  for (let attempt = 0; attempt < 100 && !fs.existsSync(socketPath); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  child.kill('SIGKILL');
+  await new Promise((resolve) => child.once('exit', resolve));
+};
+
+afterEach(() => {
+  while (staleSocketRoots.length > 0) {
+    const root = staleSocketRoots.pop();
+    try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});
+
+describe('guardian transport detection', () => {
+  it('fails closed without probing unsupported transport platforms', async () => {
+    await expect(isGuardianRunning('/tmp/guardian.sock', undefined, { platform: 'plan9' }))
+      .rejects
+      .toMatchObject({
+        code: 'GUARDIAN_TRANSPORT_UNSUPPORTED',
+        message: 'Unsupported guardian transport platform: plan9',
+      });
+  });
+
+  it.skipIf(process.platform === 'win32')('reports a crashed POSIX guardian as absent without unlinking its socket', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-detection-crash-'));
+    staleSocketRoots.push(root);
+    const socketPath = path.join(root, 'guardian.sock');
+    await createCrashedSocket(socketPath);
+
+    await expect(isGuardianRunning(socketPath)).resolves.toBe(false);
+    expect(fs.existsSync(socketPath)).toBe(true);
+  });
+});
+
 describe('guardian adoption selection', () => {
   it('selects only the active child owned by this runtime', () => {
     const selected = selectGuardianChild([
@@ -48,6 +95,20 @@ describe('guardian adoption selection', () => {
       child({ incarnation: 'first' }),
       child({ incarnation: 'second', pid: 1002, port: 4097 }),
     ], { expectedOwner })).toThrow(/adoption conflict/);
+  });
+
+  it('uses launch fingerprint to disambiguate the same owner and runtime', () => {
+    const first = child({ incarnation: 'first', launchFingerprint: 'fingerprint-a' });
+    const second = child({
+      incarnation: 'second',
+      pid: 1002,
+      port: 4097,
+      launchFingerprint: 'fingerprint-b',
+    });
+
+    expect(selectGuardianChild([first, second], {
+      expectedOwner: { ...expectedOwner, launchFingerprint: 'fingerprint-b' },
+    })).toMatchObject({ incarnation: 'second' });
   });
 
   it('isolates two live instances by exact owner and runtime identity', () => {

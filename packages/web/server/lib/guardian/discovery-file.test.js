@@ -7,6 +7,7 @@ import * as windowsAcl from './windows-acl.js';
 import {
   readDiscoveryFile,
   removeDiscoveryFile,
+  removeFileByIdentity,
   writeDiscoveryFileAtomic,
   __test__,
 } from './discovery-file.js';
@@ -70,15 +71,28 @@ describe('readDiscoveryFile', () => {
   it('returns null for a malformed body (test of internal parser)', () => {
     const file = mkTmpFile();
     fs.writeFileSync(file, 'not-a-valid-port-line\n');
-    const parsed = readDiscoveryFile(file, { platform: 'win32', username: 'alice', aclInspector });
-    expect(parsed).toBeNull();
+    expect(() => readDiscoveryFile(file, {
+      platform: 'win32', username: 'alice', aclInspector,
+    })).toThrowError(expect.objectContaining({ code: 'GUARDIAN_DISCOVERY_INVALID' }));
   });
 
-  it('returns null for a port out of range', () => {
+  it('rejects a port out of range as invalid discovery state', () => {
     const file = mkTmpFile();
     fs.writeFileSync(file, '127.0.0.1:70000\n');
-    const parsed = readDiscoveryFile(file, { platform: 'win32', username: 'alice', aclInspector });
-    expect(parsed).toBeNull();
+    expect(() => readDiscoveryFile(file, {
+      platform: 'win32', username: 'alice', aclInspector,
+    })).toThrowError(expect.objectContaining({ code: 'GUARDIAN_DISCOVERY_INVALID' }));
+  });
+
+  it('rejects an oversized discovery body before reading/parsing it', () => {
+    const file = mkTmpFile('discovery-oversized');
+    fs.writeFileSync(file, 'x'.repeat(__test__.GUARDIAN_DISCOVERY_MAX_BODY_BYTES + 1));
+    const readSync = vi.spyOn(fs, 'readSync');
+
+    expect(() => readDiscoveryFile(file, {
+      platform: 'win32', username: 'alice', aclInspector,
+    })).toThrowError(expect.objectContaining({ code: 'GUARDIAN_DISCOVERY_INVALID' }));
+    expect(readSync).not.toHaveBeenCalled();
   });
 
   it.runIf(process.platform !== 'win32')('throws on non-Windows (Windows-only boundary)', () => {
@@ -131,6 +145,33 @@ describe('readDiscoveryFile', () => {
     })).toThrow(/unapproved principal/);
   });
 
+  it('fails closed when the discovery path is replaced after the validated handle read', () => {
+    const file = mkTmpFile('discovery-read-toctou');
+    fs.writeFileSync(file, '127.0.0.1:4096\n');
+    const readSync = fs.readSync.bind(fs);
+    let replaced = false;
+    const readSpy = vi.spyOn(fs, 'readSync').mockImplementation((target, ...args) => {
+      const result = readSync(target, ...args);
+      if (typeof target === 'number' && !replaced) {
+        replaced = true;
+        fs.unlinkSync(file);
+        fs.writeFileSync(file, '127.0.0.1:4100\n');
+      }
+      return result;
+    });
+
+    try {
+      expect(() => readDiscoveryFile(file, {
+        platform: 'win32',
+        username: 'alice',
+        aclInspector,
+      })).toThrow(/replaced/);
+      expect(fs.readFileSync(file, 'utf8')).toBe('127.0.0.1:4100\n');
+    } finally {
+      readSpy.mockRestore();
+    }
+  });
+
   it('rejects unsafe path characters (defense in depth)', () => {
     expect(() => readDiscoveryFile('/path/with&', { platform: 'win32' })).toThrow(/unsafe characters/);
   });
@@ -152,6 +193,32 @@ describe('removeDiscoveryFile', () => {
     })).not.toThrow();
   });
 
+  it('can return explicit discovery removal outcomes', () => {
+    const file = mkTmpFile('discovery-removal-outcomes');
+    fs.writeFileSync(file, '127.0.0.1:4096\n');
+    expect(removeDiscoveryFile(file, {
+      platform: 'win32',
+      username: 'alice',
+      aclInspector,
+      returnResult: true,
+    })).toEqual({ status: 'removed' });
+    expect(removeDiscoveryFile(file, {
+      platform: 'win32',
+      username: 'alice',
+      aclInspector,
+      returnResult: true,
+    })).toEqual({ status: 'absent' });
+
+    fs.writeFileSync(file, '127.0.0.1:4100\n');
+    expect(removeDiscoveryFile(file, {
+      platform: 'win32',
+      username: 'alice',
+      expectedPort: 4096,
+      aclInspector,
+      returnResult: true,
+    })).toMatchObject({ status: 'replaced' });
+  });
+
   it.runIf(process.platform !== 'win32')('throws on non-Windows', () => {
     // Default platform override; on a Linux CI runtime this throws.
     // Gated to non-Windows runners for the same reason as the matching
@@ -164,6 +231,207 @@ describe('removeDiscoveryFile', () => {
 
   it('throws TypeError on empty portPath', () => {
     expect(() => removeDiscoveryFile('', { platform: 'win32' })).toThrow(/portPath is required/);
+  });
+
+  it('exposes absent, removed, and replaced outcomes from shared identity removal', () => {
+    const file = mkTmpFile('identity-removal-outcomes');
+    fs.writeFileSync(file, 'owned');
+    const identity = fs.lstatSync(file);
+
+    expect(removeFileByIdentity(file, identity, {
+      returnResult: true,
+      label: 'test artifact',
+    })).toEqual({ status: 'removed' });
+    expect(removeFileByIdentity(file, identity, {
+      returnResult: true,
+      label: 'test artifact',
+    })).toEqual({ status: 'absent' });
+
+    fs.writeFileSync(file, 'replacement');
+    expect(removeFileByIdentity(file, identity, {
+      returnResult: true,
+      label: 'test artifact',
+    })).toMatchObject({ status: 'replaced' });
+    expect(fs.readFileSync(file, 'utf8')).toBe('replacement');
+  });
+
+  it('preserves an unlink/recreate replacement with reused dev+ino but changed identity metadata', () => {
+    const file = mkTmpFile('identity-reused-dev-ino');
+    fs.writeFileSync(file, 'owned');
+    const originalStat = fs.lstatSync(file);
+    const originalIdentity = __test__.snapshotFileIdentity(originalStat);
+    expect(originalIdentity).not.toBeNull();
+
+    fs.unlinkSync(file);
+    fs.writeFileSync(file, 'replacement-after-recreate');
+    const replacementStat = fs.lstatSync(file);
+    // Model the deterministic XFS case even when the host filesystem does not
+    // immediately recycle the inode: dev+ino are reused, but the generation
+    // metadata changes. The cleanup fence must reject the replacement without
+    // relying on mutable discovery content.
+    Object.assign(replacementStat, {
+      dev: originalStat.dev,
+      ino: originalStat.ino,
+      birthtimeMs: originalStat.birthtimeMs + 1,
+      ctimeMs: originalStat.ctimeMs + 1,
+    });
+    const realLstatSync = fs.lstatSync.bind(fs);
+    const lstatSpy = vi.spyOn(fs, 'lstatSync').mockImplementation((target, ...args) => (
+      target === file ? replacementStat : realLstatSync(target, ...args)
+    ));
+
+    try {
+      expect(removeDiscoveryFile(file, {
+        platform: 'win32',
+        username: 'alice',
+        expectedIdentity: originalIdentity,
+        aclInspector,
+        returnResult: true,
+      })).toMatchObject({ status: 'replaced' });
+      expect(fs.readFileSync(file, 'utf8')).toBe('replacement-after-recreate');
+    } finally {
+      lstatSpy.mockRestore();
+    }
+  });
+
+  it('refreshes a ctime-only identity after a descriptor-proven quarantine rename', () => {
+    const file = mkTmpFile('discovery-ctime-quarantine');
+    fs.writeFileSync(file, 'owned');
+    const realLstatSync = fs.lstatSync.bind(fs);
+    const realFstatSync = fs.fstatSync.bind(fs);
+    const realRenameSync = fs.renameSync.bind(fs);
+    const initialStat = realLstatSync(file);
+    const initialCtime = Number(initialStat.ctimeMs);
+    let renamed = false;
+
+    const ctimeOnly = (stat) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, {
+      birthtime: undefined,
+      birthtimeNs: undefined,
+      birthtimeMs: undefined,
+      ctime: undefined,
+      ctimeNs: undefined,
+      ctimeMs: initialCtime + (renamed ? 1 : 0),
+    });
+    const lstatSpy = vi.spyOn(fs, 'lstatSync').mockImplementation((target, ...args) => (
+      ctimeOnly(realLstatSync(target, ...args))
+    ));
+    const fstatSpy = vi.spyOn(fs, 'fstatSync').mockImplementation((target, ...args) => (
+      ctimeOnly(realFstatSync(target, ...args))
+    ));
+    const renameSpy = vi.spyOn(fs, 'renameSync').mockImplementation((source, destination, ...args) => {
+      const result = realRenameSync(source, destination, ...args);
+      if (source === file) renamed = true;
+      return result;
+    });
+
+    const originalIdentity = ctimeOnly(initialStat);
+    let refreshedIdentity;
+    try {
+      expect(removeFileByIdentity(file, originalIdentity, {
+        returnResult: true,
+        label: 'ctime-only discovery artifact',
+        onIdentity: (identity) => { refreshedIdentity = identity; },
+      })).toEqual({ status: 'removed' });
+      expect(refreshedIdentity).toMatchObject({
+        birthtime: null,
+        ctime: `ms:${initialCtime + 1}`,
+      });
+      expect(fs.existsSync(file)).toBe(false);
+    } finally {
+      renameSpy.mockRestore();
+      fstatSpy.mockRestore();
+      lstatSpy.mockRestore();
+    }
+  });
+
+  it('fails closed when a transport identity is missing stable metadata or type', () => {
+    const file = mkTmpFile('identity-metadata-unavailable');
+    fs.writeFileSync(file, 'owned');
+    const stat = fs.lstatSync(file);
+
+    expect(() => removeFileByIdentity(file, { dev: stat.dev, ino: stat.ino }, {
+      label: 'identity-incomplete artifact',
+    })).toThrowError(expect.objectContaining({
+      code: 'GUARDIAN_TRANSPORT_IDENTITY_UNAVAILABLE',
+    }));
+    expect(fs.readFileSync(file, 'utf8')).toBe('owned');
+  });
+
+  it('does not remove a discovery file replaced during cleanup validation', () => {
+    const file = mkTmpFile('discovery-toctou');
+    fs.writeFileSync(file, '127.0.0.1:4096\n');
+    let replaced = false;
+
+    expect(removeDiscoveryFile(file, {
+      platform: 'win32',
+      username: 'alice',
+      aclInspector,
+      reparseChecker: (candidate) => {
+        if (candidate === file && !replaced) {
+          replaced = true;
+          fs.unlinkSync(file);
+          fs.writeFileSync(file, '127.0.0.1:4096\n');
+        }
+        return false;
+      },
+    })).toBe(false);
+    expect(fs.readFileSync(file, 'utf8')).toBe('127.0.0.1:4096\n');
+  });
+
+  it('does not remove a replacement introduced immediately before atomic quarantine', () => {
+    const file = mkTmpFile('discovery-quarantine-toctou');
+    fs.writeFileSync(file, '127.0.0.1:4096\n');
+    const renameSync = fs.renameSync.bind(fs);
+    let replaced = false;
+    const renameSpy = vi.spyOn(fs, 'renameSync').mockImplementation((source, destination) => {
+      if (source === file && !replaced) {
+        replaced = true;
+        fs.unlinkSync(file);
+        fs.writeFileSync(file, '127.0.0.1:4100\n');
+      }
+      return renameSync(source, destination);
+    });
+
+    try {
+      expect(removeDiscoveryFile(file, {
+        platform: 'win32',
+        username: 'alice',
+        aclInspector,
+      })).toBe(false);
+      expect(fs.readFileSync(file, 'utf8')).toBe('127.0.0.1:4100\n');
+    } finally {
+      renameSpy.mockRestore();
+    }
+  });
+
+  it('does not unlink the expected file after a replacement appears after quarantine', () => {
+    const file = mkTmpFile('discovery-post-quarantine-toctou');
+    fs.writeFileSync(file, '127.0.0.1:4096\n');
+    const renameSync = fs.renameSync.bind(fs);
+    let quarantinedPath;
+    const renameSpy = vi.spyOn(fs, 'renameSync').mockImplementation((source, destination) => {
+      const result = renameSync(source, destination);
+      if (source === file && destination.endsWith('.remove')) {
+        quarantinedPath = destination;
+        fs.writeFileSync(file, '127.0.0.1:4100\n');
+      }
+      return result;
+    });
+
+    try {
+      expect(() => removeDiscoveryFile(file, {
+        platform: 'win32',
+        username: 'alice',
+        aclInspector,
+        strict: true,
+      })).toThrowError(expect.objectContaining({
+        code: 'GUARDIAN_TRANSPORT_CLEANUP_UNCERTAIN',
+      }));
+      expect(fs.readFileSync(file, 'utf8')).toBe('127.0.0.1:4100\n');
+      expect(quarantinedPath && fs.existsSync(quarantinedPath)).toBe(true);
+    } finally {
+      renameSpy.mockRestore();
+    }
   });
 });
 
@@ -183,11 +451,161 @@ describe('writeDiscoveryFileAtomic (W-B)', () => {
     expect(fs.existsSync(`${file}.tmp`)).toBe(false);
 
     // ACL was applied to the temp file, not the final file (closes
-    // F-6: temp is the only file ACL'd before the atomic rename).
+    // F-6: temp is the only file ACL'd before hard-link publication).
     expect(aclSpy).toHaveBeenCalledTimes(1);
     const aclArgs = aclSpy.mock.calls[0][0];
     expect(aclArgs.portPath).toBe(`${file}.tmp`);
     expect(aclArgs.username).toBe('alice');
+  });
+
+  it('retains an O_EXCL lock as cleanup-uncertain when its first identity probe fails', () => {
+    const file = mkTmpFile('discovery-lock-identity-uncertain');
+    const fstatSpy = vi.spyOn(fs, 'fstatSync').mockImplementation(() => {
+      throw Object.assign(new Error('lock identity metadata unavailable'), { code: 'EIO' });
+    });
+
+    try {
+      expect(() => writeDiscoveryFileAtomic(file, 4096, {
+        platform: 'win32', username: 'alice', aclInspector,
+      })).toThrowError(expect.objectContaining({
+        code: 'GUARDIAN_TRANSPORT_CLEANUP_UNCERTAIN',
+      }));
+      expect(fs.existsSync(`${file}.lock`)).toBe(true);
+      expect(fs.existsSync(`${file}.tmp`)).toBe(false);
+    } finally {
+      fstatSpy.mockRestore();
+    }
+  });
+
+  it('retains an O_EXCL temp as cleanup-uncertain when its first identity probe fails', () => {
+    const file = mkTmpFile('discovery-temp-identity-uncertain');
+    const realFstatSync = fs.fstatSync.bind(fs);
+    let calls = 0;
+    const fstatSpy = vi.spyOn(fs, 'fstatSync').mockImplementation((descriptor, ...args) => {
+      calls += 1;
+      if (calls === 2) {
+        throw Object.assign(new Error('temp identity metadata unavailable'), { code: 'EIO' });
+      }
+      return realFstatSync(descriptor, ...args);
+    });
+
+    try {
+      expect(() => writeDiscoveryFileAtomic(file, 4096, {
+        platform: 'win32', username: 'alice', aclInspector,
+      })).toThrowError(expect.objectContaining({
+        code: 'GUARDIAN_TRANSPORT_CLEANUP_UNCERTAIN',
+      }));
+      expect(fs.existsSync(`${file}.lock`)).toBe(false);
+      expect(fs.existsSync(`${file}.tmp`)).toBe(true);
+    } finally {
+      fstatSpy.mockRestore();
+    }
+  });
+
+  it('rolls back the final artifact when post-link temp cleanup fails', () => {
+    const file = mkTmpFile('discovery-post-link-temp-cleanup');
+    const realUnlinkSync = fs.unlinkSync.bind(fs);
+    let injected = false;
+    const unlinkSpy = vi.spyOn(fs, 'unlinkSync').mockImplementation((target, ...args) => {
+      if (
+        typeof target === 'string'
+        && path.basename(target).startsWith('.port.tmp.')
+        && !injected
+      ) {
+        injected = true;
+        throw Object.assign(new Error('temporary cleanup denied'), { code: 'EACCES' });
+      }
+      return realUnlinkSync(target, ...args);
+    });
+
+    try {
+      expect(() => writeDiscoveryFileAtomic(file, 4096, {
+        platform: 'win32', username: 'alice', aclInspector,
+      })).toThrow(/temporary cleanup denied/);
+      expect(fs.existsSync(file)).toBe(false);
+      expect(fs.existsSync(`${file}.tmp`)).toBe(false);
+      expect(fs.existsSync(`${file}.lock`)).toBe(false);
+    } finally {
+      unlinkSpy.mockRestore();
+    }
+  });
+
+  it('rolls back the final artifact when post-link lock cleanup fails', () => {
+    const file = mkTmpFile('discovery-post-link-lock-cleanup');
+    const realUnlinkSync = fs.unlinkSync.bind(fs);
+    let injected = false;
+    const unlinkSpy = vi.spyOn(fs, 'unlinkSync').mockImplementation((target, ...args) => {
+      if (
+        typeof target === 'string'
+        && path.basename(target).startsWith('.port.lock.')
+        && !injected
+      ) {
+        injected = true;
+        throw Object.assign(new Error('lock cleanup denied'), { code: 'EACCES' });
+      }
+      return realUnlinkSync(target, ...args);
+    });
+
+    try {
+      expect(() => writeDiscoveryFileAtomic(file, 4096, {
+        platform: 'win32', username: 'alice', aclInspector,
+      })).toThrow(/lock cleanup denied/);
+      expect(fs.existsSync(file)).toBe(false);
+      expect(fs.existsSync(`${file}.tmp`)).toBe(false);
+      expect(fs.existsSync(`${file}.lock`)).toBe(false);
+    } finally {
+      unlinkSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    { label: 'temp', prefix: '.port.tmp.', pathKey: 'tmp' },
+    { label: 'lock', prefix: '.port.lock.', pathKey: 'lock' },
+  ])('returns cleanup uncertainty for persistent post-publication $label leftovers', ({ prefix, pathKey }) => {
+    const file = mkTmpFile(`discovery-persistent-${pathKey}-cleanup`);
+    const realUnlinkSync = fs.unlinkSync.bind(fs);
+    const unlinkSpy = vi.spyOn(fs, 'unlinkSync').mockImplementation((target, ...args) => {
+      if (typeof target === 'string' && path.basename(target).startsWith(prefix)) {
+        throw Object.assign(new Error(`${pathKey} cleanup denied`), { code: 'EACCES' });
+      }
+      return realUnlinkSync(target, ...args);
+    });
+
+    try {
+      expect(() => writeDiscoveryFileAtomic(file, 4096, {
+        platform: 'win32', username: 'alice', aclInspector,
+      })).toThrowError(expect.objectContaining({
+        code: 'GUARDIAN_TRANSPORT_CLEANUP_UNCERTAIN',
+      }));
+      expect(fs.existsSync(file)).toBe(false);
+      expect(fs.existsSync(`${file}.tmp`)).toBe(pathKey === 'tmp');
+      expect(fs.existsSync(`${file}.lock`)).toBe(pathKey === 'lock');
+    } finally {
+      unlinkSpy.mockRestore();
+    }
+  });
+
+  it('returns a stable cleanup-uncertain error when final rollback cannot be proven', () => {
+    const file = mkTmpFile('discovery-final-cleanup-uncertain');
+    const realUnlinkSync = fs.unlinkSync.bind(fs);
+    const unlinkSpy = vi.spyOn(fs, 'unlinkSync').mockImplementation((target, ...args) => {
+      if (typeof target === 'string' && path.basename(target).startsWith('.port.')) {
+        throw Object.assign(new Error('final cleanup denied'), { code: 'EACCES' });
+      }
+      return realUnlinkSync(target, ...args);
+    });
+
+    try {
+      expect(() => writeDiscoveryFileAtomic(file, 4096, {
+        platform: 'win32', username: 'alice', aclInspector,
+      })).toThrowError(expect.objectContaining({
+        code: 'GUARDIAN_TRANSPORT_CLEANUP_UNCERTAIN',
+        message: 'Guardian discovery publication cleanup is uncertain',
+      }));
+      expect(fs.existsSync(file)).toBe(true);
+    } finally {
+      unlinkSpy.mockRestore();
+    }
   });
 
   it('writes through "127.0.0.1:" even when called with a hostname', () => {
@@ -220,10 +638,12 @@ describe('writeDiscoveryFileAtomic (W-B)', () => {
     const file = mkTmpFile();
     // Pre-create the lock file to simulate a concurrent publisher.
     fs.writeFileSync(`${file}.lock`, '');
+    fs.writeFileSync(`${file}.tmp`, 'live-publisher-temp');
     expect(() => writeDiscoveryFileAtomic(file, 4096, {
       platform: 'win32', username: 'alice', aclInspector,
     }))
       .toThrow(/lock held/);
+    expect(fs.readFileSync(`${file}.tmp`, 'utf8')).toBe('live-publisher-temp');
     // Cleanup: remove the lock so afterEach does not error.
     try { fs.unlinkSync(`${file}.lock`); } catch { /* ignore */ }
   });
@@ -236,8 +656,41 @@ describe('writeDiscoveryFileAtomic (W-B)', () => {
       platform: 'win32', username: 'alice', aclInspector,
     }))
       .toThrow(/temp file .* already exists/);
+    expect(fs.existsSync(`${file}.tmp`)).toBe(true);
     // Cleanup.
     try { fs.unlinkSync(`${file}.tmp`); } catch { /* ignore */ }
+  });
+
+  it('refuses to replace an existing final discovery file without recovery proof', () => {
+    const file = mkTmpFile('discovery-live-final');
+    fs.writeFileSync(file, '127.0.0.1:4096\n');
+
+    expect(() => writeDiscoveryFileAtomic(file, 4100, {
+      platform: 'win32', username: 'alice', aclInspector,
+    })).toThrow(/refusing to replace it without stale-guardian recovery/);
+    expect(fs.readFileSync(file, 'utf8')).toBe('127.0.0.1:4096\n');
+  });
+
+  it('does not clobber a final discovery file that appears after the existence check', () => {
+    const file = mkTmpFile('discovery-publish-toctou');
+    const linkSync = fs.linkSync.bind(fs);
+    let appeared = false;
+    const linkSpy = vi.spyOn(fs, 'linkSync').mockImplementation((source, destination) => {
+      if (destination === file && !appeared) {
+        appeared = true;
+        fs.writeFileSync(file, '127.0.0.1:4096\n');
+      }
+      return linkSync(source, destination);
+    });
+
+    try {
+      expect(() => writeDiscoveryFileAtomic(file, 4100, {
+        platform: 'win32', username: 'alice', aclInspector,
+      })).toThrow(/appeared during publication/);
+      expect(fs.readFileSync(file, 'utf8')).toBe('127.0.0.1:4096\n');
+    } finally {
+      linkSpy.mockRestore();
+    }
   });
 
   it('rejects paths with unsafe characters (defense in depth)', () => {

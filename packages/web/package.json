@@ -21,6 +21,7 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js",
     "test": "vitest run",
+    "test:node-boundary": "node ./node_modules/vitest/vitest.mjs run server/lib/guardian/process-boundary.test.js && node --test server/lib/guardian/ipc-transport.boundary.mjs",
     "start": "node bin/cli.js serve"
   },
   "dependencies": {

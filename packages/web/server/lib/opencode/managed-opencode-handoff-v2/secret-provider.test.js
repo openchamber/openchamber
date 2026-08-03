@@ -13,6 +13,7 @@ import {
 import { fsyncDirectory } from './filesystem.js';
 
 const roots = [];
+const noFollow = fs.constants.O_NOFOLLOW ?? 0;
 
 const createRoot = () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-handoff-v2-secret-'));
@@ -117,6 +118,66 @@ describe('managed OpenCode handoff v2 secret provider', () => {
     reopened.dispose();
   });
 
+  it.skipIf(noFollow === 0)('retries master-secret reads without O_NOFOLLOW only after EINVAL', async () => {
+    const root = createRoot();
+    const incarnation = createIncarnation();
+    const first = createProvider(root);
+    const firstKey = await first.deriveRecordMacKey({ incarnation });
+    firstKey.fill(0);
+    first.dispose();
+
+    const secretPath = path.join(root, MANAGED_OPENCODE_HANDOFF_V2_MASTER_SECRET_FILENAME);
+    const realOpenSync = fs.openSync.bind(fs);
+    let fallbackAttempted = false;
+    const openSpy = vi.spyOn(fs, 'openSync').mockImplementation((target, flags, ...args) => {
+      if (target === secretPath && typeof flags === 'number' && (flags & noFollow) !== 0) {
+        fallbackAttempted = true;
+        throw Object.assign(new Error('O_NOFOLLOW is unsupported'), { code: 'EINVAL' });
+      }
+      return realOpenSync(target, flags, ...args);
+    });
+    const reopened = createProvider(root);
+
+    try {
+      const key = await reopened.deriveRecordMacKey({ incarnation });
+      expect(key).toHaveLength(32);
+      expect(fallbackAttempted).toBe(true);
+      key.fill(0);
+    } finally {
+      openSpy.mockRestore();
+      reopened.dispose();
+    }
+  });
+
+  it('does not retry an ordinary master-secret open error', async () => {
+    const root = createRoot();
+    const incarnation = createIncarnation();
+    const first = createProvider(root);
+    const firstKey = await first.deriveRecordMacKey({ incarnation });
+    firstKey.fill(0);
+    first.dispose();
+
+    const secretPath = path.join(root, MANAGED_OPENCODE_HANDOFF_V2_MASTER_SECRET_FILENAME);
+    const realOpenSync = fs.openSync.bind(fs);
+    let secretOpenAttempts = 0;
+    const openSpy = vi.spyOn(fs, 'openSync').mockImplementation((target, flags, ...args) => {
+      if (target === secretPath && typeof flags === 'number') {
+        secretOpenAttempts += 1;
+        throw Object.assign(new Error('master-secret open denied'), { code: 'EACCES' });
+      }
+      return realOpenSync(target, flags, ...args);
+    });
+    const reopened = createProvider(root);
+
+    try {
+      await expect(reopened.deriveRecordMacKey({ incarnation })).rejects.toMatchObject({ code: 'EACCES' });
+      expect(secretOpenAttempts).toBe(1);
+    } finally {
+      openSpy.mockRestore();
+      reopened.dispose();
+    }
+  });
+
   it('rejects an existing master-secret ACL that grants a broader principal', async () => {
     const root = createRoot();
     vi.spyOn(windowsAcl, 'applyDirectoryAcl').mockReturnValue({ ok: true, username: 'alice' });
@@ -179,6 +240,7 @@ describe('managed OpenCode handoff v2 secret provider', () => {
     ]);
     expect(fs.statSync(path.join(root, MANAGED_OPENCODE_HANDOFF_V2_INITIALIZATION_EVIDENCE_FILENAME)).mode & 0o777).toBe(0o600);
     expect(Object.keys(secondProvider).sort()).toEqual([
+      'deriveCredentialEncryptionKey',
       'deriveRecordMacKey',
       'dispose',
       'getLifecycleCredentialFingerprint',
@@ -361,6 +423,20 @@ describe('managed OpenCode handoff v2 secret provider', () => {
     await expect(material.withCredential(async () => undefined)).rejects.toThrow(/unavailable/);
     expect(material.dispose()).toBe(true);
     expect(material.dispose()).toBe(false);
+    provider.dispose();
+  });
+
+  it.skipIf(process.platform === 'win32')('derives a domain-separated credential-encryption key', async () => {
+    const root = createRoot();
+    const provider = createProvider(root);
+    const incarnation = createIncarnation();
+    const recordKey = await provider.deriveRecordMacKey({ incarnation });
+    const credentialKey = await provider.deriveCredentialEncryptionKey({ incarnation });
+
+    expect(credentialKey).toHaveLength(32);
+    expect(credentialKey.equals(recordKey)).toBe(false);
+    recordKey.fill(0);
+    credentialKey.fill(0);
     provider.dispose();
   });
 

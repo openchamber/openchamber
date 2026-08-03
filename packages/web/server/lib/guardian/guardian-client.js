@@ -8,10 +8,20 @@ import {
   createHandshakeProof,
   createRequestMac,
   createSessionKey,
+  GUARDIAN_IPC_MAX_FRAME_BYTES,
 } from './ipc-auth.js';
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
+const hasCompleteOwnerIdentity = (owner) => owner !== null
+  && typeof owner === 'object'
+  && !Array.isArray(owner)
+  && typeof owner.ownerInstanceId === 'string'
+  && owner.ownerInstanceId.length > 0
+  && typeof owner.runtimeIdentity === 'string'
+  && owner.runtimeIdentity.length > 0
+  && typeof owner.launchFingerprint === 'string'
+  && owner.launchFingerprint.length > 0;
 
 export class GuardianClientError extends Error {
   constructor(message, code) {
@@ -225,8 +235,19 @@ export class GuardianClient {
     this.#buffer += chunk.toString();
     let lineEnd;
     while ((lineEnd = this.#buffer.indexOf('\n')) !== -1) {
-      const line = this.#buffer.slice(0, lineEnd).trim();
+      const rawLine = this.#buffer.slice(0, lineEnd);
       this.#buffer = this.#buffer.slice(lineEnd + 1);
+      // The newline is part of the wire frame. Check each frame separately so
+      // two valid responses coalesced into one TCP chunk are not rejected just
+      // because their combined chunk exceeds the per-frame limit.
+      if (Buffer.byteLength(`${rawLine}\n`, 'utf8') > GUARDIAN_IPC_MAX_FRAME_BYTES) {
+        const error = new GuardianClientError('Guardian IPC frame is too large', 'frame_too_large');
+        this.#rejectAllPending(error);
+        try { this.#socket?.destroy(); } catch { /* ignore */ }
+        this.#buffer = '';
+        return;
+      }
+      const line = rawLine.trim();
       if (!line) continue;
       let response;
       try { response = JSON.parse(line); } catch { continue; }
@@ -237,6 +258,15 @@ export class GuardianClient {
         continue;
       }
       this.#handleResponse(response);
+    }
+    // A partial frame must still leave room for its terminating newline. An
+    // exact-limit unterminated buffer can therefore never become a valid
+    // frame and is rejected before it grows further.
+    if (Buffer.byteLength(this.#buffer, 'utf8') >= GUARDIAN_IPC_MAX_FRAME_BYTES) {
+      const error = new GuardianClientError('Guardian IPC frame is too large', 'frame_too_large');
+      this.#rejectAllPending(error);
+      try { this.#socket?.destroy(); } catch { /* ignore */ }
+      this.#buffer = '';
     }
   }
 
@@ -269,6 +299,15 @@ export class GuardianClient {
     if (!socket || socket.destroyed) {
       return Promise.reject(new GuardianClientError('Guardian connection is not available', 'not_connected'));
     }
+    let frame;
+    try {
+      frame = `${JSON.stringify(request)}\n`;
+    } catch (error) {
+      return Promise.reject(new GuardianClientError(error?.message || String(error), 'write_error'));
+    }
+    if (Buffer.byteLength(frame, 'utf8') > GUARDIAN_IPC_MAX_FRAME_BYTES) {
+      return Promise.reject(new GuardianClientError('Guardian IPC frame is too large', 'frame_too_large'));
+    }
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.#pending.delete(request.id);
@@ -283,7 +322,7 @@ export class GuardianClient {
       }, this.#requestTimeoutMs);
       this.#pending.set(request.id, { resolve, reject, timeout });
       try {
-        socket.write(`${JSON.stringify(request)}\n`);
+        socket.write(frame);
         onSent?.();
       } catch (error) {
         this.#pending.delete(request.id);
@@ -325,7 +364,26 @@ export class GuardianClient {
 
   async spawn(params) { return this.#call('spawn', params); }
   async stop(params) { return this.#call('stop', params); }
-  async health(params) { return this.#call('health', params); }
+  async health(params = {}) {
+    if (typeof params?.incarnation !== 'string' || params.incarnation.length === 0
+      || !hasCompleteOwnerIdentity(params.owner)) {
+      throw new GuardianClientError(
+        'Guardian health requires the exact owner and incarnation identity',
+        'owner_required',
+      );
+    }
+    return this.#call('health', params);
+  }
+  async credential(params = {}) {
+    if (typeof params?.incarnation !== 'string' || params.incarnation.length === 0
+      || !hasCompleteOwnerIdentity(params.owner)) {
+      throw new GuardianClientError(
+        'Guardian credential requires the exact owner and incarnation identity',
+        'owner_required',
+      );
+    }
+    return this.#call('credential', params);
+  }
   async prepareHandoff(params) { return this.#call('prepare-handoff', params); }
   async abortHandoff(params) { return this.#call('abort-handoff', params); }
   async reload() { return this.#call('reload'); }

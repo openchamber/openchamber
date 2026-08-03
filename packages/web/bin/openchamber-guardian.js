@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { createManagedOpenCodeGuardian } from '../server/lib/guardian/guardian.js';
 import { resolveCurrentUsername } from '../server/lib/guardian/windows-acl.js';
 import { ensurePrivateDirectory } from '../server/lib/opencode/managed-opencode-handoff-v2/filesystem.js';
 import { resolveGuardianPaths } from '../server/lib/guardian/paths.js';
-import { readProcessIdentity } from '../server/lib/guardian/process-identity.js';
+import { probeProcessLiveness, readProcessIdentity } from '../server/lib/guardian/process-identity.js';
+import { recoverStaleGuardianTransportArtifacts } from '../server/lib/guardian/ipc-transport.js';
 import {
   acquireGuardianPidMarker,
   releaseGuardianPidMarker,
+  updateGuardianPidMarkerTransportIdentity,
 } from '../server/lib/guardian/pid-marker.js';
 
 /**
@@ -33,7 +39,6 @@ const parseArgs = (argv) => {
     dataDir: undefined,
     healthInterval: undefined,
     leaseInterval: undefined,
-    username: undefined,
   };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -53,17 +58,23 @@ const parseArgs = (argv) => {
     } else if (arg === '--lease-interval' && i + 1 < argv.length) {
       args.leaseInterval = Number.parseInt(argv[i + 1], 10);
       i += 1;
-    } else if (arg === '--username' && i + 1 < argv.length) {
-      // Windows-only: override the resolved current user (rare; only
-      // useful for tests that mock `resolveCurrentUsername`).
-      args.username = argv[i + 1];
-      i += 1;
+    } else if (arg === '--username' || arg.startsWith('--username=')) {
+      throw new Error('The --username option is not supported; Windows ACLs always use the current Windows user.');
     }
   }
   return args;
 };
 
 let markerOwnership = null;
+let shutdownRetryHold = null;
+
+const retainProcessForShutdownRetry = () => {
+  if (shutdownRetryHold) return;
+  // A failed stop closes the listener before reporting an uncertain artifact
+  // cleanup. Keep the standalone process and its marker alive so a later
+  // signal can retry the same authoritative guardian shutdown.
+  shutdownRetryHold = setInterval(() => {}, 1000);
+};
 
 const releaseOwnedMarker = () => {
   if (!markerOwnership) return;
@@ -71,10 +82,19 @@ const releaseOwnedMarker = () => {
   markerOwnership = null;
 };
 
-// Startup errors and unexpected exits must only release a marker acquired by
-// this process. The helper compares the persisted ownership token before
-// unlinking, so a later guardian cannot be damaged by cleanup.
-process.once('exit', releaseOwnedMarker);
+export const shouldRetainGuardianAuthority = (guardian, error) => Boolean(
+  guardian
+  && error?.cleanupSettled !== true
+  && (
+    error?.code === 'GUARDIAN_CLEANUP_UNCERTAIN'
+    || error?.code === 'GUARDIAN_TRANSPORT_CLEANUP_UNCERTAIN'
+  )
+);
+
+export const shouldReleaseGuardianMarkerAfterStartupFailure = (guardian, error) => (
+  !shouldRetainGuardianAuthority(guardian, error)
+  && (error?.cleanupSettled === true || !guardian)
+);
 
 const main = async () => {
   // W-C: the Windows early-exit is removed. The same singleton marker +
@@ -90,9 +110,12 @@ const main = async () => {
   const effectivePaths = {
     ...paths,
   };
-  const username = typeof args.username === 'string' && args.username.length > 0
-    ? args.username
-    : (effectivePaths.platform === 'win32' ? resolveCurrentUsername({ log: console.warn }) : undefined);
+  // The production entrypoint always derives the Windows ACL principal from
+  // the current process. Test callers inject usernames through the lower-level
+  // filesystem/guardian dependency seams instead of a CLI principal flag.
+  const username = effectivePaths.platform === 'win32'
+    ? resolveCurrentUsername({ log: console.warn })
+    : undefined;
   ensurePrivateDirectory(effectivePaths.rootDir, {
     platform: effectivePaths.platform,
     username,
@@ -103,6 +126,14 @@ const main = async () => {
     pidFile,
     identity: readProcessIdentity(process.pid),
     requireIdentity: true,
+    onVerifiedStale: ({ marker }) => recoverStaleGuardianTransportArtifacts({
+      platform: effectivePaths.platform,
+      socketPath: effectivePaths.socketPath,
+      portPath: effectivePaths.portPath,
+      priorMarker: marker,
+      liveness: probeProcessLiveness,
+      username,
+    }),
   });
 
   let guardian;
@@ -113,10 +144,10 @@ const main = async () => {
       await guardian.stop();
     } catch (error) {
       console.error('[guardian-cli] shutdown error:', error.message);
-      // A failed child termination leaves the guardian authoritative and
-      // reachable so an operator can retry through authenticated IPC. Do not
-      // remove the singleton marker or report a clean process exit while a
-      // live child record remains.
+      // A failed child or transport termination leaves the guardian
+      // authoritative and retryable. Do not remove the singleton marker or
+      // report a clean process exit while cleanup remains uncertain.
+      retainProcessForShutdownRetry();
       return;
     }
   };
@@ -146,7 +177,18 @@ const main = async () => {
       username,
       healthCheckIntervalMs: args.healthInterval,
       leaseRenewalIntervalMs: args.leaseInterval,
+      onTransportReady: (transportIdentity) => {
+        if (effectivePaths.platform === 'win32') return;
+        markerOwnership = updateGuardianPidMarkerTransportIdentity(
+          markerOwnership,
+          transportIdentity,
+        );
+      },
       onStopped: () => {
+        if (shutdownRetryHold) {
+          clearInterval(shutdownRetryHold);
+          shutdownRetryHold = null;
+        }
         releaseOwnedMarker();
         process.exit(0);
       },
@@ -154,16 +196,45 @@ const main = async () => {
     await guardian.start();
   } catch (error) {
     console.error('[guardian-cli] failed to start:', error.message);
-    releaseOwnedMarker();
-    process.exit(1);
+    if (shouldRetainGuardianAuthority(guardian, error)) {
+      // Startup reached the transport but could not prove that cleanup
+      // completed. Keep the process and marker authoritative so SIGTERM/SIGINT
+      // can retry guardian.stop() instead of allowing a second guardian to
+      // race an unresolved discovery/socket artifact.
+      retainProcessForShutdownRetry();
+    } else if (shouldReleaseGuardianMarkerAfterStartupFailure(guardian, error)) {
+      // The guardian explicitly marked startup rollback clean, or construction
+      // failed before a guardian instance existed. Only those paths have
+      // proved that no live transport/child authority remains.
+      releaseOwnedMarker();
+      process.exit(1);
+    } else {
+      // An unclassified failure after guardian construction is equivalent to an
+      // unexpected parent exit: retain the marker rather than allowing a new
+      // guardian to race an artifact whose ownership was not verified.
+      retainProcessForShutdownRetry();
+    }
   }
 
   // Block until stopped.
   await new Promise(() => {});
 };
 
-main().catch((error) => {
-  console.error('[guardian-cli] fatal error:', error);
-  releaseOwnedMarker();
-  process.exit(1);
-});
+const isDirectInvocation = (() => {
+  if (!process.argv[1]) return false;
+  const entrypointPath = path.resolve(fileURLToPath(import.meta.url));
+  const invokedPath = path.resolve(process.argv[1]);
+  if (invokedPath === entrypointPath) return true;
+  try {
+    return path.resolve(fs.realpathSync(invokedPath)) === entrypointPath;
+  } catch {
+    return false;
+  }
+})();
+
+if (isDirectInvocation) {
+  main().catch((error) => {
+    console.error('[guardian-cli] fatal error:', error);
+    process.exit(1);
+  });
+}

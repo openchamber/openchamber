@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const GUARDIAN_IPC_PROTOCOL = 'openchamber-guardian-ipc-v1';
+export const GUARDIAN_IPC_MAX_FRAME_BYTES = 256 * 1024;
 
 const toBase64Url = (value) => Buffer.from(value).toString('base64url');
 const fromBase64Url = (value) => {

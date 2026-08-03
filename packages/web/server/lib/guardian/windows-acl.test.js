@@ -9,6 +9,7 @@ import {
   validateWindowsAcl,
   __test__,
 } from './windows-acl.js';
+import { resolveWindowsSystemToolPath } from './process-identity.js';
 
 let spawnSyncMock;
 const safeAcl = (username = 'alice') => [{ principal: username, rights: ['F'] }];
@@ -26,7 +27,11 @@ describe('resolveCurrentUsername', () => {
     spawnSyncMock.mockReturnValue({ status: 0, stdout: 'DOMAIN\\alice\n', stderr: '' });
     const result = resolveCurrentUsername({ spawnSync: spawnSyncMock });
     expect(result).toBe('DOMAIN\\alice');
-    expect(spawnSyncMock).toHaveBeenCalledWith('whoami', [], { encoding: 'utf8' });
+    expect(spawnSyncMock).toHaveBeenCalledWith(
+      resolveWindowsSystemToolPath('whoami'),
+      [],
+      { encoding: 'utf8', shell: false },
+    );
   });
 
   it('throws with a "whoami not found" message when the binary is missing (ENOENT)', () => {
@@ -64,7 +69,7 @@ describe('applyDiscoveryFileAcl', () => {
     expect(result).toEqual({ ok: true, username: 'alice' });
     expect(spawnSyncMock).toHaveBeenCalledTimes(1);
     const [command, args, options] = spawnSyncMock.mock.calls[0];
-    expect(command).toBe('icacls');
+    expect(command).toBe(resolveWindowsSystemToolPath('icacls'));
     expect(args).toEqual([
       'C:\\Users\\alice\\AppData\\Local\\openchamber\\managed-opencode-handoff-v2\\port',
       '/inheritance:r',
@@ -167,7 +172,7 @@ describe('applyDirectoryAcl', () => {
     });
     expect(result).toEqual({ ok: true, username: 'DOMAIN\\alice' });
     const [command, args] = spawnSyncMock.mock.calls[0];
-    expect(command).toBe('icacls');
+    expect(command).toBe(resolveWindowsSystemToolPath('icacls'));
     expect(args).toEqual([
       'C:\\Users\\alice\\AppData\\Local\\openchamber\\managed-opencode-handoff-v2',
       '/inheritance:r',
@@ -215,7 +220,7 @@ describe('applyPrivateFileAcl', () => {
     });
 
     expect(spawnSyncMock).toHaveBeenCalledWith(
-      'icacls',
+      resolveWindowsSystemToolPath('icacls'),
       [
         'C:\\Users\\alice\\App Data\\openchamber\\guardian-auth.secret',
         '/inheritance:r',
@@ -224,6 +229,37 @@ describe('applyPrivateFileAcl', () => {
       ],
       { encoding: 'utf8', shell: false },
     );
+  });
+
+  it('uses the supplied SystemRoot for every ACL/identity command without PATH lookup', () => {
+    const systemRoot = 'D:\\Windows';
+    spawnSyncMock
+      .mockReturnValueOnce({ status: 0, stdout: 'DOMAIN\\alice\n', stderr: '' })
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' });
+
+    resolveCurrentUsername({ spawnSync: spawnSyncMock, systemRoot });
+    applyDiscoveryFileAcl({
+      portPath: 'C:\\safe\\port',
+      username: 'DOMAIN\\alice',
+      spawnSync: spawnSyncMock,
+      systemRoot,
+      aclEntries: safeAcl('DOMAIN\\alice'),
+    });
+    applyPrivateFileAcl({
+      filePath: 'C:\\safe\\secret',
+      username: 'DOMAIN\\alice',
+      spawnSync: spawnSyncMock,
+      systemRoot,
+      aclEntries: safeAcl('DOMAIN\\alice'),
+    });
+
+    expect(spawnSyncMock.mock.calls.map(([command]) => command)).toEqual([
+      'D:\\Windows\\System32\\whoami.exe',
+      'D:\\Windows\\System32\\icacls.exe',
+      'D:\\Windows\\System32\\icacls.exe',
+    ]);
+    expect(spawnSyncMock.mock.calls.every(([, , options]) => options.shell === false)).toBe(true);
   });
 });
 

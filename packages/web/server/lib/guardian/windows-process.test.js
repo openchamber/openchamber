@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   runTaskkillForce,
   terminateChildWindows,
+  terminateRehydratedChildWindows,
   __test__,
 } from './windows-process.js';
+import { resolveWindowsPowerShellPath } from './process-identity.js';
 
 let spawnSyncMock;
 
@@ -17,17 +19,40 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Mirrors the mock child used in guardian.test.js, but minimal:
-// no `kill` (the Windows path does not call child.kill; it shells
-// out to `taskkill.exe`) and no `stdout`/`stderr` (we never read
-// them from the child in the W-D code path).
+// Mirrors a live Node ChildProcess handle. The lifecycle must use this
+// handle-backed kill path rather than converting an identity check into a
+// PID-only taskkill operation.
 const createFakeChild = ({ pid = 4242, exitCode = null, signalCode = null } = {}) => {
   const child = new EventEmitter();
   child.pid = pid;
   child.exitCode = exitCode;
   child.signalCode = signalCode;
+  child.kill = vi.fn(() => {
+    child.exitCode = 0;
+    queueMicrotask(() => child.emit('close', 0, null));
+    return true;
+  });
   return child;
 };
+
+const rehydratedRecord = {
+  pid: 4242,
+  processStartTicks: '638912345678901234',
+  port: 4096,
+  launchSpec: {
+    binary: 'C:\\OpenCode\\opencode.exe',
+    args: [],
+    hostname: '127.0.0.1',
+    port: 4096,
+    cwd: 'C:\\OpenCode',
+  },
+};
+
+const helperOutput = (value) => ({
+  status: 0,
+  stdout: `${JSON.stringify(value)}\r\n`,
+  stderr: '',
+});
 
 describe('terminateChildWindows', () => {
   it('returns ok: true immediately if child already exited (exitCode set)', async () => {
@@ -51,167 +76,277 @@ describe('terminateChildWindows', () => {
     expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 
-  it('invokes taskkill.exe with /F /PID <pid> and no /T flag', async () => {
-    spawnSyncMock.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+  it('uses the live child process handle and never invokes PID-only taskkill', async () => {
     const child = createFakeChild({ pid: 12345 });
-    // Emit a close event asynchronously so the close-wait resolves.
-    setTimeout(() => {
-      child.exitCode = 0;
-      child.emit('close', 0, null);
-    }, 0);
 
     const result = await terminateChildWindows(child, { timeoutMs: 500, spawnSync: spawnSyncMock });
     expect(result).toEqual({ ok: true });
-
-    expect(spawnSyncMock).toHaveBeenCalledTimes(1);
-    const [command, args, options] = spawnSyncMock.mock.calls[0];
-    expect(command).toBe('taskkill.exe');
-    expect(args).toEqual(['/F', '/PID', '12345']);
-    // Crucially, no /T flag (risk register: "taskkill /pid /f kills
-    // our own process group via accidental /t" — High).
-    expect(args).not.toContain('/T');
-    expect(args).not.toContain('/t');
-    expect(options).toEqual({
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 5000,
-    });
+    expect(child.kill).toHaveBeenCalledOnce();
+    expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 
-  it('polls OS liveness for a rehydrated child instead of waiting for close', async () => {
-    spawnSyncMock.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+  it('fails closed for a rehydrated child without a handle-backed terminator', async () => {
     const child = createFakeChild({ pid: 12345 });
     child.isRehydrated = true;
-    const isProcessAlive = vi.fn()
-      .mockReturnValueOnce(true)
-      .mockReturnValueOnce(false);
+    const isProcessAlive = vi.fn().mockReturnValue(true);
 
     await expect(terminateChildWindows(child, {
       timeoutMs: 100,
       spawnSync: spawnSyncMock,
       isProcessAlive,
-    })).resolves.toEqual({ ok: true });
+    })).resolves.toEqual({
+      ok: false,
+      reason: 'handle-backed Windows termination is unavailable for a rehydrated child',
+    });
 
     expect(isProcessAlive).toHaveBeenCalledWith(12345);
-    expect(isProcessAlive).toHaveBeenCalledTimes(2);
+    expect(isProcessAlive).toHaveBeenCalledTimes(1);
+    expect(spawnSyncMock).not.toHaveBeenCalled();
     expect(child.listenerCount('close')).toBe(0);
   });
 
-  it('does not skip taskkill when a rehydrated liveness probe is unknown', async () => {
-    spawnSyncMock.mockReturnValue({ status: 128, stdout: '', stderr: 'process not found' });
+  it('accepts an injected handle-backed rehydrated terminator', async () => {
     const child = createFakeChild({ pid: 12346 });
     child.isRehydrated = true;
+    const terminateByHandle = vi.fn().mockResolvedValue({ status: 'already-gone' });
 
     await expect(terminateChildWindows(child, {
       timeoutMs: 100,
       spawnSync: spawnSyncMock,
-      isProcessAlive: () => 'unknown',
+      isProcessAlive: () => 'alive',
+      terminateByHandle,
     })).resolves.toEqual({ ok: true });
 
-    expect(spawnSyncMock).toHaveBeenCalledTimes(1);
+    expect(terminateByHandle).toHaveBeenCalledWith(child);
+    expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 
-  it('does not treat EPERM from the default probe as an already-dead child', async () => {
-    spawnSyncMock.mockReturnValue({ status: 128, stdout: '', stderr: 'process not found' });
+  it('does not treat an unknown rehydrated identity as permission to use PID-only taskkill', async () => {
     const child = createFakeChild({ pid: 12347 });
     child.isRehydrated = true;
-    const processKill = vi.spyOn(process, 'kill').mockImplementation(() => {
-      throw Object.assign(new Error('permission denied'), { code: 'EPERM' });
+    const result = await terminateChildWindows(child, {
+      timeoutMs: 100,
+      spawnSync: spawnSyncMock,
+      isProcessAlive: () => 'unknown',
     });
-
-    try {
-      await expect(terminateChildWindows(child, {
-        timeoutMs: 100,
-        spawnSync: spawnSyncMock,
-      })).resolves.toEqual({ ok: true });
-      expect(spawnSyncMock).toHaveBeenCalledTimes(1);
-    } finally {
-      processKill.mockRestore();
-    }
-  });
-
-  it('treats taskkill exit 128 (process not found) as success', async () => {
-    spawnSyncMock.mockReturnValue({ status: 128, stdout: '', stderr: 'process not found' });
-    const child = createFakeChild({ pid: 99999 });
-
-    const result = await terminateChildWindows(child, { timeoutMs: 100, spawnSync: spawnSyncMock });
-    expect(result).toEqual({ ok: true });
-    expect(spawnSyncMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('treats EPERM spawn error as a termination failure', async () => {
-    const eperm = Object.assign(new Error('permission denied'), { code: 'EPERM' });
-    spawnSyncMock.mockReturnValue({ error: eperm, status: null });
-    const child = createFakeChild({ pid: 88888 });
-
-    const result = await terminateChildWindows(child, { timeoutMs: 100, spawnSync: spawnSyncMock });
-    expect(result).toEqual({ ok: false, reason: 'taskkill.exe spawn failed: permission denied' });
-  });
-
-  it('treats ESRCH spawn error as success (no such process)', async () => {
-    const esrch = Object.assign(new Error('no such process'), { code: 'ESRCH' });
-    spawnSyncMock.mockReturnValue({ error: esrch, status: null });
-    const child = createFakeChild({ pid: 77777 });
-
-    const result = await terminateChildWindows(child, { timeoutMs: 100, spawnSync: spawnSyncMock });
-    expect(result).toEqual({ ok: true });
+    expect(result).toMatchObject({ ok: false });
+    expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 
   it('returns ok: true when child emits close before the timeout fires', async () => {
-    spawnSyncMock.mockReturnValue({ status: 0, stdout: '', stderr: '' });
     const child = createFakeChild({ pid: 12345 });
-    // Close fires after a short delay, well within the 1000ms timeout.
-    setTimeout(() => {
-      child.exitCode = 0;
-      child.emit('close', 0, null);
-    }, 10);
 
     const result = await terminateChildWindows(child, { timeoutMs: 1000, spawnSync: spawnSyncMock });
     expect(result).toEqual({ ok: true });
   });
 
   it('returns ok: false reason: still-running when child never closes within timeout', async () => {
-    spawnSyncMock.mockReturnValue({ status: 0, stdout: '', stderr: '' });
     const child = createFakeChild({ pid: 12345 });
-    // No `close` event ever emitted.
+    child.kill.mockImplementation(() => true);
 
     const result = await terminateChildWindows(child, { timeoutMs: 50, spawnSync: spawnSyncMock });
     expect(result).toEqual({ ok: false, reason: 'still-running' });
   });
 
-  it('returns ok: false with the taskkill reason when taskkill reports a real error', async () => {
-    spawnSyncMock.mockReturnValue({ status: 1, stdout: '', stderr: 'Access is denied.' });
+  it('returns ok: false when the handle-backed kill is rejected', async () => {
     const child = createFakeChild({ pid: 12345 });
+    child.kill.mockReturnValue(false);
 
     const result = await terminateChildWindows(child, { timeoutMs: 50, spawnSync: spawnSyncMock });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/taskkill\.exe exited with code 1: Access is denied\./);
+    expect(result).toEqual({ ok: false, reason: 'handle-backed Windows termination was rejected' });
+    expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 
-  it('returns ok: false with ENOENT message when taskkill.exe is missing', async () => {
-    const enoent = Object.assign(new Error('spawn taskkill.exe ENOENT'), { code: 'ENOENT' });
-    spawnSyncMock.mockReturnValue({ error: enoent, status: null });
+  it('does not use taskkill when a live child has no handle method', async () => {
     const child = createFakeChild({ pid: 12345 });
-
-    const result = await terminateChildWindows(child, { timeoutMs: 50, spawnSync: spawnSyncMock });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/taskkill\.exe not found on PATH/);
-  });
-
-  it('returns ok: true synchronously if the child has already exited by the time taskkill resolves', async () => {
-    // Race-condition guard: taskkill is synchronous in our usage
-    // (spawnSync), but in tests we still want to assert that an
-    // already-exited child observed between taskkill return and the
-    // close-wait is treated as ok. We synthesize that by mutating
-    // the child right after taskkill returns.
-    spawnSyncMock.mockImplementation(() => {
-      child.exitCode = 0;
-      child.signalCode = null;
-      return { status: 0, stdout: '', stderr: '' };
-    });
-    const child = createFakeChild({ pid: 12345 });
+    delete child.kill;
 
     const result = await terminateChildWindows(child, { timeoutMs: 100, spawnSync: spawnSyncMock });
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({
+      ok: false,
+      reason: 'handle-backed Windows termination is unavailable for a live child',
+    });
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('terminateRehydratedChildWindows', () => {
+  it('uses the hidden PowerShell/.NET handle helper and passes persisted identity over stdin', () => {
+    spawnSyncMock.mockReturnValue(helperOutput({ status: 'killed' }));
+    const child = createFakeChild({ pid: rehydratedRecord.pid });
+
+    expect(terminateRehydratedChildWindows(child, {
+      record: rehydratedRecord,
+      spawnSync: spawnSyncMock,
+    })).toEqual({ status: 'killed' });
+
+    const [executable, args, options] = spawnSyncMock.mock.calls[0];
+    expect(executable).toBe(__test__.resolveWindowsPowerShellPath());
+    expect(args).toEqual(expect.arrayContaining([
+      '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle',
+      'Hidden',
+      '-EncodedCommand',
+    ]));
+    expect(options).toEqual(expect.objectContaining({
+      encoding: 'utf8',
+      timeout: __test__.WINDOWS_HANDLE_TERMINATION_TIMEOUT_MS,
+      windowsHide: true,
+      shell: false,
+    }));
+    expect(JSON.parse(options.input)).toEqual({
+      pid: rehydratedRecord.pid,
+      processStartTicks: rehydratedRecord.processStartTicks,
+      port: rehydratedRecord.port,
+      launchSpec: rehydratedRecord.launchSpec,
+    });
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).toMatch(/OpenProcess/);
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).toMatch(/GetProcessTimes/);
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).toMatch(/TerminateProcess/);
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).toMatch(/CloseHandle/);
+  });
+
+  it('does not assign PowerShell reserved $PID at source level', () => {
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).toMatch(
+      /\$requestPid\s*=\s*\[uint32\]\$request\.pid/,
+    );
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).not.toMatch(/\$pid\b/i);
+  });
+
+  it('uses complete case-insensitive command identity instead of basename substrings', () => {
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).toMatch(/Split-WindowsCommandLine/);
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).toMatch(/Normalize-WindowsCommandToken/);
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).toMatch(/\bserve\b/);
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).toMatch(/expectedPort/);
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).toMatch(/ToLowerInvariant/);
+    expect(__test__.WINDOWS_HANDLE_TERMINATION_SCRIPT).not.toMatch(/\.IndexOf\(/);
+  });
+
+  it('derives an absolute PowerShell path from SystemRoot without shell interpolation', () => {
+    expect(__test__.resolveWindowsPowerShellPath).toBe(resolveWindowsPowerShellPath);
+    expect(__test__.resolveWindowsPowerShellPath('D:\\Windows')).toBe(
+      'D:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    );
+    expect(__test__.resolveWindowsPowerShellPath('relative-root')).toBe(
+      __test__.WINDOWS_POWERSHELL_FALLBACK_PATH,
+    );
+    expect(__test__.resolveWindowsPowerShellPath()).toMatch(
+      /^[A-Za-z]:\\.+\\powershell\.exe$/,
+    );
+  });
+
+  it('passes a caller-supplied SystemRoot to the centralized command executable resolver', () => {
+    spawnSyncMock.mockReturnValue(helperOutput({ status: 'already-gone' }));
+    const child = createFakeChild({ pid: rehydratedRecord.pid });
+
+    expect(terminateRehydratedChildWindows(child, {
+      record: rehydratedRecord,
+      spawnSync: spawnSyncMock,
+      systemRoot: 'E:\\Windows',
+    })).toEqual({ status: 'already-gone' });
+    expect(spawnSyncMock.mock.calls[0][0]).toBe(
+      'E:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    );
+  });
+
+  it('returns the helper identity failure without attempting PID-only taskkill', () => {
+    spawnSyncMock.mockReturnValue(helperOutput({
+      status: 'error',
+      reason: 'Windows process start identity changed',
+    }));
+    const child = createFakeChild({ pid: rehydratedRecord.pid });
+
+    expect(terminateRehydratedChildWindows(child, {
+      record: rehydratedRecord,
+      spawnSync: spawnSyncMock,
+    })).toEqual({
+      status: 'error',
+      reason: 'Windows process start identity changed',
+    });
+    expect(spawnSyncMock).toHaveBeenCalledWith(
+      __test__.resolveWindowsPowerShellPath(),
+      expect.any(Array),
+      expect.any(Object),
+    );
+  });
+
+  it('fails closed when PowerShell is unavailable', () => {
+    const error = Object.assign(new Error('spawn powershell.exe ENOENT'), { code: 'ENOENT' });
+    spawnSyncMock.mockReturnValue({ error, status: null, stdout: '', stderr: '' });
+    const child = createFakeChild({ pid: rehydratedRecord.pid });
+
+    expect(terminateRehydratedChildWindows(child, {
+      record: rehydratedRecord,
+      spawnSync: spawnSyncMock,
+    })).toEqual({
+      status: 'error',
+      reason: 'Windows handle terminator is unavailable: powershell.exe not found',
+    });
+  });
+
+  it('does not return untrusted helper stderr or credential material in diagnostics', () => {
+    spawnSyncMock.mockReturnValue({
+      status: 17,
+      stdout: '',
+      stderr: `password=do-not-leak\u0000${'x'.repeat(2000)}`,
+    });
+    const child = createFakeChild({ pid: rehydratedRecord.pid });
+
+    const result = terminateRehydratedChildWindows(child, {
+      record: rehydratedRecord,
+      spawnSync: spawnSyncMock,
+    });
+    expect(result.reason).not.toContain('do-not-leak');
+    expect(result.reason).not.toContain('\u0000');
+    expect(result.reason.length).toBeLessThanOrEqual(512);
+  });
+
+  it('bounds and sanitizes helper-provided reasons before returning them', () => {
+    const noisyReason = `secret=do-not-leak\u0001${'x'.repeat(2000)}`;
+    spawnSyncMock.mockReturnValue(helperOutput({ status: 'error', reason: noisyReason }));
+    const child = createFakeChild({ pid: rehydratedRecord.pid });
+
+    const result = terminateRehydratedChildWindows(child, {
+      record: rehydratedRecord,
+      spawnSync: spawnSyncMock,
+    });
+    expect(result).toEqual({ status: 'error', reason: 'Windows handle terminator failed' });
+    expect(result.reason).not.toContain('do-not-leak');
+    expect(result.reason).not.toContain('\u0001');
+    expect(__test__.sanitizeWindowsHelperDiagnostic(`a\u0000${'b'.repeat(600)}`).length).toBeLessThanOrEqual(512);
+  });
+
+  it.each([
+    ['spawn error', { error: Object.assign(new Error('permission denied'), { code: 'EPERM' }), status: 0 }],
+    ['signal', { status: 0, signal: 'SIGTERM' }],
+    ['non-zero exit', { status: 1, stderr: 'helper failed' }],
+  ])('never accepts success output when helper execution has a %s', (_label, result) => {
+    spawnSyncMock.mockReturnValue({
+      ...result,
+      stdout: JSON.stringify({ status: 'killed' }),
+    });
+    const child = createFakeChild({ pid: rehydratedRecord.pid });
+
+    const outcome = terminateRehydratedChildWindows(child, {
+      record: rehydratedRecord,
+      spawnSync: spawnSyncMock,
+    });
+
+    expect(outcome.status).toBe('error');
+  });
+
+  it('fails closed for malformed helper JSON even after a status-0 exit', () => {
+    spawnSyncMock.mockReturnValue({ status: 0, stdout: '{not-json}', stderr: '' });
+    const child = createFakeChild({ pid: rehydratedRecord.pid });
+
+    expect(terminateRehydratedChildWindows(child, {
+      record: rehydratedRecord,
+      spawnSync: spawnSyncMock,
+    })).toEqual({
+      status: 'error',
+      reason: 'Windows handle terminator returned malformed or ambiguous output',
+    });
   });
 });
 
@@ -232,7 +367,7 @@ describe('runTaskkillForce (lower-level envelope)', () => {
     const eperm = Object.assign(new Error('permission denied'), { code: 'EPERM' });
     spawnSyncMock.mockReturnValue({ error: eperm, status: null });
     const r = runTaskkillForce({ pid: 1, spawnSync: spawnSyncMock });
-    expect(r).toEqual({ status: 'error', reason: 'taskkill.exe spawn failed: permission denied' });
+    expect(r).toEqual({ status: 'error', reason: 'taskkill.exe spawn failed (EPERM)' });
   });
 
   it('returns { status: "already-gone" } on ESRCH spawn error', () => {

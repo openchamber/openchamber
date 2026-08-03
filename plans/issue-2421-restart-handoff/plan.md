@@ -5,7 +5,8 @@
 - Keep phase-1 v1 in `managed-opencode-handoff-protocol.js` unchanged.
 - Add an isolated v2 namespace under `packages/web/server/lib/opencode/managed-opencode-handoff-v2/` for Web-daemon foundations shared by POSIX and Windows transports.
 - V2 owns a private local master-secret provider, a separate SQLite record store, and a signed reservation/lease protocol. It does not share the legacy managed-process registry or any auth/HMR/CLI secret source.
-- Default v2 storage is `~/.local/state/openchamber/managed-opencode-handoff-v2/`, containing `master-secret.bin` and `master-secret.initialized` (`0600`) plus `records.sqlite3`; records contain public identity, lease, revision, and MAC fields only.
+- Default v2 storage is `~/.local/state/openchamber/managed-opencode-handoff-v2/`, containing `master-secret.bin` and `master-secret.initialized` (`0600`) plus `records.sqlite3`; public records contain public identity, lease, revision, and MAC fields only.
+- Phase 2E extends the existing ACL/private v2 root with encrypted per-incarnation managed OpenCode credential records. The encryption key is derived from the existing guardian master secret; plaintext credentials never enter SQLite/JSON or public records, and public record fields remain unchanged unless later evidence proves a change necessary.
 - A standalone **guardian process** (`bin/openchamber-guardian.js`) outlives the web server and manages OpenCode child processes via the v2 durable protocol. POSIX uses a `0600` Unix-domain socket; Windows uses loopback TCP and an ACL-protected discovery file.
 - Web lifecycle adoption (`bootstrapOpenCodeAtStartup()`) and restart handoff (`restartOpenCode()`) are owner-checked and transactional, with legacy fallback only after guardian cleanup/rollback is attempted.
 
@@ -17,13 +18,14 @@
 | 2A | v2 secret provider, SQLite CAS store, reservation/launch/lease protocol | complete |
 | 2B | Linux guardian core + IPC server + GuardianClient | complete |
 | 2C | Guardian launch wiring: `openchamber-guardian` bin entry, `openchamber guardian {status\|start\|stop\|reload}` subcommand, `--guardian`/`--no-guardian` flag, autostart in `serve`, owner-scoped shutdown/restart semantics, and real Linux/Windows smoke tests | complete; Linux/Windows CI passed at `7e4d595f3`; maintainer review pending |
-| 2D | Cross-platform guardian transport, authenticated IPC, stable owner/launch identity, Windows process/ACL path, and hard Windows smoke gate | implementation complete; Windows baseline passed at `7e4d595f3`; maintainer review pending |
-| 3 | Web lifecycle integration (`bootstrapOpenCodeAtStartup()` adoption + `restartOpenCode()` handoff branch + `--handoff` CLI flag) | complete (landed in same PR as 2B) |
+| 2D | Cross-platform guardian transport, authenticated IPC, stable owner/launch identity, Windows process/ACL path, and hard Windows smoke gate | prior implementation complete; Windows baseline passed at `7e4d595f3`; maintainer review pending; Phase 2E follow-up open |
+| 3 | Web lifecycle integration (`bootstrapOpenCodeAtStartup()` adoption + `restartOpenCode()` handoff branch + `--handoff` CLI flag) | prior implementation complete (landed in same PR as 2B); Phase 2E follow-up open |
+| 2E | Protected managed OpenCode credential handoff across web-process boundaries | implementation present; Linux boundary script/test present; native Windows evidence and true bundled OpenChamber web-process E2E remain open; not complete |
 | 4 | Cross-runtime adoption — see "Phase 4 scope" below | closed by user direction (2026-07-29): no VS Code, no Electron, no mobile, no hosted mobile |
 
 ## Current status
 
-Phases 1, 2A, 2B, 2C, and 3 are implemented on `fix/issue-2421-restart-handoff`. Current provenance is aligned with `upstream/main` at `eafa7ceec`; PR #2485 is OPEN/Draft and GitHub reports `MERGEABLE` with all current checks passing; runtime fix commit is `7e4d595f3`, followed by plan-only updates on the same branch. The PR comparison is 90 task-scoped files covering guardian/lifecycle/IPC, shared live-status reconciliation in `packages/ui`, CI, docs, tests, and plans. UI client persistence remains out of scope. Local ACL follow-up validation passed (34 tests, syntax, web type-check/lint, docs validation, and diff check); GitHub Linux baseline, Windows baseline, and `pr checks` passed for `7e4d595f3`. Human maintainer review of workflow trust-boundary files remains required; PR Draft/status is intentionally unchanged.
+Phases 1, 2A, 2B, 2C, 2D, and 3 remain the prior implementation history; that history does not close Phase 2E. Follow-up baseline (2026-07-31): HEAD is `894daff0c1138de3a3f422ee84a00eee5b844438`; current `upstream/main` is `9a0f0b8aa`; the existing PR branch has no commits after the specified HEAD. The Phase 2E implementation is present, including encrypted credential storage, authenticated credential/health handling, and the Linux process-boundary script/test. Native Windows evidence remains open, and no true bundled OpenChamber web-process E2E exists in this worktree; the closest helper uses the controlled managed-child fixture and does not claim a bundled web binary. Phase 2E remains open pending those evidence/review gates. UI client persistence remains out of scope.
 
 ## Phase 2A state machine
 
@@ -49,11 +51,13 @@ User direction (2026-07-29) closes the originally-listed Phase 4 items as follow
 | Hosted mobile | **Out — not doing.** Closed. |
 | UI state persistence (open tabs, draft, scroll) | **Ours but unrelated to #2421.** This is a `packages/ui` client-persistence task, not a server-restart-handoff task. Different issue, different PR if/when it ever happens. |
 
-**Net Phase 4 status: closed.** Phase 2C closes the user-visible bug in #2421; there is no Phase 4 work on our roadmap. If a future request brings VS Code, Electron, mobile, or hosted-mobile guardian support, each becomes a fresh issue with its own design.
+**Net Phase 4 status: closed.** The prior implementation closed the original user-visible bug in #2421; Phase 2E is a web-only protected-credential follow-up and does not reopen cross-runtime scope. If a future request brings VS Code, Electron, mobile, or hosted-mobile guardian support, each becomes a fresh issue with its own design.
 
 **VS Code forward-reference:** an out-of-scope VS Code design sketch is documented in `plans/vscode-handoff-design-notes.md`. Its historical POSIX-only assumptions are superseded by the current web guardian's POSIX + Windows implementation. Read that file only if a fresh VS Code issue is opened.
 
-## PR review comments and remaining gates (read 2026-07-31)
+## Prior review status and active follow-up gates (read 2026-07-31)
+
+### Prior implementation review history
 
 - The original review blockers (guardian launch wiring, managed launch environment, and list-trust adoption decision) are recorded by the PR bot as addressed. Shared `packages/ui` live-status changes are an intentional affected surface, not UI-persistence scope.
 - Workflow files under `.github/workflows/` are a trust boundary. Automated review must remain `human-review-required`; a maintainer must review the Linux/Windows workflows. The separate `pr-review.yml` oversized-diff fail-closed issue is a repository follow-up, not silently waived here.
@@ -63,6 +67,12 @@ User direction (2026-07-29) closes the originally-listed Phase 4 items as follow
 - Validation is refreshed on exact runtime head `7e4d595f3`: local ACL checks passed, and GitHub Linux baseline, Windows baseline, and `pr checks` all passed. Subsequent branch commits are plan-only. The PR body handoff was completed on 2026-07-31; the PR body was refreshed with the guardian-owned `openchamber stop` failure/retry behavior and current CI evidence.
 - The merge-conflict review finding is resolved by the current merge with `upstream/main`; do not rewrite or force-push this published branch without separate approval.
 
+### Active Phase 2E review gate
+
+- Phase 2E implementation is present but the phase is not complete. Prior guardian/lifecycle review and baseline CI do not clear native Windows evidence or true bundled web-boundary E2E requirements.
+- Review must cover encrypted per-incarnation storage and key derivation, authenticated owner tuple validation, bounded IPC frames, shared hostname/Basic Auth resolution, lifecycle retention, and hard-gated Linux/Windows coverage.
+- Native Windows was not run locally; required Windows evidence must come from CI, with no `continue-on-error` on required credential/restart/owner-mismatch paths.
+
 ## Risks and gates
 
 - Secret, filesystem, SQLite, clock, MAC, or CAS failure blocks v2; it is never treated as an absent/free record.
@@ -70,6 +80,6 @@ User direction (2026-07-29) closes the originally-listed Phase 4 items as follow
 - Renewal is bounded from authoritative store time, never accumulated from a prior expiry.
 - Master initialization has durable evidence and exclusive creation semantics; a missing/corrupt secret in a previously initialized root, or a secret-only root without evidence, fails closed. Deleting the whole root remains an unavoidable loss-of-evidence boundary.
 - Concurrent store initialization must converge under SQLite locking/retry across worker threads and OS processes, and reject damaged, under-constrained, metadata-tampered, or SQLite-lookalike schema objects.
-- No raw master, child credential, or lifecycle material may be persisted, logged, returned as public record data, or reused from existing auth/config state.
+- The master secret remains only in its existing protected provider/store; no raw master, plaintext child credential, or lifecycle material may be logged or returned as public record data. Phase 2E may persist only encrypted per-incarnation credentials under the existing ACL/private v2 root, using a key derived from the existing guardian master secret; no plaintext SQLite/JSON credentials or public field changes are allowed without later evidence.
 - The guardian is a long-lived process subject to the same-UID local trust boundary. Cross-process adoption with a `claimCapability` is intentionally out of scope (Phase 2B deferred it); bootstrap adoption instead requires exact stable owner/runtime identity.
 - Validate focused unit/integration tests, source syntax, package checks available in the worktree, and documentation consistency. The v2 protocol package remains transport/lifecycle agnostic, while the guardian and web lifecycle own real child, port, signal, registry, route, and CLI behavior for POSIX and Windows.

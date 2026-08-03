@@ -13,10 +13,11 @@ Quando o OpenChamber inicia, ele procura por um servidor nesta ordem:
 
 1. reutilizar um servidor que ele já iniciou
 2. conectar a um servidor externo, se você indicou (veja abaixo)
-3. detectar automaticamente um servidor na porta padrão (`4096`)
-4. caso contrário, iniciar e gerenciar o seu próprio
+3. caso contrário, iniciar e gerenciar o seu próprio
 
-Se nada estiver configurado, o passo 4 acontece automaticamente e você já está pronto para usar.
+Se nada estiver configurado, o passo 3 acontece automaticamente e você já está pronto para usar.
+O OpenChamber não se conecta cegamente a um servidor não relacionado na porta padrão; um filho
+guardian existente só é adotado quando o proprietário e a identidade do processo persistidos correspondem a esta instância.
 
 ## Conectar a um servidor que você já executa
 

@@ -27,6 +27,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..', '..', '..', '..');
 const scriptPath = join(repoRoot, 'scripts', 'guardian-smoke-test.ps1');
 const clientScriptPath = join(repoRoot, 'scripts', 'guardian-smoke-client.js');
+const guardianEntrypointPath = join(repoRoot, 'packages', 'web', 'bin', 'openchamber-guardian.js');
 
 const readScript = () => {
   if (!existsSync(scriptPath)) {
@@ -34,6 +35,23 @@ const readScript = () => {
   }
   return readFileSync(scriptPath, 'utf8');
 };
+
+const readGuardianEntrypoint = () => {
+  if (!existsSync(guardianEntrypointPath)) {
+    throw new Error(`Guardian entrypoint not found at ${guardianEntrypointPath}`);
+  }
+  return readFileSync(guardianEntrypointPath, 'utf8');
+};
+
+describe('openchamber-guardian Windows principal contract', () => {
+  it('always resolves the current Windows user and rejects the removed CLI override', () => {
+    const src = readGuardianEntrypoint();
+    expect(src).toMatch(/resolveCurrentUsername/);
+    expect(src).toMatch(/effectivePaths\.platform\s*===\s*['"]win32['"]/);
+    expect(src).not.toMatch(/args\.username/);
+    expect(src).toMatch(/--username[\s\S]{0,240}not supported/);
+  });
+});
 
 describe('scripts/guardian-smoke-test.ps1 well-formedness', () => {
   it('exists at the canonical path', () => {
@@ -87,6 +105,11 @@ describe('scripts/guardian-smoke-test.ps1 well-formedness', () => {
     expect(src).toMatch(/'shutdown'/);
     expect(src).toMatch(/'spawn'/);
     expect(src).toMatch(/'stop'/);
+  });
+
+  it('sends the complete owner/incarnation identity for health', () => {
+    const src = readFileSync(clientScriptPath, 'utf8');
+    expect(src).toMatch(/request\('smoke-health',\s*'health',\s*\{[\s\S]*incarnation:\s*child\.incarnation,[\s\S]*owner:\s*\{\s*\.\.\.owner,\s*launchFingerprint\s*\},[\s\S]*\}\)/);
   });
 
   it('has balanced curly braces (sanity check for an unterminated block)', () => {

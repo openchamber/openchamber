@@ -647,6 +647,10 @@ export const createManagedOpenCodeHandoffV2Protocol = ({
       ...input,
       nextState: ManagedOpenCodeHandoffV2State.Interrupted,
     }),
+    prepareHandoff: (input = {}) => transition({
+      ...input,
+      nextState: ManagedOpenCodeHandoffV2State.HandoffPrepared,
+    }),
     beginStopping: (input = {}) => transition({
       ...input,
       nextState: ManagedOpenCodeHandoffV2State.Stopping,

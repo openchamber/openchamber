@@ -11,7 +11,10 @@ import {
   createRequestMac,
   decodeNonce,
   verifyEncodedMac,
+  GUARDIAN_IPC_MAX_FRAME_BYTES,
 } from './ipc-auth.js';
+
+const TRANSPORT_PUBLICATION_CLEANUP_UNCERTAIN_CODE = 'GUARDIAN_TRANSPORT_CLEANUP_UNCERTAIN';
 
 const parseJsonLine = (line) => {
   try {
@@ -22,7 +25,13 @@ const parseJsonLine = (line) => {
 };
 
 const sendResponse = (socket, response) => {
-  if (!socket.destroyed) socket.write(`${JSON.stringify(response)}\n`);
+  if (socket.destroyed) return;
+  const frame = `${JSON.stringify(response)}\n`;
+  if (Buffer.byteLength(frame, 'utf8') > GUARDIAN_IPC_MAX_FRAME_BYTES) {
+    socket.destroy();
+    return;
+  }
+  socket.write(frame);
 };
 
 const sendError = (socket, id, message, code = 'internal_error') => {
@@ -55,6 +64,7 @@ export class GuardianIpcServer extends EventEmitter {
   #reparseChecker;
   #authSecretInput;
   #authSecret = null;
+  #transportIdentity = null;
 
   constructor({
     platform = process.platform,
@@ -106,7 +116,26 @@ export class GuardianIpcServer extends EventEmitter {
       incarnation: params?.incarnation,
       owner: params?.owner,
     }));
-    this.#methods.set('health', async (params) => this.#guardian.healthCheck(params));
+    this.#methods.set('health', async (params) => {
+      if (!params?.owner) {
+        const error = new Error('Guardian health requires the exact owner and incarnation identity');
+        error.code = 'GUARDIAN_OWNER_REQUIRED';
+        throw error;
+      }
+      if (typeof this.#guardian.healthCheckForOwner !== 'function') {
+        throw new Error('Guardian owner-scoped health is unavailable');
+      }
+      // Internal timer callers never cross IPC and call healthCheck() directly.
+      // Every external health request must prove the full owner/incarnation
+      // tuple before the guardian probes a child.
+      return this.#guardian.healthCheckForOwner(params);
+    });
+    this.#methods.set('credential', async (params) => {
+      if (typeof this.#guardian.getCredential !== 'function') {
+        throw new Error('Guardian credential retrieval is unavailable');
+      }
+      return this.#guardian.getCredential(params);
+    });
     this.#methods.set('prepare-handoff', async (params) => this.#guardian.prepareHandoff({
       incarnation: params?.incarnation,
       owner: params?.owner,
@@ -125,6 +154,10 @@ export class GuardianIpcServer extends EventEmitter {
       await this.#guardian.stop();
       return GuardianIpcServer.RESPONSE_SENT;
     });
+  }
+
+  get transportIdentity() {
+    return this.#transportIdentity;
   }
 
   async start() {
@@ -151,7 +184,7 @@ export class GuardianIpcServer extends EventEmitter {
         reparseChecker: this.#reparseChecker,
         log: this.#log,
       });
-      await this.#transport.listen({
+      this.#transportIdentity = await this.#transport.listen({
         onRequest: (socket) => {
           this.#sockets.add(socket);
           const connection = {
@@ -168,9 +201,21 @@ export class GuardianIpcServer extends EventEmitter {
             buffer += chunk.toString();
             let lineEnd;
             while ((lineEnd = buffer.indexOf('\n')) !== -1) {
-              const line = buffer.slice(0, lineEnd).trim();
+              const rawLine = buffer.slice(0, lineEnd);
               buffer = buffer.slice(lineEnd + 1);
+              if (Buffer.byteLength(`${rawLine}\n`, 'utf8') > GUARDIAN_IPC_MAX_FRAME_BYTES) {
+                sendError(socket, null, 'Guardian IPC frame is too large', 'frame_too_large');
+                socket.destroy();
+                buffer = '';
+                return;
+              }
+              const line = rawLine.trim();
               if (line) void this.#handleRequest(socket, line, connection);
+            }
+            if (Buffer.byteLength(buffer, 'utf8') >= GUARDIAN_IPC_MAX_FRAME_BYTES) {
+              sendError(socket, null, 'Guardian IPC frame is too large', 'frame_too_large');
+              socket.destroy();
+              buffer = '';
             }
           });
 
@@ -189,7 +234,14 @@ export class GuardianIpcServer extends EventEmitter {
         },
       });
     } catch (error) {
-      this.#transport = null;
+      // A post-publication cleanup uncertainty leaves a live transport handle
+      // that must remain available to Guardian.start()'s rollback/stop path.
+      // Other listen failures have already torn down their listener and can
+      // discard the factory handle as before.
+      if (error?.code !== TRANSPORT_PUBLICATION_CLEANUP_UNCERTAIN_CODE) {
+        this.#transport = null;
+        this.#transportIdentity = null;
+      }
       this.#authSecret?.fill(0);
       this.#authSecret = null;
       throw error;
@@ -303,9 +355,13 @@ export class GuardianIpcServer extends EventEmitter {
     this.#connections.clear();
 
     const transport = this.#transport;
-    this.#transport = null;
     try {
       await transport.close();
+      // Keep the transport object until close() has completed successfully.
+      // A failed artifact cleanup must remain retryable by a later guardian
+      // stop request instead of making the IPC server appear disposed.
+      this.#transport = null;
+      this.#transportIdentity = null;
     } finally {
       this.#authSecret?.fill(0);
       this.#authSecret = null;

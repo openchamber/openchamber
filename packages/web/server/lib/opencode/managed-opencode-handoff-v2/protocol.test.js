@@ -386,6 +386,22 @@ describe('managed OpenCode handoff v2 protocol foundation', () => {
     })).resolves.toEqual({ ok: false, reason: 'lease-not-renewable' });
   });
 
+  it.skipIf(process.platform === 'win32')('owns the active-to-handoff transition and preserves CAS fencing', async () => {
+    const fixture = createFixture();
+    const { active } = await activate(fixture);
+
+    await expect(fixture.protocol.prepareHandoff({
+      incarnation: active.record.incarnation,
+      expectedRevision: active.record.revision,
+    })).resolves.toMatchObject({
+      ok: true,
+      record: {
+        state: ManagedOpenCodeHandoffV2State.HandoffPrepared,
+        revision: active.record.revision + 1,
+      },
+    });
+  });
+
   it.skipIf(process.platform === 'win32')('fails closed on a MAC-tampered reopened real SQLite record without serializing secret material', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-handoff-v2-integration-'));
     fs.chmodSync(root, 0o700);

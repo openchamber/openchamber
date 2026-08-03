@@ -34,6 +34,23 @@ describe('OpenCode network runtime', () => {
     await expect(readyPromise).resolves.toBe(false);
   });
 
+  it('does not probe a guardian-managed child or attach generic auth', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    const authHeaders = vi.fn(() => ({ Authorization: 'Basic should-not-send' }));
+    const runtime = createOpenCodeNetworkRuntime({
+      state: {
+        openCodePort: 4096,
+        openCodeProcess: { isGuardianManaged: true },
+      },
+      getOpenCodeAuthHeaders: authHeaders,
+    });
+
+    await expect(runtime.waitForReady('http://127.0.0.1:4096', 100)).resolves.toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(authHeaders).not.toHaveBeenCalled();
+  });
+
   it('builds managed OpenCode URLs against IPv4 loopback by default', () => {
     const runtime = createRuntime();
 
@@ -48,10 +65,25 @@ describe('OpenCode network runtime', () => {
     expect(runtime.buildOpenCodeUrl('/provider')).toBe('http://remote.example:4096/provider');
   });
 
+  it('keeps an adopted IPv6 origin authoritative when configured host changed', () => {
+    const runtime = createRuntime({
+      configuredOpenCodeHostname: '10.0.0.9',
+      state: { openCodeBaseUrl: 'http://[::1]:4123' },
+    });
+
+    expect(runtime.buildOpenCodeUrl('/event')).toBe('http://[::1]:4123/event');
+  });
+
   it('normalizes wildcard and IPv6 OpenCode bind hosts for local connects', () => {
     expect(createRuntime({ configuredOpenCodeHostname: '0.0.0.0' }).buildOpenCodeUrl('/provider'))
       .toBe('http://127.0.0.1:4096/provider');
+    expect(createRuntime({ configuredOpenCodeHostname: '::' }).buildOpenCodeUrl('/provider'))
+      .toBe('http://[::1]:4096/provider');
+    expect(createRuntime({ configuredOpenCodeHostname: '[::]' }).buildOpenCodeUrl('/provider'))
+      .toBe('http://[::1]:4096/provider');
     expect(createRuntime({ configuredOpenCodeHostname: '::1' }).buildOpenCodeUrl('/provider'))
       .toBe('http://[::1]:4096/provider');
+    expect(createRuntime({ configuredOpenCodeHostname: '[2001:db8::1]' }).buildOpenCodeUrl('/provider'))
+      .toBe('http://[2001:db8::1]:4096/provider');
   });
 });

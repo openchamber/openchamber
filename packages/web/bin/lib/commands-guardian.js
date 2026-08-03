@@ -41,6 +41,8 @@ const GUARDIAN_LOG_FILE = 'guardian.log';
 const PROBE_READY_TIMEOUT_MS = 5000;
 const PROBE_POLL_INTERVAL_MS = 100;
 const STOP_TIMEOUT_MS = 3000;
+const WINDOWS_GUARDIAN_IPC_REQUIRED_MESSAGE =
+  'authenticated guardian IPC is required on Windows; PID fallback signaling is disabled to prevent PID reuse. Retry after the guardian IPC endpoint is reachable.';
 
 function getDefaultGuardianSocketPath() {
   return getDefaultGuardianPaths().socketPath;
@@ -179,9 +181,9 @@ async function stopGuardianViaIpc({
   processLivenessFn = probeProcessLiveness,
   logWarning,
 } = {}) {
-  // W-C: the Windows early-return is removed. The IPC shutdown RPC is
-  // platform-agnostic inside the guardian; the transport factory dials
-  // the right backend.
+  // There is no platform short-circuit before the IPC shutdown RPC; the
+  // transport factory dials the right backend. After an IPC failure, Windows
+  // deliberately refuses the POSIX-style PID fallback below.
 
   const emitWarning = (message) => {
     if (typeof logWarning === 'function') {
@@ -232,8 +234,17 @@ async function stopGuardianViaIpc({
     ipcError = error;
   }
 
-  // IPC path failed (connect refused, hung, stale socket, ...). A direct signal
-  // is only a last resort after revalidating the persisted marker identity.
+  // IPC path failed (connect refused, hung, stale socket, ...). Windows has no
+  // safe equivalent of a retained guardian process handle here, so never turn
+  // a persisted PID into a signal target after an IPC failure. POSIX keeps its
+  // existing identity-fenced fallback below.
+  if (process.platform === 'win32') {
+    emitWarning(`Guardian IPC shutdown failed; ${WINDOWS_GUARDIAN_IPC_REQUIRED_MESSAGE}`);
+    return false;
+  }
+
+  // POSIX direct signaling is only a last resort after revalidating the
+  // persisted marker identity.
   emitWarning(
     `Guardian IPC shutdown failed (${ipcError?.message || String(ipcError)}); checking persisted identity before fallback signaling.`
   );
@@ -494,7 +505,11 @@ async function runStopAction({ options }) {
     stopped,
     pid: status.pid ?? (Number.isFinite(marker?.pid) ? marker.pid : null),
     socketPath: status.socketPath,
-    ...(stopped ? {} : { reason: 'guardian-stop-unconfirmed' }),
+    ...(stopped ? {} : {
+      reason: process.platform === 'win32'
+        ? 'windows-guardian-ipc-required'
+        : 'guardian-stop-unconfirmed',
+    }),
   };
   if (isJsonMode(options)) {
     printJson(result);
@@ -508,7 +523,12 @@ async function runStopAction({ options }) {
   if (stopped) {
     logStatus('success', `guardian stopped${status.pid ? ` (pid ${status.pid})` : ''}`);
   } else {
-    logStatus('warning', `guardian did not stop within ${STOP_TIMEOUT_MS}ms`);
+    logStatus(
+      'warning',
+      process.platform === 'win32'
+        ? `guardian did not stop: ${WINDOWS_GUARDIAN_IPC_REQUIRED_MESSAGE}`
+        : `guardian did not stop within ${STOP_TIMEOUT_MS}ms`,
+    );
   }
   clackOutro(stopped ? 'stopped' : 'incomplete');
 }
@@ -611,6 +631,13 @@ async function runReloadAction({
     return;
   }
 
+  if (process.platform === 'win32') {
+    throw new TunnelCliError(
+      `Guardian reload failed: ${WINDOWS_GUARDIAN_IPC_REQUIRED_MESSAGE}`,
+      EXIT_CODE.GENERAL_ERROR,
+    );
+  }
+
   const marker = readGuardianPidMarker(getDefaultGuardianPidFile());
   const verification = inspectGuardianPidMarker(marker, {
     readIdentity: processIdentityFn,
@@ -702,6 +729,7 @@ function showGuardianHelp(options) {
       '`start` spawns the guardian process detached; `stop` issues a graceful shutdown RPC.',
       '`guardian stop` is administrative and stops all guardian-owned children; normal `openchamber stop` is owner-scoped.',
       '`reload` sends SIGHUP (SIGBREAK on Windows) to restart guardian timers. (Config reload is not yet wired.)',
+      'Windows ACLs always use the current Windows user and require authenticated IPC; no CLI principal or PID fallback is accepted.',
     ],
   };
   if (isJsonMode(options)) {

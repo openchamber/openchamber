@@ -8,6 +8,7 @@ import {
   fsyncDirectory,
   resolveManagedOpenCodeHandoffV2Root,
 } from './filesystem.js';
+import { sameFileIdentity, snapshotFileIdentity } from '../../guardian/file-identity.js';
 import {
   isManagedOpenCodeHandoffV2Incarnation,
   MANAGED_OPENCODE_HANDOFF_V2_INCARNATION_BYTES,
@@ -21,6 +22,8 @@ const MANAGED_OPENCODE_HANDOFF_V2_RECORD_MAC_HKDF_INFO =
   'openchamber/managed-opencode-handoff/v2/record-mac';
 const MANAGED_OPENCODE_HANDOFF_V2_LIFECYCLE_CREDENTIAL_HKDF_INFO =
   'openchamber/managed-opencode-handoff/v2/lifecycle-credential';
+const MANAGED_OPENCODE_HANDOFF_V2_CREDENTIAL_ENCRYPTION_HKDF_INFO =
+  'openchamber/managed-opencode-handoff/v2/managed-opencode-credential-encryption';
 const INITIALIZATION_EVIDENCE = Buffer.from(
   'openchamber/managed-opencode-handoff/v2/master-secret-initialized/v1\n',
   'utf8',
@@ -38,6 +41,28 @@ const writeAllSync = (descriptor, buffer) => {
     offset += written;
   }
 };
+
+const openPrivateFileReadOnly = (filePath) => {
+  const noFollow = fs.constants.O_NOFOLLOW ?? 0;
+  try {
+    return fs.openSync(filePath, fs.constants.O_RDONLY | noFollow);
+  } catch (error) {
+    // O_NOFOLLOW is exposed by some Windows Node/libuv builds but rejected at
+    // runtime. The lstat/fstat identity fence below remains in force for the
+    // fallback, so unsupported flags never weaken replacement or symlink
+    // defenses.
+    if (error?.code !== 'EINVAL' || noFollow === 0) throw error;
+    return fs.openSync(filePath, fs.constants.O_RDONLY);
+  }
+};
+
+const isPrivateRegularFileStat = (stat, platform) => Boolean(
+  stat?.isFile?.()
+  && (platform === 'win32' || (stat.mode & 0o777) === 0o600)
+  && (platform === 'win32'
+    || typeof process.getuid !== 'function'
+    || stat.uid === process.getuid())
+);
 
 const readPrivateFile = (
   filePath,
@@ -62,17 +87,19 @@ const readPrivateFile = (
     throw new Error(`Managed OpenCode handoff v2 ${label} has an invalid length`);
   }
 
+  const listedIdentity = snapshotFileIdentity(listed);
+  if (!listedIdentity) {
+    throw new Error(`Managed OpenCode handoff v2 ${label} has no usable file identity`);
+  }
+
   let descriptor;
   let value;
   try {
-    descriptor = fs.openSync(
-      filePath,
-      fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0),
-    );
+    descriptor = openPrivateFileReadOnly(filePath);
     const opened = fs.fstatSync(descriptor);
     if (
-      opened.dev !== listed.dev
-      || opened.ino !== listed.ino
+      !sameFileIdentity(listedIdentity, opened)
+      || !isPrivateRegularFileStat(opened, platform)
       || opened.size !== expectedLength
     ) {
       throw new Error(`Managed OpenCode handoff v2 ${label} changed while being read`);
@@ -93,6 +120,18 @@ const readPrivateFile = (
     }
     if (offset !== value.length) {
       throw new Error(`Managed OpenCode handoff v2 ${label} could not be read completely`);
+    }
+    const afterRead = fs.fstatSync(descriptor);
+    const currentPathStat = fs.lstatSync(filePath);
+    if (
+      !sameFileIdentity(opened, afterRead)
+      || !sameFileIdentity(opened, currentPathStat)
+      || !isPrivateRegularFileStat(afterRead, platform)
+      || !isPrivateRegularFileStat(currentPathStat, platform)
+      || afterRead.size !== expectedLength
+      || currentPathStat.size !== expectedLength
+    ) {
+      throw new Error(`Managed OpenCode handoff v2 ${label} changed while being read`);
     }
     return value;
   } catch (error) {
@@ -459,6 +498,8 @@ export const createManagedOpenCodeHandoffV2SecretProvider = ({
   return Object.freeze({
     deriveRecordMacKey: ({ incarnation } = {}) =>
       derive(incarnation, MANAGED_OPENCODE_HANDOFF_V2_RECORD_MAC_HKDF_INFO),
+    deriveCredentialEncryptionKey: ({ incarnation } = {}) =>
+      derive(incarnation, MANAGED_OPENCODE_HANDOFF_V2_CREDENTIAL_ENCRYPTION_HKDF_INFO),
     getLifecycleCredentialFingerprint,
     issueLifecycleCredential,
     dispose: () => {
