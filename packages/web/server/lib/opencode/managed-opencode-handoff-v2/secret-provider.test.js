@@ -2,7 +2,7 @@ import { createHmac, createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as windowsAcl from '../../guardian/windows-acl.js';
 import {
@@ -26,14 +26,16 @@ const createIncarnation = () => randomBytes(32).toString('base64url');
 const createProvider = (root, options = {}) =>
   createManagedOpenCodeHandoffV2SecretProvider({
     rootDir: root,
-    // General provider tests exercise secret lifecycle semantics, not the
-    // platform ACL implementation. Windows ACL coverage is explicit below
-    // and supplies its own mocked ACL seam.
-    platform: 'linux',
     username: 'alice',
     aclInspector: () => ({ entries: [{ principal: 'alice', rights: ['F'] }] }),
     ...options,
   });
+
+beforeEach(() => {
+  if (process.platform === 'win32') {
+    vi.spyOn(windowsAcl, 'applyDirectoryAcl').mockReturnValue({ ok: true, username: 'alice' });
+  }
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
