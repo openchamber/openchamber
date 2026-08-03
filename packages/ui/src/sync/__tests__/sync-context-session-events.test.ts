@@ -6,11 +6,19 @@ const upsertedSessions: Session[] = []
 const removedSessionIds: string[] = []
 let runtimeKey = "runtime-a"
 let runtimeWillChange: (() => void) | null = null
+const autoCloseDirectories: Array<Array<string | null | undefined>> = []
+
+mock.module("../session-actions", () => ({
+  closeProjectsWithoutActiveSessionsForDirectories: mock(async (directories: Iterable<string | null | undefined>) => {
+    autoCloseDirectories.push([...directories])
+  }),
+}))
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
   isGlobalSessionRecencyOnlyUpdate: (existing: Session, incoming: Session) => (
     existing.title === incoming.title && existing.time?.updated !== incoming.time?.updated
   ),
+  resolveGlobalSessionDirectory: (session: Session) => (session as Session & { directory?: string }).directory ?? null,
   useGlobalSessionsStore: {
     getState: () => ({
       activeSessions: currentSessions,
@@ -66,6 +74,7 @@ describe("applySessionEventToGlobalSessions", () => {
     currentSessions = []
     upsertedSessions.length = 0
     removedSessionIds.length = 0
+    autoCloseDirectories.length = 0
   })
 
   test("skips stale global session.updated echoes after a newer rename", () => {
@@ -115,5 +124,27 @@ describe("applySessionEventToGlobalSessions", () => {
     applySessionEventToGlobalSessions(buildLifecycleEvent("session.idle", "ses_1"))
 
     expect(upsertedSessions).toEqual([])
+  })
+
+  test("checks project closure after an authoritative archive event", () => {
+    currentSessions = [{ ...buildSession("Session", { created: 1, updated: 10 }), directory: "/project" } as Session]
+
+    applySessionEventToGlobalSessions(buildEvent({
+      ...currentSessions[0],
+      time: { created: 1, updated: 20, archived: 20 },
+    }))
+
+    expect(autoCloseDirectories).toEqual([["/project"]])
+  })
+
+  test("checks project closure after an authoritative delete event", () => {
+    currentSessions = [{ ...buildSession("Session", { created: 1, updated: 10 }), directory: "/project" } as Session]
+
+    applySessionEventToGlobalSessions({
+      type: "session.deleted",
+      properties: { sessionID: "ses_1" },
+    } as Event)
+
+    expect(autoCloseDirectories).toEqual([["/project"]])
   })
 })
