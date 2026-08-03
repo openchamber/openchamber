@@ -7,6 +7,10 @@ const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = [
 const scopedClientDirectories: string[] = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let sessionRevertResult: { data?: unknown; error?: unknown; response?: { status?: number } } = {}
+// Opt-in hook for tests that need to control the order in which overlapping
+// revertSession calls settle (default sync-resolve behavior is unaffected).
+let sessionRevertDeferred = false
+const revertSessionDeferredResolvers: Array<(data: unknown) => void> = []
 let questionReplyError: unknown | null = null
 let questionRejectError: unknown | null = null
 let permissionReplyError: unknown | null = null
@@ -143,6 +147,9 @@ mock.module("@/lib/opencode/client", () => ({
         method: "session.revert",
         params: { sessionID: sessionId, messageID: messageId, partID: partId, directory },
       })
+      if (sessionRevertDeferred) {
+        return new Promise((resolve) => { revertSessionDeferredResolvers.push(resolve) })
+      }
       if (sessionRevertResult.error) {
         const status = sessionRevertResult.response?.status
         throw new Error(`session.revert failed${status ? ` (${status})` : ""}: rejected`)
@@ -1465,6 +1472,47 @@ describe("revertToMessage passes session directory", () => {
     expect((thrown as Error).message).toContain("session.revert failed (500)")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert).toBe(undefined)
     expect(inputState.pendingInputText).toBe("previous draft")
+  })
+
+  test("ignores a stale revert response that resolves after a newer revert has moved the marker", async () => {
+    const session = { id: "session-a", time: { created: 1 } } as Session
+    const earlierMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 2 } } as Message
+    const laterMessage = { id: "msg_3", sessionID: "session-a", role: "user", time: { created: 3 } } as Message
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [earlierMessage, laterMessage] },
+      part: { "msg_2": [], "msg_3": [] },
+    })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    sessionRevertDeferred = true
+    try {
+      // User clicks revert on an earlier message first, then quickly clicks
+      // revert on a later message before the first request settles.
+      const firstCall = revertToMessage("session-a", "msg_2")
+      const secondCall = revertToMessage("session-a", "msg_3")
+
+      expect(revertSessionDeferredResolvers).toHaveLength(2)
+
+      // The SECOND (newer) call's network response arrives FIRST — this is
+      // the common case (less work to compute) as well as the adversarial
+      // case this test targets: resolution order must not depend on call
+      // order for the final state to be correct.
+      revertSessionDeferredResolvers[1]({ id: "session-a", time: { created: 1, updated: 3 }, revert: { messageID: "msg_3" } })
+      await secondCall
+      // The FIRST (older) call's response arrives LATE, after the newer
+      // target already won. It must not clobber session.revert back to msg_2.
+      revertSessionDeferredResolvers[0]({ id: "session-a", time: { created: 1, updated: 2 }, revert: { messageID: "msg_2" } })
+      await firstCall
+
+      expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_3")
+    } finally {
+      sessionRevertDeferred = false
+      revertSessionDeferredResolvers.length = 0
+    }
   })
 })
 

@@ -1825,36 +1825,52 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // must not carry over, even when the current message has no files.
   restoreFilePartsToInput(submittedFileParts)
 
+  // A newer revertToMessage call for this session (e.g. a second click before
+  // this one's request settles) advances session.revert past what this call
+  // set. When that happens, this call's late completion must not clobber the
+  // newer target — otherwise whichever request happens to resolve last wins,
+  // regardless of which one the user issued last, and the timeline can snap
+  // back to an earlier revert point or re-show messages the newer call hid.
+  const stillOwnsRevert = () => {
+    const candidate = store.getState().session.find((s) => s.id === sessionId)
+    return (candidate as Session & { revert?: { messageID?: string } } | undefined)?.revert?.messageID === messageId
+  }
+
   // Call SDK and merge authoritative result into store
   try {
     const revertedSession = await opencodeClient.revertSession(sessionId, messageId, undefined, directory)
-    const current = store.getState()
-    const updated = [...current.session]
-    const idx = updated.findIndex((s) => s.id === sessionId)
-    if (idx >= 0) {
-      updated[idx] = revertedSession
-      store.setState({ session: updated })
+    if (stillOwnsRevert()) {
+      const current = store.getState()
+      const updated = [...current.session]
+      const idx = updated.findIndex((s) => s.id === sessionId)
+      if (idx >= 0) {
+        updated[idx] = revertedSession
+        store.setState({ session: updated })
+      }
     }
     if (directory) {
       sessionEvents.requestGitRefresh({ directory })
     }
   } catch (err) {
-    // Rollback: restore removed messages + revert marker
-    const current = store.getState()
-    const rollback = [...current.session]
-    const idx = rollback.findIndex((s) => s.id === sessionId)
-    if (idx >= 0) {
-      rollback[idx] = { ...rollback[idx], revert: prevRevert } as Session
+    // Rollback: restore removed messages + revert marker, but only if a newer
+    // call hasn't already moved the marker past this one.
+    if (stillOwnsRevert()) {
+      const current = store.getState()
+      const rollback = [...current.session]
+      const idx = rollback.findIndex((s) => s.id === sessionId)
+      if (idx >= 0) {
+        rollback[idx] = { ...rollback[idx], revert: prevRevert } as Session
+      }
+      store.setState({
+        session: rollback,
+      })
+      // Rollback input store: restore previous text and attachments
+      useInputStore.setState({
+        pendingInputText: prevInputText,
+        pendingInputMode: prevInputMode,
+        attachedFiles: prevInputAttachments,
+      })
     }
-    store.setState({
-      session: rollback,
-    })
-    // Rollback input store: restore previous text and attachments
-    useInputStore.setState({
-      pendingInputText: prevInputText,
-      pendingInputMode: prevInputMode,
-      attachedFiles: prevInputAttachments,
-    })
     throw err
   }
 }
