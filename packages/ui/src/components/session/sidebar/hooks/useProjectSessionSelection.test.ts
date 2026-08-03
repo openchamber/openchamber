@@ -53,6 +53,10 @@ function computeProjectMeta(projectSections: ProjectSection[]) {
   return { metaByProject, firstSessionByProject };
 }
 
+const didSwitchProjects = (previousProjectId: string | null, activeProjectId: string): boolean => (
+  previousProjectId !== null && previousProjectId !== activeProjectId
+);
+
 // ---------------------------------------------------------------------------
 // Test data
 // ---------------------------------------------------------------------------
@@ -182,7 +186,7 @@ describe('useProjectSessionSelection — worktree session click race', () => {
     expect(projectMap?.has('wt-session-1')).toBe(true);
   });
 
-  test('guard preserves currentSessionId when projectMap is stale (the bug fix)', () => {
+  test('guard preserves an unindexed worktree session when projectMap is stale', () => {
     const { metaByProject, firstSessionByProject } = computeProjectMeta(staleSections);
     const projectMap = metaByProject.get('project-1')!;
     const currentSessionId = 'wt-session-1';
@@ -191,13 +195,23 @@ describe('useProjectSessionSelection — worktree session click race', () => {
     const pathAHit = Boolean(currentSessionId && projectMap?.has(currentSessionId));
     expect(pathAHit).toBe(false);
 
-    // Guard: if (currentSessionId) return;
-    // This is what prevents the fallthrough to Path C (auto-select wrong session)
-    // Without the guard, Path C would select firstSessionByProject = root-session-1
-    // instead of preserving the user's wt-session-1 selection
+    const switchedProjects = didSwitchProjects(null, 'project-1');
+    expect(switchedProjects).toBe(false);
+
+    // The guard prevents fallthrough to Path C while the worktree data catches up.
     const fallback = firstSessionByProject.get('project-1')?.id ?? null;
     expect(fallback).toBe('root-session-1');
     expect(fallback).not.toBe(currentSessionId);
+  });
+
+  test('project switch does not preserve the previous session', () => {
+    const { metaByProject } = computeProjectMeta(project2Sections);
+    const currentSessionId = 'root-session-1';
+
+    expect(metaByProject.get('project-2')?.has(currentSessionId)).toBe(false);
+    const switchedProjects = didSwitchProjects('project-1', 'project-2');
+    expect(switchedProjects).toBe(true);
+    expect(Boolean(currentSessionId && metaByProject.get('project-2') && !switchedProjects)).toBe(false);
   });
 
   test('second click works correctly when projectSections is updated', () => {

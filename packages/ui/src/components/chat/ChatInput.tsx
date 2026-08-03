@@ -948,6 +948,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const queuedMessagesToSend = queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages;
+        const capturedSessionId = currentSessionId;
+        const capturedDraft = newSessionDraftOpen ? newSessionDraft : null;
+        const capturedDirectory = capturedSessionId
+            ? currentSessionDirectoryForSync ?? currentDirectory
+            : capturedDraft?.bootstrapPendingDirectory ?? capturedDraft?.directoryOverride ?? currentDirectory;
 
         if (queuedOnly && autoReviewRunning) {
             return;
@@ -1004,7 +1009,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const sendMessageOptions = delivery ? { delivery } : undefined;
+        const sendMessageOptions = {
+            ...(delivery ? { delivery } : {}),
+            ...(capturedSessionId
+                ? { sessionId: capturedSessionId, directory: capturedDirectory }
+                : capturedDraft
+                    ? { draftSnapshot: capturedDraft }
+                    : {}),
+        };
 
         // Inline review comments and synthetic context are consumed before
         // assembly so a failed send can restore exactly what it took.

@@ -4,6 +4,9 @@ import { togglePermissionAutoAccept } from "../../components/chat/permissionAuto
 const storage = new Map<string, string>()
 const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
 const permissionAutoAcceptCalls: Array<[string, boolean]> = []
+const optimisticSendCalls: Array<{ sessionId: string; directory?: string | null }> = []
+let creationGate: Promise<void> | null = null
+let releaseCreation: (() => void) | null = null
 
 const getMockCalls = (fn: unknown): unknown[][] => ((fn as { mock?: { calls: unknown[][] } }).mock?.calls ?? [])
 
@@ -53,6 +56,11 @@ const deferredStorage: Storage = {
 
 mock.module("@/stores/utils/safeStorage", () => ({
   getDeferredSafeStorage: () => deferredStorage,
+  createDeferredSafeJSONStorage: () => ({
+    getItem: () => null,
+    setItem: () => undefined,
+    removeItem: () => undefined,
+  }),
 }))
 
 mock.module("@/lib/opencode/client", () => ({
@@ -79,6 +87,23 @@ mock.module("@/stores/useConfigStore", () => ({
       agents: [],
       activateDirectory: mock(async () => undefined),
       applyDefaultModelAgentSelection: mock(() => undefined),
+    }),
+  },
+}))
+
+mock.module("@/stores/useUIStore", () => ({
+  useUIStore: {
+    getState: () => ({
+      sessionGoalDefaultBudgetEnabled: false,
+      sessionGoalDefaultBudget: 0,
+    }),
+  },
+}))
+
+mock.module("@/stores/useSessionGoalArmStore", () => ({
+  useSessionGoalArmStore: {
+    getState: () => ({
+      consume: () => ({ armed: false, objectiveOverride: null }),
     }),
   },
 }))
@@ -171,6 +196,10 @@ mock.module("@/lib/userSendAnimation", () => ({
   markPendingUserSendAnimation: () => undefined,
 }))
 
+mock.module("@/lib/sessionGoalActions", () => ({
+  setSessionGoal: mock(async () => undefined),
+}))
+
 mock.module("../sync-context", () => ({
   setActiveSession: () => undefined,
 }))
@@ -229,6 +258,7 @@ mock.module("../sync-refs", () => ({
 mock.module("../session-actions", () => ({
   createSession: mock(async (title: string | undefined, directory: string | null, parentID: string | null, metadata?: unknown) => {
     createSessionCalls.push({ title, directory, parentID, metadata })
+    await creationGate
     return { id: "ses_issue_2039", directory }
   }),
   deleteSession: mock(async () => true),
@@ -236,12 +266,15 @@ mock.module("../session-actions", () => ({
   updateSessionTitle: mock(async () => undefined),
   shareSession: mock(async () => undefined),
   unshareSession: mock(async () => undefined),
-  optimisticSend: mock(async () => undefined),
+  optimisticSend: mock(async (input: { sessionId: string; directory?: string | null }) => {
+    optimisticSendCalls.push(input)
+  }),
   refetchSessionMessages: mock(async () => undefined),
   revertToMessage: mock(async () => undefined),
   unrevertSession: mock(async () => undefined),
   forkFromMessage: mock(async () => undefined),
   fetchMessagesForSession: mock(async () => undefined),
+  getSessionLastAssistantModel: () => null,
 }))
 
 const { materializeOpenDraftSession, useSessionUIStore } = await import("../session-ui-store")
@@ -298,6 +331,9 @@ describe("issue 2039 draft auto-accept", () => {
     storage.clear()
     createSessionCalls.length = 0
     permissionAutoAcceptCalls.length = 0
+    optimisticSendCalls.length = 0
+    creationGate = null
+    releaseCreation = null
 
     useSessionUIStore.setState({
       currentSessionId: null,
@@ -347,5 +383,57 @@ describe("issue 2039 draft auto-accept", () => {
     expect(result).toBeNull()
     expect(createSessionCalls).toHaveLength(0)
     expect(permissionAutoAcceptCalls).toHaveLength(0)
+  })
+
+  test("sends a captured draft to its new session after the user switches sessions", async () => {
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: "/projects/alpha" })
+    const capturedDraft = useSessionUIStore.getState().newSessionDraft
+    creationGate = new Promise<void>((resolve) => {
+      releaseCreation = resolve
+    })
+
+    const send = useSessionUIStore.getState().sendMessage(
+      "draft message",
+      "provider",
+      "model",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { draftSnapshot: capturedDraft },
+    )
+    await Promise.resolve()
+    useSessionUIStore.getState().setCurrentSession("existing-session", "/projects/alpha")
+    releaseCreation?.()
+    await send
+
+    expect(optimisticSendCalls).toHaveLength(1)
+    expect(optimisticSendCalls[0]?.sessionId).toBe("ses_issue_2039")
+    expect(useSessionUIStore.getState().currentSessionId).toBe("existing-session")
+  })
+
+  test("does not close a newer draft when an older draft finishes materializing", async () => {
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: "/projects/alpha" })
+    const capturedDraft = useSessionUIStore.getState().newSessionDraft
+    creationGate = new Promise<void>((resolve) => {
+      releaseCreation = resolve
+    })
+
+    const materialize = materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "model",
+    }, capturedDraft)
+    await Promise.resolve()
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: "/projects/beta" })
+    const newerDraft = useSessionUIStore.getState().newSessionDraft
+    releaseCreation?.()
+    await materialize
+
+    expect(useSessionUIStore.getState().currentSessionId).toBeNull()
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true)
+    expect(useSessionUIStore.getState().newSessionDraft.draftToken).toBe(newerDraft.draftToken)
+    expect(useSessionUIStore.getState().newSessionDraft.draftToken).not.toBe(capturedDraft.draftToken)
   })
 })
