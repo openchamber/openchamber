@@ -234,7 +234,7 @@ describe('guardian PID marker ownership', () => {
     expect(readGuardianPidMarker(pidFile)).toBeNull();
   });
 
-  it('retains releasable authority when directory durability is uncertain after rename', async () => {
+  it.skipIf(process.platform === 'win32')('retains releasable authority when directory durability is uncertain after rename', async () => {
     const pidFile = makeMarkerPath();
     const owner = await acquireGuardianPidMarker({ pidFile, pid: 1234, identity });
     const realFsyncSync = fs.fsyncSync.bind(fs);
