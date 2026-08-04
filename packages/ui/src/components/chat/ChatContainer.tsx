@@ -44,7 +44,10 @@ import {
     useScopedBlockingQuestions,
     useParentSession,
     useSession,
+    useChildStoreManager,
+    resyncBlockingRequestsForDirectory,
 } from '@/sync/sync-context';
+import { findPendingQuestionGaps } from '@/sync/question-recovery';
 import { useSync } from '@/sync/use-sync';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { useI18n } from '@/lib/i18n';
@@ -59,6 +62,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
+const QUESTION_RECOVERY_DEBOUNCE_MS = 400;
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
@@ -308,6 +312,27 @@ const ChatViewport = React.memo(({
 
         scrollRef.current?.focus({ preventScroll: true });
     }, [scrollRef]);
+
+    // A `question` tool part that is still running but has no store-backed
+    // QuestionRequest means its `question.asked` SSE event was lost (SSE gap).
+    // Re-run the authoritative resync so the real question lands in the store
+    // and the normal QuestionCard renders (issue #2448). Debounced and cleared
+    // on unmount; a failed resync does not auto-retry (no retry signal), so
+    // the next event or reconnect resync covers it.
+    const pendingQuestionGaps = React.useMemo(() => {
+        return findPendingQuestionGaps(renderedMessages, sessionQuestions);
+    }, [renderedMessages, sessionQuestions]);
+
+    const recoveryChildStores = useChildStoreManager();
+    React.useEffect(() => {
+        if (!currentSessionId || !directory || pendingQuestionGaps.length === 0) return;
+        const store = recoveryChildStores.getChild(directory);
+        if (!store) return;
+        const timer = setTimeout(() => {
+            void resyncBlockingRequestsForDirectory(directory, store, [currentSessionId]);
+        }, QUESTION_RECOVERY_DEBOUNCE_MS);
+        return () => clearTimeout(timer);
+    }, [currentSessionId, directory, pendingQuestionGaps.length, recoveryChildStores]);
 
     return (
         <div

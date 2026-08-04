@@ -147,13 +147,17 @@ describe("resyncBlockingRequestsForDirectory", () => {
     expect(store.getState().question["ses_a"]).toEqual(undefined)
   })
 
-  test("ignores questions for sessions the directory does not know about", async () => {
+  test("merges questions for sessions the directory does not know about", async () => {
+    // Issue #2448: listPendingQuestions is already directory-scoped server-side,
+    // so a question for a session the store does not know yet (e.g. a new
+    // subagent created during an SSE gap) is merged instead of dropped — it can
+    // then surface as an answerable form once scoping materializes the session.
     const store = createDirectoryStore({})
     pendingQuestionsResponse = [{ ...buildQuestion(), sessionID: "ses_unknown" }]
 
     await resyncBlockingRequestsForDirectory("/repo", store)
 
-    expect(store.getState().question["ses_unknown"]).toEqual(undefined)
+    expect(store.getState().question["ses_unknown"]).toHaveLength(1)
   })
 
   test("returns early without fetching when no candidate sessions are known", async () => {

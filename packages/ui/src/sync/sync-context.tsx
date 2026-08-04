@@ -1145,6 +1145,56 @@ const updateRoutingIndexFromEvent = (
 }
 
 /**
+ * Materialize sessions referenced by pending questions that the store does not
+ * know yet (e.g. a subagent session created during an SSE gap). Without this,
+ * a pending question from a new session could never surface as an answerable
+ * form: subtree scoping, the sidebar, and trimSessions all derive session
+ * identity from `state.session` (issue #2448). Best-effort — a failed fetch
+ * leaves the question merged but not scoped, recoverable on the next event.
+ */
+async function materializeQuestionSessions(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  grouped: Record<string, QuestionRequest[]>,
+): Promise<void> {
+  const sessionIds = Object.keys(grouped)
+  if (sessionIds.length === 0) return
+  const known = new Set(store.getState().session.map((session) => session.id))
+  const missing = sessionIds.filter((sessionId) => !known.has(sessionId))
+  if (missing.length === 0) return
+
+  const scopedClient = opencodeClient.getScopedSdkClient(directory)
+  await Promise.all(missing.map(async (sessionId) => {
+    try {
+      const response = await retry(async () => {
+        const result = await scopedClient.session.get({ sessionID: sessionId, directory })
+        assertSdkSuccess(result, "session.get")
+        return result
+      })
+      const session = response?.data
+      if (!session?.id) return
+      const nextSession = stripSessionDiffSnapshots(session)
+      store.setState((state: DirectoryStore) => {
+        const sessionIndex = state.session.findIndex((item) => item.id === nextSession.id)
+        if (sessionIndex >= 0) {
+          if (haveEquivalentSyncSnapshots(state.session[sessionIndex], nextSession)) return state
+          const sessions = [...state.session]
+          sessions[sessionIndex] = nextSession
+          return { session: sessions }
+        }
+        const sessions = [...state.session, nextSession].sort((a, b) => cmp(a.id, b.id))
+        const sessionTotal = nextSession.parentID ? state.sessionTotal : state.sessionTotal + 1
+        return { session: sessions, sessionTotal }
+      })
+    } catch {
+      // Best-effort: the question is still merged into the store below; if the
+      // session cannot be materialized, scoping surfaces it once a session
+      // event arrives.
+    }
+  }))
+}
+
+/**
  * Re-fetch pending questions and permissions for a directory and merge them
  * into the directory's child store, preserving any in-flight SSE updates that
  * arrived while the request was pending. Used by reconnect/materialization
@@ -1179,7 +1229,6 @@ export async function resyncBlockingRequestsForDirectory(
     const grouped: Record<string, QuestionRequest[]> = {}
     for (const q of pendingQuestions) {
       if (!q?.id || !q.sessionID) continue
-      if (!knownSessionIds.has(q.sessionID)) continue
       const list = grouped[q.sessionID]
       if (list) list.push(q)
       else grouped[q.sessionID] = [q]
@@ -1187,6 +1236,11 @@ export async function resyncBlockingRequestsForDirectory(
     for (const sessionId of Object.keys(grouped)) {
       grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     }
+
+    // The directory-scoped list may reference sessions the store does not know
+    // yet (created during an SSE gap). Materialize them so a pending question
+    // from a new/subagent session surfaces as an answerable form (issue #2448).
+    await materializeQuestionSessions(directory, store, grouped)
 
     for (const [sessionId, questions] of Object.entries(grouped)) {
       const knownIds = new Set((before.question[sessionId] ?? []).map((item) => item.id))
