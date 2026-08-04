@@ -1675,6 +1675,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.openCommandPalette': 'コマンドパレットを開く',
   'helpDialog.item.showKeyboardShortcuts': 'キーボードショートカットを表示（このダイアログ）',
   'helpDialog.item.toggleSessionSidebar': 'セッションサイドバーの切り替え',
+  'helpDialog.item.addSelectionToChat': '選択範囲をチャットに追加',
   'helpDialog.item.cycleAgent': 'エージェント切り替え（チャット入力）',
   'helpDialog.item.openModelSelector': 'モデルセレクターを開く',
   'helpDialog.item.navigateModels': 'モデルを移動（ピッカー内）',

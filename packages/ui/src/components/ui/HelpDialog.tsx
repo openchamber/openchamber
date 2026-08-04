@@ -66,6 +66,12 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
+          id: 'add_selection_to_chat',
+          descriptionKey: "helpDialog.item.addSelectionToChat",
+          icon: "add",
+          keys: '',
+        },
+        {
           id: 'cycle_agent',
           keys: '',
           descriptionKey: "helpDialog.item.cycleAgent",

@@ -1070,6 +1070,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '打开设置',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': '切换终端停靠区',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': '切换终端展开',
+  'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': '将选中内容添加到聊天',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': '切换侧边栏',
   'settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label': '切换上下文面板',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': '打开 Git 界面',

@@ -1103,6 +1103,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Open settings',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'Toggle terminal dock',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'Toggle terminal expanded',
+  'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': 'Add selection to chat',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'Toggle sidebar',
   'settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label': 'Toggle context panel',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': 'Open Git surface',

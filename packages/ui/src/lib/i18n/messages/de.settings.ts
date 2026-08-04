@@ -1038,6 +1038,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Einstellungen öffnen',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'Terminal-Dock umschalten',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'Terminal erweitert umschalten',
+  'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': 'Auswahl zum Chat hinzufügen',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'Seitenleiste umschalten',
   'settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label': 'Rechte Seitenleiste umschalten',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': 'Git-Tab der rechten Seitenleiste öffnen',

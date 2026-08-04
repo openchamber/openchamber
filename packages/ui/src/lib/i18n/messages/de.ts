@@ -1532,6 +1532,7 @@ export const dict = {
   'helpDialog.item.openCommandPalette': 'Befehlspalette öffnen',
   'helpDialog.item.showKeyboardShortcuts': 'Tastaturkürzel anzeigen (dieses Dialogfeld)',
   'helpDialog.item.toggleSessionSidebar': 'Sitzungs-Seitenleiste umschalten',
+  'helpDialog.item.addSelectionToChat': 'Auswahl zum Chat hinzufügen',
   'helpDialog.item.cycleAgent': 'Agent wechseln (Chat-Eingabe)',
   'helpDialog.item.openModelSelector': 'Modell-Auswahldialog öffnen',
   'helpDialog.item.navigateModels': 'Modelle navigieren (in Auswahl)',

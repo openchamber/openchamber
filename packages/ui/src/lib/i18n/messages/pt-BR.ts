@@ -1657,6 +1657,7 @@ export const dict: Record<I18nKey, string> = {
   "helpDialog.item.openCommandPalette": "Abrir paleta de comandos",
   "helpDialog.item.showKeyboardShortcuts": "Mostrar atalhos de teclado (este diálogo)",
   "helpDialog.item.toggleSessionSidebar": "Mostrar ou ocultar barra lateral de sessão",
+  "helpDialog.item.addSelectionToChat": "Adicionar seleção ao chat",
   "helpDialog.item.cycleAgent": "Alternar agente (entrada do chat)",
   "helpDialog.item.openModelSelector": "Abrir seletor de modelos",
   "helpDialog.item.navigateModels": "Navegar por modelos (no seletor)",

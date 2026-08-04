@@ -991,6 +991,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Ouvrir les paramètres',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'Basculer la station d\'accueil du terminal',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'Terminal à bascule étendu',
+  'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': 'Ajouter la sélection au chat',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'Basculer la barre latérale',
   'settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label': 'Afficher/masquer le panneau de contexte',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': 'Ouvrir la surface Git',

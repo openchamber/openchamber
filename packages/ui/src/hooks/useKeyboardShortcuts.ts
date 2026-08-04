@@ -16,6 +16,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import { addSelectionToChat } from '@/lib/addSelectionToChat';
 import { hasOpenDropdown } from './keyboard-shortcut-dom';
 
 export const useKeyboardShortcuts = () => {
@@ -334,6 +335,12 @@ export const useKeyboardShortcuts = () => {
         e.preventDefault();
         const { isSettingsDialogOpen } = useUIStore.getState();
         setSettingsDialogOpen(!isSettingsDialogOpen);
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('add_selection_to_chat'))) {
+        e.preventDefault();
+        addSelectionToChat();
         return;
       }
 

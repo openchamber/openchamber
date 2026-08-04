@@ -2256,6 +2256,13 @@ const dispatchMenuAction = (action) => {
   dispatchDomEventToWindow(target, 'openchamber:menu-action', action);
 };
 
+// Append-style menu actions must reach the renderer exactly once. Dual IPC+DOM
+// delivery (dispatchMenuAction) would insert the selection twice.
+const dispatchAddSelectionToChat = () => {
+  const target = getMenuTargetWindow();
+  if (target) emitToWindow(target, 'openchamber:menu-action', 'add-selection-to-chat');
+};
+
 // Mini-chat draft windows are not deduplicated, so this must reach the renderer
 // exactly once — emitToWindow alone (no DOM-event double dispatch). The renderer
 // resolves the active directory/project and opens the window.
@@ -4577,6 +4584,7 @@ const buildMacMenu = (locale = 'en') => {
         { type: 'separator' },
         { role: 'cut', label: t('cut') },
         { label: t('copy'), accelerator: 'Cmd+C', click: () => handleCopyAction() },
+        { label: t('addSelectionToChat'), accelerator: 'Cmd+L', registerAccelerator: false, click: () => dispatchAddSelectionToChat() },
         { role: 'paste', label: t('paste') },
         { role: 'selectAll', label: t('selectAll') },
       ],
@@ -4595,7 +4603,7 @@ const buildMacMenu = (locale = 'en') => {
         { label: t('darkTheme'), click: () => dispatchAction('theme-dark') },
         { label: t('systemTheme'), click: () => dispatchAction('theme-system') },
         { type: 'separator' },
-        { label: t('toggleSessionSidebar'), accelerator: 'Cmd+L', click: () => dispatchAction('toggle-sidebar') },
+        { label: t('toggleSessionSidebar'), accelerator: 'Cmd+Alt+L', click: () => dispatchAction('toggle-sidebar') },
         { label: t('toggleMemoryDebug'), accelerator: 'Cmd+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         { role: 'togglefullscreen', label: t('toggleFullScreen') },
@@ -4675,6 +4683,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { type: 'separator' },
         { role: 'cut', label: t('cut') },
         { label: t('copy'), accelerator: 'Ctrl+C', click: () => handleCopyAction() },
+        { label: t('addSelectionToChat'), accelerator: 'Ctrl+L', registerAccelerator: false, click: () => dispatchAddSelectionToChat() },
         { role: 'paste', label: t('paste') },
         { role: 'selectAll', label: t('selectAll') },
       ],
@@ -4697,7 +4706,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('darkTheme'), click: () => dispatchAction('theme-dark') },
         { label: t('systemTheme'), click: () => dispatchAction('theme-system') },
         { type: 'separator' },
-        { label: t('toggleSessionSidebar'), accelerator: 'Ctrl+L', click: () => dispatchAction('toggle-sidebar') },
+        { label: t('toggleSessionSidebar'), accelerator: 'Ctrl+Alt+L', click: () => dispatchAction('toggle-sidebar') },
         { label: t('toggleMemoryDebug'), accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         { role: 'togglefullscreen', label: t('toggleFullScreen') },

@@ -1070,6 +1070,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '설정 열기',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': '터미널 dock 토글',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': '터미널 확장 토글',
+  'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': '선택 내용을 채팅에 추가',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': '사이드바 토글',
   'settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label': '컨텍스트 패널 표시 전환',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': 'Git 서피스 열기',

@@ -1070,6 +1070,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.open_settings.label": "Abrir configuración",
   "settings.openchamber.keyboardShortcuts.action.toggle_terminal.label": "Mostrar u ocultar panel de terminal",
   "settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label": "Expandir o contraer terminal",
+  "settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label": "Agregar selección al chat",
   "settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label": "Mostrar u ocultar barra lateral",
   "settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label": 'Alternar panel de contexto',
   "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label": 'Abrir superficie de Git',

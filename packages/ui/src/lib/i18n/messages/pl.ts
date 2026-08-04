@@ -2325,6 +2325,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.toggleRightSidebar': 'Przełącz panel kontekstu',
   'helpDialog.item.toggleServicesMenu': 'Przełącz menu usług',
   'helpDialog.item.toggleSessionSidebar': 'Przełącz panel sesji',
+  'helpDialog.item.addSelectionToChat': 'Dodaj zaznaczenie do czatu',
   'helpDialog.item.toggleTerminalDock': 'Przełącz dolny terminal',
   'helpDialog.item.toggleTerminalExpanded': 'Przełącz rozszerzenie terminala',
   'helpDialog.keyCombiner.or': 'lub',

@@ -977,6 +977,7 @@
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '開啟設定',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': '切換終端機停靠區',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': '切換終端機展開',
+  'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': '將選取內容加入聊天',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': '切換側邊欄',
   'settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label': '切換上下文面板',
   'settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label': '開啟 Git 介面',

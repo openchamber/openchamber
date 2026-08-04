@@ -1645,6 +1645,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.openCommandPalette': '打开命令面板',
   'helpDialog.item.showKeyboardShortcuts': '显示键盘快捷键（此对话框）',
   'helpDialog.item.toggleSessionSidebar': '切换会话侧边栏',
+  'helpDialog.item.addSelectionToChat': '将选中内容添加到聊天',
   'helpDialog.item.cycleAgent': '循环切换智能体（聊天输入）',
   'helpDialog.item.openModelSelector': '打开模型选择器',
   'helpDialog.item.navigateModels': '导航模型（选择器中）',

@@ -1657,6 +1657,7 @@ export const dict: Record<I18nKey, string> = {
   "helpDialog.item.openCommandPalette": "Відкрити палітру команд",
   "helpDialog.item.showKeyboardShortcuts": "Показати комбінації клавіш (це діалогове вікно)",
   "helpDialog.item.toggleSessionSidebar": "Перемкнути бічну панель сесій",
+  "helpDialog.item.addSelectionToChat": "Додати виділення в чат",
   "helpDialog.item.cycleAgent": "Перемкнути агента (введення в чат)",
   "helpDialog.item.openModelSelector": "Відкрити засіб вибору моделі",
   "helpDialog.item.navigateModels": "Навігація моделями (у засобі вибору)",

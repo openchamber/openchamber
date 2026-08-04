@@ -1070,6 +1070,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.open_settings.label": "Відкрити налаштування",
   "settings.openchamber.keyboardShortcuts.action.toggle_terminal.label": "Перемкнути панель терміналу",
   "settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label": "Розгорнути або згорнути термінал",
+  "settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label": "Додати виділення в чат",
   "settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label": "Перемкнути бічну панель",
   "settings.openchamber.keyboardShortcuts.action.toggle_right_sidebar.label": 'Перемкнути контекстну панель',
   "settings.openchamber.keyboardShortcuts.action.open_right_sidebar_git.label": 'Відкрити поверхню Git',

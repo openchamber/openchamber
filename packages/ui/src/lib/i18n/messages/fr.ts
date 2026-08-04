@@ -1492,6 +1492,7 @@ export const dict = {
   'helpDialog.item.openCommandPalette': 'Ouvrir la palette de commandes',
   'helpDialog.item.showKeyboardShortcuts': 'Afficher les raccourcis clavier (cette boîte de dialogue)',
   'helpDialog.item.toggleSessionSidebar': 'Toggle la barre latérale de la session',
+  'helpDialog.item.addSelectionToChat': 'Ajouter la sélection au chat',
   'helpDialog.item.cycleAgent': 'Agent de cycle (entrée de chat)',
   'helpDialog.item.openModelSelector': 'Ouvrir le sélecteur de modèle',
   'helpDialog.item.navigateModels': 'Naviguer dans les modèles (dans le sélecteur)',

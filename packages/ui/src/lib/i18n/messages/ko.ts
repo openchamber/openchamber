@@ -1681,6 +1681,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.openCommandPalette': '명령 팔레트 열기',
   'helpDialog.item.showKeyboardShortcuts': '키보드 단축키 보기(이 대화상자)',
   'helpDialog.item.toggleSessionSidebar': '토글 세션 사이드바',
+  'helpDialog.item.addSelectionToChat': '선택 내용을 채팅에 추가',
   'helpDialog.item.cycleAgent': '에이전트 순환(채팅 입력)',
   'helpDialog.item.openModelSelector': '모델 선택기 열기',
   'helpDialog.item.navigateModels': '모델 이동(선택기)',
