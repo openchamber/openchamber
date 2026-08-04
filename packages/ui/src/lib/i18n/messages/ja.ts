@@ -1689,6 +1689,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.toggleRightSidebar': 'コンテキストパネルの表示切替',
   'helpDialog.item.openRightSidebarGitTab': 'Git サーフェスを開く',
   'helpDialog.item.openRightSidebarFilesTab': 'ファイルサーフェスを開く',
+  'helpDialog.item.openChangesSurface': '変更画面を開く',
   'helpDialog.item.toggleTerminalDock': 'ターミナルドックの切り替え',
   'helpDialog.item.toggleTerminalExpanded': 'ターミナル展開の切り替え',
   'helpDialog.item.togglePlanContextPanel': '計画コンテキストパネルの切り替え',

@@ -1671,6 +1671,7 @@ export const dict: Record<I18nKey, string> = {
   "helpDialog.item.toggleRightSidebar": 'Alternar painel de contexto',
   "helpDialog.item.openRightSidebarGitTab": 'Abrir superfície do Git',
   "helpDialog.item.openRightSidebarFilesTab": 'Abrir superfície de arquivos',
+  "helpDialog.item.openChangesSurface": "Abrir área de alterações",
   "helpDialog.item.toggleTerminalDock": "Mostrar ou ocultar dock de terminal",
   "helpDialog.item.toggleTerminalExpanded": "Expandir ou recolher o terminal",
   "helpDialog.item.togglePlanContextPanel": "Alternar painel de contexto do plano",

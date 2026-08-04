@@ -1695,6 +1695,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.toggleRightSidebar': '컨텍스트 패널 표시 전환',
   'helpDialog.item.openRightSidebarGitTab': 'Git 서피스 열기',
   'helpDialog.item.openRightSidebarFilesTab': '파일 서피스 열기',
+  'helpDialog.item.openChangesSurface': '변경사항 화면 열기',
   'helpDialog.item.toggleTerminalDock': '터미널 독 전환',
   'helpDialog.item.toggleTerminalExpanded': '터미널 펼치기/접기',
   'helpDialog.item.togglePlanContextPanel': '플랜 컨텍스트 패널 전환',

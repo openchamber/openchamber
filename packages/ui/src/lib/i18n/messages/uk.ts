@@ -1671,6 +1671,7 @@ export const dict: Record<I18nKey, string> = {
   "helpDialog.item.toggleRightSidebar": 'Перемкнути контекстну панель',
   "helpDialog.item.openRightSidebarGitTab": 'Відкрити поверхню Git',
   "helpDialog.item.openRightSidebarFilesTab": 'Відкрити поверхню файлів',
+  "helpDialog.item.openChangesSurface": "Відкрити подання змін",
   "helpDialog.item.toggleTerminalDock": "Перемкнути панель терміналу",
   "helpDialog.item.toggleTerminalExpanded": "Розгорнути або згорнути термінал",
   "helpDialog.item.togglePlanContextPanel": "Перемкнути панель контексту плану",

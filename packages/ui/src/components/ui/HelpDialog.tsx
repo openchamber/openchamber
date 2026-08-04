@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Icon } from "@/components/icon/Icon";
+import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore } from "@/stores/useUIStore";
 import {
   getEffectiveShortcutCombo,
@@ -22,7 +23,7 @@ type ShortcutItem = {
   id?: string;
   keys: string | string[];
   descriptionKey: I18nKey;
-  icon: IconName | null;
+  icon: IconName | 'diff' | null;
 };
 
 type ShortcutSection = {
@@ -152,6 +153,12 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
+          id: 'open_diff_panel',
+          descriptionKey: 'helpDialog.item.openChangesSurface',
+          icon: 'diff',
+          keys: '',
+        },
+        {
           id: 'toggle_terminal',
           descriptionKey: 'helpDialog.item.toggleTerminalDock',
           icon: "window",
@@ -179,11 +186,6 @@ export const HelpDialog: React.FC = () => {
           descriptionKey: "helpDialog.item.cycleTheme",
           icon: "palette",
           keys: '',
-        },
-        {
-          keys: [`${mod} + 1...9`],
-          descriptionKey: "helpDialog.item.switchProject",
-          icon: "layout-left",
         },
         {
           id: 'toggle_services_menu',
@@ -241,9 +243,11 @@ export const HelpDialog: React.FC = () => {
                         className="flex items-center justify-between py-1 px-2"
                       >
                         <div className="flex items-center gap-2">
-                          {shortcut.icon && (
+                          {shortcut.icon === 'diff' ? (
+                            <DiffIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                          ) : shortcut.icon ? (
                             <Icon name={shortcut.icon} className="h-3.5 w-3.5 text-muted-foreground" />
-                          )}
+                          ) : null}
                           <span className="typography-meta">
                             {t(shortcut.descriptionKey)}
                           </span>

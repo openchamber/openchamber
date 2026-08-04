@@ -1659,6 +1659,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.toggleRightSidebar': '切换上下文面板',
   'helpDialog.item.openRightSidebarGitTab': '打开 Git 界面',
   'helpDialog.item.openRightSidebarFilesTab': '打开文件界面',
+  'helpDialog.item.openChangesSurface': '打开更改界面',
   'helpDialog.item.toggleTerminalDock': '切换终端停靠栏',
   'helpDialog.item.toggleTerminalExpanded': '切换终端展开状态',
   'helpDialog.item.togglePlanContextPanel': '切换计划上下文面板',

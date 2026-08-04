@@ -1693,6 +1693,7 @@ export const dict = {
   'helpDialog.item.toggleRightSidebar': 'Toggle context panel',
   'helpDialog.item.openRightSidebarGitTab': 'Open Git surface',
   'helpDialog.item.openRightSidebarFilesTab': 'Open Files surface',
+  'helpDialog.item.openChangesSurface': 'Open Changes Surface',
   'helpDialog.item.toggleTerminalDock': 'Toggle Terminal Dock',
   'helpDialog.item.toggleTerminalExpanded': 'Toggle Terminal Expanded',
   'helpDialog.item.togglePlanContextPanel': 'Toggle Plan Context Panel',

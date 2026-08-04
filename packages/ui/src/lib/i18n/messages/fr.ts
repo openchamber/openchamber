@@ -1506,6 +1506,7 @@ export const dict = {
   'helpDialog.item.toggleRightSidebar': 'Afficher/masquer le panneau de contexte',
   'helpDialog.item.openRightSidebarGitTab': 'Ouvrir la surface Git',
   'helpDialog.item.openRightSidebarFilesTab': 'Ouvrir la surface Fichiers',
+  'helpDialog.item.openChangesSurface': 'Ouvrir la vue Modifications',
   'helpDialog.item.toggleTerminalDock': 'Basculer la station d\'accueil du terminal',
   'helpDialog.item.toggleTerminalExpanded': 'Terminal à bascule étendu',
   'helpDialog.item.togglePlanContextPanel': 'Toggle Panneau contextuel du plan',

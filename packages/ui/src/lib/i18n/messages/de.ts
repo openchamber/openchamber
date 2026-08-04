@@ -1546,6 +1546,7 @@ export const dict = {
   'helpDialog.item.toggleRightSidebar': 'Rechte Seitenleiste umschalten',
   'helpDialog.item.openRightSidebarGitTab': 'Git-Registerkarte der rechten Seitenleiste öffnen',
   'helpDialog.item.openRightSidebarFilesTab': 'Datei-Registerkarte der rechten Seitenleiste öffnen',
+  'helpDialog.item.openChangesSurface': 'Änderungsansicht öffnen',
   'helpDialog.item.toggleTerminalDock': 'Terminal-Dock umschalten',
   'helpDialog.item.toggleTerminalExpanded': 'Terminal erweitert umschalten',
   'helpDialog.item.togglePlanContextPanel': 'Plan-Kontext-Panel umschalten',

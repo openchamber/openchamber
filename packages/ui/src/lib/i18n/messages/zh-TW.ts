@@ -1663,6 +1663,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.toggleRightSidebar': '切換上下文面板',
   'helpDialog.item.openRightSidebarGitTab': '開啟 Git 介面',
   'helpDialog.item.openRightSidebarFilesTab': '開啟檔案介面',
+  'helpDialog.item.openChangesSurface': '開啟變更介面',
   'helpDialog.item.toggleTerminalDock': '切換終端機停靠欄',
   'helpDialog.item.toggleTerminalExpanded': '切換終端機展開狀態',
   'helpDialog.item.togglePlanContextPanel': '切換計畫上下文面板',

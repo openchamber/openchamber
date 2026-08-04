@@ -2317,6 +2317,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.openCommandPalette': 'Otwórz paletę poleceń',
   'helpDialog.item.openModelSelector': 'Otwórz selektor modeli',
   'helpDialog.item.openRightSidebarFilesTab': 'Otwórz powierzchnię plików',
+  'helpDialog.item.openChangesSurface': 'Otwórz widok zmian',
   'helpDialog.item.openRightSidebarGitTab': 'Otwórz powierzchnię Git',
   'helpDialog.item.openSettings': 'Otwórz ustawienia',
   'helpDialog.item.showKeyboardShortcuts': 'Pokaż skróty klawiaturowe (to okno)',
