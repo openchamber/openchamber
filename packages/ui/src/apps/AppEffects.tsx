@@ -1,4 +1,5 @@
 import React from 'react';
+import { useActiveSessionBootstrapDemand } from '@/hooks/useActiveSessionBootstrapDemand';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
@@ -77,6 +78,7 @@ export function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
   usePwaManifestSync();
   useWindowControlsOverlayLayout();
   useKeyboardShortcuts();
+  useActiveSessionBootstrapDemand();
 
   return (
     <>

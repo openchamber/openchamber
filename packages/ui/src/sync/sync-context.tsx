@@ -1148,10 +1148,10 @@ const updateRoutingIndexFromEvent = (
  * Re-fetch pending questions and permissions for a directory and merge them
  * into the directory's child store, preserving any in-flight SSE updates that
  * arrived while the request was pending. Used by reconnect/materialization
- * recovery paths only; normal session switches rely on primary SSE reducer
- * state for `question.asked` / `permission.asked` events. When
- * `candidateSessionIds` is omitted, every session known to the directory store
- * is treated as a candidate.
+ * recovery and selected-session revalidation paths. When `candidateSessionIds`
+ * is omitted, every session known to the directory store is treated as a
+ * candidate. Explicit candidates are authoritative for only those sessions,
+ * including before the directory's session index catches up.
  */
 export async function resyncBlockingRequestsForDirectory(
   directory: string,
@@ -1166,8 +1166,12 @@ export async function resyncBlockingRequestsForDirectory(
     ...Object.keys(before.question ?? {}),
     ...Object.keys(before.permission ?? {}),
   ])
-  const candidates = candidateSessionIds ?? Array.from(knownSessionIds)
+  const explicitCandidates = candidateSessionIds
+    ? Array.from(new Set(candidateSessionIds.filter((sessionId) => !!sessionId)))
+    : undefined
+  const candidates = explicitCandidates ?? Array.from(knownSessionIds)
   if (candidates.length === 0) return
+  const authoritativeSessionIds = explicitCandidates ? new Set(explicitCandidates) : knownSessionIds
 
   // Re-fetch pending questions that may have been asked during an SSE gap,
   // reconnect window, or directory materialization gap.
@@ -1179,7 +1183,7 @@ export async function resyncBlockingRequestsForDirectory(
     const grouped: Record<string, QuestionRequest[]> = {}
     for (const q of pendingQuestions) {
       if (!q?.id || !q.sessionID) continue
-      if (!knownSessionIds.has(q.sessionID)) continue
+      if (!authoritativeSessionIds.has(q.sessionID)) continue
       const list = grouped[q.sessionID]
       if (list) list.push(q)
       else grouped[q.sessionID] = [q]
@@ -1213,15 +1217,13 @@ export async function resyncBlockingRequestsForDirectory(
 
     store.setState((state: DirectoryStore) => {
       const merged = { ...state.question }
-      for (const [sessionId, questions] of Object.entries(grouped)) {
-        merged[sessionId] = questions
-      }
       for (const sessionId of candidates) {
-        if (grouped[sessionId]) continue
         const beforeSignature = beforeSignatures.get(sessionId) ?? ""
         const currentSignature = requestSignature(state.question[sessionId])
         if (currentSignature !== beforeSignature) continue
-        delete merged[sessionId]
+        const questions = grouped[sessionId]
+        if (questions) merged[sessionId] = questions
+        else delete merged[sessionId]
       }
       return { question: merged }
     })
@@ -1238,7 +1240,7 @@ export async function resyncBlockingRequestsForDirectory(
     const grouped: Record<string, PermissionRequest[]> = {}
     for (const permission of pendingPermissions) {
       if (!permission?.id || !permission.sessionID) continue
-      if (!knownSessionIds.has(permission.sessionID)) continue
+      if (!authoritativeSessionIds.has(permission.sessionID)) continue
       const list = grouped[permission.sessionID]
       if (list) list.push(permission)
       else grouped[permission.sessionID] = [permission]
@@ -1286,15 +1288,13 @@ export async function resyncBlockingRequestsForDirectory(
 
     store.setState((state: DirectoryStore) => {
       const merged = { ...state.permission }
-      for (const [sessionId, permissions] of Object.entries(grouped)) {
-        merged[sessionId] = permissions
-      }
       for (const sessionId of candidates) {
-        if (grouped[sessionId]) continue
         const beforeSignature = beforeSignatures.get(sessionId) ?? ""
         const currentSignature = requestSignature(state.permission[sessionId])
         if (currentSignature !== beforeSignature) continue
-        delete merged[sessionId]
+        const permissions = grouped[sessionId]
+        if (permissions) merged[sessionId] = permissions
+        else delete merged[sessionId]
       }
       return { permission: merged }
     })
