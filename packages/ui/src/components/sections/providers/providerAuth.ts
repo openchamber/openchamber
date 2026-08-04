@@ -60,3 +60,33 @@ export const getOAuthAuthMethods = (methods: AuthMethod[]): OAuthAuthMethodEntry
 
 export const requiresOpenCodeRestartAfterOAuth = (providerId: string): boolean =>
   providerId !== 'claude-code';
+
+export interface ProviderCredentialInput {
+  /** Present when OpenCode reports an active credential (api/env/oauth). */
+  key?: string | null;
+  /** OpenChamber auth.json provenance for this provider. */
+  authSourceExists?: boolean | null;
+}
+
+/**
+ * Prefer authoritative credential signals. Do not treat Provider.env length as
+ * proof of credentials — that array is declared env var *names*, not values.
+ */
+export const providerHasCredentials = (input: ProviderCredentialInput): boolean => {
+  if (typeof input.key === 'string' && input.key.trim().length > 0) {
+    return true;
+  }
+  return input.authSourceExists === true;
+};
+
+export const shouldShowModelsSection = (input: {
+  modelCount: number;
+  sourcesLoaded: boolean;
+  hasCredentials: boolean;
+}): boolean => input.modelCount > 0 && (!input.sourcesLoaded || input.hasCredentials);
+
+export const shouldAutoOpenAuthPanel = (input: {
+  sourcesLoaded: boolean;
+  hasCredentials: boolean;
+  userDismissed: boolean;
+}): boolean => input.sourcesLoaded && !input.hasCredentials && !input.userDismissed;
