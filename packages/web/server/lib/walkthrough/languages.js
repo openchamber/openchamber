@@ -17,6 +17,7 @@ export const DEFAULT_LANGUAGE = 'en';
 // which every model handles more reliably than a switch mid-sentence.
 const LANGUAGE_NAMES = {
   en: 'English',
+  de: 'German',
   fr: 'French',
   'zh-CN': 'Simplified Chinese',
   'zh-TW': 'Traditional Chinese',
@@ -57,3 +58,9 @@ export function normalizeLanguage(value) {
 export function languageName(language) {
   return LANGUAGE_NAMES[language] ?? LANGUAGE_NAMES[DEFAULT_LANGUAGE];
 }
+
+// The tags this list must agree with live in `packages/ui/src/lib/i18n`, which
+// the server cannot import. `languages.test.js` compares the two by reading
+// that file, because a locale added on one side only fails silently: the picker
+// offers the language and the walkthrough comes back in English.
+export const __testing = { LANGUAGE_NAMES };

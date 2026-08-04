@@ -17,6 +17,7 @@ export type QuotaProviderId =
   | 'wafer'
   | 'opencode-go'
   | 'crof'
+  | 'deepseek'
   | 'neuralwatt';
 
 export interface UsageWindow {

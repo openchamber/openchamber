@@ -233,6 +233,30 @@ describe('OpenCode lifecycle', () => {
     warn.mockRestore();
   });
 
+  it('does not mistake a live managed process wrapper for an exited child', async () => {
+    const close = vi.fn(async () => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      json: async () => null,
+    }));
+    const runtime = createRuntime({}, {
+      openCodePort: 45678,
+      openCodeProcess: {
+        pid: process.pid,
+        close,
+      },
+      isOpenCodeReady: true,
+    });
+
+    await runtime.triggerHealthCheck();
+
+    expect(close).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('(1/20)'));
+    warn.mockRestore();
+  });
+
   it('restarts an exited managed process without waiting for the failure interval', async () => {
     const close = vi.fn(async () => {});
     const replacement = createMockChild();
@@ -281,8 +305,45 @@ describe('OpenCode lifecycle', () => {
     expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
     expect(options.env.SHELL_ONLY).toBe('yes');
     expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
+    expect(server.exitCode).toBeNull();
+    expect(server.signalCode).toBeNull();
 
     await server.close();
+    expect(server.signalCode).toBe('SIGTERM');
+  });
+
+  it('strips AppImage ARGV0 from managed OpenCode launch env', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const previousArgv0 = process.env.ARGV0;
+    process.env.ARGV0 = '/path/to/OpenChamber/OpenChamber-1.17.2-linux-x86_64.AppImage';
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    try {
+      const runtime = createRuntime({
+        getManagedOpenCodeShellEnvSnapshot: vi.fn(() => ({
+          PATH: '/home/user/.bun/bin:/usr/local/bin:/usr/bin',
+          ARGV0: '/leaked/from/shell/snapshot.AppImage',
+          SHELL_ONLY: 'yes',
+        })),
+      });
+      const server = await runtime.startOpenCode();
+      const [, , options] = spawnMock.mock.calls[0];
+
+      expect(options.env).not.toHaveProperty('ARGV0');
+      expect(options.env.SHELL_ONLY).toBe('yes');
+      expect(options.env.PATH).toBe('/home/user/.bun/bin:/usr/local/bin:/usr/bin');
+
+      await server.close();
+    } finally {
+      if (previousArgv0 === undefined) delete process.env.ARGV0;
+      else process.env.ARGV0 = previousArgv0;
+    }
   });
 
   it('adds managed OpenChamber tool environment without allowing it to replace launch invariants', async () => {

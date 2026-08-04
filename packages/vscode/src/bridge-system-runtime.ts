@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
-import { removeProviderConfig, getProviderSources } from './opencodeConfig';
+import { removeProviderConfig, getProviderSources, upsertProviderConfig } from './opencodeConfig';
 import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
@@ -479,6 +479,64 @@ export async function handleSystemBridgeMessage(
         const auth = getProviderAuth(providerId);
         sources.auth.exists = Boolean(auth);
         return { id, type, success: true, data: { providerId, sources } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider:upsert': {
+      const {
+        providerID,
+        providerId: providerIdAlias,
+        config,
+        scope,
+        directory,
+      } = (payload || {}) as {
+        providerID?: string;
+        providerId?: string;
+        config?: unknown;
+        scope?: string;
+        directory?: string;
+      };
+      const providerId = (typeof providerID === 'string' && providerID.trim())
+        || (typeof providerIdAlias === 'string' && providerIdAlias.trim())
+        || '';
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        return { id, type, success: false, error: 'Provider config is required' };
+      }
+      const normalizedScope = typeof scope === 'string' ? scope : 'user';
+      if (normalizedScope !== 'user' && normalizedScope !== 'project' && normalizedScope !== 'custom') {
+        return { id, type, success: false, error: 'Invalid scope' };
+      }
+      try {
+        const workingDirectory = typeof directory === 'string' && directory.trim().length > 0
+          ? directory.trim()
+          : ctx?.manager?.getWorkingDirectory();
+        const result = upsertProviderConfig(
+          providerId,
+          config,
+          workingDirectory,
+          normalizedScope,
+          { hasStoredAuth: Boolean(getProviderAuth(providerId)) },
+        );
+        await ctx?.manager?.restart();
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            success: true,
+            providerId: result.providerId,
+            path: result.path,
+            config: result.config,
+            requiresReload: true,
+            reloadDelayMs: deps.clientReloadDelayMs,
+          },
+        };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };

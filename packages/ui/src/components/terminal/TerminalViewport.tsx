@@ -18,6 +18,42 @@ import type { TerminalChunk } from '@/stores/useTerminalStore';
 let ghosttyPromise: Promise<Ghostty> | null = null;
 const loadGhostty = (): Promise<Ghostty> => ghosttyPromise ??= Ghostty.load();
 
+type TerminalSize = { cols: number; rows: number };
+
+const getProvisionalTerminalSize = (
+  container: HTMLDivElement,
+  fontFamily: string,
+  fontSize: number,
+): TerminalSize | null => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+
+  const context = document.createElement('canvas').getContext('2d');
+  if (!context || container.clientWidth < 24 || container.clientHeight < 24) return null;
+
+  context.font = `${fontSize}px ${fontFamily}`;
+  const metrics = context.measureText('M');
+  const cellWidth = Math.ceil(metrics.width);
+  const cellHeight = Math.ceil(
+    (metrics.actualBoundingBoxAscent || fontSize * 0.8) +
+    (metrics.actualBoundingBoxDescent || fontSize * 0.2),
+  ) + 2;
+  if (cellWidth < 1 || cellHeight < 1) return null;
+
+  const style = window.getComputedStyle(container);
+  const horizontalPadding =
+    (Number.parseInt(style.paddingLeft, 10) || 0) +
+    (Number.parseInt(style.paddingRight, 10) || 0);
+  const verticalPadding =
+    (Number.parseInt(style.paddingTop, 10) || 0) +
+    (Number.parseInt(style.paddingBottom, 10) || 0);
+
+  // Match Ghostty FitAddon's 15px scrollbar reservation and minimum dimensions.
+  return {
+    cols: Math.max(2, Math.floor((container.clientWidth - horizontalPadding - 15) / cellWidth)),
+    rows: Math.max(1, Math.floor((container.clientHeight - verticalPadding) / cellHeight)),
+  };
+};
+
 export type TerminalController = {
   focus: () => void;
   fit: () => void;
@@ -47,7 +83,8 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   const fitRef = React.useRef<FitAddon | null>(null);
   const inputRef = React.useRef(onInput);
   const resizeRef = React.useRef(onResize);
-  const lastSizeRef = React.useRef<{ cols: number; rows: number } | null>(null);
+  const lastSizeRef = React.useRef<TerminalSize | null>(null);
+  const provisionalSizeRef = React.useRef<TerminalSize | null>(null);
   const lastChunkRef = React.useRef<number | null>(null);
   const writeQueueRef = React.useRef('');
   const outputRewriteCarryRef = React.useRef('');
@@ -64,6 +101,14 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   resizeRef.current = onResize;
   visibleRef.current = isVisible;
   safeResetRef.current = getGhosttySafeResetSequence(theme.background);
+
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const size = getProvisionalTerminalSize(container, fontFamily, fontSize);
+    provisionalSizeRef.current = size;
+    if (size) resizeRef.current(size.cols, size.rows);
+  }, [fontFamily, fontSize]);
 
   const fit = React.useCallback(() => {
     const container = containerRef.current;
@@ -168,7 +213,10 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
 
     loadGhostty().then((ghostty) => {
       if (disposed) return;
-      terminal = new GhosttyTerminal(getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, false));
+      terminal = new GhosttyTerminal({
+        ...getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, false),
+        ...(provisionalSizeRef.current ?? {}),
+      });
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);

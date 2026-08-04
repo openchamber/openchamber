@@ -32,6 +32,18 @@ const TINT_DESTRUCTIVE = [
   "dark:active:bg-[color-mix(in_srgb,var(--status-error)_20%,transparent)]",
 ].join(" ")
 
+const TINT_INFO = [
+  "bg-[color-mix(in_srgb,var(--status-info)_4%,var(--background))]",
+  "text-[var(--status-info)]",
+  "border border-[color-mix(in_srgb,var(--status-info)_8%,transparent)]",
+  "hover:bg-[color-mix(in_srgb,var(--status-info)_7%,var(--background))]",
+  "active:bg-[color-mix(in_srgb,var(--status-info)_10%,var(--background))]",
+  "dark:bg-[color-mix(in_srgb,var(--status-info)_7%,transparent)]",
+  "dark:border-[color-mix(in_srgb,var(--status-info)_12%,transparent)]",
+  "dark:hover:bg-[color-mix(in_srgb,var(--status-info)_10%,transparent)]",
+  "dark:active:bg-[color-mix(in_srgb,var(--status-info)_14%,transparent)]",
+].join(" ")
+
 const buttonVariants = cva(
   [
     "group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none",
@@ -49,6 +61,7 @@ const buttonVariants = cva(
           TINT_DESTRUCTIVE,
           "focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
         ),
+        info: TINT_INFO,
         neutral:
           "bg-interactive-hover text-foreground border border-border/60 hover:bg-interactive-active",
         outline:

@@ -136,7 +136,12 @@ silently. The prompt says so explicitly.
 
 `languages.js` owns the accepted tags; they match the UI's `Locale` union, and
 anything else — unknown, malformed, absent — resolves to English rather than
-failing the request. The default language adds no instruction at all, since the
+failing the request. The two lists cannot be one, because the server cannot
+import from `packages/ui`, so `languages.test.js` reads `i18n/runtime.ts` and
+compares them. That test exists because a locale added to the interface alone
+fails silently in the worst way: the picker offers the language, the tag
+resolves to English, and the reader pays for a walkthrough written in the wrong
+one while the picker still names theirs. The default language adds no instruction at all, since the
 system prompt is already English.
 
 The language is part of the cache key. Without that, asking for a translation

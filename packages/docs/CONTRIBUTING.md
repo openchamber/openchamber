@@ -203,13 +203,14 @@ other language mirrors the English files under a locale folder.
 | Korean | `ko/` | `ko` |
 | Polish | `pl/` | `pl` |
 | French | `fr/` | `fr` |
+| German | `de/` | `de` |
 | Japanese | `ja/` | `ja` |
 
 > [!IMPORTANT]
 > The **content folder** uses the lowercase locale key (`zh-cn`, `pt-br`); the
 > **sidebar `translations`** key uses the BCP-47 language tag (`zh-CN`, `pt-BR`).
 > They look similar but are not interchangeable — Starlight resolves them with
-> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `fr`, `ja`, `en`) is identical
+> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `fr`, `de`, `ja`, `en`) is identical
 > in both columns.
 
 This locale set is mirrored in the website at
@@ -269,6 +270,7 @@ to each section and item in `sidebar.config.json`:
     "ko": "여기서 시작",
     "pl": "Zacznij tutaj",
     "fr": "Commencer ici",
+    "de": "Hier starten",
     "ja": "ここから開始"
   },
   "items": [
@@ -283,6 +285,7 @@ to each section and item in `sidebar.config.json`:
         "ko": "설치",
         "pl": "Instalacja",
         "fr": "Installation",
+        "de": "Installation",
         "ja": "インストール"
       }
     }

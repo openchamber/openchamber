@@ -57,8 +57,14 @@ This module provides OpenCode server integration utilities for the web server ru
 - `AUTH_FILE`: Auth file path constant.
 - `OPENCODE_DATA_DIR`: OpenCode data directory path constant.
 
+## Public exports (providers.js)
+- `getProviderSources(providerId, workingDirectory)`: Resolves which OpenCode config layers define a provider.
+- `upsertProviderConfig(providerId, config, workingDirectory, scope?, options?)`: Validates and writes a custom OpenAI-compatible provider block (`npm`, `name`, `options.baseURL`, `models`, optional `env`/`headers`) into the user/project/custom config layer. Does not store API keys. Requires `config.env` or `options.hasStoredAuth` (auth already written via OpenCode `auth.set`). Edit flows must pass the provider's effective existing layer (`custom` > `project` > `user`) so updates do not create a global user override.
+- `validateCustomProviderConfig(providerId, config, options?)`: Structural validation for custom provider payloads (id format, http(s) base URL, models, credentials via `env` or `hasStoredAuth`).
+- `removeProviderConfig(providerId, workingDirectory, scope?)`: Removes a provider block from the selected config layer.
+
 ## Public exports (shared.js)
-- `OPENCODE_CONFIG_DIR`, `AGENT_DIR`, `COMMAND_DIR`, `SKILL_DIR`, `CONFIG_FILE`, `CUSTOM_CONFIG_FILE`: Path constants.
+- `OPENCODE_CONFIG_DIR`, `AGENT_DIR`, `COMMAND_DIR`, `SKILL_DIR`, `CONFIG_FILE`: Path constants. `OPENCODE_CONFIG` is resolved at call time for the custom config layer path.
 - `AGENT_SCOPE`, `COMMAND_SCOPE`, `SKILL_SCOPE`: Scope constants with USER and PROJECT values.
 - `ensureDirs()`: Creates required OpenCode directories.
 - `parseMdFile(filePath)`, `writeMdFile(filePath, frontmatter, body)`: Markdown file operations with YAML frontmatter.
@@ -82,6 +88,7 @@ This module provides OpenCode server integration utilities for the web server ru
   - `GET /api/opencode/upgrade-status` (returns version availability plus the authoritative `upgrade.supported`, `upgrade.manager`, and `upgrade.reason` capability)
   - `POST /api/opencode/directory`
   - `GET /api/provider/:providerId/source`
+  - `PUT /api/provider` (create/update custom OpenAI-compatible provider config in OpenCode user/project/custom layers via `scope`; secrets stay in auth via the OpenCode auth API)
   - `DELETE /api/provider/:providerId/auth`
 - Owns lazy auth library loading for provider auth checks/removal.
 - Keeps route behavior independent from composition root; `index.js` now supplies dependencies only.
@@ -120,7 +127,9 @@ The runtime maintains active-session count incrementally from idempotent activit
 Managed OpenCode launch also merges the environment returned by the agent-tool
 runtime. PATH and `OPENCODE_SERVER_PASSWORD` remain lifecycle-owned and cannot
 be replaced by injected values. External OpenCode processes receive no
-OpenChamber tool injection.
+OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
+spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
+path (#2588).
 
 Set `OPENCHAMBER_STARTUP_PERF=1` to emit bounded startup phase records for server listen, managed OpenCode preparation/readiness, and proxy readiness holds. Every OpenCode bootstrap emits one terminal `opencode.bootstrap.ready` or `opencode.bootstrap.error` event, including reused and external server paths. Records contain controlled phase/outcome/route labels and timing values only; they never contain request URLs, runtime keys, directories, session IDs, credentials, or content.
 
@@ -351,8 +360,14 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
 ## Public exports (skill-routes.js)
 - `registerSkillRoutes(app, dependencies)`: registers skills-related routes:
   - Skills config CRUD and metadata under `/api/config/skills*`
+  - Skill rename via `PATCH /api/config/skills/:name` with `{ renameTo }` (directory rename preserves `SKILL.md` body and supporting files; restricted to managed skill roots under `.opencode/skills|skill`, `.claude/skills`, and `.agents/skills`)
+  - Skill list responses include authoritative `renamable` derived from the same managed-root policy used by rename
   - Skills catalog listing/source pagination, scan, and install routes
   - Supporting skill file read/write/delete routes
+  - Directory resolution prefers an explicit request directory, then soft-falls
+    back to the active project / `lastDirectory` so repository-local
+    `.agents/skills` and `.opencode/skills` remain discoverable when the client
+    omits `directory`. Requests without any project still list user-scoped skills.
 
 ## Public exports (proxy.js)
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.

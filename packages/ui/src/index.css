@@ -930,21 +930,15 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Status row: collapse optional text when narrow to keep both sides in one line.
- *
- * The todo text goes first, and it goes early. The changed-files summary on the
- * left has a floor it cannot shrink past — the file count, the +/- counts and
- * the chevron are all fixed width — so once the two sides no longer fit, they
- * collide rather than politely truncating. 30rem was measured against the todo
- * text alone; with a changed-files summary beside it the collision starts around
- * 36rem, so this hides one step before that. */
+/* Hide the long active todo before it can collide with the changed-files summary. */
 @container status-row (max-width: 38rem) {
   .status-row__active-todo {
     display: none;
   }
 }
 
-@container status-row (max-width: 24rem) {
+/* Hide the secondary changed-files label on narrow mobile layouts. */
+@container status-row (max-width: 30rem) {
   .status-row__changed-label {
     display: none;
   }

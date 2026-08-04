@@ -68,4 +68,5 @@ workspaces/
 *.pid
 .worktrees/
 test-results/
-artifacts/browser-profile-*/
+artifacts/
+

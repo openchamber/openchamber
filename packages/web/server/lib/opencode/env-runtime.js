@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { clearAppImageArgv0FromProcessEnv } from '../inherited-env.js';
 import { mergePathValues } from './path-utils.js';
 
 export const createOpenCodeEnvRuntime = (deps) => {
@@ -227,12 +228,16 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const applyLoginShellEnvSnapshot = () => {
+    // Always clear AppImage ARGV0, even when no login-shell snapshot is available.
+    // Otherwise a leaked process.env.ARGV0 survives into later child spawns (#2588).
+    clearAppImageArgv0FromProcessEnv();
+
     const snapshot = getLoginShellEnvSnapshot();
     if (!snapshot) {
       return;
     }
 
-    const skipKeys = new Set(['PWD', 'OLDPWD', 'SHLVL', '_']);
+    const skipKeys = new Set(['PWD', 'OLDPWD', 'SHLVL', '_', 'ARGV0']);
     for (const [key, value] of Object.entries(snapshot)) {
       if (skipKeys.has(key)) {
         continue;

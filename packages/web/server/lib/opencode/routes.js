@@ -18,6 +18,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     resolveProjectDirectory,
     getProviderSources,
     removeProviderConfig,
+    upsertProviderConfig,
     refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
@@ -440,6 +441,64 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to get provider sources:', error);
       return res.status(500).json({ error: error.message || 'Failed to get provider sources' });
+    }
+  });
+
+  app.put('/api/provider', async (req, res) => {
+    try {
+      const providerID = typeof req.body?.providerID === 'string'
+        ? req.body.providerID.trim()
+        : (typeof req.body?.providerId === 'string' ? req.body.providerId.trim() : '');
+      const config = req.body?.config;
+      const scope = typeof req.body?.scope === 'string' ? req.body.scope : 'user';
+
+      if (!providerID) {
+        return res.status(400).json({ error: 'Provider ID is required' });
+      }
+      if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        return res.status(400).json({ error: 'Provider config is required' });
+      }
+      if (scope !== 'user' && scope !== 'project' && scope !== 'custom') {
+        return res.status(400).json({ error: 'Invalid scope' });
+      }
+
+      const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
+      const queryDirectory = Array.isArray(req.query?.directory)
+        ? req.query.directory[0]
+        : req.query?.directory;
+      const requestedDirectory = headerDirectory || queryDirectory || null;
+
+      let directory = null;
+      if (scope === 'project' || requestedDirectory) {
+        const resolved = await resolveProjectDirectory(req);
+        if (!resolved.directory) {
+          return res.status(400).json({ error: resolved.error || 'Working directory is required' });
+        }
+        directory = resolved.directory;
+      } else {
+        const resolved = await resolveProjectDirectory(req);
+        if (resolved.directory) {
+          directory = resolved.directory;
+        }
+      }
+
+      const { getProviderAuth } = await getAuthLibrary();
+      const hasStoredAuth = Boolean(getProviderAuth(providerID));
+      const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth });
+      await refreshOpenCodeAfterConfigChange(`provider ${providerID} upserted (${scope})`);
+
+      return res.json({
+        success: true,
+        providerId: upsertResult.providerId,
+        path: upsertResult.path,
+        config: upsertResult.config,
+        requiresReload: true,
+        reloadDelayMs: clientReloadDelayMs,
+      });
+    } catch (error) {
+      const status = typeof error?.statusCode === 'number' ? error.statusCode : 500;
+      console.error('Failed to upsert provider config:', error);
+      return res.status(status).json({ error: error.message || 'Failed to save provider config' });
     }
   });
 
