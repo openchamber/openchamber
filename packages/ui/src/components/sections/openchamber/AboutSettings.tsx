@@ -221,7 +221,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           onDownload={updateStore.downloadUpdate}
           onRestart={updateStore.restartToUpdate}
           runtimeType={updateStore.runtimeType}
-          updateTarget={updateStore.runtimeType === 'desktop' ? 'desktop-app' : undefined}
         />
       </div>
     );
@@ -313,7 +312,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         onDownload={updateStore.downloadUpdate}
         onRestart={updateStore.restartToUpdate}
         runtimeType={updateStore.runtimeType}
-        updateTarget={updateStore.runtimeType === 'desktop' ? 'desktop-app' : undefined}
       />
     </SettingsSection>
   );

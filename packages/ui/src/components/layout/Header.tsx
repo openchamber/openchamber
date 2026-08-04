@@ -2605,7 +2605,6 @@ export const Header: React.FC<HeaderProps> = ({
         onDownload={() => {}}
         onRestart={() => {}}
         runtimeType="web"
-        updateTarget="remote-instance"
       />
     </>
   );

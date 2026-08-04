@@ -1924,7 +1924,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         onDownload={updateStore.downloadUpdate}
         onRestart={updateStore.restartToUpdate}
         runtimeType={updateStore.runtimeType}
-        updateTarget={updateStore.runtimeType === 'desktop' ? 'desktop-app' : undefined}
       />
 
       <ProjectEditDialog
